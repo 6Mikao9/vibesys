@@ -107,8 +107,11 @@ interface SubscriptionRecord {
 class FakeTransport implements ControlTransport {
   readonly requests: RequestInput[] = [];
   readonly subscriptions: SubscriptionRecord[] = [];
-  readonly snapshots: Array<ProtocolResponse | Error> = [];
+  readonly snapshots: Array<ProtocolResponse | Error | Promise<ProtocolResponse>> = [];
   readonly #subscriptionWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
+  readonly #subscriptionCloseWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
+  #deferNextSubscription = false;
+  #releaseSubscription: (() => void) | null = null;
   /**
    * How many upcoming dials connect without delivering their bootstrap batch,
    * as a socket that dies between `subscribed` and the first batch does: the
@@ -118,6 +121,7 @@ class FakeTransport implements ControlTransport {
   silentDials = 0;
   closeCalls = 0;
   reconnectCalls = 0;
+  readonly reconnectFailures: Error[] = [];
   readonly #hooks: WebSessionTransportHooks;
   #controls: ControlChannelState = {status: 'connected'};
 
@@ -155,6 +159,8 @@ class FakeTransport implements ControlTransport {
    */
   reconnect(): void {
     this.reconnectCalls += 1;
+    const failure = this.reconnectFailures.shift();
+    if (failure !== undefined) throw failure;
     this.recoverControlChannel();
   }
 
@@ -168,7 +174,7 @@ class FakeTransport implements ControlTransport {
     this.requests.push(input);
     const response = this.snapshots.shift();
     if (response instanceof Error) throw response;
-    return response ?? snapshotResponse();
+    return (await response) ?? snapshotResponse();
   }
 
   async subscribe(
@@ -188,11 +194,20 @@ class FakeTransport implements ControlTransport {
     this.#subscriptionWaiters.shift()?.(record);
     if (this.silentDials > 0) this.silentDials -= 1;
     else onMessage(streamBatch(`store-${this.subscriptions.length}`, afterSequence + 1));
-    return {
+    const subscription = {
       close: async () => {
+        if (record.closed) return;
         record.closed = true;
+        this.#subscriptionCloseWaiters.shift()?.(record);
       },
     };
+    if (this.#deferNextSubscription) {
+      this.#deferNextSubscription = false;
+      await new Promise<void>(resolve => {
+        this.#releaseSubscription = resolve;
+      });
+    }
+    return subscription;
   }
 
   async close(): Promise<void> {
@@ -202,6 +217,22 @@ class FakeTransport implements ControlTransport {
   /** Resolves when the stream makes its next dial. */
   nextSubscription(): Promise<SubscriptionRecord> {
     return new Promise(resolve => this.#subscriptionWaiters.push(resolve));
+  }
+
+  /** Resolves when the stream retires its next owned subscription. */
+  nextSubscriptionClose(): Promise<SubscriptionRecord> {
+    return new Promise(resolve => this.#subscriptionCloseWaiters.push(resolve));
+  }
+
+  /** Hold the next subscription handle until the test releases its handshake. */
+  deferNextSubscribe(): void {
+    this.#deferNextSubscription = true;
+  }
+
+  releasePendingSubscribe(): void {
+    const release = this.#releaseSubscription;
+    this.#releaseSubscription = null;
+    release?.();
   }
 }
 
@@ -371,6 +402,159 @@ describe('WebSession', () => {
       'caught up after throttling\n',
     ]);
     await session.close();
+  });
+
+  test('releases recovery ownership when control reconnect throws synchronously', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    await session.start();
+
+    const failure = new Error('control reconnect failed');
+    transport.reconnectFailures.push(failure);
+    lifecycle.emit('online');
+    expect(session.getState()).toMatchObject({status: 'stale', error: failure});
+
+    const recovered = transport.nextSubscription();
+    session.reattach();
+    expect(transport.reconnectCalls).toBe(2);
+    await expect(recovered).resolves.toMatchObject({afterSequence: 0, options: undefined});
+    await session.close();
+  });
+
+  test('promotes an overlapping lifecycle retry to an explicit reattach', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    await session.start();
+    transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
+    expect(session.getState().status).toBe('stale');
+
+    const snapshot = deferred<ProtocolResponse>();
+    transport.snapshots.push(snapshot.promise);
+    lifecycle.emit('online');
+    expect(transport.requests).toHaveLength(2);
+    expect(transport.reconnectCalls).toBe(1);
+
+    // The lifecycle retry owns the one control redial and snapshot request,
+    // but an explicit user request that arrives before that snapshot settles
+    // must promote its eventual stream recovery to a fresh bootstrap.
+    session.reattach();
+    session.reattach();
+    lifecycle.emit('online');
+    expect(transport.requests).toHaveLength(2);
+    expect(transport.reconnectCalls).toBe(1);
+    expect(transport.subscriptions).toHaveLength(1);
+
+    const recovered = transport.nextSubscription();
+    snapshot.resolve(snapshotResponse({sequence: 1}));
+    expect(await recovered).toMatchObject({afterSequence: 0, options: undefined});
+    expect(transport.subscriptions).toHaveLength(2);
+
+    await session.close();
+  });
+
+  test('keeps an explicit reattach behind a lifecycle stream dial', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new ManualScheduler();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    await session.start();
+
+    transport.silentDials = 1;
+    transport.deferNextSubscribe();
+    const retrying = transport.nextSubscription();
+    const retiring = transport.nextSubscriptionClose();
+    transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
+    lifecycle.emit('online');
+    await retiring;
+
+    // The retry has taken ownership and begun retiring the stale handle, but
+    // the session's flight must already be reusable when its public caller can
+    // observe that transition. Otherwise this stronger intent is dropped in a
+    // Promise.finally tail after the retry has already been dispatched.
+    transport.snapshots.push(new Error('reattach snapshot failed'));
+    const refreshed = waitForSession(
+      session,
+      () => session.getState().error?.message === 'reattach snapshot failed',
+    );
+    session.reattach();
+    session.reattach();
+    expect(transport.requests).toHaveLength(3);
+    await refreshed;
+
+    const resumed = await retrying;
+    expect(resumed).toMatchObject({afterSequence: 1, options: {storeId: 'store-1'}});
+
+    resumed.onMessage(outputBatch('store-1', 2, 'superseded retry\n'));
+    expect(session.store.getState().sequence).toBe(1);
+    expect(session.store.getState().transcript).toEqual([]);
+
+    const fresh = transport.nextSubscription();
+    transport.releasePendingSubscribe();
+    await expect(fresh).resolves.toMatchObject({afterSequence: 0, options: undefined});
+
+    expect(
+      transport.subscriptions.slice(1).map(({afterSequence, options}) => ({
+        afterSequence,
+        options,
+      })),
+    ).toEqual([
+      {afterSequence: 1, options: {storeId: 'store-1'}},
+      {afterSequence: 0, options: undefined},
+    ]);
+    expect(resumed.closed).toBe(true);
+    await session.close();
+  });
+
+  test('coalesces reattach with a recovery bootstrap before the first batch', async () => {
+    const lifecycle = new FakeLifecycle();
+    const scheduler = new ManualScheduler();
+    const {session, transport} = sessionWith(lifecycle, {
+      reconnectDelaysMs: [0],
+      scheduleTimeout: scheduler.scheduleTimeout,
+    });
+    transport.silentDials = 2;
+    await session.start();
+
+    transport.deferNextSubscribe();
+    const retrying = transport.nextSubscription();
+    transport.subscriptions[0]?.onDisconnect(disconnect('gateway restarted'));
+    scheduler.runNext();
+    expect(await retrying).toMatchObject({afterSequence: 0, options: undefined});
+
+    session.reattach();
+    session.reattach();
+    expect(transport.subscriptions).toHaveLength(2);
+
+    const recovered = waitForSession(session, () => session.getState().status === 'connected');
+    transport.releasePendingSubscribe();
+    await recovered;
+
+    expect(transport.subscriptions).toHaveLength(2);
+    await session.close();
+  });
+
+  test('coalesces reattach with a pending initial stream bootstrap', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    transport.deferNextSubscribe();
+    const initialSubscription = transport.nextSubscription();
+    const starting = session.start();
+    const initial = await initialSubscription;
+
+    // start() has completed its snapshot but still owns the first sequence-zero
+    // handshake. Reattach is the same fresh intent, so it must not create a
+    // second socket whose handle could later be orphaned by the first one.
+    session.reattach();
+    session.reattach();
+    expect(transport.subscriptions).toHaveLength(1);
+
+    transport.releasePendingSubscribe();
+    await starting;
+    await session.close();
+    expect(initial.closed).toBe(true);
+    expect(transport.subscriptions.every(subscription => subscription.closed)).toBe(true);
   });
 
   test('re-bootstraps when one store raises its declared history floor', async () => {
@@ -867,4 +1051,14 @@ function waitForSession(session: WebSession, predicate: () => boolean): Promise<
 async function settle(): Promise<void> {
   await new Promise<void>(resolve => setTimeout(resolve, 0));
   await Promise.resolve();
+}
+
+function deferred<T>(): {readonly promise: Promise<T>; readonly resolve: (value: T) => void} {
+  let complete = (_value: T): void => {
+    throw new Error('Deferred promise was not initialized');
+  };
+  const promise = new Promise<T>(resolve => {
+    complete = resolve;
+  });
+  return {promise, resolve: complete};
 }

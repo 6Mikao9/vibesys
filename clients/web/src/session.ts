@@ -110,7 +110,8 @@ export class WebSession {
   };
   #started = false;
   #closed = false;
-  #wakeInFlight: Promise<void> | null = null;
+  #wakeInFlight = false;
+  #recoveryIntent: StreamRecovery = 'retry';
 
   constructor(options: WebSessionOptions = {}) {
     this.store = createCoreStateStore();
@@ -299,10 +300,17 @@ export class WebSession {
     if (this.#closed || this.#lifecycle.visibilityState === 'hidden' || !this.#lifecycle.online) {
       return;
     }
-    if (this.#wakeInFlight !== null) return;
-    this.#wakeInFlight = this.#resume(mode).finally(() => {
-      this.#wakeInFlight = null;
-    });
+    // Recovery is single-flight, but its intent is monotone while that flight
+    // owns the control redial and snapshot. A lifecycle retry cannot weaken a
+    // user-requested fresh bootstrap that overlaps it.
+    if (mode === 'rebootstrap') this.#recoveryIntent = mode;
+    if (this.#wakeInFlight) return;
+    // Claim the flight before entering adapter code. `reconnect()` is a
+    // synchronous interface and a structural implementation may throw; an
+    // assignment from `#resume()` would otherwise overwrite the cleanup in its
+    // `finally` with the rejected promise returned after that throw.
+    this.#wakeInFlight = true;
+    void this.#resume();
   }
 
   #offline = (): void => {
@@ -316,20 +324,30 @@ export class WebSession {
     }
   };
 
-  async #resume(mode: StreamRecovery): Promise<void> {
-    // A browser wake is stronger evidence than either reconnect timer: a
-    // background tab may have had both callbacks coalesced indefinitely.
-    // `reconnect()` is inert on a healthy or already-dialing control channel,
-    // and otherwise cancels its timer and dials before the snapshot request is
-    // queued. The stream recovery runs after the snapshot: lifecycle wakes
-    // retry normally, while an explicit Reattach asks for a fresh bootstrap.
-    this.#transport.reconnect();
+  async #resume(): Promise<void> {
     try {
-      await this.#loadSnapshot();
-      this.#recoverStream(mode);
+      // A browser wake is stronger evidence than either reconnect timer: a
+      // background tab may have had both callbacks coalesced indefinitely.
+      // `reconnect()` is inert on a healthy or already-dialing control channel,
+      // and otherwise cancels its timer and dials before the snapshot request is
+      // queued. The stream recovery runs after the snapshot: lifecycle wakes
+      // retry normally, while an explicit Reattach asks for a fresh bootstrap.
+      this.#transport.reconnect();
+      try {
+        await this.#loadSnapshot();
+      } catch (error) {
+        this.#setState('stale', toError(error));
+      }
+      this.#recoverStream(this.#recoveryIntent);
     } catch (error) {
       this.#setState('stale', toError(error));
-      this.#recoverStream(mode);
+    } finally {
+      // Clear the flight in the same continuation that hands recovery to the
+      // stream. A Promise.finally callback leaves a microtask-sized window in
+      // which a new explicit intent sees the old flight but can no longer
+      // promote the stream recovery it already dispatched.
+      this.#wakeInFlight = false;
+      this.#recoveryIntent = 'retry';
     }
   }
 
