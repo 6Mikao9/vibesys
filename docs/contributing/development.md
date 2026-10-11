@@ -167,7 +167,7 @@ slurmdbd (so `sacct` works), sshd and a login node in a `head` container, and on
 slurmd with four fake GPUs (GRES backed by character devices, no real hardware)
 in a `node` container. No LLM agents run. The agent is a real Docker container
 that VibeSys creates exactly as in production, and the tests drive it with
-scripted commands (`vibesys-gpu`, `vibesys-gate`) through the session's sandbox.
+scripted commands (`vibesys-gpu`) through the session's sandbox.
 
 The test's run directory is mounted into both cluster containers at the same
 absolute path and stands in for the shared filesystem. `slurm` reaches the head
@@ -213,7 +213,7 @@ In each container it checks that:
   MCP `initialize` and lists its tools, started from the descriptor the run builds;
 - the profiler MCP server of the base's default profiler answers `initialize` and
   lists its tools;
-- `vibesys-gate` and `vibesys-gpu` run a gate and a command through a real host
+- `vibesys-gpu` runs a command through a real host
   broker (its `srun` is a local program);
 - the `agent` user has a group of its own name and the host's uid and gid.
 

@@ -67,6 +67,8 @@ if TYPE_CHECKING:
 
     from vs_agent.api.images import DockerBuildRunner
     from vs_project.api import RunResourceRequest
+    from vs_runtime._run_environment import _OrphanReaper
+    from vs_sandbox.api import DockerCli
     from vs_sandbox.api.slurm import JobConfinement
 
 _REMOTE_PROFILER_IDS = frozenset({"auto", "none", "rocprof"})
@@ -308,7 +310,9 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         return cls(
             load_slurm_operator_settings(Path(str(value))),
             docker=DockerEnvironmentConfig(
-                build_runner=cast("DockerBuildRunner | None", build_runner)
+                docker=cast("DockerCli | None", options.get("docker")),
+                build_runner=cast("DockerBuildRunner | None", build_runner),
+                orphan_reaper=cast("_OrphanReaper | None", options.get("orphan_reaper")),
             ),
         )
 

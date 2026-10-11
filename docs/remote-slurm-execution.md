@@ -8,25 +8,25 @@ policy, and SkyPilot/SSH configuration supplies site access.
 ## Direct Slurm (`--run-environment slurm`)
 
 `--run-environment slurm --slurm-config PATH` runs trusted accuracy and
-benchmark gates, and ROCprof captures, on a Slurm cluster the submit host reaches
+benchmark evaluations, and ROCprof captures, on a Slurm cluster the submit host reaches
 directly (for example over SSH), without SkyPilot. The editor is the same local
 Docker container as in every other environment, with the workspace mounted at
 its host path.
 
-The container cannot hold the cluster's tools or credentials, so the host owns a
-broker and the container reaches it over a bind-mounted Unix socket with a
-per-run token. The agent runs a gate as `vibesys-gate --gate accuracy` or
-`vibesys-gate --gate benchmark`. The client is mounted at
-`/usr/local/bin/vibesys-gate`, so the bare name resolves in any shell, and the
-environment notes in the agent's prompts name it and the gates the task plans. The
-broker runs the planned gate with the
-cluster wrapper (`vs_sandbox.slurm_command`), which stages the workspace, runs
-the job, and copies the result back. The agent names only the gate and supplies no
-arguments; the broker passes the benchmark's declared result argument itself,
-relays the result file into the container's `/tmp`, and names it in the gate's
-output. The framework's own evaluation sends the argument and path explicitly,
-which the broker validates. Interrupting the client or
-dropping the connection cancels the job.
+The container cannot hold the cluster's tools or credentials, so trusted
+evaluation never runs there. An agent requests one through the evaluation tool
+(`submit_evaluation`, then `validate_evaluation_wait`), which the run's evaluation
+service answers on the host, and only its results count. There is no shell client
+for evaluation: the agent has no `vibesys-gate`, and `vibesys-gpu` has no `--gate`.
+
+Loops that are not yet on the core path (everything except `dynamic`) evaluate each
+round through the framework itself. For them the environment gives the framework a
+host runner for the planned commands: it runs the cluster wrapper
+(`vs_sandbox.slurm_command`) from the candidate workspace, which stages the
+workspace, runs the job, copies the result back, and writes a benchmark's result
+file where the trusted executor reads it. This path is internal, the agent cannot
+name it, and it is deleted when those loops are ported (roadmap #1952). Until then
+those loops have no mid-turn trusted evaluation on `slurm`.
 
 The ROCprof server runs in the container and reaches the cluster through a
 second host broker. It imports the Slurm adapter from the framework's `libs`
@@ -34,21 +34,20 @@ directory, mounted read-only at its host path, so the agent image needs only a
 `python3` (3.11 or newer) with `pydantic`, which its MCP library already
 requires. When the submit host is itself the machine that runs VibeSys, the
 configuration can use the `local` transport (`[slurm.transport] kind = "local"`,
-see the `vs-slurm` README) instead of SSH: gates run through the same
+see the `vs-slurm` README) instead of SSH: evaluations run through the same
 sbatch, poll and collect path. The local transport starts its programs in a
 login-like environment (`HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `LANG`,
 `LC_*`, `TZ`, `TMPDIR`, and nothing else), as sshd would, so the host's
 credentials and any `SLURM_*` variables of an enclosing allocation never reach
-a gate. The second broker exists only for the SSH transport, so a
-local-transport run without agent GPU commands offers the gates but not the
-agent's ad hoc ROCprof capture, and no profiler is offered.
+a job. The profiler broker exists only for the SSH transport, so a
+local-transport run without agent GPU commands offers no profiler.
 
 ### Agent GPU commands (optional)
 
 On a host that is itself a Slurm submit node (`[slurm.transport] kind = "local"`),
 the operator can also let the agent run its own GPU commands as Slurm jobs, by
-adding a `[vibesys.agent_gpu]` table to the same operator file. The same host
-broker then offers `vibesys-gpu` beside the gates, and the agent profiles
+adding a `[vibesys.agent_gpu]` table to the same operator file. A host
+broker then offers `vibesys-gpu`, and the agent profiles
 through its own commands instead of through the remote ROCprof capture. The
 table is rejected with any other transport. See
 [GPU commands through Slurm](slurm-gpu-commands.md) for the table, the agent's

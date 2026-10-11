@@ -729,7 +729,7 @@ def _run_facts(
         reference_location=ref_name,
         accuracy_command=view.paths.accuracy_command,
         benchmark_command=view.paths.benchmark_command,
-        accuracy_configured=bool(view.paths.accuracy_command),
+        accuracy_configured=bool(bundle.accuracy_command),
         benchmark_configured=(
             bundle.benchmark_result is not None or bundle.benchmark_result_protocol is not None
         ),
