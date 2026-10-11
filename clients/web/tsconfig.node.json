@@ -9,6 +9,7 @@
     "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo"
   },
   "include": [
+    "build-inputs.ts",
     "build-manifest.ts",
     "playwright.config.ts",
     "vite.config.ts",
