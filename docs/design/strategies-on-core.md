@@ -68,7 +68,10 @@ stop), `RunEnded`.
 | Core lifecycle, attempts, settlement, adoption, suspension, exclusive root, `wip` retention | built (`vs-core`) | n/a |
 | Agent evaluation tool bridge, per-candidate budgets, the `waiting_for_evaluation` reply (declared privately in `dynamic`) | built (`docs/design/core-agent-evaluation-bridge.md`) | n/a |
 | `dynamic` on core, its scenario, recovery-matrix, liveness, chaos and smoke tests | built | n/a |
-| Shared building blocks B1 to B15 (section 3) | unbuilt; `dynamic` holds private copies | 2 |
+| Tests of assumptions A1 to A4 (section 11) | built; A2 is false, A3 and A4 are partly open (section 11.1) | 2 |
+| Decision transcript test of `dynamic` (3.4) | built (`test_decision_transcript.py`, 96 scenarios) | 2 |
+| Exclusive-root executor fixes (B16, section 3.1) | unbuilt; prerequisite of every port that runs without candidate sandboxes | 2 |
+| Shared building blocks B1 to B15 (section 3) | unbuilt; `dynamic` holds private copies; extraction waits for the decision in 11.1 | 2 |
 | Strategy conformance suite and the promoted runtime shell test kit (T1, T2 in 3.1) | unbuilt; `dynamic` holds a private shell harness | 2 |
 | `CaptureCommand` operation (profile-guided attribution) | unbuilt | 3 |
 | Immutable hypothesis state, or the JSON-field bridge (8.4) | unbuilt | 3 |
@@ -99,6 +102,14 @@ These restate `CLAUDE.md` and `software-design` for this work; the sections belo
    data, never prompt text.
 6. State is a tree of strict, frozen, tuple-only `Value` models, so it passes
    `validate_immutable_schema` and round-trips through the envelope codec.
+7. Role ids are `<strategy>-<role>` (`single-implementer`), declared by the plugin, and an
+   `[agent.roles.<id>]` model override in `agent.toml` is keyed by exactly that declared id.
+   An override that names an undeclared id, including a legacy id such as `implementer`, is
+   refused before the run opens with an error naming `agent.roles.<id>`. This is how
+   `dynamic` works today (design question Q6; pinned by
+   `tests/vibesys/orchestration/dynamic/test_role_overrides.py`), and each port follows it
+   without a legacy alias. The cost is that a user's existing `[agent.roles.implementer]`
+   entry must be renamed when the run moves to the ported strategy; the refusal names the key.
 
 ## 2. What `dynamic` already does
 
@@ -176,6 +187,7 @@ code sits in `dynamic`.
 | B13 | Core-protocol prompt templates and contexts: reply correction, resume, wait-unrecorded, agent-evaluation notes, environment notes, run context | `dynamic/core_policy/prompts/*.j2`, `strategy/_prompts.py` | `vibesys.prompts` (shared templates) | all five | import them |
 | B14 | `CaptureCommand` operation: run a configured argv in a revision's workspace with a timeout and return bounded output | none; two copies of the legacy call in `single/attribution.py` and `multi/attribution.py` | contract in `vs_runtime.api.core`, owner in `vs_runtime` | single, multi (profile-guided) | none |
 | B15 | Stateless tool admission: a role may name a tool server that holds no run state (profiler diagnostics) | none; `_refuse_unbridged_tools` rejects all but `evaluation` | `vs_runtime.api.core` (`AgentTool` declares its class), `vibesys.run.core_services` | multi, evolve, issue_queue | none |
+| B16 | Exclusive-root executor: ending an exclusive-root attempt releases the root, and granting the root restores the plan's base while preserving the configured artifact directories (A2, A4) | none; `RuntimeWorkspaceRequests` rejects the discard of a root attempt and `_ensure_root` binds without restoring | `vs_runtime` workspace executor (`_workspace_requests.py`, `_workspace_receipts.py`) | single, multi, issue_queue (the serial strategies on a host without candidate sandboxes) | none (`dynamic` always uses isolated children) |
 | T1 | Runtime shell test kit: `ScriptedExecutors`, `run_shell`, restart-at-boundary | `tests/vibesys/orchestration/dynamic/strategy/_shell.py`, `_executors.py`, `_run.py` (about 1,000 lines) | `vs_runtime.api.testing` | all five | import it |
 | T2 | Whole-loop harness and invariants: `_harness.py`, `_chaos.py`, `loop_invariants.py`, smoke e2e | `tests/composition/dynamic/`, `tests/support/loop_invariants.py`, `tests/e2e/test_dynamic_loop_smoke_e2e.py` | `tests/composition/_loop/` and `tests/support/` parametrized by plugin id | all five | become one parametrization |
 
@@ -303,7 +315,8 @@ each paid turn atomically with its dispatch), `accuracy_receipt` (the evidence l
 - One round is one attempt, serial (`Limits.max_parallel = 1`). The workspace mode is
   `ISOLATED_CHILD` when the run environment can open candidate sandboxes and `EXCLUSIVE_ROOT`
   otherwise. B12 chooses once, in config. `dynamic` refuses environments without candidate
-  sandboxes, but these loops run there today and must keep doing so. The attempt budget is
+  sandboxes, but these loops run there today and must keep doing so. Today the executor cannot
+  serve a serial `EXCLUSIVE_ROOT` run (assumption A2 is false, 11.1), so B16 comes first. The attempt budget is
   `paid_invocation_limit = max_retries_per_round`, `retry_limit = max_corrections +
   max_turn_drops`.
 - A continued hypothesis starts a new attempt in the next round on the previous round's
@@ -757,7 +770,7 @@ envelope migration.
 
 | Roadmap phase | Port | Why here |
 |---|---|---|
-| 2 | Blocks B1 to B15, T1 and T2; `dynamic` refactored onto them; tests for assumptions A1 to A4 | Nothing is ported until the shared parts exist and `dynamic` proves they preserve behavior. The four assumptions decide the shape of every port, so they are tested first. |
+| 2 | Tests for assumptions A1 to A4 and the transcript test (built); B16 (exclusive-root executor); then blocks B1 to B15, T1 and T2 with `dynamic` refactored onto them | Nothing is ported until the shared parts exist and `dynamic` proves they preserve behavior. The four assumptions decide the shape of every port, so they are tested first. A2 failed, so extraction paused for the decision in 11.1. |
 | 3, first | `single`, then `profile-guided single` | The smallest hypothesis-round machine. It proves the round machine (B9), the designer as a run-scoped turn that writes an artifact, cadence with provisional retention (A1) and the JSON-field ledger (8.4, L1). `multi` is `single` plus roles, so `single` must come first. |
 | 3, in parallel | `issue_queue` | Independent of `single`: different modules and a different owner (`vs-issue-tracker`). It carries the only new external-system operations, the largest new surface, so it should not wait behind `multi` and `evolve`. |
 | 4 | `multi`, then `profile-guided multi` | Adds the pre-round and profiler turns, the judge, `ValidateLocal` and stateless tool admission on top of `single`. |
@@ -868,6 +881,9 @@ and before dispatch, and after dispatch and before the observation is committed.
 
 ### 9.7 Phase 2 acceptance
 
+Status: the A1 to A4 spikes and the transcript test are merged; A2 is false, so extraction
+(everything below except those two) is paused for the decision in 11.1.
+
 `dynamic`'s whole suite passes unchanged; the transcript test (3.4) shows identical decision
 ids and payload digests; `scripts/check_tach.py`, `check_purity.py` (no baseline entry for
 `vs-core`), `check_ci.sh` pass; the spikes for A1 to A4 are vs-core or vs-runtime tests that
@@ -951,3 +967,45 @@ without isolated candidate sandboxes; **A3** a stateless tool server can be offe
 session without a second writer of run state; **A4** a run-scoped `WRITE_ARTIFACTS` turn can
 write the configured artifact directory (`roadmap/`) in the run root, and that file survives
 until the next designer turn.
+
+### 11.1 Results of the assumption tests
+
+| # | Result | Test | Consequence |
+|---|---|---|---|
+| A1 | true | `tests/vibesys/orchestration/test_serial_strategy_assumptions.py` (real core and shell, both workspace modes, `candidate` and `wip`); `libs/vs-runtime/tests/test_serial_strategy_workspaces.py::test_a_retained_candidate_is_a_base_for_the_next_attempt` (real Git) | none: the cadence design in 4.4 stands, and the `wip` fallback also works |
+| A2 | **false** in `vs_runtime`, two gaps | `libs/vs-runtime/tests/test_serial_strategy_workspaces.py`, two strict expected failures | add B16 (below); until it lands no port may use `EXCLUSIVE_ROOT` |
+| A3 | feasible, not yet built | `tests/vibesys/run/test_core_stateless_tools.py` | B15 as designed: the session resolver already takes any `ToolServerSource`, and the only gate is `_refuse_unbridged_tools`; the issue board stays refused (pinned by the second test in that file) |
+| A4 | true with isolated children, false across a root restore | `libs/vs-runtime/tests/test_run_scoped_artifacts.py` | the roadmap written by a `WRITE_ARTIFACTS` run-scoped turn is kept and is visible at the next designer turn; a restore of the root to a revision deletes it, so B16's restore must preserve the artifact directories |
+
+**A2 gaps.** (1) Core ends every settled attempt with a `DiscardWorkspace` request and
+documents that, for an exclusive-root attempt, it releases the hold on the root. The executor
+rejects that request (`_discard` in `_workspace_requests.py`: "the exclusive root workspace is
+run-owned and cannot be discarded") and nothing else clears the holder recorded by
+`acquire_root`. A second exclusive-root attempt is then answered `HELD` (`UNKNOWN`) for as long
+as the run lasts. (2) `_ensure_root` records the binding and reports the plan's base as the
+revision but does not touch the tree, so a retry or a next attempt starts from the previous
+attempt's edits instead of its base. The legacy loops restore explicitly, which is why this
+went unnoticed. Both are executor defects, not core defects: core and the Phase 1 mapping are
+right.
+
+**B16, the changed plan.** The fix is in the owner of the mechanism, `vs_runtime`'s workspace
+executor, and `dynamic` does not use it, so it can land independently of B1 to B15:
+
+1. A discard of an exclusive-root binding succeeds and releases the hold: it clears
+   the recorded holder only when it still names that attempt generation, so a stale
+   generation cannot release a newer one, and replay is idempotent. It does not delete files.
+2. Granting the root restores it to `plan.base` before the observation succeeds, preserving
+   the plugin's artifact directories (the preserve-aware `restore_for_agent` already exists for
+   session access), and proves the result with `matches_revision`. A crash between the restore
+   and the binding record is recovered by the same replay rule as the candidate path.
+3. The three tests marked strict expected failures in `test_serial_strategy_workspaces.py` and
+   `test_run_scoped_artifacts.py` lose their marker in that change, and gain a case for a
+   third and a fourth attempt.
+
+The alternative is to drop `EXCLUSIVE_ROOT` and require candidate sandboxes for the ported
+strategies. That removes B16 but makes `single`, `multi` and `issue_queue` refuse environments
+they run in today, which contradicts the scope in 1.1. The default is B16.
+
+**Decision requested.** Phase 2's instruction was to stop extraction when an assumption fails.
+Extraction of B1 to B15 does not depend on B16 (`dynamic` is unaffected), so the proposal is to
+land B16 and the extraction as independent changes, B16 first because it gates Phase 3.
