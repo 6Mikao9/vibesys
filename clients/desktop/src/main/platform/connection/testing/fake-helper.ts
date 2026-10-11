@@ -48,7 +48,7 @@ export interface FakeHost {
 
 export function record(id: string, runId: string, project = '/p'): LiveInstanceRecord {
   return {
-    version: 3,
+    version: 4,
     id,
     status: 'serving',
     phase: {status: 'running', stage: null, reason: null},
@@ -119,7 +119,7 @@ export class FakeHelper {
 
   listing(): InstanceList {
     return {
-      version: 3,
+      version: 4,
       instances: [...this.host.instances],
       ended: [...this.host.ended],
       unreadable: [],

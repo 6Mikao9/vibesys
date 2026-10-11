@@ -4,7 +4,7 @@
  * host is never asked again for them.
  */
 import type {HostKey} from './hosts.js';
-import type {HostListing, WelcomeRecent} from './welcome-protocol.js';
+import type {HostListing, WelcomeRecent, WelcomeRun} from './welcome-protocol.js';
 
 /** What the welcome view says about a recent run. */
 export type RecentStatus =
@@ -22,7 +22,14 @@ export function recentStatus(run: WelcomeRecent, listing: HostListing | undefine
     entry => entry.runId === run.runId && entry.projectRoot === run.project,
   );
   if (live !== undefined) return {kind: 'live', instanceId: live.id, status: live.status};
-  const ended = listing.ended.find(entry => entry.runId === run.runId);
+  // A run resumed and ended again has several tombstones: its latest server says how it ended.
+  const ended = listing.ended
+    .filter(entry => entry.runId === run.runId)
+    .reduce<WelcomeRun | undefined>(
+      (latest, entry) =>
+        latest === undefined || entry.startedAt > latest.startedAt ? entry : latest,
+      undefined,
+    );
   return {kind: 'ended', status: ended?.status ?? null, reason: ended?.reason ?? null};
 }
 

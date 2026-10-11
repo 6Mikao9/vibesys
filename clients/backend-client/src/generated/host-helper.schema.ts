@@ -411,11 +411,11 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "InstanceList": {
       "additionalProperties": false,
-      "description": "``vibesys instances list --json``: the detached servers on this node (version 3).",
+      "description": "``vibesys instances list --json``: the detached servers on this node (version 4).",
       "properties": {
         "version": {
-          "const": 3,
-          "default": 3,
+          "const": 4,
+          "default": 4,
           "title": "Version",
           "type": "integer"
         },
@@ -724,11 +724,11 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "LiveInstanceRecord": {
       "additionalProperties": false,
-      "description": "What a detached server publishes about itself (version 3).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal. When the server\nexits it leaves its last record, with an ended phase and ``ended_at``, as a\ntombstone the registry keeps for a day.",
+      "description": "What a detached server publishes about itself (version 4).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal. When the server\nexits it leaves its last record, with an ended phase and ``ended_at``, as a\ntombstone the registry keeps for a day.",
       "properties": {
         "version": {
-          "const": 3,
-          "default": 3,
+          "const": 4,
+          "default": 4,
           "title": "Version",
           "type": "integer"
         },
@@ -1127,7 +1127,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunPhase": {
       "additionalProperties": false,
-      "description": "A run's lifecycle status with the detail its status needs.\n\n``stage`` says where a ``starting`` run is; ``reason`` says why a\n``failed`` one ended. Neither is present for any other status.",
+      "description": "A run's lifecycle status with the detail its status needs.\n\n``stage`` (and, when the stage reports it, ``progress``) says where a\n``starting`` run is; ``reason`` says why a ``failed`` one ended. None of\nthem is present for any other status.",
       "properties": {
         "status": {
           "$ref": "#/$defs/RunStatus"
@@ -1136,6 +1136,17 @@ const hostHelperSchema: Record<string, unknown> = {
           "anyOf": [
             {
               "$ref": "#/$defs/StartupStage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StartupProgress"
             },
             {
               "type": "null"
@@ -1490,10 +1501,46 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunsListRequest",
       "type": "object"
     },
+    "StartupProgress": {
+      "additionalProperties": false,
+      "description": "How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``.\n\n``total`` is ``None`` when the stage does not know it. ``label`` names the\nstep now running (an image build's Dockerfile instruction), as data.",
+      "properties": {
+        "done": {
+          "minimum": 0,
+          "title": "Done",
+          "type": "integer"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "done"
+      ],
+      "title": "StartupProgress",
+      "type": "object"
+    },
     "StartupStage": {
-      "description": "Where a starting run is, in the order it gets there.",
+      "description": "Where a starting run is, in the order it gets there.\n\nDeclaration order is the order: a starting run only moves to a later stage.",
       "enum": [
-        "resolving"
+        "resolving",
+        "building_image",
+        "starting_container"
       ],
       "title": "StartupStage",
       "type": "string"
