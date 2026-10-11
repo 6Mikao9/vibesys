@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {HostError} from './host.js';
 import {type CheckedHost, HostPool} from './host-pool.js';
 import type {HostId} from './host-settings.js';
+import {SettingsStore} from './settings-store.js';
 import {FakeHost} from './testing/fake-host.js';
 import {fakeRecord} from './testing/fake-record.js';
 
@@ -20,6 +21,8 @@ function pool(
     readonly broken?: ReadonlySet<string>;
     readonly roots?: readonly string[];
     readonly rootsError?: HostError;
+    /** What `vibesys tasks` prints on stderr when it fails; it succeeds when absent. */
+    readonly tasksStderr?: string;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'vsd-pool-'));
@@ -29,31 +32,38 @@ function pool(
   const built: Built[] = [];
   const hosts = new HostPool({
     sshConfigPath: join(directory, 'config'),
-    settingsPath: join(directory, 'hosts.json'),
-    recentPath: join(directory, 'recent.json'),
+    settings: new SettingsStore({
+      settingsPath: join(directory, 'hosts.json'),
+      recentPath: join(directory, 'recent.json'),
+      log: message => logged.push(message),
+    }),
     localCheckout: '/Users/me/src/vibesys',
     factory: async (id, checkout) => {
       built.push({id, checkout});
       const host = new FakeHost({
         command: argv =>
-          argv[0] === 'tasks'
-            ? {
-                code: 0,
-                stdout: JSON.stringify({
-                  version: 1,
-                  project_root: argv[1],
-                  tasks: [{name: 'mpmc'}, {name: 'spsc'}],
-                }),
-                stderr: '',
-              }
-            : {
-                code: 0,
-                stdout: JSON.stringify({
-                  version: 1,
-                  instances: [{...fakeRecord('0123456789ab', '/run/s', 1), vibesys_root: checkout}],
-                }),
-                stderr: '',
-              },
+          argv[0] === 'tasks' && options.tasksStderr !== undefined
+            ? {code: 1, stdout: '', stderr: options.tasksStderr}
+            : argv[0] === 'tasks'
+              ? {
+                  code: 0,
+                  stdout: JSON.stringify({
+                    version: 1,
+                    project_root: argv[1],
+                    tasks: [{name: 'mpmc'}, {name: 'spsc'}],
+                  }),
+                  stderr: '',
+                }
+              : {
+                  code: 0,
+                  stdout: JSON.stringify({
+                    version: 1,
+                    instances: [
+                      {...fakeRecord('0123456789ab', '/run/s', 1), vibesys_root: checkout},
+                    ],
+                  }),
+                  stderr: '',
+                },
       });
       return Object.assign(host, {
         verifyCheckout: async () => {
@@ -132,6 +142,18 @@ describe('HostPool', () => {
     const {hosts} = pool('', null);
     expect(await hosts.tasks({kind: 'local'}, '/tmp/queue-rs')).toEqual(['mpmc', 'spsc']);
     await expect(hosts.tasks({kind: 'local'}, '-x')).rejects.toThrow('cannot start with "-"');
+  });
+
+  test('regression: a failed task listing reads as plain language, not a command line', async () => {
+    const {hosts, logged} = pool('', null, {
+      tasksStderr: 'vibesys tasks: Project root does not exist: /x',
+    });
+    const listing = hosts.tasks({kind: 'local'}, '/x');
+    await expect(listing).rejects.toThrow(
+      'Could not read the tasks of /x: Project root does not exist: /x',
+    );
+    await listing.catch((error: Error) => expect(error.message).not.toContain('--json'));
+    expect(logged.join('\n')).toContain('exited with 1');
   });
 
   test('remembers attached runs, most recent first', async () => {
