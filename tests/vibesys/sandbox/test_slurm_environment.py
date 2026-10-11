@@ -7,7 +7,6 @@ program stands in for the cluster, so nothing patches the code under test.
 
 from __future__ import annotations
 
-import shlex
 import shutil
 import sys
 from dataclasses import replace
@@ -80,7 +79,7 @@ with open({log!r}, "a") as log:
 command = sys.argv[sys.argv.index("--") + 1 :]
 os.execvp(command[0], command)
 """
-# The local transport without the agent's GPU commands: gates only, and no remote capture.
+# The local transport without the agent's GPU commands: no remote capture.
 _SLURM_LOCAL_CONFIG = """[slurm]
 name = "test-cluster"
 remote_workspace_root = "/shared/vibesys"
@@ -92,12 +91,6 @@ _SLURM_GPU_CONFIG = """[slurm_gpu]
 partitions = ["main"]
 max_gpus = 8
 max_time_minutes = 120
-"""
-# Stands in for ``vs_sandbox.slurm_command``: reports how it was called and fails the benchmark.
-_FAKE_GATE = """\
-import os, sys
-print("gate", *sys.argv[1:], "cwd=" + os.getcwd())
-sys.exit(7 if "benchmark" in sys.argv else 0)
 """
 
 
@@ -137,14 +130,11 @@ def _write_agent_gpu_slurm_config(tmp_path: Path, srun_log: Path) -> Path:
 def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnvironment:
     docker = daemon_docker_config(backend.engine)
     if name == "slurm+gpu":
-        gate = tmp_path / "fake_gate.py"
-        gate.write_text(_FAKE_GATE, encoding="utf-8")
         return SlurmEnvironment(
             load_slurm_operator_settings(
                 _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log")
             ),
             docker=docker,
-            gate_wrapper=(_PYTHON, str(gate)),
             job_confinement=_PassThroughConfinement(),
         )
     if name in ("slurm", "slurm-local"):
@@ -152,22 +142,16 @@ def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnviro
         config.write_text(
             _SLURM_CONFIG if name == "slurm" else _SLURM_LOCAL_CONFIG, encoding="utf-8"
         )
-        gate = tmp_path / "fake_gate.py"
-        gate.write_text(_FAKE_GATE, encoding="utf-8")
         return SlurmEnvironment(
             load_slurm_operator_settings(config),
             docker=docker,
-            gate_wrapper=(_PYTHON, str(gate)),
         )
     config = tmp_path / "slurm-gpu.toml"
     config.write_text(_SLURM_GPU_CONFIG, encoding="utf-8")
-    gate = tmp_path / "fake_gate.py"
-    gate.write_text(_FAKE_GATE, encoding="utf-8")
     return SlurmEnvironment.from_slurm_gpu(
         config,
         RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda"),
         docker=docker,
-        gate_wrapper=(_PYTHON, str(gate)),
         job_confinement=_PassThroughConfinement(),
     )
 
@@ -197,6 +181,10 @@ def _request(
     )
 
 
+# The configurations whose agent may run its own GPU commands through ``vibesys-gpu``.
+_WITH_GPU = ("slurm-gpu", "slurm+gpu")
+
+
 def _open(
     tmp_path: Path,
     name: str,
@@ -223,38 +211,29 @@ def test_the_agent_never_runs_on_the_host_for_either_slurm_environment(
         run = next(call for call in backend.engine.calls if call[1] == "run")
         mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
         assert f"{request.workspace}:{request.workspace}" in mounts
-        assert any(token.startswith("VIBESYS_COMMAND_BROKER_TOKEN=") for token in run)
+        assert any(token.startswith("VIBESYS_COMMAND_BROKER_TOKEN=") for token in run) is (
+            name in _WITH_GPU
+        )
     finally:
         session.close()
 
 
-def test_a_slurm_gate_run_in_the_container_runs_on_the_host_through_the_wrapper(
-    tmp_path: Path,
+@pytest.mark.parametrize("name", _ENVIRONMENTS)
+@pytest.mark.parametrize("accuracy", [None, "python accuracy.py"])
+@pytest.mark.parametrize("benchmark", [None, "python benchmark.py"])
+def test_the_agent_gets_no_shell_command_for_trusted_evaluation(
+    tmp_path: Path, name: str, accuracy: str | None, benchmark: str | None
 ) -> None:
-    _backend, request, session = _open(tmp_path, "slurm")
-    try:
-        accuracy = session.view.paths.accuracy_command
-        benchmark = session.view.paths.benchmark_command
-        assert accuracy is not None
-        assert benchmark is not None
-
-        passed = session.sandbox.execute(accuracy)
-        failed = session.sandbox.execute(benchmark)
-
-        plan = tmp_path / "logs" / "slurm-evaluation-plan.json"
-        assert passed.exit_code == 0
-        assert f"gate --plan {plan} accuracy cwd={request.workspace}" in passed.output
-        # The gate's own exit status reaches the agent.
-        assert failed.exit_code == 7
-    finally:
-        session.close()
-
-
-def test_a_slurm_gate_the_task_does_not_plan_is_not_offered(tmp_path: Path) -> None:
-    _backend, _, session = _open(tmp_path, "slurm", accuracy=None)
+    """Trusted evaluation is requested only through the evaluation tool (#1649)."""
+    backend, _, session = _open(tmp_path, name, accuracy=accuracy, benchmark=benchmark)
     try:
         assert session.view.paths.accuracy_command is None
-        assert session.view.paths.benchmark_command is not None
+        assert session.view.paths.benchmark_command is None
+        notes = session.view.prompt_notes
+        assert "vibesys-gate" not in notes
+        assert "--gate" not in notes
+        run = _run_tokens(backend)
+        assert not any("vibesys-gate" in token for token in run)
     finally:
         session.close()
 
@@ -273,7 +252,8 @@ def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str
         for key, value in session.view.profiler_mcp_env
         if key == "VIBESYS_SLURM_BROKER_SOCKET"
     ]
-    assert len(sockets) == (2 if name == "slurm" else 1)
+    # The profiler transport's broker (SSH only) and the GPU command broker (agent GPU only).
+    assert len(sockets) == {"slurm": 1, "slurm-local": 0}.get(name, 1)
     assert all(socket.exists() for socket in sockets)
 
     session.close()
@@ -281,57 +261,33 @@ def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str
     assert not any(socket.exists() for socket in sockets)
 
 
-# What the agent types to reach the host broker's gates, per environment.
-_GATE_CLIENTS = {
-    "slurm": "vibesys-gate",
-    "slurm-local": "vibesys-gate",
-    "slurm-gpu": "vibesys-gpu",
-    "slurm+gpu": "vibesys-gpu",
-}
-
-
 @pytest.mark.parametrize("name", _ENVIRONMENTS)
-def test_the_gate_client_is_mounted_where_the_agents_path_finds_it(
+def test_the_gpu_client_is_mounted_where_the_agents_path_finds_it(
     tmp_path: Path, name: str
 ) -> None:
     """Regression for #1646: the client was reachable only by its absolute host path."""
     backend, _, session = _open(tmp_path, name)
     try:
-        run = next(call for call in backend.engine.calls if call[1] == "run")
-        mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
-        client = _GATE_CLIENTS[name]
-        [mount] = [mount for mount in mounts if mount.endswith(f":/usr/local/bin/{client}:ro")]
-        launcher = Path(mount.split(":", 1)[0])
-        assert launcher.name == client
-        assert launcher.is_file()
-        # The gate commands the run hands out name that same program.
-        gate = session.view.paths.accuracy_command
-        assert gate is not None
-        assert shlex.split(gate)[0] == str(launcher)
+        mounts = _mounts(_run_tokens(backend))
+        clients = [mount for mount in mounts if "/usr/local/bin/" in mount]
+        if name not in _WITH_GPU:
+            assert clients == []
+            return
+        [mount] = clients
+        assert mount.endswith(":/usr/local/bin/vibesys-gpu:ro")
+        assert Path(mount.split(":", 1)[0]).is_file()
     finally:
         session.close()
 
 
-@pytest.mark.parametrize("name", _ENVIRONMENTS)
-@pytest.mark.parametrize("accuracy", [None, "python accuracy.py"])
-@pytest.mark.parametrize("benchmark", [None, "python benchmark.py"])
-def test_the_environment_notes_name_the_gate_client_and_exactly_the_planned_gates(
-    tmp_path: Path, name: str, accuracy: str | None, benchmark: str | None
-) -> None:
-    """Regression for #1646: no prompt told the agent a gate client exists."""
-    _backend, _, session = _open(tmp_path, name, accuracy=accuracy, benchmark=benchmark)
-    try:
-        notes = session.view.prompt_notes
-        client = _GATE_CLIENTS[name]
-        assert (f"`{client} --gate accuracy`" in notes) is (accuracy is not None)
-        assert (f"`{client} --gate benchmark`" in notes) is (benchmark is not None)
-        if name == "slurm" and accuracy is None and benchmark is None:
-            assert client not in notes
-        # The notes and the gate commands handed to the run agree on what is planned.
-        assert (session.view.paths.accuracy_command is not None) is (accuracy is not None)
-        assert (session.view.paths.benchmark_command is not None) is (benchmark is not None)
-    finally:
-        session.close()
+def _mounts(run: list[str]) -> list[str]:
+    return [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
+
+
+def _gpu_client(backend: DaemonBackend) -> str:
+    """The host path of the ``vibesys-gpu`` client the container was given."""
+    [mount] = [m for m in _mounts(_run_tokens(backend)) if m.endswith("/vibesys-gpu:ro")]
+    return mount.split(":", 1)[0]
 
 
 def _run_tokens(backend: DaemonBackend) -> list[str]:
@@ -346,13 +302,11 @@ def test_the_container_gets_the_gpu_launcher_exactly_when_the_agent_may_run_gpu_
     try:
         run = _run_tokens(backend)
         mounts = [run[i + 1] for i, flag in enumerate(run) if flag == "-v"]
-        has_gpu = name not in ("slurm", "slurm-local")
+        has_gpu = name in _WITH_GPU
         assert any(token.startswith("VIBESYS_GPU=") for token in run) is has_gpu
         assert ("CUDA_VISIBLE_DEVICES=" in run) is has_gpu
         assert any(mount.endswith(":/usr/local/bin/vibesys-gpu:ro") for mount in mounts) is has_gpu
-        assert any(mount.endswith(":/usr/local/bin/vibesys-gate:ro") for mount in mounts) is (
-            not has_gpu
-        )
+        assert not any("vibesys-gate" in mount for mount in mounts)
         assert ("GPU process runs as a Slurm job" in session.view.prompt_notes) is has_gpu
     finally:
         session.close()
@@ -361,12 +315,10 @@ def test_the_container_gets_the_gpu_launcher_exactly_when_the_agent_may_run_gpu_
 def test_a_gpu_command_from_the_container_runs_in_a_slurm_job_within_the_operator_limits(
     tmp_path: Path,
 ) -> None:
-    _backend, _, session = _open(tmp_path, "slurm+gpu")
+    backend, _, session = _open(tmp_path, "slurm+gpu")
     try:
-        gate = session.view.paths.accuracy_command
-        assert gate is not None
         # The fake daemon runs programs on the host, where the bare name is not on PATH.
-        client = shlex.split(gate)[0]
+        client = _gpu_client(backend)
         ran = session.sandbox.execute(f"{client} --gpus 3 --time 45 -- echo from-the-job")
         refused = session.sandbox.execute(f"{client} --gpus 5 -- echo too-many")
         too_long = session.sandbox.execute(f"{client} --time 91 -- echo too-long")
@@ -383,21 +335,6 @@ def test_a_gpu_command_from_the_container_runs_in_a_slurm_job_within_the_operato
         assert "limit of 4" in refused.output
         assert too_long.exit_code != 0
         assert "limit of 90" in too_long.output
-    finally:
-        session.close()
-
-
-def test_the_gates_still_run_through_the_sbatch_wrapper_when_the_agent_may_run_gpu_commands(
-    tmp_path: Path,
-) -> None:
-    _backend, request, session = _open(tmp_path, "slurm+gpu")
-    try:
-        accuracy = session.view.paths.accuracy_command
-        assert accuracy is not None
-        passed = session.sandbox.execute(accuracy)
-        plan = tmp_path / "logs" / "slurm-evaluation-plan.json"
-        assert f"gate --plan {plan} accuracy cwd={request.workspace}" in passed.output
-        assert not (tmp_path / "srun.log").exists()
     finally:
         session.close()
 
@@ -489,12 +426,9 @@ def _real_confinement_environment(
     paths = ", ".join(f'"{path}"' for path in read_only_paths)
     with config.open("a", encoding="utf-8") as handle:
         handle.write(f"read_only_paths = [{paths}]\n")
-    gate = tmp_path / "fake_gate.py"
-    gate.write_text(_FAKE_GATE, encoding="utf-8")
     return SlurmEnvironment(
         load_slurm_operator_settings(config),
         docker=daemon_docker_config(backend.engine),
-        gate_wrapper=(_PYTHON, str(gate)),
     )
 
 
@@ -510,9 +444,7 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
     environment = _real_confinement_environment(tmp_path, backend, [tools] if exposed else [])
     session = open_run_environment(environment, request)
     try:
-        gate = session.view.paths.accuracy_command
-        assert gate is not None
-        client = shlex.split(gate)[0]
+        client = _gpu_client(backend)
 
         read = session.sandbox.execute(f"{client} -- cat {tools}/interpreter.txt")
         write = session.sandbox.execute(f"{client} -- sh -c 'echo x > {tools}/written.txt'")
@@ -572,9 +504,7 @@ def test_a_gpu_job_runs_an_interpreter_reached_through_a_link_chain_once_the_ali
     environment = _real_confinement_environment(tmp_path, backend, [venv, alias])
     session = open_run_environment(environment, _request(tmp_path, backend))
     try:
-        gate = session.view.paths.accuracy_command
-        assert gate is not None
-        client = shlex.split(gate)[0]
+        client = _gpu_client(backend)
 
         result = session.sandbox.execute(f"{client} -- {venv}/bin/python")
 

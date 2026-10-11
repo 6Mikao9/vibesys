@@ -53,12 +53,12 @@ def test_a_file_the_agent_names_by_absolute_path_is_the_same_file_in_the_job(
 
 @pytest.mark.parametrize("elsewhere", ["/home/agent", "/"])
 def test_a_request_from_outside_the_workspace_is_refused_and_starts_no_job(
-    run: OpenRun, slurm_cluster: SlurmCluster, elsewhere: str
+    gpu_run: OpenRun, slurm_cluster: SlurmCluster, elsewhere: str
 ) -> None:
-    gate = run.agent(f"cd {elsewhere} && {run.launcher()} --gate accuracy")
+    result = gpu_run.agent(f'cd {elsewhere} && "$VIBESYS_GPU" -- true')
 
-    assert gate.exit_code == 2, gate.output
-    assert "inside the run's workspace" in gate.output
+    assert result.exit_code == 2, result.output
+    assert "inside the run's workspace" in result.output
     assert slurm_cluster.queue() == []
 
 

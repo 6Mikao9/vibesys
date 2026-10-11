@@ -7,12 +7,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.slurm_cluster.conftest import HOST_CANARY_ENV, HOST_CANARY_VALUE
-from tests.slurm_cluster.harness import open_run, parse_env
+from tests.slurm_cluster.harness import parse_env
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from tests.slurm_cluster.cluster import SlurmCluster
     from tests.slurm_cluster.harness import OpenRun
 
 pytestmark = pytest.mark.slurm_cluster
@@ -53,34 +50,3 @@ def test_the_host_secret_exists_in_the_test_process(gpu_run: OpenRun) -> None:
     """Guards the guard: the leak checks mean something only if the host holds the secret."""
     assert os.environ[HOST_CANARY_ENV] == HOST_CANARY_VALUE
     assert gpu_run.workspace.exists()
-
-
-def test_a_gate_job_sees_none_of_the_hosts_environment(run: OpenRun) -> None:
-    run.set_mode("accuracy", "env")
-
-    result = run.gate("accuracy")
-
-    assert result.exit_code == 0, result.output
-    job = parse_env(result.output)
-    assert HOST_CANARY_ENV not in job
-    assert HOST_CANARY_VALUE not in result.output
-
-
-@pytest.mark.parametrize("kind", ["slurm-local", "slurm-local-gpu"])
-def test_a_host_that_is_itself_inside_a_slurm_allocation_still_runs_gates_as_new_jobs(
-    kind: str,
-    slurm_cluster: SlurmCluster,
-    workdir: Path,
-    agent_image_id: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # VibeSys started from an ``salloc`` shell inherits the allocation's variables.
-    monkeypatch.setenv("SLURM_JOB_ID", "424242")
-    monkeypatch.setenv("SLURM_JOBID", "424242")
-    monkeypatch.setenv("SLURM_STEP_ID", "0")
-    with open_run(kind, slurm_cluster, workdir, agent_image_id) as run:
-        result = run.gate("accuracy")
-
-        assert result.exit_code == 0, result.output
-        assert "accuracy ok" in result.output
-        assert slurm_cluster.queue() == []

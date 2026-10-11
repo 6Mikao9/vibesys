@@ -172,7 +172,6 @@ def representative_context() -> dict[str, object]:
         "exhaustion_entry",
         "feedback",
         "framework_revert_commit",
-        "gate_client",
         "gate_approved_evaluation_artifact",
         "gate_approved_perf_unit",
         "gpu",

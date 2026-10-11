@@ -11,7 +11,6 @@ is a job), so the CUDA and ROCm bases are built and started without a device.
 from __future__ import annotations
 
 import secrets
-import shlex
 import sys
 import textwrap
 from contextlib import contextmanager
@@ -61,16 +60,6 @@ _FAKE_SLURM = textwrap.dedent(
     if "--" in sys.argv:
         command = sys.argv[sys.argv.index("--") + 1 :]
         os.execvp(command[0], command)
-    """
-)
-#: Stands in for ``vs_sandbox.slurm_command``: runs the planned gate right here.
-_FAKE_GATE = textwrap.dedent(
-    """\
-    import json, os, sys
-    plan = json.load(open(sys.argv[sys.argv.index("--plan") + 1]))
-    kind = sys.argv[sys.argv.index("--plan") + 2]
-    command = plan[kind + "_command"] + sys.argv[sys.argv.index("--plan") + 3 :]
-    os.execvp(command[0], command)
     """
 )
 ACCURACY_SCRIPT = 'print("accuracy ok")\n'
@@ -166,15 +155,8 @@ class Editor:
 
     @property
     def gpu_client(self) -> str:
-        """The ``vibesys-gpu`` broker client the editor was given: the program of its gate commands."""
-        paths = self.session.view.paths
-        command = paths.accuracy_command or paths.benchmark_command
-        assert command is not None
-        return shlex.split(command)[0]
-
-    def gate(self, kind: str, *arguments: str) -> tuple[int, str]:
-        """Run the agent's *kind* gate (``accuracy`` or ``benchmark``) with *arguments*."""
-        return self.run(shlex.join((self.gpu_client, "--gate", kind, *arguments)))
+        """The ``vibesys-gpu`` client the editor was given; it is on the agent's ``PATH``."""
+        return "vibesys-gpu"
 
 
 def ensure_base_image(image: str) -> None:
@@ -248,11 +230,8 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
         profiler_support_name=definition.support_name,
         profiler_support_extra=profiler_support_extra(definition),
     )
-    gate = directory / "fake_gate.py"
-    gate.write_text(_FAKE_GATE, encoding="utf-8")
     environment = SlurmEnvironment(
         load_slurm_operator_settings(_slurm_config(directory)),
-        gate_wrapper=(sys.executable, str(gate)),
         docker=DockerEnvironmentConfig(),
         job_confinement=PassThroughConfinement(),
     )

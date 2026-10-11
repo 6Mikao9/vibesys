@@ -48,8 +48,6 @@ def open_run_environment(
                 "slurm/prompt_notes.j2",
                 template_dir=_TEMPLATE_DIR,
                 service_command=shlex.join(facts.service_command),
-                gate_client=facts.gate_client,
-                gates=facts.gates,
                 agent_gpu=facts.agent_gpu,
                 read_only_paths=[
                     path.as_posix() for path in request.project_path_policy.read_only_paths

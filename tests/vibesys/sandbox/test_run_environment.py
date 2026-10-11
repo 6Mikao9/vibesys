@@ -496,10 +496,9 @@ remote_python = "/remote/venv/bin/python"
     assert kind is SandboxKind.DOCKER
     assert options["same_path_workspace"] is True
     assert options["attach_accelerator"] is False
-    # The gates are requests to the host broker, not host commands run in the container.
-    assert (session.view.paths.accuracy_command or "").endswith("vibesys-gate --gate accuracy")
-    assert (session.view.paths.benchmark_command or "").endswith("vibesys-gate --gate benchmark")
-    assert "vs_sandbox" not in (session.view.paths.accuracy_command or "")
+    # Trusted evaluation is the evaluation tool's: the agent gets no shell command for it.
+    assert session.view.paths.accuracy_command is None
+    assert session.view.paths.benchmark_command is None
     profiler_env = dict(session.view.profiler_mcp_env)
     # The profiler reads the run's own rendering of the settings it validated.
     assert load_slurm_operator_settings(

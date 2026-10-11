@@ -22,8 +22,10 @@ import pytest
 from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
     COMMAND_BROKER_TOKEN_ENV,
-    GateKind,
-    Gates,
+    AgentGpuConfig,
+    GpuCommand,
+    GpuCommands,
+    GpuJobRequest,
     HostCommandBroker,
     RunRoots,
 )
@@ -38,8 +40,8 @@ if TYPE_CHECKING:
     from vs_sim.api import Event
 
 
-class _Gates:
-    """A gate runner that writes one line, then optionally waits to be cancelled."""
+class _Launcher:
+    """A job launcher that writes one line, then optionally waits to be cancelled."""
 
     def __init__(self, *, block: bool = False) -> None:
         self.started = threading.Event()
@@ -48,20 +50,25 @@ class _Gates:
 
     def run(
         self,
-        kind: GateKind,
-        arguments: Sequence[str],
+        request: GpuJobRequest,
+        command: GpuCommand,
         *,
-        cwd: Path,
         write: Callable[[bytes], None],
         cancel: Event,
     ) -> int:
-        del arguments, cwd
-        write(f"gate {kind.value}\n".encode())
+        del request, command
+        write(b"started\n")
         self.started.set()
         if self._block:
-            wait_or_fail(cancel, "the broker to cancel the gate")
+            wait_or_fail(cancel, "the broker to cancel the job")
             self.cancelled.set()
         return 3
+
+
+class _NoConfinement:
+    def wrap(self, workspace: Path, argv: Sequence[str]) -> list[str]:
+        del workspace
+        return list(argv)
 
 
 @contextmanager
@@ -75,11 +82,16 @@ def _short_directory() -> Iterator[Path]:
 
 
 @contextmanager
-def _serving(directory: Path, gates: _Gates) -> Iterator[HostCommandBroker]:
+def _serving(directory: Path, launcher: _Launcher) -> Iterator[HostCommandBroker]:
     workspace = directory / "workspace"
     workspace.mkdir()
+    config = AgentGpuConfig.model_validate(
+        {"partitions": ("main",), "max_gpus": 8, "max_time_minutes": 120}
+    )
     broker = HostCommandBroker(
-        directory / "broker.sock", roots=RunRoots((workspace,)), gates=Gates(gates)
+        directory / "broker.sock",
+        roots=RunRoots((workspace,)),
+        gpu=GpuCommands(config, _NoConfinement(), {}, launcher=launcher),
     )
     broker.start()
     try:
@@ -88,39 +100,39 @@ def _serving(directory: Path, gates: _Gates) -> Iterator[HostCommandBroker]:
         broker.close()
 
 
-def test_a_gate_runs_through_the_real_socket(
+def test_a_gpu_command_runs_through_the_real_socket(
     monkeypatch: pytest.MonkeyPatch, capsysbinary: pytest.CaptureFixture[bytes]
 ) -> None:
-    with _short_directory() as directory, _serving(directory, _Gates()) as broker:
+    with _short_directory() as directory, _serving(directory, _Launcher()) as broker:
         monkeypatch.chdir(directory / "workspace")
         monkeypatch.setenv(COMMAND_BROKER_SOCKET_ENV, str(broker.socket_path))
         monkeypatch.setenv(COMMAND_BROKER_TOKEN_ENV, broker.token)
 
-        status = execute(["--gate", "accuracy"], stop=Stop())
+        status = execute(["--", "true"], stop=Stop())
 
     assert status == 3
-    assert capsysbinary.readouterr().out == b"gate accuracy\n"
+    assert capsysbinary.readouterr().out == b"started\n"
     assert not broker.socket_path.exists()
 
 
-def test_hanging_up_cancels_a_running_gate() -> None:
-    gates = _Gates(block=True)
-    with _short_directory() as directory, _serving(directory, gates) as broker:
+def test_hanging_up_cancels_a_running_job() -> None:
+    launcher = _Launcher(block=True)
+    with _short_directory() as directory, _serving(directory, launcher) as broker:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client.settimeout(HANG_GUARD_S)
         client.connect(str(broker.socket_path))
         call = {
-            "op": "gate",
+            "op": "gpu",
             "token": broker.token,
-            "kind": "accuracy",
-            "arguments": [],
+            "argv": ["true"],
             "cwd": str(directory / "workspace"),
+            "env": {},
         }
         client.sendall(json.dumps(call).encode() + b"\n")
-        wait_or_fail(gates.started, "the gate to start")
+        wait_or_fail(launcher.started, "the job to start")
         client.close()
 
-        wait_or_fail(gates.cancelled, "the hang-up to cancel the gate")
+        wait_or_fail(launcher.cancelled, "the hang-up to cancel the job")
 
 
 @pytest.mark.parametrize("argument_bytes", [1, 4 * 1024 * 1024])
