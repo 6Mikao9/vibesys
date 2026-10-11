@@ -195,7 +195,7 @@ matching project reference; the graph checker names any mismatch.
 
 | Package | Layer | Status | Item that creates or moves it |
 | --- | --- | --- | --- |
-| `@vibesys/contracts` | foundation | pilot | foundation item, contracts pilot (this roadmap's first item) |
+| `@vibesys/contracts` | foundation | pilot | foundation item (#1869), contracts pilot |
 | `@vibesys/ui` | foundation | planned | web feature-folder refactor, then package extraction |
 | `@vibesys/core-state` | core | exists (moves to the source condition and project references) | foundation item |
 | `@vibesys/transport` | core | planned (split from `backend-client`) | backend-client split |
@@ -210,4 +210,5 @@ matching project reference; the graph checker names any mismatch.
 | `@vibesys/desktop`, `@vibesys/web` | app | exist; emptied into features and apps, then deleted | app composition |
 | `@vibesys/tui` | app | deprecated; kept building, not migrated | none |
 
-Sub-issues under roadmap #891 track each item when it starts.
+Roadmap [#1878](https://github.com/uw-syfi/vibesys/issues/1878) tracks this migration; each item gets
+a sub-issue there when it starts.
