@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {PROTOCOL_VERSION} from '@vibesys/backend-client';
+import {PROTOCOL_VERSION} from '@vibesys/contracts';
 import {checkAttachment} from './attachment.js';
 import {
   parseDetachedLaunch,

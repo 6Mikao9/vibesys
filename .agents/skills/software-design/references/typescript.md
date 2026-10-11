@@ -39,7 +39,7 @@ anything else in another package is an error.
 - **Closed sets.** A string-literal union. When the values cross the backend
   boundary, take the union from the generated protocol types, never a
   hand-written copy. Branch exhaustively so a new member is a compile error.
-- **Generated types.** Never edit `backend-client/src/generated/`. Regenerate
+- **Generated types.** Never edit `contracts/src/generated/`. Regenerate
   with `pnpm generate:protocol` (from `clients/backend-client`) and review the
   diff.
 - **State.** Frontend state changes only from backend events; keep folds pure

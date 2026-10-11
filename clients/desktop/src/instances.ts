@@ -9,7 +9,7 @@
  * protocol version may also publish a record of another shape, so its record is reported as
  * `incompatible` with the two versions, never as a schema error the user cannot act on.
  */
-import {PROTOCOL_VERSION} from '@vibesys/backend-client';
+import {PROTOCOL_VERSION} from '@vibesys/contracts';
 import {isInstanceId} from './ids.js';
 
 /** A live detached server this client can talk to. */

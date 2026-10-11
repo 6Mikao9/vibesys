@@ -79,7 +79,7 @@ desktop main process (clients/desktop)                host (local or ssh)
 | Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaces `entrypoints.stdio_bridge` once the app uses it (phase 5). |
 | Relay core | `server.stdio_bridge` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
-| Generated helper types | `clients/backend-client/src/generated/` | `host-helper.schema.json` (committed, language neutral) and TypeScript types generated from it. |
+| Generated helper types | `clients/contracts/src/generated/` | `host-helper.schema.json` (committed, language neutral) and TypeScript types generated from it. |
 | Connection manager | `clients/desktop` (`connection-manager.ts`, replaces `host.ts`, `detached-host.ts`, `ssh-host.ts`, `local-host.ts`) | The only code that creates links and channels. One `HostConnection` per host, one supervisor per `HostConnection`. |
 | Screen stores | `clients/desktop` and `clients/web` | One store per screen; pure reducer; React renders state. |
 | App lifecycle | `clients/desktop` (`app-lifecycle.ts`) | Single-instance lock, the quit sequence, the settings store. |
@@ -399,7 +399,7 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 ## Contract pipeline and IDL
 
 Helper messages join the existing pipeline: Pydantic models in `server.host_api` produce
-`clients/backend-client/src/generated/host-helper.schema.json` (committed) through
+`clients/contracts/src/generated/host-helper.schema.json` (committed) through
 `server.api.schema`'s generator, and TypeScript types are generated from that schema, as for the
 run protocol (see the generated directory's README). CI fails when the committed schema is stale.
 The committed JSON Schema is the language-neutral contract; the conformance corpus is the

@@ -15,7 +15,7 @@ const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
-const BACKEND_CLIENT_TEST_ONLY = '^backend-client/src/(?:test-support/|testing/)';
+const BACKEND_CLIENT_TEST_ONLY = '^(?:backend-client|contracts)/src/(?:test-support/|testing/)';
 const CORE_STATE_TEST_ONLY = '^core-state/src/testing/';
 // A package's own test-support directory (`desktop/src/testing/`): Fakes that only tests import.
 const PACKAGE_TEST_SUPPORT = '^[^/]+/src/testing/';
@@ -39,9 +39,16 @@ const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // `^$1/` matches no path: such an importer may reach no tool directory at all.
 const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 
+// The rank order `scripts/check_package_graph.mjs` defines; a package reaches only lower ranks.
+const LAYER_ORDER = ['foundation', 'core', 'domain', 'service', 'feature', 'app'];
+
 function packagesAbove(directory) {
+  const own = layout.packages.find(workspacePackage => workspacePackage.directory === directory);
+  const rank = LAYER_ORDER.indexOf(own?.manifest.vibesys?.layer);
   const above = layout.packages.filter(
-    workspacePackage => workspacePackage.directory !== directory,
+    workspacePackage =>
+      workspacePackage.directory !== directory &&
+      LAYER_ORDER.indexOf(workspacePackage.manifest.vibesys?.layer) >= rank,
   );
   return packagePaths(above);
 }
@@ -82,6 +89,8 @@ function frontendPeerRules() {
 const WEB = '^web/src/';
 const WEB_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
 const BACKEND_CLIENT = ['^backend-client/', '/node_modules/@vibesys/backend-client/'];
+// The protocol vocabulary, which presentational and domain-free code never names.
+const CONTRACTS = ['^contracts/', '/node_modules/@vibesys/contracts/'];
 const CORE_STATE = ['^core-state/', '/node_modules/@vibesys/core-state/'];
 const WEB_BACKEND_ADAPTER = `${WEB}platform/backend\\.ts$`;
 const WEB_FEATURE_PART = part => `${WEB}features/[^/]+/${part}/`;
@@ -149,6 +158,7 @@ function webRunPageRules() {
           WEB_FEATURE_PART('effects'),
           `${WEB}platform/`,
           ...BACKEND_CLIENT,
+          ...CONTRACTS,
           '(?:^|/)node_modules/electron/',
         ],
       },
@@ -172,7 +182,7 @@ function webRunPageRules() {
       name: 'web-shared-is-domain-free',
       severity: 'error',
       from: {path: `${WEB}shared/`, pathNot: TEST_FILE},
-      to: {path: [...BACKEND_CLIENT, ...CORE_STATE]},
+      to: {path: [...BACKEND_CLIENT, ...CONTRACTS, ...CORE_STATE]},
     },
   ];
 }
@@ -199,8 +209,8 @@ export default {
       },
     },
     {
-      // `backend-client` is the lowest layer, so it may not reach any other package: the set is
-      // derived, because a rule that names the layers above it goes stale when one is added.
+      // `backend-client` may reach only lower layers (`contracts`): the set is derived from each
+      // manifest's `vibesys.layer`, because a rule that names the layers above it goes stale.
       name: 'backend-client-is-lowest-layer',
       severity: 'error',
       from: {path: '^backend-client/src/'},
@@ -344,7 +354,12 @@ export default {
       name: 'tui-ui-does-not-depend-on-backend-client',
       severity: 'error',
       from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
-      to: {path: ['^backend-client/', '/node_modules/@vibesys/backend-client/']},
+      to: {
+        path: [
+          '^(?:backend-client|contracts)/',
+          '/node_modules/@vibesys/(?:backend-client|contracts)/',
+        ],
+      },
     },
     {
       // The replay harness consumes published workspace entry points. A relative import into any
@@ -418,8 +433,8 @@ export default {
           '^desktop/src/welcome/(?:ui|effects)/',
           '^desktop/src/welcome/main\\.tsx$',
           '(?:^|/)node_modules/(?:react|react-dom|electron)/',
-          '^backend-client/',
-          '/node_modules/@vibesys/backend-client/',
+          '^(?:backend-client|contracts)/',
+          '/node_modules/@vibesys/(?:backend-client|contracts)/',
         ],
         dependencyTypesNot: ['type-only'],
       },
@@ -438,8 +453,8 @@ export default {
         path: [
           '^desktop/src/welcome/effects/',
           '^desktop/src/welcome/main\\.tsx$',
-          '^backend-client/',
-          '/node_modules/@vibesys/backend-client/',
+          '^(?:backend-client|contracts)/',
+          '/node_modules/@vibesys/(?:backend-client|contracts)/',
           '(?:^|/)node_modules/electron/',
         ],
       },
@@ -487,7 +502,7 @@ export default {
       to: {
         path: [
           '^tui/src/(?!launcher\\.ts$|theme\\.ts$)',
-          '^(?:backend-client|core-state)/',
+          '^(?:backend-client|contracts|core-state)/',
           '@opentui[+/]',
         ],
       },
