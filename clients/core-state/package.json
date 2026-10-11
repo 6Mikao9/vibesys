@@ -3,6 +3,13 @@
   "version": "0.1.1",
   "private": true,
   "type": "module",
+  "vibesys": {
+    "layer": "core",
+    "entries": {
+      ".": "neutral",
+      "./testing": "neutral"
+    }
+  },
   "exports": {
     ".": {
       "@vibesys/source": "./src/index.ts",
@@ -22,7 +29,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.testing.json",
     "check": "tsc -b",
     "test": "node ../scripts/run_bun_tests.mjs ./src",
     "bench:performance": "bun bench/performance-projection.ts",

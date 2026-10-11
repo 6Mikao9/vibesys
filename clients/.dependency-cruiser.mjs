@@ -54,11 +54,10 @@ function packagePaths(packages) {
   ];
 }
 
-// Every package above the two shared libraries is a peer frontend. Deriving that set means a new
-// frontend starts isolated from its peers instead of requiring another pair of hand-written rules.
-const FRONTEND_PACKAGES = layout.packages.filter(
-  ({directory}) => directory !== 'backend-client' && directory !== 'core-state',
-);
+// The app-layer packages (`vibesys.layer` in each manifest) are peer frontends. Deriving the set
+// means a new app starts isolated from its peers instead of requiring another pair of hand-written
+// rules; `scripts/check_package_graph.mjs` owns the layer rules between manifests.
+const FRONTEND_PACKAGES = layout.packages.filter(({manifest}) => manifest.vibesys?.layer === 'app');
 
 function frontendPeerRules() {
   return FRONTEND_PACKAGES.flatMap(frontend => {

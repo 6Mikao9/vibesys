@@ -4,7 +4,7 @@
  * `pnpm-workspace.yaml` admits directories rather than names (`packages: ["*"]`), so which
  * packages exist is a fact about the filesystem, not a list to maintain. Every gate that used to
  * repeat the names reads them from here: `.dependency-cruiser.mjs` (the scanned-path patterns),
- * `scripts/check_ts_architecture.mjs` (the scan roots), `scripts/check_ts_package_manifests.mjs`
+ * `scripts/check_ts_architecture.mjs` (the scan roots), `scripts/check_package_graph.mjs`
  * (the dependency policy), and `knip.config.ts` (the audited workspaces). The workspace scripts in
  * `package.json` need no list at all: `pnpm -r` runs every member by construction.
  *

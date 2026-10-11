@@ -9,7 +9,6 @@ import {cruise} from 'dependency-cruiser';
 import extractDepcruiseOptions from 'dependency-cruiser/config-utl/extract-depcruise-options';
 import extractTSConfig from 'dependency-cruiser/config-utl/extract-ts-config';
 import {cruiseWorkspace} from './check_ts_architecture.mjs';
-import {manifestErrors} from './check_ts_package_manifests.mjs';
 import {declarationErrors, pathAlternation, workspaceLayout} from './workspace_layout.mjs';
 
 const WORKSPACE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -526,38 +525,6 @@ for (const {rule, files} of RULE_CASES) {
   });
 }
 
-test('manifest policy rejects declared reverse dependencies', async t => {
-  const root = await workspaceFixture(t, 'vibesys-manifest-rules-');
-  await writeManifest(root, 'backend-client', '@vibesys/backend-client', {
-    '@vibesys/core-state': 'workspace:*',
-  });
-  await writeManifest(root, 'core-state', '@vibesys/core-state', {
-    '@vibesys/backend-client': 'workspace:*',
-    '@opentui/core': '1.0.0',
-  });
-  await writeManifest(root, 'tui', '@vibesys/tui', {'@vibesys/backend-client': 'workspace:*'});
-  await writeManifest(root, 'web', '@vibesys/web', {
-    '@vibesys/backend-client': 'workspace:*',
-    '@vibesys/core-state': 'workspace:*',
-  });
-
-  assert.deepEqual(manifestErrors(root), [
-    'backend-client/package.json: @vibesys/backend-client must not depend on @vibesys/core-state',
-    'core-state/package.json: @vibesys/core-state must not depend on @opentui/core',
-    'tui/package.json: @vibesys/tui must declare @vibesys/core-state in dependencies',
-  ]);
-});
-
-test('manifest policy names a package that joins the workspace without one', async t => {
-  const root = await workspaceFixture(t, 'vibesys-manifest-policy-');
-  await writeManifest(root, 'stub', '@vibesys/stub', {});
-
-  assert.deepEqual(manifestErrors(root), [
-    'stub/package.json: @vibesys/stub has no dependency policy in ' +
-      'scripts/check_ts_package_manifests.mjs',
-  ]);
-});
-
 // The workspace admits directories, so the layout is what every gate enumerates from: a package
 // or a directory that joins it must appear here without anyone editing a list. These fixtures are
 // plain directories with no git metadata, which is the unpacked-sdist case: the layout cannot ask
@@ -895,10 +862,6 @@ async function scratchDirectory(t, prefix) {
   const root = await mkdtemp(join(tmpdir(), prefix));
   t.after(() => rm(root, {recursive: true, force: true}));
   return root;
-}
-
-async function writeManifest(root, directory, name, dependencies, scripts = {}) {
-  await writePackage(root, directory, name, [], {dependencies, scripts});
 }
 
 async function writePackage(root, directory, name, directories, manifest = {}) {
