@@ -112,6 +112,7 @@ from vs_runtime._evidence_ledger import (
     ReceiptEvidenceLedger,
 )
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
+from vs_runtime._issue_board_operations import BoardTexts, IssueBoardOwner
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementObserver,
@@ -244,6 +245,7 @@ __all__ = [
     "AttemptBinding",
     "BegunUnsealed",
     "BlockDiagnostic",
+    "BoardTexts",
     "CancellableOwner",
     "Cancelled",
     "CaptureCommandOwner",
@@ -279,6 +281,7 @@ __all__ = [
     "Inspection",
     "IntentReceipt",
     "InterpretEvidenceOwner",
+    "IssueBoardOwner",
     "JobRecord",
     "JournalPublicationDelivery",
     "JournalRunInvocations",
