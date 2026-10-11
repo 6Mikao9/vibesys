@@ -1,9 +1,10 @@
 # Live campaign telemetry: streaming a long run into the web UI
 
-Status: draft for discussion, with one real backend fix shipped as proof of
-concept (see "Backend PoC"). Owner: web + orchestration. Companion to the
-campaign dashboard in PR #1304 (`feat/web-trajectory-replay-fixtures`): this
-branch forks directly from #1304's own tip (`git merge-base` against it is
+Status: draft for discussion, with five real backend changes
+shipped, not only a paper proposal (see "Backend changes"). Owner:
+web + orchestration. Companion to the campaign dashboard in PR #1304
+(`feat/web-trajectory-replay-fixtures`): this branch forks directly from
+#1304's own tip (`git merge-base` against it is
 exactly #1304's tip commit), so `CampaignDashboard.tsx`, `replay-scenario.ts`,
 and the rest of that UI shell are inherited verbatim, not reimplemented from
 its shape. What #1304 itself does not provide is any connection to a real
@@ -84,9 +85,9 @@ Non-goals (named here, deferred to "Backend path"):
 
 - Emitting the *campaign-dashboard-specific* events (workstream lifecycle,
   token spend) from the real orchestrator. That still needs the projection
-  work in "Backend path"; it is sketched, not built, here. The one event this
-  PR does wire for real (async-operation lifecycle, see "Backend PoC") is
-  general-purpose plumbing the campaign projection will also depend on, not
+  work in "Backend path"; it is sketched, not built, here. The five events
+  this PR does wire for real (see "Backend changes") are general-purpose
+  plumbing the campaign projection will also depend on, not
   the campaign projection itself.
 - Running a real `dynamic` campaign locally. `orchestrate()`
   (`orchestration/dynamic/orchestration.py`) raises at startup unless
@@ -145,9 +146,14 @@ describing a pre-migration engine as the design target would go stale the
 moment this branch rebases. The cost is that those citations do not resolve
 inside this branch's own checked-out tree today; re-verify them against
 current `upstream/main` before relying on them, or after this branch syncs
-past `712586df6`. "Backend PoC" is the one exception: it touches only
-`src/server/`, is verified directly against this branch's own working tree
-(see its own commit citations), and does not depend on either engine.
+past `712586df6`. "Backend changes" is the exception: every citation there is
+verified directly against this branch's own working tree (see each
+subsection's own commit citations). Its first item (`ASYNC_OPERATION_LIFECYCLE`)
+touches only `src/server/` and depends on neither engine; its other four
+items extend `orchestration/dynamic/orchestration.py` and `workstream.py`,
+which on this branch means the live legacy `DynamicWorkstream`/`DynamicState`
+engine, not the `upstream/main`-only `DynamicStrategyState`/`AttemptRecord`
+one this caveat otherwise warns about.
 
 **Telemetry already flows through named chokepoints, not prints.** There are
 two, one per layer, not a single one. Core-side, every producer emits
@@ -438,7 +444,8 @@ backend and a live `CampaignRecord`:
    `CoreEventType.ASYNC_OPERATION_LIFECYCLE` had no case in the server's
    `EventType`/`EventData` union or in `project_event()`, so
    `project_event()`'s `EventType(event.type.value)` would raise on it,
-   uncaught, killing the run. **This PR fixes that; see "Backend PoC."**
+   uncaught, killing the run. **This PR fixes that; see "Backend changes,"
+   item 1.**
    Promoting `scope_id` into a documented, first-class
    `workstream_id`/`attempt_id` envelope concern for every event, not just
    this one, is still future work, scoped out of this PR; see "Backend
@@ -496,10 +503,11 @@ side.
 - **It is already proven additive.** `#697` added five `EventType` members
   and a field as a pure-additive, no-protocol-version-bump change. Adding a
   telemetry kind is already a small, type-checker-enforced, one-PR change,
-  not a migration. "Backend PoC" below is a second, independent instance of
-  the same pattern on this branch directly: one core enum member, one wire
-  enum member, one conformance fixture, no `project_event()` change needed
-  since the generic fallthrough already handled it.
+  not a migration. "Backend changes" below adds five more independent
+  instances of the same pattern on this branch directly: five new core enum
+  members (and one widened existing payload, for the sixth), five mirrored
+  wire types, five conformance fixtures, no `project_event()` change needed
+  since the generic fallthrough already handled all of them.
 - **It already avoids "a thousand streams."** One multiplexed, sequenced,
   size-capped, chunked channel discriminated by `kind`, not a connection per
   metric. This is the direct answer to the failure mode a print-statement or
@@ -511,9 +519,9 @@ side.
 - **The one real gap is coverage, not design.** Nothing today guarantees
   every `CoreEventType` has a wire mapping, exactly what let
   `ASYNC_OPERATION_LIFECYCLE` crash a run uncaught. The fix for that class of
-  gap is a test, not a new mechanism; this PR adds one (see "Backend PoC")
-  that fails on any future core event added without its wire counterpart,
-  not just on this one instance.
+  gap is a test, not a new mechanism; this PR adds one (see "Backend
+  changes," item 1) that fails on any future core event added without its
+  wire counterpart, not just on this one instance.
 - **Correlation should be promoted, not reinvented.** The ad hoc `scope_id`
   pattern, already on `AsyncOperationLifecycleData`, is the right shape for
   "which workstream does this event belong to"; it should become a
@@ -800,7 +808,16 @@ the frames come from the curated record, not a live orchestrator; token values
 are the record's reconstructed spend; `dynamic`'s real concurrency is not
 exercised (it cannot be, locally).
 
-## Backend PoC: closing the `ASYNC_OPERATION_LIFECYCLE` gap
+## Backend changes
+
+Five real backend changes ship in this PR, not only the design above. Each
+follows the same recipe "Scalable packaging design" argues for: one
+`CoreEventType` member and payload (or, for the fourth, a widened existing
+payload class), one mirrored wire type, no new `project_event()` case beyond
+the existing generic fallthrough, one regenerated TypeScript type, one
+conformance fixture.
+
+### 1. Closing the `ASYNC_OPERATION_LIFECYCLE` gap
 
 "The gap" item 2 above is a real, production-reachable crash, not a
 hypothetical: `run/host.py`'s `_evaluation_lifecycle_event` and
@@ -870,6 +887,104 @@ fixup), and `0bbb9ae28` (review caught a fabricated justification for
 weakening `operation_id`'s wire-side validation; corrected to mirror
 core exactly) on `feat/web-live-campaign-streaming`.
 
+### 2. Live per-workstream retry diagnostics
+
+`WorkstreamAttemptData` (`hypothesis_id`, `attempt`, `attempt_limit`,
+`refunded`, `last_error`, `setup_failure`, `repeated_error`) is emitted
+whenever `orchestration/dynamic/plugin.py`'s projection of
+`DynamicState.workstreams` changes for a hypothesis, via the same
+commit-diff chokepoint `RoundFinishedData` already uses
+(`run/integration.py`'s `_emit_commit_events`). `repeated_error` mirrors
+`Workstreams._record_failure`'s own comparison
+(`orchestration/dynamic/workstream.py`): true only when the previous summary
+was itself a setup failure with identical error text. Mirrored into
+`server/events.py` with no `project_event()` case needed. On the frontend: a
+`workstream-attempt` frame and an `AttemptBadge` showing "attempt N/limit"
+with a warning marker on a repeated error, rendered in both the Kanban and
+table workstream layouts.
+
+### 3. Retry waits, GPU contention, local validation, and per-turn cost
+
+Four more events, each a previously-computed-and-discarded fact, not new
+instrumentation:
+
+- `RetryWaitData` (`attempt`, `delay_s`, `error_kind`) reports each
+  agentshim retry backoff (`TRANSIENT_RETRY_DELAYS_S`,
+  `vs_agent/drivers/agentshim.py:108`) to the run's own `AgentEventSink`
+  instead of only a plain-text "retrying this turn in ...s" log line. The
+  sink this wires into (`AgentDiagnosticLog`, `factory.py`) previously
+  defaulted to `NULL_AGENT_EVENT_SINK`: a dead sink, not a missing feature.
+- `GpuContentionData` (`is_contended`, `new_process_count`, device
+  memory/utilization) is published by `CoreGpuContentionEvents`
+  (`vibesys/run/gpu_events.py`) whenever `GpuContentionMonitor`'s contention
+  state flips, not on every 30s poll, via a `ContentionEventSink` threaded
+  through `create_compute_backend(..., events=...)` in `resources.py`'s run
+  assembly. A real CUDA run now publishes this instead of writing only to
+  `gpu_contention.jsonl`.
+- `LocalValidationSummaryData` (`attempted`, `succeeded`, `passed`) is
+  emitted once per `validate_local` call (`run/evaluation.py`'s
+  `_validate_local`), alongside the existing per-recipe
+  `gate_started`/`gate_finished` events.
+- `TurnUsageData` (input/output/cache tokens, `total_cost_usd`,
+  `duration_ms`) is published by `AgentEventSink.turn_usage`, called from
+  `AgentClient._write_usage_record` (`vs_agent/client.py`) alongside the
+  existing `usage.jsonl` row, not instead of it; the call fires even when
+  `log_dir` is unset, since the live event and the durable row are now
+  independent writes.
+
+All four are additive `CoreEventType` members mirrored into `server/events.py`
+with no `project_event()` case needed beyond the generic fallthrough. On the
+frontend: a `workstream-activity` frame (mode, summary, current tool) folds
+into an `ActivityLabel` shown next to each workstream.
+
+### 4. Judge and gate review transparency
+
+`JudgeResultData` (`vibesys/events.py`, mirrored in `server/events.py`)
+widens in place rather than adding a new event kind: `verdict` gains
+`skipped` (previously only `pass`/`fail`), `analysis` and `feedback` both
+default to `""`, a `skip_reason` (`blocked`/`unchanged`/`not_due`) is
+required exactly when `verdict` is `skipped`, `implementer_outcome` records
+the implementer's own self-declared readiness for the attempt, and `attempt`
+is dropped in favor of correlating repeat assessments of the same workstream
+through the event envelope's own `round_label`. The defaults mean a journal
+record written before this field existed still parses, treating an absent
+value as unknown rather than requiring a schema-version bump.
+`orchestration/dynamic/orchestration.py` and `workstream.py` gained an
+injected emit callable, called from the review-obtained and review-skipped
+branches of `_assess`/`_maybe_review`, so the event now fires for every
+review assessment, including the ones where no judge turn ran. For the
+dynamic engine's own accuracy/benchmark gates specifically,
+`GateFinishedData` now also sets `round_label` to the same
+`round-{sequence}` convention `RoundFinishedData` already used, closing the
+correlation gap for those two events (the general, every-event case remains
+future work; see "Backend path"). On the frontend: a `judge-result` frame,
+upserted by id like a measurement, renders as a review-history list per
+workstream with the verdict, the skip reason when skipped, and the
+implementer's stated outcome.
+
+### 5. Operator-intervention attribution
+
+`Request.client_id` (`server/api/protocol.py`) was previously read only to
+echo back on the `Response`, then discarded before the pause/resume/stop/steer
+call it triggered. `RunControlTransition`, `RunControlChannel`, `RunApi`,
+`RunController` (`libs/vs-runtime/src/vs_runtime/_run_control.py`,
+`contracts.py`, `fakes.py`), and `CoreEvent`/`RunEvent` now all
+carry it through to the `CONTROL`/`RUN_STATUS_CHANGED` wire event: a
+request-time transition (`steer_queued`, `pause_requested`, `resumed`,
+`stop_requested`) carries the issuing connection's `client_id`; a
+boundary-landing transition (`steer_consumed`, `paused`, `stopped`)
+instead carries `agent_kind`/`round_label`/`execution_id`, since it has no
+requesting client. This is additive on existing dataclasses and contracts:
+no new event kind, no wire-protocol version change. On the frontend: an
+`operator-action` frame folds into an append-only timeline, rendered as
+an `OperatorActionLog` plus a `DwellIndicator` chip that escalates past a
+one-hour unresolved pause or stop, and a pure `steeredPromptTail` selector
+that joins a consumed steer prompt back to the execution it landed on. What
+remains: resolving a client's own `client_id` on the web frontend once it
+issues control requests itself (#815), so `OperatorActionLog`'s "this tab"
+case has something to compare against instead of rendering every attributed
+entry's raw id (see "Backend path").
+
 ## Backend path (future, not in this PR)
 
 The prototype's frame schema is the proposed contract for the
@@ -892,7 +1007,8 @@ expand-migrate-contract order, each behind the existing emission chokepoints
    "Telemetry inventory"), not after.
 2. **Add workstream identity to the envelope.** Done in this PR for one
    event: `project_event()` now carries `AsyncOperationLifecycleData.scope_id`
-   through instead of crashing on it (see "Backend PoC"). What remains:
+   through instead of crashing on it (see "Backend changes," item 1). What
+   remains:
    extending the same id to the rest of the per-turn events so they group
    into lanes, and promoting it from a payload-specific field to a
    documented, first-class `workstream_id`/`attempt_id` envelope concern
@@ -1025,14 +1141,14 @@ the client does not need to change when the source does.
   pauses follow without rewriting the already-completed status. This is the one
   place the React + transport wiring is exercised, matching the repo's
   unit-core / e2e-integration split.
-- `tests/server/test_integration.py`'s two new tests (see "Backend PoC")
-  cover the real bridge fix: `scope_id` survives `project_event()` intact for
-  an `ASYNC_OPERATION_LIFECYCLE` event, and every `CoreEventType` outside
-  `_CONTROL_EVENT_TYPES` has a working `EventType` counterpart, checked
-  exhaustively rather than one kind at a time. Reverting `server/events.py`
-  to its pre-fix state (via a saved patch, not `git stash`) reproduces the
-  exact `ValueError` the production crash hit; restoring the fix turns both
-  green.
+- `tests/server/test_integration.py`'s two new tests (see "Backend changes,"
+  item 1) cover the real bridge fix: `scope_id` survives `project_event()`
+  intact for an `ASYNC_OPERATION_LIFECYCLE` event, and every `CoreEventType`
+  outside `_CONTROL_EVENT_TYPES` has a working `EventType` counterpart,
+  checked exhaustively rather than one kind at a time. Reverting
+  `server/events.py` to its pre-fix state (via a saved patch, not
+  `git stash`) reproduces the exact `ValueError` the production crash hit;
+  restoring the fix turns both green.
 - Known gaps, named rather than silently dropped: `FakeCampaignStream` and the
   `useLiveCampaign` hook it exists to test (tail-follow, scrubbing while still
   active, and the `streamError` surface) have no automated test yet. This
