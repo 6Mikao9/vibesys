@@ -94,5 +94,8 @@ are not for its awaiting measurement step.
   budget (the identity and snapshot helpers survive)
 - `_evaluation_tool` legacy branch in `src/launch/composition.py`
 - Legacy loop handling of `WaitingForEvaluation`
-- The `slurm` restriction to the dynamic loop (`_require_evaluation_tool_loop` in
-  `src/vibesys/run/profilers.py`): delete it when the older loops are ported (roadmap #1952).
+- The Slurm environment's host trusted commands (`HostTrustedCommands` in
+  `libs/vs-runtime/src/vs_runtime/_run_environment.py`, built by
+  `_host_trusted_commands` in `_slurm_environment.py`, and `vs_sandbox.slurm_command`).
+  The older loops evaluate each round through them; delete them when those loops are
+  ported to the core path (roadmap #1952). The agent has no shell client for evaluation.

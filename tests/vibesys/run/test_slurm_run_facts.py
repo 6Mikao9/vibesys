@@ -28,6 +28,7 @@ from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.dynamic_core import resolve_core_policy
 from vibesys.inputs import load_task
+from vibesys.orchestration.dynamic import DynamicOptions
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
 from vibesys.run.host import open_product_run_host
@@ -132,7 +133,7 @@ def test_the_dynamic_loop_still_requires_correctness_on_slurm(tmp_path: Path) ->
     dynamic_root = tmp_path / "dynamic"
     dynamic = run_request(dynamic_root)
     policy = resolve_core_policy(
-        options_of(dynamic),
+        DynamicOptions.model_validate(options_of(dynamic).model_dump()),
         bounds_of(dynamic),
         replace(resolved(dynamic_root), facts=facts),
     )

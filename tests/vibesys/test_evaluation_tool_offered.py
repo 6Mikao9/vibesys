@@ -7,10 +7,10 @@ role is given.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.support.skeleton_strategy import ATTEMPT
+from tests.support.skeleton_strategy import ATTEMPT, DIGEST
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import write_project
 
 from vibesys.dynamic_roles import CORE_ROLES, IMPLEMENTER, JUDGE
@@ -29,21 +29,19 @@ from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_core.api import ContentDigest
-
-_DIGEST = "sha256:" + "0" * 64
+    from vs_runtime.api import AgentRole
+    from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
 
 def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
     root = tmp_path / "project"
     write_project(root)
     namespace = Project.open(root).state.state_store_namespace("offer")
-    digest: ContentDigest = _DIGEST  # type: ignore[assignment]
     policy = AgentEvaluationPolicy(
-        evaluator_digest=digest,
-        workload_digest=digest,
-        environment_digest=digest,
-        recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=digest),
+        evaluator_digest=DIGEST,
+        workload_digest=DIGEST,
+        environment_digest=DIGEST,
+        recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=DIGEST),
         stages=(("accuracy", 10.0), ("benchmark", 10.0)),
         queue_allowance=880.0,
     )
@@ -51,18 +49,19 @@ def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
         tmp_path / "evaluation.sock",
         policy,
         ScopeWorkspaces(
-            FakeWorkspaces(FakeWorkspace()), StoreWorkspaceReceipts(ReceiptStore(namespace))
+            cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace())),
+            StoreWorkspaceReceipts(ReceiptStore(namespace)),
         ),
     )
 
 
 @pytest.mark.parametrize("role", CORE_ROLES, ids=lambda role: role.id)
 def test_a_dynamic_role_is_offered_the_evaluation_tool_exactly_when_it_measures(
-    tmp_path: Path, role: object
+    tmp_path: Path, role: AgentRole
 ) -> None:
     bridge = _bridge(tmp_path)
 
-    servers = bridge.servers(role, Scope(owner=ATTEMPT.attempt_id, generation=0))  # type: ignore[arg-type]
+    servers = bridge.servers(role, Scope(owner=ATTEMPT.attempt_id, generation=0))
 
     measures = role in (IMPLEMENTER, JUDGE)
     assert bool(servers) is measures

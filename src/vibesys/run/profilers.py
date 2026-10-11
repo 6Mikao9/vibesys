@@ -109,44 +109,8 @@ def resolve_run_profiler(
     return resolved
 
 
-#: The run environments whose trusted evaluation is the evaluation tool alone.
-_EVALUATION_TOOL_ONLY_ENVIRONMENTS = frozenset({"slurm", "slurm-gpu"})
-#: The one outer loop that has the evaluation tool; the others move to it with roadmap #1952.
-_EVALUATION_TOOL_LOOP = "dynamic"
-
-
-def _require_evaluation_tool_loop(request: RunRequest) -> None:
-    """Refuse a loop that cannot evaluate on a run environment that offers only the tool.
-
-    The Slurm environment gives agents no shell client for evaluation, and only the
-    dynamic loop reaches the evaluation tool. The other loops evaluate each round through
-    a path that Slurm no longer has, so they would run without any trusted evaluation.
-    """
-    environment = request.run_environment
-    loop = request.orchestration.id
-    if (
-        environment is None
-        or environment.name not in _EVALUATION_TOOL_ONLY_ENVIRONMENTS
-        or loop == _EVALUATION_TOOL_LOOP
-    ):
-        return
-    raise ConfigurationError(
-        ConfigurationDiagnostic(
-            code="slurm_loop_unsupported",
-            stage="request_validation",
-            message=(
-                f"the {loop!r} loop cannot run on the slurm run environment: it supports only "
-                f"the {_EVALUATION_TOOL_LOOP!r} loop until the other loops are ported to the "
-                "evaluation tool (roadmap #1952); use --outer-loop dynamic or another run "
-                "environment"
-            ),
-        )
-    )
-
-
 def validate_run_request(request: RunRequest) -> None:
     """Validate placement, profiler policy, and workload before opening run resources."""
-    _require_evaluation_tool_loop(request)
     if request.runs_dir is not None:
         try:
             Project.validate_collection_root(request.runs_dir)
