@@ -550,9 +550,9 @@ out to justify.
 
 ```mermaid
 flowchart LR
-    Orch[Orchestration code] --> Emit["Emit chokepoint<br/>+ new core kind here"]
+    Orch[Orchestration code] --> Emit[Emit chokepoint: new core kind added here]
     Emit --> CoreJournal[(Core event journal)]
-    CoreJournal --> Bridge["Bridge chokepoint<br/>+ new wire kind here"]
+    CoreJournal --> Bridge[Bridge chokepoint: new wire kind added here]
     Bridge --> WireEvent[Wire event]
     WireEvent --> WireJournal[(Wire journal)]
     WireJournal --> WS[Websocket]
@@ -603,11 +603,11 @@ everything that is computed.
 
 ```mermaid
 flowchart LR
-    FullJournal[(Full journal)] --> Replay["Unbounded replay<br/>(today)"]
+    FullJournal[(Full journal)] --> Replay[Unbounded replay - today]
     Replay --> Dashboard[Web dashboard]
-    Spine[Spine + tail window] --> Bootstrap["Bounded bootstrap<br/>(proposed)"]
+    Spine[Spine + tail window] --> Bootstrap[Bounded bootstrap - proposed]
     Bootstrap --> Dashboard
-    TUI[TUI client] -. already uses .-> Bootstrap
+    TUI[TUI client] -.->|already uses| Bootstrap
 ```
 
 The TUI client already takes the bounded path. Problem 1 above is wiring the
@@ -636,14 +636,14 @@ pattern grows into, not a reason to add a new pattern now.
 
 ```mermaid
 flowchart LR
-    Global[Global] --> Stream["Event stream<br/>scoped by run / workstream id"]
+    Global[Global] --> Stream["Event stream, scoped by run / workstream id"]
     Run[Run] --> Stream
     Workstream[Workstream] --> Stream
     Checkpoint[Checkpoint] --> Stream
     AgentLocal[Agent-local] --> Stream
     Stream --> Perf[Performance graph]
     Stream --> Timeline[Workstream timeline]
-    Stream --> Kanban[Kanban / table]
+    Stream --> Kanban["Kanban / table"]
 ```
 
 All five viewpoints share the one pipeline from "Scalable packaging design."
