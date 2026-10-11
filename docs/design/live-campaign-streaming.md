@@ -721,13 +721,15 @@ The reducer guarantees these properties, and the tests assert them:
   builder and the fold are inverses; this is the central round-trip property and
   the thing that makes the prototype a faithful reference for the real backend.
 - The operator-intervention timeline (`FoldState.operatorActions`) is
-  append-only and, like token spend and run status, is not part of the
-  reconstructed `CampaignRecord`: it has no finished-record counterpart to
-  round-trip against. `operator-timeline.ts`'s `dwellTime` and
-  `steeredPromptTail` are pure selectors over it, taking their reference point
-  (`now`, a list of known executions) as an explicit argument rather than
-  reading a clock or a live subscription, so they are tested with fixed data
-  and never sleep.
+  append-only and, like token spend, run status, and the per-workstream
+  attempt and activity maps (`FoldState.workstreamAttempts`,
+  `workstreamActivity`), is not part of the reconstructed `CampaignRecord`:
+  none has a finished-record counterpart to round-trip against, so none
+  rewinds when the cursor scrubs backward. `operator-timeline.ts`'s
+  `dwellTime` and `steeredPromptTail` are pure selectors over it, taking
+  their reference point (`now`, a list of known executions) as an explicit
+  argument rather than reading a clock or a live subscription, so they are
+  tested with fixed data and never sleep.
 
 Keeping the fold pure is what lets the whole live path be tested with generated
 frame sequences and no sleeps (see "Verification").
@@ -829,8 +831,11 @@ The table layout renders the same attempt badge and activity label for the
 same workstream, confirming both layouts read from one live data source.
 
 ![Operator-action log with resume and steer entries](./assets/campaign-live-04-operator-log-timeline.png)
-The operator-action log grows entry by entry: pause, resume, and a steered
-prompt with its quoted text, each tagged with the issuing tab's id.
+The operator-action log grows entry by entry: pause, resume, a steered
+prompt with its quoted text, and the later "Steer applied" entry. Resume
+and the steered prompt carry the issuing tab's id; pause and "Steer
+applied" carry none, since each lands at an invocation boundary with no
+requesting client.
 
 ![Completed dashboard with the connection dot still fresh](./assets/campaign-live-05-completed-dashboard-fresh.png)
 After the run completes, the performance graph shows all 111 measurements
@@ -940,7 +945,10 @@ was itself a setup failure with identical error text. Mirrored into
 `server/events.py` with no `project_event()` case needed. On the frontend: a
 `workstream-attempt` frame and an `AttemptBadge` showing "attempt N/limit"
 with a warning marker on a repeated error, rendered in both the Kanban and
-table workstream layouts.
+table workstream layouts. Like `operatorActions` (see "Correctness
+properties"), `FoldState.workstreamAttempts` is a plain upsert-by-id map
+with no stored history, so the badge always shows the latest attempt, not
+the attempt as of the scrubbed cursor.
 
 ### 3. Retry waits, GPU contention, local validation, and per-turn cost
 
@@ -974,7 +982,11 @@ instrumentation:
 All four are additive `CoreEventType` members mirrored into `server/events.py`
 with no `project_event()` case needed beyond the generic fallthrough. On the
 frontend: a `workstream-activity` frame (mode, summary, current tool) folds
-into an `ActivityLabel` shown next to each workstream.
+into an `ActivityLabel` shown next to each workstream. Like
+`workstreamAttempts` (see "Correctness properties"),
+`FoldState.workstreamActivity` is also a plain upsert-by-id map with no
+stored history, so the label always shows the latest activity, not the
+activity as of the scrubbed cursor.
 
 ### 4. Judge and gate review transparency
 

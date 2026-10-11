@@ -226,7 +226,7 @@ button { color: inherit; }
 .kanban-items > button { background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; cursor: pointer; display: grid; gap: 4px; padding: 9px; text-align: left; }
 .kanban-items > button:hover { background: var(--surface-hover); border-color: var(--text-faint); }
 .kanban-items strong { color: var(--text-primary); font-size: 10px; }
-.kanban-items span, .kanban-items small { color: var(--text-faint); font-family: 'DM Mono',monospace; font-size: 8px; }
+:where(.kanban-items) :where(span, small) { color: var(--text-faint); font-family: 'DM Mono',monospace; font-size: 8px; }
 .attempt-badge { color: var(--text-faint); }
 .attempt-badge-warning { color: var(--warning); }
 .activity-label { color: var(--text-muted); font-style: italic; }

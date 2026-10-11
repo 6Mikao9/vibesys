@@ -1,4 +1,4 @@
-import {expect, test} from '@playwright/test';
+import {expect, test, type Page} from '@playwright/test';
 
 /**
  * The replay-as-live route streams the campaign fixture over Server-Sent Events
@@ -10,6 +10,21 @@ import {expect, test} from '@playwright/test';
 
 function recordedCount(text: string): number {
   return Number(/(\d+) recorded/.exec(text)?.[1] ?? '0');
+}
+
+/** What a color-valued custom property resolves to in this browser, e.g.
+ * `'rgb(138, 84, 0)'` for `--warning`. Lets a test compare an element's
+ * computed color against the variable it is meant to render, independent of
+ * whether the source uses hex, `rgb()`, or a named color. */
+async function resolvedColorVariable(page: Page, variableName: string): Promise<string> {
+  return page.evaluate(name => {
+    const probe = document.createElement('span');
+    probe.style.color = `var(${name})`;
+    document.body.appendChild(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    return resolved;
+  }, variableName);
 }
 
 test('streams the campaign in live and completes', async ({page}) => {
@@ -71,4 +86,33 @@ test('an active workstream shows its activity label in the table layout too', as
   // first workstream partway through its run, well before the campaign
   // completes.
   await expect(table.locator('.activity-label').first()).toBeVisible({timeout: 40_000});
+});
+
+test('the Kanban attempt badge and activity label render their semantic colors', async ({page}) => {
+  // Regression test: `.kanban-items span, .kanban-items small` (specificity
+  // 0,1,1) used to outrank the single-class `.attempt-badge-warning` and
+  // `.activity-mode-tool` rules (0,1,0) regardless of source order, so both
+  // silently rendered as the container's default gray instead of the warning
+  // amber / accent blue the Table layout already showed for the same data.
+  await page.goto('/?campaign-live&interval=50');
+  await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
+
+  const active = page.getByRole('region', {name: 'Active'});
+  const warningBadge = active.locator('.attempt-badge-warning').first();
+  const toolActivity = active.locator('.activity-mode-tool').first();
+
+  // The replay script drives a repeated setup failure (warning badge) and a
+  // concurrent tool-mode activity label for the same workstream.
+  await expect(warningBadge).toBeVisible({timeout: 20_000});
+  await expect(toolActivity).toBeVisible();
+
+  const [badgeColor, activityColor, expectedWarning, expectedAccent] = await Promise.all([
+    warningBadge.evaluate(el => getComputedStyle(el).color),
+    toolActivity.evaluate(el => getComputedStyle(el).color),
+    resolvedColorVariable(page, '--warning'),
+    resolvedColorVariable(page, '--accent'),
+  ]);
+
+  expect(badgeColor).toBe(expectedWarning);
+  expect(activityColor).toBe(expectedAccent);
 });
