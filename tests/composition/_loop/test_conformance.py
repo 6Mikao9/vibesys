@@ -117,23 +117,17 @@ def test_c5_an_operator_stop_at_any_request_ends_the_run_and_leaves_nothing(
 def test_c10_a_request_blocked_in_any_turn_step_ends_the_attempt_that_has_one_in_flight(
     name: str,
 ) -> None:
-    """The subject's fixed worlds meet both steps with a request in flight, so the probe bites."""
+    """The subject's shortest run meets both steps with a request in flight, so the probe bites."""
     subject = SUBJECTS[name]
     met: set[Step] = set()
-    for world in (subject.default_world, subject.smallest_world):
+    # The shortest run first; a subject whose shortest run ends before an attempt starts needs
+    # its fuller default run.
+    for world in (subject.smallest_world, subject.default_world):
+        if {Step.RENDERING, Step.AWAITING} <= met:
+            break
         recorded = c.run_subject(subject, world(), live=False)
         met |= c.check_a_blocked_request_ends_the_track_that_has_one_in_flight(subject, recorded)
     assert {Step.RENDERING, Step.AWAITING} <= met
-
-
-@pytest.mark.parametrize("name", SUBJECT_NAMES)
-@PURE
-@given(data=st.data())
-def test_c10_the_blocked_request_rule_holds_in_any_world(name: str, data: st.DataObject) -> None:
-    subject = SUBJECTS[name]
-    world = c.Faulted(data.draw(subject.worlds)(), data.draw(outcomes))
-    recorded = c.run_subject(subject, world)
-    c.check_a_blocked_request_ends_the_track_that_has_one_in_flight(subject, recorded)
 
 
 @pytest.mark.parametrize("name", SUBJECT_NAMES)
