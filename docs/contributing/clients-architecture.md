@@ -159,6 +159,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | --- | --- |
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` entries of features (`./main`) and apps (`desktop-main`) |
+| `@opentui/core` | `node` entries of apps (the deprecated `tui`) |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
 A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
