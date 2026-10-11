@@ -15,6 +15,7 @@ from hypothesis import strategies as st
 from tests.composition._loop import conformance as c
 from tests.composition._loop.subjects import SUBJECTS
 
+from vs_core.api import Step
 from vs_core.testing.drive import Faults
 from vs_core.testing.liveness import Budget, End, assert_live
 from vs_runtime.api.core import REQUEST_DISPATCH
@@ -110,6 +111,29 @@ def test_c5_an_operator_stop_at_any_request_ends_the_run_and_leaves_nothing(
     # is, the run is terminal with every attempt settled and nothing open.
     assert core.run.result is not None
     assert_live(recorded.run.journal, core, budget, End.TERMINAL)
+
+
+@pytest.mark.parametrize("name", SUBJECT_NAMES)
+def test_c10_a_request_blocked_in_any_turn_step_ends_the_attempt_that_has_one_in_flight(
+    name: str,
+) -> None:
+    """The subject's fixed worlds meet both steps with a request in flight, so the probe bites."""
+    subject = SUBJECTS[name]
+    met: set[Step] = set()
+    for world in (subject.default_world, subject.smallest_world):
+        recorded = c.run_subject(subject, world(), live=False)
+        met |= c.check_a_blocked_request_ends_the_track_that_has_one_in_flight(subject, recorded)
+    assert {Step.RENDERING, Step.AWAITING} <= met
+
+
+@pytest.mark.parametrize("name", SUBJECT_NAMES)
+@PURE
+@given(data=st.data())
+def test_c10_the_blocked_request_rule_holds_in_any_world(name: str, data: st.DataObject) -> None:
+    subject = SUBJECTS[name]
+    world = c.Faulted(data.draw(subject.worlds)(), data.draw(outcomes))
+    recorded = c.run_subject(subject, world)
+    c.check_a_blocked_request_ends_the_track_that_has_one_in_flight(subject, recorded)
 
 
 @pytest.mark.parametrize("name", SUBJECT_NAMES)
