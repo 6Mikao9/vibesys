@@ -1209,6 +1209,8 @@ export interface SubprocessOutputData {
  * repeat assessments of the same workstream share); ``skip_reason`` then
  * names why. ``implementer_outcome`` is the implementer's own self-declared
  * readiness for this attempt, present regardless of whether a review ran.
+ * It defaults to empty so a journal record written before this field
+ * existed still parses; a reader should treat an empty string as unknown.
  */
 export interface JudgeResultData {
   kind: Kind17;
@@ -1216,7 +1218,7 @@ export interface JudgeResultData {
   analysis?: Analysis;
   feedback?: Feedback;
   skip_reason?: SkipReason;
-  implementer_outcome: ImplementerOutcome;
+  implementer_outcome?: ImplementerOutcome;
   [k: string]: unknown;
 }
 /**

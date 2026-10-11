@@ -283,6 +283,8 @@ class JudgeResultData(EventPayload):
     repeat assessments of the same workstream share); ``skip_reason`` then
     names why. ``implementer_outcome`` is the implementer's own self-declared
     readiness for this attempt, present regardless of whether a review ran.
+    It defaults to empty so a journal record written before this field
+    existed still parses; a reader should treat an empty string as unknown.
     """
 
     kind: Literal["judge_result"] = "judge_result"
@@ -290,7 +292,7 @@ class JudgeResultData(EventPayload):
     analysis: str = ""
     feedback: str = ""
     skip_reason: Literal["blocked", "unchanged", "not_due"] | None = None
-    implementer_outcome: str
+    implementer_outcome: str = ""
 
 
 class BenchmarkResultData(EventPayload):

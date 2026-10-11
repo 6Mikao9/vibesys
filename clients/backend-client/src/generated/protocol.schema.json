@@ -2566,7 +2566,7 @@
       "type": "object"
     },
     "JudgeResultData": {
-      "description": "One workstream's review assessment: a judge verdict or a skip reason.\n\n``skipped`` means no judge turn ran this assessment (the workstream's own\ncorrelation, carried by the event envelope's ``round_label``, is what\nrepeat assessments of the same workstream share); ``skip_reason`` then\nnames why. ``implementer_outcome`` is the implementer's own self-declared\nreadiness for this attempt, present regardless of whether a review ran.",
+      "description": "One workstream's review assessment: a judge verdict or a skip reason.\n\n``skipped`` means no judge turn ran this assessment (the workstream's own\ncorrelation, carried by the event envelope's ``round_label``, is what\nrepeat assessments of the same workstream share); ``skip_reason`` then\nnames why. ``implementer_outcome`` is the implementer's own self-declared\nreadiness for this attempt, present regardless of whether a review ran.\nIt defaults to empty so a journal record written before this field\nexisted still parses; a reader should treat an empty string as unknown.",
       "properties": {
         "kind": {
           "const": "judge_result",
@@ -2611,14 +2611,14 @@
           "title": "Skip Reason"
         },
         "implementer_outcome": {
+          "default": "",
           "title": "Implementer Outcome",
           "type": "string"
         }
       },
       "required": [
         "kind",
-        "verdict",
-        "implementer_outcome"
+        "verdict"
       ],
       "title": "JudgeResultData",
       "type": "object"
