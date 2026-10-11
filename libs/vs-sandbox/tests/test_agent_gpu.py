@@ -10,16 +10,16 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_sandbox.api.slurm import (
+    AgentGpuConfig,
+    AgentGpuLauncher,
+    AgentGpuRequestError,
     GpuCommand,
     GpuJobRequest,
-    SlurmGpuConfig,
-    SlurmGpuConfigError,
-    SlurmGpuLauncher,
-    SlurmGpuRequestError,
     choose_partition,
-    load_slurm_gpu_config,
 )
 
 if TYPE_CHECKING:
@@ -69,9 +69,12 @@ WINDOWS: Mapping[str, object] = {
     ],
 }
 
-# Stands in for srun and scancel: records its argv, then runs what follows `--`.
+# Stands in for the Slurm shell (the local transport's `bash -c`): it receives the
+# command line of `srun` or `scancel` as its one argument, records the arguments,
+# then runs what follows `--`.
 FAKE_SLURM = """\
-import os, sys
+import os, shlex, sys
+sys.argv = [sys.argv[0], *shlex.split(sys.argv[1])[1:]]
 with open(os.environ["FAKE_SLURM_LOG"], "a") as log:
     log.write(repr(sys.argv[1:]) + "\\n")
 if "--" in sys.argv:
@@ -80,18 +83,20 @@ if "--" in sys.argv:
 """
 
 
-def _config(tmp_path: Path, **updates: object) -> SlurmGpuConfig:
+def _launcher(tmp_path: Path, **updates: object) -> AgentGpuLauncher:
     fake = tmp_path / "fake_slurm.py"
     fake.write_text(FAKE_SLURM)
+    return AgentGpuLauncher(_config(**updates), (sys.executable, str(fake)))
+
+
+def _config(**updates: object) -> AgentGpuConfig:
     values: dict[str, object] = {
         "partitions": ("main", "priority"),
         "max_gpus": 8,
         "max_time_minutes": 120,
-        "srun_command": (sys.executable, str(fake)),
-        "scancel_command": (sys.executable, str(fake)),
     }
     values.update(updates)
-    return SlurmGpuConfig.model_validate(values)
+    return AgentGpuConfig.model_validate(values)
 
 
 @pytest.fixture
@@ -102,32 +107,12 @@ def slurm_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 class TestConfig:
-    def test_loads_the_operator_table(self, tmp_path: Path) -> None:
-        path = tmp_path / "slurm-gpu.toml"
-        path.write_text(
-            '[slurm_gpu]\npartitions = ["main", "priority"]\nmax_gpus = 8\n'
-            'max_time_minutes = 120\nwindows_command = ["slurm-windows", "--json"]\n'
-        )
-        config = load_slurm_gpu_config(path)
-        assert config.partitions == ("main", "priority")
-        assert config.windows_command == ("slurm-windows", "--json")
-
-    def test_rejects_unknown_settings_by_name(self, tmp_path: Path) -> None:
-        path = tmp_path / "slurm-gpu.toml"
-        path.write_text(
-            '[slurm_gpu]\npartitions = ["main"]\nmax_gpus = 8\nmax_time_minutes = 60\n'
-            'account = "secret-account"\n'
-        )
-        with pytest.raises(SlurmGpuConfigError, match=r"slurm_gpu\.account") as error:
-            load_slurm_gpu_config(path)
-        assert "secret-account" not in str(error.value)
-
-    def test_requests_above_the_limits_are_rejected_not_clamped(self, tmp_path: Path) -> None:
-        config = _config(tmp_path, max_gpus=4, max_time_minutes=30, gate_time_minutes=30)
+    def test_requests_above_the_limits_are_rejected_not_clamped(self) -> None:
+        config = _config(max_gpus=4, max_time_minutes=30)
         assert config.request(None, None) == GpuJobRequest(gpus=1, time_minutes=30)
-        with pytest.raises(SlurmGpuRequestError, match="limit of 4"):
+        with pytest.raises(AgentGpuRequestError, match="limit of 4"):
             config.request(8, 10)
-        with pytest.raises(SlurmGpuRequestError, match="limit of 30 minutes"):
+        with pytest.raises(AgentGpuRequestError, match="limit of 30 minutes"):
             config.request(1, 31)
 
 
@@ -141,29 +126,29 @@ class TestPartition:
         ],
     )
     def test_prefers_a_partition_that_starts_now(
-        self, tmp_path: Path, gpus: int, minutes: int, expected: str
+        self, gpus: int, minutes: int, expected: str
     ) -> None:
         request = GpuJobRequest(gpus=gpus, time_minutes=minutes)
-        assert choose_partition(_config(tmp_path), request, WINDOWS) == expected
+        assert choose_partition(_config(), request, WINDOWS) == expected
 
-    def test_uses_priority_for_a_short_job_main_cannot_start(self, tmp_path: Path) -> None:
-        config = _config(tmp_path)
+    def test_uses_priority_for_a_short_job_main_cannot_start(self) -> None:
+        config = _config()
         request = GpuJobRequest(gpus=2, time_minutes=20)
         busy = json.loads(json.dumps(WINDOWS))
         busy["partitions"][0]["groups"][0]["options"][0]["start"] = "2026-10-08T23:31"
         assert choose_partition(config, request, busy) == "priority"
 
-    def test_never_picks_a_partition_whose_limit_is_too_short(self, tmp_path: Path) -> None:
-        config = _config(tmp_path, partitions=("priority", "main"))
+    def test_never_picks_a_partition_whose_limit_is_too_short(self) -> None:
+        config = _config(partitions=("priority", "main"))
         request = GpuJobRequest(gpus=8, time_minutes=60)
         assert choose_partition(config, request, WINDOWS) == "main"
 
     @pytest.mark.parametrize("windows", [None, {"partitions": "garbled"}, {}])
     def test_without_a_usable_report_uses_the_first_partition(
-        self, tmp_path: Path, windows: Mapping[str, object] | None
+        self, windows: Mapping[str, object] | None
     ) -> None:
         request = GpuJobRequest(gpus=1, time_minutes=5)
-        assert choose_partition(_config(tmp_path), request, windows) == "main"
+        assert choose_partition(_config(), request, windows) == "main"
 
 
 class TestLauncher:
@@ -171,7 +156,7 @@ class TestLauncher:
         self, tmp_path: Path, slurm_log: Path
     ) -> None:
         output = bytearray()
-        status = SlurmGpuLauncher(_config(tmp_path)).run(
+        status = _launcher(tmp_path).run(
             GpuJobRequest(gpus=2, time_minutes=7),
             GpuCommand(
                 argv=("sh", "-c", "echo from-job; exit 3"), cwd=tmp_path, env=dict(os.environ)
@@ -192,7 +177,7 @@ class TestLauncher:
         cancel = threading.Event()
         cancel.set()
         output = bytearray()
-        SlurmGpuLauncher(_config(tmp_path)).run(
+        _launcher(tmp_path).run(
             GpuJobRequest(gpus=1, time_minutes=5),
             GpuCommand(argv=("sleep", "60"), cwd=tmp_path, env=dict(os.environ)),
             write=output.extend,
@@ -210,3 +195,37 @@ class TestLauncher:
         ]
         assert len(scancel_lines) == 1
         assert "--me" in scancel_lines[0]
+
+
+_LIMITS = {"partitions": ["main"], "max_gpus": 2, "max_time_minutes": 30}
+_path_segment = st.from_regex(r"[A-Za-z0-9_.-]{1,8}", fullmatch=True).filter(
+    lambda segment: segment not in {".", ".."}
+)
+
+
+@given(segments=st.lists(_path_segment, min_size=1, max_size=4, unique=True))
+def test_read_only_paths_accept_absolute_normalized_paths(segments: list[str]) -> None:
+    paths = ["/" + "/".join(segments[: n + 1]) for n in range(len(segments))]
+
+    config = AgentGpuConfig.model_validate({**_LIMITS, "read_only_paths": paths})
+
+    assert config.read_only_paths == tuple(paths)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["", "/", "relative/venv", "~/venv", "/opt/../etc", "/opt/./venv", "/opt//venv", "/opt/venv/"],
+)
+def test_read_only_paths_reject_what_is_not_absolute_and_normalized(path: str) -> None:
+    with pytest.raises(ValueError, match="read_only_paths"):
+        AgentGpuConfig.model_validate({**_LIMITS, "read_only_paths": [path]})
+
+
+def test_read_only_paths_reject_a_repeated_path() -> None:
+    with pytest.raises(ValueError, match="repeat"):
+        AgentGpuConfig.model_validate({**_LIMITS, "read_only_paths": ["/opt/venv", "/opt/venv"]})
+
+
+def test_there_is_no_writable_counterpart_to_read_only_paths() -> None:
+    with pytest.raises(ValueError, match="writable_paths"):
+        AgentGpuConfig.model_validate({**_LIMITS, "writable_paths": ["/opt/venv"]})

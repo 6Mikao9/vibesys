@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
-    SlurmGpuRequestError,
+    AgentGpuRequestError,
     SlurmPolicyError,
     agent_gpu_capability,
     load_slurm_policy,
@@ -81,9 +81,11 @@ def test_an_unknown_agent_gpu_key_is_rejected_naming_it(key: str) -> None:
             load_slurm_policy(path)
 
 
-def test_a_gate_sizing_key_of_the_slurm_gpu_table_is_not_an_agent_gpu_key(tmp_path: Path) -> None:
-    """The slurm environment sizes gates by sbatch arguments, so it refuses these two keys."""
-    for key in ("gate_gpus", "gate_time_minutes"):
+def test_a_key_of_the_slurm_gpu_table_that_the_slurm_file_says_elsewhere_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Gates are sized by sbatch arguments and Slurm is reached through the transport's shell."""
+    for key in ("gate_gpus", "gate_time_minutes", "srun_command", "scancel_command"):
         path = _agent_gpu_file(tmp_path, f"{_AGENT_GPU}{key} = 1\n")
         with pytest.raises(SlurmPolicyError, match=rf"vibesys\.agent_gpu\.{key}$"):
             load_slurm_policy(path)
@@ -119,9 +121,9 @@ def test_a_default_time_above_the_time_limit_is_rejected_and_otherwise_requests_
     assert config is not None
     assert config.request(None, None).time_minutes == default
     assert config.request(maximum, limit).gpus == maximum
-    with pytest.raises(SlurmGpuRequestError, match="--gpus"):
+    with pytest.raises(AgentGpuRequestError, match="--gpus"):
         config.request(maximum + 1, None)
-    with pytest.raises(SlurmGpuRequestError, match="--time"):
+    with pytest.raises(AgentGpuRequestError, match="--time"):
         config.request(None, limit + 1)
 
 
