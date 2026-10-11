@@ -12,6 +12,7 @@ import type {
   CampaignFrame,
   CampaignHeader,
   FrameAgent,
+  FrameJudgeResult,
   FrameMeasurement,
   FrameWorkstream,
 } from './campaign-frames.js';
@@ -347,4 +348,33 @@ test('operator-action frames are not part of the reconstructed record, like toke
 test('a replayed record carries at least one operator-action frame in its live demo timeline', () => {
   const frames = framesFromRecord(record);
   expect(frames.some(frame => frame.kind === 'operator-action')).toBe(true);
+});
+
+test('judge-result frames upsert by id, unlike the append-only operator timeline', () => {
+  const pass: FrameJudgeResult = {
+    id: 'judge-1',
+    sequence: 2,
+    workstreamId: 'ws-1',
+    verdict: 'pass',
+    analysis: 'Looks correct.',
+    feedback: '',
+    skipReason: null,
+    implementerOutcome: 'nominated',
+  };
+  const state = foldFrames([
+    initFrame,
+    {kind: 'judge-result', seq: 2, judgeResult: pass},
+    {kind: 'judge-result', seq: 3, judgeResult: pass},
+  ]);
+  expect(state.judgeResults.size).toBe(1);
+  const projected = foldStateToRecord(state, 0);
+  expect(projected?.judgeResults).toEqual([pass]);
+});
+
+test('a replayed record carries every judge result from the fixture in its live demo timeline', () => {
+  const frames = framesFromRecord(record);
+  const seen = frames
+    .filter(frame => frame.kind === 'judge-result')
+    .map(frame => frame.judgeResult.id);
+  expect(new Set(seen)).toEqual(new Set(record.judgeResults.map(item => item.id)));
 });

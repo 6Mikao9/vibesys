@@ -79,6 +79,27 @@ function tokenTotal(workstream: CampaignRecord['workstreams'][number], index: nu
   return 2000 + index * 600 + span * 150;
 }
 
+/** Place each workstream's judge results in its span, in proportion to
+ * `sequence`'s position in the workstream's `[firstSequence, lastSequence]`
+ * interval: the same campaign-order basis `validateJudgeResults` enforces. */
+function judgeResultTimeline(record: CampaignRecord): TimedFrame[] {
+  const workstreams = new Map(record.workstreams.map(workstream => [workstream.id, workstream]));
+  const timed: TimedFrame[] = [];
+  for (const judgeResult of record.judgeResults) {
+    const workstream = workstreams.get(judgeResult.workstreamId);
+    if (workstream === undefined) continue;
+    const started = Date.parse(workstream.startedAt);
+    const finished = Date.parse(workstream.finishedAt);
+    const span = workstream.lastSequence - workstream.firstSequence;
+    const fraction = span <= 0 ? 1 : (judgeResult.sequence - workstream.firstSequence) / span;
+    timed.push({
+      at: started + (finished - started) * fraction,
+      make: seq => ({kind: 'judge-result', seq, judgeResult}),
+    });
+  }
+  return timed;
+}
+
 /** A deterministic operator-intervention timeline, placed across the first
  * workstream's span so the demo has something on the dashboard's
  * operator-action log and dwell indicator. There is no `agent-execution`
@@ -188,6 +209,7 @@ export function framesFromRecord(record: CampaignRecord): CampaignFrame[] {
       make: seq => ({kind: 'measurement', seq, measurement}),
     });
   timed.push(...operatorActionTimeline(record));
+  timed.push(...judgeResultTimeline(record));
 
   // Stable sort by time; ties keep insertion order, which already puts a
   // workstream's in-flight upsert before its settled one (finished >= started).

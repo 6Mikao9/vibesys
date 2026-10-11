@@ -372,6 +372,7 @@ class _DynamicRun:
             self.rounds,
             lock=self._state_lock,
             commit=self._commit_labeled,
+            emit_judge_result=self.run.observations.judge_result,
         )
         self.profiles = Profiles(
             self.run, self.state, lock=self._state_lock, commit=self._commit_labeled

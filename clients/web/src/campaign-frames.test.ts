@@ -15,6 +15,17 @@ const validWorkstream = {
   outcomeSummary: '',
 };
 
+const validJudgeResult = {
+  id: 'judge-1',
+  sequence: 1,
+  workstreamId: 'ws-1',
+  verdict: 'pass',
+  analysis: 'Candidate is correct.',
+  feedback: '',
+  skipReason: null,
+  implementerOutcome: 'nominated',
+};
+
 test('parses every frame kind', () => {
   expect(parseCampaignFrame({kind: 'campaign-init', seq: 1, header: {}}).kind).toBe(
     'campaign-init',
@@ -43,6 +54,58 @@ test('parses every frame kind', () => {
       timestamp: '2026-01-01T00:00:00Z',
     }).kind,
   ).toBe('operator-action');
+  expect(
+    parseCampaignFrame({kind: 'judge-result', seq: 8, judgeResult: validJudgeResult}).kind,
+  ).toBe('judge-result');
+});
+
+test('parses a skipped judge result for each skip reason', () => {
+  const reasons = ['blocked', 'unchanged', 'not_due'] as const;
+  for (const skipReason of reasons) {
+    const frame = parseCampaignFrame({
+      kind: 'judge-result',
+      seq: 1,
+      judgeResult: {
+        ...validJudgeResult,
+        verdict: 'skipped',
+        analysis: '',
+        feedback: '',
+        skipReason,
+      },
+    });
+    if (frame.kind !== 'judge-result') throw new Error('expected a judge-result frame');
+    expect(frame.judgeResult.skipReason).toBe(skipReason);
+  }
+});
+
+test('rejects a skipped verdict with no skip reason', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'judge-result',
+      seq: 1,
+      judgeResult: {...validJudgeResult, verdict: 'skipped', skipReason: null},
+    }),
+  ).toThrow(/\$\.judgeResult\.skipReason/);
+});
+
+test('rejects a non-skipped verdict carrying a skip reason', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'judge-result',
+      seq: 1,
+      judgeResult: {...validJudgeResult, verdict: 'pass', skipReason: 'blocked'},
+    }),
+  ).toThrow(/\$\.judgeResult\.skipReason/);
+});
+
+test('rejects an unexpected judge-result key and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'judge-result',
+      seq: 1,
+      judgeResult: {...validJudgeResult, extra: true},
+    }),
+  ).toThrow(/\$\.judgeResult\.extra/);
 });
 
 test('parses every operator action value', () => {

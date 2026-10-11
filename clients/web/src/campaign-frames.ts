@@ -78,6 +78,40 @@ const OPERATOR_ACTIONS: readonly OperatorAction[] = [
 ];
 
 /**
+ * Mirrors the backend `JudgeResultData.verdict` Literal. Local to frame
+ * parsing; the canonical, externally-consumed alias lives in
+ * `replay-scenario.ts` and is re-exported via `campaign-record.ts`.
+ */
+type JudgeVerdict = 'pass' | 'fail' | 'skipped';
+const JUDGE_VERDICTS: readonly JudgeVerdict[] = ['pass', 'fail', 'skipped'];
+
+/**
+ * Mirrors the backend `JudgeResultData.skip_reason` Literal. Local to frame
+ * parsing; the canonical, externally-consumed alias lives in
+ * `replay-scenario.ts` and is re-exported via `campaign-record.ts`.
+ */
+type JudgeSkipReason = 'blocked' | 'unchanged' | 'not_due';
+const JUDGE_SKIP_REASONS: readonly JudgeSkipReason[] = ['blocked', 'unchanged', 'not_due'];
+
+/**
+ * One workstream's review assessment: a judge verdict when a review ran, or a
+ * skip reason (with empty `analysis`/`feedback`) when it did not. Mirrors the
+ * backend `JudgeResultData` payload; `sequence` is the attempt's position in
+ * the campaign order, consistent with `FrameWorkstream.firstSequence`/
+ * `lastSequence` and `FrameMeasurement.sequence`.
+ */
+export interface FrameJudgeResult {
+  readonly id: string;
+  readonly sequence: number;
+  readonly workstreamId: string;
+  readonly verdict: JudgeVerdict;
+  readonly analysis: string;
+  readonly feedback: string;
+  readonly skipReason: JudgeSkipReason | null;
+  readonly implementerOutcome: string;
+}
+
+/**
  * One entry on the operator-intervention timeline. Mirrors the fields carried
  * on `server.api.events.RunEvent` for a `CONTROL`/`RUN_STATUS_CHANGED` wire
  * event: `text` is the steer prompt (non-empty only for `steer_queued`),
@@ -129,7 +163,8 @@ export type CampaignFrame =
       readonly tokens: number;
     }
   | {readonly kind: 'status'; readonly seq: number; readonly status: 'active' | 'completed'}
-  | ({readonly kind: 'operator-action'; readonly seq: number} & FrameOperatorAction);
+  | ({readonly kind: 'operator-action'; readonly seq: number} & FrameOperatorAction)
+  | {readonly kind: 'judge-result'; readonly seq: number; readonly judgeResult: FrameJudgeResult};
 
 type CampaignFrameKind = CampaignFrame['kind'];
 
@@ -141,6 +176,7 @@ const FRAME_KINDS: readonly CampaignFrameKind[] = [
   'tokens',
   'status',
   'operator-action',
+  'judge-result',
 ];
 
 class FrameError extends Error {}
@@ -182,6 +218,13 @@ type FrameObject = Record<string, unknown> & {
   executionId?: unknown;
   clientId?: unknown;
   timestamp?: unknown;
+  judgeResult?: unknown;
+  sequence?: unknown;
+  verdict?: unknown;
+  analysis?: unknown;
+  feedback?: unknown;
+  skipReason?: unknown;
+  implementerOutcome?: unknown;
 };
 
 function asObject(value: unknown, path: string): FrameObject {
@@ -225,6 +268,14 @@ function nullableNumber(value: unknown, path: string): number | null {
   return value === null ? null : asNumber(value, path);
 }
 
+function nullableMember<T extends string>(
+  value: unknown,
+  path: string,
+  allowed: readonly T[],
+): T | null {
+  return value === null ? null : member(value, path, allowed);
+}
+
 function parseWorkstream(value: unknown, path: string): FrameWorkstream {
   const object = asObject(value, path);
   exactKeys(object, path, [
@@ -255,6 +306,36 @@ function parseWorkstream(value: unknown, path: string): FrameWorkstream {
         ? null
         : member(object.outcome, `${path}.outcome`, ['accepted', 'rejected'] as const),
     outcomeSummary: asString(object.outcomeSummary, `${path}.outcomeSummary`),
+  };
+}
+
+function parseJudgeResult(value: unknown, path: string): FrameJudgeResult {
+  const object = asObject(value, path);
+  exactKeys(object, path, [
+    'id',
+    'sequence',
+    'workstreamId',
+    'verdict',
+    'analysis',
+    'feedback',
+    'skipReason',
+    'implementerOutcome',
+  ]);
+  const verdict = member(object.verdict, `${path}.verdict`, JUDGE_VERDICTS);
+  const skipReason = nullableMember(object.skipReason, `${path}.skipReason`, JUDGE_SKIP_REASONS);
+  if (verdict === 'skipped' && skipReason === null)
+    fail(`${path}.skipReason`, 'required when verdict is skipped');
+  if (verdict !== 'skipped' && skipReason !== null)
+    fail(`${path}.skipReason`, 'must be null unless verdict is skipped');
+  return {
+    id: asString(object.id, `${path}.id`),
+    sequence: asNumber(object.sequence, `${path}.sequence`),
+    workstreamId: asString(object.workstreamId, `${path}.workstreamId`),
+    verdict,
+    analysis: asString(object.analysis, `${path}.analysis`),
+    feedback: asString(object.feedback, `${path}.feedback`),
+    skipReason,
+    implementerOutcome: asString(object.implementerOutcome, `${path}.implementerOutcome`),
   };
 }
 
@@ -330,6 +411,10 @@ export function parseCampaignFrame(value: unknown): CampaignFrame {
         clientId: nullableString(object.clientId, '$.clientId'),
         timestamp: asString(object.timestamp, '$.timestamp'),
       };
+    }
+    case 'judge-result': {
+      exactKeys(object, '$', ['kind', 'seq', 'judgeResult']);
+      return {kind, seq, judgeResult: parseJudgeResult(object.judgeResult, '$.judgeResult')};
     }
   }
 }

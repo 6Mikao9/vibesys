@@ -50,6 +50,7 @@ const EMPTY_RECORD: CampaignRecord = {
   agents: [],
   measurements: [],
   trajectories: [],
+  judgeResults: [],
 };
 
 function timelineBounds(record: CampaignRecord): {start: number; end: number} {

@@ -1,6 +1,11 @@
 import type {CSSProperties, JSX, KeyboardEvent} from 'react';
 import type {FrameOperatorAction, OperatorAction} from './campaign-frames.js';
-import type {CampaignRecord, TurnMessage} from './campaign-record.js';
+import type {
+  CampaignRecord,
+  JudgeSkipReason,
+  JudgeVerdict,
+  TurnMessage,
+} from './campaign-record.js';
 import type {CampaignViewModel} from './campaign-view.js';
 import {dwellMessage, dwellTime} from './operator-timeline.js';
 
@@ -1322,8 +1327,62 @@ function WorkstreamDialog({
             </article>
           ))}
         </div>
+        <JudgeResultSection scenario={scenario} workstreamId={workstream.id} />
       </section>
     </div>
+  );
+}
+
+const JUDGE_VERDICT_LABEL: Record<JudgeVerdict, string> = {
+  pass: 'Passed review',
+  fail: 'Failed review',
+  skipped: 'Review skipped',
+};
+
+const JUDGE_SKIP_REASON_LABEL: Record<JudgeSkipReason, string> = {
+  blocked: 'Implementer was blocked',
+  unchanged: 'Candidate revision was unchanged',
+  not_due: 'Not due for review this attempt',
+};
+
+/** The judge/review assessment of each attempt at this workstream, oldest
+ * first: a verdict and the judge's analysis and feedback when a review ran,
+ * or a skip reason when it did not. Renders nothing when the workstream has
+ * no assessments yet. */
+function JudgeResultSection({
+  scenario,
+  workstreamId,
+}: {
+  readonly scenario: CampaignRecord;
+  readonly workstreamId: string;
+}): JSX.Element | null {
+  const results = scenario.judgeResults.filter(item => item.workstreamId === workstreamId);
+  if (results.length === 0) return null;
+  return (
+    <>
+      <h3>
+        Review history <small>{results.length} assessments</small>
+      </h3>
+      <ol className="detail-judge-results">
+        {results.map(item => (
+          <li key={item.id} className={`judge-result-entry judge-result-${item.verdict}`}>
+            <div className="judge-result-head">
+              <span className={`outcome-chip chip-judge-${item.verdict}`}>
+                {JUDGE_VERDICT_LABEL[item.verdict]}
+              </span>
+              <span className="judge-result-implementer">
+                Implementer: {item.implementerOutcome}
+              </span>
+            </div>
+            {item.skipReason !== null && (
+              <p className="judge-result-skip-reason">{JUDGE_SKIP_REASON_LABEL[item.skipReason]}</p>
+            )}
+            {item.analysis !== '' && <p className="judge-result-analysis">{item.analysis}</p>}
+            {item.feedback !== '' && <p className="judge-result-feedback">{item.feedback}</p>}
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 

@@ -10,6 +10,7 @@
 import type {
   CampaignHeader,
   FrameAgent,
+  FrameJudgeResult,
   FrameMeasurement,
   FrameOperatorAction,
 } from './campaign-frames.js';
@@ -23,6 +24,7 @@ export interface FoldState {
   readonly workstreams: ReadonlyMap<string, FrameWorkstream>;
   readonly agents: ReadonlyMap<string, FrameAgent>;
   readonly measurements: ReadonlyMap<string, FrameMeasurement>;
+  readonly judgeResults: ReadonlyMap<string, FrameJudgeResult>;
   readonly tokenSpend: ReadonlyMap<string, number>;
   readonly status: 'active' | 'completed';
   /** The operator-intervention timeline, oldest first. Append-only: an
@@ -37,6 +39,7 @@ export function initialFoldState(): FoldState {
     workstreams: new Map(),
     agents: new Map(),
     measurements: new Map(),
+    judgeResults: new Map(),
     tokenSpend: new Map(),
     status: 'active',
     operatorActions: [],
@@ -82,6 +85,12 @@ export function foldCampaignFrame(state: FoldState, frame: CampaignFrame): FoldS
       };
     case 'status':
       return {...state, seq, status: frame.status};
+    case 'judge-result':
+      return {
+        ...state,
+        seq,
+        judgeResults: withEntry(state.judgeResults, frame.judgeResult.id, frame.judgeResult),
+      };
     case 'operator-action':
       return {
         ...state,
@@ -112,6 +121,12 @@ function sortedMeasurements(
   measurements: ReadonlyMap<string, FrameMeasurement>,
 ): CampaignRecord['measurements'] {
   return [...measurements.values()].sort((left, right) => left.sequence - right.sequence);
+}
+
+function sortedJudgeResults(
+  judgeResults: ReadonlyMap<string, FrameJudgeResult>,
+): CampaignRecord['judgeResults'] {
+  return [...judgeResults.values()].sort((left, right) => left.sequence - right.sequence);
 }
 
 function projectWorkstream(
@@ -174,5 +189,6 @@ export function foldStateToRecord(state: FoldState, now: number): CampaignRecord
     agents: [...state.agents.values()],
     measurements: sortedMeasurements(state.measurements),
     trajectories: state.header.trajectories,
+    judgeResults: sortedJudgeResults(state.judgeResults),
   };
 }

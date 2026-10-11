@@ -225,12 +225,23 @@ persisted but not streamed, and not computed anywhere.
   `QuotaPausedData`/`QuotaResumedData`/`QuotaAbandonedData`,
   `ProviderSwitchedData`.
 - **Gate lifecycle**: `GateStartedData`/`GateFinishedData` (gate, recipe,
-  reused, metric, value, unit, output tail). No duration field.
+  reused, metric, value, unit, output tail). No duration field. For the
+  dynamic engine's own accuracy/benchmark gates specifically, `round_label`
+  now follows the same `round-{sequence}` convention as `RoundFinishedData`
+  (`DynamicWorkstream.sequence` is unique and stable per workstream), so these
+  two events are parseable back to their owning workstream; before this PR,
+  that path always emitted `round_label=None`. Other producers of
+  `GateStartedData`/`GateFinishedData` are unaffected.
 - **Round outcomes**: `RoundFinishedData` (attempts, judge verdict,
   `perf_metric`/`perf_unit`, whether profiling was skipped). This is also
   where a profiler's headline metric surfaces; see the profiler bullet
   below.
-- **Judge and benchmark results**: `JudgeResultData`, `BenchmarkResultData`.
+- **Judge results, correlated to their round**: `JudgeResultData` (verdict,
+  analysis, feedback, `skip_reason`, `implementer_outcome`), emitted once per
+  review assessment, whether a review ran (`pass`/`fail`) or was skipped
+  (`blocked`/`unchanged`/`not_due`). **Correction from the first draft:** this
+  bullet previously also listed `BenchmarkResultData` as already streamed;
+  it is not, see "does not exist anywhere" below.
 - **Run failure, in aggregate**: `RunFailure` (kind, reason,
   `workstreams_started`, `workstream_budget`, `candidates_kept`), a real
   cross-workstream count, but terminal-only, built once when a run fails.
@@ -304,6 +315,14 @@ persisted but not streamed, and not computed anywhere.
 
 ### Does not exist anywhere
 
+- **`BenchmarkResultData` as an event anyone emits.** Declared in both
+  `vibesys.events` and `server.events`' unions, and constructed directly in
+  `tests/server/test_events.py`, but no production call site builds one; grep
+  confirms the only non-test, non-definition hits are zero. The first draft of
+  this doc listed it under "already streamed" alongside `JudgeResultData`;
+  that was wrong. A benchmark gate's metric reaches the UI through
+  `GateFinishedData` (gate, recipe, metric, value, unit), which is the event
+  that is actually emitted.
 - **VibeSys's own throughput.** No tokens-per-second or any rate computation
   for VibeSys's own agent activity exists anywhere, confirmed against
   production code and against this PR's own prototype fold
@@ -327,7 +346,13 @@ persisted but not streamed, and not computed anywhere.
   proof of concept to one change.
 - **Typed workstream/attempt correlation.** `round_label`/`agent_kind` on the
   event envelope are free text, not references; which workstream an
-  agent-local event belongs to is not a parseable field anywhere today.
+  agent-local event belongs to is not a parseable field anywhere today. One
+  narrower case is now an exception: the dynamic engine's own accuracy and
+  benchmark gates set `round_label` to `round-{sequence}`, the same convention
+  `RoundFinishedData` already used, so those two events in particular are
+  parseable back to their workstream (see "Gate lifecycle" above). The general
+  concern, a declared `workstream_id`/`attempt_id` reference type on every
+  event, remains unresolved.
 - **Tool output size, and real tool-call identity.** `ToolResultData` has no
   byte-size field; `call_id` is a synthetic UUID, paired to its call by a
   per-tool-name FIFO queue, not the provider's real id.
@@ -602,6 +627,7 @@ SSE, the real gateway would carry it over its existing websocket). Frame kinds:
 | `tokens` | workstreamId, cumulative tokens | gap 3 |
 | `status` | run status: active / completed | run lifecycle |
 | `operator-action` | one operator-intervention timeline entry: `action` (mirrors `RunControlTransitionKind`), `text`, `agentKind`, `roundLabel`, `executionId`, `clientId`, `timestamp` | the operator-intervention timeline (pause/resume/stop/steer) |
+| `judge-result` | one review assessment: `id`, `sequence`, `workstreamId`, `verdict` (pass/fail/skipped), `analysis`, `feedback`, `skipReason` (blocked/unchanged/not_due, required iff `verdict` is skipped), `implementerOutcome` | judge and gate review transparency: mirrors `JudgeResultData`, upserted by `id` like `measurement` |
 
 Every frame carries a monotonic `seq` for ordering and idempotent dedup. Frames
 are **deltas, not snapshots**: a workstream that moves `IMPLEMENTING ->
@@ -945,6 +971,13 @@ the client does not need to change when the source does.
   entries accumulate oldest first, they are absent from the reconstructed
   record (like token spend and status), and a replayed record's synthesized
   demo timeline carries at least one `operator-action` frame.
+- `campaign-frames.test.ts` also covers the `judge-result` frame: every
+  verdict and skip reason parses, a skipped verdict with no skip reason is
+  rejected, a non-skipped verdict carrying one is rejected, and an unexpected
+  key is rejected and named.
+- `campaign-fold.test.ts` also covers judge results: frames upsert by `id`
+  (unlike the append-only operator timeline), and a replayed record carries
+  every judge result from the fixture through its live demo timeline.
 - `operator-timeline.test.ts`: `dwellTime` finds the most recent unresolved
   pause or stop and clears once it resolves (`resumed`/`stopped`), ignores
   steer entries, tracks only the latest wait rather than an earlier resolved

@@ -14,7 +14,7 @@ from pathlib import (
     PurePosixPath,
     PureWindowsPath,
 )  # Pydantic resolves WorkspaceRef at runtime.
-from typing import TYPE_CHECKING, Annotated, Protocol, TypeVar, overload
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, TypeVar, overload
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
@@ -986,8 +986,14 @@ class Evaluation(Protocol):
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        round_label: str | None = None,
     ) -> AccuracyEvaluation:
-        """Evaluate correctness, optionally reusing an exact-candidate pass."""
+        """Evaluate correctness, optionally reusing an exact-candidate pass.
+
+        ``round_label`` correlates the gate events this emits with the
+        caller's round. ``None`` for a caller with no round, such as a run's
+        one-time input baseline measurement.
+        """
         ...
 
     async def benchmark(
@@ -995,8 +1001,14 @@ class Evaluation(Protocol):
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        round_label: str | None = None,
     ) -> BenchmarkEvaluation:
-        """Measure one live workspace against policy-selected objectives."""
+        """Measure one live workspace against policy-selected objectives.
+
+        ``round_label`` correlates the gate events this emits with the
+        caller's round. ``None`` for a caller with no round, such as a run's
+        one-time input baseline measurement.
+        """
         ...
 
     async def validate_local(
@@ -1165,6 +1177,25 @@ class Observations(Protocol):
 
     def warning(self, message: str) -> None:
         """Publish one non-fatal policy warning for the run operator."""
+        ...
+
+    def judge_result(  # noqa: PLR0913  # lint-waiver: LW-466159 [PLR0913]; each argument is one field of the review-assessment event this Protocol describes, and this package must not import the concrete `vibesys.events` payload to bundle them into one object.
+        self,
+        *,
+        round_label: str,
+        verdict: Literal["pass", "fail", "skipped"],
+        analysis: str,
+        feedback: str,
+        skip_reason: Literal["blocked", "unchanged", "not_due"] | None,
+        implementer_outcome: str,
+    ) -> None:
+        """Publish one workstream's review assessment, scoped to its round.
+
+        ``verdict`` is ``"skipped"`` when no judge turn ran this assessment;
+        ``skip_reason`` then names why and ``analysis``/``feedback`` are empty.
+        ``implementer_outcome`` is the implementer's self-declared readiness,
+        present either way.
+        """
         ...
 
 

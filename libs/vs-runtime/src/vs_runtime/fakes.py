@@ -1209,6 +1209,7 @@ class FakeAccuracyCall:
 
     workspace: Workspace
     reuse: AccuracyReceipt | None
+    round_label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1217,6 +1218,7 @@ class FakeBenchmarkCall:
 
     workspace: Workspace
     objectives: tuple[BenchmarkObjective, ...]
+    round_label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1647,9 +1649,10 @@ class FakeEvaluation:
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        round_label: str | None = None,
     ) -> AccuracyEvaluation:
         """Record the request and return the next scripted result."""
-        self.accuracy_calls.append(FakeAccuracyCall(workspace, reuse))
+        self.accuracy_calls.append(FakeAccuracyCall(workspace, reuse, round_label))
         await self._pass_gate("accuracy", len(self.accuracy_calls) - 1, workspace)
         if reuse is not None:
             if reuse.run_id != self.run_id:
@@ -1683,10 +1686,11 @@ class FakeEvaluation:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        round_label: str | None = None,
     ) -> BenchmarkEvaluation:
         """Record the request and return the next scripted result."""
         validate_objectives(objectives)
-        self.benchmark_calls.append(FakeBenchmarkCall(workspace, objectives))
+        self.benchmark_calls.append(FakeBenchmarkCall(workspace, objectives, round_label))
         await self._pass_gate("benchmark", len(self.benchmark_calls) - 1, workspace)
         if workspace.id is None and self.root_benchmark_results:
             result = self.root_benchmark_results.pop(0)
@@ -1733,17 +1737,35 @@ class ObservationCall:
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class JudgeResultCall:
+    """One ordered ``judge_result`` call captured by :class:`FakeObservations`."""
+
+    round_label: str
+    verdict: Literal["pass", "fail", "skipped"]
+    analysis: str
+    feedback: str
+    skip_reason: Literal["blocked", "unchanged", "not_due"] | None
+    implementer_outcome: str
+
+
 class FakeObservations:
     """In-memory observation capability preserving kind and call order."""
 
     def __init__(self) -> None:
         """Create an empty ordered observation log."""
         self._calls: list[ObservationCall] = []
+        self._judge_results: list[JudgeResultCall] = []
 
     @property
     def calls(self) -> tuple[ObservationCall, ...]:
         """Return observation calls in publication order."""
         return tuple(self._calls)
+
+    @property
+    def judge_results(self) -> tuple[JudgeResultCall, ...]:
+        """Return ``judge_result`` calls in publication order."""
+        return tuple(self._judge_results)
 
     def note(self, message: str) -> None:
         """Capture one informational note."""
@@ -1752,6 +1774,28 @@ class FakeObservations:
     def warning(self, message: str) -> None:
         """Capture one non-fatal warning."""
         self._calls.append(ObservationCall("warning", message))
+
+    def judge_result(  # noqa: PLR0913  # lint-waiver: LW-699056 [PLR0913]; mirrors the `Observations.judge_result` Protocol it fakes, which takes the same arguments for the same reason.
+        self,
+        *,
+        round_label: str,
+        verdict: Literal["pass", "fail", "skipped"],
+        analysis: str,
+        feedback: str,
+        skip_reason: Literal["blocked", "unchanged", "not_due"] | None,
+        implementer_outcome: str,
+    ) -> None:
+        """Capture one workstream review assessment."""
+        self._judge_results.append(
+            JudgeResultCall(
+                round_label=round_label,
+                verdict=verdict,
+                analysis=analysis,
+                feedback=feedback,
+                skip_reason=skip_reason,
+                implementer_outcome=implementer_outcome,
+            )
+        )
 
 
 class FakeRun(Run):
