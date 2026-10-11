@@ -462,6 +462,12 @@ class CoreEvent(BaseModel):
     round_label: str | None = None
     agent_kind: str | None = None
     execution_id: str | None = None
+    # Stable identity of the issuing frontend connection, carried on
+    # request-time run-control transitions (see
+    # `vs_runtime.api.infrastructure.RunControlTransition`). ``None`` off that
+    # path, mirroring `server.api.protocol.Request.client_id`'s empty-string
+    # compatibility default.
+    client_id: str | None = None
     data: CoreEventData | None = None
 
 

@@ -2566,7 +2566,7 @@
       "type": "object"
     },
     "JudgeResultData": {
-      "description": "Verdict and feedback returned by the judge.",
+      "description": "One workstream's review assessment: a judge verdict or a skip reason.\n\n``skipped`` means no judge turn ran this assessment (the workstream's own\ncorrelation, carried by the event envelope's ``round_label``, is what\nrepeat assessments of the same workstream share); ``skip_reason`` then\nnames why. ``implementer_outcome`` is the implementer's own self-declared\nreadiness for this attempt, present regardless of whether a review ran.",
       "properties": {
         "kind": {
           "const": "judge_result",
@@ -2577,25 +2577,48 @@
         "verdict": {
           "enum": [
             "pass",
-            "fail"
+            "fail",
+            "skipped"
           ],
           "title": "Verdict",
           "type": "string"
         },
+        "analysis": {
+          "default": "",
+          "title": "Analysis",
+          "type": "string"
+        },
         "feedback": {
+          "default": "",
           "title": "Feedback",
           "type": "string"
         },
-        "attempt": {
-          "title": "Attempt",
-          "type": "integer"
+        "skip_reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "blocked",
+                "unchanged",
+                "not_due"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skip Reason"
+        },
+        "implementer_outcome": {
+          "title": "Implementer Outcome",
+          "type": "string"
         }
       },
       "required": [
         "kind",
         "verdict",
-        "feedback",
-        "attempt"
+        "implementer_outcome"
       ],
       "title": "JudgeResultData",
       "type": "object"
@@ -3459,6 +3482,18 @@
           ],
           "default": null,
           "title": "Chat Thread Id"
+        },
+        "client_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Id"
         },
         "data": {
           "anyOf": [

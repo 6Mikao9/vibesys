@@ -17,6 +17,7 @@ import {
   initialFoldState,
   latestMoment,
 } from './campaign-fold.js';
+import type {FrameOperatorAction} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 import type {CampaignStream} from './campaign-stream.js';
 import type {
@@ -105,6 +106,7 @@ interface LiveUiState {
 interface ReadonlyViewInputs {
   readonly source: CampaignRecord;
   readonly status: 'active' | 'completed';
+  readonly operatorActions: readonly FrameOperatorAction[];
   readonly orderedMeasurements: CampaignRecord['measurements'];
   readonly timeline: {readonly start: number; readonly end: number};
   readonly workstreamTokenSpend: Readonly<Record<string, number>>;
@@ -116,7 +118,16 @@ interface ReadonlyViewInputs {
  * contract. Status comes from the fold, not the cursor, so scrubbing never
  * rewrites the run status. */
 function readOnlyView(inputs: ReadonlyViewInputs): CampaignViewReadonly {
-  const {source, status, orderedMeasurements, timeline, workstreamTokenSpend, cursor, ui} = inputs;
+  const {
+    source,
+    status,
+    operatorActions,
+    orderedMeasurements,
+    timeline,
+    workstreamTokenSpend,
+    cursor,
+    ui,
+  } = inputs;
   const activeMeasurement = orderedMeasurements[cursor.pointIndex];
   const latestTimestamp = activeMeasurement?.timestamp ?? new Date(timeline.end).toISOString();
   return {
@@ -126,6 +137,7 @@ function readOnlyView(inputs: ReadonlyViewInputs): CampaignViewReadonly {
     metric:
       source.objective.metrics.find(item => item.id === ui.metricId) ?? source.objective.metrics[0],
     metricId: ui.metricId,
+    operatorActions,
     orderedMeasurements,
     playing: cursor.following,
     pointIndex: cursor.pointIndex,
@@ -185,6 +197,7 @@ export function useLiveCampaign(stream: CampaignStream): LiveCampaignState {
   const readOnly = readOnlyView({
     source,
     status: fold.status,
+    operatorActions: fold.operatorActions,
     orderedMeasurements,
     timeline,
     workstreamTokenSpend,

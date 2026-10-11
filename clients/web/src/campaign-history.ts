@@ -98,6 +98,9 @@ export function useCampaignHistory(scenario: CampaignRecord): CampaignViewModel 
     latestTimestamp,
     metric,
     metricId,
+    // A fixture replay has no separate operator-intervention channel; the
+    // live fold is the only source for this timeline (see `live-campaign.ts`).
+    operatorActions: [],
     orderedMeasurements,
     playing,
     pointIndex,

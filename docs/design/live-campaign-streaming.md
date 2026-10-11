@@ -601,6 +601,7 @@ SSE, the real gateway would carry it over its existing websocket). Frame kinds:
 | `measurement` | one measurement: sequence, workstreamId, values, gates, disposition, benchmark version | the already-real telemetry |
 | `tokens` | workstreamId, cumulative tokens | gap 3 |
 | `status` | run status: active / completed | run lifecycle |
+| `operator-action` | one operator-intervention timeline entry: `action` (mirrors `RunControlTransitionKind`), `text`, `agentKind`, `roundLabel`, `executionId`, `clientId`, `timestamp` | the operator-intervention timeline (pause/resume/stop/steer) |
 
 Every frame carries a monotonic `seq` for ordering and idempotent dedup. Frames
 are **deltas, not snapshots**: a workstream that moves `IMPLEMENTING ->
@@ -634,8 +635,8 @@ validates; the fold and the view operate on typed values only. This mirrors
 
 `foldCampaignFrame(state, frame): FoldState` is a pure reducer: `state + event
 -> new state`, no I/O, no clock, no React. `FoldState` holds the growing
-`CampaignRecord`, the run status, the per-workstream token spend, and the last
-applied `seq`.
+`CampaignRecord`, the run status, the per-workstream token spend, the
+append-only operator-intervention timeline, and the last applied `seq`.
 
 ### Correctness properties
 
@@ -650,6 +651,14 @@ The reducer guarantees these properties, and the tests assert them:
 - Replaying `framesFromRecord(R)` through the fold reconstructs `R`. The frame
   builder and the fold are inverses; this is the central round-trip property and
   the thing that makes the prototype a faithful reference for the real backend.
+- The operator-intervention timeline (`FoldState.operatorActions`) is
+  append-only and, like token spend and run status, is not part of the
+  reconstructed `CampaignRecord`: it has no finished-record counterpart to
+  round-trip against. `operator-timeline.ts`'s `dwellTime` and
+  `steeredPromptTail` are pure selectors over it, taking their reference point
+  (`now`, a list of known executions) as an explicit argument rather than
+  reading a clock or a live subscription, so they are tested with fixed data
+  and never sleep.
 
 Keeping the fold pure is what lets the whole live path be tested with generated
 frame sequences and no sleeps (see "Verification").
@@ -844,6 +853,21 @@ expand-migrate-contract order, each behind the existing emission chokepoints
    `agent-upsert`'s `workstreamIds` by aggregating (role, workstream_id)
    pairs observed in the event stream itself, once step 2 makes that id
    available everywhere, not just on async-operation events.
+5. **Attribute operator-intervention events to their issuing connection.**
+   Done in this PR: `Request.client_id` (`server.api.protocol.Request`) was
+   previously read only to echo back on the `Response`, then discarded before
+   the pause/resume/stop/steer call it triggered. `RunControlTransition`,
+   `RunControlChannel`, `RunApi`, `RunController`, and `CoreEvent`/`RunEvent`
+   now all carry it through to the `CONTROL`/`RUN_STATUS_CHANGED` wire event
+   (`None` for an ATTACHED-triggered or boundary-landing transition, which has
+   no requesting client; see `CoreEventType`'s request-time-vs-boundary-
+   consume-time distinction). What remains: projecting these events into the
+   `operator-action` frame added in this PR from a live stream rather than the
+   synthetic demo timeline `framesFromRecord` emits today, and resolving a
+   client's own `client_id` on the web frontend once it issues control
+   requests itself (#815), so `OperatorActionLog`'s "this tab" case has
+   something to compare against instead of rendering every attributed entry's
+   raw id.
 
 Also surfaced by this inventory, not yet scheduled against the four steps
 above:
@@ -914,6 +938,21 @@ the client does not need to change when the source does.
   a regression case for a workstream that starts after the latest measurement
   elsewhere in the run), and PARKED's non-terminal liveness, over the campaign
   fixture and constructed frame sequences, with no sleeps.
+- `campaign-frames.test.ts` also covers the `operator-action` frame: every
+  `OperatorAction` value parses, and an invalid action or an unexpected key is
+  rejected and named.
+- `campaign-fold.test.ts` also covers the operator-intervention timeline:
+  entries accumulate oldest first, they are absent from the reconstructed
+  record (like token spend and status), and a replayed record's synthesized
+  demo timeline carries at least one `operator-action` frame.
+- `operator-timeline.test.ts`: `dwellTime` finds the most recent unresolved
+  pause or stop and clears once it resolves (`resumed`/`stopped`), ignores
+  steer entries, tracks only the latest wait rather than an earlier resolved
+  one, and escalates past the one-hour threshold; `formatDwell` and
+  `dwellMessage` render the expected text; `steeredPromptTail` joins a
+  `steer_consumed` entry to the matching execution by id and returns null for
+  no `executionId`, no match, or a non-`steer_consumed` entry. All of this is
+  driven by fixed timestamps and an explicit `now`, never a real clock.
 - `e2e/campaign-live.spec.ts`: against the dev stream, measurement count and the
   chart grow while the run is active, status goes active -> completed, the
   final best-goodput value renders once the run settles, and scrubbing back

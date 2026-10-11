@@ -10,8 +10,10 @@ export {
 export {
   type CampaignFrame,
   type CampaignHeader,
+  type FrameOperatorAction,
   type FrameWorkstream,
   isTerminalPhase,
+  type OperatorAction,
   parseCampaignFrame,
   type WorkstreamPhase,
 } from './campaign-frames.js';
@@ -23,6 +25,16 @@ export {
   FakeCampaignStream,
 } from './campaign-stream.js';
 export {type LiveCampaignState, useLiveCampaign} from './live-campaign.js';
+export {
+  type DwellInfo,
+  type DwellSeverity,
+  dwellMessage,
+  dwellTime,
+  type ExecutionStarted,
+  formatDwell,
+  steeredPromptTail,
+  type WaitingAction,
+} from './operator-timeline.js';
 export {loadReplayFixture} from './replay.js';
 export {
   loadReplayScenario,

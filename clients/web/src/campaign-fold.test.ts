@@ -295,3 +295,56 @@ test('a parked workstream still projects as live even once inactive with a real 
 test('the header must arrive before a record can be projected', () => {
   expect(foldStateToRecord(initialFoldState(), 0)).toBeNull();
 });
+
+test('operator-action frames accumulate on the fold, oldest first', () => {
+  const state = foldFrames([
+    initFrame,
+    {
+      kind: 'operator-action',
+      seq: 2,
+      action: 'pause_requested',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: '2026-01-01T00:00:01Z',
+    },
+    {
+      kind: 'operator-action',
+      seq: 3,
+      action: 'resumed',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: '2026-01-01T00:00:02Z',
+    },
+  ]);
+  expect(state.operatorActions.map(entry => entry.action)).toEqual(['pause_requested', 'resumed']);
+});
+
+test('operator-action frames are not part of the reconstructed record, like tokenSpend and status', () => {
+  const state = foldFrames([
+    initFrame,
+    {
+      kind: 'operator-action',
+      seq: 2,
+      action: 'steer_queued',
+      text: 'focus on latency',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: '2026-01-01T00:00:01Z',
+    },
+  ]);
+  const projected = foldStateToRecord(state, 0);
+  expect(projected).not.toHaveProperty('operatorActions');
+});
+
+test('a replayed record carries at least one operator-action frame in its live demo timeline', () => {
+  const frames = framesFromRecord(record);
+  expect(frames.some(frame => frame.kind === 'operator-action')).toBe(true);
+});

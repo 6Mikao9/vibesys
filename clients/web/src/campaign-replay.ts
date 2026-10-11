@@ -11,7 +11,12 @@
  * the exact interleaving only affects the live drama, not correctness.
  */
 
-import type {CampaignFrame, CampaignHeader, FrameWorkstream} from './campaign-frames.js';
+import type {
+  CampaignFrame,
+  CampaignHeader,
+  FrameOperatorAction,
+  FrameWorkstream,
+} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 
 function headerOf(record: CampaignRecord): CampaignHeader {
@@ -74,6 +79,77 @@ function tokenTotal(workstream: CampaignRecord['workstreams'][number], index: nu
   return 2000 + index * 600 + span * 150;
 }
 
+/** A deterministic operator-intervention timeline, placed across the first
+ * workstream's span so the demo has something on the dashboard's
+ * operator-action log and dwell indicator. There is no `agent-execution`
+ * frame kind yet (see the design doc's "Backend path"), so the
+ * `steer_consumed` entry below carries no `executionId`: fabricating one with
+ * no execution to join against would make the steered-prompt join always
+ * report "no match", which is more misleading than showing none. */
+function operatorActionTimeline(record: CampaignRecord): TimedFrame[] {
+  const first = record.workstreams[0];
+  if (first === undefined) return [];
+  const started = Date.parse(first.startedAt);
+  const finished = Date.parse(first.finishedAt);
+  const span = finished - started;
+  const entries: Array<{at: number} & FrameOperatorAction> = [
+    {
+      at: started + span * 0.2,
+      action: 'pause_requested',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: new Date(started + span * 0.2).toISOString(),
+    },
+    {
+      at: started + span * 0.24,
+      action: 'paused',
+      text: '',
+      agentKind: 'implementer',
+      roundLabel: 'round-1',
+      executionId: null,
+      clientId: null,
+      timestamp: new Date(started + span * 0.24).toISOString(),
+    },
+    {
+      at: started + span * 0.4,
+      action: 'resumed',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: new Date(started + span * 0.4).toISOString(),
+    },
+    {
+      at: started + span * 0.6,
+      action: 'steer_queued',
+      text: 'Focus on reducing tail latency before the next checkpoint.',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-b',
+      timestamp: new Date(started + span * 0.6).toISOString(),
+    },
+    {
+      at: started + span * 0.62,
+      action: 'steer_consumed',
+      text: '',
+      agentKind: 'implementer',
+      roundLabel: 'round-2',
+      executionId: null,
+      clientId: null,
+      timestamp: new Date(started + span * 0.62).toISOString(),
+    },
+  ];
+  return entries.map(({at, ...entry}) => ({
+    at,
+    make: seq => ({kind: 'operator-action', seq, ...entry}),
+  }));
+}
+
 export function framesFromRecord(record: CampaignRecord): CampaignFrame[] {
   const makers: Array<(seq: number) => CampaignFrame> = [];
   makers.push(seq => ({kind: 'campaign-init', seq, header: headerOf(record)}));
@@ -111,6 +187,7 @@ export function framesFromRecord(record: CampaignRecord): CampaignFrame[] {
       at: Date.parse(measurement.timestamp),
       make: seq => ({kind: 'measurement', seq, measurement}),
     });
+  timed.push(...operatorActionTimeline(record));
 
   // Stable sort by time; ties keep insertion order, which already puts a
   // workstream's in-flight upsert before its settled one (finished >= started).

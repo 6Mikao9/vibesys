@@ -98,6 +98,7 @@ class _CoreRunControlEvents:
             agent_kind=transition.agent_kind,
             round_label=transition.round_label,
             execution_id=transition.execution_id,
+            client_id=transition.client_id,
         )
 
 

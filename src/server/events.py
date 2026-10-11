@@ -559,6 +559,12 @@ class RunEvent(BaseModel):
     # Which experiment-chat thread a chat event belongs to. None is the
     # default thread, preserving events written before threads existed.
     chat_thread_id: str | None = None
+    # Stable identity of the frontend connection whose request caused a
+    # request-time control transition (`CONTROL`/`RUN_STATUS_CHANGED` events
+    # from `/pause`, `/resume`, `/stop`, `/steer`). ``None`` for events with
+    # no requesting client, mirroring `Request.client_id`'s empty-string
+    # compatibility default (see `server.api.protocol.Request`).
+    client_id: str | None = None
     data: EventData | None = None
 
     @model_validator(mode="before")

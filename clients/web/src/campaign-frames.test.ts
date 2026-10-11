@@ -30,6 +30,79 @@ test('parses every frame kind', () => {
     'tokens',
   );
   expect(parseCampaignFrame({kind: 'status', seq: 6, status: 'completed'}).kind).toBe('status');
+  expect(
+    parseCampaignFrame({
+      kind: 'operator-action',
+      seq: 7,
+      action: 'pause_requested',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: '2026-01-01T00:00:00Z',
+    }).kind,
+  ).toBe('operator-action');
+});
+
+test('parses every operator action value', () => {
+  const actions = [
+    'steer_queued',
+    'pause_requested',
+    'resumed',
+    'stop_requested',
+    'steer_consumed',
+    'paused',
+    'stopped',
+  ] as const;
+  for (const action of actions) {
+    const frame = parseCampaignFrame({
+      kind: 'operator-action',
+      seq: 1,
+      action,
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: null,
+      timestamp: '2026-01-01T00:00:00Z',
+    });
+    if (frame.kind !== 'operator-action') throw new Error('expected an operator-action frame');
+    expect(frame.action).toBe(action);
+  }
+});
+
+test('rejects an invalid operator action and names the path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'operator-action',
+      seq: 1,
+      action: 'bogus',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: null,
+      timestamp: '2026-01-01T00:00:00Z',
+    }),
+  ).toThrow(/\$\.action/);
+});
+
+test('rejects an unexpected operator-action key and names it', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'operator-action',
+      seq: 1,
+      action: 'resumed',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: null,
+      timestamp: '2026-01-01T00:00:00Z',
+      extra: true,
+    }),
+  ).toThrow(/\$\.extra/);
 });
 
 test('rejects an unknown frame kind and names the path', () => {

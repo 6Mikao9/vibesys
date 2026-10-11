@@ -272,6 +272,7 @@ export type AgentKind2 = string | null;
 export type InvocationId = string | null;
 export type ExecutionId1 = string | null;
 export type ChatThreadId = string | null;
+export type ClientId17 = string | null;
 export type Data =
   | (
       | ChatData
@@ -373,9 +374,11 @@ export type ProcessKind = string;
 export type Stream1 = "stdout" | "stderr";
 export type Content2 = string;
 export type Kind17 = "judge_result";
-export type Verdict = "pass" | "fail";
+export type Verdict = "pass" | "fail" | "skipped";
+export type Analysis = string;
 export type Feedback = string;
-export type Attempt3 = number;
+export type SkipReason = ("blocked" | "unchanged" | "not_due") | null;
+export type ImplementerOutcome = string;
 export type Kind18 = "benchmark_result";
 export type Metric = string;
 export type Value = number;
@@ -603,7 +606,7 @@ export type Truncated = boolean;
 export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
 export type Type16 = "subscribed";
 export type RequestId17 = string;
-export type ClientId17 = string;
+export type ClientId18 = string;
 export type RunId4 = string;
 export type LatestSequence = number;
 export type Type17 = "event";
@@ -615,7 +618,7 @@ export type StoreId1 = string;
 export type HistoryAfterSequence = number;
 export type Type19 = "protocol_error";
 export type RequestId18 = string | null;
-export type ClientId18 = string;
+export type ClientId19 = string;
 export type Code2 = string;
 export type Message1 = string;
 
@@ -1002,6 +1005,7 @@ export interface RunEvent {
   invocation_id?: InvocationId;
   execution_id?: ExecutionId1;
   chat_thread_id?: ChatThreadId;
+  client_id?: ClientId17;
   data?: Data;
 }
 /**
@@ -1198,13 +1202,21 @@ export interface SubprocessOutputData {
   [k: string]: unknown;
 }
 /**
- * Verdict and feedback returned by the judge.
+ * One workstream's review assessment: a judge verdict or a skip reason.
+ *
+ * ``skipped`` means no judge turn ran this assessment (the workstream's own
+ * correlation, carried by the event envelope's ``round_label``, is what
+ * repeat assessments of the same workstream share); ``skip_reason`` then
+ * names why. ``implementer_outcome`` is the implementer's own self-declared
+ * readiness for this attempt, present regardless of whether a review ran.
  */
 export interface JudgeResultData {
   kind: Kind17;
   verdict: Verdict;
-  feedback: Feedback;
-  attempt: Attempt3;
+  analysis?: Analysis;
+  feedback?: Feedback;
+  skip_reason?: SkipReason;
+  implementer_outcome: ImplementerOutcome;
   [k: string]: unknown;
 }
 /**
@@ -1547,7 +1559,7 @@ export interface DesignPatch {
 export interface SubscribedMessage {
   type: Type16;
   request_id: RequestId17;
-  client_id?: ClientId17;
+  client_id?: ClientId18;
   run_id: RunId4;
   latest_sequence: LatestSequence;
 }
@@ -1575,7 +1587,7 @@ export interface EventBatchMessage {
 export interface ProtocolErrorMessage {
   type: Type19;
   request_id?: RequestId18;
-  client_id?: ClientId18;
+  client_id?: ClientId19;
   code: Code2;
   message: Message1;
   diagnostic?: Diagnostic | null;

@@ -52,6 +52,51 @@ export type CampaignHeader = Pick<
 export type FrameAgent = CampaignRecord['agents'][number];
 export type FrameMeasurement = CampaignRecord['measurements'][number];
 
+/** Mirrors the backend `RunControlTransitionKind` StrEnum (see
+ * `vs_runtime.api.infrastructure.RunControlTransitionKind`). A hand-written
+ * copy until the backend emits these frames; see the design doc's "Backend
+ * path". `steer_consumed`, `paused`, and `stopped` land at an invocation
+ * boundary and may carry `agentKind`/`roundLabel`/`executionId`; the other
+ * four are request-time and never do. */
+export type OperatorAction =
+  | 'steer_queued'
+  | 'pause_requested'
+  | 'resumed'
+  | 'stop_requested'
+  | 'steer_consumed'
+  | 'paused'
+  | 'stopped';
+
+const OPERATOR_ACTIONS: readonly OperatorAction[] = [
+  'steer_queued',
+  'pause_requested',
+  'resumed',
+  'stop_requested',
+  'steer_consumed',
+  'paused',
+  'stopped',
+];
+
+/**
+ * One entry on the operator-intervention timeline. Mirrors the fields carried
+ * on `server.api.events.RunEvent` for a `CONTROL`/`RUN_STATUS_CHANGED` wire
+ * event: `text` is the steer prompt (non-empty only for `steer_queued`),
+ * `clientId` is the issuing frontend connection's stable id (null for a
+ * boundary-landing transition, which has no requesting client), and
+ * `agentKind`/`roundLabel`/`executionId` locate the invocation a
+ * boundary-landing transition landed on (null for a request-time
+ * transition).
+ */
+export interface FrameOperatorAction {
+  readonly action: OperatorAction;
+  readonly text: string;
+  readonly agentKind: string | null;
+  readonly roundLabel: string | null;
+  readonly executionId: string | null;
+  readonly clientId: string | null;
+  readonly timestamp: string;
+}
+
 /**
  * A workstream delta. Unlike the finished-record shape, a live workstream may be
  * in flight: `active` is true, and `finishedAt`/`outcome`/`lastSequence` are not
@@ -83,7 +128,8 @@ export type CampaignFrame =
       readonly workstreamId: string;
       readonly tokens: number;
     }
-  | {readonly kind: 'status'; readonly seq: number; readonly status: 'active' | 'completed'};
+  | {readonly kind: 'status'; readonly seq: number; readonly status: 'active' | 'completed'}
+  | ({readonly kind: 'operator-action'; readonly seq: number} & FrameOperatorAction);
 
 type CampaignFrameKind = CampaignFrame['kind'];
 
@@ -94,6 +140,7 @@ const FRAME_KINDS: readonly CampaignFrameKind[] = [
   'measurement',
   'tokens',
   'status',
+  'operator-action',
 ];
 
 class FrameError extends Error {}
@@ -128,6 +175,13 @@ type FrameObject = Record<string, unknown> & {
   lastSequence?: unknown;
   outcome?: unknown;
   outcomeSummary?: unknown;
+  action?: unknown;
+  text?: unknown;
+  agentKind?: unknown;
+  roundLabel?: unknown;
+  executionId?: unknown;
+  clientId?: unknown;
+  timestamp?: unknown;
 };
 
 function asObject(value: unknown, path: string): FrameObject {
@@ -251,6 +305,30 @@ export function parseCampaignFrame(value: unknown): CampaignFrame {
         kind,
         seq,
         status: member(object.status, '$.status', ['active', 'completed'] as const),
+      };
+    }
+    case 'operator-action': {
+      exactKeys(object, '$', [
+        'kind',
+        'seq',
+        'action',
+        'text',
+        'agentKind',
+        'roundLabel',
+        'executionId',
+        'clientId',
+        'timestamp',
+      ]);
+      return {
+        kind,
+        seq,
+        action: member(object.action, '$.action', OPERATOR_ACTIONS),
+        text: asString(object.text, '$.text'),
+        agentKind: nullableString(object.agentKind, '$.agentKind'),
+        roundLabel: nullableString(object.roundLabel, '$.roundLabel'),
+        executionId: nullableString(object.executionId, '$.executionId'),
+        clientId: nullableString(object.clientId, '$.clientId'),
+        timestamp: asString(object.timestamp, '$.timestamp'),
       };
     }
   }

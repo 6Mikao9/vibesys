@@ -7,7 +7,12 @@
  * sleeps (see `campaign-fold.test.ts`).
  */
 
-import type {CampaignHeader, FrameAgent, FrameMeasurement} from './campaign-frames.js';
+import type {
+  CampaignHeader,
+  FrameAgent,
+  FrameMeasurement,
+  FrameOperatorAction,
+} from './campaign-frames.js';
 import {type CampaignFrame, type FrameWorkstream, isTerminalPhase} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 
@@ -20,6 +25,9 @@ export interface FoldState {
   readonly measurements: ReadonlyMap<string, FrameMeasurement>;
   readonly tokenSpend: ReadonlyMap<string, number>;
   readonly status: 'active' | 'completed';
+  /** The operator-intervention timeline, oldest first. Append-only: an
+   * operator action is never superseded the way an upsert is. */
+  readonly operatorActions: readonly FrameOperatorAction[];
 }
 
 export function initialFoldState(): FoldState {
@@ -31,6 +39,7 @@ export function initialFoldState(): FoldState {
     measurements: new Map(),
     tokenSpend: new Map(),
     status: 'active',
+    operatorActions: [],
   };
 }
 
@@ -73,6 +82,23 @@ export function foldCampaignFrame(state: FoldState, frame: CampaignFrame): FoldS
       };
     case 'status':
       return {...state, seq, status: frame.status};
+    case 'operator-action':
+      return {
+        ...state,
+        seq,
+        operatorActions: [
+          ...state.operatorActions,
+          {
+            action: frame.action,
+            text: frame.text,
+            agentKind: frame.agentKind,
+            roundLabel: frame.roundLabel,
+            executionId: frame.executionId,
+            clientId: frame.clientId,
+            timestamp: frame.timestamp,
+          },
+        ],
+      };
   }
 }
 
