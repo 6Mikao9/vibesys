@@ -1,6 +1,19 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
 from vs_core._continuations import SuspensionRefusal
+from vs_core._evidence_views import (
+    ledger_refs,
+    trusted_keys,
+    turn_candidate,
+)
+from vs_core._ids import (
+    IdScheme,
+    attempt_id,
+    attempt_ref,
+    component,
+    decision_of_operation,
+    item_id,
+)
 from vs_core._migration import v2_to_v3_migration
 from vs_core._projection import (
     attempt_view,
@@ -586,6 +599,7 @@ __all__ = [
     "HistoricalSubmissionReceipt",
     "HostFence",
     "HostId",
+    "IdScheme",
     "Identity",
     "IdentityTypeError",
     "InitialSessionsFailed",
@@ -834,10 +848,16 @@ __all__ = [
     "advance_evaluation",
     "advance_intent",
     "advance_session",
+    "attempt_id",
+    "attempt_ref",
     "attempt_view",
+    "component",
+    "decision_of_operation",
     "dependency_status",
     "evidence_view",
     "initial_state",
+    "item_id",
+    "ledger_refs",
     "may_resubmit",
     "operation_result",
     "operation_trace",
@@ -854,6 +874,8 @@ __all__ = [
     "step",
     "suspension_refusal",
     "trace_step",
+    "trusted_keys",
+    "turn_candidate",
     "v2_to_v3_migration",
     "validate_startup",
     "validate_terminal_inputs",

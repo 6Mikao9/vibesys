@@ -1,12 +1,7 @@
 """Public surface of the dynamic strategy package."""
 
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._evidence import (
-    accept_readings,
-    ledger_refs,
-    trusted_keys,
-    turn_candidate,
-)
+from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
 from vibesys.orchestration.dynamic.strategy._ids import (
     decision_id,
     invocation_id,
@@ -73,6 +68,7 @@ from vibesys.orchestration.dynamic.strategy._state import (
     Winner,
 )
 from vibesys.orchestration.dynamic.strategy._strategy import DynamicStrategy
+from vs_core.api import ledger_refs, trusted_keys, turn_candidate
 
 __all__ = [
     "IMPLEMENTER_REPLY",

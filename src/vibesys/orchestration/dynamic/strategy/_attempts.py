@@ -26,7 +26,6 @@ from vibesys.orchestration.dynamic.strategy._draft import (
     turn_id,
     workspace_for,
 )
-from vibesys.orchestration.dynamic.strategy._evidence import ledger_refs
 from vibesys.orchestration.dynamic.strategy._operations import (
     InterpretEvidence,
     VerifyParentRevision,
@@ -59,6 +58,7 @@ from vs_core.api import (
     Withdraw,
     WorkspaceMode,
     WorkspacePlan,
+    ledger_refs,
 )
 
 _TURN_PHASES = {

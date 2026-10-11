@@ -12,11 +12,7 @@ from vibesys.orchestration.dynamic.strategy._draft import (
     operation,
     run_scope,
 )
-from vibesys.orchestration.dynamic.strategy._evidence import (
-    accept_readings,
-    ledger_refs,
-    trusted_keys,
-)
+from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
 from vibesys.orchestration.dynamic.strategy._ids import decision_id
 from vibesys.orchestration.dynamic.strategy._operations import EvidenceReadings, InterpretEvidence
 from vibesys.orchestration.dynamic.strategy._rows import reading_of
@@ -25,7 +21,15 @@ from vibesys.orchestration.dynamic.strategy._state import (
     BaselineState,
     DynamicStrategyState,
 )
-from vs_core.api import EvidenceKind, Measure, MeasurementResult, RunView, may_resubmit
+from vs_core.api import (
+    EvidenceKind,
+    Measure,
+    MeasurementResult,
+    RunView,
+    ledger_refs,
+    may_resubmit,
+    trusted_keys,
+)
 
 
 def stages(config: DynamicConfig) -> tuple[str, ...]:
