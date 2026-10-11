@@ -8,11 +8,30 @@
   "vibesys": {
     "layer": "app",
     "entries": {
-      ".": "node"
+      ".": "node",
+      "./renderer": "dom",
+      "./preload/run": "node",
+      "./preload/welcome": "node"
     }
   },
-  "main": "dist/main/app/main.js",
-  "exports": {},
+  "main": "dist/main/index.js",
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/main/index.ts",
+      "default": "./dist/main/index.js"
+    },
+    "./renderer": {
+      "@vibesys/source": "./src/renderer/index.ts"
+    },
+    "./preload/run": {
+      "@vibesys/source": "./src/renderer/preload/run.cts",
+      "default": "./dist/renderer/preload/run.cjs"
+    },
+    "./preload/welcome": {
+      "@vibesys/source": "./src/renderer/preload/welcome.cts",
+      "default": "./dist/renderer/preload/welcome.cjs"
+    }
+  },
   "scripts": {
     "build": "tsc -b tsconfig.main.json && vite build --config vite.welcome.config.ts && node scripts/copy-ui.mjs",
     "check": "tsc -b && tsc -p tsconfig.welcome.json",
@@ -20,9 +39,12 @@
     "start": "pnpm build && electron ."
   },
   "dependencies": {
-    "@vibesys/transport": "workspace:*",
     "@vibesys/contracts": "workspace:*",
     "@vibesys/core-state": "workspace:*",
+    "@vibesys/entities": "workspace:*",
+    "@vibesys/ipc": "workspace:*",
+    "@vibesys/transport": "workspace:*",
+    "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },

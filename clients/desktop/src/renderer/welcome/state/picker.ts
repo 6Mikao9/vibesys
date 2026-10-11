@@ -5,9 +5,8 @@
  */
 
 import {only, type Step} from '@vibesys/core-state';
-import type {HostKey} from '../../../common/hosts.js';
-import {validAlias} from '../../../common/hosts.js';
-import type {WelcomeResult} from '../../../common/welcome-protocol.js';
+import {type HostKey, validAlias} from '@vibesys/entities';
+import type {WelcomeResult} from '@vibesys/ipc';
 
 /** One row of the host list: an alias from `~/.ssh/config`, or the destination the user typed. */
 export interface HostChoice {

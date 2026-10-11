@@ -1,9 +1,9 @@
 /** Recent: the runs this user opened, each with its status on its host and what it allows. */
+
+import {type RecentRun, type RecentStatus, resumeDecision, stopKey} from '@vibesys/entities';
+import type {ChromeState} from '@vibesys/ipc';
+import {Button} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
-import type {RecentStatus} from '../../../common/recent-status.js';
-import {resumeDecision} from '../../../common/resume-run.js';
-import {stopKey} from '../../../common/stop-run.js';
-import type {ChromeState, WelcomeRecent} from '../../../common/welcome-protocol.js';
 import {type ListsState, statusOf} from '../state/lists.js';
 import {commands, StopControls, type WelcomeSenders} from './common.js';
 
@@ -21,7 +21,7 @@ function statusText(status: RecentStatus): {text: string; className: string} {
 }
 
 function RowActions(props: {
-  readonly run: WelcomeRecent;
+  readonly run: RecentRun;
   readonly status: RecentStatus;
   readonly chrome: ChromeState;
   readonly send: WelcomeSenders;
@@ -33,13 +33,12 @@ function RowActions(props: {
       const instance = status.instanceId;
       return (
         <>
-          <button
-            type="button"
-            className="primary"
+          <Button
+            variant="primary"
             onClick={() => dispatch({kind: 'attach', host: run.host, instance})}
           >
             Reattach
-          </button>
+          </Button>
           <StopControls
             view={chrome.stops[stopKey(run.host, instance)]}
             stop={force => dispatch({kind: 'stop', host: run.host, instance, force})}
@@ -51,18 +50,10 @@ function RowActions(props: {
       const decision = resumeDecision(run.runId);
       if (decision.kind === 'unavailable') return <span className="muted">{decision.reason}</span>;
       const resume = {host: run.host, project: run.project, run: decision.runId};
-      return (
-        <button type="button" onClick={() => dispatch({kind: 'resume', ...resume})}>
-          Resume…
-        </button>
-      );
+      return <Button onClick={() => dispatch({kind: 'resume', ...resume})}>Resume…</Button>;
     }
     case 'unknown':
-      return (
-        <button type="button" onClick={() => send.host({type: 'show', host: run.host})}>
-          Open host
-        </button>
-      );
+      return <Button onClick={() => send.host({type: 'show', host: run.host})}>Open host</Button>;
   }
 }
 

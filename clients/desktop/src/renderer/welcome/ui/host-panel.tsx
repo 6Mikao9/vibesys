@@ -2,23 +2,25 @@
  * The host panel: one host's VibeSys checkout (or the form asking for it), its runs as the host
  * pushes them, and "Start a run…"; or why the host cannot be reached, with Sign in.
  */
+
+import {
+  type HostKey,
+  type HostListing,
+  type HostRun,
+  type HostSummary,
+  stopKey,
+  suggestProjects,
+} from '@vibesys/entities';
+import type {ChromeState} from '@vibesys/ipc';
+import {Button} from '@vibesys/ui';
 import type {FormEvent, JSX, KeyboardEvent, ReactNode} from 'react';
-import type {HostKey} from '../../../common/hosts.js';
-import {suggestProjects} from '../../../common/recent-status.js';
-import {stopKey} from '../../../common/stop-run.js';
-import type {
-  ChromeState,
-  HostListing,
-  WelcomeHost,
-  WelcomeRun,
-} from '../../../common/welcome-protocol.js';
 import type {CompletionState} from '../state/completion.js';
 import {type CheckoutForm, type HostAction, type HostState, hostLabelOf} from '../state/host.js';
 import type {ListsState} from '../state/lists.js';
 import {commands, PathInput, StopControls, type WelcomeSenders} from './common.js';
 
 function RunRow(props: {
-  readonly run: WelcomeRun;
+  readonly run: HostRun;
   readonly host: HostKey;
   readonly chrome: ChromeState;
   readonly send: WelcomeSenders;
@@ -32,13 +34,12 @@ function RunRow(props: {
       <td>{run.reason === null ? run.status : `${run.status}: ${run.reason}`}</td>
       <td>{run.startedAt === 0 ? '' : new Date(run.startedAt * 1000).toLocaleString()}</td>
       <td className="actions-cell">
-        <button
-          type="button"
-          className="primary"
+        <Button
+          variant="primary"
           onClick={() => dispatch({kind: 'attach', host, instance: run.id})}
         >
           Attach
-        </button>
+        </Button>
         <StopControls
           view={chrome.stops[stopKey(host, run.id)]}
           stop={force => dispatch({kind: 'stop', host, instance: run.id, force})}
@@ -49,7 +50,7 @@ function RunRow(props: {
 }
 
 function RunTable(props: {
-  readonly data: WelcomeHost;
+  readonly data: HostSummary;
   readonly listing: HostListing | undefined;
   readonly chrome: ChromeState;
   readonly send: WelcomeSenders;
@@ -102,13 +103,9 @@ function Unavailable(props: {
       return (
         <>
           <p className="error">{connection.detail}</p>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => props.send.host({type: 'sign-in'})}
-          >
+          <Button variant="primary" onClick={() => props.send.host({type: 'sign-in'})}>
             Sign in
-          </button>
+          </Button>
         </>
       );
     case 'offline':
@@ -121,7 +118,7 @@ function Unavailable(props: {
   }
 }
 
-function formStatus(form: CheckoutForm, data: WelcomeHost): string {
+function formStatus(form: CheckoutForm, data: HostSummary): string {
   if (form.error !== null) return form.error;
   if (form.checking !== null) return `Checking ${form.value.trim()} on ${data.label}…`;
   return '';
@@ -130,7 +127,7 @@ function formStatus(form: CheckoutForm, data: WelcomeHost): string {
 /** "Where is your VibeSys checkout on HOST?", checked by the host before it is saved. */
 function CheckoutQuestion(props: {
   readonly form: CheckoutForm;
-  readonly data: WelcomeHost;
+  readonly data: HostSummary;
   readonly host: (action: HostAction) => void;
   readonly completion: CompletionState;
   readonly send: WelcomeSenders;
@@ -164,13 +161,11 @@ function CheckoutQuestion(props: {
           change={value => host({type: 'checkout-input', value})}
           placeholder="/home/me/src/vibesys"
         />
-        <button type="submit" className="primary" disabled={form.checking !== null}>
+        <Button type="submit" variant="primary" disabled={form.checking !== null}>
           Check and save
-        </button>
+        </Button>
         {form.cancellable ? (
-          <button type="button" onClick={() => host({type: 'cancel-checkout'})}>
-            Cancel
-          </button>
+          <Button onClick={() => host({type: 'cancel-checkout'})}>Cancel</Button>
         ) : null}
       </div>
       <p className={form.error === null ? 'status' : 'status error'}>{formStatus(form, data)}</p>
@@ -197,9 +192,9 @@ function Ready(props: {
         <div className="row">
           <span className="muted">VibeSys checkout:</span>
           <code>{data.checkout}</code>
-          <button type="button" className="link" onClick={() => host({type: 'edit-checkout'})}>
+          <Button variant="link" onClick={() => host({type: 'edit-checkout'})}>
             Change
-          </button>
+          </Button>
         </div>
       ) : (
         <CheckoutQuestion
@@ -215,9 +210,8 @@ function Ready(props: {
         <>
           <RunTable data={data} listing={listing} chrome={chrome} send={send} />
           <div className="row">
-            <button
-              type="button"
-              className="primary"
+            <Button
+              variant="primary"
               onClick={() =>
                 send.start({
                   type: 'open',
@@ -227,7 +221,7 @@ function Ready(props: {
               }
             >
               Start a run…
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -253,9 +247,9 @@ function SignIn(props: {
   return (
     <>
       {note}
-      <button type="button" className="primary" onClick={() => props.host({type: 'sign-in'})}>
+      <Button variant="primary" onClick={() => props.host({type: 'sign-in'})}>
         Sign in to {label}
-      </button>
+      </Button>
     </>
   );
 }
@@ -281,9 +275,7 @@ export function HostPanel(props: {
         {panel.authNeeded ? (
           signIn
         ) : (
-          <button type="button" onClick={() => send.host({type: 'reload'})}>
-            Try again
-          </button>
+          <Button onClick={() => send.host({type: 'reload'})}>Try again</Button>
         )}
       </>
     );
@@ -304,13 +296,9 @@ export function HostPanel(props: {
       <h2>
         {label}
         {state.host === 'local' ? null : (
-          <button
-            type="button"
-            className="link"
-            onClick={() => send.host({type: 'show', host: 'local'})}
-          >
+          <Button variant="link" onClick={() => send.host({type: 'show', host: 'local'})}>
             Back to This Mac
-          </button>
+          </Button>
         )}
       </h2>
       {body}

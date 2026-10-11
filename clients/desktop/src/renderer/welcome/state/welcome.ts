@@ -8,9 +8,8 @@
  */
 
 import {only, type Step} from '@vibesys/core-state';
-import type {HostKey} from '../../../common/hosts.js';
-import type {ResumeRunId} from '../../../common/resume-run.js';
-import type {ChromeState, WelcomeResult} from '../../../common/welcome-protocol.js';
+import type {HostKey, ResumeRunId} from '@vibesys/entities';
+import type {ChromeState, WelcomeResult} from '@vibesys/ipc';
 
 interface Banner {
   readonly text: string;

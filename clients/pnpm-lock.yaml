@@ -67,9 +67,18 @@ importers:
       '@vibesys/core-state':
         specifier: workspace:*
         version: link:../core-state
+      '@vibesys/entities':
+        specifier: workspace:*
+        version: link:../entities
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../ipc
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../ui
       react:
         specifier: 19.1.1
         version: 19.1.1
@@ -95,6 +104,38 @@ importers:
       electron:
         specifier: 44.6.0
         version: 44.6.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  entities:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@vibesys/core-state':
+        specifier: workspace:*
+        version: link:../core-state
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  ipc:
+    dependencies:
+      '@vibesys/entities':
+        specifier: workspace:*
+        version: link:../entities
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@vibesys/core-state':
+        specifier: workspace:*
+        version: link:../core-state
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -174,6 +215,28 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  ui:
+    dependencies:
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   web:
     dependencies:
       '@vibesys/contracts':
@@ -182,9 +245,15 @@ importers:
       '@vibesys/core-state':
         specifier: workspace:*
         version: link:../core-state
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../ipc
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../ui
       react:
         specifier: 19.1.1
         version: 19.1.1
