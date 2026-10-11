@@ -62,6 +62,7 @@ implementation (they share the same contract suite):
 * ``diff_patch``, ``diff_name_status``: byte-exact CLI patch text and the
   ``--name-status -z`` rename format.
 * ``uncommitted_paths``, ``changed_since``: ``status --porcelain=v1`` output.
+* ``unversioned_paths``: ``ls-files --others`` with Git's full ignore rules.
 
 Everything else is *portable*.
 """
@@ -351,6 +352,16 @@ class GitRepository(Protocol):
         """
         ...
 
+    def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
+        """Sorted files below the worktree root that the index does not track.
+
+        Untracked files are always listed; ignored ones only with ``include_ignored``.
+        Files are listed one by one (never as a directory), workspace-relative with
+        ``/`` separators, and the contents of nested repositories are not entered
+        (cli-only).
+        """
+        ...
+
     def changed_since(self, commit: Revision, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         """Sorted union of paths changed in ``commit..HEAD`` and ``uncommitted_paths``."""
         ...
@@ -417,8 +428,14 @@ class GitRepository(Protocol):
         """
         ...
 
-    def clean_untracked(self, *, include_ignored: bool, protect: Pathspec) -> bool:
-        """Delete untracked files and directories except ``protect``; return success.
+    def clean_untracked(
+        self, *, include_ignored: bool, protect: Pathspec, keep: Sequence[Pathspec] = ()
+    ) -> bool:
+        """Delete untracked files and directories except ``protect`` and ``keep``.
+
+        Return success. ``keep`` lists further paths (workspace-relative, anchored at the
+        worktree root) that the caller has no other copy of, so a crash mid-restore never
+        loses them.
 
         Best effort: ``False`` means some paths may remain (cli-only).
         """

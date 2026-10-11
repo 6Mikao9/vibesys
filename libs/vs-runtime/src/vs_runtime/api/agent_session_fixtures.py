@@ -109,8 +109,9 @@ class WorkspaceResource:
         clean: bool,
         preserve_paths: tuple[str, ...] = (),
         preserve_memory: bool = True,
+        exact_keeping: tuple[str, ...] | None = None,
     ) -> bool:
-        del clean, preserve_memory
+        del clean, preserve_memory, exact_keeping
         self.revision = revision
         self.agent_restores.append((revision, preserve_paths))
         self.changes = [
@@ -130,8 +131,13 @@ class WorkspaceResource:
         del revision
         return True
 
-    def matches_revision(self, revision: str) -> bool:
-        del revision
+    def unversioned_paths(self) -> tuple[str, ...]:
+        return ()
+
+    def matches_revision(
+        self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
+    ) -> bool:
+        del revision, exact_keeping
         return True
 
     def find_snapshot(self, label: str) -> str | None:

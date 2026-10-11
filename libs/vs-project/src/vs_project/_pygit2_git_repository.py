@@ -426,6 +426,9 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS as error:
             self._fail(f"ls-files -- {pathspec}", error)
 
+    def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
+        return self._cli.unversioned_paths(include_ignored=include_ignored)
+
     def worktree_matches(
         self,
         revision: Revision,
@@ -488,8 +491,12 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS as error:
             self._fail("reset --mixed HEAD", error)
 
-    def clean_untracked(self, *, include_ignored: bool, protect: Pathspec) -> bool:
-        return self._cli.clean_untracked(include_ignored=include_ignored, protect=protect)
+    def clean_untracked(
+        self, *, include_ignored: bool, protect: Pathspec, keep: Sequence[Pathspec] = ()
+    ) -> bool:
+        return self._cli.clean_untracked(
+            include_ignored=include_ignored, protect=protect, keep=keep
+        )
 
     def restore_worktree(self, revision: Revision, exclude: Sequence[Pathspec] = ()) -> None:
         self._cli.restore_worktree(revision, exclude)

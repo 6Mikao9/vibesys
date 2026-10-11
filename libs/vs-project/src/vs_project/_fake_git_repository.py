@@ -548,6 +548,20 @@ class FakeGitRepository:
             scope = self._scope(command)
             return tuple(sorted(self._status(scope, self._specs(pathspecs, command))))
 
+    def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
+        with self._operation("unversioned_paths"):
+            command = ["ls-files", "-z", "--others", "--exclude-standard", "--", "."]
+            scope = self._scope(command)
+            specs = self._specs(["."], command)
+            walk = self._walk(scope, specs, descend_ignored=include_ignored)
+            return tuple(
+                sorted(
+                    found.path
+                    for found in walk_untracked(walk)
+                    if include_ignored or not found.ignored
+                )
+            )
+
     def changed_since(self, commit: Revision, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
         with self._operation("changed_since"):
             command = ["diff", "--name-only", f"{commit}..HEAD", "--", *pathspecs]
@@ -843,7 +857,9 @@ class FakeGitRepository:
                 self._refuse(command, "fatal: ambiguous argument 'HEAD': unknown revision")
             scope.co.index = dict(scope.head_snapshot)
 
-    def clean_untracked(self, *, include_ignored: bool, protect: Pathspec) -> bool:
+    def clean_untracked(
+        self, *, include_ignored: bool, protect: Pathspec, keep: Sequence[Pathspec] = ()
+    ) -> bool:
         with self._operation("clean_untracked"):
             found = self._find()
             if found is None:
@@ -857,7 +873,7 @@ class FakeGitRepository:
             request = WalkRequest(
                 root=scope.root,
                 tracked=frozenset(scope.co.index),
-                layers=self._layers(scope, [protect], standard=not include_ignored),
+                layers=self._layers(scope, [protect, *keep], standard=not include_ignored),
                 use_ignore_files=not include_ignored,
                 skip=self._skip(scope),
             )
