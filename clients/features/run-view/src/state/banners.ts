@@ -1,6 +1,7 @@
-import {activeRunFocus, type CoreState, hasRunEnded, phaseText} from '@vibesys/core-state';
+import type {WebSessionState} from '@vibesys/run-session';
+import {type CoreState, hasRunEnded} from '@vibesys/run-state';
+import {activeRunFocus, phaseText} from '@vibesys/run-state/rounds';
 import type {ControlChannelState} from '@vibesys/transport';
-import type {WebSessionState} from './connection.js';
 
 /** The control-channel outage a banner describes, once there is one to show. */
 type ControlOutage = Extract<ControlChannelState, {status: 'disconnected'}>;
@@ -208,7 +209,7 @@ export function connectionBanners(run: CoreState, session: WebSessionState): Con
 }
 
 /**
- * Decide the page header without presenting core-state's initial value as a
+ * Decide the page header without presenting the run fold's initial value as a
  * fact about a live run. Replay mode keeps its existing loading heading; a live
  * session names gateway connectivity until a snapshot establishes run state.
  */

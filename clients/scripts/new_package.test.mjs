@@ -38,20 +38,14 @@ const SCAFFOLDS = [
   ['feature', 'stop-run'],
   ['foundation', 'ui', '--runtime', 'dom'],
   ['service', 'connection', '--runtime', 'node'],
-  ['core', 'core-thing'],
+  ['core', 'scheduler'],
   ['app', 'web'],
 ];
 
 test('every scaffolded package passes the graph and declaration checks', t => {
   const root = fixtureWorkspace(t);
   const directories = SCAFFOLDS.map(argv => createPackage(root, argv));
-  assert.deepEqual(directories, [
-    'features/stop-run',
-    'ui',
-    'connection',
-    'core-thing',
-    'apps/web',
-  ]);
+  assert.deepEqual(directories, ['features/stop-run', 'ui', 'connection', 'scheduler', 'apps/web']);
   assert.deepEqual(packageGraphErrors(root), []);
   assert.deepEqual(declarationErrors(root, workspaceLayout(root)), []);
 });
@@ -81,21 +75,21 @@ const CAPABILITY_VIOLATIONS = [
   },
   {
     name: 'a neutral entry rejects a Node import',
-    argv: ['core', 'core-thing'],
+    argv: ['core', 'scheduler'],
     file: 'src/leak.ts',
     source: "export {readFileSync} from 'node:fs';\n",
     error: 'TS2307',
   },
   {
     name: 'a neutral entry rejects a Node global',
-    argv: ['core', 'core-thing'],
+    argv: ['core', 'scheduler'],
     file: 'src/leak.ts',
     source: 'export const pid = process.pid;\n',
     error: 'TS2591',
   },
   {
     name: 'a neutral entry rejects a DOM global',
-    argv: ['core', 'core-thing'],
+    argv: ['core', 'scheduler'],
     file: 'src/leak.ts',
     source: 'export const title = document.title;\n',
     error: 'TS2584',

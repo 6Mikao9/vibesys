@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {BackendClientError, type RunEvent} from '@vibesys/contracts';
-import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/core-state';
+import {runStep, type WebSessionState, type WebSessionStatus} from '@vibesys/run-session';
+import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/run-state';
 import {
   CONTROLS_BANNER_COPY,
   connectionBanners,
@@ -11,8 +12,6 @@ import {
   pageHeader,
   STREAM_BANNER_COPY,
 } from './banners.js';
-import type {WebSessionState, WebSessionStatus} from './connection.js';
-import {runStep} from './run.js';
 
 /** Every status core state can hold, so a new one is a compile error here. */
 const RUN_STATUSES: readonly CoreRunStatus[] = [
@@ -150,7 +149,7 @@ describe('connectionBanners', () => {
     // The property below builds its `CoreState` by assigning `status`, so it
     // asserts that the decision is right about a status without asserting that
     // any real input produces that status. This closes that: the run's own
-    // terminal event goes through `core-state`'s reducer, which is the path the
+    // terminal event goes through `@vibesys/run-state`'s reducer, which is the path the
     // browser takes, and is the same event `e2e/controls-banner.spec.ts`
     // withholds and then releases.
     let run = initialCoreState();
