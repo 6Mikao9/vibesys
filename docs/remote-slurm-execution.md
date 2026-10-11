@@ -19,14 +19,11 @@ evaluation never runs there. An agent requests one through the evaluation tool
 service answers on the host, and only its results count. There is no shell client
 for evaluation: the agent has no `vibesys-gate`, and `vibesys-gpu` has no `--gate`.
 
-Loops that are not yet on the core path (everything except `dynamic`) evaluate each
-round through the framework itself. For them the environment gives the framework a
-host runner for the planned commands: it runs the cluster wrapper
-(`vs_sandbox.slurm_command`) from the candidate workspace, which stages the
-workspace, runs the job, copies the result back, and writes a benchmark's result
-file where the trusted executor reads it. This path is internal, the agent cannot
-name it, and it is deleted when those loops are ported (roadmap #1952). Until then
-those loops have no mid-turn trusted evaluation on `slurm`.
+Only the `dynamic` outer loop runs on `slurm` (and on the deprecated `slurm-gpu`
+alias). Every other loop is refused at configuration validation with an error that
+names it, because those loops still request evaluation through a shell client or run
+it in the agent's container, neither of which `slurm` provides. They return when they
+are ported to the evaluation tool (roadmap #1952).
 
 The ROCprof server runs in the container and reaches the cluster through a
 second host broker. It imports the Slurm adapter from the framework's `libs`
