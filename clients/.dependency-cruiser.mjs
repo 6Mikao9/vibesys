@@ -329,8 +329,8 @@ export default {
       // Applies to the tooling too (harness, benchmarks, end-to-end specs, scripts): they must
       // declare what they import, though they may import any public workspace export.
       from: {
-        path: `^[^/]+/src/|${TOOLING}`,
-        pathNot: '^[^/]+/src/.*\\.test\\.[cm]?[jt]sx?$',
+        path: `${PACKAGE_SOURCES}|${TOOLING}`,
+        pathNot: `${PACKAGE_SOURCES}.*${TEST_FILE}`,
       },
       to: {dependencyTypes: ['npm-no-pkg', 'npm-unknown']},
     },

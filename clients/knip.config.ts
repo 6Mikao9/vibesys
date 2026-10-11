@@ -70,8 +70,22 @@ const ROOT_POLICY: WorkspacePolicy = {
 const layout = workspaceLayout(fileURLToPath(new URL('.', import.meta.url)));
 
 const workspaces: Record<string, WorkspacePolicy> = {'.': ROOT_POLICY};
-for (const {name, directory} of layout.packages) {
-  const policy = PACKAGE_POLICIES[directory];
+// A package on the per-entry layout (every package `pnpm new:package` creates) needs no policy
+// here: its entries are the sources its exports name, plus its tests.
+function derivedPolicy(manifest: {exports?: Record<string, Record<string, string>>}) {
+  const sources = Object.values(manifest.exports ?? {}).flatMap(target => {
+    const source = target['@vibesys/source'];
+    return source === undefined ? [] : [source.replace(/^\.\//, '')];
+  });
+  if (sources.length === 0) return undefined;
+  return {
+    entry: [...sources, 'src/**/*.test.ts', 'src/**/*.test.tsx'],
+    project: ['src/**/*.ts', 'src/**/*.tsx'],
+  };
+}
+
+for (const {name, directory, manifest} of layout.packages) {
+  const policy = PACKAGE_POLICIES[directory] ?? derivedPolicy(manifest);
   if (policy === undefined) {
     throw new Error(`knip.config.ts: ${name} (${directory}/) has no entry or project policy`);
   }

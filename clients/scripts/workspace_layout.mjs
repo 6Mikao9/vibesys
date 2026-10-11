@@ -81,10 +81,12 @@ const NOT_A_WORKSPACE_MEMBER = new Set(['node_modules', 'bower_components']);
 // already excluded above.
 const OUTPUT_DIRECTORY_NAMES = new Set(['dist', 'node_modules']);
 
-// A workspace pattern this module understands: `*` (every directory, what pnpm is configured with)
-// or a literal directory name. Anything else would need glob semantics to expand correctly, and
-// guessing would narrow the package set silently.
-const SUPPORTED_PATTERN = /^(?:\*|[\w.-]+)$/;
+// A workspace pattern this module understands: `*` (every directory), `<group>/*` (every directory
+// inside one grouping directory, such as `features/*`), or a literal directory name. Anything else
+// would need glob semantics to expand correctly, and guessing would narrow the package set
+// silently.
+const SUPPORTED_PATTERN = /^(?:\*|[\w.-]+\/\*|[\w.-]+)$/;
+const GROUP_PATTERN = /^([\w.-]+)\/\*$/;
 
 const SEQUENCE_ENTRY = /^\s+-\s*(?:"([^"]+)"|'([^']+)'|([^\s#]+))\s*$/;
 
@@ -107,11 +109,15 @@ export function workspaceLayout(root) {
   const rootChildren = candidateChildren(root, '', false);
   const packages = readPackages(root, rootChildren);
   const packageDirectories = new Set(packages.map(({directory}) => directory));
+  // A grouping directory (`features` for `features/*`) holds packages, not source or tooling.
+  const groups = new Set(
+    packagePatterns(root).flatMap(pattern => GROUP_PATTERN.exec(pattern)?.[1] ?? []),
+  );
   // The ignore filter starts here, one layer below the package question: a root directory that is
   // not a package, and every directory inside a package. The packages themselves are already
   // settled, by pnpm's rule, and are not re-asked about.
   const candidates = [
-    ...rootChildren.filter(({path}) => !packageDirectories.has(path)),
+    ...rootChildren.filter(({path}) => !packageDirectories.has(path) && !groups.has(path)),
     ...packages.flatMap(({directory}) =>
       candidateChildren(root, directory, crossesSymlink(root, directory)),
     ),
@@ -121,12 +127,12 @@ export function workspaceLayout(root) {
   const tooling = [];
   for (const {path} of candidates) {
     if (ignored.has(path)) continue;
-    const separator = path.lastIndexOf('/');
-    if (separator < 0) {
+    if (!path.includes('/')) {
       // A root directory that is not a package is the workspace's own tooling (`scripts`).
       tooling.push(path);
     } else {
-      (path.slice(separator + 1) === SOURCE_DIRECTORY ? source : tooling).push(path);
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      (name === SOURCE_DIRECTORY ? source : tooling).push(path);
     }
   }
   return {
@@ -252,26 +258,33 @@ function packageScriptErrors(layout) {
  * meta-check. A nested `dist/package.json` cannot become a member by this rule, because `*` matches
  * direct children only, so keeping the filter out of it costs nothing.
  */
-function starMembers(root, rootChildren) {
-  return rootChildren
+function starMembers(root, children) {
+  return children
     .map(({path}) => path)
-    .filter(path => !NOT_A_WORKSPACE_MEMBER.has(path))
+    .filter(path => !NOT_A_WORKSPACE_MEMBER.has(path.slice(path.lastIndexOf('/') + 1)))
     .filter(path => existsSync(join(root, path, MANIFEST_FILE)));
 }
 
 function readPackages(root, rootChildren) {
-  const directories = new Set();
-  for (const pattern of packagePatterns(root)) {
-    if (pattern === '*') {
-      for (const directory of starMembers(root, rootChildren)) directories.add(directory);
-      continue;
-    }
-    if (!existsSync(join(root, pattern, MANIFEST_FILE))) {
-      throw new Error(`${WORKSPACE_FILE}: packages entry "${pattern}" has no ${MANIFEST_FILE}`);
-    }
-    directories.add(pattern);
-  }
+  const directories = new Set(
+    packagePatterns(root).flatMap(pattern => patternMembers(root, rootChildren, pattern)),
+  );
   return [...directories].sort().map(directory => readPackage(root, directory));
+}
+
+/** The package directories one `packages` pattern admits. */
+function patternMembers(root, rootChildren, pattern) {
+  if (pattern === '*') return starMembers(root, rootChildren);
+  const group = GROUP_PATTERN.exec(pattern)?.[1];
+  if (group !== undefined) {
+    // A grouping directory that does not exist yet (no feature package so far) admits nothing.
+    if (!existsSync(join(root, group))) return [];
+    return starMembers(root, candidateChildren(root, group, false));
+  }
+  if (!existsSync(join(root, pattern, MANIFEST_FILE))) {
+    throw new Error(`${WORKSPACE_FILE}: packages entry "${pattern}" has no ${MANIFEST_FILE}`);
+  }
+  return [pattern];
 }
 
 function readPackage(root, directory) {
