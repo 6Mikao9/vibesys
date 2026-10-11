@@ -55,6 +55,8 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     ASYNC_OPERATION_LIFECYCLE = "async_operation_lifecycle"
+    WORKSTREAM_ATTEMPT_UPDATED = "workstream_attempt_updated"
+    RETRY_WAIT_STARTED = "retry_wait_started"
 
     # Run-control transitions (see `vs_runtime.api.infrastructure.RunControlChannel`):
     # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `RESUMED`) come from
@@ -306,6 +308,36 @@ class RoundFinishedData(EventPayload):
     profile_skipped: bool
 
 
+class WorkstreamAttemptData(EventPayload):
+    """Live retry-budget diagnostics for one dynamic-portfolio workstream.
+
+    Emitted whenever a workstream's attempt bookkeeping changes: a new
+    implementer turn spent an attempt, an attempt failed, or an interrupted
+    turn was refunded. ``repeated_error`` is true only when this failure is a
+    setup failure (no agent turn started) whose error text is identical to
+    the workstream's previous setup failure, the deterministic case where
+    retrying spends budget on the same outcome every time.
+    """
+
+    kind: Literal["workstream_attempt_updated"] = "workstream_attempt_updated"
+    hypothesis_id: str
+    attempt: int
+    attempt_limit: int
+    refunded: int
+    last_error: str | None = None
+    setup_failure: bool = False
+    repeated_error: bool = False
+
+
+class RetryWaitData(EventPayload):
+    """One wait before retrying an agent turn that failed on a transient provider error."""
+
+    kind: Literal["retry_wait_started"] = "retry_wait_started"
+    attempt: int
+    delay_s: FiniteFloat
+    error_kind: str
+
+
 class GateStartedData(EventPayload):
     """One framework gate began evaluating the current candidate.
 
@@ -424,7 +456,9 @@ CoreEventData = Annotated[
     | WorkspaceSnapshotData
     | RunConfiguredData
     | FrameworkWarningData
-    | AsyncOperationLifecycleData,
+    | AsyncOperationLifecycleData
+    | WorkstreamAttemptData
+    | RetryWaitData,
     Field(discriminator="kind"),
 ]
 

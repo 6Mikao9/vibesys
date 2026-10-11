@@ -1518,7 +1518,9 @@
         "workspace_snapshot",
         "run_configured",
         "framework_warning",
-        "async_operation_lifecycle"
+        "async_operation_lifecycle",
+        "workstream_attempt_updated",
+        "retry_wait_started"
       ],
       "title": "EventType",
       "type": "string"
@@ -3201,6 +3203,37 @@
         "type"
       ]
     },
+    "RetryWaitData": {
+      "description": "One wait before retrying an agent turn that failed on a transient provider error.",
+      "properties": {
+        "kind": {
+          "const": "retry_wait_started",
+          "default": "retry_wait_started",
+          "title": "Kind",
+          "type": "string"
+        },
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "delay_s": {
+          "title": "Delay S",
+          "type": "number"
+        },
+        "error_kind": {
+          "title": "Error Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "attempt",
+        "delay_s",
+        "error_kind"
+      ],
+      "title": "RetryWaitData",
+      "type": "object"
+    },
     "RoundFinishedData": {
       "description": "Summary of attempt, judge, and performance outcomes for a round.",
       "properties": {
@@ -3483,6 +3516,7 @@
                   "judge_result": "#/$defs/JudgeResultData",
                   "output": "#/$defs/OutputData",
                   "phase": "#/$defs/PhaseData",
+                  "retry_wait_started": "#/$defs/RetryWaitData",
                   "round_finished": "#/$defs/RoundFinishedData",
                   "run_configured": "#/$defs/RunConfiguredData",
                   "run_interrupted": "#/$defs/RunInterruptedData",
@@ -3494,7 +3528,8 @@
                   "tool_call": "#/$defs/ToolCallData",
                   "tool_result": "#/$defs/ToolResultData",
                   "usage_update": "#/$defs/UsageUpdateData",
-                  "workspace_snapshot": "#/$defs/WorkspaceSnapshotData"
+                  "workspace_snapshot": "#/$defs/WorkspaceSnapshotData",
+                  "workstream_attempt_updated": "#/$defs/WorkstreamAttemptData"
                 },
                 "propertyName": "kind"
               },
@@ -3588,6 +3623,12 @@
                 },
                 {
                   "$ref": "#/$defs/AsyncOperationLifecycleData"
+                },
+                {
+                  "$ref": "#/$defs/WorkstreamAttemptData"
+                },
+                {
+                  "$ref": "#/$defs/RetryWaitData"
                 }
               ]
             },
@@ -4388,6 +4429,64 @@
       "required": [
         "kind"
       ]
+    },
+    "WorkstreamAttemptData": {
+      "description": "Live retry-budget diagnostics for one dynamic-portfolio workstream.",
+      "properties": {
+        "kind": {
+          "const": "workstream_attempt_updated",
+          "default": "workstream_attempt_updated",
+          "title": "Kind",
+          "type": "string"
+        },
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "attempt_limit": {
+          "title": "Attempt Limit",
+          "type": "integer"
+        },
+        "refunded": {
+          "title": "Refunded",
+          "type": "integer"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "setup_failure": {
+          "default": false,
+          "title": "Setup Failure",
+          "type": "boolean"
+        },
+        "repeated_error": {
+          "default": false,
+          "title": "Repeated Error",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "hypothesis_id",
+        "attempt",
+        "attempt_limit",
+        "refunded"
+      ],
+      "title": "WorkstreamAttemptData",
+      "type": "object"
     }
   },
   "description": "Root schema document for the public server protocol.",

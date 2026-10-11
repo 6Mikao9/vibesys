@@ -84,6 +84,8 @@ class EventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     ASYNC_OPERATION_LIFECYCLE = "async_operation_lifecycle"
+    WORKSTREAM_ATTEMPT_UPDATED = "workstream_attempt_updated"
+    RETRY_WAIT_STARTED = "retry_wait_started"
 
 
 class EventStatus(StrEnum):
@@ -499,6 +501,28 @@ class AsyncOperationLifecycleData(EventPayload):
     source: FrameworkSource = FrameworkSource.LOOP
 
 
+class WorkstreamAttemptData(EventPayload):
+    """Live retry-budget diagnostics for one dynamic-portfolio workstream."""
+
+    kind: Literal["workstream_attempt_updated"] = "workstream_attempt_updated"
+    hypothesis_id: str
+    attempt: int
+    attempt_limit: int
+    refunded: int
+    last_error: str | None = None
+    setup_failure: bool = False
+    repeated_error: bool = False
+
+
+class RetryWaitData(EventPayload):
+    """One wait before retrying an agent turn that failed on a transient provider error."""
+
+    kind: Literal["retry_wait_started"] = "retry_wait_started"
+    attempt: int
+    delay_s: FiniteFloat
+    error_kind: str
+
+
 EventData = Annotated[
     ChatData
     | ChatThreadCreatedData
@@ -529,7 +553,9 @@ EventData = Annotated[
     | WorkspaceSnapshotData
     | RunConfiguredData
     | FrameworkWarningData
-    | AsyncOperationLifecycleData,
+    | AsyncOperationLifecycleData
+    | WorkstreamAttemptData
+    | RetryWaitData,
     Field(discriminator="kind"),
 ]
 

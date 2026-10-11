@@ -260,7 +260,9 @@ export type EventType =
   | "workspace_snapshot"
   | "run_configured"
   | "framework_warning"
-  | "async_operation_lifecycle";
+  | "async_operation_lifecycle"
+  | "workstream_attempt_updated"
+  | "retry_wait_started";
 export type Text2 = string;
 /**
  * Lifecycle and command states reported in events.
@@ -304,6 +306,8 @@ export type Data =
       | RunConfiguredData
       | FrameworkWarningData
       | AsyncOperationLifecycleData
+      | WorkstreamAttemptData
+      | RetryWaitData
     )
   | null;
 export type Kind1 = "chat";
@@ -495,6 +499,18 @@ export type CurrentStage = string | null;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource5 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
+export type Kind32 = "workstream_attempt_updated";
+export type HypothesisId = string;
+export type Attempt4 = number;
+export type AttemptLimit = number;
+export type Refunded = number;
+export type LastError = string | null;
+export type SetupFailure = boolean;
+export type RepeatedError = boolean;
+export type Kind33 = "retry_wait_started";
+export type Attempt5 = number;
+export type DelayS = number;
+export type ErrorKind = string;
 export type Events = RunEvent[];
 export type Round = number;
 export type PerfMetric1 = number;
@@ -509,7 +525,7 @@ export type ObjectiveBaselineValue = number | null;
 export type ObjectiveBaselineRound = number | null;
 export type ObjectiveBaselineCommit = string | null;
 export type ObjectiveDescription = string | null;
-export type HypothesisId = string;
+export type HypothesisId1 = string;
 export type Identified = boolean;
 export type Title3 = string | null;
 export type Claim = string | null;
@@ -1394,6 +1410,30 @@ export interface AsyncOperationLifecycleData {
   [k: string]: unknown;
 }
 /**
+ * Live retry-budget diagnostics for one dynamic-portfolio workstream.
+ */
+export interface WorkstreamAttemptData {
+  kind: Kind32;
+  hypothesis_id: HypothesisId;
+  attempt: Attempt4;
+  attempt_limit: AttemptLimit;
+  refunded: Refunded;
+  last_error?: LastError;
+  setup_failure?: SetupFailure;
+  repeated_error?: RepeatedError;
+  [k: string]: unknown;
+}
+/**
+ * One wait before retrying an agent turn that failed on a transient provider error.
+ */
+export interface RetryWaitData {
+  kind: Kind33;
+  attempt: Attempt5;
+  delay_s: DelayS;
+  error_kind: ErrorKind;
+  [k: string]: unknown;
+}
+/**
  * One measured performance result in a run.
  */
 export interface PerformanceRound {
@@ -1427,7 +1467,7 @@ export interface PerformanceContext {
  * never recomputed by the server or client.
  */
 export interface HypothesisEntry {
-  hypothesis_id: HypothesisId;
+  hypothesis_id: HypothesisId1;
   identified?: Identified;
   title?: Title3;
   claim?: Claim;

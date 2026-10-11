@@ -13,6 +13,7 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    RetryWaitData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
@@ -185,4 +186,18 @@ class CoreAgentEventSink:
             agent_kind=agent_kind,
             round_label=round_label,
             invocation_id=invocation_id,
+        )
+
+    def retry_wait(self, attempt: int, delay_s: float, error_kind: str) -> None:
+        """Emit one wait before retrying a turn that hit a transient provider error.
+
+        No ``agent_kind``/``round_label``/``invocation_id``: the retry loop
+        this reports from wraps a whole turn, before any per-turn routing
+        context is bound.
+        """
+        self._sink(
+            make_core_event(
+                CoreEventType.RETRY_WAIT_STARTED,
+                data=RetryWaitData(attempt=attempt, delay_s=delay_s, error_kind=error_kind),
+            )
         )

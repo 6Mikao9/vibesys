@@ -10,6 +10,7 @@ from vibesys.events import (
     CommandResultPayload,
     CoreEventType,
     JsonResultPayload,
+    RetryWaitData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
@@ -113,6 +114,27 @@ def test_each_callback_records_one_typed_event_with_routing_metadata(tmp_path: P
         context_window=8192,
         model="test-model",
     )
+
+
+def test_retry_wait_records_one_typed_event_with_no_routing_metadata(tmp_path: Path) -> None:
+    """The retry loop reports a wait before per-turn routing context is bound.
+
+    Unlike every other ``AgentEventSink`` callback, ``retry_wait`` carries no
+    ``agent_kind``/``round_label``/``invocation_id``: the retry loop wraps a
+    whole turn, before the turn that will eventually bind that context even
+    starts.
+    """
+    journal, sink = _attached_sink(tmp_path, "run-1")
+
+    sink.retry_wait(2, 4.5, "overloaded")
+
+    events = journal.read()
+    assert [event.type for event in events] == [CoreEventType.RETRY_WAIT_STARTED]
+    event = events[0]
+    assert event.agent_kind is None
+    assert event.round_label is None
+    assert event.execution_id is None
+    assert event.data == RetryWaitData(attempt=2, delay_s=4.5, error_kind="overloaded")
 
 
 def test_explicit_tool_result_payload_is_preserved(tmp_path: Path) -> None:

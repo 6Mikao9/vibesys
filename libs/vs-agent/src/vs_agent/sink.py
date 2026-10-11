@@ -89,6 +89,15 @@ class AgentEventSink(Protocol):
         """Publish token usage from the current model response."""
         ...
 
+    def retry_wait(self, attempt: int, delay_s: float, error_kind: str) -> None:
+        """Publish one wait before retrying a turn that hit a transient provider error.
+
+        No ``agent_kind``/``round_label``/``invocation_id``: the retry loop
+        wraps a whole turn, before any per-turn context is bound, the same
+        limitation the plain-text driver log already has for this notice.
+        """
+        ...
+
 
 class NullAgentEventSink:
     """No-op :class:`AgentEventSink` — the default when no sink is injected.
@@ -164,6 +173,10 @@ class NullAgentEventSink:
     ) -> None:
         """Ignore usage updates when no event sink was injected."""
         del input_tokens, context_window, model, agent_kind, round_label, invocation_id
+
+    def retry_wait(self, attempt: int, delay_s: float, error_kind: str) -> None:
+        """Ignore a retry wait when no event sink was injected."""
+        del attempt, delay_s, error_kind
 
 
 NULL_AGENT_EVENT_SINK = NullAgentEventSink()
