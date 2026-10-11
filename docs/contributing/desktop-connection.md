@@ -13,6 +13,8 @@ It builds on, and does not restate:
 - [`tui-architecture.md`](tui-architecture.md): detached runs and the live-instance registry.
 - [`web-development.md`](web-development.md) (Desktop app): how to start the app, the page's
   MessagePort bridge, and the ssh master.
+- [`clients-architecture.md`](clients-architecture.md): which TypeScript package each client
+  component below lives in, and the layer and runtime rules between them.
 - [`sandboxing.md`](sandboxing.md): vocabulary. Nothing here touches the run environment or agent
   confinement.
 
