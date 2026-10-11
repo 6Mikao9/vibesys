@@ -3,6 +3,12 @@
   "version": "0.1.1",
   "private": true,
   "type": "module",
+  "vibesys": {
+    "layer": "core",
+    "entries": {
+      ".": "neutral"
+    }
+  },
   "exports": {
     ".": {
       "@vibesys/source": "./src/index.ts",

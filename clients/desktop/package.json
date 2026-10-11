@@ -5,6 +5,12 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "vibesys": {
+    "layer": "app",
+    "entries": {
+      ".": "node"
+    }
+  },
   "main": "dist/main.js",
   "exports": {},
   "scripts": {

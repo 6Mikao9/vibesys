@@ -117,17 +117,59 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 
 ### Rules and what enforces them
 
-| # | Rule | Enforced by |
+| # | Rule | Enforced by (rule id in `check_package_graph.mjs`) |
 | --- | --- | --- |
-| 1 | Layer direction; Node-only packages reachable only from `node` entries | `scripts/check_package_graph.mjs` (manifests and imports) |
-| 2 | No feature depends on another feature; cross-feature flows are composed in apps | `check_package_graph.mjs` (peers share a layer) |
-| 3 | A package is used only through its `exports` map; every import of a workspace package is a declared dependency | `check_package_graph.mjs`, Biome, and `.dependency-cruiser.mjs` for third-party imports |
-| 4 | Each entry is compiled with the `lib` and `types` of its runtime, so importing a Node module from a renderer entry is a type error | one composite `tsconfig.<entry>.json` per entry, checked by `check_package_graph.mjs`; `tsc -b` enforces it |
+| 1 | Layer direction; Node-only packages reachable only from `node` entries | `layer-direction`, `runtime-reachability` |
+| 2 | No feature depends on another feature; cross-feature flows are composed in apps | `layer-direction` (peers share a layer) |
+| 3 | A package is used only through its `exports` map; every import of a workspace package is a declared dependency | `imports-use-exports`, `imports-are-declared`, `imports-are-workspace-packages`, `workspace-protocol`; `.dependency-cruiser.mjs` for relative paths into another package |
+| 4 | Each entry is compiled with the `lib` and `types` of its runtime, so importing a Node module from a renderer entry is a type error | `entry-projects`, `entry-capability`; `tsc -b` then enforces it |
 | 5 | Inside a package: `state/` pure, `ui/` free of I/O, `effects/` never import `ui/`, effects depend on injected interfaces | `lint-rules/*.grit` (Biome) and `.dependency-cruiser.mjs` |
-| 6 | `@vibesys/ui` has no domain dependencies; helpers live in the lowest package that needs them, with no shared junk drawer | the layer rule (`ui` is rank 0); review |
+| 6 | `@vibesys/ui` has no domain dependencies; helpers live in the lowest package that needs them, with no shared junk drawer | `layer-direction` (`ui` is rank 0); review |
 
-The package-graph rules live in one checker. `.dependency-cruiser.mjs` keeps only the rules about
-modules inside a package and about third-party imports.
+All package-graph rules, and the tables they read, live in one module,
+[`clients/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/scripts/check_package_graph.mjs),
+run by `pnpm check:ts-architecture`. Its tests build a valid fixture workspace and break it once
+per rule, and a meta-test fails when a rule has no failing fixture. `.dependency-cruiser.mjs` keeps
+the rules about modules inside a package and about how imports resolve.
+
+### How dependencies are managed
+
+**One declaration.** A package's `package.json` is the single source of truth for its place in the
+graph:
+
+```json
+"vibesys": {"layer": "feature", "entries": {"./state": "neutral", "./renderer": "dom", "./main": "node"}}
+```
+
+The checker, the scaffold (which writes one `tsconfig.<entry>.json` per entry from it), Knip's
+policy, and this document all read that block. Unknown keys, layers, and runtimes are rejected by
+name (`declarations`), and the entries must be exactly the `exports` keys
+(`entries-match-exports`).
+
+**Workspace dependencies** are declared as `workspace:*` in the section the code needs
+(`dependencies` for production code; test code may also use `devDependencies`), point to a lower
+layer, and are mirrored by tsconfig project `references`. The references must equal the declared
+workspace dependencies, no more and no fewer (`references-match-dependencies`): a missing
+reference is not a compiler error, because the import still resolves to the dependency's source.
+
+**Third-party dependencies** are confined by runtime and layer through one allowlist table in the
+checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
+
+| Import | Allowed in |
+| --- | --- |
+| `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
+| `electron` | `node` entries of features (`./main`) and apps (`desktop-main`) |
+| Node builtins (`node:*` and bare names) | `node` entries |
+
+A package that declares one of them in `dependencies` must have an entry allowed to use it. Knip
+(`pnpm check:knip`) composes with this: it reports dependencies declared but never imported and
+imports of packages not declared, so between the two a dependency is declared exactly when it is
+used, and used only where its runtime allows.
+
+**Legacy packages.** `backend-client`, `desktop`, `web`, and `tui` predate the per-entry layout,
+so `LEGACY_EXEMPTIONS` in the checker lets them skip the per-entry project rules (and lets desktop,
+whose one `node` entry still holds the React welcome view, skip `external-dependencies`). Every
+other rule applies to them. The table only shrinks as the migration items move them.
 
 ## Build model
 

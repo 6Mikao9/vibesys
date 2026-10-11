@@ -11,6 +11,12 @@
     "url": "https://github.com/uw-syfi/vibesys/issues"
   },
   "type": "module",
+  "vibesys": {
+    "layer": "app",
+    "entries": {
+      ".": "node"
+    }
+  },
   "engines": {
     "node": ">=20"
   },

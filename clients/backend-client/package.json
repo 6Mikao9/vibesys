@@ -4,6 +4,15 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "vibesys": {
+    "layer": "foundation",
+    "entries": {
+      ".": "neutral",
+      "./testing": "neutral",
+      "./node": "node",
+      "./websocket": "dom"
+    }
+  },
   "engines": {
     "node": ">=20"
   },
