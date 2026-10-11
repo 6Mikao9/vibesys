@@ -6,6 +6,7 @@ import {FakeClock} from '@vibesys/backend-client/testing';
 import type {ConnectionConfig} from '../state/host-connection.js';
 import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
+import {ConnectionManager} from './connection-manager.js';
 import {ConnectionError} from './helper-channel.js';
 import {HostConnection} from './host-connection.js';
 import {LocalLink, nodeSpawn} from './link.js';
@@ -123,7 +124,7 @@ describe('HostConnection over the FakeHelper', () => {
     await phaseReached(connection, 'ready');
   });
 
-  test('closing ends every channel and releases the link once', async () => {
+  test('closing ends every channel, and leaves the shared link to the manager', async () => {
     const link = new FakeLink();
     link.helper.publish(record('00000000000c', 'run-c'));
     link.helper.host.runs.set('00000000000c', ECHO_SERVER);
@@ -133,7 +134,30 @@ describe('HostConnection over the FakeHelper', () => {
     await connection[Symbol.asyncDispose]();
     await connection[Symbol.asyncDispose]();
     await closed;
+    expect(link.released).toBe(0);
+  });
+
+  test('a checkout check shares the host link, and the manager releases it once, at the end', async () => {
+    const link = new FakeLink();
+    const manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: () => {},
+      config: CONFIG,
+    });
+    const kept = manager.connection({kind: 'ssh', alias: 'gpu'}, '/src/vibesys');
+    await kept.ready();
+    {
+      // regression: closing a checkout check ended the ssh master the kept connection used.
+      await using candidate = manager.candidate({kind: 'ssh', alias: 'gpu'}, '/src/other');
+      await candidate.ready();
+    }
+    expect(link.released).toBe(0);
+    await kept.request({type: 'ping'});
+    await manager[Symbol.asyncDispose]();
     expect(link.released).toBe(1);
+    expect(kept.phase.kind).toBe('closed');
   });
 });
 

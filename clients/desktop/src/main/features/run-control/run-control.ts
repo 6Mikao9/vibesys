@@ -56,6 +56,11 @@ interface Binding {
   readonly connection: HostConnection;
   readonly page: RunPage;
   status: ConnectionStatus;
+  /**
+   * True once a listing showed the run's server live. A listing read before a start published its
+   * record says nothing about the run, so only a server seen live, then gone, has ended.
+   */
+  seenLive: boolean;
   readonly release: () => void;
 }
 
@@ -250,13 +255,8 @@ export class RunControl {
     });
     this.detach();
     const page = this.#deps.openPage(hostLabel(id));
-    let binding: Binding;
-    const stopPhase = connection.onPhase(phase => this.#phase(binding, phase));
-    const stopListing = connection.watchInstances(listing => this.#listing(binding, listing));
-    const stopUnreachable = connection.onRunUnreachable(instanceId => {
-      if (instanceId === binding.instanceId) this.#ended(binding);
-    });
-    binding = {
+    const releases: (() => void)[] = [];
+    const binding: Binding = {
       id,
       instanceId: record.id,
       runId: record.run_id,
@@ -265,13 +265,20 @@ export class RunControl {
       connection,
       page,
       status: connectionStatus(connection.phase),
+      seenLive: false,
       release: () => {
-        stopPhase();
-        stopListing();
-        stopUnreachable();
+        for (const release of releases.splice(0)) release();
       },
     };
     this.#run = binding;
+    // Subscribed once the binding exists: a listing the connection already holds arrives at once.
+    releases.push(
+      connection.onPhase(phase => this.#phase(binding, phase)),
+      connection.watchInstances(listing => this.#listing(binding, listing)),
+      connection.onRunUnreachable(instanceId => {
+        if (instanceId === binding.instanceId) this.#ended(binding);
+      }),
+    );
     this.#deps.changed();
   }
 
@@ -295,9 +302,11 @@ export class RunControl {
   #listing(binding: Binding, listing: InstanceList): void {
     const host = hostKey(binding.id);
     this.#stops.observeLive(host, new Set(listing.instances.map(record => record.id)));
-    if (this.#run === binding && liveRecord(listing, binding.instanceId) === null) {
-      this.#ended(binding);
-    }
+    if (this.#run !== binding) return;
+    const live = liveRecord(listing, binding.instanceId) !== null;
+    const ended = (listing.ended ?? []).some(record => record.id === binding.instanceId);
+    if (live) binding.seenLive = true;
+    else if (ended || binding.seenLive) this.#ended(binding);
   }
 
   #ended(binding: Binding): void {

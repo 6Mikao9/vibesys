@@ -208,6 +208,9 @@ export class HelperChannel implements AsyncDisposable {
     try {
       message = parseHelperMessage(line);
     } catch (error) {
+      // Before `hello` answers, a line is the bootstrap's own report (its exit status says what
+      // it means); after, an unreadable line breaks the contract.
+      if (this.hello === null) return;
       this.#fail(
         new ConnectionError(
           'incompatible',

@@ -1,7 +1,9 @@
 /**
  * `ConnectionManager`: the only code that creates links and channels. It keeps one `HostConnection`
- * per host, built from that host's checkout, and owns every connection it built: disposing the
- * manager (quitting) closes every channel and link once. Runs are detached and keep going.
+ * per host, built from that host's checkout, and owns every connection it built and every host's
+ * link (an ssh master, shared by every connection to that host, a checkout check included):
+ * disposing the manager (quitting) closes every channel, then every link, once. Runs are detached
+ * and keep going.
  */
 import {DEFAULT_RECONNECT_DELAYS_MS, type ScheduleTimeout} from '@vibesys/backend-client';
 import {type HostId, type HostKey, hostKey} from '../../../../common/hosts.js';
@@ -31,6 +33,8 @@ export class ConnectionManager implements AsyncDisposable {
   readonly #stack = new AsyncDisposableStack();
   readonly #connections = new Map<HostKey, {checkout: string; connection: HostConnection}>();
   readonly #created = new Set<(host: HostKey, connection: HostConnection) => void>();
+  /** Hosts whose link release is registered: one per host, however many connections use it. */
+  readonly #links = new Set<HostKey>();
 
   constructor(options: ConnectionManagerOptions) {
     this.#options = options;
@@ -74,7 +78,7 @@ export class ConnectionManager implements AsyncDisposable {
    * stuck on it then tries again.
    */
   async signIn(host: HostId): Promise<void> {
-    await this.#options.linkFor(host, '~').establish(true);
+    await this.#link(host, '~').establish(true);
     this.#connections.get(hostKey(host))?.connection.dispatch({type: 'user-retry'});
   }
 
@@ -88,10 +92,22 @@ export class ConnectionManager implements AsyncDisposable {
     await this.#stack.disposeAsync();
   }
 
+  /** The link to `host` from `checkout`; the host's link is released once, when the manager is. */
+  #link(host: HostId, checkout: string): Link {
+    const link = this.#options.linkFor(host, checkout);
+    const key = hostKey(host);
+    if (!this.#links.has(key)) {
+      this.#links.add(key);
+      // Deferred before any connection that uses it is added, so it is released after them.
+      this.#stack.defer(() => link.release().catch(() => {}));
+    }
+    return link;
+  }
+
   #build(host: HostId, checkout: string): HostConnection {
-    const {linkFor, appVersion, scheduleTimeout, log, config} = this.#options;
+    const {appVersion, scheduleTimeout, log, config} = this.#options;
     return new HostConnection({
-      link: linkFor(host, checkout),
+      link: this.#link(host, checkout),
       appVersion,
       config: config ?? DEFAULT_CONNECTION_CONFIG,
       scheduleTimeout,

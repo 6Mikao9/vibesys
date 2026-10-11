@@ -77,10 +77,12 @@ export function hostConnectionContract(name: string, host: ContractHost, skip = 
       expect(connection.phase.kind).toBe('ready');
     });
 
-    test('a checkout that is not VibeSys stops as incompatible, naming the checkout', async () => {
+    test('a checkout that is not VibeSys stops as incompatible, saying why', async () => {
       await using connection = host.broken();
       const error = await rejection(connection.ready());
       expect((error as ConnectionError).reason).toBe('incompatible');
+      // The bootstrap's own report, never a parse error of its output.
+      expect(error.message).toContain('is not a directory');
       expect(connection.phase.kind).toBe('incompatible');
     });
 

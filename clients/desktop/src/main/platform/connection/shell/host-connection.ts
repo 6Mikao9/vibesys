@@ -1,10 +1,10 @@
 /**
  * `HostConnection`: the thin shell over one host's connection machine (`../state/host-connection.ts`).
  *
- * It owns the host's link, its long-lived control channel, and every run channel it opened, each
- * registered with one `AsyncDisposableStack` and one `AbortSignal`: closing the connection aborts
- * what is in flight and releases everything once, in reverse order of acquisition (run channels,
- * the control channel, then the link). It performs the machine's requests (link, `hello`, `ping`,
+ * It owns its long-lived control channel and every run channel it opened, each registered with one
+ * `AsyncDisposableStack` and one `AbortSignal`: closing the connection aborts what is in flight and
+ * releases everything once (timers and requests, then the channels). The link itself (an ssh
+ * master) is shared by every connection to the host, so its owner is the `ConnectionManager`. It performs the machine's requests (link, `hello`, `ping`,
  * and the check that is the failing operation) and feeds their typed outcomes back as events. It
  * makes no lifecycle decision of its own.
  *
@@ -78,8 +78,7 @@ export class HostConnection implements AsyncDisposable {
 
   constructor(options: HostConnectionOptions) {
     this.#options = options;
-    // Released in reverse: the link last, after every channel over it.
-    this.#stack.defer(() => options.link.release().catch(() => {}));
+    // Released in reverse: the channels after what is in flight was aborted.
     this.#stack.defer(async () => {
       const channels = [...this.#runs, ...(this.#control === null ? [] : [this.#control])];
       this.#runs.clear();
@@ -105,7 +104,8 @@ export class HostConnection implements AsyncDisposable {
   /** Feed the machine an event from outside: a wake, a network change, the user's retry. */
   dispatch(event: ConnectionEvent): void {
     const {state, requests} = step(this.#state, event, this.#options.config);
-    const changed = state.phase !== this.#state.phase;
+    // A heartbeat re-enters ready: only a phase that reads differently is a change.
+    const changed = JSON.stringify(state.phase) !== JSON.stringify(this.#state.phase);
     this.#state = state;
     for (const request of requests) this.#run(request);
     if (changed) this.#phaseChanged(state.phase);
@@ -297,7 +297,8 @@ export class HostConnection implements AsyncDisposable {
   }
 
   #phaseChanged(phase: Phase): void {
-    this.#options.log(`${this.#options.link.where}: ${phase.kind}`);
+    const detail = 'detail' in phase ? `: ${phase.detail}` : '';
+    this.#options.log(`${this.#options.link.where}: ${phase.kind}${detail}`);
     if (phase.kind === 'ready') {
       for (const waiter of this.#waiters) waiter.resolve();
       this.#waiters.clear();
