@@ -1,5 +1,9 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
+from vs_core._attempt_track import (
+    AttemptTrack,
+    Step,
+)
 from vs_core._continuations import SuspensionRefusal
 from vs_core._evidence_views import (
     ledger_refs,
@@ -41,6 +45,10 @@ from vs_core._step import (
     step,
     suspension_refusal,
     validate_terminal_inputs,
+)
+from vs_core._turn_chain import (
+    Charge,
+    TurnChain,
 )
 from vs_core._waits import (
     Producer,
@@ -514,6 +522,7 @@ __all__ = [
     "AttemptSettled",
     "AttemptSetupFailed",
     "AttemptTerminalReason",
+    "AttemptTrack",
     "AttemptView",
     "AttemptsChange",
     "AttemptsContext",
@@ -526,6 +535,7 @@ __all__ = [
     "CancelOwnedResource",
     "CancelTurn",
     "Capabilities",
+    "Charge",
     "ChargeId",
     "ChargeKind",
     "ChargeReceipt",
@@ -807,6 +817,7 @@ __all__ = [
     "SnapshotResultRef",
     "StartAttempt",
     "SteerReceived",
+    "Step",
     "Stop",
     "Strategy",
     "StrategyDeclaration",
@@ -823,6 +834,7 @@ __all__ = [
     "TraceFrame",
     "Transition",
     "TrustedBaseline",
+    "TurnChain",
     "TurnFailureKind",
     "TurnInputsReserved",
     "TurnObserved",

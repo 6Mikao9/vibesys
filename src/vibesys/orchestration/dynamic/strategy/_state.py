@@ -11,7 +11,6 @@ through the envelope codec (`validate_immutable_schema`) unchanged.
 """
 
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import Field
 
@@ -25,17 +24,17 @@ from vibesys.orchestration.dynamic.strategy._rows import (
     ReviewEvidence,
 )
 from vs_core.api import (
-    ArtifactRef,
     AttemptId,
-    ContinuationId,
+    AttemptTrack,
     DecisionId,
     EvidenceKey,
-    InvocationId,
     InvocationRef,
     RevisionRef,
     SchemaRef,
     SettlementId,
+    Step,
     StrategyState,
+    TurnChain,
     Value,
 )
 
@@ -59,25 +58,6 @@ class Role(StrEnum):
     IMPLEMENTER = "implementer"
     JUDGE = "judge"
     PROFILER = "profiler"
-
-
-class Step(StrEnum):
-    """Progress of the current phase of one subject through propose, wait, settle.
-
-    NEEDED: decide must propose the phase's next decision. RENDERING / RENDERED:
-    a prompt render is in flight or done. AWAITING: a decision or turn is in
-    flight and an event moves the subject on. SUSPENDED: the turn yielded to wait
-    for its evaluations and only `ResumeAuthorized` moves it on. RETAINING: a write
-    turn answered, but core has not yet retained (or declined) its checkpoint, so
-    the reply is held until `decide` can read the candidate from the view.
-    """
-
-    NEEDED = "needed"
-    RENDERING = "rendering"
-    RENDERED = "rendered"
-    AWAITING = "awaiting"
-    SUSPENDED = "suspended"
-    RETAINING = "retaining"
 
 
 class WorkKind(StrEnum):
@@ -134,27 +114,10 @@ class WorkPlan(Value):
     decision_impact: str = ""
 
 
-class TurnRecord(Value):
-    """Bookkeeping of one role's turn chain: free, paid, corrections and resumes."""
+class TurnRecord(TurnChain[PromptContext]):
+    """One role's turn chain: free, paid, corrections and resumes."""
 
     role: Role
-    serial: int = Field(default=0, ge=0)
-    corrections: int = Field(default=0, ge=0)
-    # Times this logical turn was lost to the transport and asked again.
-    drops: int = Field(default=0, ge=0)
-    # Run-clock time before which a lost turn must not be asked again; None when due.
-    ask_not_before: float | None = Field(default=None, ge=0)
-    charge: Literal["free", "paid", "correction", "resume"] = "paid"
-    context: PromptContext | None = None
-    prompts: tuple[ArtifactRef, ...] = ()
-    tool_policy: ArtifactRef | None = None
-    # Predecessor of a resumed turn: the suspended invocation core is resuming.
-    invocation: InvocationRef | None = None
-    # The invocation ID core authorized for a resume; None for every other turn.
-    resume_as: InvocationId | None = None
-    continuation: ContinuationId | None = None
-    # The reply asked to wait for evaluations; core's `TurnSuspended` completes the yield.
-    yielded: bool = False
 
 
 class PlannerState(Value):
@@ -269,21 +232,16 @@ class Blocker(Value):
     digest: str = ""
 
 
-class AttemptRecord(Value):
+class AttemptRecord(AttemptTrack[TurnRecord]):
     """Scientific progress of one scheduled workstream."""
 
     plan: WorkPlan
     sequence: int = Field(gt=0)
-    attempt: AttemptId
-    generation: int = Field(default=0, ge=0)
     # The parent revision is frozen when the workstream is scheduled; a later edit
     # of its producer, or a better candidate, never changes it.
     parent: RevisionRef
     parent_hypothesis_id: str | None = None
     phase: WorkPhase
-    step: Step = Step.NEEDED
-    awaiting: DecisionId | None = None
-    turn: TurnRecord | None = None
     candidate: RevisionRef | None = None
     outcome: HypothesisOutcome | None = None
     summary: str = ""
@@ -295,10 +253,7 @@ class AttemptRecord(Value):
     # The decoded trusted evaluations the judge of this workstream's candidate is shown.
     review_evidence: ReviewEvidence | None = None
     judge_invocation: InvocationRef | None = None
-    failure: str | None = None
     withdrawn: bool = False
-    # Core has admitted the attempt, so leaving it requires a settlement.
-    ready: bool = False
     # Implementer turns charged so far, bounded by `max_retries_per_round`.
     turns_spent: int = Field(default=0, ge=0)
     # Every turn that ended without a measurable candidate, in order; its length is bounded
@@ -310,10 +265,6 @@ class AttemptRecord(Value):
     # The serial the next first turn of a role takes: one past every serial used in this
     # attempt, so a retry's turn and a later review never reuse a turn's decision ID.
     next_serial: int = Field(default=0, ge=0)
-    settle_sent: bool = False
-    # The implementer reply (JSON) and turn waiting for its checkpoint, while RETAINING.
-    held_reply: str | None = None
-    held_invocation: InvocationRef | None = None
 
 
 class Winner(Value):
