@@ -30,8 +30,8 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import RunEnvironmentView, TrustedEvaluationPlan
 
 __all__ = [
-    "ParallelCandidateFacts",
     "EvaluationInputs",
+    "ParallelCandidateFacts",
     "ResolvedRun",
     "agent_evaluation_policy",
     "evaluation_inputs",
