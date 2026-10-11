@@ -20,6 +20,7 @@ from vs_core.types.common import (
     DecisionId,
     InvocationId,
     ItemId,
+    RoleId,
     SessionId,
 )
 
@@ -75,11 +76,14 @@ class IdScheme:
     """The decision, invocation and session identities of one strategy namespace.
 
     Only decision identities carry the namespace: invocation and session identities already
-    name their role, and a run has one strategy. Every subject argument is raw text; the
+    name their role, and a run has one strategy. Role identities name the roles the host
+    registers, whose prefix a strategy may fix. Every subject argument is raw text; the
     scheme encodes it.
     """
 
     namespace: str
+    role_prefix: str | None = None
+    """Prefix of the agent role ids the strategy registers; ``<namespace>-`` when None."""
 
     def __post_init__(self) -> None:
         if self.namespace != component(self.namespace) or self.namespace == "operation":
@@ -92,6 +96,11 @@ class IdScheme:
     def invocation_id(self, role: str, subject: str, serial: int) -> InvocationId:
         """One logical invocation, distinct for every correction and resume."""
         return InvocationId(root=f"inv:{role}:{component(subject)}:{serial}")
+
+    def role_id(self, role: str) -> RoleId:
+        """Agent role identity of a role the strategy registers."""
+        prefix = f"{self.namespace}-" if self.role_prefix is None else self.role_prefix
+        return RoleId(root=f"{prefix}{role}")
 
     def session_id(self, role: str, subject: str) -> SessionId:
         """Conversation identity: stable per subject so continuations reuse a session."""

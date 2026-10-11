@@ -1,98 +1,51 @@
-"""Scratch space of one `decide` call and the core value builders shared by subjects.
+"""Dynamic's binding of the shared authoring kit (`vs_core.api`) to its config and identities.
 
-`Draft` accumulates ordered decisions and the evolving state inside a single pure
-call; nothing escapes it except the final `Proposal`. The builders turn strategy
-intent into core `Scope`, `TurnSpec`, `Operation` and `MeasurementPlan` values
-using only the `RunView` and the static `DynamicConfig`, so identical inputs
-always propose byte-identical decisions.
+The kit's `Draft` and builders take every deadline and identity as an argument; this module
+supplies dynamic's: the operation deadline from `DynamicConfig`, the `dyn` identity scheme,
+and the prompt-render request that only dynamic's operations understand.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._ids import (
-    component,
-    decision_id,
-    invocation_id,
-    role_id,
-    session_id,
-)
+from vibesys.orchestration.dynamic.strategy._ids import IDS, component, decision_id
 from vibesys.orchestration.dynamic.strategy._operations import RenderRoleArtifacts
 from vibesys.orchestration.dynamic.strategy._prompts import PromptContext
 from vibesys.orchestration.dynamic.strategy._state import DynamicStrategyState, Role, TurnRecord
 from vs_core.api import (
-    Access,
-    AttemptId,
-    Decision,
     DecisionId,
-    InvocationId,
     MeasurementPlan,
     MeasurementStage,
     Operation,
     OperationRequest,
     RequestTurn,
     RevisionRef,
-    RunView,
-    SchemaRef,
     Scope,
-    SessionSpec,
-    TurnSpec,
-    WorkspaceMode,
-    WorkspaceRef,
+    TurnShape,
+    declared_operation,
 )
+from vs_core.api import Draft as AuthoringDraft
+from vs_core.api import invocation_for as _invocation_for
+from vs_core.api import request_turn as _request_turn
+from vs_core.api import turn_decision_id as _turn_decision_id
 
 type Purpose = Literal["baseline", "local-validation", "official", "profile"]
 
 
-@dataclass
-class Draft:
-    """The state and decisions one `decide` call is building."""
+@dataclass(kw_only=True)
+class Draft(AuthoringDraft[DynamicStrategyState]):
+    """The state and decisions one dynamic `decide` call is building."""
 
-    view: RunView
     config: DynamicConfig
-    state: DynamicStrategyState
-    decisions: list[Decision] = field(default_factory=list)
-    wake_at: float | None = None
-    """Earliest run-clock time a held-back turn becomes due."""
-
-    def emit(self, decision: Decision) -> None:
-        """Append one decision in proposal order."""
-        self.decisions.append(decision)
-
-    def due(self, turn: TurnRecord) -> bool:
-        """Whether the turn may be asked now; otherwise note when to be asked again."""
-        until = turn.ask_not_before
-        if until is None or self.view.run.now_at >= until:
-            return True
-        self.wake_at = until if self.wake_at is None else min(self.wake_at, until)
-        return False
-
-    def update(self, **fields: object) -> None:
-        """Replace state fields without mutating the previous state."""
-        self.state = self.state.model_copy(update=fields)
-
-
-def run_scope(view: RunView) -> Scope:
-    """The run's own scope at its current generation."""
-    return Scope(owner=view.run.run_id, generation=view.run.generation)
-
-
-def attempt_scope(view: RunView, attempt: AttemptId, generation: int) -> Scope:
-    """An attempt's scope; core reports the live generation, a new attempt starts at 0."""
-    live = next((item for item in view.attempts if item.attempt_id == attempt), None)
-    return Scope(owner=attempt, generation=generation if live is None else live.generation)
 
 
 def operation(
     draft: Draft, identifier: DecisionId, scope: Scope, request: OperationRequest
 ) -> Operation:
     """A declared operation due before the run's own deadline."""
-    return Operation(
-        decision_id=identifier,
-        scope=scope,
-        request=request,
-        deadline_at=draft.view.run.now_at + draft.config.operation_seconds,
+    return declared_operation(
+        draft.view, identifier, scope, request, seconds=draft.config.operation_seconds
     )
 
 
@@ -108,69 +61,17 @@ def render_id(subject: str, turn: TurnRecord) -> DecisionId:
 
 def turn_id(subject: str, turn: TurnRecord) -> DecisionId:
     """Decision ID of one turn request."""
-    return decision_id("turn", subject, turn.serial)
+    return _turn_decision_id(IDS, subject, turn)
 
 
 def invocation_for(role: Role, subject: str, turn: TurnRecord) -> str:
     """The logical invocation ID of a turn; a resume reuses the ID core authorized."""
-    if turn.resume_as is not None:
-        return turn.resume_as.root
-    return invocation_id(role.value, subject, turn.serial).root
-
-
-def session_for(role: Role, subject: str, access: Access) -> SessionSpec:
-    """The conversation a role speaks in.
-
-    The policy is always "reuse": core and the session executor require every turn of a
-    session (first, correction, resume) to carry one spec, and a "fresh" session cannot be
-    ensured twice, so a conversation that may continue must declare reuse on its first turn.
-    """
-    return SessionSpec(
-        session_id=session_id(role.value, subject),
-        role_id=role_id(role.value),
-        policy="reuse",
-        lifetime="owner",
-        access=access,
-    )
-
-
-def workspace_for(scope: Scope, revision: RevisionRef, mode: WorkspaceMode) -> WorkspaceRef:
-    """The exact revision a turn works on and how it may touch it."""
-    return WorkspaceRef(scope=scope, revision=revision, mode=mode)
-
-
-@dataclass(frozen=True)
-class TurnShape:
-    """Who runs a turn, on what, with which access, and what it must answer with."""
-
-    role: Role
-    subject: str
-    workspace: WorkspaceRef | Scope
-    access: Access
-    output_schema: SchemaRef
-    seconds: float
+    return _invocation_for(IDS, role.value, subject, turn).root
 
 
 def request_turn(draft: Draft, shape: TurnShape, turn: TurnRecord, scope: Scope) -> RequestTurn:
     """Build the paid, free, correction or resume turn the record describes."""
-    role, subject = shape.role, shape.subject
-    return RequestTurn(
-        decision_id=turn_id(subject, turn),
-        scope=scope,
-        turn=TurnSpec(
-            session=session_for(role, subject, shape.access),
-            invocation_id=InvocationId(root=invocation_for(role, subject, turn)),
-            continuation_id=turn.continuation,
-            workspace=shape.workspace,
-            prompts=turn.prompts,
-            output_schema=shape.output_schema,
-            tool_policy=turn.tool_policy,
-            deadline_at=draft.view.run.now_at + shape.seconds,
-            charge_class=turn.charge,
-            # A resume names its continuation, never a predecessor: core rejects both together.
-            predecessor=None if turn.charge == "resume" else turn.invocation,
-        ),
-    )
+    return _request_turn(draft.view, IDS, shape, turn, scope)
 
 
 def measurement_plan(
