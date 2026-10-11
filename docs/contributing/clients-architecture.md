@@ -223,16 +223,26 @@ here by the scaffold and the graph checker.
 
 ```bash
 cd clients
-pnpm new:package <layer> <name>      # e.g. pnpm new:package domain entities
-pnpm new:package feature <name>      # e.g. pnpm new:package feature stop-run
+pnpm new:package <layer> <name> [--runtime neutral|dom|node]   # pnpm new:package domain entities
+pnpm new:package feature <name>                                  # pnpm new:package feature stop-run
 pnpm install
 ```
 
-The scaffold writes the manifest (name, layer, `exports` with the source condition, entry
-runtimes, scripts), one `tsconfig.<entry>.json` per entry with its runtime's `lib` and `types`, the
-test project, a passing smoke test, and the Knip policy, so the new package passes every check on
-its first commit. Add workspace dependencies with `pnpm add --workspace @vibesys/<dep>` and a
-matching project reference; the graph checker names any mismatch.
+`scripts/new_package.mjs` writes the `vibesys` block first and derives everything else from it:
+the `exports` map with the source condition, one composite `tsconfig.<entry>.json` per entry with
+its runtime's `lib` and `types`, the test project and solution `tsconfig.json`, the `build`,
+`check`, and `test` scripts, a passing smoke test per entry, and the entries in
+`tsconfig.architecture.json` that dependency-cruiser resolves. Knip derives its policy from the
+exports, and Biome and Turborepo cover the package by glob. A feature lands in
+`features/<name>` as `@vibesys/feature-<name>` with `./state`, `./renderer`, and `./main`; an app
+in `apps/<name>` as `@vibesys/app-<name>`; any other layer in `<name>` with one `.` entry
+(`neutral` unless `--runtime` says otherwise). Its test scaffolds one package of each shape and
+requires the graph checker, the workspace declarations, `tsc -b`, and the package's own tests to
+pass, and a Node import in a scaffolded renderer entry to fail compilation.
+
+Add a workspace dependency with `pnpm --filter <package> add @vibesys/<dependency>@workspace:*` and
+a matching project reference in the entry project that imports it; `pnpm check:ts-architecture`
+names a missing or extra one.
 
 ## Migration status
 

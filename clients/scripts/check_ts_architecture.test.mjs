@@ -679,9 +679,9 @@ test('workspace layout drops a symlink it cannot resolve', async t => {
 
 test('workspace layout rejects a packages pattern it cannot expand', async t => {
   const root = await scratchDirectory(t, 'vibesys-layout-pattern-');
-  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "libs/*"\n');
+  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "libs/**"\n');
 
-  assert.throws(() => workspaceLayout(root), /unsupported packages pattern "libs\/\*"/);
+  assert.throws(() => workspaceLayout(root), /unsupported packages pattern "libs\/\*\*"/);
 });
 
 test('declarations accept a package whose entry points and scripts agree with the layout', async t => {
