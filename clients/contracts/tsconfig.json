@@ -5,6 +5,9 @@
       "path": "./tsconfig.lib.json"
     },
     {
+      "path": "./tsconfig.host-helper.json"
+    },
+    {
       "path": "./tsconfig.testing.json"
     },
     {

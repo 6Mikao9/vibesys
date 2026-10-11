@@ -248,7 +248,7 @@ names a missing or extra one.
 
 | Package | Layer | Status | Item that creates or moves it |
 | --- | --- | --- | --- |
-| `@vibesys/contracts` | foundation | exists (pilot: generated types, validator, error taxonomy, `./testing` fixtures) | foundation item (#1869) |
+| `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
 | `@vibesys/ui` | foundation | planned | web feature-folder refactor, then package extraction |
 | `@vibesys/core-state` | core | exists, on the per-entry layout, depends on `contracts` only | foundation item (#1869) |
 | `@vibesys/transport` | core | planned (split from `backend-client`) | backend-client split |

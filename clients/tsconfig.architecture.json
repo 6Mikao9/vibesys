@@ -7,6 +7,7 @@
       "@vibesys/backend-client/node": ["backend-client/src/node/index.ts"],
       "@vibesys/backend-client/websocket": ["backend-client/src/websocket.ts"],
       "@vibesys/contracts": ["contracts/src/index.ts"],
+      "@vibesys/contracts/host-helper": ["contracts/src/host-helper.ts"],
       "@vibesys/contracts/testing": ["contracts/src/testing/index.ts"],
       "@vibesys/core-state": ["core-state/src/index.ts"],
       "@vibesys/core-state/testing": ["core-state/src/testing/index.ts"],

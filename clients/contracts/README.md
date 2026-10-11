@@ -3,13 +3,18 @@
 `@vibesys/contracts` is the TypeScript side of the run protocol: the message
 types generated from the Python models (`src/generated`, never edited by hand),
 the one runtime validator that turns untrusted wire text into those types
-(`parseProtocolResponse`, `parseServerMessage`, `validateRunEvent`), and the
+(`parseProtocolResponse`, `parseServerMessage`, `validateRunEvent`, and the
+host helper's parses), and the
 error taxonomy the validator and the transports report (`BackendClientError`,
 `ServerError`). It is runtime neutral (no DOM, no Node) and depends on no other
 workspace package; see
 [the clients architecture](../../docs/contributing/clients-architecture.md).
 
 - `@vibesys/contracts` is the contract itself.
+- `@vibesys/contracts/host-helper` is the host helper's contract: the types
+  generated from `server.host_api` and the strict parse of every line a client
+  reads from a helper (`parseHelperMessage`, `parseChannelEnd`), walked by the
+  same validator with unknown fields, members, and message types rejected.
 - `@vibesys/contracts/testing` is the test-only, runtime-neutral fixture
   surface shared by client packages. Production imports are rejected by the
   architecture gate. Its defaults are deliberately small and deterministic:

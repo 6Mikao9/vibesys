@@ -266,24 +266,22 @@ WebSocket subscriber live in one process.
 
 ## The stdio bridge
 
-The bridge entrypoint is to be replaced by the host helper's `run.connect`, which keeps this relay
-and its outcomes; see [desktop-connection.md](desktop-connection.md).
-
-A remote client (the desktop over SSH) reaches a run's Unix transport through the stdio bridge,
-`python -m entrypoints.stdio_bridge --socket PATH` (`src/entrypoints/stdio_bridge.py` over
-`src/server/stdio_bridge.py`). It is not a third transport. The client runs one bridge per protocol
-connection over its own ssh exec channel, so `WP-ROLES` holds unchanged: a control, subscribe, or chat
-connection is one bridge process. The bridge connects to the socket and copies bytes in both
+A remote client (the desktop over SSH) reaches a run's Unix transport through the stdio bridge, the
+relay core `src/server/stdio_bridge.py` that a host helper run channel becomes after its
+`run.connect` (see [desktop-connection.md](desktop-connection.md)). It is not a third transport.
+The client opens one run channel per protocol connection over its own ssh exec channel, so
+`WP-ROLES` holds unchanged: a control, subscribe, or chat connection is one helper process. The
+bridge connects to the socket and copies bytes in both
 directions between its stdin/stdout and the socket. It does not parse or re-frame: every Unix
 transport decision above (`WP-GRANULARITY`, `WP-NEWLINE`, `WP-PROTOCOL-ERROR`, and the rest) holds
 through it, and the client keeps its `NewlineFramer` (`WP-FRAMER`) because its side is still a byte
 stream. The conformance runner `tests/conformance/runners/stdio-bridge.json` replays the Unix
-scenarios through a real bridge process to hold it to that.
+scenarios through a real helper's run channel to hold it to that.
 
-**Ends.** The bridge ends with one exit status per outcome, and, whenever the status is not 0, one
-JSON line on stderr: `{"outcome": ..., "exit_status": ..., "detail": ...}`
-(`src/server/stdio_bridge_report.py:BridgeReport`). The outcomes are
-`src/server/stdio_bridge.py:BridgeOutcome`:
+**Ends.** A relayed channel ends with one exit status per outcome, and, whenever the status is not
+0, one JSON line on stderr: `{"outcome": ..., "exit_status": ..., "detail": ...}`
+(`src/server/host_api.py:ChannelEnd`, in the helper's generated schema). The outcomes are
+`src/server/host_api.py:ChannelEndOutcome`:
 
 | Status | `outcome` | Meaning |
 | --- | --- | --- |

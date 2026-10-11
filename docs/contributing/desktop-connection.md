@@ -76,13 +76,13 @@ desktop main process (clients/desktop)                host (local or ssh)
 | Registry primitives | `server.registry` (new, light; split from `server.instances` and `server.transport.discovery`) | Registry root, lifetime lock, record store, `survey`. `server.instances` keeps the stop requester and composes these. |
 | Helper implementation | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), the per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the shell. |
 | Helper interfaces on a host | `server.host_helper_os` | The real implementations: projects through `vs_project.api`, directories as this account lists them, launches through `vs_sim.api` with the launcher's `headless_command`, the checkout through `git`. |
-| Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaces `entrypoints.stdio_bridge` once the app uses it (phase 5). |
+| Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaced `entrypoints.stdio_bridge` (phase 5). |
 | Relay core | `server.stdio_bridge` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
-| Generated helper types | `clients/contracts/src/generated/` | `host-helper.schema.json` (committed, language neutral) and TypeScript types generated from it. |
-| Connection manager | `clients/desktop` (`connection-manager.ts`, replaces `host.ts`, `detached-host.ts`, `ssh-host.ts`, `local-host.ts`) | The only code that creates links and channels. One `HostConnection` per host, one supervisor per `HostConnection`. |
+| Generated helper types | `clients/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
+| Connection manager | `clients/desktop` (`src/main/platform/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
 | Screen stores | `clients/desktop` and `clients/web` | One store per screen; pure reducer; React renders state. |
-| App lifecycle | `clients/desktop` (`app-lifecycle.ts`) | Single-instance lock, the quit sequence, the settings store. |
+| App lifecycle | `clients/desktop` (`src/main/app/app-lifecycle.ts`, `src/main/platform/settings`) | Single-instance lock, the quit sequence, the settings store. |
 
 Placement follows [architecture.md](architecture.md): the registry and relay are generic mechanisms
 under `server`, with no VibeSys policy; the helper's request handling is product wiring over them;
@@ -96,12 +96,13 @@ New modules and edges, all downward; no module gains an edge to `vibesys.*`:
 | --- | --- |
 | `server.host_api` | none (pydantic only) |
 | `server.registry` | `server.host_api`, `vs_sim.api` |
-| `server.host_helper` | `server.host_api`, `server.registry`, `server.stdio_bridge`, `server.stdio_bridge_report`, `vs_sim.api` |
+| `server.host_helper` | `server.host_api`, `server.registry`, `server.stdio_bridge`, `vs_sim.api` |
 | `server.host_helper_os` | `server.host_api`, `server.host_helper`, `vs_project`, `vs_sim.api` |
 | `server.instances` | `server.api`, `vs_sim.api` (loses `server.transport`; keeps only the stop requester) |
 | `server.api` | adds `server.host_api` (`PROTOCOL_VERSION` is defined there) |
 | `server.transport` | adds `server.registry` (discovery's lock primitives move there) |
-| `entrypoints` | adds `server.host_api` and `server.registry` (phase 1), `server.host_helper` (phase 4); drops `server.stdio_bridge_report` when the bridge entrypoint is deleted |
+| `entrypoints` | adds `server.host_api` and `server.registry` (phase 1), `server.host_helper` (phase 4); dropped `server.stdio_bridge_report` with the bridge entrypoint (phase 5) |
+| `server.stdio_bridge` | adds `server.host_api` (its outcomes and `ChannelEnd` are helper contracts) |
 
 Tach edges are module granular and `server.api` is one module, so tach alone cannot keep the helper
 light. The [import-closure guard](#guards) is the check that does.
@@ -160,8 +161,7 @@ Framing is the run protocol's: one JSON message per line, UTF-8 (`WP-GRANULARITY
 `WP-NEWLINE`), read with the existing `NewlineFramer`. After `connected`, the run channel's bytes
 are the run protocol's own, so the whole `wire-protocol.md` contract holds through it, as it does
 through the stdio bridge today. A run channel ends with the helper's exit status and, when it is
-not `0`, one typed `ChannelEnd` line on stderr (today's `BridgeReport`, which moves into
-`server.host_api` when the bridge entrypoint is deleted in phase 5): `client_closed`, `server_closed`, `run_gone`, `connect_denied`,
+not `0`, one typed `ChannelEnd` line on stderr (`server.host_api`, in the generated schema): `client_closed`, `server_closed`, `run_gone`, `connect_denied`,
 `connect_failed`, `server_stalled`, `client_stalled`, `server_failed`, `client_failed`, with the
 same statuses as the bridge.
 
@@ -488,14 +488,14 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | --- | --- |
 | Run protocol, framing, conformance corpus | built |
 | Detached runs, live registry, stop and resume | built |
-| Stdio relay core | built (entrypoint to be replaced) |
-| Pure supervisor core | built (check to be replaced) |
+| Stdio relay core | built (run channels; the bridge entrypoint is deleted) |
+| Pure supervisor core | replaced by the connection manager's machine (phase 5) |
 | Light host commands and import guard (phase 1) | built |
 | Explicit run identity (phase 2) | built (server side; the desktop app still keeps its id inference until phase 5 or 6 removes it) |
 | Lifecycle phases, progress, tombstones (phase 3) | built: phases with failure reason in the record, tombstones, startup stages and image-build progress (`run_startup_progress`, record version 4); the desktop parses them but does not render them yet |
 | Control envelope split (phase 4, step one) | built (`server.control_envelope`) |
-| Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; not built: deleting `entrypoints.stdio_bridge`, which the shipping app runs until phase 5 |
-| Connection manager (phase 5) | not built |
+| Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; `entrypoints.stdio_bridge` deleted in phase 5 |
+| Connection manager (phase 5) | built: `ConnectionManager` and `HostConnection` (pure machine, shell with disposal scopes), the bootstrap, typed channels with one strict validator, run channels, watch-pushed listings, path completion, the HostConnection contract suite over the `FakeHelper` and the real helper; not built: the Playwright journey job, a second master past `MaxSessions`, and checkout completion on a host with no checkout yet (it needs a helper) |
 | Screen stores and app lifecycle (phase 6) | built (#1839) |
 
 ## Decisions and alternatives
