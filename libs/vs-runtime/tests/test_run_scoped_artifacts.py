@@ -27,10 +27,6 @@ if TYPE_CHECKING:
 ROADMAP = "roadmap/plan.md"
 
 
-def _world(tmp_path: Path):  # noqa: ANN202
-    return open_workspace_env(tmp_path)
-
-
 async def _designer_turn(world: AccessWorld, request_id: str, invocation: str) -> None:
     result = await world.execute(dispatch_request(request_id, invocation))
     assert status(result) is ObservationStatus.SUCCEEDED
