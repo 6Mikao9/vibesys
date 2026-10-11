@@ -46,7 +46,9 @@ from vibesys.events import (
     GateKind,
     InvocationFinishedData,
     PhaseData,
+    RetryWaitData,
     ToolCallData,
+    WorkstreamAttemptData,
 )
 from vibesys.events import (
     EventStatus as CoreEventStatus,
@@ -229,6 +231,54 @@ def test_an_async_operation_lifecycle_event_reaches_the_wire_journal_with_its_sc
     assert event.data.operation_kind == "profiler"
     assert event.data.state == "running"
     assert event.data.scope_id == "hypothesis-7"
+
+
+def test_a_workstream_attempt_event_reaches_the_wire_journal_with_its_diagnostics(
+    tmp_path: Path,
+) -> None:
+    """A dynamic-portfolio workstream's live retry-budget diagnostics project onto the wire intact."""
+    parts = build_server_parts(tmp_path)
+
+    parts.core_events.emit(
+        CoreEventType.WORKSTREAM_ATTEMPT_UPDATED,
+        data=WorkstreamAttemptData(
+            hypothesis_id="hypothesis-3",
+            attempt=2,
+            attempt_limit=3,
+            refunded=1,
+            last_error="boom",
+            setup_failure=True,
+            repeated_error=True,
+        ),
+    )
+
+    event = next(e for e in parts.journal.read() if e.type is EventType.WORKSTREAM_ATTEMPT_UPDATED)
+    assert event.data is not None
+    assert event.data.kind == "workstream_attempt_updated"
+    assert event.data.hypothesis_id == "hypothesis-3"
+    assert event.data.attempt == 2
+    assert event.data.attempt_limit == 3
+    assert event.data.refunded == 1
+    assert event.data.last_error == "boom"
+    assert event.data.setup_failure is True
+    assert event.data.repeated_error is True
+
+
+def test_a_retry_wait_event_reaches_the_wire_journal_with_its_delay(tmp_path: Path) -> None:
+    """A retry wait before resuming a turn after a transient provider error reaches the wire."""
+    parts = build_server_parts(tmp_path)
+
+    parts.core_events.emit(
+        CoreEventType.RETRY_WAIT_STARTED,
+        data=RetryWaitData(attempt=1, delay_s=2.5, error_kind="overloaded"),
+    )
+
+    event = next(e for e in parts.journal.read() if e.type is EventType.RETRY_WAIT_STARTED)
+    assert event.data is not None
+    assert event.data.kind == "retry_wait_started"
+    assert event.data.attempt == 1
+    assert event.data.delay_s == 2.5
+    assert event.data.error_kind == "overloaded"
 
 
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:

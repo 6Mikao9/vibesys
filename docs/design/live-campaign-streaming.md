@@ -231,6 +231,30 @@ persisted but not streamed, and not computed anywhere.
   where a profiler's headline metric surfaces; see the profiler bullet
   below.
 - **Judge and benchmark results**: `JudgeResultData`, `BenchmarkResultData`.
+- **Live per-workstream retry-budget diagnostics.** `WorkstreamAttemptData`
+  (`hypothesis_id`, `attempt`, `attempt_limit`, `refunded`, `last_error`,
+  `setup_failure`, `repeated_error`) is emitted whenever `run/plugin.py`'s
+  (`orchestration/dynamic/plugin.py`, the live engine's own projection, not
+  the upstream-only `strategy`/`core_policy` one) projection of
+  `DynamicState.workstreams` changes for a hypothesis, via the same
+  commit-diff chokepoint `RoundFinishedData` already uses
+  (`run/integration.py`'s `_emit_commit_events`). `repeated_error` mirrors
+  `Workstreams._record_failure`'s own comparison
+  (`orchestration/dynamic/workstream.py`): true only when the previous
+  summary was itself a setup failure with identical error text, the
+  deterministic case where retrying spends the slot's budget on the same
+  outcome every time. This closes a slice of gap 1 below (the attempt/retry
+  facet of workstream state); the broader phase-transition timeline gap 1
+  describes remains open.
+- **Retry waits before resuming a turn.** `RetryWaitData` (`attempt`,
+  `delay_s`, `error_kind`) is emitted from the same agentshim retry loop that
+  used to only log "retrying this turn in ...s" as plain text. The real retry
+  policy (`TRANSIENT_RETRY_DELAYS_S`, `vs_agent/drivers/agentshim.py:108`)
+  previously had no event sink wired into it (`AgentDiagnosticLog`,
+  `factory.py`, defaulted to `NULL_AGENT_EVENT_SINK`); the retry loop now
+  reports each wait to the run's own `AgentEventSink` (the same sink that
+  already carries tool calls and usage updates) alongside the plain-text log,
+  not instead of it.
 - **Run failure, in aggregate**: `RunFailure` (kind, reason,
   `workstreams_started`, `workstream_budget`, `candidates_kept`), a real
   cross-workstream count, but terminal-only, built once when a run fails.
@@ -317,14 +341,6 @@ persisted but not streamed, and not computed anywhere.
 - **Gate duration.** Zero clock calls anywhere in gate execution.
 - **CPU/memory of agent sandboxes.** No `psutil`, `pynvml`, or cgroup-usage
   polling exists anywhere in `vs_sandbox`/`vs_agent`/`src/vibesys`.
-- **Retry/backoff as an event: a dead sink, not a missing feature.** A real
-  retry policy exists (`TRANSIENT_RETRY_DELAYS_S`,
-  `vs_agent/drivers/agentshim.py:108`) and the wait loop runs inside agentshim,
-  but its log callback, `AgentDiagnosticLog`, is constructed with no event sink
-  (`factory.py:97`, defaults to `NULL_AGENT_EVENT_SINK`). The retry notice
-  reaches the plain-text run log only. One line of wiring would fix this; it
-  is listed under "Backend path" rather than fixed in this PR, to keep the
-  proof of concept to one change.
 - **Typed workstream/attempt correlation.** `round_label`/`agent_kind` on the
   event envelope are free text, not references; which workstream an
   agent-local event belongs to is not a parseable field anywhere today.
@@ -600,6 +616,8 @@ SSE, the real gateway would carry it over its existing websocket). Frame kinds:
 | `agent-upsert` | one agent: id, name, role, workstreamIds | agent roster |
 | `measurement` | one measurement: sequence, workstreamId, values, gates, disposition, benchmark version | the already-real telemetry |
 | `tokens` | workstreamId, cumulative tokens | gap 3 |
+| `workstream-attempt` | workstreamId, live retry-budget diagnostics: attempt, attemptLimit, refunded, lastError, setupFailure, repeatedError | the live-engine slice of gap 1 (`WorkstreamAttemptData`) |
+| `workstream-activity` | workstreamId, live agent activity: mode, summary, tool | the real-time "is this workstream genuinely busy" signal (`AgentExecutionActivityData`), not a new gap |
 | `status` | run status: active / completed | run lifecycle |
 
 Every frame carries a monotonic `seq` for ordering and idempotent dedup. Frames
@@ -852,10 +870,6 @@ above:
   `RunFacts.objective` already exists, frozen at run start; wiring it is a
   `campaign-init`-shaped addition, not a new mechanism (see "Telemetry
   inventory").
-- **Fix the retry/backoff dead sink.** `AgentDiagnosticLog` is built with no
-  event sink, so retry-wait notices never leave the plain-text log (see
-  "Telemetry inventory"). A one-line wiring fix once someone decides what
-  event kind should carry it.
 - **Journal compaction for month-long runs**, extending the existing spine
   concept to bound on-disk size, not just replay (see "Long-run
   resilience").

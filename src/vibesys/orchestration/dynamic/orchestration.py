@@ -1039,6 +1039,7 @@ class _DynamicRun:
                     sequence=sequence,
                     planning_call=call,
                     plan=plan,
+                    retry_limit=self.options.max_retries_per_round,
                     measured_iterations=(
                         self.rounds.measured_iterations(self.state.workstreams[index])
                         if index is not None
