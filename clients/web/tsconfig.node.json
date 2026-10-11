@@ -1,0 +1,18 @@
+{
+  // The build and test tool configuration, which runs under Node.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/node.tsbuildinfo"
+  },
+  "include": [
+    "build-manifest.ts",
+    "playwright.config.ts",
+    "vite.config.ts",
+    "vite.browser.config.ts",
+    "vite.desktop.config.ts"
+  ]
+}

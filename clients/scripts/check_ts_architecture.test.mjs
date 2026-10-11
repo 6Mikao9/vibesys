@@ -21,14 +21,6 @@ const CONFIG = join(WORKSPACE_ROOT, '.dependency-cruiser.mjs');
 // the workspace is covered without anyone editing a list here.
 const REPOSITORY_LAYOUT = workspaceLayout(WORKSPACE_ROOT);
 const PACKAGE_DIRECTORIES = REPOSITORY_LAYOUT.packages.map(({directory}) => directory);
-const DEPENDENCY_BUILD_COMMANDS = ['build', 'check', 'test'];
-
-function dependencyBuildHooks(name) {
-  return Object.fromEntries(
-    DEPENDENCY_BUILD_COMMANDS.map(command => [`pre${command}`, `pnpm --filter ${name}^... build`]),
-  );
-}
-
 test('dependency-cruiser rule names are unique', async () => {
   const options = await extractDepcruiseOptions(CONFIG);
   const names = options.ruleSet.forbidden.map(rule => rule.name);
@@ -539,27 +531,15 @@ test('manifest policy rejects declared reverse dependencies', async t => {
   await writeManifest(root, 'backend-client', '@vibesys/backend-client', {
     '@vibesys/core-state': 'workspace:*',
   });
-  await writeManifest(
-    root,
-    'core-state',
-    '@vibesys/core-state',
-    {'@vibesys/backend-client': 'workspace:*', '@opentui/core': '1.0.0'},
-    dependencyBuildHooks('@vibesys/core-state'),
-  );
-  await writeManifest(
-    root,
-    'tui',
-    '@vibesys/tui',
-    {'@vibesys/backend-client': 'workspace:*'},
-    dependencyBuildHooks('@vibesys/tui'),
-  );
-  await writeManifest(
-    root,
-    'web',
-    '@vibesys/web',
-    {'@vibesys/backend-client': 'workspace:*', '@vibesys/core-state': 'workspace:*'},
-    dependencyBuildHooks('@vibesys/web'),
-  );
+  await writeManifest(root, 'core-state', '@vibesys/core-state', {
+    '@vibesys/backend-client': 'workspace:*',
+    '@opentui/core': '1.0.0',
+  });
+  await writeManifest(root, 'tui', '@vibesys/tui', {'@vibesys/backend-client': 'workspace:*'});
+  await writeManifest(root, 'web', '@vibesys/web', {
+    '@vibesys/backend-client': 'workspace:*',
+    '@vibesys/core-state': 'workspace:*',
+  });
 
   assert.deepEqual(manifestErrors(root), [
     'backend-client/package.json: @vibesys/backend-client must not depend on @vibesys/core-state',
@@ -567,31 +547,6 @@ test('manifest policy rejects declared reverse dependencies', async t => {
     'tui/package.json: @vibesys/tui must declare @vibesys/core-state in dependencies',
   ]);
 });
-
-for (const command of DEPENDENCY_BUILD_COMMANDS) {
-  test(`manifest policy requires dependency build order for direct ${command}`, async t => {
-    const root = await workspaceFixture(t, `vibesys-manifest-pre${command}-`);
-    // A leaf has nothing to prepare and needs no hook. The dependent has the other two correct
-    // hooks, so each case proves this command independently rather than passing because all three
-    // lifecycle scripts were absent.
-    await writeManifest(root, 'backend-client', '@vibesys/backend-client', {});
-    const scripts = dependencyBuildHooks('@vibesys/core-state');
-    delete scripts[`pre${command}`];
-    await writeManifest(
-      root,
-      'core-state',
-      '@vibesys/core-state',
-      {'@vibesys/backend-client': 'workspace:*'},
-      scripts,
-    );
-
-    assert.deepEqual(manifestErrors(root), [
-      `core-state/package.json: @vibesys/core-state must declare "pre${command}": ` +
-        '"pnpm --filter @vibesys/core-state^... build", because direct ' +
-        `"${command}" must build its runtime workspace dependencies first`,
-    ]);
-  });
-}
 
 test('manifest policy names a package that joins the workspace without one', async t => {
   const root = await workspaceFixture(t, 'vibesys-manifest-policy-');
@@ -796,7 +751,10 @@ test('declarations reject a path map entry no package exports', async t => {
   const root = await workspaceFixture(t, 'vibesys-declarations-extra-');
   await writePackage(root, 'stub', '@vibesys/stub', ['src'], {
     scripts: {build: 'true', check: 'true', test: 'true'},
-    exports: {'.': {import: './dist/index.js'}, './node': {import: './dist/node/index.js'}},
+    exports: {
+      '.': {'@vibesys/source': './src/index.ts', default: './dist/index.js'},
+      './node': {'@vibesys/source': './src/node/index.ts', default: './dist/node/index.js'},
+    },
   });
   await writeFile(join(root, 'stub/src/index.ts'), '');
   await mkdir(join(root, 'stub/src/node'), {recursive: true});
@@ -816,74 +774,6 @@ test('declarations reject a path map entry no package exports', async t => {
 
   assert.deepEqual(declarationErrors(root, workspaceLayout(root)), [
     'tsconfig.architecture.json: @vibesys/gone is not a workspace package export',
-  ]);
-});
-
-test('web aliases cover every export of its workspace dependencies', async t => {
-  const root = await workspaceFixture(t, 'vibesys-web-aliases-');
-  await writePackage(root, 'backend-client', '@vibesys/backend-client', ['src'], {
-    exports: {
-      '.': {import: './dist/index.js'},
-      './testing': {import: './dist/testing/index.js'},
-    },
-    scripts: {build: '', check: '', test: ''},
-  });
-  await writePackage(root, 'core-state', '@vibesys/core-state', ['src'], {
-    scripts: {build: '', check: '', test: ''},
-  });
-  await writePackage(root, 'web', '@vibesys/web', ['src'], {
-    dependencies: {
-      '@vibesys/backend-client': 'workspace:*',
-      '@vibesys/core-state': 'workspace:*',
-    },
-    scripts: {build: '', check: '', test: ''},
-  });
-  await writeFile(join(root, 'backend-client/src/index.ts'), '');
-  await mkdir(join(root, 'backend-client/src/testing'), {recursive: true});
-  await writeFile(join(root, 'backend-client/src/testing/index.ts'), '');
-  await writeFile(join(root, 'core-state/src/index.ts'), '');
-  await writeFile(join(root, 'web/src/index.ts'), '');
-  await writeFile(
-    join(root, 'tsconfig.architecture.json'),
-    JSON.stringify({
-      compilerOptions: {
-        paths: {
-          '@vibesys/backend-client': ['backend-client/src/index.ts'],
-          '@vibesys/backend-client/testing': ['backend-client/src/testing/index.ts'],
-          '@vibesys/core-state': ['core-state/src/index.ts'],
-          '@vibesys/web': ['web/src/index.ts'],
-        },
-      },
-    }),
-  );
-  await writeFile(
-    join(root, 'web/tsconfig.json'),
-    JSON.stringify({
-      compilerOptions: {
-        paths: {
-          '@vibesys/backend-client': ['../backend-client/src/index.ts'],
-          '@vibesys/backend-client/private': ['../backend-client/src/private.ts'],
-          '@vibesys/core-state': ['../core-state/src/index.ts'],
-        },
-      },
-    }),
-  );
-  await writeFile(
-    join(root, 'web/workspace-source-aliases.json'),
-    JSON.stringify({
-      '@vibesys/backend-client': '../backend-client/src/index.ts',
-      '@vibesys/backend-client/private': '../backend-client/src/private.ts',
-      '@vibesys/core-state': '../core-state/src/index.ts',
-    }),
-  );
-
-  assert.deepEqual(declarationErrors(root, workspaceLayout(root)), [
-    'web/tsconfig.json: @vibesys/backend-client/testing must map to ' +
-      '["../backend-client/src/testing/index.ts"]',
-    'web/tsconfig.json: @vibesys/backend-client/private is not a declared workspace package export',
-    'web/workspace-source-aliases.json: @vibesys/backend-client/testing must map to ' +
-      '"../backend-client/src/testing/index.ts"',
-    'web/workspace-source-aliases.json: @vibesys/backend-client/private is not a declared workspace package export',
   ]);
 });
 
