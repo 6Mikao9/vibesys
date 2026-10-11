@@ -11,8 +11,12 @@ offers:
   compute node, where the agent's container does not exist, so the broker
   confines it by an explicit policy rather than by whatever the agent runs in.
 * ``gate``: run the framework's planned accuracy or benchmark gate through a
-  :class:`GateRunner`. The agent names only which gate and, for a benchmark,
-  where the result goes; it never supplies a command.
+  :class:`GateRunner`. The agent names only which gate; it never supplies a
+  command or an argument. For a benchmark that declares a result argument the
+  broker supplies the result path itself and relays the file back to the
+  caller, so nothing task-specific is part of what the agent types. The
+  framework's own evaluation names the result path explicitly instead, and the
+  broker validates that form.
 
 The agent's workspace is mounted in its container at the same path as on the
 host, so the working directory a request names is a path the host can check
@@ -255,6 +259,8 @@ class _Job:
     run: Callable[[Callable[[bytes], None], Event], int]
     #: ``(host file, path in the caller)``: the result to relay once the job ends.
     relay: tuple[Path, str] | None = None
+    #: Whether the relayed path is the broker's choice, so the output must name it.
+    announce_relay: bool = False
 
 
 def _read_frame(connection: Connection) -> bytes:
@@ -279,8 +285,14 @@ def _send(connection: Connection, payload: Mapping[str, object]) -> None:
     connection.send(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
 
 
-def _relay_file(connection: Connection, host_file: Path, caller_path: str) -> None:
-    """Send the result a gate wrote at *host_file*, to be written at *caller_path*."""
+def _relay_file(
+    connection: Connection, host_file: Path, caller_path: str, *, announce: bool
+) -> None:
+    """Send the result a gate wrote at *host_file*, to be written at *caller_path*.
+
+    With *announce*, the output that follows names *caller_path*, because the
+    caller did not choose it.
+    """
     content = _read_owned_file(host_file)
     if content is None:
         return
@@ -288,6 +300,9 @@ def _relay_file(connection: Connection, host_file: Path, caller_path: str) -> No
         connection,
         {"file": {"path": caller_path, "data": base64.b64encode(content).decode()}},
     )
+    if announce:
+        note = f"benchmark result file: {caller_path}\n".encode()
+        _send(connection, {"output": base64.b64encode(note).decode()})
 
 
 def _read_owned_file(path: Path) -> bytes | None:
@@ -307,13 +322,18 @@ def _read_owned_file(path: Path) -> bytes | None:
         return handle.read()
 
 
+def _framework_result_path() -> str:
+    """Return a fresh, unguessable framework result path under ``/tmp``."""
+    return f"{_FRAMEWORK_TMP}/vibesys-framework-benchmark-{secrets.token_hex(16)}.json"
+
+
 def _reserve_result_file() -> Path:
     """Create an empty, private result file under the host's ``/tmp``.
 
     The name is unguessable and the file is created exclusively and without
     following links, so nothing else can claim it before the gate writes it.
     """
-    path = Path(f"{_FRAMEWORK_TMP}/vibesys-framework-benchmark-{secrets.token_hex(16)}.json")
+    path = Path(_framework_result_path())
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     os.close(descriptor)
     return path
@@ -489,7 +509,7 @@ class HostCommandBroker:
             return
         try:
             if job.relay is not None:
-                _relay_file(connection, *job.relay)
+                _relay_file(connection, *job.relay, announce=job.announce_relay)
             _send(connection, {"exit": status})
         except OSError:
             return
@@ -530,6 +550,7 @@ class HostCommandBroker:
                 call.kind, arguments, cwd=cwd, write=write, cancel=cancel
             ),
             relay=relay,
+            announce_relay=relay is not None and not call.arguments,
         )
 
     @staticmethod
@@ -538,11 +559,14 @@ class HostCommandBroker:
     ) -> tuple[tuple[str, ...], tuple[Path, str] | None]:
         """Validate a gate's arguments against the plan; return them and any file to relay.
 
-        An accuracy gate takes none. A benchmark takes none, or its declared
-        result argument and one allowed result path. A result under the
-        caller's ``/tmp`` is redirected to a private file of the broker's
-        and relayed back when the gate ends, because the caller's ``/tmp`` is
-        not the gate host's.
+        An accuracy gate takes none. A benchmark that declares a result
+        argument takes either none, which is what the agent types, or that
+        argument and one allowed result path, which is what the framework's own
+        evaluation sends. With none, the broker names a fresh framework result
+        path in the caller's ``/tmp`` itself. A result under the caller's
+        ``/tmp`` is redirected to a private file of the broker's and relayed
+        back when the gate ends, because the caller's ``/tmp`` is not the gate
+        host's.
         """
         arguments = call.arguments
         output_argument = gates.benchmark_output_argument
@@ -550,6 +574,9 @@ class HostCommandBroker:
             if arguments:
                 raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
             return (), None
+        if not arguments:
+            host_file = _reserve_result_file()
+            return (output_argument, str(host_file)), (host_file, _framework_result_path())
         if len(arguments) != OUTPUT_ARGUMENT_COUNT or arguments[0] != output_argument:
             raise HostCommandBrokerError.invalid_gate_arguments(call.kind)
         kind = classify_benchmark_output(arguments[1])
