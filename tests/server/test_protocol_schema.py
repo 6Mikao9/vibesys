@@ -15,6 +15,7 @@ from server.api.protocol import ProtocolRequest, Response, ServerMessage
 from server.api.schema import (
     fully_populated_response,
     host_helper_json_schema,
+    host_helper_typescript,
     protocol_json_schema,
     require_supported_response_payload_schema,
     require_supported_run_event_schema,
@@ -38,6 +39,7 @@ RESPONSE_PAYLOAD_FIXTURE_PATH = Path(
     "clients/backend-client/src/generated/response-payload.fixture.json"
 )
 RUN_EVENT_MODULE_PATH = Path("clients/backend-client/src/generated/run-event.schema.ts")
+HOST_HELPER_MODULE_PATH = Path("clients/backend-client/src/generated/host-helper.schema.ts")
 
 # The public alias of every tagged union the protocol publishes. A member model
 # is only reachable through one of these, which is why the exported schema may
@@ -97,6 +99,10 @@ def test_committed_response_payload_fixture_is_a_real_server_model_dump() -> Non
 
 def test_committed_run_event_module_matches_python_contract() -> None:
     assert RUN_EVENT_MODULE_PATH.read_text() == run_event_typescript()
+
+
+def test_committed_host_helper_module_matches_python_contract() -> None:
+    assert HOST_HELPER_MODULE_PATH.read_text() == host_helper_typescript()
 
 
 @pytest.mark.parametrize(

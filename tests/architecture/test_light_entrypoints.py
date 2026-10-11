@@ -35,7 +35,6 @@ LIGHT_ENTRYPOINTS = (
     "entrypoints.examples",
     "entrypoints.instances",
     "entrypoints.tasks",
-    "entrypoints.stdio_bridge",
     "entrypoints.detached_run",
     "entrypoints.host_helper",
 )
@@ -52,7 +51,6 @@ ALLOWED_FIRST_PARTY = (
     "entrypoints.example_catalog",
     "entrypoints.instances",
     "entrypoints.tasks",
-    "entrypoints.stdio_bridge",
     "entrypoints.detached_run",
     "entrypoints.host_helper",
     "server",
@@ -64,7 +62,6 @@ ALLOWED_FIRST_PARTY = (
     "server.instances",
     "server.registry",
     "server.stdio_bridge",
-    "server.stdio_bridge_report",
     "vs_sim",
     "vs_project",
 )

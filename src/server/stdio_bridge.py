@@ -25,6 +25,8 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Protocol
 
+from server.host_api import ChannelEnd, ChannelEndOutcome
+
 if TYPE_CHECKING:
     from vs_sim.api import Connection, Threads
 
@@ -59,39 +61,16 @@ class EndReason(StrEnum):
     """Any other I/O error."""
 
 
-class BridgeOutcome(StrEnum):
-    """How one relay ended; each value has its own exit status (:data:`EXIT_STATUS`)."""
-
-    CLIENT_CLOSED = "client_closed"
-    """Stdin reached end of stream or stdout was closed: the client went away."""
-    SERVER_CLOSED = "server_closed"
-    """The server closed the connection; everything it sent was relayed first."""
-    RUN_GONE = "run_gone"
-    """Nothing listens at the socket path (no file, or a stale one): the run is not there."""
-    CONNECT_DENIED = "connect_denied"
-    """The socket exists but this user may not connect to it."""
-    CONNECT_FAILED = "connect_failed"
-    """Connecting failed another way, including the connect deadline running out."""
-    SERVER_STALLED = "server_stalled"
-    """A write toward the server made no progress within the write deadline."""
-    CLIENT_STALLED = "client_stalled"
-    """A write toward stdout made no progress within the write deadline."""
-    SERVER_FAILED = "server_failed"
-    """Reading from or writing to the socket failed with an error other than a close."""
-    CLIENT_FAILED = "client_failed"
-    """Reading stdin or writing stdout failed with an error other than a close."""
-
-
-EXIT_STATUS: Final[dict[BridgeOutcome, int]] = {
-    BridgeOutcome.CLIENT_CLOSED: 0,
-    BridgeOutcome.SERVER_CLOSED: 3,
-    BridgeOutcome.RUN_GONE: 4,
-    BridgeOutcome.CONNECT_DENIED: 5,
-    BridgeOutcome.CONNECT_FAILED: 6,
-    BridgeOutcome.SERVER_STALLED: 7,
-    BridgeOutcome.CLIENT_STALLED: 8,
-    BridgeOutcome.SERVER_FAILED: 9,
-    BridgeOutcome.CLIENT_FAILED: 10,
+EXIT_STATUS: Final[dict[ChannelEndOutcome, int]] = {
+    ChannelEndOutcome.CLIENT_CLOSED: 0,
+    ChannelEndOutcome.SERVER_CLOSED: 3,
+    ChannelEndOutcome.RUN_GONE: 4,
+    ChannelEndOutcome.CONNECT_DENIED: 5,
+    ChannelEndOutcome.CONNECT_FAILED: 6,
+    ChannelEndOutcome.SERVER_STALLED: 7,
+    ChannelEndOutcome.CLIENT_STALLED: 8,
+    ChannelEndOutcome.SERVER_FAILED: 9,
+    ChannelEndOutcome.CLIENT_FAILED: 10,
 }
 """Process exit status per outcome. 1 stays an uncaught error and 2 a usage error."""
 
@@ -153,20 +132,20 @@ class RelayState:
 
     client_write_since: float | None = None
     server_write_since: float | None = None
-    outcome: BridgeOutcome | None = None
+    outcome: ChannelEndOutcome | None = None
 
 
 _STALLED: Final = {
-    Peer.CLIENT: BridgeOutcome.CLIENT_STALLED,
-    Peer.SERVER: BridgeOutcome.SERVER_STALLED,
+    Peer.CLIENT: ChannelEndOutcome.CLIENT_STALLED,
+    Peer.SERVER: ChannelEndOutcome.SERVER_STALLED,
 }
 _CLOSED: Final = {
-    Peer.CLIENT: BridgeOutcome.CLIENT_CLOSED,
-    Peer.SERVER: BridgeOutcome.SERVER_CLOSED,
+    Peer.CLIENT: ChannelEndOutcome.CLIENT_CLOSED,
+    Peer.SERVER: ChannelEndOutcome.SERVER_CLOSED,
 }
 _FAILED: Final = {
-    Peer.CLIENT: BridgeOutcome.CLIENT_FAILED,
-    Peer.SERVER: BridgeOutcome.SERVER_FAILED,
+    Peer.CLIENT: ChannelEndOutcome.CLIENT_FAILED,
+    Peer.SERVER: ChannelEndOutcome.SERVER_FAILED,
 }
 
 
@@ -181,7 +160,7 @@ def _with_pending(state: RelayState, peer: Peer, since: float | None) -> RelaySt
     return replace(state, server_write_since=since)
 
 
-def ending(event: Ended) -> BridgeOutcome | None:
+def ending(event: Ended) -> ChannelEndOutcome | None:
     """The outcome a side's end decides, or ``None`` when it decides nothing yet.
 
     A write toward the server that finds it closed is not the end: the server may have
@@ -327,13 +306,17 @@ class ClientStreams:
 class BridgeResult:
     """How the relay ended, with a human-readable detail for the error line."""
 
-    outcome: BridgeOutcome
+    outcome: ChannelEndOutcome
     detail: str
 
     @property
     def exit_status(self) -> int:
         """The process exit status for this outcome."""
         return EXIT_STATUS[self.outcome]
+
+    def channel_end(self) -> ChannelEnd:
+        """The ``ChannelEnd`` line a relayed channel writes when its status is not ``0``."""
+        return ChannelEnd(outcome=self.outcome, exit_status=self.exit_status, detail=self.detail)
 
 
 class _Relay:
@@ -369,7 +352,7 @@ class _Relay:
                 return
             self.report(WriteFinished(sink_peer))
 
-    def supervise(self) -> BridgeOutcome:
+    def supervise(self) -> ChannelEndOutcome:
         """Wait until the fold decides an outcome, ticking at each write deadline."""
         with self._cond:
             while self._state.outcome is None:
@@ -381,22 +364,22 @@ class _Relay:
 
 
 _DETAIL: Final = {
-    BridgeOutcome.CLIENT_CLOSED: "the client closed its side",
-    BridgeOutcome.SERVER_CLOSED: "the server closed the connection",
-    BridgeOutcome.SERVER_STALLED: "the server read nothing for {deadline:g}s",
-    BridgeOutcome.CLIENT_STALLED: "stdout was not drained for {deadline:g}s",
-    BridgeOutcome.SERVER_FAILED: "the control socket failed",
-    BridgeOutcome.CLIENT_FAILED: "stdin or stdout failed",
+    ChannelEndOutcome.CLIENT_CLOSED: "the client closed its side",
+    ChannelEndOutcome.SERVER_CLOSED: "the server closed the connection",
+    ChannelEndOutcome.SERVER_STALLED: "the server read nothing for {deadline:g}s",
+    ChannelEndOutcome.CLIENT_STALLED: "stdout was not drained for {deadline:g}s",
+    ChannelEndOutcome.SERVER_FAILED: "the control socket failed",
+    ChannelEndOutcome.CLIENT_FAILED: "stdin or stdout failed",
 }
 
 
-def connect_outcome(error: OSError) -> BridgeOutcome:
+def connect_outcome(error: OSError) -> ChannelEndOutcome:
     """Classify a failed connect: the run is gone, access is denied, or the transport broke."""
     if isinstance(error, (ConnectionRefusedError, FileNotFoundError)):
-        return BridgeOutcome.RUN_GONE
+        return ChannelEndOutcome.RUN_GONE
     if isinstance(error, PermissionError):
-        return BridgeOutcome.CONNECT_DENIED
-    return BridgeOutcome.CONNECT_FAILED
+        return ChannelEndOutcome.CONNECT_DENIED
+    return ChannelEndOutcome.CONNECT_FAILED
 
 
 def dial(
