@@ -225,12 +225,23 @@ persisted but not streamed, and not computed anywhere.
   `QuotaPausedData`/`QuotaResumedData`/`QuotaAbandonedData`,
   `ProviderSwitchedData`.
 - **Gate lifecycle**: `GateStartedData`/`GateFinishedData` (gate, recipe,
-  reused, metric, value, unit, output tail). No duration field.
+  reused, metric, value, unit, output tail). No duration field. For the
+  dynamic engine's own accuracy/benchmark gates specifically, `round_label`
+  now follows the same `round-{sequence}` convention as `RoundFinishedData`
+  (`DynamicWorkstream.sequence` is unique and stable per workstream), so these
+  two events are parseable back to their owning workstream; before this PR,
+  that path always emitted `round_label=None`. Other producers of
+  `GateStartedData`/`GateFinishedData` are unaffected.
 - **Round outcomes**: `RoundFinishedData` (attempts, judge verdict,
   `perf_metric`/`perf_unit`, whether profiling was skipped). This is also
   where a profiler's headline metric surfaces; see the profiler bullet
   below.
-- **Judge and benchmark results**: `JudgeResultData`, `BenchmarkResultData`.
+- **Judge results, correlated to their round**: `JudgeResultData` (verdict,
+  analysis, feedback, `skip_reason`, `implementer_outcome`), emitted once per
+  review assessment, whether a review ran (`pass`/`fail`) or was skipped
+  (`blocked`/`unchanged`/`not_due`). **Correction from the first draft:** this
+  bullet previously also listed `BenchmarkResultData` as already streamed;
+  it is not, see "does not exist anywhere" below.
 - **Live per-workstream retry-budget diagnostics.** `WorkstreamAttemptData`
   (`hypothesis_id`, `attempt`, `attempt_limit`, `refunded`, `last_error`,
   `setup_failure`, `repeated_error`) is emitted whenever `run/plugin.py`'s
@@ -345,6 +356,14 @@ persisted but not streamed, and not computed anywhere.
 
 ### Does not exist anywhere
 
+- **`BenchmarkResultData` as an event anyone emits.** Declared in both
+  `vibesys.events` and `server.events`' unions, and constructed directly in
+  `tests/server/test_events.py`, but no production call site builds one; grep
+  confirms the only non-test, non-definition hits are zero. The first draft of
+  this doc listed it under "already streamed" alongside `JudgeResultData`;
+  that was wrong. A benchmark gate's metric reaches the UI through
+  `GateFinishedData` (gate, recipe, metric, value, unit), which is the event
+  that is actually emitted.
 - **VibeSys's own throughput.** No tokens-per-second or any rate computation
   for VibeSys's own agent activity exists anywhere, confirmed against
   production code and against this PR's own prototype fold
@@ -360,7 +379,13 @@ persisted but not streamed, and not computed anywhere.
   polling exists anywhere in `vs_sandbox`/`vs_agent`/`src/vibesys`.
 - **Typed workstream/attempt correlation.** `round_label`/`agent_kind` on the
   event envelope are free text, not references; which workstream an
-  agent-local event belongs to is not a parseable field anywhere today.
+  agent-local event belongs to is not a parseable field anywhere today. One
+  narrower case is now an exception: the dynamic engine's own accuracy and
+  benchmark gates set `round_label` to `round-{sequence}`, the same convention
+  `RoundFinishedData` already used, so those two events in particular are
+  parseable back to their workstream (see "Gate lifecycle" above). The general
+  concern, a declared `workstream_id`/`attempt_id` reference type on every
+  event, remains unresolved.
 - **Tool output size, and real tool-call identity.** `ToolResultData` has no
   byte-size field; `call_id` is a synthetic UUID, paired to its call by a
   per-tool-name FIFO queue, not the provider's real id.
@@ -636,6 +661,8 @@ SSE, the real gateway would carry it over its existing websocket). Frame kinds:
 | `workstream-attempt` | workstreamId, live retry-budget diagnostics: attempt, attemptLimit, refunded, lastError, setupFailure, repeatedError | the live-engine slice of gap 1 (`WorkstreamAttemptData`) |
 | `workstream-activity` | workstreamId, live agent activity: mode, summary, tool | the real-time "is this workstream genuinely busy" signal (`AgentExecutionActivityData`), not a new gap |
 | `status` | run status: active / completed | run lifecycle |
+| `operator-action` | one operator-intervention timeline entry: `action` (mirrors `RunControlTransitionKind`), `text`, `agentKind`, `roundLabel`, `executionId`, `clientId`, `timestamp` | the operator-intervention timeline (pause/resume/stop/steer) |
+| `judge-result` | one review assessment: `id`, `sequence`, `workstreamId`, `verdict` (pass/fail/skipped), `analysis`, `feedback`, `skipReason` (blocked/unchanged/not_due, required iff `verdict` is skipped), `implementerOutcome` | judge and gate review transparency: mirrors `JudgeResultData`, upserted by `id` like `measurement` |
 
 Every frame carries a monotonic `seq` for ordering and idempotent dedup. Frames
 are **deltas, not snapshots**: a workstream that moves `IMPLEMENTING ->
@@ -669,8 +696,8 @@ validates; the fold and the view operate on typed values only. This mirrors
 
 `foldCampaignFrame(state, frame): FoldState` is a pure reducer: `state + event
 -> new state`, no I/O, no clock, no React. `FoldState` holds the growing
-`CampaignRecord`, the run status, the per-workstream token spend, and the last
-applied `seq`.
+`CampaignRecord`, the run status, the per-workstream token spend, the
+append-only operator-intervention timeline, and the last applied `seq`.
 
 ### Correctness properties
 
@@ -685,6 +712,14 @@ The reducer guarantees these properties, and the tests assert them:
 - Replaying `framesFromRecord(R)` through the fold reconstructs `R`. The frame
   builder and the fold are inverses; this is the central round-trip property and
   the thing that makes the prototype a faithful reference for the real backend.
+- The operator-intervention timeline (`FoldState.operatorActions`) is
+  append-only and, like token spend and run status, is not part of the
+  reconstructed `CampaignRecord`: it has no finished-record counterpart to
+  round-trip against. `operator-timeline.ts`'s `dwellTime` and
+  `steeredPromptTail` are pure selectors over it, taking their reference point
+  (`now`, a list of known executions) as an explicit argument rather than
+  reading a clock or a live subscription, so they are tested with fixed data
+  and never sleep.
 
 Keeping the fold pure is what lets the whole live path be tested with generated
 frame sequences and no sleeps (see "Verification").
@@ -881,6 +916,21 @@ expand-migrate-contract order, each behind the existing emission chokepoints
    `agent-upsert`'s `workstreamIds` by aggregating (role, workstream_id)
    pairs observed in the event stream itself, once step 2 makes that id
    available everywhere, not just on async-operation events.
+5. **Attribute operator-intervention events to their issuing connection.**
+   Done in this PR: `Request.client_id` (`server.api.protocol.Request`) was
+   previously read only to echo back on the `Response`, then discarded before
+   the pause/resume/stop/steer call it triggered. `RunControlTransition`,
+   `RunControlChannel`, `RunApi`, `RunController`, and `CoreEvent`/`RunEvent`
+   now all carry it through to the `CONTROL`/`RUN_STATUS_CHANGED` wire event
+   (`None` for an ATTACHED-triggered or boundary-landing transition, which has
+   no requesting client; see `CoreEventType`'s request-time-vs-boundary-
+   consume-time distinction). What remains: projecting these events into the
+   `operator-action` frame added in this PR from a live stream rather than the
+   synthetic demo timeline `framesFromRecord` emits today, and resolving a
+   client's own `client_id` on the web frontend once it issues control
+   requests itself (#815), so `OperatorActionLog`'s "this tab" case has
+   something to compare against instead of rendering every attributed entry's
+   raw id.
 
 Also surfaced by this inventory, not yet scheduled against the four steps
 above:
@@ -947,6 +997,28 @@ the client does not need to change when the source does.
   a regression case for a workstream that starts after the latest measurement
   elsewhere in the run), and PARKED's non-terminal liveness, over the campaign
   fixture and constructed frame sequences, with no sleeps.
+- `campaign-frames.test.ts` also covers the `operator-action` frame: every
+  `OperatorAction` value parses, and an invalid action or an unexpected key is
+  rejected and named.
+- `campaign-fold.test.ts` also covers the operator-intervention timeline:
+  entries accumulate oldest first, they are absent from the reconstructed
+  record (like token spend and status), and a replayed record's synthesized
+  demo timeline carries at least one `operator-action` frame.
+- `campaign-frames.test.ts` also covers the `judge-result` frame: every
+  verdict and skip reason parses, a skipped verdict with no skip reason is
+  rejected, a non-skipped verdict carrying one is rejected, and an unexpected
+  key is rejected and named.
+- `campaign-fold.test.ts` also covers judge results: frames upsert by `id`
+  (unlike the append-only operator timeline), and a replayed record carries
+  every judge result from the fixture through its live demo timeline.
+- `operator-timeline.test.ts`: `dwellTime` finds the most recent unresolved
+  pause or stop and clears once it resolves (`resumed`/`stopped`), ignores
+  steer entries, tracks only the latest wait rather than an earlier resolved
+  one, and escalates past the one-hour threshold; `formatDwell` and
+  `dwellMessage` render the expected text; `steeredPromptTail` joins a
+  `steer_consumed` entry to the matching execution by id and returns null for
+  no `executionId`, no match, or a non-`steer_consumed` entry. All of this is
+  driven by fixed timestamps and an explicit `now`, never a real clock.
 - `e2e/campaign-live.spec.ts`: against the dev stream, measurement count and the
   chart grow while the run is active, status goes active -> completed, the
   final best-goodput value renders once the run settles, and scrubbing back

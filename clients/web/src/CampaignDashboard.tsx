@@ -1,6 +1,13 @@
 import type {CSSProperties, JSX, KeyboardEvent} from 'react';
-import type {CampaignRecord, TurnMessage} from './campaign-record.js';
+import type {FrameOperatorAction, OperatorAction} from './campaign-frames.js';
+import type {
+  CampaignRecord,
+  JudgeSkipReason,
+  JudgeVerdict,
+  TurnMessage,
+} from './campaign-record.js';
 import type {CampaignViewModel} from './campaign-view.js';
+import {dwellMessage, dwellTime} from './operator-timeline.js';
 
 interface CampaignDashboardProps {
   readonly scenario: CampaignRecord;
@@ -88,6 +95,10 @@ function CampaignHeader({
             }
           />{' '}
           Campaign trace <span className="state-divider">·</span> {campaign.status}
+          <DwellIndicator
+            operatorActions={campaign.operatorActions}
+            latestTimestamp={campaign.latestTimestamp}
+          />
         </div>
         <button
           className="quiet-button"
@@ -99,6 +110,7 @@ function CampaignHeader({
           {campaign.view === 'dashboard' ? 'Objective view' : 'Dashboard view'}
         </button>
       </header>
+      <OperatorActionLog operatorActions={campaign.operatorActions} />
       <section className="hero-row">
         <div>
           <p className="eyebrow">
@@ -130,6 +142,81 @@ function CampaignHeader({
         </button>
       </nav>
     </>
+  );
+}
+
+/** The dwell-time callout, e.g. "Paused 6h 12m, waiting on an operator",
+ * shown next to the status chip while the run is paused, pausing, or
+ * stopping with no later resolution. Renders nothing otherwise. */
+function DwellIndicator({
+  operatorActions,
+  latestTimestamp,
+}: {
+  readonly operatorActions: readonly FrameOperatorAction[];
+  readonly latestTimestamp: string;
+}): JSX.Element | null {
+  const dwell = dwellTime(operatorActions, Date.parse(latestTimestamp));
+  if (dwell === null) return null;
+  return (
+    <>
+      <span className="state-divider">·</span>
+      <span className={dwell.severity === 'escalated' ? 'dwell-chip escalated' : 'dwell-chip'}>
+        {dwellMessage(dwell)}
+      </span>
+    </>
+  );
+}
+
+const OPERATOR_ACTION_LABEL: Record<OperatorAction, string> = {
+  pause_requested: 'Pause requested',
+  paused: 'Paused',
+  resumed: 'Resumed',
+  stop_requested: 'Stop requested',
+  stopped: 'Stopped',
+  steer_queued: 'Steer queued',
+  steer_consumed: 'Steer applied',
+};
+
+/** The id of this tab's own control-command connection, once one exists.
+ * The web client does not yet issue pause/resume/steer/stop requests itself
+ * (see #815), so there is no such id to compare against today; every
+ * attributed entry renders its raw `clientId` rather than "(this tab)". */
+function operatorClientLabel(clientId: string | null): JSX.Element | null {
+  if (clientId === null) return null;
+  return (
+    <span className="operator-action-client" title="Issuing connection">
+      {clientId}
+    </span>
+  );
+}
+
+/** A compact, most-recent-last log of operator interventions (pause, resume,
+ * stop, steer) near the status chip. Renders nothing when the campaign has
+ * none, which is always true for a static fixture replay
+ * (`useCampaignHistory`): this timeline only exists on the live fold. */
+function OperatorActionLog({
+  operatorActions,
+}: {
+  readonly operatorActions: readonly FrameOperatorAction[];
+}): JSX.Element | null {
+  if (operatorActions.length === 0) return null;
+  const recent = operatorActions.slice(-4);
+  return (
+    <ul className="operator-action-log" aria-label="Operator interventions">
+      {recent.map(entry => (
+        <li
+          className="operator-action-entry"
+          key={`${entry.timestamp}-${entry.action}-${entry.executionId ?? ''}-${entry.clientId ?? ''}`}
+        >
+          <span className="operator-action-label">{OPERATOR_ACTION_LABEL[entry.action]}</span>
+          {entry.text !== '' && <span className="operator-action-text">“{entry.text}”</span>}
+          {operatorClientLabel(entry.clientId)}
+          <time className="operator-action-time" dateTime={entry.timestamp}>
+            {formatTimestamp(entry.timestamp)}
+          </time>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -1306,8 +1393,65 @@ function WorkstreamDialog({
             </article>
           ))}
         </div>
+        <JudgeResultSection scenario={scenario} workstreamId={workstream.id} />
       </section>
     </div>
+  );
+}
+
+const JUDGE_VERDICT_LABEL: Record<JudgeVerdict, string> = {
+  pass: 'Passed review',
+  fail: 'Failed review',
+  skipped: 'Review skipped',
+};
+
+const JUDGE_SKIP_REASON_LABEL: Record<JudgeSkipReason, string> = {
+  blocked: 'Implementer was blocked',
+  unchanged: 'Candidate revision was unchanged',
+  not_due: 'Not due for review this attempt',
+};
+
+/** The judge/review assessment of each attempt at this workstream, oldest
+ * first: a verdict and the judge's analysis and feedback when a review ran,
+ * or a skip reason when it did not. Renders nothing when the workstream has
+ * no assessments yet. */
+function JudgeResultSection({
+  scenario,
+  workstreamId,
+}: {
+  readonly scenario: CampaignRecord;
+  readonly workstreamId: string;
+}): JSX.Element | null {
+  const results = scenario.judgeResults.filter(item => item.workstreamId === workstreamId);
+  if (results.length === 0) return null;
+  return (
+    <>
+      <h3>
+        Review history{' '}
+        <small>
+          {results.length} assessment{results.length === 1 ? '' : 's'}
+        </small>
+      </h3>
+      <ol className="detail-judge-results">
+        {results.map(item => (
+          <li key={item.id} className={`judge-result-entry judge-result-${item.verdict}`}>
+            <div className="judge-result-head">
+              <span className={`outcome-chip chip-judge-${item.verdict}`}>
+                {JUDGE_VERDICT_LABEL[item.verdict]}
+              </span>
+              <span className="judge-result-implementer">
+                Implementer: {item.implementerOutcome}
+              </span>
+            </div>
+            {item.skipReason !== null && (
+              <p className="judge-result-skip-reason">{JUDGE_SKIP_REASON_LABEL[item.skipReason]}</p>
+            )}
+            {item.analysis !== '' && <p className="judge-result-analysis">{item.analysis}</p>}
+            {item.feedback !== '' && <p className="judge-result-feedback">{item.feedback}</p>}
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 

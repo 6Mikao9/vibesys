@@ -11,7 +11,12 @@
  * the exact interleaving only affects the live drama, not correctness.
  */
 
-import type {CampaignFrame, CampaignHeader, FrameWorkstream} from './campaign-frames.js';
+import type {
+  CampaignFrame,
+  CampaignHeader,
+  FrameOperatorAction,
+  FrameWorkstream,
+} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 
 function headerOf(record: CampaignRecord): CampaignHeader {
@@ -83,6 +88,98 @@ function isRetryShowcaseWorkstream(
   index: number,
 ): boolean {
   return index === 0 && workstream.lastSequence > workstream.firstSequence;
+}
+
+/** Place each workstream's judge results in its span, in proportion to
+ * `sequence`'s position in the workstream's `[firstSequence, lastSequence]`
+ * interval: the same campaign-order basis `validateJudgeResults` enforces. */
+function judgeResultTimeline(record: CampaignRecord): TimedFrame[] {
+  const workstreams = new Map(record.workstreams.map(workstream => [workstream.id, workstream]));
+  const timed: TimedFrame[] = [];
+  for (const judgeResult of record.judgeResults) {
+    const workstream = workstreams.get(judgeResult.workstreamId);
+    if (workstream === undefined) continue;
+    const started = Date.parse(workstream.startedAt);
+    const finished = Date.parse(workstream.finishedAt);
+    const span = workstream.lastSequence - workstream.firstSequence;
+    const fraction = span <= 0 ? 1 : (judgeResult.sequence - workstream.firstSequence) / span;
+    timed.push({
+      at: started + (finished - started) * fraction,
+      make: seq => ({kind: 'judge-result', seq, judgeResult}),
+    });
+  }
+  return timed;
+}
+
+/** A deterministic operator-intervention timeline, placed across the first
+ * workstream's span so the demo has something on the dashboard's
+ * operator-action log and dwell indicator. There is no `agent-execution`
+ * frame kind yet (see the design doc's "Backend path"), so the
+ * `steer_consumed` entry below carries no `executionId`: fabricating one with
+ * no execution to join against would make the steered-prompt join always
+ * report "no match", which is more misleading than showing none. */
+function operatorActionTimeline(record: CampaignRecord): TimedFrame[] {
+  const first = record.workstreams[0];
+  if (first === undefined) return [];
+  const started = Date.parse(first.startedAt);
+  const finished = Date.parse(first.finishedAt);
+  const span = finished - started;
+  const entries: Array<{at: number} & FrameOperatorAction> = [
+    {
+      at: started + span * 0.2,
+      action: 'pause_requested',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: new Date(started + span * 0.2).toISOString(),
+    },
+    {
+      at: started + span * 0.24,
+      action: 'paused',
+      text: '',
+      agentKind: 'implementer',
+      roundLabel: 'round-1',
+      executionId: null,
+      clientId: null,
+      timestamp: new Date(started + span * 0.24).toISOString(),
+    },
+    {
+      at: started + span * 0.4,
+      action: 'resumed',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: new Date(started + span * 0.4).toISOString(),
+    },
+    {
+      at: started + span * 0.6,
+      action: 'steer_queued',
+      text: 'Focus on reducing tail latency before the next checkpoint.',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-b',
+      timestamp: new Date(started + span * 0.6).toISOString(),
+    },
+    {
+      at: started + span * 0.62,
+      action: 'steer_consumed',
+      text: '',
+      agentKind: 'implementer',
+      roundLabel: 'round-2',
+      executionId: null,
+      clientId: null,
+      timestamp: new Date(started + span * 0.62).toISOString(),
+    },
+  ];
+  return entries.map(({at, ...entry}) => ({
+    at,
+    make: seq => ({kind: 'operator-action', seq, ...entry}),
+  }));
 }
 
 export function framesFromRecord(record: CampaignRecord): CampaignFrame[] {
@@ -174,6 +271,8 @@ export function framesFromRecord(record: CampaignRecord): CampaignFrame[] {
       at: Date.parse(measurement.timestamp),
       make: seq => ({kind: 'measurement', seq, measurement}),
     });
+  timed.push(...operatorActionTimeline(record));
+  timed.push(...judgeResultTimeline(record));
 
   // Stable sort by time; ties keep insertion order, which already puts a
   // workstream's in-flight upsert before its settled one (finished >= started).

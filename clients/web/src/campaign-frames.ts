@@ -78,6 +78,85 @@ export interface WorkstreamActivityState {
   readonly tool: string | null;
 }
 
+/** Mirrors the backend `RunControlTransitionKind` StrEnum (see
+ * `vs_runtime.api.infrastructure.RunControlTransitionKind`). A hand-written
+ * copy until the backend emits these frames; see the design doc's "Backend
+ * path". `steer_consumed`, `paused`, and `stopped` land at an invocation
+ * boundary and may carry `agentKind`/`roundLabel`/`executionId`; the other
+ * four are request-time and never do. */
+export type OperatorAction =
+  | 'steer_queued'
+  | 'pause_requested'
+  | 'resumed'
+  | 'stop_requested'
+  | 'steer_consumed'
+  | 'paused'
+  | 'stopped';
+
+const OPERATOR_ACTIONS: readonly OperatorAction[] = [
+  'steer_queued',
+  'pause_requested',
+  'resumed',
+  'stop_requested',
+  'steer_consumed',
+  'paused',
+  'stopped',
+];
+
+/**
+ * Mirrors the backend `JudgeResultData.verdict` Literal. Local to frame
+ * parsing; the canonical, externally-consumed alias lives in
+ * `replay-scenario.ts` and is re-exported via `campaign-record.ts`.
+ */
+type JudgeVerdict = 'pass' | 'fail' | 'skipped';
+const JUDGE_VERDICTS: readonly JudgeVerdict[] = ['pass', 'fail', 'skipped'];
+
+/**
+ * Mirrors the backend `JudgeResultData.skip_reason` Literal. Local to frame
+ * parsing; the canonical, externally-consumed alias lives in
+ * `replay-scenario.ts` and is re-exported via `campaign-record.ts`.
+ */
+type JudgeSkipReason = 'blocked' | 'unchanged' | 'not_due';
+const JUDGE_SKIP_REASONS: readonly JudgeSkipReason[] = ['blocked', 'unchanged', 'not_due'];
+
+/**
+ * One workstream's review assessment: a judge verdict when a review ran, or a
+ * skip reason (with empty `analysis`/`feedback`) when it did not. Mirrors the
+ * backend `JudgeResultData` payload; `sequence` is the attempt's position in
+ * the campaign order, consistent with `FrameWorkstream.firstSequence`/
+ * `lastSequence` and `FrameMeasurement.sequence`.
+ */
+export interface FrameJudgeResult {
+  readonly id: string;
+  readonly sequence: number;
+  readonly workstreamId: string;
+  readonly verdict: JudgeVerdict;
+  readonly analysis: string;
+  readonly feedback: string;
+  readonly skipReason: JudgeSkipReason | null;
+  readonly implementerOutcome: string;
+}
+
+/**
+ * One entry on the operator-intervention timeline. Mirrors the fields carried
+ * on `server.api.events.RunEvent` for a `CONTROL`/`RUN_STATUS_CHANGED` wire
+ * event: `text` is the steer prompt (non-empty only for `steer_queued`),
+ * `clientId` is the issuing frontend connection's stable id (null for a
+ * boundary-landing transition, which has no requesting client), and
+ * `agentKind`/`roundLabel`/`executionId` locate the invocation a
+ * boundary-landing transition landed on (null for a request-time
+ * transition).
+ */
+export interface FrameOperatorAction {
+  readonly action: OperatorAction;
+  readonly text: string;
+  readonly agentKind: string | null;
+  readonly roundLabel: string | null;
+  readonly executionId: string | null;
+  readonly clientId: string | null;
+  readonly timestamp: string;
+}
+
 /**
  * A workstream delta. Unlike the finished-record shape, a live workstream may be
  * in flight: `active` is true, and `finishedAt`/`outcome`/`lastSequence` are not
@@ -121,7 +200,9 @@ export type CampaignFrame =
       readonly workstreamId: string;
       readonly activity: WorkstreamActivityState;
     }
-  | {readonly kind: 'status'; readonly seq: number; readonly status: 'active' | 'completed'};
+  | {readonly kind: 'status'; readonly seq: number; readonly status: 'active' | 'completed'}
+  | ({readonly kind: 'operator-action'; readonly seq: number} & FrameOperatorAction)
+  | {readonly kind: 'judge-result'; readonly seq: number; readonly judgeResult: FrameJudgeResult};
 
 type CampaignFrameKind = CampaignFrame['kind'];
 
@@ -134,6 +215,8 @@ const FRAME_KINDS: readonly CampaignFrameKind[] = [
   'workstream-attempt',
   'workstream-activity',
   'status',
+  'operator-action',
+  'judge-result',
 ];
 
 class FrameError extends Error {}
@@ -178,6 +261,20 @@ type FrameObject = Record<string, unknown> & {
   mode?: unknown;
   summary?: unknown;
   tool?: unknown;
+  action?: unknown;
+  text?: unknown;
+  agentKind?: unknown;
+  roundLabel?: unknown;
+  executionId?: unknown;
+  clientId?: unknown;
+  timestamp?: unknown;
+  judgeResult?: unknown;
+  sequence?: unknown;
+  verdict?: unknown;
+  analysis?: unknown;
+  feedback?: unknown;
+  skipReason?: unknown;
+  implementerOutcome?: unknown;
 };
 
 function asObject(value: unknown, path: string): FrameObject {
@@ -219,6 +316,14 @@ function nullableString(value: unknown, path: string): string | null {
 
 function nullableNumber(value: unknown, path: string): number | null {
   return value === null ? null : asNumber(value, path);
+}
+
+function nullableMember<T extends string>(
+  value: unknown,
+  path: string,
+  allowed: readonly T[],
+): T | null {
+  return value === null ? null : member(value, path, allowed);
 }
 
 function parseWorkstream(value: unknown, path: string): FrameWorkstream {
@@ -281,6 +386,36 @@ function parseWorkstreamActivity(value: unknown, path: string): WorkstreamActivi
     mode: member(object.mode, `${path}.mode`, ACTIVITY_MODES),
     summary: asString(object.summary, `${path}.summary`),
     tool: nullableString(object.tool, `${path}.tool`),
+  };
+}
+
+function parseJudgeResult(value: unknown, path: string): FrameJudgeResult {
+  const object = asObject(value, path);
+  exactKeys(object, path, [
+    'id',
+    'sequence',
+    'workstreamId',
+    'verdict',
+    'analysis',
+    'feedback',
+    'skipReason',
+    'implementerOutcome',
+  ]);
+  const verdict = member(object.verdict, `${path}.verdict`, JUDGE_VERDICTS);
+  const skipReason = nullableMember(object.skipReason, `${path}.skipReason`, JUDGE_SKIP_REASONS);
+  if (verdict === 'skipped' && skipReason === null)
+    fail(`${path}.skipReason`, 'required when verdict is skipped');
+  if (verdict !== 'skipped' && skipReason !== null)
+    fail(`${path}.skipReason`, 'must be null unless verdict is skipped');
+  return {
+    id: asString(object.id, `${path}.id`),
+    sequence: asNumber(object.sequence, `${path}.sequence`),
+    workstreamId: asString(object.workstreamId, `${path}.workstreamId`),
+    verdict,
+    analysis: asString(object.analysis, `${path}.analysis`),
+    feedback: asString(object.feedback, `${path}.feedback`),
+    skipReason,
+    implementerOutcome: asString(object.implementerOutcome, `${path}.implementerOutcome`),
   };
 }
 
@@ -350,6 +485,34 @@ export function parseCampaignFrame(value: unknown): CampaignFrame {
         seq,
         status: member(object.status, '$.status', ['active', 'completed'] as const),
       };
+    }
+    case 'operator-action': {
+      exactKeys(object, '$', [
+        'kind',
+        'seq',
+        'action',
+        'text',
+        'agentKind',
+        'roundLabel',
+        'executionId',
+        'clientId',
+        'timestamp',
+      ]);
+      return {
+        kind,
+        seq,
+        action: member(object.action, '$.action', OPERATOR_ACTIONS),
+        text: asString(object.text, '$.text'),
+        agentKind: nullableString(object.agentKind, '$.agentKind'),
+        roundLabel: nullableString(object.roundLabel, '$.roundLabel'),
+        executionId: nullableString(object.executionId, '$.executionId'),
+        clientId: nullableString(object.clientId, '$.clientId'),
+        timestamp: asString(object.timestamp, '$.timestamp'),
+      };
+    }
+    case 'judge-result': {
+      exactKeys(object, '$', ['kind', 'seq', 'judgeResult']);
+      return {kind, seq, judgeResult: parseJudgeResult(object.judgeResult, '$.judgeResult')};
     }
   }
 }

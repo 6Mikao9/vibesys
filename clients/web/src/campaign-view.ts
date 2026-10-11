@@ -1,4 +1,8 @@
-import type {WorkstreamActivityState, WorkstreamAttemptState} from './campaign-frames.js';
+import type {
+  FrameOperatorAction,
+  WorkstreamActivityState,
+  WorkstreamAttemptState,
+} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 
 export type CampaignView = 'dashboard' | 'objective';
@@ -29,6 +33,7 @@ export interface CampaignViewModel {
   readonly latestTimestamp: string;
   readonly metric: CampaignRecord['objective']['metrics'][number] | undefined;
   readonly metricId: string;
+  readonly operatorActions: readonly FrameOperatorAction[];
   readonly orderedMeasurements: CampaignRecord['measurements'];
   readonly playing: boolean;
   readonly pointIndex: number;

@@ -281,12 +281,23 @@ class SubprocessOutputData(EventPayload):
 
 
 class JudgeResultData(EventPayload):
-    """Verdict and feedback returned by the judge."""
+    """One workstream's review assessment: a judge verdict or a skip reason.
+
+    ``skipped`` means no judge turn ran this assessment (the workstream's own
+    correlation, carried by the event envelope's ``round_label``, is what
+    repeat assessments of the same workstream share); ``skip_reason`` then
+    names why. ``implementer_outcome`` is the implementer's own self-declared
+    readiness for this attempt, present regardless of whether a review ran.
+    It defaults to empty so a journal record written before this field
+    existed still parses; a reader should treat an empty string as unknown.
+    """
 
     kind: Literal["judge_result"] = "judge_result"
-    verdict: Literal["pass", "fail"]
-    feedback: str
-    attempt: int
+    verdict: Literal["pass", "fail", "skipped"]
+    analysis: str = ""
+    feedback: str = ""
+    skip_reason: Literal["blocked", "unchanged", "not_due"] | None = None
+    implementer_outcome: str = ""
 
 
 class BenchmarkResultData(EventPayload):
@@ -550,6 +561,12 @@ class CoreEvent(BaseModel):
     round_label: str | None = None
     agent_kind: str | None = None
     execution_id: str | None = None
+    # Stable identity of the issuing frontend connection, carried on
+    # request-time run-control transitions (see
+    # `vs_runtime.api.infrastructure.RunControlTransition`). ``None`` off that
+    # path, mirroring `server.api.protocol.Request.client_id`'s empty-string
+    # compatibility default.
+    client_id: str | None = None
     data: CoreEventData | None = None
 
 

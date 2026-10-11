@@ -17,7 +17,11 @@ import {
   initialFoldState,
   latestMoment,
 } from './campaign-fold.js';
-import type {WorkstreamActivityState, WorkstreamAttemptState} from './campaign-frames.js';
+import type {
+  FrameOperatorAction,
+  WorkstreamActivityState,
+  WorkstreamAttemptState,
+} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 import type {CampaignStream} from './campaign-stream.js';
 import type {
@@ -71,6 +75,7 @@ const EMPTY_RECORD: CampaignRecord = {
   agents: [],
   measurements: [],
   trajectories: [],
+  judgeResults: [],
 };
 
 function timelineBounds(record: CampaignRecord): {start: number; end: number} {
@@ -140,6 +145,7 @@ interface ReadonlyViewInputs {
   readonly source: CampaignRecord;
   readonly status: 'active' | 'completed';
   readonly connectionFreshness: ConnectionFreshness;
+  readonly operatorActions: readonly FrameOperatorAction[];
   readonly orderedMeasurements: CampaignRecord['measurements'];
   readonly timeline: {readonly start: number; readonly end: number};
   readonly workstreamTokenSpend: Readonly<Record<string, number>>;
@@ -157,6 +163,7 @@ function readOnlyView(inputs: ReadonlyViewInputs): CampaignViewReadonly {
     source,
     status,
     connectionFreshness,
+    operatorActions,
     orderedMeasurements,
     timeline,
     workstreamTokenSpend,
@@ -175,6 +182,7 @@ function readOnlyView(inputs: ReadonlyViewInputs): CampaignViewReadonly {
     metric:
       source.objective.metrics.find(item => item.id === ui.metricId) ?? source.objective.metrics[0],
     metricId: ui.metricId,
+    operatorActions,
     orderedMeasurements,
     playing: cursor.following,
     pointIndex: cursor.pointIndex,
@@ -253,6 +261,7 @@ export function useLiveCampaign(stream: CampaignStream): LiveCampaignState {
     source,
     status: fold.status,
     connectionFreshness,
+    operatorActions: fold.operatorActions,
     orderedMeasurements,
     timeline,
     workstreamTokenSpend,

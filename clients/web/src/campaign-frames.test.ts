@@ -30,6 +30,17 @@ const validActivity = {
   tool: 'run_benchmark',
 };
 
+const validJudgeResult = {
+  id: 'judge-1',
+  sequence: 1,
+  workstreamId: 'ws-1',
+  verdict: 'pass',
+  analysis: 'Candidate is correct.',
+  feedback: '',
+  skipReason: null,
+  implementerOutcome: 'nominated',
+};
+
 test('parses every frame kind', () => {
   expect(parseCampaignFrame({kind: 'campaign-init', seq: 1, header: {}}).kind).toBe(
     'campaign-init',
@@ -61,6 +72,131 @@ test('parses every frame kind', () => {
     }).kind,
   ).toBe('workstream-activity');
   expect(parseCampaignFrame({kind: 'status', seq: 8, status: 'completed'}).kind).toBe('status');
+  expect(
+    parseCampaignFrame({
+      kind: 'operator-action',
+      seq: 9,
+      action: 'pause_requested',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: 'tab-a',
+      timestamp: '2026-01-01T00:00:00Z',
+    }).kind,
+  ).toBe('operator-action');
+  expect(
+    parseCampaignFrame({kind: 'judge-result', seq: 10, judgeResult: validJudgeResult}).kind,
+  ).toBe('judge-result');
+});
+
+test('parses a skipped judge result for each skip reason', () => {
+  const reasons = ['blocked', 'unchanged', 'not_due'] as const;
+  for (const skipReason of reasons) {
+    const frame = parseCampaignFrame({
+      kind: 'judge-result',
+      seq: 1,
+      judgeResult: {
+        ...validJudgeResult,
+        verdict: 'skipped',
+        analysis: '',
+        feedback: '',
+        skipReason,
+      },
+    });
+    if (frame.kind !== 'judge-result') throw new Error('expected a judge-result frame');
+    expect(frame.judgeResult.skipReason).toBe(skipReason);
+  }
+});
+
+test('rejects a skipped verdict with no skip reason', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'judge-result',
+      seq: 1,
+      judgeResult: {...validJudgeResult, verdict: 'skipped', skipReason: null},
+    }),
+  ).toThrow(/\$\.judgeResult\.skipReason/);
+});
+
+test('rejects a non-skipped verdict carrying a skip reason', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'judge-result',
+      seq: 1,
+      judgeResult: {...validJudgeResult, verdict: 'pass', skipReason: 'blocked'},
+    }),
+  ).toThrow(/\$\.judgeResult\.skipReason/);
+});
+
+test('rejects an unexpected judge-result key and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'judge-result',
+      seq: 1,
+      judgeResult: {...validJudgeResult, extra: true},
+    }),
+  ).toThrow(/\$\.judgeResult\.extra/);
+});
+
+test('parses every operator action value', () => {
+  const actions = [
+    'steer_queued',
+    'pause_requested',
+    'resumed',
+    'stop_requested',
+    'steer_consumed',
+    'paused',
+    'stopped',
+  ] as const;
+  for (const action of actions) {
+    const frame = parseCampaignFrame({
+      kind: 'operator-action',
+      seq: 1,
+      action,
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: null,
+      timestamp: '2026-01-01T00:00:00Z',
+    });
+    if (frame.kind !== 'operator-action') throw new Error('expected an operator-action frame');
+    expect(frame.action).toBe(action);
+  }
+});
+
+test('rejects an invalid operator action and names the path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'operator-action',
+      seq: 1,
+      action: 'bogus',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: null,
+      timestamp: '2026-01-01T00:00:00Z',
+    }),
+  ).toThrow(/\$\.action/);
+});
+
+test('rejects an unexpected operator-action key and names it', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'operator-action',
+      seq: 1,
+      action: 'resumed',
+      text: '',
+      agentKind: null,
+      roundLabel: null,
+      executionId: null,
+      clientId: null,
+      timestamp: '2026-01-01T00:00:00Z',
+      extra: true,
+    }),
+  ).toThrow(/\$\.extra/);
 });
 
 test('rejects an unknown frame kind and names the path', () => {

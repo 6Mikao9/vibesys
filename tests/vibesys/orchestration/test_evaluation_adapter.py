@@ -206,6 +206,29 @@ def test_adapter_returns_semantic_results_and_events(tmp_path: Path) -> None:
         integration.close()
 
 
+def test_adapter_correlates_gate_events_with_the_caller_round(tmp_path: Path) -> None:
+    async def body(ctx: Run) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
+        accuracy = await ctx.evaluation.accuracy(ctx.workspaces.root, round_label="round-3")
+        benchmark = await ctx.evaluation.benchmark(
+            ctx.workspaces.root,
+            objectives=(BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),),
+            round_label="round-3",
+        )
+        return accuracy, benchmark
+
+    _, integration = _run(tmp_path, body)
+    try:
+        gate_events = [
+            event
+            for event in integration.events.read()
+            if event.type in {CoreEventType.GATE_STARTED, CoreEventType.GATE_FINISHED}
+        ]
+        assert len(gate_events) == 4
+        assert all(event.round_label == "round-3" for event in gate_events)
+    finally:
+        integration.close()
+
+
 def test_accuracy_receipt_round_trips_across_framework_snapshot(tmp_path: Path) -> None:
     async def body(ctx: Run) -> tuple[AccuracyEvaluation, AccuracyEvaluation]:
         first = await ctx.evaluation.accuracy(ctx.workspaces.root)

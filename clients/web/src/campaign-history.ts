@@ -43,17 +43,23 @@ type HistoryReadonly = Omit<
 >;
 
 /** Fields the fixture clock has no source for: a finished record carries no
- * live retry or activity telemetry, and never goes stale (see
- * `ConnectionFreshness`). */
+ * live retry or activity telemetry, never goes stale (see
+ * `ConnectionFreshness`), and has no separate operator-intervention channel
+ * (see `live-campaign.ts`). */
 function historyReadonlyView(
   fields: Omit<
     HistoryReadonly,
-    'connectionFreshness' | 'workstreamActivity' | 'workstreamAttempts' | 'workstreamTokenSpend'
+    | 'connectionFreshness'
+    | 'operatorActions'
+    | 'workstreamActivity'
+    | 'workstreamAttempts'
+    | 'workstreamTokenSpend'
   >,
 ): HistoryReadonly {
   return {
     ...fields,
     connectionFreshness: 'fresh',
+    operatorActions: [],
     workstreamActivity: {},
     workstreamAttempts: {},
     workstreamTokenSpend: {},
