@@ -22,9 +22,11 @@ from server.events import (
     EventStatus,
     EventType,
     RunInterruptedData,
+    RunStatusChangedData,
     ServerReadyData,
 )
 from server.execution import ExecutionTracker
+from server.host_api import FailureReason
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
@@ -71,6 +73,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from server.events import RunEvent
+    from server.host_api import RunStatus
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
     from vs_sim.api import Threads
@@ -79,24 +83,39 @@ if TYPE_CHECKING:
 _RunValueT = TypeVar("_RunValueT")
 DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
 """How long a detached server that is exiting waits for clients to read its last events."""
-UNWATCHED_FAILURE_GRACE_SECONDS = 20.0
-"""How long a detached server whose run failed before any client attached waits for one.
-
-The client that started the run (the desktop app over ssh) attaches several seconds
-after the launch returns; without the wait a run that fails sooner, such as a container
-that cannot start, exits before anyone can read why.
-"""
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
+)
+_FAILURE_EVENT_TYPES = frozenset(
+    {EventType.RUN_FAILED, EventType.RUN_INTERRUPTED, EventType.CONFIGURATION_FAILED}
 )
 
 
 class ServerLifecycleObserver(Protocol):
-    """Told when a server reaches the milestones a registry advertises."""
+    """Told the facts a registry record advertises: the server's milestones and its run's phase."""
 
     def listening(self) -> None:
         """The control socket accepts connections."""
         ...
+
+    def observe(
+        self, *, status: RunStatus | None = None, failure: FailureReason | None = None
+    ) -> None:
+        """The run's status changed, or it failed for ``failure``."""
+        ...
+
+
+def failure_reason(event: RunEvent) -> FailureReason | None:
+    """Why the run failed, if ``event`` is the failure that ended it."""
+    diagnostic = event.diagnostic
+    if event.type not in _FAILURE_EVENT_TYPES or diagnostic is None:
+        return None
+    stage = (
+        event.data.stage
+        if isinstance(event.data, ConfigurationFailedData)
+        else diagnostic.scope.value
+    )
+    return FailureReason(code=diagnostic.code, stage=stage, message=diagnostic.summary)
 
 
 class ServerRuntime:
@@ -126,7 +145,6 @@ class ServerRuntime:
         read_only_log: Path | None = None,
         observer: ServerLifecycleObserver | None = None,
         threads: Threads | None = None,
-        unwatched_failure_grace: float = UNWATCHED_FAILURE_GRACE_SECONDS,
     ) -> None:
         """Compose all server components around one shared condition.
 
@@ -147,8 +165,6 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
-        self.unwatched_failure_grace = unwatched_failure_grace
-        self._run_failed = False
         self.observer = observer
         self._shutdown = self.threads.event()
         # Set once the Unix socket accepts connections: how a same-process
@@ -197,6 +213,10 @@ class ServerRuntime:
             threads=self.threads,
         )
         self.chat.enable_terminal_retention()
+        if observer is not None:
+            self.journal.add_listener(
+                partial(_report_phase_facts, observer), replay_filter=lambda _header: False
+            )
         self.session: RunSession | None = None
         self.handle: RunHandle | None = None
 
@@ -322,11 +342,9 @@ class ServerRuntime:
         A detached server exits with its run, so without this a client could
         see the connection close before the terminal status that explains it.
         The wait is bounded: a client that stopped reading cannot hold the
-        server open. A run that failed first waits, also bounded, for a first
-        client when none has attached yet (``UNWATCHED_FAILURE_GRACE_SECONDS``).
+        server open.
         """
-        grace = self.unwatched_failure_grace if self._run_failed else 0.0
-        transport.wait_for_a_reader(self.api.latest_sequence, grace, DETACHED_DRAIN_TIMEOUT_SECONDS)
+        transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
 
     def shutdown(self) -> None:
         """Request a clean shutdown of a detached or read-only server."""
@@ -372,7 +390,6 @@ class ServerRuntime:
             self._wait_for_detached_shutdown(transport)
             return None
         except ConfigurationError as exc:
-            self._run_failed = True
             configuration_diagnostic = exc.diagnostic
             event_diagnostic = Diagnostic(
                 code=configuration_diagnostic.code,
@@ -406,7 +423,6 @@ class ServerRuntime:
             )
             raise
         except BaseException as exc:
-            self._run_failed = True
             self.controller.finish(
                 exc,
                 record_event=not self._terminal_recorded_after(terminal_cursor),
@@ -451,3 +467,12 @@ class ServerRuntime:
     def _terminal_recorded_after(self, sequence: int) -> bool:
         """Return whether the run callback already emitted its terminal event."""
         return any(event.type in _TERMINAL_EVENT_TYPES for event in self.journal.read(sequence))
+
+
+def _report_phase_facts(observer: ServerLifecycleObserver, event: RunEvent) -> None:
+    """Tell ``observer`` the lifecycle facts in one journaled event."""
+    if isinstance(event.data, RunStatusChangedData):
+        observer.observe(status=event.data.status)
+    failure = failure_reason(event)
+    if failure is not None:
+        observer.observe(failure=failure)
