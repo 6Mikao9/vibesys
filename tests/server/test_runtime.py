@@ -229,7 +229,9 @@ def _error_chain(error: BaseException) -> tuple[BaseException, ...]:
 
 
 def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
-    runtime = ServerRuntime(runs=default_runs(), socket_path=tmp_path / "control.sock")
+    runtime = ServerRuntime(
+        run_id="run-1", runs=default_runs(), socket_path=tmp_path / "control.sock"
+    )
 
     assert isinstance(runtime.journal, WireJournal)
     assert isinstance(runtime.executions, ExecutionTracker)
@@ -244,7 +246,7 @@ def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
 
 def test_runtime_streams_success_before_client_disconnect(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -269,7 +271,7 @@ def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path
     treat that as "the client is gone" while the second subscription is live.
     """
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     release_run = threading.Event()
     order: list[str] = []
 
@@ -310,7 +312,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
     `run_finished`, `run_failed`, or `run_interrupted` event follows it.
     """
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
 
     def collect_until_stopped() -> None:
@@ -373,6 +375,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
             del run_id
 
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
@@ -425,6 +428,7 @@ def test_startup_rejects_commands_that_require_an_active_session(
 
     observer = Observer()
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
@@ -438,7 +442,7 @@ def test_startup_rejects_commands_that_require_an_active_session(
 
 def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -465,7 +469,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
 
 def test_runtime_streams_configuration_failure_without_run_failure(tmp_path: Path) -> None:
     socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(runs=default_runs(), socket_path=socket_path)
+    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
     received: list[dict] = []
     subscriber = threading.Thread(
         target=_collect_until,
@@ -514,7 +518,11 @@ def test_a_web_only_subscriber_decides_a_web_runs_whole_lifetime(tmp_path: Path)
     socket_path = tmp_path / "control.sock"
     instance_path = tmp_path / "state" / "web-gateway.json"
     runtime = ServerRuntime(
-        runs=default_runs(), socket_path=socket_path, web=True, instance_path=instance_path
+        run_id="run-1",
+        runs=default_runs(),
+        socket_path=socket_path,
+        web=True,
+        instance_path=instance_path,
     )
     printed = _PrintedLines()
     received: list[dict] = []
@@ -568,6 +576,7 @@ def test_the_web_gateway_receives_its_assets_origins_and_instance_path(tmp_path:
     instance_path = tmp_path / "state" / "web-gateway.json"
     declared_origin = "http://vibesys.test:4173"
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=socket_path,
         web=True,
@@ -632,6 +641,7 @@ def test_the_runtime_composes_no_web_gateway_unless_web_is_requested(tmp_path: P
     socket_path = tmp_path / "control.sock"
     instance_path = tmp_path / "state" / "web-gateway.json"
     runtime = ServerRuntime(
+        run_id="run-1",
         runs=default_runs(),
         socket_path=socket_path,
         web_assets=tmp_path / "web-dist",
@@ -682,6 +692,7 @@ def test_the_web_gateway_binds_the_configured_port(tmp_path: Path) -> None:
 
     with socket.create_server(("127.0.0.1", 0)) as held:
         runtime = ServerRuntime(
+            run_id="run-1",
             runs=default_runs(),
             socket_path=socket_path,
             web=True,
