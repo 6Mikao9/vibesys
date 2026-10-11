@@ -533,6 +533,7 @@ class FakeWorkspaces:
         self._patches: dict[str, str] = {}
         self._default_patch: str | None = None
         self._candidate_retains: list[tuple[BaseException | None, bool]] = []
+        self._candidate_unchanged_snapshots = 0
         self.export_patch_calls: list[str] = []
         self._closing = False
         self._closed = False
@@ -542,6 +543,15 @@ class FakeWorkspaces:
     ) -> None:
         """Script retention acknowledgements for the next created candidate."""
         self._candidate_retains.extend((result, after_retention) for result in results)
+
+    def script_candidate_unchanged_snapshot(self, count: int = 1) -> None:
+        """Make the next created candidate's first ``count`` snapshots a no-op.
+
+        See `FakeWorkspace.script_unchanged_snapshot`; this applies the same
+        configuration to whichever candidate workspace is created next
+        (typically by the orchestrator, not the test itself).
+        """
+        self._candidate_unchanged_snapshots += count
 
     @property
     def root(self) -> FakeWorkspace:
@@ -599,6 +609,9 @@ class FakeWorkspaces:
         for result, after_retention in self._candidate_retains:
             candidate.script_retain(result, after_retention=after_retention)
         self._candidate_retains.clear()
+        if self._candidate_unchanged_snapshots:
+            candidate.script_unchanged_snapshot(self._candidate_unchanged_snapshots)
+            self._candidate_unchanged_snapshots = 0
         self._candidates.append(candidate)
         return candidate
 
@@ -865,6 +878,7 @@ class FakeWorkspace:
             value for value in (revision, self._trusted_input_baseline) if value
         }
         self._snapshot_count = 0
+        self._unchanged_snapshots = 0
         # Revision names stay unique when a member-keyed candidate reuses an ID.
         self._revision_prefix = workspace_id or "fake"
         self._retained: dict[str, str] = {}
@@ -899,10 +913,30 @@ class FakeWorkspace:
         """Return policy labels and revisions retained so far."""
         return dict(self._retained)
 
+    def script_unchanged_snapshot(self, count: int = 1) -> None:
+        """Make the next ``count`` snapshots report no tree change.
+
+        A real, Git-backed workspace only advances its revision when a
+        snapshot has something new to commit; an implementer attempt that
+        leaves the tree exactly as it found it reports the same revision it
+        started from. This fake otherwise always mints a fresh revision per
+        snapshot, so a caller that needs to drive that no-change case opts in
+        here instead.
+        """
+        self._unchanged_snapshots += count
+
     async def snapshot(self, label: str) -> str:
         """Record a deterministic new revision for the current fake tree."""
         await self.access_recovery.reconcile(self)
         del label
+        if self._unchanged_snapshots > 0:
+            self._unchanged_snapshots -= 1
+            revision = self._revision
+            if revision is None:
+                message = "an unchanged fake snapshot requires an existing revision"
+                raise RuntimeError(message)
+            self.add_retained_revision(revision)
+            return revision
         self._snapshot_count += 1
         revision = f"{self._revision_prefix}-revision-{self._snapshot_count}"
         self._revision = revision

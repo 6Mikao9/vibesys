@@ -100,6 +100,46 @@ def test_judge_result_reports_blocked_skip_reason(tmp_path: Path) -> None:
     assert result.implementer_outcome == "blocked"
 
 
+def test_judge_result_reports_unchanged_skip_reason_before_blocked_or_not_due(
+    tmp_path: Path,
+) -> None:
+    """`unchanged` wins over `not_due` when a tree-unchanged attempt is also not due.
+
+    `_maybe_review` checks `blocked` first, then `unchanged`, then `not_due`;
+    this attempt's outcome is `continue` (not blocked, not promotable, and its
+    sequence does not land on a `judge_every` boundary, so it would otherwise
+    be `not_due`), but the candidate workspace reports no tree change, so the
+    workstream's own correlation reports `unchanged` instead.
+    """
+    script = Script(
+        {
+            ORCHESTRATOR.id: [portfolio("probe")],
+            IMPLEMENTER.id: [
+                {
+                    "summary": "Still exploring the mechanism.",
+                    "outcome": "continue",
+                    "next_step": "Keep investigating.",
+                }
+            ],
+        }
+    )
+    fake = baseline_run(tmp_path, script)
+    # One implementer attempt snapshots its workspace three times (bracketing
+    # the agent turn, then once more after it): all three report no change,
+    # matching a real Git-backed workspace whose tree never moved.
+    fake.workspaces.script_candidate_unchanged_snapshot(3)
+    asyncio.run(
+        PLUGIN.orchestrate(
+            fake,
+            dynamic_options(max_in_flight=1, max_rounds=1, max_retries_per_round=1, judge_every=3),
+        )
+    )
+    [result] = fake.observations.judge_results
+    assert result.verdict == "skipped"
+    assert result.skip_reason == "unchanged"
+    assert result.implementer_outcome == "continue"
+
+
 def test_judge_result_reports_not_due_skip_reason(tmp_path: Path) -> None:
     script = Script(
         {
