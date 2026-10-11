@@ -25,12 +25,7 @@ from vibesys.orchestration.dynamic.strategy._attempts import measured_revision, 
 from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import invocation_for
-from vibesys.orchestration.dynamic.strategy._evidence import (
-    accept_readings,
-    ledger_refs,
-    trusted_keys,
-    turn_candidate,
-)
+from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
 from vibesys.orchestration.dynamic.strategy._operations import (
     EvidenceReadings,
     ParentVerification,
@@ -81,7 +76,10 @@ from vs_core.api import (
     TurnFailureKind,
     TurnResult,
     TurnSuspended,
+    ledger_refs,
     may_resubmit,
+    trusted_keys,
+    turn_candidate,
 )
 
 _IMPLEMENTER_REPLY = TypeAdapter(ImplementerReply)

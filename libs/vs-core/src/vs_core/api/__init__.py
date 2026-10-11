@@ -1,6 +1,11 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
 from vs_core._continuations import SuspensionRefusal
+from vs_core._evidence_views import (
+    ledger_refs,
+    trusted_keys,
+    turn_candidate,
+)
 from vs_core._ids import (
     IdScheme,
     attempt_id,
@@ -852,6 +857,7 @@ __all__ = [
     "evidence_view",
     "initial_state",
     "item_id",
+    "ledger_refs",
     "may_resubmit",
     "operation_result",
     "operation_trace",
@@ -868,6 +874,8 @@ __all__ = [
     "step",
     "suspension_refusal",
     "trace_step",
+    "trusted_keys",
+    "turn_candidate",
     "v2_to_v3_migration",
     "validate_startup",
     "validate_terminal_inputs",
