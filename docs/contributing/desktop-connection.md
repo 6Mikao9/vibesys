@@ -60,7 +60,7 @@ desktop main process (clients/desktop)                host (local or ssh)
 | AppLifecycle: single-instance lock, quit, |        | host helper (one process per        |
 |   settings store (sole writer)            |        |   channel; stateless)               |
 | ConnectionManager                         |  stdio | entrypoints.host_helper             |
-|   HostConnection per host                 |<------>|   -> server.host_helper (requests)  |
+|   HostConnection per host                 |<------>|   -> server.host_helper (channel)   |
 |     link (ssh master | none)              |  (ssh  |   -> server.host_api   (contracts)  |
 |     control channel  -> helper            |  exec  |   -> server.registry   (records)    |
 |     run channels     -> helper -> relay   |  chan- |   -> server.relay (relay)    |
@@ -74,7 +74,8 @@ desktop main process (clients/desktop)                host (local or ssh)
 | --- | --- | --- |
 | Helper contracts | `server.host_api` (new, light) | Pydantic models for every helper message, the registry record, launch and stop results, and `RunPhase`. Imports `pydantic` and the standard library only. The single source of the helper's JSON Schema. |
 | Registry primitives | `server.registry` (new, light; split from `server.instances` and `server.transport.discovery`) | Registry root, lifetime lock, record store, `survey`. `server.instances` keeps the stop requester and composes these. |
-| Helper implementation | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), the per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the shell. |
+| Helper channel | `server.host_helper` | The channel: a pure `step` that folds lines, replies, watch observations, and time into the channel's state and the outputs the shell performs (the handshake, request ids, deadlines, feature gates, the one hand-over to the relay), and the shell. |
+| Helper requests | `server.host_helper_requests` | The per-method execution over role-named interfaces (`Projects`, `Directories`, `RunLauncher`, `CheckoutProbe`, the registry), and the pure decisions it needs (`negotiate`, `run_summaries`, `launch_arguments`, path completion). |
 | Helper interfaces on a host | `server.host_helper_os` | The real implementations: projects through `vs_project.api`, directories as this account lists them, launches through `vs_sim.api` with the launcher's `headless_command`, the checkout through `git`. |
 | Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaced `entrypoints.stdio_bridge` (phase 5). |
 | Relay core | `server.relay` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
@@ -96,8 +97,9 @@ New modules and edges, all downward; no module gains an edge to `vibesys.*`:
 | --- | --- |
 | `server.host_api` | none (pydantic only) |
 | `server.registry` | `server.host_api`, `vs_sim.api` |
-| `server.host_helper` | `server.host_api`, `server.registry`, `server.relay`, `vs_sim.api` |
-| `server.host_helper_os` | `server.host_api`, `server.host_helper`, `vs_project`, `vs_sim.api` |
+| `server.host_helper` | `server.host_api`, `server.host_helper_requests`, `server.relay`, `vs_sim.api` |
+| `server.host_helper_requests` | `server.host_api`, `server.registry`, `server.relay`, `vs_sim.api` |
+| `server.host_helper_os` | `server.host_api`, `server.host_helper_requests`, `vs_project`, `vs_sim.api` |
 | `server.instances` | `server.api`, `vs_sim.api` (loses `server.transport`; keeps only the stop requester) |
 | `server.api` | adds `server.host_api` (`PROTOCOL_VERSION` is defined there) |
 | `server.transport` | adds `server.registry` (discovery's lock primitives move there) |
@@ -193,7 +195,7 @@ either the method's result, whose `type` is the request's, or `HelperError` (`ty
 | --- | --- | --- | --- |
 | `hello` | `client_versions: [min, max]`, `features: [Feature]`, `app_version` | `protocol_version`, `features`, `vibesys_version`, `checkout: {root, commit, dirty} \| null` | First message on every channel; anything else first is `handshake_required`. |
 | `instances.list` | none | `InstanceList`: `live`, `ended` (tombstones with phase and reason), `unreadable` (id and record version) | Replaces `vibesys instances list --json`. |
-| `instances.watch` | none | `watch_id`, then `instances.changed {watch_id, listing}` pushes: the listing at once, then on each change | Removes manual refresh (Recent and host panels). Gated by feature `instances_watch`. The helper reads the registry once a second per watch; the client never polls. |
+| `instances.watch` | none | `watch_id`, then `instances.changed {watch_id, listing}` pushes: the listing at once, then on each change | Removes manual refresh (Recent and host panels). Gated by feature `instances_watch`. The helper reads the registry once a second per watch, without writing to it; the client never polls. |
 | `instances.unwatch` | `watch_id` | `watch_id` | Ends a watch; no push for it follows. `unknown_watch` when none is open. |
 | `tasks.list` | `project` | `TaskList` | Replaces `vibesys tasks --json`. Errors are typed: `project_missing`, `project_uninitialized`, `task_invalid`, each with the path. |
 | `runs.list` | `project` | the project's runs (`run_id`, `task`, `display_name`, `created_at`) with the `phase` of the server on this host that drives or last drove each, and its `instance_id` while live | Gives Recent rows status and lets resume name a concrete run. A run whose server left no record here has no phase; reading the run's own journal for it needs a light journal reader and is not built. |
@@ -308,6 +310,18 @@ Facts enter once:
   `ended`, and a free lock with a non-terminal record as `ended {failed: crashed}` with the server
   log path. A run that dies before any client attaches is therefore visible with its reason, and
   the bounded wait for a first client (the current fix for that symptom) is no longer needed.
+- **Who writes**: only a writing listing (`LiveRegistry.list`, behind `instances list`,
+  `instances.list` and `runs.list`) buries crashed servers and removes expired records. A watch
+  reads with `LiveRegistry.read`, which writes nothing: it reports a crashed server not yet buried
+  as `failed {crashed}` with `ended_at: null`, so a once-a-second read reports the same listing
+  until something changes, and it leaves expired records on disk, unreported. Watches poll rather
+  than wait on file events because a crashed holder releases its lock without touching any file.
+- **Accepted gaps across record versions and crashes**:
+  - A tombstone of a newer record version is never aged by an older reader: it is reported
+    `unreadable` and left for that version's lister to remove, so a host that only ever runs the
+    older checkout keeps it.
+  - A crashed run's `ended_at` is when a writing listing found it dead, not when it died: the
+    server wrote nothing as it died, and the lock carries no time. Its 24 hours run from then.
 
 The UI renders only the phase: Retry appears only on a link failure, never on an ended phase;
 Resume appears only on `stopped`, `failed`, and `finished`.
