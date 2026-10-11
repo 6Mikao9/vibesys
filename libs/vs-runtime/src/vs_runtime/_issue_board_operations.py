@@ -35,6 +35,8 @@ from vs_issue_tracker.api import (
 from vs_runtime._operation_catalog import Applied, Inspection, NotApplied
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from vs_core.api import OperationRequest
@@ -59,11 +61,21 @@ class BoardTexts(Protocol):
 class IssueBoardOwner:
     """Perform and inspect the three issue-board operations over one tracker."""
 
-    def __init__(self, tracker: IssueTracker, progress: ProgressLog, texts: BoardTexts) -> None:
-        """Bind the run's tracker, progress log and the strategy's text renderer."""
+    def __init__(
+        self,
+        tracker: IssueTracker,
+        progress: ProgressLog,
+        texts: BoardTexts,
+        publish: Callable[[list[Issue]], None] | None = None,
+    ) -> None:
+        """Bind the run's tracker, progress log and the strategy's text renderer.
+
+        ``publish`` receives every board read, for a human-readable mirror of the board.
+        """
         self._tracker = tracker
         self._progress = progress
         self._texts = texts
+        self._publish = publish
 
     async def execute(self, request: OperationRequest, context: ExecutionContext) -> BaseModel:
         """Perform one operation; a tracker failure propagates as an unknown effect."""
@@ -100,6 +112,8 @@ class IssueBoardOwner:
 
     def _read(self) -> BoardSnapshot:
         issues = sorted(self._tracker.list(), key=lambda issue: issue.id)
+        if self._publish is not None:
+            self._publish(issues)
         return BoardSnapshot(
             status="succeeded",
             issues=tuple(

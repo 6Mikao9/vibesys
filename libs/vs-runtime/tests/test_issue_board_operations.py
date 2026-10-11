@@ -296,3 +296,18 @@ def test_progress_is_logged_once_per_key() -> None:
     execute(owner, entry)
     assert progress.read().count("implement 1") == 1
     assert isinstance(run(owner.inspect(entry, _context(entry))), Applied)
+
+
+def test_every_board_read_is_published_for_a_human_readable_mirror() -> None:
+    tracker = FakeIssueTracker()
+    tracker.create(type=IssueType.BUG, title="t", description="d", created_by="loop", iteration=1)
+    seen: list[int] = []
+    owner = IssueBoardOwner(
+        tracker,
+        MemoryProgressLog(),
+        TEXTS,
+        publish=lambda issues: seen.append(len(issues)),
+    )
+    execute(owner, ReadBoard())
+    execute(owner, ReadBoard())
+    assert seen == [1, 1]
