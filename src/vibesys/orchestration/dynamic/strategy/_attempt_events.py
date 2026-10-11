@@ -99,15 +99,11 @@ def _put(state: DynamicStrategyState, index: int, record: AttemptRecord) -> Dyna
 
 
 def _awaiting(state: DynamicStrategyState, decision: str | None) -> int | None:
-    if decision is None:
-        return None
     return next(
         (
             index
             for index, item in enumerate(state.attempts)
-            if item.awaiting is not None
-            and item.awaiting.root == decision
-            and item.phase is not WorkPhase.DONE
+            if item.awaits(decision) and item.phase is not WorkPhase.DONE
         ),
         None,
     )
@@ -118,21 +114,12 @@ def fail(state: DynamicStrategyState, index: int, reason: str) -> DynamicStrateg
     record = state.attempts[index]
     if record.phase is WorkPhase.DONE:
         return state
-    if record.ready:
-        failed = record.model_copy(
-            update={
-                "phase": WorkPhase.SETTLE,
-                "step": Step.NEEDED,
-                "awaiting": None,
-                "failure": record.failure or reason,
-            }
-        )
-        return _put(state, index, failed)
-    failed = record.model_copy(
-        update={"phase": WorkPhase.DONE, "awaiting": None, "failure": record.failure or reason}
-    )
-    refunded = state.refunded + 1
-    return _put(state, index, failed).model_copy(update={"refunded": refunded})
+    failed = record.failed(reason)
+    if failed.owes_settlement:
+        return _put(state, index, failed.model_copy(update={"phase": WorkPhase.SETTLE}))
+    # An attempt core never admitted has nothing to settle: its slot is refunded.
+    done = failed.model_copy(update={"phase": WorkPhase.DONE})
+    return _put(state, index, done).model_copy(update={"refunded": state.refunded + 1})
 
 
 def on_rejected(state: DynamicStrategyState, event: Rejected) -> DynamicStrategyState:
@@ -155,9 +142,7 @@ def on_ready(state: DynamicStrategyState, event: AttemptReady) -> DynamicStrateg
     )
     if index is None:
         return state
-    record = state.attempts[index].model_copy(
-        update={"ready": True, "generation": event.attempt.generation, "awaiting": None}
-    )
+    record = state.attempts[index].admitted(event.attempt.generation)
     if state.stopping:
         record = record.model_copy(
             update={"phase": WorkPhase.SETTLE, "step": Step.NEEDED, "failure": STOPPED}
@@ -174,9 +159,7 @@ def _rendered(
     record = state.attempts[index]
     if outcome.status != "succeeded" or not outcome.prompts or record.turn is None:
         return fail(state, index, f"prompt render {outcome.status}")
-    turn = record.turn.model_copy(
-        update={"prompts": outcome.prompts, "tool_policy": outcome.tool_policy}
-    )
+    turn = record.turn.with_prompts(outcome.prompts, outcome.tool_policy)
     return _put(
         state,
         index,
@@ -365,18 +348,17 @@ def _correct(
     record = state.attempts[index]
     turn = record.turn
     role = role_of(record.phase)
-    if turn is None or role is None or turn.corrections >= config.max_corrections:
+    if turn is None or role is None:
         return None
-    corrected = TurnRecord(
-        role=role,
-        serial=turn.serial + 1,
-        corrections=turn.corrections + 1,
-        charge="correction",
-        invocation=invalid,
-        context=WaitUnrecordedPrompt()
+    corrected = turn.corrected(
+        invalid,
+        WaitUnrecordedPrompt()
         if error is None
         else ReplyCorrectionPrompt(role=_CORRECTION_ROLE[role], error=error),
+        limit=config.max_corrections,
     )
+    if corrected is None:
+        return None
     return _put(
         state,
         index,
@@ -402,23 +384,16 @@ def _ask_again(
     turn = record.turn
     role = role_of(record.phase)
     reason = f"{role.value if role else 'agent'} turn was lost ({event.detail or 'transport'})"
-    if (
-        turn is None
-        or role is None
-        or turn.charge == "resume"
-        or turn.drops >= config.max_turn_drops
-    ):
+    if turn is None or role is None:
         return fail(state, index, reason)
-    again = turn.model_copy(
-        update={
-            "serial": turn.serial + 1,
-            "drops": turn.drops + 1,
-            "charge": "correction",
-            "invocation": event.invocation,
-            "prompts": (),
-            "ask_not_before": now + config.drop_backoff(turn.drops),
-        }
+    again = turn.asked_again(
+        event.invocation,
+        now=now,
+        limit=config.max_turn_drops,
+        backoff=config.drop_backoff(turn.drops),
     )
+    if again is None:
+        return fail(state, index, reason)
     return _put(
         state,
         index,
@@ -486,7 +461,7 @@ def _yielded(state: DynamicStrategyState, index: int, view: RunView) -> DynamicS
         )
         failed = fail(state, index, "the run offers no suspend capability")
         return failed.model_copy(update={"unreachable": (*failed.unreachable, unreachable)})
-    turn = (record.turn or TurnRecord(role=Role.IMPLEMENTER)).model_copy(update={"yielded": True})
+    turn = (record.turn or TurnRecord(role=Role.IMPLEMENTER)).yielding()
     return _put(state, index, record.model_copy(update={"turn": turn}))
 
 
@@ -497,12 +472,8 @@ def on_suspended(state: DynamicStrategyState, event: TurnSuspended) -> DynamicSt
     if index is None:
         return state
     record = state.attempts[index]
-    turn = (record.turn or TurnRecord(role=Role.IMPLEMENTER)).model_copy(
-        update={
-            "invocation": continuation.invocation,
-            "continuation": continuation.continuation_id,
-            "yielded": True,
-        }
+    turn = (record.turn or TurnRecord(role=Role.IMPLEMENTER)).suspended(
+        continuation.invocation, continuation.continuation_id
     )
     return _put(
         state,
@@ -554,7 +525,7 @@ def settle_retained(
     """
     for index, record in enumerate(state.attempts):
         invocation = record.held_invocation
-        if record.step is not Step.RETAINING or invocation is None or record.held_reply is None:
+        if not record.holds_reply or invocation is None or record.held_reply is None:
             continue
         live = next((item for item in view.attempts if item.attempt_id == record.attempt), None)
         candidate = turn_candidate(view, record.attempt, invocation)
@@ -564,10 +535,7 @@ def settle_retained(
         if candidate is None and not declined:
             continue
         reply = _decode(Role.IMPLEMENTER, record.held_reply)
-        released = record.model_copy(
-            update={"step": Step.NEEDED, "held_reply": None, "held_invocation": None}
-        )
-        state = _put(state, index, released)
+        state = _put(state, index, record.released())
         if isinstance(reply, ImplementerResult):
             state = _implemented(state, index, config, reply, candidate)
     return state
@@ -711,14 +679,7 @@ def _answered(
             return _put(
                 state,
                 index,
-                state.attempts[index].model_copy(
-                    update={
-                        "step": Step.RETAINING,
-                        "awaiting": None,
-                        "held_reply": event.output_json,
-                        "held_invocation": event.invocation,
-                    }
-                ),
+                state.attempts[index].holding(event.output_json or "", event.invocation),
             )
         return _implemented(state, index, config, reply, candidate)
     return _reviewed(state, index, config, reply, event)
@@ -752,10 +713,9 @@ def on_resume(state: DynamicStrategyState, event: ResumeAuthorized) -> DynamicSt
     previous = record.turn
     if role is None or previous is None or role is Role.PLANNER:
         return state
-    resumed = TurnRecord(
-        role=role,
-        serial=previous.serial + 1,
-        charge="resume",
+    resumed = previous.resumed(
+        authorized=event.next_invocation.invocation_id,
+        continuation=event.continuation_id,
         context=ResumePrompt(
             role=role.value,  # type: ignore[arg-type]
             retained_revision=record.candidate,
@@ -765,9 +725,6 @@ def on_resume(state: DynamicStrategyState, event: ResumeAuthorized) -> DynamicSt
             if event.repeated_failure is None
             else str(event.repeated_failure),
         ),
-        invocation=previous.invocation,
-        resume_as=event.next_invocation.invocation_id,
-        continuation=event.continuation_id,
     )
     return _put(state, index, record.model_copy(update={"turn": resumed, "step": Step.NEEDED}))
 

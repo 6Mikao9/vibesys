@@ -216,9 +216,10 @@ def on_turn(
     complete = check is not None and check.valid and len(check.accepted) >= want
     if complete and check is not None:
         return schedule(state, view, check)
-    if turn.corrections < config.max_corrections:
+    corrected = turn.corrected(event.invocation, None, limit=config.max_corrections)
+    if corrected is not None:
         held = event.output_json if check is not None and check.valid and check.accepted else None
-        return _corrected(state, turn, event, held, _correction_error(check, parse_error, want))
+        return _corrected(state, corrected, held, _correction_error(check, parse_error, want))
     return _exhausted(state, view, config, check, parse_error)
 
 
@@ -232,7 +233,7 @@ def _correction_error(check: PlanCheck | None, parse_error: str, want: int) -> s
 
 
 def _corrected(
-    state: DynamicStrategyState, turn: TurnRecord, event: TurnResult, held: str | None, error: str
+    state: DynamicStrategyState, turn: TurnRecord, held: str | None, error: str
 ) -> DynamicStrategyState:
     """Ask the planner to fix its reply, naming what was wrong."""
     planner = state.planner
@@ -244,14 +245,7 @@ def _corrected(
                     "awaiting": None,
                     "held_plan_json": held or planner.held_plan_json,
                     "last_error": error,
-                    "turn": turn.model_copy(
-                        update={
-                            "serial": turn.serial + 1,
-                            "corrections": turn.corrections + 1,
-                            "charge": "correction",
-                            "invocation": event.invocation,
-                        }
-                    ),
+                    "turn": turn,
                 }
             )
         }
@@ -296,17 +290,14 @@ def _ask_again(
     turn = planner.turn
     if turn is None:
         return state
-    if turn.drops >= config.max_turn_drops:
-        return _nothing_valid(state, planner, event.detail or "the planner turn was lost", None)
-    again = turn.model_copy(
-        update={
-            "serial": turn.serial + 1,
-            "drops": turn.drops + 1,
-            "charge": "correction",
-            "invocation": event.invocation,
-            "ask_not_before": now + config.drop_backoff(turn.drops),
-        }
+    again = turn.asked_again(
+        event.invocation,
+        now=now,
+        limit=config.max_turn_drops,
+        backoff=config.drop_backoff(turn.drops),
     )
+    if again is None:
+        return _nothing_valid(state, planner, event.detail or "the planner turn was lost", None)
     return state.model_copy(
         update={
             "planner": planner.model_copy(
@@ -334,7 +325,7 @@ def _fresh_turn(
                     "held_plan_json": None,
                     "last_error": detail or planner.last_error,
                     "retries": planner.retries + 1,
-                    "turn": TurnRecord(role=Role.PLANNER, serial=turn.serial + 1, charge="free"),
+                    "turn": turn.followed_by(charge="free"),
                 }
             )
         }
@@ -457,9 +448,7 @@ def on_rendered(state: DynamicStrategyState, outcome: RenderedArtifacts) -> Dyna
         return state
     if outcome.status != "succeeded" or not outcome.prompts:
         return _nothing_valid(state, planner, f"planner prompt render {outcome.status}", None)
-    turn = planner.turn.model_copy(
-        update={"prompts": outcome.prompts, "tool_policy": outcome.tool_policy}
-    )
+    turn = planner.turn.with_prompts(outcome.prompts, outcome.tool_policy)
     return state.model_copy(
         update={
             "planner": planner.model_copy(
