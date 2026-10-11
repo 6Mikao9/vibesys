@@ -75,7 +75,9 @@ type Json = null | boolean | number | string | Json[] | {[key: string]: Json};
 function withUnknownField(value: Json): Json[] {
   if (Array.isArray(value)) {
     return value.flatMap((item, index) =>
-      withUnknownField(item).map(changed => value.map((other, at) => (at === index ? changed : other))),
+      withUnknownField(item).map(changed =>
+        value.map((other, at) => (at === index ? changed : other)),
+      ),
     );
   }
   if (value === null || typeof value !== 'object') return [];
@@ -98,7 +100,8 @@ function rejects(line: string, parse: (line: string) => unknown): BackendClientE
 
 describe('parseHelperMessage', () => {
   it('accepts every complete message as the helper writes it', () => {
-    for (const message of VALID) expect(parseHelperMessage(JSON.stringify(message))).toEqual(message);
+    for (const message of VALID)
+      expect(parseHelperMessage(JSON.stringify(message))).toEqual(message);
   });
 
   it('rejects an unknown field at any depth, naming it', () => {

@@ -265,7 +265,8 @@ function validateObject(value: unknown, schema: Schema, path: string, walk: Sche
   // #869 (open walks): newly added server fields must not make an older client disconnect, so only
   // known fields are validated; the generated types retain the known contract.
   for (const [key, child] of Object.entries(properties)) {
-    if (key in record && isRecord(child)) validateSchema(record[key], child, `${path}.${key}`, walk);
+    if (key in record && isRecord(child))
+      validateSchema(record[key], child, `${path}.${key}`, walk);
   }
 }
 

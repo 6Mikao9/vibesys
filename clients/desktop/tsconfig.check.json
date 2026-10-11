@@ -6,5 +6,5 @@
     "rootDir": "."
   },
   "include": ["src/**/*.ts", "src/**/*.cts", "vite.welcome.config.ts"],
-  "exclude": ["src/welcome/**/*.tsx"]
+  "exclude": ["src/renderer/welcome/**/*.tsx"]
 }

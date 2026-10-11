@@ -1,13 +1,13 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "esnext.disposable"],
     "types": [],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "noEmit": true
   },
-  "include": ["src/welcome/**/*.ts", "src/welcome/**/*.tsx"],
-  "exclude": ["src/welcome/**/*.test.ts"]
+  "include": ["src/renderer/welcome/**/*.ts", "src/renderer/welcome/**/*.tsx"],
+  "exclude": ["src/renderer/welcome/**/*.test.ts"]
 }

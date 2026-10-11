@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "esnext.disposable"],
     "types": ["node"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
@@ -25,5 +26,5 @@
     "rootDir": "src"
   },
   "include": ["src/**/*.ts", "src/**/*.cts"],
-  "exclude": ["src/**/*.test.ts", "src/testing/**", "src/welcome/**"]
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**", "src/renderer/welcome/**"]
 }

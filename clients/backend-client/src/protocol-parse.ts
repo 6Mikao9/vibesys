@@ -46,7 +46,6 @@ export function validateRunEvent(value: unknown): RunEvent {
   return validateRunEventAt(value, 'run event');
 }
 
-
 /**
  * Parse and validate a streamed server message independently of framing.
  *
@@ -283,8 +282,6 @@ function parseJson(line: string, path: string): unknown {
   }
 }
 
-
-
 /**
  * Unknown-enum policy: a closed set's kind is checked here, its membership is
  * not.
@@ -363,7 +360,6 @@ function nullableNumber(record: Record<string, unknown>, key: string, path: stri
 function requireBoolean(record: Record<string, unknown>, key: string, path: string): void {
   if (typeof record[key] !== 'boolean') throw fieldError(path, key, 'a boolean');
 }
-
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));

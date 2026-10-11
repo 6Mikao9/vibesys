@@ -9,7 +9,7 @@
  * naming its path, never a value passed on.
  */
 import {BackendClientError} from './errors.js';
-import type {ChannelEnd, Message} from './generated/host-helper.generated.js';
+import type {ChannelEnd, Message, Request} from './generated/host-helper.generated.js';
 import hostHelperSchema from './generated/host-helper.schema.js';
 import {type Schema, type SchemaWalk, validateSchema} from './schema-walker.js';
 
@@ -48,6 +48,7 @@ const STRICT: SchemaWalk = {documents: [hostHelperSchema], strict: true};
 const properties = hostHelperSchema['properties'] as Record<string, Schema>;
 const MESSAGE = properties['message'] as Schema;
 const CHANNEL_END = properties['channel_end'] as Schema;
+const REQUEST = properties['request'] as Schema;
 
 /** The helper protocol versions this client speaks (`hello`'s `client_versions`). */
 export const HELPER_CLIENT_VERSIONS: readonly [number, number] = [1, 1];
@@ -57,6 +58,16 @@ export function parseHelperMessage(line: string): Message {
   const value = parseJson(line, 'helper message');
   validateSchema(value, MESSAGE, 'helper message', STRICT);
   return value as Message;
+}
+
+/**
+ * Parse one request line as a helper does: for another implementation of the helper (a Fake, or a
+ * helper in another language tested against this contract).
+ */
+export function parseHelperRequest(line: string): Request {
+  const value = parseJson(line, 'helper request');
+  validateSchema(value, REQUEST, 'helper request', STRICT);
+  return value as Request;
 }
 
 /** Parse the `ChannelEnd` line a relayed run channel wrote on stderr. */
