@@ -904,6 +904,7 @@ function WorkstreamExplorer({
           asOfTime={asOfTime}
           tokenSpend={tokenSpend}
           attempts={attempts}
+          activity={activity}
           sort={sort}
           onSort={onSort}
           onSelect={onSelect}
@@ -1001,6 +1002,7 @@ function WorkstreamTable({
   asOfTime,
   tokenSpend,
   attempts,
+  activity,
   sort,
   onSort,
   onSelect,
@@ -1009,6 +1011,7 @@ function WorkstreamTable({
   readonly asOfTime: number;
   readonly tokenSpend: Readonly<Record<string, number>>;
   readonly attempts: CampaignViewModel['workstreamAttempts'];
+  readonly activity: CampaignViewModel['workstreamActivity'];
   readonly sort: CampaignViewModel['workstreamSort'];
   readonly onSort: CampaignViewModel['setWorkstreamSort'];
   readonly onSelect: (id: string) => void;
@@ -1030,6 +1033,7 @@ function WorkstreamTable({
             disabled={Object.keys(tokenSpend).length === 0}
           />
           <th>Attempt</th>
+          <th>Activity</th>
         </tr>
       </thead>
       <tbody>
@@ -1056,6 +1060,7 @@ function WorkstreamTable({
               <td>
                 <AttemptBadge attempt={attempts[item.id]} />
               </td>
+              <td>{state === 'active' && <ActivityLabel activity={activity[item.id]} />}</td>
             </tr>
           );
         })}

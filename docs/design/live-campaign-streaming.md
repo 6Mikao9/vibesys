@@ -258,20 +258,32 @@ persisted but not streamed, and not computed anywhere.
 - **Run failure, in aggregate**: `RunFailure` (kind, reason,
   `workstreams_started`, `workstream_budget`, `candidates_kept`), a real
   cross-workstream count, but terminal-only, built once when a run fails.
+- **Token usage and cost, per completed turn.** `TurnUsageData`
+  (input/output/cache tokens, `total_cost_usd`, `duration_ms`) is published by
+  `AgentEventSink.turn_usage`, called from `AgentClient._write_usage_record`
+  (`vs_agent/client.py`) alongside the existing `usage.jsonl` row, not instead
+  of it; the call fires even when `log_dir` is unset, since the live event and
+  the durable row are now independent writes. Still no run-level or
+  per-agent-kind cost aggregate; this is per-turn only.
+- **GPU contention transitions.** `GpuContentionData` (`is_contended`,
+  `new_process_count`, device memory/utilization) is published by
+  `CoreGpuContentionEvents` (`vibesys/run/gpu_events.py`) whenever
+  `GpuContentionMonitor`'s contention state flips, not on every 30s poll, via
+  a `ContentionEventSink` threaded through `create_compute_backend(...,
+  events=...)` at its call site in `resources.py`'s run assembly
+  (`_assemble_run_resources`). A real CUDA run now publishes this instead of
+  writing only to `gpu_contention.jsonl`.
+- **Local validation pass-fraction.** `LocalValidationSummaryData`
+  (`attempted`, `succeeded`, `passed`) is emitted once per `validate_local`
+  call (`run/evaluation.py`'s `_validate_local`), alongside the existing
+  per-recipe `gate_started`/`gate_finished` events. `attempted` counts
+  recipes that actually ran before the first failure, not the recipe
+  catalog's size.
 - **Envelope metadata on every event**: `sequence`, `timestamp`, `run_id`,
   `type`, `text`, plus the optional `status`, `execution_id`, `round_label`,
   `agent_kind`.
 
 ### Exists, computed or persisted, not streamed
-
-- **Per-turn usage, with cost and real per-agent-kind attribution.**
-  `AgentUsage` (`vs_agent/contracts.py`) itself carries input/output/cache
-  tokens, `total_cost_usd`, `duration_ms`; the per-agent-kind label
-  ("dynamic-implementer", "dynamic-judge", and so on) is not a field of
-  `AgentUsage` but a separate `kind` parameter `_write_usage_record()`
-  (`vs_agent/client.py:526`) adds when it assembles each `usage.jsonl`
-  row. This is the richest disconnected source in the repo. It is write-only
-  today: nothing reads it back into an event.
 - **Portfolio concurrency.** `active()`/`capacity()` (`strategy/_context.py`)
   compute true N-way in-flight/queued counts every tick, from live
   `DynamicStrategyState.attempts`, and discard the result immediately. One
@@ -295,10 +307,15 @@ persisted but not streamed, and not computed anywhere.
 - **The run's stated objective.** `RunFacts.objective`, frozen at run start
   (`vs_core` kernel `RunView.facts`). Exists today; nothing emits it as an
   event. This is the direct answer to showing the run's objective in the UI.
-- **GPU telemetry and contention.** `NvidiaSmiTelemetry`,
-  `GpuContentionMonitor` (`vs_sandbox/gpu_monitor.py`), a daemon thread
-  polling every 30s. `FrameworkSource.GPU` is declared in `vibesys.events`
-  and never constructed anywhere in production.
+- **Full GPU telemetry readings.** `NvidiaSmiTelemetry`
+  (`vs_sandbox/gpu_monitor.py`)'s per-poll device snapshot (every 30s) stays
+  on disk in `gpu_contention.jsonl`; only the contention on/off transition
+  reaches an event (`GpuContentionData`, see "Already streamed" above), not
+  every poll's full reading. `FrameworkSource.GPU` is declared in
+  `vibesys.events` and still never constructed anywhere in production, since
+  `GpuContentionData` carries no `source` field (its one emitting subsystem
+  makes one unnecessary, the same reasoning `WorkstreamAttemptData` and
+  `RetryWaitData` already use).
 - **Executor/evaluation capacity.** `AvailabilitySnapshot`
   (`vs_evaluation/models.py`: state, capacity, in_flight, queue_depth,
   estimated start/runtime, cost class) is real and detailed, consumed only
@@ -573,9 +590,9 @@ argument.
 | --- | --- | --- | --- |
 | Global / cross-run | Whole portfolio, this run | `RunFailure` aggregate counts (terminal only); best-result-so-far (`Winner`, computed once at search end) | live N-way concurrency snapshot (`active()`/`capacity()`, sampled, not per-tick); baseline state (`BaselineState`, already the one clean run-wide fact) |
 | Run-specific | One run, no workstream breakdown | `RunStatus`/`RunPhase`; global round counter (`RoundSummary.number`, not per-hypothesis) | the run's objective (`RunFacts.objective`, exists, unwired); run elapsed time (derived from the first event's timestamp, since no start-time field exists) |
-| Workstream-specific | One hypothesis/attempt | phase/step transitions, once gap 2 is closed generally | `AttemptRecord` detail while still live: `blockers`, `turns_spent`, `judge_invocation`, `review_evidence`, candidate revision |
+| Workstream-specific | One hypothesis/attempt | `WorkstreamAttemptData` (live retry-budget diagnostics, keyed by `hypothesis_id`); phase/step transitions remain open, pending gap 2 | `AttemptRecord` detail while still live: `blockers`, `turns_spent`, `judge_invocation`, `review_evidence`, candidate revision |
 | Checkpoint-specific | One retained snapshot within an attempt | none today | kernel-level `AttemptCheckpoint` (`wip` vs. `candidate` retention), if historical, not just latest, checkpoints are ever needed on the dashboard |
-| Agent / local-specific | One tool call or turn | tool calls + duration, `AgentStatusData`, `UsageUpdateData`, provider/model switches, rate limits | per-turn cost and cache tokens with real per-agent-kind attribution, once `usage.jsonl`/`AgentUsage` is wired |
+| Agent / local-specific | One tool call or turn | tool calls + duration, `AgentStatusData`, `UsageUpdateData`, `RetryWaitData` (one wait before an agentshim retry), `TurnUsageData` (per-turn cost and cache tokens, `agent_kind`-attributed via the envelope), provider/model switches, rate limits | a run-level or per-agent-kind cost aggregate, which `TurnUsageData` does not itself provide |
 
 Every tier fits the same envelope from "Scalable packaging design": scoped by
 `run_id` always, and by `workstream_id`/`attempt_id` where the tier is
@@ -850,12 +867,14 @@ expand-migrate-contract order, each behind the existing emission chokepoints
 3. **Surface token spend.** The first draft of this doc pointed at
    `AgentLoopState.input_tokens`/`output_tokens` as the seed to extend; that
    field is legacy, dead code reachable only from tests (see "The gap" item
-   3). The real seed is `usage.jsonl`/`AgentUsage` (`vs_agent/contracts.py`):
-   write a `CoreEventType` and payload mirroring its fields (input/output/
-   cache tokens, `total_cost_usd`, `duration_ms`, `kind`), emit it from
-   wherever `vs_agent` already writes `usage.jsonl`, and bridge it like any
-   other event. This is the single highest-value next wiring target this
-   inventory found.
+   3). The real seed was `usage.jsonl`/`AgentUsage` (`vs_agent/contracts.py`).
+   Done: `TurnUsageData` mirrors its fields (input/output/cache tokens,
+   `total_cost_usd`, `duration_ms`) and is bridged like any other event (see
+   "Already streamed"); `kind` reaches it the same way every other per-turn
+   event's `agent_kind` does, through the envelope, not the payload. What
+   remains: a `campaign-*` frame kind and `CampaignDashboard` rendering for
+   it, the one part of this item this inventory left for the dashboard-facing
+   work this doc otherwise scopes.
 4. **Derive the agent roster's `workstreamIds`; do not store it.** Roles are
    a run-level set (`orchestrator`/`implementer`/`judge`/`profiler`); no
    backend aggregate maps an agent to the workstreams it touched. Build

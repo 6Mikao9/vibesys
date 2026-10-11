@@ -55,3 +55,20 @@ test('scrubbing pauses the follow and keeps the folded run status', async ({page
   // stream, not from the cursor position.
   await expect(runState).toContainText('completed');
 });
+
+test('an active workstream shows its activity label in the table layout too', async ({page}) => {
+  // Regression test: the table layout used to render an Attempt column but
+  // drop the activity label entirely, even though the Kanban layout showed
+  // both for the same live data.
+  await page.goto('/?campaign-live&interval=20');
+  await expect(page.getByRole('heading', {name: 'Qwen3.5-397B-A17B on 4x MI300A'})).toBeVisible();
+
+  const workstreams = page.getByRole('region', {name: 'Workstreams'});
+  await workstreams.getByRole('button', {name: 'Table'}).click();
+  const table = workstreams.getByRole('table');
+
+  // The replay script emits a scripted workstream-activity frame for the
+  // first workstream partway through its run, well before the campaign
+  // completes.
+  await expect(table.locator('.activity-label').first()).toBeVisible({timeout: 40_000});
+});
