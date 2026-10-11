@@ -1,6 +1,7 @@
 """Public surface of the dynamic strategy package."""
 
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
+from vibesys.orchestration.dynamic.strategy._draft import measurement_recipe
 from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
 from vibesys.orchestration.dynamic.strategy._ids import (
     decision_id,
@@ -123,6 +124,7 @@ __all__ = [
     "ingest",
     "invocation_id",
     "ledger_refs",
+    "measurement_recipe",
     "options",
     "resolve",
     "role_id",

@@ -30,6 +30,11 @@ from vs_core._ids import (
     decision_of_operation,
     item_id,
 )
+from vs_core._measurement_recipe import (
+    MeasurementPurpose,
+    MeasurementRecipe,
+    StageBudget,
+)
 from vs_core._migration import v2_to_v3_migration
 from vs_core._projection import (
     attempt_view,
@@ -681,6 +686,8 @@ __all__ = [
     "MeasurementIdentity",
     "MeasurementPlan",
     "MeasurementPlanError",
+    "MeasurementPurpose",
+    "MeasurementRecipe",
     "MeasurementRequested",
     "MeasurementResult",
     "MeasurementStage",
@@ -828,6 +835,7 @@ __all__ = [
     "SnapshotAndRetain",
     "SnapshotAndRetainRun",
     "SnapshotResultRef",
+    "StageBudget",
     "StartAttempt",
     "SteerReceived",
     "Step",

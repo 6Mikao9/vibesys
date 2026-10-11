@@ -16,12 +16,14 @@ from vibesys.orchestration.dynamic.strategy._state import DynamicStrategyState, 
 from vs_core.api import (
     DecisionId,
     MeasurementPlan,
-    MeasurementStage,
+    MeasurementRecipe,
     Operation,
     OperationRequest,
     RequestTurn,
     RevisionRef,
+    RunFacts,
     Scope,
+    StageBudget,
     TurnShape,
     declared_operation,
 )
@@ -74,42 +76,37 @@ def request_turn(draft: Draft, shape: TurnShape, turn: TurnRecord, scope: Scope)
     return _request_turn(draft.view, IDS, shape, turn, scope)
 
 
+def measurement_recipe(config: DynamicConfig, facts: RunFacts) -> MeasurementRecipe:
+    """How this run measures a candidate: the single source of every measurement plan.
+
+    The strategy's trusted plans and the plan an agent measures with are both built from this
+    value, so an agent measurement and a trusted one share one identity.
+    """
+    return MeasurementRecipe(
+        evaluator_digest=facts.evaluator_digest,
+        workload_digest=facts.workload_digest,
+        environment_digest=facts.environment_digest,
+        recipe=config.recipe,
+        stages=(
+            StageBudget(stage_id="accuracy", execution_seconds=config.accuracy_seconds),
+            StageBudget(stage_id="benchmark", execution_seconds=config.benchmark_seconds),
+            StageBudget(stage_id="profile", execution_seconds=config.profile_seconds),
+        ),
+        queue_allowance=config.queue_allowance_seconds,
+        accuracy_stage="accuracy",
+    )
+
+
 def measurement_plan(
     draft: Draft, candidate: RevisionRef, purpose: Purpose, stages: tuple[str, ...]
 ) -> MeasurementPlan:
     """An ordered plan over the named stages, each depending on the one before it."""
-    config = draft.config
-    seconds = {
-        "accuracy": config.accuracy_seconds,
-        "benchmark": config.benchmark_seconds,
-        "profile": config.profile_seconds,
-    }
-    ordered = tuple(
-        MeasurementStage(
-            stage_id=name,
-            depends_on=stages[index - 1 : index] if index else (),
-            execution_budget=seconds[name],
-        )
-        for index, name in enumerate(stages)
-    )
-    now = draft.view.run.now_at
-    facts = draft.view.facts
-    return MeasurementPlan(
+    return measurement_recipe(draft.config, draft.view.facts).plan(
+        candidate,
         purpose=purpose,
-        candidate=candidate,
-        evaluator_digest=facts.evaluator_digest,
-        workload_digest=facts.workload_digest,
-        environment_digest=facts.environment_digest,
-        stages=ordered,
-        accuracy_stage="accuracy" if "accuracy" in stages else None,
-        policy="ordered",
-        recipe=config.recipe,
+        now_at=draft.view.run.now_at,
+        stages=stages,
         # Core retries a submission only after an infrastructure failure, and only within
         # this bound, which core's own run limit repeats (`limits_for`).
-        submission_limit=config.max_input_measurement_attempts,
-        submitted_at=now,
-        queue_allowance=config.queue_allowance_seconds,
-        deadline_at=now
-        + sum(item.execution_budget for item in ordered)
-        + config.queue_allowance_seconds,
+        submission_limit=draft.config.max_input_measurement_attempts,
     )
