@@ -24,11 +24,7 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     // The Electron main process is the package `main` (an entry by default); the sandboxed
     // preloads are loaded by path from `main/app/app-security.ts`, so knip cannot see them as
     // imports.
-    entry: [
-      'src/**/*.test.ts',
-      'src/renderer/preload/*.cts',
-      'src/renderer/welcome/main.tsx',
-    ],
+    entry: ['src/**/*.test.ts', 'src/renderer/preload/*.cts', 'src/renderer/welcome/main.tsx'],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'src/**/*.cts'],
   },
   tui: {

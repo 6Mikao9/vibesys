@@ -286,6 +286,12 @@ function desktopRules() {
       from: {path: `${DESKTOP_MAIN}(?:app|entities|shared)/`, pathNot: DESKTOP_SLICE_SUPPORT},
       to: {path: `${DESKTOP_MAIN}${DESKTOP_SLICE}/(?!index\\.ts$)`},
     },
+  ];
+}
+
+/** The renderers' rules: the welcome view's layers, and what no renderer may reach. */
+function rendererRules() {
+  return [
     {
       name: 'desktop-welcome-ui-does-not-depend-on-shell',
       severity: 'error',
@@ -552,6 +558,7 @@ export default {
       to: {path: '^tui/src/session-controller\\.ts$', dependencyTypesNot: ['type-only']},
     },
     ...desktopRules(),
+    ...rendererRules(),
     ...webRunPageRules(),
     {
       // `index.ts` (the frontend process) and `launcher.ts` (the `vibesys` bin) run on import,

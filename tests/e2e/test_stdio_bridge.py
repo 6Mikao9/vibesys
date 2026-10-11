@@ -90,9 +90,6 @@ class _BridgeConnection:
     """One protocol connection through one helper process, after ``hello`` and ``run.connect``."""
 
     def __init__(self, env: Mapping[str, str]) -> None:
-        # lint-waiver: LW-178504 [S603]; the helper must be its own process, as over ssh.
-        # > The argv is fixed; an in-process call would skip the entrypoint's stdio, exit
-        # > status and stderr contract under test.
         self.process = subprocess.Popen(
             [sys.executable, "-m", "entrypoints.host_helper"],
             stdin=subprocess.PIPE,
