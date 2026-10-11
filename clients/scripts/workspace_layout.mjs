@@ -44,13 +44,11 @@ import {join} from 'node:path';
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 const MANIFEST_FILE = 'package.json';
 const ARCHITECTURE_TSCONFIG = 'tsconfig.architecture.json';
-const WEB_PACKAGE = '@vibesys/web';
-const WEB_TSCONFIG = 'web/tsconfig.json';
-const WEB_ALIAS_DEFINITION = 'web/workspace-source-aliases.json';
 const SOURCE_DIRECTORY = 'src';
-const BUILD_OUTPUT_PREFIX = './dist/';
-const JAVASCRIPT_SUFFIX = '.js';
 const TYPESCRIPT_SUFFIX = '.ts';
+// The export condition every workspace export names its TypeScript source with; see
+// docs/contributing/clients-architecture.md (Build model).
+const SOURCE_CONDITION = '@vibesys/source';
 
 // Which directories hold no source is already declared, in `.gitignore`, so this asks git rather
 // than keeping a second list: build output (`dist`), installed dependencies (`node_modules`), tool
@@ -164,98 +162,36 @@ export function pathAlternation(directories) {
  * @returns {string[]} one message per disagreement, naming the file and the offending key
  */
 export function declarationErrors(root, layout) {
-  return [
-    ...architecturePathErrors(root, layout),
-    ...workspaceAliasErrors(root, layout),
-    ...packageScriptErrors(layout),
-  ];
-}
-
-/**
- * Check the Web source aliases that both Vite configurations derive from.
- *
- * The package exports are authoritative. `web/tsconfig.json` must map every
- * public entry point of each workspace package Web declares as a dependency,
- * and no other workspace specifier, to its source file. The TypeScript map is
- * checked separately because TypeScript owns its JSONC configuration format.
- *
- * @param {string} root
- * @param {ReturnType<typeof workspaceLayout>} layout
- * @returns {string[]} one message per alias that can resolve to build output
- */
-export function workspaceAliasErrors(root, layout) {
-  const web = layout.packages.find(({name}) => name === WEB_PACKAGE);
-  if (web === undefined) return [];
-
-  const declared = readJson(root, WEB_TSCONFIG).compilerOptions?.paths ?? {};
-  const aliases = readJson(root, WEB_ALIAS_DEFINITION);
-  const expected = expectedWebPaths(layout, web.manifest);
-  return [
-    ...pathMapErrors(
-      root,
-      WEB_TSCONFIG,
-      'web',
-      declared,
-      expected,
-      'a declared workspace package export',
-    ),
-    ...aliasMapErrors(root, aliases, expected),
-  ];
+  return [...architecturePathErrors(root, layout), ...packageScriptErrors(layout)];
 }
 
 function architecturePathErrors(root, layout) {
   const declared = readJson(root, ARCHITECTURE_TSCONFIG).compilerOptions?.paths ?? {};
   const expected = expectedArchitecturePaths(layout);
-  return pathMapErrors(
-    root,
-    ARCHITECTURE_TSCONFIG,
-    '.',
-    declared,
-    expected,
-    'a workspace package export',
-  );
+  return pathMapErrors(root, declared, expected);
 }
 
-function pathMapErrors(root, config, pathBase, declared, expected, unexpectedDescription) {
+function pathMapErrors(root, declared, expected) {
   const errors = [];
   for (const [specifier, target] of expected) {
     const value = declared[specifier];
     if (!Array.isArray(value) || value.length !== 1 || value[0] !== target) {
-      errors.push(`${config}: ${specifier} must map to ["${target}"]`);
-    } else if (!existsSync(join(root, pathBase, target))) {
-      errors.push(`${config}: ${specifier} maps to missing ${target}`);
+      errors.push(`${ARCHITECTURE_TSCONFIG}: ${specifier} must map to ["${target}"]`);
+    } else if (!existsSync(join(root, target))) {
+      errors.push(`${ARCHITECTURE_TSCONFIG}: ${specifier} maps to missing ${target}`);
     }
   }
   for (const specifier of Object.keys(declared)) {
     if (!expected.has(specifier)) {
-      errors.push(`${config}: ${specifier} is not ${unexpectedDescription}`);
-    }
-  }
-  return errors;
-}
-
-function aliasMapErrors(root, declared, expected) {
-  const errors = [];
-  for (const [specifier, target] of expected) {
-    if (declared[specifier] !== target) {
-      errors.push(`${WEB_ALIAS_DEFINITION}: ${specifier} must map to "${target}"`);
-    } else if (!existsSync(join(root, 'web', target))) {
-      errors.push(`${WEB_ALIAS_DEFINITION}: ${specifier} maps to missing ${target}`);
-    }
-  }
-  for (const specifier of Object.keys(declared)) {
-    if (!expected.has(specifier)) {
-      errors.push(
-        `${WEB_ALIAS_DEFINITION}: ${specifier} is not a declared workspace package export`,
-      );
+      errors.push(`${ARCHITECTURE_TSCONFIG}: ${specifier} is not a workspace package export`);
     }
   }
   return errors;
 }
 
 /**
- * The path map the packages imply: every package's public entry points, mapped to the source they
- * are built from, so a public import resolves to source instead of build output.
+ * The path map the packages imply: every package's public entry points, mapped to the source their
+ * `@vibesys/source` condition names, so a public import resolves to source instead of build output.
  */
 function expectedArchitecturePaths(layout) {
   const expected = new Map();
@@ -273,40 +209,20 @@ function expectedArchitecturePaths(layout) {
   return expected;
 }
 
-function expectedWebPaths(layout, webManifest) {
-  const workspaceDependencies = new Set(
-    Object.keys(webManifest.dependencies ?? {}).filter(dependency =>
-      dependency.startsWith('@vibesys/'),
-    ),
-  );
-  const allPaths = expectedArchitecturePaths(layout);
-  const expected = new Map();
-  for (const [specifier, target] of allPaths) {
-    if (
-      [...workspaceDependencies].some(
-        dependency => specifier === dependency || specifier.startsWith(`${dependency}/`),
-      )
-    ) {
-      expected.set(specifier, `../${target}`);
-    }
-  }
-  return expected;
-}
-
 function exportSourcePath(directory, subpath, target) {
-  const built = typeof target === 'string' ? target : (target?.import ?? target?.default);
+  const source =
+    typeof target === 'object' && target !== null ? target[SOURCE_CONDITION] : undefined;
   if (
-    typeof built !== 'string' ||
-    !built.startsWith(BUILD_OUTPUT_PREFIX) ||
-    !built.endsWith(JAVASCRIPT_SUFFIX)
+    typeof source !== 'string' ||
+    !source.startsWith('./') ||
+    !source.endsWith(TYPESCRIPT_SUFFIX)
   ) {
     throw new Error(
-      `${directory}/${MANIFEST_FILE}: cannot map the "${subpath}" export target ` +
-        `${JSON.stringify(built)} to a source file`,
+      `${directory}/${MANIFEST_FILE}: the "${subpath}" export must name its TypeScript source ` +
+        `with the "${SOURCE_CONDITION}" condition`,
     );
   }
-  const relativePath = built.slice(BUILD_OUTPUT_PREFIX.length, -JAVASCRIPT_SUFFIX.length);
-  return `${directory}/${SOURCE_DIRECTORY}/${relativePath}${TYPESCRIPT_SUFFIX}`;
+  return `${directory}/${source.slice('./'.length)}`;
 }
 
 function packageScriptErrors(layout) {

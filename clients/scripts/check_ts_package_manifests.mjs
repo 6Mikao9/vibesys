@@ -41,8 +41,6 @@ const DEPENDENCY_SECTIONS = [
   'peerDependencies',
 ];
 
-const DEPENDENCY_BUILD_COMMANDS = ['build', 'check', 'test'];
-
 export function manifestErrors(root) {
   const errors = [];
   const {packages} = workspaceLayout(root);
@@ -58,33 +56,8 @@ export function manifestErrors(root) {
       continue;
     }
     errors.push(...packageErrors(relativePath, name, policy, manifest, workspaceNames));
-    errors.push(...buildOrderErrors(relativePath, name, policy, manifest));
   }
   return errors;
-}
-
-/**
- * Whether each direct package command builds the workspace dependencies it imports.
- *
- * A direct `pnpm --filter <package> <command>` has no workspace scheduler to prepare its runtime
- * dependencies. Recursive `check` and `test` runs order packages, but invoke only that command,
- * which doesn't emit the dependency `dist` their imports resolve through. The hook is required
- * whether or not every entry point is redirected to source today: aliases are per specifier, so a
- * new subpath import can silently return to build output. The hook's argument is derivable from the
- * package name, and the required command set is closed here, so the checker accepts neither a
- * partial lifecycle nor an arbitrary script that happens to start with pnpm (#1039).
- */
-function buildOrderErrors(relativePath, name, policy, manifest) {
-  if (policy.runtimeWorkspaceDependencies.length === 0) return [];
-  const expected = `pnpm --filter ${name}^... build`;
-  return DEPENDENCY_BUILD_COMMANDS.flatMap(command => {
-    const hook = `pre${command}`;
-    if (manifest.scripts?.[hook] === expected) return [];
-    return [
-      `${relativePath}: ${name} must declare "${hook}": "${expected}", because direct ` +
-        `"${command}" must build its runtime workspace dependencies first`,
-    ];
-  });
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing; tracked: #288

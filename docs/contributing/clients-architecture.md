@@ -160,8 +160,9 @@ are unchanged, and checks a dependent against its dependencies' declarations ins
 source.
 
 **Task runner.** [Turborepo](https://turborepo.com) runs `build`, `check`, and `test` across the
-workspace in dependency order, in parallel, with a content-hash cache in `clients/.turbo/cache`.
-A task whose inputs (the package's tracked files, its dependencies' hashes, and the shared
+workspace in dependency order, in parallel, with a local content-hash cache in `.turbo/cache` at
+the repository root (shared by the git worktrees of one clone; CI keeps none between runs). A task
+whose inputs (the package's tracked files, its dependencies' hashes, and the shared
 configuration) match a previous run replays its output instead of running. `test` depends on a
 `transit` task rather than on `^build`, so tests start at once while still being invalidated
 when a dependency's source changes. Turborepo was chosen over Nx because it needs one
