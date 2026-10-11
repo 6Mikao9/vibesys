@@ -166,7 +166,7 @@ uv run python -m entrypoints.web live --project /path/to/project --task TASK --o
 - `entities/` holds domain values and pure functions shared by features (the
   run fold, connection state, gateway URL policy). No I/O.
 - `platform/` holds system services: `backend.ts` is the only module that
-  imports backend-client runtime values or uses `fetch`
+  imports `@vibesys/transport` runtime values or uses `fetch`
   (`lint-rules/web-fetch-only-in-backend.grit`), plus the browser lifecycle,
   tab storage, and the desktop bridge transport.
 - `shared/` is for domain-free utilities; it is empty today.
@@ -445,7 +445,7 @@ own package; `clients/.dependency-cruiser.mjs` enforces it:
   helper), 65 (not a VibeSys checkout), or 66 (no `uv`), with a word saying which.
 - `HelperChannel` is one channel: `hello`, then requests answered concurrently by id, each under
   a deadline, every line parsed strictly against the generated contract
-  (`@vibesys/backend-client/host-helper`). A run channel's one `run.connect` makes it a byte relay
+  (`@vibesys/contracts/host-helper`). A run channel's one `run.connect` makes it a byte relay
   carrying the run protocol; its end is the helper's exit status and `ChannelEnd` line.
 - `HostConnection` is one host's connection: a pure machine (`state/host-connection.ts`: idle,
   linking, handshaking, ready, reconnecting, offline, auth-needed, incompatible, closed) under a

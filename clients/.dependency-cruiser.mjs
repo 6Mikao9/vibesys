@@ -15,13 +15,11 @@ const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
-const BACKEND_CLIENT_TEST_ONLY = '^backend-client/src/(?:test-support/|testing/)';
+const TRANSPORT_TEST_ONLY =
+  '^(?:transport|transport-node|contracts)/src/(?:test-support/|testing/)';
 const CORE_STATE_TEST_ONLY = '^core-state/src/testing/';
 // A package's own test-support directory (`desktop/src/testing/`): Fakes that only tests import.
 const PACKAGE_TEST_SUPPORT = '^[^/]+/src/testing/';
-const BACKEND_CLIENT_NODE_TEST_SUPPORT =
-  '^backend-client/src/(?:test-support/|testing/.*\\.test-helper\\.[cm]?[jt]sx?$)';
-
 // The replay harness is tooling, but it has its own rule below, with the reason it exists; the
 // remaining tooling directories are plain leaf tools.
 const DEV_HARNESS = 'tui/dev';
@@ -39,41 +37,6 @@ const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // `^$1/` matches no path: such an importer may reach no tool directory at all.
 const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 
-function packagesAbove(directory) {
-  const above = layout.packages.filter(
-    workspacePackage => workspacePackage.directory !== directory,
-  );
-  return packagePaths(above);
-}
-
-function packagePaths(packages) {
-  if (packages.length === 0) return [];
-  return [
-    `^(?:${pathAlternation(packages.map(({directory}) => directory))})/`,
-    `/node_modules/(?:${pathAlternation(packages.map(({name}) => name))})/`,
-  ];
-}
-
-// The app-layer packages (`vibesys.layer` in each manifest) are peer frontends. Deriving the set
-// means a new app starts isolated from its peers instead of requiring another pair of hand-written
-// rules; `scripts/check_package_graph.mjs` owns the layer rules between manifests.
-const FRONTEND_PACKAGES = layout.packages.filter(({manifest}) => manifest.vibesys?.layer === 'app');
-
-function frontendPeerRules() {
-  return FRONTEND_PACKAGES.flatMap(frontend => {
-    const peers = FRONTEND_PACKAGES.filter(({directory}) => directory !== frontend.directory);
-    if (peers.length === 0) return [];
-    return [
-      {
-        name: `${frontend.directory}-does-not-depend-on-peer-frontends`,
-        severity: 'error',
-        from: {path: `^${frontend.directory}/`},
-        to: {path: packagePaths(peers)},
-      },
-    ];
-  });
-}
-
 // The web run page (`web/src`) is feature-sliced, with layers that point down only:
 // `app/` (composition) -> `features/<name>/` -> `entities/` (domain values and pure selectors)
 // -> `platform/` (system services: the one backend adapter, lifecycle, storage) -> `shared/`
@@ -81,7 +44,9 @@ function frontendPeerRules() {
 // and `effects/` is the shell. `docs/contributing/web-development.md` describes the layout.
 const WEB = '^web/src/';
 const WEB_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
-const BACKEND_CLIENT = ['^backend-client/', '/node_modules/@vibesys/backend-client/'];
+const TRANSPORT = ['^transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
+// The protocol vocabulary, which presentational and domain-free code never names.
+const CONTRACTS = ['^contracts/', '/node_modules/@vibesys/contracts/'];
 const CORE_STATE = ['^core-state/', '/node_modules/@vibesys/core-state/'];
 const WEB_BACKEND_ADAPTER = `${WEB}platform/backend\\.ts$`;
 const WEB_FEATURE_PART = part => `${WEB}features/[^/]+/${part}/`;
@@ -118,7 +83,7 @@ function webRunPageRules() {
     },
     {
       // The functional core (domain values and each feature's reducers) does no I/O: no React,
-      // no platform services, no backend-client runtime values. Generated types and core-state
+      // no platform services, no transport runtime values. Generated types and core-state
       // are the inputs it folds.
       name: 'web-core-is-pure',
       severity: 'error',
@@ -127,7 +92,7 @@ function webRunPageRules() {
         path: [
           `${WEB}platform/`,
           '(?:^|/)node_modules/(?:react|react-dom|electron)/',
-          ...BACKEND_CLIENT,
+          ...TRANSPORT,
         ],
         dependencyTypesNot: ['type-only'],
       },
@@ -148,7 +113,8 @@ function webRunPageRules() {
         path: [
           WEB_FEATURE_PART('effects'),
           `${WEB}platform/`,
-          ...BACKEND_CLIENT,
+          ...TRANSPORT,
+          ...CONTRACTS,
           '(?:^|/)node_modules/electron/',
         ],
       },
@@ -161,18 +127,18 @@ function webRunPageRules() {
     },
     {
       // One path to the backend: `platform/backend.ts` is the only module that imports
-      // backend-client's runtime values (`web-fetch-only-in-backend.grit` holds `fetch` to it).
-      name: 'web-backend-client-only-in-backend-adapter',
+      // @vibesys/transport's runtime values (`web-fetch-only-in-backend.grit` holds `fetch` to it).
+      name: 'web-transport-only-in-backend-adapter',
       severity: 'error',
       from: {path: WEB, pathNot: [TEST_FILE, WEB_BACKEND_ADAPTER]},
-      to: {path: BACKEND_CLIENT, dependencyTypesNot: ['type-only']},
+      to: {path: TRANSPORT, dependencyTypesNot: ['type-only']},
     },
     {
       // `shared/` is domain-free: no run, protocol, or connection vocabulary reaches it.
       name: 'web-shared-is-domain-free',
       severity: 'error',
       from: {path: `${WEB}shared/`, pathNot: TEST_FILE},
-      to: {path: [...BACKEND_CLIENT, ...CORE_STATE]},
+      to: {path: [...TRANSPORT, ...CONTRACTS, ...CORE_STATE]},
     },
   ];
 }
@@ -222,7 +188,7 @@ function desktopRules() {
       severity: 'error',
       from: {path: `${DESKTOP}common/`, pathNot: TEST_FILE},
       to: {
-        path: [`${DESKTOP}(?:main|renderer)/`, UI_RUNTIME, ...BACKEND_CLIENT],
+        path: [`${DESKTOP}(?:main|renderer)/`, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS],
         dependencyTypesNot: ['type-only'],
       },
     },
@@ -243,7 +209,8 @@ function desktopRules() {
           `${DESKTOP_MAIN}.+/shell/`,
           `${DESKTOP_WELCOME}(?:ui|effects)/`,
           UI_RUNTIME,
-          ...BACKEND_CLIENT,
+          ...TRANSPORT,
+          ...CONTRACTS,
         ],
         dependencyTypesNot: ['type-only'],
       },
@@ -299,7 +266,8 @@ function rendererRules() {
         path: [
           `${DESKTOP_WELCOME}effects/`,
           `${DESKTOP_WELCOME}main\\.tsx$`,
-          ...BACKEND_CLIENT,
+          ...TRANSPORT,
+          ...CONTRACTS,
           '(?:^|/)node_modules/electron/',
         ],
       },
@@ -319,7 +287,7 @@ function rendererRules() {
       to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
     },
     {
-      // The web run page reaches its server only through backend-client.
+      // The web run page reaches its server only through @vibesys/transport.
       name: 'web-opens-no-sockets-or-processes',
       severity: 'error',
       from: {path: '^web/src/', pathNot: TEST_FILE},
@@ -328,6 +296,10 @@ function rendererRules() {
   ];
 }
 
+// Rules between packages (layers, runtimes, declared and exported imports, third-party
+// confinement) have one home, `scripts/check_package_graph.mjs`, which reads them from the
+// manifests. These rules cover what it cannot see: modules inside a package, relative paths into
+// another package, and how imports resolve.
 /** @type {import('dependency-cruiser').IConfiguration} */
 export default {
   forbidden: [
@@ -349,15 +321,6 @@ export default {
         pathNot: ['^bun:test$', '^dependency-cruiser/config-utl/'],
       },
     },
-    {
-      // `backend-client` is the lowest layer, so it may not reach any other package: the set is
-      // derived, because a rule that names the layers above it goes stale when one is added.
-      name: 'backend-client-is-lowest-layer',
-      severity: 'error',
-      from: {path: '^backend-client/src/'},
-      to: {path: packagesAbove('backend-client')},
-    },
-    ...frontendPeerRules(),
     {
       // `tui/dev/` is the development replay harness. It is kept out of
       // `dist` by `rootDir: "src"`, but `tui/tsconfig.check.json` widens the root so
@@ -402,11 +365,11 @@ export default {
     {
       // Cross-runtime test helpers may use runtime adapters or deterministic scheduling seams
       // that shipping code must not reach. Keep them reachable only from test files.
-      name: 'production-code-does-not-import-backend-client-test-support',
+      name: 'production-code-does-not-import-transport-test-support',
       severity: 'error',
       // Test support may build on itself, e.g. the testing entry re-exporting its Fakes.
-      from: {path: SCANNED, pathNot: [TEST_FILE, BACKEND_CLIENT_TEST_ONLY]},
-      to: {path: BACKEND_CLIENT_TEST_ONLY},
+      from: {path: SCANNED, pathNot: [TEST_FILE, TRANSPORT_TEST_ONLY]},
+      to: {path: TRANSPORT_TEST_ONLY},
     },
     {
       // The store model checker and its seeded generator are test support for every frontend's
@@ -415,14 +378,6 @@ export default {
       severity: 'error',
       from: {path: SCANNED, pathNot: [TEST_FILE, PACKAGE_TEST_SUPPORT]},
       to: {path: CORE_STATE_TEST_ONLY},
-    },
-    {
-      // Core state is below every frontend, not only the two that happened to exist when the rule
-      // was written. A new workspace package is a frontend until its layer is deliberately added.
-      name: 'core-state-is-below-frontends',
-      severity: 'error',
-      from: {path: '^core-state/src/'},
-      to: {path: packagePaths(FRONTEND_PACKAGES)},
     },
     {
       name: 'workspace-packages-use-public-exports',
@@ -435,56 +390,6 @@ export default {
         dependencyTypesNot: ['aliased-tsconfig-paths'],
       },
     },
-    {
-      // The public entry points are the `exports` of each package, mapped to source by
-      // `tsconfig.architecture.json`, so a public import never resolves into `node_modules`.
-      // A specifier such as `@vibesys/x/dist/...` or `@vibesys/x/src/...` does: it reaches
-      // build output or private modules. (When the package declares `exports`, such a
-      // specifier is also unresolvable, which `no-unresolvable-imports` reports.)
-      name: 'workspace-packages-have-no-deep-imports',
-      severity: 'error',
-      from: {path: SCANNED},
-      to: {path: '(?:^|/)node_modules/@vibesys/'},
-    },
-    {
-      name: 'core-state-has-no-node-runtime',
-      severity: 'error',
-      from: {path: '^core-state/src/', pathNot: TEST_FILE},
-      to: {dependencyTypes: ['core']},
-    },
-    {
-      // The default (`.`) entry must bundle for a browser, so nothing it reaches
-      // may import a Node builtin. Only `backend-client/src/node/` may: the
-      // node-socket transport lives there, behind the `./node` export. Everything
-      // above that seam (protocol, folds, backoff, request policy, the transport
-      // interface) stays runtime-neutral. Test files and their non-shipping support directory
-      // are outside that contract and separately kept out of production imports above. This
-      // mirrors core-state-has-no-node-runtime.
-      name: 'backend-client-neutral-has-no-node-runtime',
-      severity: 'error',
-      from: {
-        path: '^backend-client/src/',
-        pathNot: ['^backend-client/src/node/', TEST_FILE, BACKEND_CLIENT_NODE_TEST_SUPPORT],
-      },
-      to: {dependencyTypes: ['core']},
-    },
-    {
-      name: 'core-state-has-no-ui-runtime',
-      severity: 'error',
-      from: {path: '^core-state/src/'},
-      to: {path: '@opentui[+/]'},
-    },
-    {
-      name: 'production-dependencies-are-declared',
-      severity: 'error',
-      // Applies to the tooling too (harness, benchmarks, end-to-end specs, scripts): they must
-      // declare what they import, though they may import any public workspace export.
-      from: {
-        path: `${PACKAGE_SOURCES}|${TOOLING}`,
-        pathNot: `${PACKAGE_SOURCES}.*${TEST_FILE}`,
-      },
-      to: {dependencyTypes: ['npm-no-pkg', 'npm-unknown']},
-    },
     // Layering inside `tui/src`. `docs/contributing/tui-architecture.md` gives the package
     // ownership of interaction state, effects, and OpenTUI rendering/input; these rules encode
     // that split over the current module structure. Test files are exempt: they wire layers
@@ -492,10 +397,15 @@ export default {
     {
       // Widgets render the TUI-owned session model. Wire types stop in the model/controller
       // layer, so generated backend contracts cannot spread into presentation modules.
-      name: 'tui-ui-does-not-depend-on-backend-client',
+      name: 'tui-ui-does-not-depend-on-transport',
       severity: 'error',
       from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
-      to: {path: ['^backend-client/', '/node_modules/@vibesys/backend-client/']},
+      to: {
+        path: [
+          '^(?:transport|transport-node|contracts)/',
+          '/node_modules/@vibesys/(?:transport|transport-node|contracts)/',
+        ],
+      },
     },
     {
       // The replay harness consumes published workspace entry points. A relative import into any
@@ -577,7 +487,7 @@ export default {
       to: {
         path: [
           '^tui/src/(?!launcher\\.ts$|theme\\.ts$)',
-          '^(?:backend-client|core-state)/',
+          '^(?:transport|transport-node|contracts|core-state)/',
           '@opentui[+/]',
         ],
       },

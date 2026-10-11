@@ -1,17 +1,19 @@
 import {
-  DEFAULT_RECONNECT_DELAYS_MS,
   type ExperimentCursor,
-  PersistentEventStream,
   type RunEvent,
   type RunSnapshot,
-  type ScheduleTimeout,
   ServerError,
   type ServerMessage,
+} from '@vibesys/contracts';
+import {DEFAULT_CHAT_THREAD_ID, hasRunEnded, recordsBenchmark} from '@vibesys/core-state';
+import {
+  DEFAULT_RECONNECT_DELAYS_MS,
+  PersistentEventStream,
+  type ScheduleTimeout,
   type ServerTransport,
   type StreamConnectionState,
   StreamReconciler,
-} from '@vibesys/backend-client';
-import {DEFAULT_CHAT_THREAD_ID, hasRunEnded, recordsBenchmark} from '@vibesys/core-state';
+} from '@vibesys/transport';
 import type {StartupTrace} from './boot-trace.js';
 import {
   chatMenuCustomModel,

@@ -6,5 +6,13 @@
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts", "build-inputs.ts"],
-  "exclude": []
+  "exclude": [],
+  "references": [
+    {"path": "../transport/tsconfig.lib.json"},
+    {"path": "../transport/tsconfig.testing.json"},
+    {"path": "../transport/tsconfig.websocket.json"},
+    {"path": "../contracts/tsconfig.lib.json"},
+    {"path": "../contracts/tsconfig.testing.json"},
+    {"path": "../core-state/tsconfig.lib.json"}
+  ]
 }

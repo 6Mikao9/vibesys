@@ -1,10 +1,7 @@
 import {describe, expect, test} from 'bun:test';
-import {
-  BackendClientError,
-  type ControlChannelState,
-  type RunSnapshot,
-} from '@vibesys/backend-client';
+import {BackendClientError, type RunSnapshot} from '@vibesys/contracts';
 import {checkModel, type Seeded} from '@vibesys/core-state/testing';
+import type {ControlChannelState} from '@vibesys/transport';
 import {
   type Reachability,
   SESSION_INITIAL,

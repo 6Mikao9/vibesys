@@ -21,7 +21,9 @@ bundles, and the TUI.
 src/vibesys/             Orchestration policy and thin product API/composition
 src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
-clients/backend-client/  TypeScript server protocol and transport
+clients/contracts/       TypeScript server protocol types and validator
+clients/transport/       Runtime-neutral transport and the WebSocket adapter
+clients/transport-node/  Node transport: the Unix-socket client
 clients/core-state/      Pure backend-event projection
 clients/tui/             TypeScript terminal UI and launcher
 libs/                    Reusable standalone libraries
@@ -253,7 +255,7 @@ The TypeScript client has its own workflow; see
 ```bash
 cd clients
 pnpm install --frozen-lockfile
-pnpm --dir backend-client generate:protocol
+pnpm --dir contracts generate:protocol
 pnpm check:ts-architecture
 pnpm check:knip
 pnpm check:clients
@@ -271,7 +273,7 @@ model. `tsc -b` keeps each package's `dist` incrementally; `pnpm exec tsc -b --c
 removes it.
 
 When Python protocol models change, regenerate the files under
-`clients/backend-client/src/generated/` and review the diff.
+`clients/contracts/src/generated/` and review the diff.
 See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
 TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 

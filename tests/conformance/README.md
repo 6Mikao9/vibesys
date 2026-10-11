@@ -6,7 +6,7 @@ socket and a WebSocket gateway (#811). Both must reproduce the framing and conne
 written down in [`docs/contributing/wire-protocol.md`](../../docs/contributing/wire-protocol.md).
 This corpus is the fixtures that hold them to it.
 
-There is exactly one copy. The client-side fold suite (`@vibesys/backend-client`, #812) and the
+There is exactly one copy. The client-side fold suite (`@vibesys/transport`, #812) and the
 server-side scenario suite (`src/server`, #811) both read the files here. Neither keeps a private
 copy, so a fixture change moves both suites at once.
 
@@ -22,7 +22,7 @@ tests/conformance/
 ```
 
 - `events/` proves event-kind coverage. There is one file per member of the `EventType` enum in the
-  generated schema (`clients/backend-client/src/generated/protocol.schema.json`). The corpus gate
+  generated schema (`clients/contracts/src/generated/protocol.schema.json`). The corpus gate
   enumerates the enum and fails if a kind has no fixture, so a new event kind cannot land without
   one. Each file is a single valid `RunEvent` instance; the filename stem is its `type`.
 

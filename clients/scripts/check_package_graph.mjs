@@ -95,6 +95,7 @@ export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './ma
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
   {packages: ['electron'], runtimes: ['node'], layers: ['feature', 'app']},
+  {packages: ['@opentui/core'], runtimes: ['node'], layers: ['app']},
 ];
 const NODE_BUILTINS = {runtimes: ['node']};
 
@@ -106,7 +107,6 @@ const NODE_BUILTINS = {runtimes: ['node']};
  * applies. This table only shrinks.
  */
 export const LEGACY_EXEMPTIONS = {
-  '@vibesys/backend-client': new Set(['entry-projects']),
   '@vibesys/desktop': new Set(['entry-projects', 'external-dependencies']),
   '@vibesys/tui': new Set(['entry-projects']),
   '@vibesys/web': new Set(['entry-projects']),
