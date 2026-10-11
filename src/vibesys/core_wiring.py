@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import RunEnvironmentView, TrustedEvaluationPlan
 
 __all__ = [
-    "CandidateSandboxFacts",
+    "ParallelCandidateFacts",
     "EvaluationInputs",
     "ResolvedRun",
     "agent_evaluation_policy",
@@ -40,7 +40,7 @@ __all__ = [
 ]
 
 
-class CandidateSandboxFacts(Protocol):
+class ParallelCandidateFacts(Protocol):
     """What the sandbox check reads of a run environment."""
 
     @property
@@ -130,7 +130,7 @@ def operation_catalog(operations: StrategyOperations, ports: OperationPorts) -> 
     return build_operation_catalog(registrations, production_owners(registrations, ports))
 
 
-def require_candidate_sandboxes(environment: CandidateSandboxFacts, *, loop: str) -> None:
+def require_candidate_sandboxes(environment: ParallelCandidateFacts, *, loop: str) -> None:
     """Refuse a run environment that cannot open isolated candidate sandboxes.
 
     A strategy whose workstreams each run in their own candidate sandbox would otherwise fail

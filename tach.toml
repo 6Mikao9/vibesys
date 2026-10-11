@@ -1295,7 +1295,7 @@ depends_on = ["vs_core", "vs_runtime", "vibesys.errors", "vibesys.run.evaluation
 
 [[interfaces]]
 from = ["vibesys.core_wiring"]
-expose = ["CandidateSandboxFacts", "EvaluationInputs", "ResolvedRun", "agent_evaluation_policy", "evaluation_inputs", "operation_catalog", "require_candidate_sandboxes"]
+expose = ["ParallelCandidateFacts", "EvaluationInputs", "ResolvedRun", "agent_evaluation_policy", "evaluation_inputs", "operation_catalog", "require_candidate_sandboxes"]
 
 [[modules]]
 # The capability sets and the factory of the agent roles of a strategy on the core lifecycle.
