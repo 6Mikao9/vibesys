@@ -32,6 +32,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     DynamicStrategyState,
     dynamic_operation_registrations,
     dynamic_operation_registry,
+    measurement_recipe,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.run.evaluation_backend import semantic_evaluation_identity
@@ -210,19 +211,16 @@ def _agent_evaluation(policy: DynamicCorePolicy) -> AgentEvaluationPolicy:
     measurement plans, so an agent measurement and a trusted one share one identity.
     """
     config = policy.strategy.config
-    facts = policy.facts
-    gates = (
-        ("accuracy", config.accuracy_seconds, config.accuracy_configured),
-        ("benchmark", config.benchmark_seconds, config.benchmark_configured),
+    configured = tuple(
+        name
+        for name, enabled in (
+            ("accuracy", config.accuracy_configured),
+            ("benchmark", config.benchmark_configured),
+        )
+        if enabled
     )
-    return AgentEvaluationPolicy(
-        evaluator_digest=facts.evaluator_digest,
-        workload_digest=facts.workload_digest,
-        environment_digest=facts.environment_digest,
-        recipe=config.recipe,
-        stages=tuple((name, seconds) for name, seconds, configured in gates if configured),
-        queue_allowance=config.queue_allowance_seconds,
-        accuracy_stage="accuracy" if config.accuracy_configured else None,
+    return AgentEvaluationPolicy.from_recipe(
+        measurement_recipe(config, policy.facts).only(configured)
     )
 
 

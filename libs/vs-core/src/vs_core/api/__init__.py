@@ -5,6 +5,18 @@ from vs_core._attempt_track import (
     Step,
 )
 from vs_core._continuations import SuspensionRefusal
+from vs_core._draft import (
+    Draft,
+    TurnShape,
+    attempt_scope,
+    declared_operation,
+    invocation_for,
+    request_turn,
+    run_scope,
+    session_for,
+    turn_decision_id,
+    workspace_for,
+)
 from vs_core._evidence_views import (
     ledger_refs,
     trusted_keys,
@@ -17,6 +29,11 @@ from vs_core._ids import (
     component,
     decision_of_operation,
     item_id,
+)
+from vs_core._measurement_recipe import (
+    MeasurementPurpose,
+    MeasurementRecipe,
+    StageBudget,
 )
 from vs_core._migration import v2_to_v3_migration
 from vs_core._projection import (
@@ -582,6 +599,7 @@ __all__ = [
     "DispatchAuthorized",
     "DispatchTurn",
     "Disposition",
+    "Draft",
     "EnsureSession",
     "EnsureWorkspace",
     "EnvelopeMigration",
@@ -668,6 +686,8 @@ __all__ = [
     "MeasurementIdentity",
     "MeasurementPlan",
     "MeasurementPlanError",
+    "MeasurementPurpose",
+    "MeasurementRecipe",
     "MeasurementRequested",
     "MeasurementResult",
     "MeasurementStage",
@@ -815,6 +835,7 @@ __all__ = [
     "SnapshotAndRetain",
     "SnapshotAndRetainRun",
     "SnapshotResultRef",
+    "StageBudget",
     "StartAttempt",
     "SteerReceived",
     "Step",
@@ -840,6 +861,7 @@ __all__ = [
     "TurnObserved",
     "TurnRequested",
     "TurnResult",
+    "TurnShape",
     "TurnSpec",
     "TurnSuspended",
     "UnobservedJobFacts",
@@ -862,12 +884,15 @@ __all__ = [
     "advance_session",
     "attempt_id",
     "attempt_ref",
+    "attempt_scope",
     "attempt_view",
     "component",
     "decision_of_operation",
+    "declared_operation",
     "dependency_status",
     "evidence_view",
     "initial_state",
+    "invocation_for",
     "item_id",
     "ledger_refs",
     "may_resubmit",
@@ -878,8 +903,11 @@ __all__ = [
     "phase_waits",
     "project",
     "recover",
+    "request_turn",
+    "run_scope",
     "schedule",
     "scheduling_view",
+    "session_for",
     "session_view",
     "settle",
     "settlement_view",
@@ -888,9 +916,11 @@ __all__ = [
     "trace_step",
     "trusted_keys",
     "turn_candidate",
+    "turn_decision_id",
     "v2_to_v3_migration",
     "validate_startup",
     "validate_terminal_inputs",
     "waits",
+    "workspace_for",
     "write_turn_authority",
 ]

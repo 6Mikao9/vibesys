@@ -15,16 +15,12 @@ from vibesys.orchestration.dynamic.strategy import _review_evidence as review_ev
 from vibesys.orchestration.dynamic.strategy._baseline import stages
 from vibesys.orchestration.dynamic.strategy._draft import (
     Draft,
-    TurnShape,
-    attempt_scope,
     measurement_plan,
     operation,
     render_id,
     render_request,
     request_turn,
-    run_scope,
     turn_id,
-    workspace_for,
 )
 from vibesys.orchestration.dynamic.strategy._operations import (
     InterpretEvidence,
@@ -55,10 +51,14 @@ from vs_core.api import (
     RevisionRef,
     SchemaRef,
     StartAttempt,
+    TurnShape,
     Withdraw,
     WorkspaceMode,
     WorkspacePlan,
+    attempt_scope,
     ledger_refs,
+    run_scope,
+    workspace_for,
 )
 
 _TURN_PHASES = {

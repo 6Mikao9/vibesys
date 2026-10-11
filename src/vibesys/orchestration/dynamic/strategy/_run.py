@@ -17,7 +17,7 @@ has a trusted, measured result to use:
 from vibesys.hypothesis import RunEnding
 from vibesys.orchestration.dynamic.strategy import _context as context
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._draft import Draft, run_scope
+from vibesys.orchestration.dynamic.strategy._draft import Draft
 from vibesys.orchestration.dynamic.strategy._ids import decision_id
 from vibesys.orchestration.dynamic.strategy._settlement import measurement
 from vibesys.orchestration.dynamic.strategy._state import (
@@ -37,6 +37,7 @@ from vs_core.api import (
     Selection,
     Stop,
     TrustedBaseline,
+    run_scope,
 )
 
 

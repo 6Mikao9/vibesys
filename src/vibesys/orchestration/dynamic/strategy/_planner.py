@@ -15,13 +15,11 @@ from vibesys.orchestration.dynamic.strategy import _ids as ids
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import (
     Draft,
-    TurnShape,
     invocation_for,
     operation,
     render_id,
     render_request,
     request_turn,
-    run_scope,
     turn_id,
 )
 from vibesys.orchestration.dynamic.strategy._operations import RenderedArtifacts
@@ -49,6 +47,8 @@ from vs_core.api import (
     RunView,
     TurnFailureKind,
     TurnResult,
+    TurnShape,
+    run_scope,
 )
 
 SUBJECT = "run"

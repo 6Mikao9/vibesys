@@ -69,11 +69,12 @@ from vs_core.api import (
     InvocationId,
     InvocationRef,
     MeasurementPlan,
-    MeasurementStage,
+    MeasurementRecipe,
     ResourceId,
     RevisionRef,
     Scope,
     SessionPhase,
+    StageBudget,
     SubmitMeasurement,
     SuspensionRefusal,
     Transition,
@@ -187,30 +188,45 @@ class AgentEvaluationPolicy:
     accuracy_stage: str | None = None
     purpose: Literal["baseline", "local-validation", "official", "profile"] = "local-validation"
 
-    def plan(self, candidate: RevisionRef, *, now_at: float) -> MeasurementPlan:
-        """The ordered plan over the declared stages for this candidate, submitted now."""
-        stages = tuple(
-            MeasurementStage(
-                stage_id=name,
-                depends_on=self.stages[index - 1][:1] if index else (),
-                execution_budget=seconds,
-            )
-            for index, (name, seconds) in enumerate(self.stages)
+    @classmethod
+    def from_recipe(
+        cls,
+        recipe: MeasurementRecipe,
+        *,
+        purpose: Literal[
+            "baseline", "local-validation", "official", "profile"
+        ] = "local-validation",
+    ) -> AgentEvaluationPolicy:
+        """The agent's policy over exactly the stages ``recipe`` holds."""
+        return cls(
+            evaluator_digest=recipe.evaluator_digest,
+            workload_digest=recipe.workload_digest,
+            environment_digest=recipe.environment_digest,
+            recipe=recipe.recipe,
+            stages=tuple((item.stage_id, item.execution_seconds) for item in recipe.stages),
+            queue_allowance=recipe.queue_allowance,
+            accuracy_stage=recipe.accuracy_stage,
+            purpose=purpose,
         )
-        return MeasurementPlan(
-            purpose=self.purpose,
-            candidate=candidate,
+
+    @property
+    def measurement(self) -> MeasurementRecipe:
+        """The measurement recipe this policy fixes; the one place its plan is assembled."""
+        return MeasurementRecipe(
             evaluator_digest=self.evaluator_digest,
             workload_digest=self.workload_digest,
             environment_digest=self.environment_digest,
-            stages=stages,
-            policy="ordered",
             recipe=self.recipe,
-            submitted_at=now_at,
+            stages=tuple(
+                StageBudget(stage_id=name, execution_seconds=sec) for name, sec in self.stages
+            ),
             queue_allowance=self.queue_allowance,
-            deadline_at=now_at + sum(s.execution_budget for s in stages) + self.queue_allowance,
             accuracy_stage=self.accuracy_stage,
         )
+
+    def plan(self, candidate: RevisionRef, *, now_at: float) -> MeasurementPlan:
+        """The ordered plan over the declared stages for this candidate, submitted now."""
+        return self.measurement.plan(candidate, purpose=self.purpose, now_at=now_at)
 
 
 class SnapshotWorkspace(Protocol):
