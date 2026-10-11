@@ -54,7 +54,7 @@ export class HelperRequestError extends Error {
 }
 
 /** How a channel's process ending is explained: the link's own words (ssh) for a status. */
-export type ExitExplanation = (code: number | null, stderr: string) => ConnectionError;
+type ExitExplanation = (code: number | null, stderr: string) => ConnectionError;
 
 export interface ChannelOptions {
   /** `CHECKOUT on HOST`, for what the bootstrap reports. */

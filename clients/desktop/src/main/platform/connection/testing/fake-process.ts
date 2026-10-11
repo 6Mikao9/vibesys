@@ -58,10 +58,3 @@ export function fakeProcess(onKill: (signal: KillSignal) => void = () => {}): Fa
     end,
   };
 }
-
-/** A process that has already printed `stdout` and `stderr` and exited with `code`. */
-export function finishedProcess(code: number | null, stdout = '', stderr = ''): SpawnedProcess {
-  const fake = fakeProcess();
-  fake.end(code, stdout, stderr);
-  return fake.process;
-}

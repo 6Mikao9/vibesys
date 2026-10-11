@@ -20,7 +20,7 @@
  */
 
 /** Directories probed for `uv` when it is on neither the host's PATH nor a login shell's. */
-export const PROBED_DIRECTORIES = [
+const PROBED_DIRECTORIES = [
   '$HOME/.local/bin',
   '$HOME/.cargo/bin',
   '/opt/homebrew/bin',
@@ -28,7 +28,7 @@ export const PROBED_DIRECTORIES = [
 ] as const;
 
 /** The bootstrap's reserved exit statuses, and what each means. */
-export const BOOTSTRAP_STATUS = {predates: 64, notCheckout: 65, noUv: 66} as const;
+const BOOTSTRAP_STATUS = {predates: 64, notCheckout: 65, noUv: 66} as const;
 
 /**
  * Decodes the hex-encoded arguments back into `"$@"`. `\134` (a backslash) is the one backslash in

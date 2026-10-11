@@ -13,7 +13,7 @@ import {only, type Step} from '@vibesys/core-state';
 import type {HostKey} from '../../../common/hosts.js';
 import type {StartOutcome, WelcomeResult} from '../../../common/welcome-protocol.js';
 
-export interface SheetHost {
+interface SheetHost {
   readonly key: HostKey;
   readonly label: string;
 }

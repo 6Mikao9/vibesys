@@ -12,7 +12,7 @@ import type {HostKey} from '../../../common/hosts.js';
 import type {PathCompletion, WelcomeResult} from '../../../common/welcome-protocol.js';
 
 /** How long typing must pause before a directory is listed. */
-export const COMPLETION_PAUSE_MS = 80;
+const COMPLETION_PAUSE_MS = 80;
 /** The most suggestions a field shows. */
 const SHOWN = 50;
 

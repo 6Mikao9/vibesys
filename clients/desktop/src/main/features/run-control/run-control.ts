@@ -26,7 +26,7 @@ import {type RelayPort, relay} from './relay.js';
 import {StopController} from './stop-controller.js';
 
 /** The page that shows an attached run. */
-export interface RunPage {
+interface RunPage {
   /** Tell the page its host is reachable again, so its session redials now. */
   wake(): void;
   close(): void;

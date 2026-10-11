@@ -30,9 +30,7 @@ export type Cause =
   | 'denied';
 
 /** What a check proves: the control channel answers, or a run channel to `instanceId` connects. */
-export type CheckTarget =
-  | {readonly kind: 'control'}
-  | {readonly kind: 'run'; readonly instanceId: string};
+type CheckTarget = {readonly kind: 'control'} | {readonly kind: 'run'; readonly instanceId: string};
 
 export type Phase =
   | {readonly kind: 'idle'}

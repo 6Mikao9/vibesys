@@ -1,8 +1,9 @@
 /**
- * A started process as the hosts observe it, and the adapter from a real child process.
+ * A started process as a link observes it, and the adapter from a real child process.
  *
- * Every process a host starts (a local `vibesys` command, an `ssh` client) goes through this shape,
- * so the hosts run their contract suite against in-memory processes.
+ * Every process a link starts (a helper channel over `/bin/sh` or `ssh`, an `ssh` control
+ * command) goes through this shape, so the connection runs its contract suite against in-memory
+ * processes.
  */
 import type {ChildProcess} from 'node:child_process';
 import type {Readable, Writable} from 'node:stream';
@@ -17,79 +18,6 @@ export interface SpawnedProcess {
    */
   readonly exit: Promise<number | null>;
   kill(signal: 'SIGTERM' | 'SIGKILL'): void;
-}
-
-/** What a finished command printed and how it exited. */
-export interface CommandOutput {
-  readonly code: number | null;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
-/** A host command crossed the output bound and was killed before it could exhaust Electron. */
-export class ProcessOutputLimitError extends Error {
-  readonly stream: 'stdout' | 'stderr';
-  readonly limitBytes: number;
-
-  constructor(stream: 'stdout' | 'stderr', limitBytes: number) {
-    super(`command ${stream} exceeded the ${limitBytes}-byte output limit`);
-    this.name = 'ProcessOutputLimitError';
-    this.stream = stream;
-    this.limitBytes = limitBytes;
-  }
-}
-
-/**
- * Wait for `process` to finish, retaining at most `limitBytes` from each output stream.
- *
- * Crossing either bound kills the owned child exactly once and rejects after the child and both
- * pipes have ended. Output is never truncated into a superficially valid command result.
- */
-export async function finish(process: SpawnedProcess, limitBytes: number): Promise<CommandOutput> {
-  process.stdin.end();
-  let overflow: ProcessOutputLimitError | null = null;
-  const exceeded = (stream: 'stdout' | 'stderr'): void => {
-    if (overflow !== null) return;
-    overflow = new ProcessOutputLimitError(stream, limitBytes);
-    // A command that broke its output contract must not get another chance to keep writing.
-    process.kill('SIGKILL');
-  };
-  const [stdout, stderr, code] = await Promise.all([
-    collect(process.stdout, 'stdout', limitBytes, exceeded),
-    collect(process.stderr, 'stderr', limitBytes, exceeded),
-    process.exit,
-  ]);
-  if (overflow !== null) throw overflow;
-  return {code, stdout, stderr};
-}
-
-async function collect(
-  stream: Readable,
-  name: 'stdout' | 'stderr',
-  limitBytes: number,
-  exceeded: (stream: 'stdout' | 'stderr') => void,
-): Promise<string> {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  let retaining = true;
-  for await (const value of stream) {
-    if (!retaining) continue;
-    const chunk =
-      typeof value === 'string'
-        ? Buffer.from(value)
-        : Buffer.isBuffer(value)
-          ? value
-          : Buffer.from(value as Uint8Array);
-    if (bytes + chunk.length > limitBytes) {
-      retaining = false;
-      chunks.length = 0;
-      exceeded(name);
-      continue;
-    }
-    chunks.push(chunk);
-    bytes += chunk.length;
-  }
-  return retaining ? Buffer.concat(chunks, bytes).toString('utf8') : '';
 }
 
 /** A real child process spawned with three pipes. */

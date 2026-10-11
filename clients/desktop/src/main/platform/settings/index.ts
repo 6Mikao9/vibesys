@@ -3,8 +3,6 @@
  * (`recent.json`), validated, with `SettingsStore` as their one writer.
  */
 export {
-  type HostSettings,
-  type SettingsFile,
   settingsFor,
   sshConfigHosts,
   withHostSettings,
