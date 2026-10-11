@@ -1,7 +1,8 @@
-"""The stdio bridge process against a real Unix server: the conformance runner ``stdio-bridge``.
+"""A run channel against a real Unix server: the conformance runner ``stdio-bridge``.
 
-Each connection is a real ``python -m entrypoints.stdio_bridge`` process whose stdin and
-stdout stand in for an ssh exec channel. The scenarios in
+Each connection is a real ``python -m entrypoints.host_helper`` process whose stdin and
+stdout stand in for an ssh exec channel, turned into a relay by ``hello`` and
+``run.connect``, as the desktop app opens one. The scenarios in
 ``tests/conformance/runners/stdio-bridge.json`` replay through it unchanged, so the relay
 is held to the same corpus as the Unix transport it fronts. The deterministic tests of
 the relay's ends and deadlines are in ``tests/server/test_stdio_bridge.py``.
@@ -10,6 +11,7 @@ the relay's ends and deadlines are in ``tests/server/test_stdio_bridge.py``.
 from __future__ import annotations
 
 import json
+import os
 import queue
 import socket
 import subprocess
@@ -23,8 +25,16 @@ from tests.conformance.frame_matching import assert_frame_matches
 from tests.conformance.replay import load_scenario, run_steps, runner_group
 from tests.server.support import DEADLOCK_GUARD_S, ServerParts, build_server_parts
 
-from server.stdio_bridge import EXIT_STATUS, BridgeOutcome
-from server.stdio_bridge_report import BridgeReport
+from server.host_api import (
+    ChannelEnd,
+    ChannelEndOutcome,
+    InstanceStatus,
+    LiveInstanceRecord,
+    RunPhase,
+    RunStatus,
+)
+from server.registry import FileInstanceStore, instance_root
+from server.stdio_bridge import EXIT_STATUS
 from server.transport.unix_jsonl import UnixJsonlServer
 
 if TYPE_CHECKING:
@@ -33,25 +43,72 @@ if TYPE_CHECKING:
 
 _HISTORY_EVENTS = 100
 _RUNNER = "stdio-bridge"
+_INSTANCE_ID = "0123456789ab"
+_HELLO = {
+    "type": "hello",
+    "request_id": "h",
+    "deadline_ms": 10000,
+    "client_versions": [1, 1],
+    "features": [],
+    "app_version": "e2e",
+}
+
+
+@pytest.fixture
+def env(tmp_path: Path) -> dict[str, str]:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    return {**os.environ, "XDG_RUNTIME_DIR": str(runtime), "PYTHONPATH": os.pathsep.join(sys.path)}
+
+
+@contextmanager
+def _registered(env: Mapping[str, str], socket_path: Path) -> Iterator[None]:
+    """A live record for ``_INSTANCE_ID`` naming ``socket_path``, as a detached server publishes."""
+    hold = FileInstanceStore(instance_root(env, os.getuid())).hold(_INSTANCE_ID)
+    try:
+        hold.publish(
+            LiveInstanceRecord(
+                id=_INSTANCE_ID,
+                status=InstanceStatus.SERVING,
+                phase=RunPhase(status=RunStatus.RUNNING),
+                socket_path=str(socket_path),
+                log_path=str(socket_path.with_suffix(".log")),
+                project_root=str(socket_path.parent),
+                run_id="run-e2e",
+                pid=os.getpid(),
+                started_at=0.0,
+                hostname="e2e",
+                vibesys_version="0+e2e",
+            )
+        )
+        yield
+    finally:
+        hold.release()
 
 
 class _BridgeConnection:
-    """One protocol connection through one bridge process."""
+    """One protocol connection through one helper process, after ``hello`` and ``run.connect``."""
 
-    def __init__(self, socket_path: Path) -> None:
-        # lint-waiver: LW-178504 [S603]; the bridge must be its own process, as over ssh.
-        # > The argv is fixed apart from a test-owned socket path; an in-process call would
-        # > skip the entrypoint's stdio, exit status and stderr contract under test.
-        self.process = subprocess.Popen(  # noqa: S603
-            [sys.executable, "-m", "entrypoints.stdio_bridge", "--socket", str(socket_path)],
+    def __init__(self, env: Mapping[str, str]) -> None:
+        # lint-waiver: LW-178504 [S603]; the helper must be its own process, as over ssh.
+        # > The argv is fixed; an in-process call would skip the entrypoint's stdio, exit
+        # > status and stderr contract under test.
+        self.process = subprocess.Popen(
+            [sys.executable, "-m", "entrypoints.host_helper"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=dict(env),
         )
         self._lines: queue.Queue[bytes] = queue.Queue()
         stdout = cast("IO[bytes]", self.process.stdout)
         self._reader = threading.Thread(target=self._read, args=(stdout,), daemon=True)
         self._reader.start()
+        self.send(_HELLO)
+        assert self.receive()["type"] == "hello"
+        connect = {"request_id": "c", "deadline_ms": 10000, "instance_id": _INSTANCE_ID}
+        self.send({"type": "run.connect", **connect, "role": "control"})
+        self.connected = self.receive()
 
     def _read(self, stdout: IO[bytes]) -> None:
         for line in stdout:
@@ -90,25 +147,28 @@ class _BridgeConnection:
 
 
 @contextmanager
-def _bridged(parts: ServerParts, socket_path: Path) -> Iterator[_BridgeConnection]:
-    with UnixJsonlServer(socket_path, parts.api):
-        connection = _BridgeConnection(socket_path)
+def _bridged(
+    env: Mapping[str, str], parts: ServerParts, socket_path: Path
+) -> Iterator[_BridgeConnection]:
+    with _registered(env, socket_path), UnixJsonlServer(socket_path, parts.api):
+        connection = _BridgeConnection(env)
+        assert connection.connected["type"] == "run.connect"
         try:
             yield connection
         finally:
             # Closing stdin is the client going away: a clean end, status 0, no report.
-            assert connection.finish() == (EXIT_STATUS[BridgeOutcome.CLIENT_CLOSED], b"")
+            assert connection.finish() == (EXIT_STATUS[ChannelEndOutcome.CLIENT_CLOSED], b"")
 
 
 @pytest.mark.parametrize("scenario_name", runner_group(_RUNNER, "bootstrap"))
 def test_bootstrap_scenarios_cross_the_bridge(
-    tmp_path: Path, socket_dir: Path, scenario_name: str
+    env: dict[str, str], tmp_path: Path, socket_dir: Path, scenario_name: str
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
     for index in range(_HISTORY_EVENTS):
         parts.journal.publish_output("stdout", f"conformance-{index}")
     try:
-        with _bridged(parts, socket_dir / "bridge.sock") as connection:
+        with _bridged(env, parts, socket_dir / "bridge.sock") as connection:
             batch = run_steps(connection, load_scenario(scenario_name))[-1]
         expected_floor = (
             parts.api.latest_sequence - 50 if scenario_name == "tail-bootstrap-spine-prepend" else 0
@@ -120,11 +180,11 @@ def test_bootstrap_scenarios_cross_the_bridge(
 
 @pytest.mark.parametrize("scenario_name", runner_group(_RUNNER, "control"))
 def test_control_scenarios_cross_the_bridge(
-    tmp_path: Path, socket_dir: Path, scenario_name: str
+    env: dict[str, str], tmp_path: Path, socket_dir: Path, scenario_name: str
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
     try:
-        with _bridged(parts, socket_dir / "bridge.sock") as connection:
+        with _bridged(env, parts, socket_dir / "bridge.sock") as connection:
             assert len(run_steps(connection, load_scenario(scenario_name))) == 1
     finally:
         parts.close()
@@ -132,12 +192,12 @@ def test_control_scenarios_cross_the_bridge(
 
 @pytest.mark.parametrize("scenario_name", runner_group(_RUNNER, "tail-overflow"))
 def test_tail_overflow_rebootstrap_crosses_the_bridge(
-    tmp_path: Path, socket_dir: Path, scenario_name: str
+    env: dict[str, str], tmp_path: Path, socket_dir: Path, scenario_name: str
 ) -> None:
     steps = load_scenario(scenario_name)["steps"]
     parts = build_server_parts(tmp_path / "logs")
     try:
-        with _bridged(parts, socket_dir / "bridge.sock") as connection:
+        with _bridged(env, parts, socket_dir / "bridge.sock") as connection:
             connection.send(steps[0]["frame"])
             assert_frame_matches(connection.receive(), steps[1]["expect"])
             assert_frame_matches(connection.receive(), steps[2]["expect"])
@@ -151,18 +211,17 @@ def test_tail_overflow_rebootstrap_crosses_the_bridge(
         parts.close()
 
 
-def test_a_missing_socket_exits_as_run_gone_with_one_report_line(socket_dir: Path) -> None:
-    connection = _BridgeConnection(socket_dir / "absent.sock")
-    status, stderr = connection.finish()
-    assert status == EXIT_STATUS[BridgeOutcome.RUN_GONE]
-    report = BridgeReport.model_validate_json(stderr)
-    assert report.outcome is BridgeOutcome.RUN_GONE
-    assert report.exit_status == status
-    assert stderr.count(b"\n") == 1
+def test_a_missing_socket_is_answered_run_gone_and_the_channel_stays_a_request_channel(
+    env: dict[str, str], socket_dir: Path
+) -> None:
+    with _registered(env, socket_dir / "absent.sock"):
+        connection = _BridgeConnection(env)
+    assert (connection.connected["type"], connection.connected["code"]) == ("error", "run_gone")
+    assert connection.finish() == (0, b"")
 
 
 def test_a_server_close_relays_the_last_frame_then_exits_as_server_closed(
-    socket_dir: Path,
+    env: dict[str, str], socket_dir: Path
 ) -> None:
     path = socket_dir / "closing.sock"
     final = {"type": "protocol_error", "message": "stream failed"}
@@ -170,7 +229,8 @@ def test_a_server_close_relays_the_last_frame_then_exits_as_server_closed(
         listener.bind(str(path))
         listener.listen()
         listener.settimeout(DEADLOCK_GUARD_S)
-        connection = _BridgeConnection(path)
+        with _registered(env, path):
+            connection = _BridgeConnection(env)
         server, _ = listener.accept()
         with server:
             server.sendall(json.dumps(final).encode() + b"\n")
@@ -179,5 +239,5 @@ def test_a_server_close_relays_the_last_frame_then_exits_as_server_closed(
     # read of the server's close, and either end could win (status 0 or 3).
     status, stderr = connection.wait_for_exit()
     connection.close()
-    assert status == EXIT_STATUS[BridgeOutcome.SERVER_CLOSED]
-    assert BridgeReport.model_validate_json(stderr).outcome is BridgeOutcome.SERVER_CLOSED
+    assert status == EXIT_STATUS[ChannelEndOutcome.SERVER_CLOSED]
+    assert ChannelEnd.model_validate_json(stderr).outcome is ChannelEndOutcome.SERVER_CLOSED

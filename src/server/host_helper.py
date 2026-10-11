@@ -91,13 +91,12 @@ from server.host_api import (
     parse_helper_request,
 )
 from server.stdio_bridge import (
-    BridgeOutcome,
     BridgeResult,
+    ChannelEndOutcome,
     ClientStreams,
     dial,
     relay,
 )
-from server.stdio_bridge_report import BridgeReport
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -743,10 +742,10 @@ def _answer(request: HelperRequest, host: HelperHost) -> HelperReply | HelperErr
     return reply
 
 
-_CONNECT_ERRORS: Final[Mapping[BridgeOutcome, HelperErrorCode]] = {
-    BridgeOutcome.RUN_GONE: HelperErrorCode.RUN_GONE,
-    BridgeOutcome.CONNECT_DENIED: HelperErrorCode.CONNECT_DENIED,
-    BridgeOutcome.CONNECT_FAILED: HelperErrorCode.CONNECT_FAILED,
+_CONNECT_ERRORS: Final[Mapping[ChannelEndOutcome, HelperErrorCode]] = {
+    ChannelEndOutcome.RUN_GONE: HelperErrorCode.RUN_GONE,
+    ChannelEndOutcome.CONNECT_DENIED: HelperErrorCode.CONNECT_DENIED,
+    ChannelEndOutcome.CONNECT_FAILED: HelperErrorCode.CONNECT_FAILED,
 }
 
 
@@ -947,7 +946,7 @@ def serve_channel(
     """Serve one channel until its input ends or it is relayed; the process exit status.
 
     ``0`` when the client ended a control channel; a relayed channel ends with the
-    relay's status and, when that is not ``0``, one ``BridgeReport`` line on
+    relay's status and, when that is not ``0``, one ``ChannelEnd`` line on
     ``errors``. Workers and the input pump may still be blocked when this returns;
     the caller ends the process.
     """
@@ -958,6 +957,6 @@ def serve_channel(
     if connection is None:
         return 0
     result = relay(connection, client=ClientStreams(_InboxSource(inbox), output), threads=threads)
-    if result.outcome is not BridgeOutcome.CLIENT_CLOSED:
-        errors.write(BridgeReport.of(result).line().encode())
+    if result.outcome is not ChannelEndOutcome.CLIENT_CLOSED:
+        errors.write(result.channel_end().line().encode())
     return result.exit_status

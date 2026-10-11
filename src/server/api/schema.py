@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
 from server.events import RunEvent
-from server.host_api import HelperMessage, HelperRequest
+from server.host_api import ChannelEnd, HelperMessage, HelperRequest
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -95,6 +95,7 @@ class HostHelperDocument(BaseModel):
 
     request: HelperRequest
     message: HelperMessage
+    channel_end: ChannelEnd
 
 
 def host_helper_json_schema() -> dict[str, Any]:
@@ -104,6 +105,68 @@ def host_helper_json_schema() -> dict[str, Any]:
     from here; another helper or client implementation generates its types from it.
     """
     return require_tagged_union_discriminants(HostHelperDocument.model_json_schema())
+
+
+_HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
+    {
+        "$defs",
+        "$ref",
+        "additionalProperties",
+        "anyOf",
+        "const",
+        "default",
+        "description",
+        "discriminator",
+        "enum",
+        "exclusiveMinimum",
+        "format",
+        "items",
+        "maxItems",
+        "maxLength",
+        "maximum",
+        "minItems",
+        "minLength",
+        "minimum",
+        "oneOf",
+        "pattern",
+        "prefixItems",
+        "properties",
+        "required",
+        "title",
+        "type",
+    }
+)
+"""What the TypeScript walker's strict mode enforces (``backend-client/src/schema-walker.ts``)."""
+
+
+def host_helper_typescript() -> str:
+    """Return the generated module the desktop validates every helper message with.
+
+    The helper's contract is strict (``extra="forbid"``, versions negotiated by
+    ``hello``), so the client walks this descriptor strictly. A keyword the walker
+    does not enforce fails generation instead of passing unchecked.
+    """
+    document = host_helper_json_schema()
+    _require_keywords(document, _HOST_HELPER_DESCRIPTOR_KEYWORDS, "$")
+    return _schema_typescript("hostHelperSchema", document)
+
+
+def _require_keywords(node: object, supported: frozenset[str], path: str) -> None:
+    """Refuse a schema keyword outside ``supported`` anywhere in ``node``, naming its path."""
+    if isinstance(node, list):
+        for index, child in enumerate(node):
+            _require_keywords(child, supported, f"{path}[{index}]")
+        return
+    if not isinstance(node, dict):
+        return
+    for key, child in node.items():
+        if key not in supported:
+            raise UnsupportedResponsePayloadSchemaError(path, f"unsupported schema keyword {key!r}")
+        if key in {"$defs", "properties"} and isinstance(child, dict):
+            for name, member in child.items():
+                _require_keywords(member, supported, f"{path}.{name}")
+        elif key in {"items", "anyOf", "oneOf", "prefixItems"}:
+            _require_keywords(child, supported, f"{path}.{key}")
 
 
 def protocol_json_schema() -> dict[str, Any]:
@@ -898,6 +961,11 @@ def main() -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(fully_populated_response().model_dump_json() + "\n")
         return
+    elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--host-helper-module":
+        output = Path(arguments[1])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(host_helper_typescript())
+        return
     elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--run-event-module":
         output = Path(arguments[1])
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -906,7 +974,8 @@ def main() -> None:
     else:
         message = (
             "usage: python -m server.api.schema "
-            "[--host-helper-schema|--response-payload-schema|--response-payload-module|"
+            "[--host-helper-schema|--host-helper-module|--response-payload-schema|"
+            "--response-payload-module|"
             "--response-payload-fixture|--run-event-module] OUTPUT"
         )
         raise SystemExit(message)

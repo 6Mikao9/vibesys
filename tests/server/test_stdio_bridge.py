@@ -19,10 +19,10 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
+from server.host_api import ChannelEnd, ChannelEndOutcome
 from server.stdio_bridge import (
     EXIT_STATUS,
     BridgeLimits,
-    BridgeOutcome,
     BridgeResult,
     ClientStreams,
     Ended,
@@ -39,7 +39,6 @@ from server.stdio_bridge import (
     next_deadline,
     run_bridge,
 )
-from server.stdio_bridge_report import BridgeReport
 from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
@@ -88,7 +87,7 @@ def test_a_write_in_flight_stalls_exactly_at_its_deadline(
     early = advance(state, Tick(deadline - early_by), _LIMITS)
     assert early.outcome is None
     stalled = advance(state, Tick(deadline), _LIMITS)
-    assert stalled.outcome in {BridgeOutcome.CLIENT_STALLED, BridgeOutcome.SERVER_STALLED}
+    assert stalled.outcome in {ChannelEndOutcome.CLIENT_STALLED, ChannelEndOutcome.SERVER_STALLED}
 
 
 @pytest.mark.parametrize("peer", list(Peer))
@@ -99,9 +98,10 @@ def test_every_end_has_one_classification(peer: Peer, flow: Flow, reason: EndRea
     if reason is EndReason.FAILED:
         assert (
             decided
-            is {Peer.CLIENT: BridgeOutcome.CLIENT_FAILED, Peer.SERVER: BridgeOutcome.SERVER_FAILED}[
-                peer
-            ]
+            is {
+                Peer.CLIENT: ChannelEndOutcome.CLIENT_FAILED,
+                Peer.SERVER: ChannelEndOutcome.SERVER_FAILED,
+            }[peer]
         )
     elif peer is Peer.SERVER and flow is Flow.TO_PEER:
         # The server's last frame may still be in flight toward the client.
@@ -109,9 +109,10 @@ def test_every_end_has_one_classification(peer: Peer, flow: Flow, reason: EndRea
     else:
         assert (
             decided
-            is {Peer.CLIENT: BridgeOutcome.CLIENT_CLOSED, Peer.SERVER: BridgeOutcome.SERVER_CLOSED}[
-                peer
-            ]
+            is {
+                Peer.CLIENT: ChannelEndOutcome.CLIENT_CLOSED,
+                Peer.SERVER: ChannelEndOutcome.SERVER_CLOSED,
+            }[peer]
         )
 
 
@@ -125,17 +126,19 @@ def test_a_write_that_finds_the_server_closed_is_not_left_to_stall() -> None:
 
 
 def test_every_outcome_has_its_own_exit_status_and_only_a_client_close_is_zero() -> None:
-    assert set(EXIT_STATUS) == set(BridgeOutcome)
-    assert len(set(EXIT_STATUS.values())) == len(BridgeOutcome)
-    assert [o for o, status in EXIT_STATUS.items() if status == 0] == [BridgeOutcome.CLIENT_CLOSED]
+    assert set(EXIT_STATUS) == set(ChannelEndOutcome)
+    assert len(set(EXIT_STATUS.values())) == len(ChannelEndOutcome)
+    assert [o for o, status in EXIT_STATUS.items() if status == 0] == [
+        ChannelEndOutcome.CLIENT_CLOSED
+    ]
     assert {1, 2}.isdisjoint(EXIT_STATUS.values())
 
 
-@pytest.mark.parametrize("outcome", list(BridgeOutcome))
+@pytest.mark.parametrize("outcome", list(ChannelEndOutcome))
 def test_the_report_line_is_one_json_object_naming_outcome_and_status(
-    outcome: BridgeOutcome,
+    outcome: ChannelEndOutcome,
 ) -> None:
-    line = BridgeReport.of(BridgeResult(outcome, "why")).line()
+    line = BridgeResult(outcome, "why").channel_end().line()
     assert line.endswith("\n")
     assert line.count("\n") == 1
     assert json.loads(line) == {
@@ -143,7 +146,7 @@ def test_the_report_line_is_one_json_object_naming_outcome_and_status(
         "exit_status": EXIT_STATUS[outcome],
         "detail": "why",
     }
-    assert BridgeReport.model_validate_json(line).outcome is outcome
+    assert ChannelEnd.model_validate_json(line).outcome is outcome
 
 
 # ----- the shell, on simulated threads and network -----
@@ -255,7 +258,7 @@ def test_bytes_cross_unchanged_both_ways_and_a_client_close_closes_the_socket(
         return result
 
     result = threads.run(main)
-    assert result.outcome is BridgeOutcome.CLIENT_CLOSED
+    assert result.outcome is ChannelEndOutcome.CLIENT_CLOSED
     assert seen == {"upstream": upstream, "after_close": b""}
     assert bytes(stdout.data) == downstream
 
@@ -290,8 +293,8 @@ def test_a_server_close_is_reported_only_after_its_last_frame_reaches_stdout(
         )
 
     result = threads.run(main)
-    assert result.outcome is BridgeOutcome.SERVER_CLOSED
-    assert result.exit_status == EXIT_STATUS[BridgeOutcome.SERVER_CLOSED]
+    assert result.outcome is ChannelEndOutcome.SERVER_CLOSED
+    assert result.exit_status == EXIT_STATUS[ChannelEndOutcome.SERVER_CLOSED]
     assert bytes(stdout.data) == final
 
 
@@ -319,7 +322,7 @@ def test_a_stdout_that_stops_draining_ends_the_relay_at_the_write_deadline() -> 
         return result, ended_at
 
     result, ended_at = threads.run(main)
-    assert result.outcome is BridgeOutcome.CLIENT_STALLED
+    assert result.outcome is ChannelEndOutcome.CLIENT_STALLED
     assert ended_at == pytest.approx(_DEADLINE)
     # The server sees the client gone instead of being pinned behind it.
     assert peer == {"after_stall": b""}
@@ -381,10 +384,10 @@ def test_a_server_that_stops_reading_ends_the_relay_at_the_write_deadline() -> N
         return result, threads.now() - started_at
 
     result, ended_at = threads.run(main)
-    assert result.outcome is BridgeOutcome.SERVER_STALLED
+    assert result.outcome is ChannelEndOutcome.SERVER_STALLED
     assert ended_at == pytest.approx(_DEADLINE)
     assert "40s" in result.detail
-    assert result.exit_status == EXIT_STATUS[BridgeOutcome.SERVER_STALLED]
+    assert result.exit_status == EXIT_STATUS[ChannelEndOutcome.SERVER_STALLED]
 
 
 def test_a_stdin_failure_is_a_client_failure() -> None:
@@ -404,7 +407,7 @@ def test_a_stdin_failure_is_a_client_failure() -> None:
         finally:
             listener.close()
 
-    assert threads.run(main).outcome is BridgeOutcome.CLIENT_FAILED
+    assert threads.run(main).outcome is ChannelEndOutcome.CLIENT_FAILED
 
 
 class _RefusingNetwork:
@@ -420,15 +423,15 @@ class _RefusingNetwork:
 @pytest.mark.parametrize(
     ("error", "outcome"),
     [
-        (ConnectionRefusedError(errno.ECONNREFUSED, "nothing listens"), BridgeOutcome.RUN_GONE),
-        (FileNotFoundError(errno.ENOENT, "no such file"), BridgeOutcome.RUN_GONE),
-        (PermissionError(errno.EACCES, "permission denied"), BridgeOutcome.CONNECT_DENIED),
-        (TimeoutError("timed out"), BridgeOutcome.CONNECT_FAILED),
-        (OSError(errno.ENOTSOCK, "not a socket"), BridgeOutcome.CONNECT_FAILED),
+        (ConnectionRefusedError(errno.ECONNREFUSED, "nothing listens"), ChannelEndOutcome.RUN_GONE),
+        (FileNotFoundError(errno.ENOENT, "no such file"), ChannelEndOutcome.RUN_GONE),
+        (PermissionError(errno.EACCES, "permission denied"), ChannelEndOutcome.CONNECT_DENIED),
+        (TimeoutError("timed out"), ChannelEndOutcome.CONNECT_FAILED),
+        (OSError(errno.ENOTSOCK, "not a socket"), ChannelEndOutcome.CONNECT_FAILED),
     ],
 )
 def test_a_failed_connect_names_why_without_relaying(
-    error: OSError, outcome: BridgeOutcome
+    error: OSError, outcome: ChannelEndOutcome
 ) -> None:
     threads = SimThreads()
     stdin = _Stdin(threads, [b"never read\n"])
@@ -458,4 +461,4 @@ def test_dialing_an_unbound_address_on_the_simulated_network_is_run_gone() -> No
             threads=threads,
         )
     )
-    assert result.outcome is BridgeOutcome.RUN_GONE
+    assert result.outcome is ChannelEndOutcome.RUN_GONE
