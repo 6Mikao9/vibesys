@@ -166,7 +166,7 @@ uv run python -m entrypoints.web live --project /path/to/project --task TASK --o
 - `entities/` holds domain values and pure functions shared by features (the
   run fold, connection state, gateway URL policy). No I/O.
 - `platform/` holds system services: `backend.ts` is the only module that
-  imports backend-client runtime values or uses `fetch`
+  imports `@vibesys/transport` runtime values or uses `fetch`
   (`lint-rules/web-fetch-only-in-backend.grit`), plus the browser lifecycle,
   tab storage, and the desktop bridge transport.
 - `shared/` is for domain-free utilities; it is empty today.
@@ -507,7 +507,7 @@ The welcome view (`clients/desktop/src/welcome/`) is layered like the TUI, and
   state union and a pure `step(state, action) -> {state, requests}` with its
   `invariants`. Every request that awaits a reply carries a token held by the
   state that awaits it; a reply with any other token is dropped. No React, DOM,
-  Electron, Node, or backend-client.
+  Electron, Node, or `@vibesys/transport`.
 - `ui/` is presentational: React components, props in and events out. Sheets
   are native `<dialog>`s (`showModal()`), so focus containment, Esc, and focus
   return come from the platform. No bridge, Electron, or I/O.

@@ -1,7 +1,8 @@
 # TypeScript
 
-Workspace: pnpm packages under `clients/` (`backend-client`, `core-state`,
-`tui`, `web`). Lint: Biome. Boundaries: dependency-cruiser and a package
+Workspace: pnpm packages under `clients/` (`contracts`, `transport`,
+`transport-node`, `core-state`, `tui`, `web`, `desktop`); the graph is in
+`docs/contributing/clients-architecture.md`. Lint: Biome. Boundaries: dependency-cruiser and a package
 manifest check.
 
 ## Size cues
@@ -17,9 +18,10 @@ manifest check.
 A package's public interface is its `exports` in `package.json`. Importing
 anything else in another package is an error.
 
-- **Layering.** `backend-client` is the lowest layer; `core-state` sits on it;
-  `tui` and `web` sit on both and do not import each other. Rules live in
-  `clients/.dependency-cruiser.mjs`.
+- **Layering.** Each package declares a layer in its `package.json`
+  `vibesys` block and depends only on lower layers; apps do not import each
+  other. `clients/scripts/check_package_graph.mjs` and
+  `clients/.dependency-cruiser.mjs` enforce it.
 - **No deep imports.** `workspace-packages-use-public-exports` and
   `workspace-packages-have-no-deep-imports` reject imports of another
   package's internal files or build output.
@@ -40,7 +42,7 @@ anything else in another package is an error.
   boundary, take the union from the generated protocol types, never a
   hand-written copy. Branch exhaustively so a new member is a compile error.
 - **Generated types.** Never edit `contracts/src/generated/`. Regenerate
-  with `pnpm generate:protocol` (from `clients/backend-client`) and review the
+  with `pnpm generate:protocol` (from `clients/contracts`) and review the
   diff.
 - **State.** Frontend state changes only from backend events; keep folds pure
   and pass time as event data. See [functional-core.md](functional-core.md).
@@ -55,8 +57,8 @@ Named by module.
 | --- | --- |
 | 1, 2 | `@vibesys/core-state` (small `exports`, logic behind it) |
 | 4 | The layering rules in `.dependency-cruiser.mjs` |
-| 6 | The backend-neutral versus `backend-client/src/node` split behind the `./node` export |
-| 8 | `@vibesys/backend-client` generated protocol types |
+| 6 | The runtime-neutral `@vibesys/transport` versus the Node-only `@vibesys/transport-node` |
+| 8 | `@vibesys/contracts` generated protocol types |
 
 ## Commands
 
@@ -66,5 +68,5 @@ From `clients/`:
 pnpm check:ts                  # biome
 pnpm check:ts-architecture     # dependency-cruiser + manifest check
 pnpm check:knip
-pnpm generate:protocol         # in backend-client, after changing protocol models
+pnpm generate:protocol         # in contracts, after changing protocol models
 ```
