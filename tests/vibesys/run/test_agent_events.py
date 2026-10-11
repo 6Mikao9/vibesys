@@ -15,6 +15,7 @@ from vibesys.events import (
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
+    TurnUsageData,
     UsageUpdateData,
 )
 from vibesys.run import CoreAgentEventSink, EventJournal
@@ -135,6 +136,37 @@ def test_retry_wait_records_one_typed_event_with_no_routing_metadata(tmp_path: P
     assert event.round_label is None
     assert event.execution_id is None
     assert event.data == RetryWaitData(attempt=2, delay_s=4.5, error_kind="overloaded")
+
+
+def test_turn_usage_records_one_typed_event_with_routing_metadata(tmp_path: Path) -> None:
+    journal, sink = _attached_sink(tmp_path, "run-1")
+
+    sink.turn_usage(
+        input_tokens=11,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+        output_tokens=22,
+        total_cost_usd=0.03,
+        duration_ms=1500,
+        agent_kind="dynamic-implementer",
+        round_label="round-1",
+        invocation_id="invocation-1",
+    )
+
+    events = journal.read()
+    assert [event.type for event in events] == [CoreEventType.TURN_USAGE_RECORDED]
+    event = events[0]
+    assert event.agent_kind == "dynamic-implementer"
+    assert event.round_label == "round-1"
+    assert event.execution_id == "invocation-1"
+    assert event.data == TurnUsageData(
+        input_tokens=11,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=0,
+        output_tokens=22,
+        total_cost_usd=0.03,
+        duration_ms=1500,
+    )
 
 
 def test_explicit_tool_result_payload_is_preserved(tmp_path: Path) -> None:

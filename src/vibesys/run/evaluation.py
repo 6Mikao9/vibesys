@@ -14,6 +14,7 @@ from vibesys.events import (
     GateFinishedData,
     GateKind,
     GateStartedData,
+    LocalValidationSummaryData,
     SubprocessOutputData,
 )
 from vs_evaluation.api import AccessErrorCode, EvaluationAgentAccessError, TrustedEvidence
@@ -187,9 +188,24 @@ async def _validate_local(
             recipe_unusable=True,
         )
 
+    attempted = len(results)
+    succeeded = sum(1 for result in results if result.passed)
     failed = next((result for result in results if not result.passed), None)
+    events.emit(
+        CoreEventType.LOCAL_VALIDATION_SUMMARY,
+        data=LocalValidationSummaryData(
+            attempted=attempted,
+            succeeded=succeeded,
+            passed=failed is None,
+        ),
+    )
     if failed is None:
-        return LocalValidationEvaluation(passed=True, report_location=report_location)
+        return LocalValidationEvaluation(
+            passed=True,
+            report_location=report_location,
+            recipes_attempted=attempted,
+            recipes_succeeded=succeeded,
+        )
     detail = failed.error or failed.output or "unknown failure"
     return LocalValidationEvaluation(
         passed=False,
@@ -198,6 +214,8 @@ async def _validate_local(
             f"Inspect `{report_location}` and repair only the affected local contract."
         ),
         report_location=report_location,
+        recipes_attempted=attempted,
+        recipes_succeeded=succeeded,
     )
 
 

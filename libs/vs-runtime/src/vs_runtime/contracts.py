@@ -802,6 +802,20 @@ class LocalValidationEvaluation(BaseModel):
             "is an input error the agent can correct in its reply, not a candidate failure."
         ),
     )
+    recipes_attempted: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "How many validation recipes actually ran. None when the recipe artifact was "
+            "unusable, since no recipe ran at all; the policy-neutral count that `passed` "
+            "alone collapses away."
+        ),
+    )
+    recipes_succeeded: int | None = Field(
+        default=None,
+        ge=0,
+        description="How many of `recipes_attempted` passed. None alongside recipes_attempted.",
+    )
 
     @model_validator(mode="after")
     def _consistent_outcome(self) -> LocalValidationEvaluation:
@@ -811,6 +825,16 @@ class LocalValidationEvaluation(BaseModel):
             raise ValueError(message)
         if self.recipe_unusable and self.passed:
             message = "a passing local validation cannot report an unusable recipe"
+            raise ValueError(message)
+        if (self.recipes_attempted is None) != (self.recipes_succeeded is None):
+            message = "recipes_attempted and recipes_succeeded must both be set or both unset"
+            raise ValueError(message)
+        if (
+            self.recipes_attempted is not None
+            and self.recipes_succeeded is not None
+            and self.recipes_succeeded > self.recipes_attempted
+        ):
+            message = "recipes_succeeded cannot exceed recipes_attempted"
             raise ValueError(message)
         return self
 

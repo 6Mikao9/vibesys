@@ -19,6 +19,7 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
     ToolResultPayload,
+    TurnUsageData,
     UsageUpdateData,
     make_core_event,
 )
@@ -61,7 +62,8 @@ class CoreAgentEventSink:
         | ToolCallData
         | ToolResultData
         | TodoUpdateData
-        | UsageUpdateData,
+        | UsageUpdateData
+        | TurnUsageData,
         *,
         agent_kind: str | None,
         round_label: str | None,
@@ -200,4 +202,33 @@ class CoreAgentEventSink:
                 CoreEventType.RETRY_WAIT_STARTED,
                 data=RetryWaitData(attempt=attempt, delay_s=delay_s, error_kind=error_kind),
             )
+        )
+
+    def turn_usage(  # noqa: PLR0913  # lint-waiver: LW-877803 [PLR0913]; This implements AgentEventSink's public named-argument contract exactly.
+        self,
+        *,
+        input_tokens: int | None = None,
+        cache_creation_input_tokens: int | None = None,
+        cache_read_input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        total_cost_usd: float | None = None,
+        duration_ms: int | None = None,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Emit one completed turn's token and cost accounting with routing metadata."""
+        self._emit(
+            CoreEventType.TURN_USAGE_RECORDED,
+            TurnUsageData(
+                input_tokens=input_tokens,
+                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+                output_tokens=output_tokens,
+                total_cost_usd=total_cost_usd,
+                duration_ms=duration_ms,
+            ),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
         )

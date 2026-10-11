@@ -262,7 +262,10 @@ export type EventType =
   | "framework_warning"
   | "async_operation_lifecycle"
   | "workstream_attempt_updated"
-  | "retry_wait_started";
+  | "retry_wait_started"
+  | "gpu_contention_changed"
+  | "local_validation_summary"
+  | "turn_usage_recorded";
 export type Text2 = string;
 /**
  * Lifecycle and command states reported in events.
@@ -308,6 +311,9 @@ export type Data =
       | AsyncOperationLifecycleData
       | WorkstreamAttemptData
       | RetryWaitData
+      | GpuContentionData
+      | LocalValidationSummaryData
+      | TurnUsageData
     )
   | null;
 export type Kind1 = "chat";
@@ -511,11 +517,29 @@ export type Kind33 = "retry_wait_started";
 export type Attempt5 = number;
 export type DelayS = number;
 export type ErrorKind = string;
+export type Kind34 = "gpu_contention_changed";
+export type IsContended = boolean;
+export type NewProcessCount = number;
+export type GpuIndex = number | null;
+export type MemoryUsedMib = number | null;
+export type MemoryTotalMib = number | null;
+export type UtilizationPct = number | null;
+export type Kind35 = "local_validation_summary";
+export type Attempted = number;
+export type Succeeded = number;
+export type Passed = boolean;
+export type Kind36 = "turn_usage_recorded";
+export type InputTokens2 = number | null;
+export type CacheCreationInputTokens = number | null;
+export type CacheReadInputTokens = number | null;
+export type OutputTokens = number | null;
+export type TotalCostUsd = number | null;
+export type DurationMs = number | null;
 export type Events = RunEvent[];
 export type Round = number;
 export type PerfMetric1 = number;
 export type PerfUnit1 = string;
-export type Passed = boolean;
+export type Passed1 = boolean;
 export type ProfileSkipped1 = boolean;
 export type Performance = PerformanceRound[];
 export type ObjectiveMetric = string | null;
@@ -533,7 +557,7 @@ export type Action1 = string | null;
 export type FirstRound = number;
 export type LastRound = number;
 export type Round1 = number;
-export type Passed1 = boolean;
+export type Passed2 = boolean;
 export type Reviewed = boolean;
 export type HypothesisOutcome = HypothesisOutcome1 | HypothesisResolution | null;
 /**
@@ -1434,13 +1458,49 @@ export interface RetryWaitData {
   [k: string]: unknown;
 }
 /**
+ * One contention-state transition observed by a GPU contention monitor.
+ */
+export interface GpuContentionData {
+  kind: Kind34;
+  is_contended: IsContended;
+  new_process_count: NewProcessCount;
+  gpu_index?: GpuIndex;
+  memory_used_mib?: MemoryUsedMib;
+  memory_total_mib?: MemoryTotalMib;
+  utilization_pct?: UtilizationPct;
+  [k: string]: unknown;
+}
+/**
+ * Recipe pass-fraction for one ``validate_local`` call.
+ */
+export interface LocalValidationSummaryData {
+  kind: Kind35;
+  attempted: Attempted;
+  succeeded: Succeeded;
+  passed: Passed;
+  [k: string]: unknown;
+}
+/**
+ * Token and cost accounting for one completed agent turn.
+ */
+export interface TurnUsageData {
+  kind: Kind36;
+  input_tokens?: InputTokens2;
+  cache_creation_input_tokens?: CacheCreationInputTokens;
+  cache_read_input_tokens?: CacheReadInputTokens;
+  output_tokens?: OutputTokens;
+  total_cost_usd?: TotalCostUsd;
+  duration_ms?: DurationMs;
+  [k: string]: unknown;
+}
+/**
  * One measured performance result in a run.
  */
 export interface PerformanceRound {
   round: Round;
   perf_metric: PerfMetric1;
   perf_unit: PerfUnit1;
-  passed: Passed;
+  passed: Passed1;
   profile_skipped?: ProfileSkipped1;
 }
 /**
@@ -1506,7 +1566,7 @@ export interface HypothesisEntry {
  */
 export interface HypothesisRound {
   round: Round1;
-  passed: Passed1;
+  passed: Passed2;
   reviewed: Reviewed;
   hypothesis_outcome?: HypothesisOutcome;
   judge_verdict?: JudgeVerdict1;

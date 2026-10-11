@@ -86,6 +86,9 @@ class EventType(StrEnum):
     ASYNC_OPERATION_LIFECYCLE = "async_operation_lifecycle"
     WORKSTREAM_ATTEMPT_UPDATED = "workstream_attempt_updated"
     RETRY_WAIT_STARTED = "retry_wait_started"
+    GPU_CONTENTION_CHANGED = "gpu_contention_changed"
+    LOCAL_VALIDATION_SUMMARY = "local_validation_summary"
+    TURN_USAGE_RECORDED = "turn_usage_recorded"
 
 
 class EventStatus(StrEnum):
@@ -523,6 +526,39 @@ class RetryWaitData(EventPayload):
     error_kind: str
 
 
+class GpuContentionData(EventPayload):
+    """One contention-state transition observed by a GPU contention monitor."""
+
+    kind: Literal["gpu_contention_changed"] = "gpu_contention_changed"
+    is_contended: bool
+    new_process_count: int = Field(ge=0)
+    gpu_index: int | None = None
+    memory_used_mib: int | None = None
+    memory_total_mib: int | None = None
+    utilization_pct: int | None = None
+
+
+class LocalValidationSummaryData(EventPayload):
+    """Recipe pass-fraction for one ``validate_local`` call."""
+
+    kind: Literal["local_validation_summary"] = "local_validation_summary"
+    attempted: int = Field(ge=0)
+    succeeded: int = Field(ge=0)
+    passed: bool
+
+
+class TurnUsageData(EventPayload):
+    """Token and cost accounting for one completed agent turn."""
+
+    kind: Literal["turn_usage_recorded"] = "turn_usage_recorded"
+    input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_cost_usd: float | None = None
+    duration_ms: int | None = None
+
+
 EventData = Annotated[
     ChatData
     | ChatThreadCreatedData
@@ -555,7 +591,10 @@ EventData = Annotated[
     | FrameworkWarningData
     | AsyncOperationLifecycleData
     | WorkstreamAttemptData
-    | RetryWaitData,
+    | RetryWaitData
+    | GpuContentionData
+    | LocalValidationSummaryData
+    | TurnUsageData,
     Field(discriminator="kind"),
 ]
 

@@ -1520,7 +1520,10 @@
         "framework_warning",
         "async_operation_lifecycle",
         "workstream_attempt_updated",
-        "retry_wait_started"
+        "retry_wait_started",
+        "gpu_contention_changed",
+        "local_validation_summary",
+        "turn_usage_recorded"
       ],
       "title": "EventType",
       "type": "string"
@@ -1983,6 +1986,81 @@
         "gate"
       ],
       "title": "GateStartedData",
+      "type": "object"
+    },
+    "GpuContentionData": {
+      "description": "One contention-state transition observed by a GPU contention monitor.",
+      "properties": {
+        "kind": {
+          "const": "gpu_contention_changed",
+          "default": "gpu_contention_changed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "is_contended": {
+          "title": "Is Contended",
+          "type": "boolean"
+        },
+        "new_process_count": {
+          "minimum": 0,
+          "title": "New Process Count",
+          "type": "integer"
+        },
+        "gpu_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Index"
+        },
+        "memory_used_mib": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Used Mib"
+        },
+        "memory_total_mib": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Total Mib"
+        },
+        "utilization_pct": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Utilization Pct"
+        }
+      },
+      "required": [
+        "kind",
+        "is_contended",
+        "new_process_count"
+      ],
+      "title": "GpuContentionData",
       "type": "object"
     },
     "HistoryQuery": {
@@ -2600,6 +2678,39 @@
         "attempt"
       ],
       "title": "JudgeResultData",
+      "type": "object"
+    },
+    "LocalValidationSummaryData": {
+      "description": "Recipe pass-fraction for one ``validate_local`` call.",
+      "properties": {
+        "kind": {
+          "const": "local_validation_summary",
+          "default": "local_validation_summary",
+          "title": "Kind",
+          "type": "string"
+        },
+        "attempted": {
+          "minimum": 0,
+          "title": "Attempted",
+          "type": "integer"
+        },
+        "succeeded": {
+          "minimum": 0,
+          "title": "Succeeded",
+          "type": "integer"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "attempted",
+        "succeeded",
+        "passed"
+      ],
+      "title": "LocalValidationSummaryData",
       "type": "object"
     },
     "OutputData": {
@@ -3511,9 +3622,11 @@
                   "framework_warning": "#/$defs/FrameworkWarningData",
                   "gate_finished": "#/$defs/GateFinishedData",
                   "gate_started": "#/$defs/GateStartedData",
+                  "gpu_contention_changed": "#/$defs/GpuContentionData",
                   "invocation_finished": "#/$defs/InvocationFinishedData",
                   "invocation_started": "#/$defs/InvocationStartedData",
                   "judge_result": "#/$defs/JudgeResultData",
+                  "local_validation_summary": "#/$defs/LocalValidationSummaryData",
                   "output": "#/$defs/OutputData",
                   "phase": "#/$defs/PhaseData",
                   "retry_wait_started": "#/$defs/RetryWaitData",
@@ -3527,6 +3640,7 @@
                   "todo_update": "#/$defs/TodoUpdateData",
                   "tool_call": "#/$defs/ToolCallData",
                   "tool_result": "#/$defs/ToolResultData",
+                  "turn_usage_recorded": "#/$defs/TurnUsageData",
                   "usage_update": "#/$defs/UsageUpdateData",
                   "workspace_snapshot": "#/$defs/WorkspaceSnapshotData",
                   "workstream_attempt_updated": "#/$defs/WorkstreamAttemptData"
@@ -3629,6 +3743,15 @@
                 },
                 {
                   "$ref": "#/$defs/RetryWaitData"
+                },
+                {
+                  "$ref": "#/$defs/GpuContentionData"
+                },
+                {
+                  "$ref": "#/$defs/LocalValidationSummaryData"
+                },
+                {
+                  "$ref": "#/$defs/TurnUsageData"
                 }
               ]
             },
@@ -4327,6 +4450,94 @@
       ],
       "title": "TuiTheme",
       "type": "string"
+    },
+    "TurnUsageData": {
+      "description": "Token and cost accounting for one completed agent turn.",
+      "properties": {
+        "kind": {
+          "const": "turn_usage_recorded",
+          "default": "turn_usage_recorded",
+          "title": "Kind",
+          "type": "string"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "cache_creation_input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Creation Input Tokens"
+        },
+        "cache_read_input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Read Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "total_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Cost Usd"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        }
+      },
+      "title": "TurnUsageData",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "UsageUpdateData": {
       "description": "Token usage reported by the active model.",
