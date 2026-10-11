@@ -14,7 +14,7 @@
     },
     "constraints": [
       "Keep the benchmark version visible because v4 and v5 workloads are not directly comparable.",
-      "Workload: 3\u20136 turns, 1\u20138 seconds think time, up to 48 sessions, greedy decoding with ignore-EOS, exactly 80\u2013300 generated tokens.",
+      "Workload: 3–6 turns, 1–8 seconds think time, up to 48 sessions, greedy decoding with ignore-EOS, exactly 80–300 generated tokens.",
       "Accuracy: 13 probes plus pins; at least 90% exact on the first 32 tokens, and no divergence before token 8 for the remaining probes.",
       "Benchmark integrity: no dropped, errored, empty, or wrong-length outputs.",
       "Use one node with 4x MI300A GPUs on ROCm.",
@@ -34,7 +34,7 @@
       {
         "id": "serving",
         "label": "Benchmark integrity",
-        "description": "No dropped, errored, empty, or wrong-length outputs; generate exactly 80\u2013300 tokens with greedy ignore-EOS decoding."
+        "description": "No dropped, errored, empty, or wrong-length outputs; generate exactly 80–300 tokens with greedy ignore-EOS decoding."
       }
     ],
     "metrics": [
@@ -3825,12 +3825,12 @@
             {
               "kind": "tool_result",
               "toolName": "ExecuteBenchmark",
-              "content": "1905.4\u21922242.4 and 1898.3\u21922201.4 tok/s.",
+              "content": "1905.4→2242.4 and 1898.3→2201.4 tok/s.",
               "isError": false
             },
             {
               "kind": "result",
-              "content": "1905.4\u21922242.4 and 1898.3\u21922201.4 tok/s.",
+              "content": "1905.4→2242.4 and 1898.3→2201.4 tok/s.",
               "disposition": "accepted"
             }
           ]

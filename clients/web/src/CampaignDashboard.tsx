@@ -1361,7 +1361,10 @@ function JudgeResultSection({
   return (
     <>
       <h3>
-        Review history <small>{results.length} assessments</small>
+        Review history{' '}
+        <small>
+          {results.length} assessment{results.length === 1 ? '' : 's'}
+        </small>
       </h3>
       <ol className="detail-judge-results">
         {results.map(item => (
