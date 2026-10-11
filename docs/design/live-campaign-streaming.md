@@ -808,6 +808,45 @@ the frames come from the curated record, not a live orchestrator; token values
 are the record's reconstructed spend; `dynamic`'s real concurrency is not
 exercised (it cannot be, locally).
 
+### Live demo screenshots
+
+Captured from the dev-only replay at `?campaign-live&interval=1`, which
+drives the same `CampaignDashboard` a real backend integration will later
+feed.
+
+![Dwell indicator and operator-action log after a live pause](./assets/campaign-live-01-pause-dwell-escalation.png)
+A live operator pause lands in the append-only intervention log, and the
+dwell indicator escalates to its overdue state once the simulated clock
+passes the one-hour threshold.
+
+![Kanban card with an attempt badge and activity label](./assets/campaign-live-02-kanban-retry-activity.png)
+An active workstream's Kanban card shows the attempt badge in warning
+styling after a repeated failure, next to a label naming the tool the agent
+is running right now.
+
+![Table row with the same attempt badge and activity label](./assets/campaign-live-03-table-retry-activity.png)
+The table layout renders the same attempt badge and activity label for the
+same workstream, confirming both layouts read from one live data source.
+
+![Operator-action log with resume and steer entries](./assets/campaign-live-04-operator-log-timeline.png)
+The operator-action log grows entry by entry: pause, resume, and a steered
+prompt with its quoted text, each tagged with the issuing tab's id.
+
+![Completed dashboard with the connection dot still fresh](./assets/campaign-live-05-completed-dashboard-fresh.png)
+After the run completes, the performance graph shows all 111 measurements
+recorded and the best goodput value, while the connection dot still reports
+fresh.
+
+![Workstream review history with a skipped and a failed verdict](./assets/campaign-live-06-judge-review-history.png)
+A workstream's review history lists a skipped verdict reasoned as
+"Candidate revision was unchanged," followed by a failed verdict carrying
+the judge's own analysis and feedback.
+
+![Connection dot after it flips from fresh to stale](./assets/campaign-live-07-stale-connection-dot.png)
+Fifteen seconds after the campaign completes with no further frames, the
+connection dot flips from fresh to stale, a state the static fixture path
+cannot reach.
+
 ## Backend changes
 
 Five real backend changes ship in this PR, not only the design above. Each
