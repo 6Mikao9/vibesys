@@ -1,5 +1,6 @@
 """Public surface of the dynamic strategy package."""
 
+from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
 from vibesys.orchestration.dynamic.strategy._draft import measurement_recipe
 from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
@@ -11,6 +12,7 @@ from vibesys.orchestration.dynamic.strategy._ids import (
 )
 from vibesys.orchestration.dynamic.strategy._operations import (
     INTERPRET_KIND,
+    OPERATIONS,
     RENDER_KIND,
     RETAIN_KIND,
     VERIFY_KIND,
@@ -48,12 +50,6 @@ from vibesys.orchestration.dynamic.strategy._prompts import (
     ReviewPrompt,
     WaitUnrecordedPrompt,
 )
-from vibesys.orchestration.dynamic.strategy._rows import (
-    AcceptedReading,
-    EvidenceReading,
-    MetricRow,
-    PartialRow,
-)
 from vibesys.orchestration.dynamic.strategy._schemas import (
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
@@ -75,6 +71,7 @@ __all__ = [
     "IMPLEMENTER_REPLY",
     "INTERPRET_KIND",
     "JUDGE_REPLY",
+    "OPERATIONS",
     "PLANNER_REPLY",
     "PROFILER_REPLY",
     "RENDER_KIND",
