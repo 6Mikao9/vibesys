@@ -9,7 +9,7 @@
  * A `ConnectionSupervisor` restores the host link after drops, sleep, and network changes, then
  * wakes the page so its own session resumes.
  */
-import type {ScheduleTimeout} from '@vibesys/backend-client';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {
   BaseWindow,
   dialog,

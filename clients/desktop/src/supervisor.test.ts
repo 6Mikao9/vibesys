@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {FakeClock} from '@vibesys/backend-client/testing';
+import {FakeClock} from '@vibesys/transport/testing';
 import {type AttachedRun, checkAttachment, observedDial} from './attachment.js';
 import {SshHost} from './ssh-host.js';
 import {

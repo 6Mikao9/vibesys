@@ -13,7 +13,7 @@
  * `step` is the pure core (state and event in, state and requests out; no clock, no I/O). The shell
  * `ConnectionSupervisor` below runs its requests through injected functions and timers.
  */
-import {DEFAULT_RECONNECT_DELAYS_MS, type ScheduleTimeout} from '@vibesys/backend-client';
+import {DEFAULT_RECONNECT_DELAYS_MS, type ScheduleTimeout} from '@vibesys/transport';
 
 /** Why a check failed: the closed set the supervisor decides on. */
 export type CheckFailure =
