@@ -15,12 +15,11 @@ const PACKAGE_SOURCES = `^(?:${PACKAGE_DIRECTORIES})/src/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
-const BACKEND_CLIENT_TEST_ONLY = '^(?:backend-client|contracts)/src/(?:test-support/|testing/)';
+const TRANSPORT_TEST_ONLY =
+  '^(?:transport|transport-node|contracts)/src/(?:test-support/|testing/)';
 const CORE_STATE_TEST_ONLY = '^core-state/src/testing/';
 // A package's own test-support directory (`desktop/src/testing/`): Fakes that only tests import.
 const PACKAGE_TEST_SUPPORT = '^[^/]+/src/testing/';
-const BACKEND_CLIENT_NODE_TEST_SUPPORT =
-  '^backend-client/src/(?:test-support/|testing/.*\\.test-helper\\.[cm]?[jt]sx?$)';
 
 // The replay harness is tooling, but it has its own rule below, with the reason it exists; the
 // remaining tooling directories are plain leaf tools.
@@ -38,20 +37,6 @@ const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // alternative, where group 1 does not participate, so `$1` is never substituted and the resulting
 // `^$1/` matches no path: such an importer may reach no tool directory at all.
 const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
-
-// The rank order `scripts/check_package_graph.mjs` defines; a package reaches only lower ranks.
-const LAYER_ORDER = ['foundation', 'core', 'domain', 'service', 'feature', 'app'];
-
-function packagesAbove(directory) {
-  const own = layout.packages.find(workspacePackage => workspacePackage.directory === directory);
-  const rank = LAYER_ORDER.indexOf(own?.manifest.vibesys?.layer);
-  const above = layout.packages.filter(
-    workspacePackage =>
-      workspacePackage.directory !== directory &&
-      LAYER_ORDER.indexOf(workspacePackage.manifest.vibesys?.layer) >= rank,
-  );
-  return packagePaths(above);
-}
 
 function packagePaths(packages) {
   if (packages.length === 0) return [];
@@ -88,7 +73,7 @@ function frontendPeerRules() {
 // and `effects/` is the shell. `docs/contributing/web-development.md` describes the layout.
 const WEB = '^web/src/';
 const WEB_LAYERS = ['app', 'features', 'entities', 'platform', 'shared'];
-const BACKEND_CLIENT = ['^backend-client/', '/node_modules/@vibesys/backend-client/'];
+const TRANSPORT = ['^transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
 // The protocol vocabulary, which presentational and domain-free code never names.
 const CONTRACTS = ['^contracts/', '/node_modules/@vibesys/contracts/'];
 const CORE_STATE = ['^core-state/', '/node_modules/@vibesys/core-state/'];
@@ -127,7 +112,7 @@ function webRunPageRules() {
     },
     {
       // The functional core (domain values and each feature's reducers) does no I/O: no React,
-      // no platform services, no backend-client runtime values. Generated types and core-state
+      // no platform services, no transport runtime values. Generated types and core-state
       // are the inputs it folds.
       name: 'web-core-is-pure',
       severity: 'error',
@@ -136,7 +121,7 @@ function webRunPageRules() {
         path: [
           `${WEB}platform/`,
           '(?:^|/)node_modules/(?:react|react-dom|electron)/',
-          ...BACKEND_CLIENT,
+          ...TRANSPORT,
         ],
         dependencyTypesNot: ['type-only'],
       },
@@ -157,7 +142,7 @@ function webRunPageRules() {
         path: [
           WEB_FEATURE_PART('effects'),
           `${WEB}platform/`,
-          ...BACKEND_CLIENT,
+          ...TRANSPORT,
           ...CONTRACTS,
           '(?:^|/)node_modules/electron/',
         ],
@@ -171,18 +156,18 @@ function webRunPageRules() {
     },
     {
       // One path to the backend: `platform/backend.ts` is the only module that imports
-      // backend-client's runtime values (`web-fetch-only-in-backend.grit` holds `fetch` to it).
-      name: 'web-backend-client-only-in-backend-adapter',
+      // @vibesys/transport's runtime values (`web-fetch-only-in-backend.grit` holds `fetch` to it).
+      name: 'web-transport-only-in-backend-adapter',
       severity: 'error',
       from: {path: WEB, pathNot: [TEST_FILE, WEB_BACKEND_ADAPTER]},
-      to: {path: BACKEND_CLIENT, dependencyTypesNot: ['type-only']},
+      to: {path: TRANSPORT, dependencyTypesNot: ['type-only']},
     },
     {
       // `shared/` is domain-free: no run, protocol, or connection vocabulary reaches it.
       name: 'web-shared-is-domain-free',
       severity: 'error',
       from: {path: `${WEB}shared/`, pathNot: TEST_FILE},
-      to: {path: [...BACKEND_CLIENT, ...CONTRACTS, ...CORE_STATE]},
+      to: {path: [...TRANSPORT, ...CONTRACTS, ...CORE_STATE]},
     },
   ];
 }
@@ -207,14 +192,6 @@ export default {
         couldNotResolve: true,
         pathNot: ['^bun:test$', '^dependency-cruiser/config-utl/'],
       },
-    },
-    {
-      // `backend-client` may reach only lower layers (`contracts`): the set is derived from each
-      // manifest's `vibesys.layer`, because a rule that names the layers above it goes stale.
-      name: 'backend-client-is-lowest-layer',
-      severity: 'error',
-      from: {path: '^backend-client/src/'},
-      to: {path: packagesAbove('backend-client')},
     },
     ...frontendPeerRules(),
     {
@@ -261,11 +238,11 @@ export default {
     {
       // Cross-runtime test helpers may use runtime adapters or deterministic scheduling seams
       // that shipping code must not reach. Keep them reachable only from test files.
-      name: 'production-code-does-not-import-backend-client-test-support',
+      name: 'production-code-does-not-import-transport-test-support',
       severity: 'error',
       // Test support may build on itself, e.g. the testing entry re-exporting its Fakes.
-      from: {path: SCANNED, pathNot: [TEST_FILE, BACKEND_CLIENT_TEST_ONLY]},
-      to: {path: BACKEND_CLIENT_TEST_ONLY},
+      from: {path: SCANNED, pathNot: [TEST_FILE, TRANSPORT_TEST_ONLY]},
+      to: {path: TRANSPORT_TEST_ONLY},
     },
     {
       // The store model checker and its seeded generator are test support for every frontend's
@@ -312,22 +289,6 @@ export default {
       to: {dependencyTypes: ['core']},
     },
     {
-      // The default (`.`) entry must bundle for a browser, so nothing it reaches
-      // may import a Node builtin. Only `backend-client/src/node/` may: the
-      // node-socket transport lives there, behind the `./node` export. Everything
-      // above that seam (protocol, folds, backoff, request policy, the transport
-      // interface) stays runtime-neutral. Test files and their non-shipping support directory
-      // are outside that contract and separately kept out of production imports above. This
-      // mirrors core-state-has-no-node-runtime.
-      name: 'backend-client-neutral-has-no-node-runtime',
-      severity: 'error',
-      from: {
-        path: '^backend-client/src/',
-        pathNot: ['^backend-client/src/node/', TEST_FILE, BACKEND_CLIENT_NODE_TEST_SUPPORT],
-      },
-      to: {dependencyTypes: ['core']},
-    },
-    {
       name: 'core-state-has-no-ui-runtime',
       severity: 'error',
       from: {path: '^core-state/src/'},
@@ -351,13 +312,13 @@ export default {
     {
       // Widgets render the TUI-owned session model. Wire types stop in the model/controller
       // layer, so generated backend contracts cannot spread into presentation modules.
-      name: 'tui-ui-does-not-depend-on-backend-client',
+      name: 'tui-ui-does-not-depend-on-transport',
       severity: 'error',
       from: {path: '^tui/src/ui/', pathNot: TEST_FILE},
       to: {
         path: [
-          '^(?:backend-client|contracts)/',
-          '/node_modules/@vibesys/(?:backend-client|contracts)/',
+          '^(?:transport|transport-node|contracts)/',
+          '/node_modules/@vibesys/(?:transport|transport-node|contracts)/',
         ],
       },
     },
@@ -433,8 +394,8 @@ export default {
           '^desktop/src/welcome/(?:ui|effects)/',
           '^desktop/src/welcome/main\\.tsx$',
           '(?:^|/)node_modules/(?:react|react-dom|electron)/',
-          '^(?:backend-client|contracts)/',
-          '/node_modules/@vibesys/(?:backend-client|contracts)/',
+          '^(?:transport|transport-node|contracts)/',
+          '/node_modules/@vibesys/(?:transport|transport-node|contracts)/',
         ],
         dependencyTypesNot: ['type-only'],
       },
@@ -453,8 +414,8 @@ export default {
         path: [
           '^desktop/src/welcome/effects/',
           '^desktop/src/welcome/main\\.tsx$',
-          '^(?:backend-client|contracts)/',
-          '/node_modules/@vibesys/(?:backend-client|contracts)/',
+          '^(?:transport|transport-node|contracts)/',
+          '/node_modules/@vibesys/(?:transport|transport-node|contracts)/',
           '(?:^|/)node_modules/electron/',
         ],
       },
@@ -475,7 +436,7 @@ export default {
       to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
     },
     {
-      // Sockets and processes belong to backend-client and the desktop's connection layer.
+      // Sockets and processes belong to @vibesys/transport-node and the desktop's connection layer.
       name: 'desktop-and-web-confine-sockets-and-processes',
       severity: 'error',
       from: {
@@ -502,7 +463,7 @@ export default {
       to: {
         path: [
           '^tui/src/(?!launcher\\.ts$|theme\\.ts$)',
-          '^(?:backend-client|contracts|core-state)/',
+          '^(?:transport|transport-node|contracts|core-state)/',
           '@opentui[+/]',
         ],
       },
