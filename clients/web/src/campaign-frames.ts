@@ -52,6 +52,32 @@ export type CampaignHeader = Pick<
 export type FrameAgent = CampaignRecord['agents'][number];
 export type FrameMeasurement = CampaignRecord['measurements'][number];
 
+/** Mirrors the backend `ExecutionActivityMode` (`vibesys.events`): what an
+ * agent is doing right now, live during a turn rather than frozen at the
+ * turn's start. */
+type ActivityMode = 'thinking' | 'responding' | 'tool' | 'waiting';
+
+const ACTIVITY_MODES: readonly ActivityMode[] = ['thinking', 'responding', 'tool', 'waiting'];
+
+/** Live retry-budget diagnostics for one workstream, mirroring the backend's
+ * `WorkstreamAttemptData` payload. */
+export interface WorkstreamAttemptState {
+  readonly attempt: number;
+  readonly attemptLimit: number;
+  readonly refunded: number;
+  readonly lastError: string | null;
+  readonly setupFailure: boolean;
+  readonly repeatedError: boolean;
+}
+
+/** One workstream's current live activity, mirroring the backend's
+ * `AgentExecutionActivityData` payload. */
+export interface WorkstreamActivityState {
+  readonly mode: ActivityMode;
+  readonly summary: string;
+  readonly tool: string | null;
+}
+
 /**
  * A workstream delta. Unlike the finished-record shape, a live workstream may be
  * in flight: `active` is true, and `finishedAt`/`outcome`/`lastSequence` are not
@@ -83,6 +109,18 @@ export type CampaignFrame =
       readonly workstreamId: string;
       readonly tokens: number;
     }
+  | {
+      readonly kind: 'workstream-attempt';
+      readonly seq: number;
+      readonly workstreamId: string;
+      readonly attempt: WorkstreamAttemptState;
+    }
+  | {
+      readonly kind: 'workstream-activity';
+      readonly seq: number;
+      readonly workstreamId: string;
+      readonly activity: WorkstreamActivityState;
+    }
   | {readonly kind: 'status'; readonly seq: number; readonly status: 'active' | 'completed'};
 
 type CampaignFrameKind = CampaignFrame['kind'];
@@ -93,6 +131,8 @@ const FRAME_KINDS: readonly CampaignFrameKind[] = [
   'workstream-upsert',
   'measurement',
   'tokens',
+  'workstream-attempt',
+  'workstream-activity',
   'status',
 ];
 
@@ -128,6 +168,16 @@ type FrameObject = Record<string, unknown> & {
   lastSequence?: unknown;
   outcome?: unknown;
   outcomeSummary?: unknown;
+  attempt?: unknown;
+  attemptLimit?: unknown;
+  refunded?: unknown;
+  lastError?: unknown;
+  setupFailure?: unknown;
+  repeatedError?: unknown;
+  activity?: unknown;
+  mode?: unknown;
+  summary?: unknown;
+  tool?: unknown;
 };
 
 function asObject(value: unknown, path: string): FrameObject {
@@ -204,6 +254,36 @@ function parseWorkstream(value: unknown, path: string): FrameWorkstream {
   };
 }
 
+function parseWorkstreamAttempt(value: unknown, path: string): WorkstreamAttemptState {
+  const object = asObject(value, path);
+  exactKeys(object, path, [
+    'attempt',
+    'attemptLimit',
+    'refunded',
+    'lastError',
+    'setupFailure',
+    'repeatedError',
+  ]);
+  return {
+    attempt: asNumber(object.attempt, `${path}.attempt`),
+    attemptLimit: asNumber(object.attemptLimit, `${path}.attemptLimit`),
+    refunded: asNumber(object.refunded, `${path}.refunded`),
+    lastError: nullableString(object.lastError, `${path}.lastError`),
+    setupFailure: asBoolean(object.setupFailure, `${path}.setupFailure`),
+    repeatedError: asBoolean(object.repeatedError, `${path}.repeatedError`),
+  };
+}
+
+function parseWorkstreamActivity(value: unknown, path: string): WorkstreamActivityState {
+  const object = asObject(value, path);
+  exactKeys(object, path, ['mode', 'summary', 'tool']);
+  return {
+    mode: member(object.mode, `${path}.mode`, ACTIVITY_MODES),
+    summary: asString(object.summary, `${path}.summary`),
+    tool: nullableString(object.tool, `${path}.tool`),
+  };
+}
+
 /**
  * Validate an unknown value as a campaign frame, rejecting an unknown kind,
  * an unexpected or missing key, or a wrong type, and naming the offending path.
@@ -243,6 +323,24 @@ export function parseCampaignFrame(value: unknown): CampaignFrame {
         seq,
         workstreamId: asString(object.workstreamId, '$.workstreamId'),
         tokens: asNumber(object.tokens, '$.tokens'),
+      };
+    }
+    case 'workstream-attempt': {
+      exactKeys(object, '$', ['kind', 'seq', 'workstreamId', 'attempt']);
+      return {
+        kind,
+        seq,
+        workstreamId: asString(object.workstreamId, '$.workstreamId'),
+        attempt: parseWorkstreamAttempt(object.attempt, '$.attempt'),
+      };
+    }
+    case 'workstream-activity': {
+      exactKeys(object, '$', ['kind', 'seq', 'workstreamId', 'activity']);
+      return {
+        kind,
+        seq,
+        workstreamId: asString(object.workstreamId, '$.workstreamId'),
+        activity: parseWorkstreamActivity(object.activity, '$.activity'),
       };
     }
     case 'status': {

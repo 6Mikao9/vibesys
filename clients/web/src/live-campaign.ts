@@ -17,15 +17,37 @@ import {
   initialFoldState,
   latestMoment,
 } from './campaign-fold.js';
+import type {WorkstreamActivityState, WorkstreamAttemptState} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 import type {CampaignStream} from './campaign-stream.js';
 import type {
   CampaignTimeline,
   CampaignView,
   CampaignViewModel,
+  ConnectionFreshness,
   WorkstreamLayout,
   WorkstreamSort,
 } from './campaign-view.js';
+
+/** How long a live campaign may go without a frame before its liveness
+ * indicator reports `stale` rather than `fresh`. Generous relative to the
+ * replay prototype's own frame pacing (hundreds of ms to a few seconds per
+ * frame; see `campaignStreamPlugin`'s `interval` query param) so normal
+ * inter-frame gaps never flicker the indicator; meant to catch a genuinely
+ * stalled connection, not a quiet moment in the run. */
+const STALE_AFTER_MS = 15_000;
+
+/** Pure: no clock, no timers. `lastFrameAt` is `null` before any frame has
+ * ever arrived, which reports `stale` since nothing yet proves the
+ * connection is live. */
+export function connectionFreshnessAt(
+  now: number,
+  lastFrameAt: number | null,
+  staleAfterMs: number = STALE_AFTER_MS,
+): ConnectionFreshness {
+  if (lastFrameAt === null) return 'stale';
+  return now - lastFrameAt <= staleAfterMs ? 'fresh' : 'stale';
+}
 
 export interface LiveCampaignState {
   /** The folded record, or null before the campaign header has arrived. */
@@ -59,6 +81,18 @@ function timelineBounds(record: CampaignRecord): {start: number; end: number} {
 
 function tokenSpendObject(fold: FoldState): Readonly<Record<string, number>> {
   return Object.fromEntries(fold.tokenSpend);
+}
+
+function workstreamAttemptsObject(
+  fold: FoldState,
+): Readonly<Record<string, WorkstreamAttemptState>> {
+  return Object.fromEntries(fold.workstreamAttempts);
+}
+
+function workstreamActivityObject(
+  fold: FoldState,
+): Readonly<Record<string, WorkstreamActivityState>> {
+  return Object.fromEntries(fold.workstreamActivity);
 }
 
 /** The read-only half of the view model (everything but the setters). */
@@ -105,9 +139,12 @@ interface LiveUiState {
 interface ReadonlyViewInputs {
   readonly source: CampaignRecord;
   readonly status: 'active' | 'completed';
+  readonly connectionFreshness: ConnectionFreshness;
   readonly orderedMeasurements: CampaignRecord['measurements'];
   readonly timeline: {readonly start: number; readonly end: number};
   readonly workstreamTokenSpend: Readonly<Record<string, number>>;
+  readonly workstreamAttempts: Readonly<Record<string, WorkstreamAttemptState>>;
+  readonly workstreamActivity: Readonly<Record<string, WorkstreamActivityState>>;
   readonly cursor: LiveCursor;
   readonly ui: LiveUiState;
 }
@@ -116,11 +153,23 @@ interface ReadonlyViewInputs {
  * contract. Status comes from the fold, not the cursor, so scrubbing never
  * rewrites the run status. */
 function readOnlyView(inputs: ReadonlyViewInputs): CampaignViewReadonly {
-  const {source, status, orderedMeasurements, timeline, workstreamTokenSpend, cursor, ui} = inputs;
+  const {
+    source,
+    status,
+    connectionFreshness,
+    orderedMeasurements,
+    timeline,
+    workstreamTokenSpend,
+    workstreamAttempts,
+    workstreamActivity,
+    cursor,
+    ui,
+  } = inputs;
   const activeMeasurement = orderedMeasurements[cursor.pointIndex];
   const latestTimestamp = activeMeasurement?.timestamp ?? new Date(timeline.end).toISOString();
   return {
     activeMeasurement,
+    connectionFreshness,
     cursorSequence: activeMeasurement?.sequence ?? Number.POSITIVE_INFINITY,
     latestTimestamp,
     metric:
@@ -139,6 +188,8 @@ function readOnlyView(inputs: ReadonlyViewInputs): CampaignViewReadonly {
     visibleWorkstreamCount: source.workstreams.filter(
       item => Date.parse(item.startedAt) <= Date.parse(latestTimestamp),
     ).length,
+    workstreamActivity,
+    workstreamAttempts,
     workstreamLayout: ui.workstreamLayout,
     workstreamSort: ui.workstreamSort,
     workstreamTokenSpend,
@@ -157,22 +208,36 @@ export function useLiveCampaign(stream: CampaignStream): LiveCampaignState {
   const [workstreamLayout, setWorkstreamLayout] = useState<WorkstreamLayout>('kanban');
   const [workstreamSort, setWorkstreamSort] = useState<WorkstreamSort>('start-asc');
   const [timelineMode, setTimelineMode] = useState<CampaignTimeline>('workstreams');
+  // Wall-clock time of the last received frame, independent of the fold's own
+  // `seq`: this is purely about transport liveness, not application state.
+  const [lastFrameAt, setLastFrameAt] = useState<number | null>(null);
+  // Forces a re-render on a plain timer so the indicator can flip from fresh
+  // to stale even while no new frame arrives to trigger one on its own.
+  const [freshnessTick, setFreshnessTick] = useState(() => Date.now());
 
   useEffect(() => {
     setFold(initialFoldState());
     setStreamError(null);
+    setLastFrameAt(null);
     return stream.subscribe(
       frame => {
         // A frame arriving proves the stream recovered, so any earlier error
         // (including one from a connection drop the browser already retried)
         // must not leave the banner stuck on past the problem it reported.
         setStreamError(null);
+        setLastFrameAt(Date.now());
         setFold(current => foldCampaignFrame(current, frame));
       },
       error => setStreamError(error),
     );
   }, [stream]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setFreshnessTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const connectionFreshness = connectionFreshnessAt(freshnessTick, lastFrameAt);
   const scenario = useMemo(() => foldStateToRecord(fold, latestMoment(fold)), [fold]);
   const source = scenario ?? EMPTY_RECORD;
   const orderedMeasurements = useMemo(
@@ -180,14 +245,19 @@ export function useLiveCampaign(stream: CampaignStream): LiveCampaignState {
     [source.measurements],
   );
   const workstreamTokenSpend = useMemo(() => tokenSpendObject(fold), [fold]);
+  const workstreamAttempts = useMemo(() => workstreamAttemptsObject(fold), [fold]);
+  const workstreamActivity = useMemo(() => workstreamActivityObject(fold), [fold]);
   const timeline = useMemo(() => timelineBounds(source), [source]);
   const cursor = liveCursor(orderedMeasurements.length, scrubIndex);
   const readOnly = readOnlyView({
     source,
     status: fold.status,
+    connectionFreshness,
     orderedMeasurements,
     timeline,
     workstreamTokenSpend,
+    workstreamAttempts,
+    workstreamActivity,
     cursor,
     ui: {
       metricId,

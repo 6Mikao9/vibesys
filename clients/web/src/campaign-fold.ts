@@ -7,7 +7,13 @@
  * sleeps (see `campaign-fold.test.ts`).
  */
 
-import type {CampaignHeader, FrameAgent, FrameMeasurement} from './campaign-frames.js';
+import type {
+  CampaignHeader,
+  FrameAgent,
+  FrameMeasurement,
+  WorkstreamActivityState,
+  WorkstreamAttemptState,
+} from './campaign-frames.js';
 import {type CampaignFrame, type FrameWorkstream, isTerminalPhase} from './campaign-frames.js';
 import type {CampaignRecord} from './campaign-record.js';
 
@@ -19,6 +25,8 @@ export interface FoldState {
   readonly agents: ReadonlyMap<string, FrameAgent>;
   readonly measurements: ReadonlyMap<string, FrameMeasurement>;
   readonly tokenSpend: ReadonlyMap<string, number>;
+  readonly workstreamAttempts: ReadonlyMap<string, WorkstreamAttemptState>;
+  readonly workstreamActivity: ReadonlyMap<string, WorkstreamActivityState>;
   readonly status: 'active' | 'completed';
 }
 
@@ -30,6 +38,8 @@ export function initialFoldState(): FoldState {
     agents: new Map(),
     measurements: new Map(),
     tokenSpend: new Map(),
+    workstreamAttempts: new Map(),
+    workstreamActivity: new Map(),
     status: 'active',
   };
 }
@@ -70,6 +80,18 @@ export function foldCampaignFrame(state: FoldState, frame: CampaignFrame): FoldS
         ...state,
         seq,
         tokenSpend: withEntry(state.tokenSpend, frame.workstreamId, frame.tokens),
+      };
+    case 'workstream-attempt':
+      return {
+        ...state,
+        seq,
+        workstreamAttempts: withEntry(state.workstreamAttempts, frame.workstreamId, frame.attempt),
+      };
+    case 'workstream-activity':
+      return {
+        ...state,
+        seq,
+        workstreamActivity: withEntry(state.workstreamActivity, frame.workstreamId, frame.activity),
       };
     case 'status':
       return {...state, seq, status: frame.status};

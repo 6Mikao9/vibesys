@@ -28,6 +28,38 @@ function timelineBounds(scenario: CampaignRecord): {start: number; end: number} 
   return {start: Number.isFinite(start) ? start : 0, end: Number.isFinite(end) ? end : 1};
 }
 
+/** The read-only half of the view model (everything but the setters). */
+type HistoryReadonly = Omit<
+  CampaignViewModel,
+  | 'setMetric'
+  | 'setPlaying'
+  | 'setPointIndex'
+  | 'setSelectedAgentId'
+  | 'setSelectedWorkstreamId'
+  | 'setView'
+  | 'setTimelineMode'
+  | 'setWorkstreamLayout'
+  | 'setWorkstreamSort'
+>;
+
+/** Fields the fixture clock has no source for: a finished record carries no
+ * live retry or activity telemetry, and never goes stale (see
+ * `ConnectionFreshness`). */
+function historyReadonlyView(
+  fields: Omit<
+    HistoryReadonly,
+    'connectionFreshness' | 'workstreamActivity' | 'workstreamAttempts' | 'workstreamTokenSpend'
+  >,
+): HistoryReadonly {
+  return {
+    ...fields,
+    connectionFreshness: 'fresh',
+    workstreamActivity: {},
+    workstreamAttempts: {},
+    workstreamTokenSpend: {},
+  };
+}
+
 export function useCampaignHistory(scenario: CampaignRecord): CampaignViewModel {
   const [view, setView] = useState<CampaignView>('dashboard');
   const orderedMeasurements = useMemo(
@@ -93,30 +125,31 @@ export function useCampaignHistory(scenario: CampaignRecord): CampaignViewModel 
   };
 
   return {
-    activeMeasurement,
-    cursorSequence,
-    latestTimestamp,
-    metric,
-    metricId,
-    orderedMeasurements,
-    playing,
-    pointIndex,
-    selectedAgent,
-    selectedWorkstream,
+    ...historyReadonlyView({
+      activeMeasurement,
+      cursorSequence,
+      latestTimestamp,
+      metric,
+      metricId,
+      orderedMeasurements,
+      playing,
+      pointIndex,
+      selectedAgent,
+      selectedWorkstream,
+      status: pointIndex < orderedMeasurements.length - 1 ? 'active' : 'completed',
+      timeline,
+      timelineMode,
+      view,
+      visibleWorkstreamCount,
+      workstreamLayout,
+      workstreamSort,
+    }),
     setMetric,
     setPlaying,
     setPointIndex: showMeasurement,
     setSelectedAgentId,
     setSelectedWorkstreamId,
     setView,
-    status: pointIndex < orderedMeasurements.length - 1 ? 'active' : 'completed',
-    timeline,
-    timelineMode,
-    view,
-    visibleWorkstreamCount,
-    workstreamLayout,
-    workstreamSort,
-    workstreamTokenSpend: {},
     setWorkstreamLayout,
     setWorkstreamSort,
     setTimelineMode,

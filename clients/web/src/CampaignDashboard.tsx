@@ -79,8 +79,15 @@ function CampaignHeader({
           </span>
         </div>
         <div className="run-state">
-          <span className="live-dot" /> Campaign trace <span className="state-divider">·</span>{' '}
-          {campaign.status}
+          <span
+            className={`live-dot live-dot-${campaign.connectionFreshness}`}
+            title={
+              campaign.connectionFreshness === 'fresh'
+                ? 'Receiving live updates'
+                : 'No update recently: the connection may have stalled'
+            }
+          />{' '}
+          Campaign trace <span className="state-divider">·</span> {campaign.status}
         </div>
         <button
           className="quiet-button"
@@ -454,6 +461,8 @@ function WorkstreamsSection({
         layout={campaign.workstreamLayout}
         sort={campaign.workstreamSort}
         tokenSpend={campaign.workstreamTokenSpend}
+        attempts={campaign.workstreamAttempts}
+        activity={campaign.workstreamActivity}
         onSort={campaign.setWorkstreamSort}
         onSelect={campaign.setSelectedWorkstreamId}
       />
@@ -856,6 +865,8 @@ function WorkstreamExplorer({
   layout,
   sort,
   tokenSpend,
+  attempts,
+  activity,
   onSort,
   onSelect,
 }: {
@@ -864,6 +875,8 @@ function WorkstreamExplorer({
   readonly layout: CampaignViewModel['workstreamLayout'];
   readonly sort: CampaignViewModel['workstreamSort'];
   readonly tokenSpend: CampaignViewModel['workstreamTokenSpend'];
+  readonly attempts: CampaignViewModel['workstreamAttempts'];
+  readonly activity: CampaignViewModel['workstreamActivity'];
   readonly onSort: CampaignViewModel['setWorkstreamSort'];
   readonly onSelect: (id: string) => void;
 }): JSX.Element {
@@ -881,6 +894,8 @@ function WorkstreamExplorer({
           workstreams={visible}
           asOfTime={asOfTime}
           tokenSpend={tokenSpend}
+          attempts={attempts}
+          activity={activity}
           onSelect={onSelect}
         />
       ) : (
@@ -888,6 +903,7 @@ function WorkstreamExplorer({
           workstreams={visible}
           asOfTime={asOfTime}
           tokenSpend={tokenSpend}
+          attempts={attempts}
           sort={sort}
           onSort={onSort}
           onSelect={onSelect}
@@ -897,15 +913,48 @@ function WorkstreamExplorer({
   );
 }
 
+/** "attempt 2/3" plus a warning marker when a retry is spending budget on the
+ * same setup failure repeatedly, the case worth a human's attention. */
+function AttemptBadge({
+  attempt,
+}: {
+  readonly attempt: CampaignViewModel['workstreamAttempts'][string] | undefined;
+}): JSX.Element | null {
+  if (attempt === undefined) return null;
+  const label = `attempt ${attempt.attempt}/${attempt.attemptLimit}`;
+  if (!attempt.repeatedError) return <small className="attempt-badge">{label}</small>;
+  return (
+    <small className="attempt-badge attempt-badge-warning" title={attempt.lastError ?? undefined}>
+      {label} · repeating
+    </small>
+  );
+}
+
+/** "doing: <tool>" (or the activity's own summary outside a tool call), the
+ * live signal that a workstream is genuinely busy rather than stuck. */
+function ActivityLabel({
+  activity,
+}: {
+  readonly activity: CampaignViewModel['workstreamActivity'][string] | undefined;
+}): JSX.Element | null {
+  if (activity === undefined) return null;
+  const label = activity.tool === null ? activity.summary : `doing: ${activity.tool}`;
+  return <small className={`activity-label activity-mode-${activity.mode}`}>{label}</small>;
+}
+
 function WorkstreamKanban({
   workstreams,
   asOfTime,
   tokenSpend,
+  attempts,
+  activity,
   onSelect,
 }: {
   readonly workstreams: Workstream[];
   readonly asOfTime: number;
   readonly tokenSpend: Readonly<Record<string, number>>;
+  readonly attempts: CampaignViewModel['workstreamAttempts'];
+  readonly activity: CampaignViewModel['workstreamActivity'];
   readonly onSelect: (id: string) => void;
 }): JSX.Element {
   const columns: {state: WorkstreamState; label: string}[] = [
@@ -931,6 +980,12 @@ function WorkstreamKanban({
                   {tokenSpend[item.id] !== undefined && (
                     <small>{formatTokenSpend(tokenSpend[item.id])}</small>
                   )}
+                  {column.state === 'active' && (
+                    <>
+                      <ActivityLabel activity={activity[item.id]} />
+                      <AttemptBadge attempt={attempts[item.id]} />
+                    </>
+                  )}
                 </button>
               ))}
             </div>
@@ -945,6 +1000,7 @@ function WorkstreamTable({
   workstreams,
   asOfTime,
   tokenSpend,
+  attempts,
   sort,
   onSort,
   onSelect,
@@ -952,6 +1008,7 @@ function WorkstreamTable({
   readonly workstreams: Workstream[];
   readonly asOfTime: number;
   readonly tokenSpend: Readonly<Record<string, number>>;
+  readonly attempts: CampaignViewModel['workstreamAttempts'];
   readonly sort: CampaignViewModel['workstreamSort'];
   readonly onSort: CampaignViewModel['setWorkstreamSort'];
   readonly onSelect: (id: string) => void;
@@ -972,6 +1029,7 @@ function WorkstreamTable({
             onSort={onSort}
             disabled={Object.keys(tokenSpend).length === 0}
           />
+          <th>Attempt</th>
         </tr>
       </thead>
       <tbody>
@@ -994,6 +1052,9 @@ function WorkstreamTable({
                 <span title={tokenSpend[item.id] === undefined ? 'Tokens not recorded' : undefined}>
                   {formatTokenSpend(tokenSpend[item.id])}
                 </span>
+              </td>
+              <td>
+                <AttemptBadge attempt={attempts[item.id]} />
               </td>
             </tr>
           );

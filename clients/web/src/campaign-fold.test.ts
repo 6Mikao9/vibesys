@@ -158,6 +158,81 @@ test('token frames carry the cumulative total per workstream', () => {
   expect(Object.fromEntries(state.tokenSpend)).toEqual({'ws-1': 250, 'ws-2': 40});
 });
 
+test('an attempt frame upserts live retry-budget diagnostics per workstream', () => {
+  const state = foldFrames([
+    initFrame,
+    {
+      kind: 'workstream-attempt',
+      seq: 2,
+      workstreamId: 'ws-1',
+      attempt: {
+        attempt: 1,
+        attemptLimit: 3,
+        refunded: 0,
+        lastError: null,
+        setupFailure: false,
+        repeatedError: false,
+      },
+    },
+    {
+      kind: 'workstream-attempt',
+      seq: 3,
+      workstreamId: 'ws-1',
+      attempt: {
+        attempt: 2,
+        attemptLimit: 3,
+        refunded: 1,
+        lastError: 'boom',
+        setupFailure: true,
+        repeatedError: true,
+      },
+    },
+  ]);
+  expect(state.workstreamAttempts.size).toBe(1);
+  expect(state.workstreamAttempts.get('ws-1')).toEqual({
+    attempt: 2,
+    attemptLimit: 3,
+    refunded: 1,
+    lastError: 'boom',
+    setupFailure: true,
+    repeatedError: true,
+  });
+});
+
+test('an activity frame upserts the live mode per workstream, keyed independently per id', () => {
+  const state = foldFrames([
+    initFrame,
+    {
+      kind: 'workstream-activity',
+      seq: 2,
+      workstreamId: 'ws-1',
+      activity: {mode: 'tool', summary: 'Using run_benchmark', tool: 'run_benchmark'},
+    },
+    {
+      kind: 'workstream-activity',
+      seq: 3,
+      workstreamId: 'ws-1',
+      activity: {mode: 'thinking', summary: 'Thinking', tool: null},
+    },
+    {
+      kind: 'workstream-activity',
+      seq: 4,
+      workstreamId: 'ws-2',
+      activity: {mode: 'tool', summary: 'Using read_file', tool: 'read_file'},
+    },
+  ]);
+  expect(state.workstreamActivity.get('ws-1')).toEqual({
+    mode: 'thinking',
+    summary: 'Thinking',
+    tool: null,
+  });
+  expect(state.workstreamActivity.get('ws-2')).toEqual({
+    mode: 'tool',
+    summary: 'Using read_file',
+    tool: 'read_file',
+  });
+});
+
 test('the run status is active until a completed status frame arrives', () => {
   expect(initialFoldState().status).toBe('active');
   const active = foldCampaignFrame(initialFoldState(), initFrame);

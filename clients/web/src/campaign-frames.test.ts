@@ -15,6 +15,21 @@ const validWorkstream = {
   outcomeSummary: '',
 };
 
+const validAttempt = {
+  attempt: 2,
+  attemptLimit: 5,
+  refunded: 1,
+  lastError: 'transient provider error',
+  setupFailure: false,
+  repeatedError: false,
+};
+
+const validActivity = {
+  mode: 'tool',
+  summary: 'Using run_benchmark',
+  tool: 'run_benchmark',
+};
+
 test('parses every frame kind', () => {
   expect(parseCampaignFrame({kind: 'campaign-init', seq: 1, header: {}}).kind).toBe(
     'campaign-init',
@@ -29,7 +44,23 @@ test('parses every frame kind', () => {
   expect(parseCampaignFrame({kind: 'tokens', seq: 5, workstreamId: 'ws-1', tokens: 10}).kind).toBe(
     'tokens',
   );
-  expect(parseCampaignFrame({kind: 'status', seq: 6, status: 'completed'}).kind).toBe('status');
+  expect(
+    parseCampaignFrame({
+      kind: 'workstream-attempt',
+      seq: 6,
+      workstreamId: 'ws-1',
+      attempt: validAttempt,
+    }).kind,
+  ).toBe('workstream-attempt');
+  expect(
+    parseCampaignFrame({
+      kind: 'workstream-activity',
+      seq: 7,
+      workstreamId: 'ws-1',
+      activity: validActivity,
+    }).kind,
+  ).toBe('workstream-activity');
+  expect(parseCampaignFrame({kind: 'status', seq: 8, status: 'completed'}).kind).toBe('status');
 });
 
 test('rejects an unknown frame kind and names the path', () => {
@@ -129,4 +160,70 @@ test('rejects a wrong-typed tokens workstreamId and names the path', () => {
   expect(() => parseCampaignFrame({kind: 'tokens', seq: 1, workstreamId: 7, tokens: 10})).toThrow(
     /\$\.workstreamId/,
   );
+});
+
+test('rejects an invalid attempt mode value and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'workstream-attempt',
+      seq: 1,
+      workstreamId: 'ws-1',
+      attempt: {...validAttempt, attempt: '2'},
+    }),
+  ).toThrow(/\$\.attempt\.attempt/);
+});
+
+test('rejects an unexpected attempt key and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'workstream-attempt',
+      seq: 1,
+      workstreamId: 'ws-1',
+      attempt: {...validAttempt, surprise: true},
+    }),
+  ).toThrow(/\$\.attempt\.surprise/);
+});
+
+test('accepts a null lastError on an attempt frame', () => {
+  expect(
+    parseCampaignFrame({
+      kind: 'workstream-attempt',
+      seq: 1,
+      workstreamId: 'ws-1',
+      attempt: {...validAttempt, lastError: null},
+    }).kind,
+  ).toBe('workstream-attempt');
+});
+
+test('rejects an invalid activity mode and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'workstream-activity',
+      seq: 1,
+      workstreamId: 'ws-1',
+      activity: {...validActivity, mode: 'sleeping'},
+    }),
+  ).toThrow(/\$\.activity\.mode/);
+});
+
+test('rejects an unexpected activity key and names the nested path', () => {
+  expect(() =>
+    parseCampaignFrame({
+      kind: 'workstream-activity',
+      seq: 1,
+      workstreamId: 'ws-1',
+      activity: {...validActivity, surprise: true},
+    }),
+  ).toThrow(/\$\.activity\.surprise/);
+});
+
+test('accepts a null tool on an activity frame', () => {
+  expect(
+    parseCampaignFrame({
+      kind: 'workstream-activity',
+      seq: 1,
+      workstreamId: 'ws-1',
+      activity: {...validActivity, mode: 'thinking', tool: null},
+    }).kind,
+  ).toBe('workstream-activity');
 });

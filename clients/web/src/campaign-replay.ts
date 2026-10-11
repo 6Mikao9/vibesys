@@ -74,6 +74,17 @@ function tokenTotal(workstream: CampaignRecord['workstreams'][number], index: nu
   return 2000 + index * 600 + span * 150;
 }
 
+/** A workstream whose demo attempt diagnostics show a retry: the first
+ * (by start time) is the one most visible in the Kanban's "Active" column
+ * early in the replay, so it is the one worth spending the demo's one
+ * scripted retry on. */
+function isRetryShowcaseWorkstream(
+  workstream: CampaignRecord['workstreams'][number],
+  index: number,
+): boolean {
+  return index === 0 && workstream.lastSequence > workstream.firstSequence;
+}
+
 export function framesFromRecord(record: CampaignRecord): CampaignFrame[] {
   const makers: Array<(seq: number) => CampaignFrame> = [];
   makers.push(seq => ({kind: 'campaign-init', seq, header: headerOf(record)}));
@@ -89,12 +100,64 @@ export function framesFromRecord(record: CampaignRecord): CampaignFrame[] {
       make: seq => ({kind: 'workstream-upsert', seq, workstream: inFlight(workstream)}),
     });
     timed.push({
+      at: started,
+      make: seq => ({
+        kind: 'workstream-attempt',
+        seq,
+        workstreamId: workstream.id,
+        attempt: {
+          attempt: 1,
+          attemptLimit: 3,
+          refunded: 0,
+          lastError: null,
+          setupFailure: false,
+          repeatedError: false,
+        },
+      }),
+    });
+    timed.push({
       at: started + (finished - started) * 0.3,
       make: seq => ({
         kind: 'tokens',
         seq,
         workstreamId: workstream.id,
         tokens: Math.round(total * 0.4),
+      }),
+    });
+    timed.push({
+      at: started + (finished - started) * 0.35,
+      make: seq => ({
+        kind: 'workstream-activity',
+        seq,
+        workstreamId: workstream.id,
+        activity: {mode: 'tool', summary: 'Using run_benchmark', tool: 'run_benchmark'},
+      }),
+    });
+    if (isRetryShowcaseWorkstream(workstream, index)) {
+      timed.push({
+        at: started + (finished - started) * 0.5,
+        make: seq => ({
+          kind: 'workstream-attempt',
+          seq,
+          workstreamId: workstream.id,
+          attempt: {
+            attempt: 2,
+            attemptLimit: 3,
+            refunded: 1,
+            lastError: 'Transient provider error (529): overloaded',
+            setupFailure: true,
+            repeatedError: true,
+          },
+        }),
+      });
+    }
+    timed.push({
+      at: started + (finished - started) * 0.7,
+      make: seq => ({
+        kind: 'workstream-activity',
+        seq,
+        workstreamId: workstream.id,
+        activity: {mode: 'thinking', summary: 'Thinking', tool: null},
       }),
     });
     timed.push({
