@@ -2,6 +2,8 @@ import {describe, expect, test} from 'bun:test';
 import {parseInstanceRecord} from './instances.js';
 import {
   EMPTY_RECENT,
+  launchedRunId,
+  learnedRunId,
   parseRecent,
   RECENT_LIMIT,
   type RecentRun,
@@ -81,6 +83,32 @@ describe('remember', () => {
     expect(file.runs.map(entry => entry.instanceId)).toEqual(['ba9876543210']);
   });
 
+  test('regression: resuming a run records it under its run id before its server reports one', () => {
+    const resumed = run({
+      instanceId: 'ba9876543210',
+      task: null,
+      runId: launchedRunId({kind: 'resume', run: 'run-1'}, null),
+      attachedAt: 2,
+    });
+    const file = remember(remember(EMPTY_RECENT, run()), resumed);
+    expect(file.runs).toEqual([run({instanceId: 'ba9876543210', attachedAt: 2})]);
+  });
+
+  test('a launch names a run only when its server reported one or it resumes a named run', () => {
+    for (const reported of RUNS) {
+      expect(launchedRunId({kind: 'start'}, reported)).toBe(reported);
+      expect(launchedRunId({kind: 'resume', run: ''}, reported)).toBe(reported);
+      expect(launchedRunId({kind: 'resume', run: 'run-9'}, reported)).toBe(reported ?? 'run-9');
+    }
+  });
+
+  test('regression: a run that learns its id merges with its earlier entry and keeps that task', () => {
+    const resumed = run({instanceId: 'ba9876543210', task: null, runId: null, attachedAt: 2});
+    let file = remember(remember(EMPTY_RECENT, run()), resumed);
+    file = remember(file, {...resumed, runId: 'run-1', attachedAt: 3});
+    expect(file.runs).toEqual([run({instanceId: 'ba9876543210', attachedAt: 3})]);
+  });
+
   test('keeps RECENT_LIMIT runs by default', () => {
     let file = EMPTY_RECENT;
     for (let index = 0; index < RECENT_LIMIT + 5; index += 1) {
@@ -103,6 +131,21 @@ describe('parseRecent', () => {
       [{version: 1, runs: [run({attachedAt: -1})]}, 'runs[0].attachedAt'],
     ];
     for (const [value, message] of cases) expect(() => parseRecent(value)).toThrow(message);
+  });
+});
+
+describe('learnedRunId', () => {
+  test('regression: an attached run learns its run id from a live record once its server reports it', () => {
+    const records = [
+      parseInstanceRecord({...fakeRecord('0123456789ab', '/run/a'), run_id: null}),
+      parseInstanceRecord({...fakeRecord('ba9876543210', '/run/b'), run_id: 'run-7'}),
+    ];
+    expect(learnedRunId(null, 'ba9876543210', records)).toBe('run-7');
+    // Nothing to learn: not reported yet, already known, not attached by id, or not listed.
+    expect(learnedRunId(null, '0123456789ab', records)).toBeNull();
+    expect(learnedRunId('run-7', 'ba9876543210', records)).toBeNull();
+    expect(learnedRunId(null, null, records)).toBeNull();
+    expect(learnedRunId(null, 'aaaaaaaaaaaa', records)).toBeNull();
   });
 });
 

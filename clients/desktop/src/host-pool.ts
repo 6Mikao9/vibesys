@@ -7,7 +7,7 @@
  * the recent-runs list. Electron-free: the main process supplies paths and the system, and tests
  * supply a `HostFactory` over fakes.
  */
-import {readFile, writeFile} from 'node:fs/promises';
+import {readFile, rename, writeFile} from 'node:fs/promises';
 import type {Host} from './host.js';
 import {HostError} from './host.js';
 import {
@@ -22,7 +22,12 @@ import {
   validHostPath,
   withHostSettings,
 } from './host-settings.js';
-import {type InstanceRecord, parseInstanceList, versionSkewMessage} from './instances.js';
+import {
+  type InstanceRecord,
+  parseInstanceList,
+  type StopResult,
+  versionSkewMessage,
+} from './instances.js';
 import {checkLocalCheckout, checkoutPython, LocalHost} from './local-host.js';
 import {EMPTY_RECENT, parseRecent, type RecentFile, type RecentRun, remember} from './recent.js';
 import {SshHost} from './ssh-host.js';
@@ -74,6 +79,8 @@ export class HostPool {
   /** Hosts replaced by a checkout change, still serving the run attached through them. */
   readonly #retired: Promise<CheckedHost>[] = [];
   #settingsProblem: string | null = null;
+  /** The last update of `recent.json`; each update reads the file the one before wrote. */
+  #recentUpdate: Promise<void> = Promise.resolve();
 
   constructor(options: HostPoolOptions) {
     this.#options = options;
@@ -144,9 +151,7 @@ export class HostPool {
     const candidate = this.#options.factory(id, checkout);
     const root = await (await candidate).verifyCheckout();
     const next = withHostSettings(await this.#settings(), id, {checkout});
-    await writeFile(this.#options.settingsPath, `${JSON.stringify(next, null, 2)}\n`, {
-      mode: 0o600,
-    });
+    await writeJson(this.#options.settingsPath, next);
     const key = hostKey(id);
     const previous = this.#hosts.get(key);
     if (previous !== undefined) this.#retired.push(previous);
@@ -154,13 +159,19 @@ export class HostPool {
     return root;
   }
 
-  /** A checkout to suggest for `id`, from the `vibesys_root` its live servers report. */
+  /**
+   * A checkout to suggest for `id`, from the `vibesys_root` its live servers report. Asking also
+   * connects, so a host that cannot be reached (`link`) or refuses the user (`auth`) rejects here,
+   * before the user is asked for a checkout there; any other failure only means no suggestion.
+   */
   async suggestedCheckout(id: HostId): Promise<string | null> {
     if (id.kind === 'local') return null;
     try {
       const probe = await this.#options.factory(id, '/');
       return (await probe.registryRoots())[0] ?? null;
-    } catch {
+    } catch (error) {
+      if (error instanceof HostError && (error.kind === 'link' || error.kind === 'auth'))
+        throw error;
       return null;
     }
   }
@@ -200,6 +211,11 @@ export class HostPool {
     );
   }
 
+  /** Ask `instanceId` on `id` to stop; `force` adds `--force`. */
+  async stopRun(id: HostId, instanceId: string, force: boolean): Promise<StopResult> {
+    return (await this.host(id)).stopInstance(instanceId, {force});
+  }
+
   /** The tasks `project` defines on `id`, read with `vibesys tasks PROJECT --json`. */
   async tasks(id: HostId, project: unknown): Promise<string[]> {
     const path = validHostPath(project, 'the project directory');
@@ -222,9 +238,13 @@ export class HostPool {
     }
   }
 
+  /** Record `run` in `recent.json`. Updates run one at a time, so none overwrites another. */
   async remember(run: RecentRun): Promise<void> {
-    const next = remember(await this.recent(), run);
-    await writeFile(this.#options.recentPath, `${JSON.stringify(next, null, 2)}\n`, {mode: 0o600});
+    const update = this.#recentUpdate.then(async () => {
+      await writeJson(this.#options.recentPath, remember(await this.recent(), run));
+    });
+    this.#recentUpdate = update.catch(() => undefined);
+    await update;
   }
 
   async closeAll(): Promise<void> {
@@ -258,4 +278,14 @@ export class HostPool {
       return EMPTY_SETTINGS;
     }
   }
+}
+
+/**
+ * Replace `path` with `value` as JSON, private to the user. The text goes to a sibling file first and
+ * is renamed over `path`, so a reader sees the old file or the new one, never a partial write.
+ */
+async function writeJson(path: string, value: unknown): Promise<void> {
+  const staging = `${path}.${process.pid}.tmp`;
+  await writeFile(staging, `${JSON.stringify(value, null, 2)}\n`, {mode: 0o600});
+  await rename(staging, path);
 }

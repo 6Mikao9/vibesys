@@ -16,7 +16,11 @@ interface Built {
 function pool(
   sshConfig: string,
   settings: string | null,
-  options: {readonly broken?: ReadonlySet<string>; readonly roots?: readonly string[]} = {},
+  options: {
+    readonly broken?: ReadonlySet<string>;
+    readonly roots?: readonly string[];
+    readonly rootsError?: HostError;
+  } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'vsd-pool-'));
   writeFileSync(join(directory, 'config'), sshConfig);
@@ -58,7 +62,10 @@ function pool(
           }
           return checkout.replace('~', '/home/me');
         },
-        registryRoots: async () => [...(options.roots ?? [])],
+        registryRoots: async () => {
+          if (options.rootsError !== undefined) throw options.rootsError;
+          return [...(options.roots ?? [])];
+        },
       }) satisfies CheckedHost;
     },
     log: message => logged.push(message),
@@ -109,6 +116,18 @@ describe('HostPool', () => {
     expect(await hosts.suggestedCheckout(GPU)).toBe('/home/me/src/vibesys');
   });
 
+  test('regression: a host that cannot be reached or refuses the user says so instead of asking for a checkout', async () => {
+    for (const kind of ['link', 'auth'] as const) {
+      const error = new HostError(kind, `ssh: ${kind}`);
+      const {hosts} = pool('Host gpu-box\n', null, {rootsError: error});
+      await expect(hosts.suggestedCheckout(GPU)).rejects.toBe(error);
+    }
+    const {hosts} = pool('Host gpu-box\n', null, {
+      rootsError: new HostError('failed', 'no registry'),
+    });
+    expect(await hosts.suggestedCheckout(GPU)).toBeNull();
+  });
+
   test("lists a project's tasks and validates the project path first", async () => {
     const {hosts} = pool('', null);
     expect(await hosts.tasks({kind: 'local'}, '/tmp/queue-rs')).toEqual(['mpmc', 'spsc']);
@@ -131,6 +150,27 @@ describe('HostPool', () => {
       'ba9876543210',
       '0123456789ab',
     ]);
+  });
+
+  test('regression: concurrent remembers and reads keep every run and never see a partial file', async () => {
+    const {hosts, logged} = pool('', null);
+    const ids = ['0123456789ab', 'ba9876543210', 'aaaaaaaaaaaa', 'bbbbbbbbbbbb', 'cccccccccccc'];
+    const reads: Promise<unknown>[] = [];
+    const writes = ids.map((instanceId, index) => {
+      reads.push(hosts.recent());
+      return hosts.remember({
+        host: 'local',
+        project: '/tmp/queue-rs',
+        task: null,
+        instanceId,
+        runId: null,
+        attachedAt: index,
+      });
+    });
+    await Promise.all([...writes, ...reads]);
+    const remembered = (await hosts.recent()).runs.map(entry => entry.instanceId);
+    expect([...remembered].sort()).toEqual([...ids].sort());
+    expect(logged.filter(line => line.startsWith('ignoring'))).toEqual([]);
   });
 
   test('an invalid settings file is reported and ignored, not fatal', async () => {

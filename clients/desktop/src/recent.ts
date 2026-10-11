@@ -116,14 +116,48 @@ function sameRun(a: RecentRun, b: RecentRun): boolean {
  * does not know one), and the list keeps the `limit` most recent runs.
  */
 export function remember(file: RecentFile, run: RecentRun, limit = RECENT_LIMIT): RecentFile {
-  const previous = file.runs.find(entry => sameRun(entry, run));
+  const same = file.runs.filter(entry => sameRun(entry, run));
+  const previous = same[0];
   const merged: RecentRun = {
     ...run,
-    task: run.task ?? previous?.task ?? null,
+    // A run can match two entries (its server's, and its run id's from an earlier server).
+    task: run.task ?? same.find(entry => entry.task !== null)?.task ?? null,
     runId: run.runId ?? (previous?.instanceId === run.instanceId ? previous.runId : null),
   };
   const rest = file.runs.filter(entry => !sameRun(entry, run));
   return {version: 1, runs: [merged, ...rest].slice(0, Math.max(0, limit))};
+}
+
+/** What the app asked a host to launch: a new run, or a resume of `run` (empty: the latest). */
+export type RunLaunch = {readonly kind: 'start'} | {readonly kind: 'resume'; readonly run: string};
+
+/**
+ * The run id to record for a run the app just launched. A server reports its run's id only once
+ * the run is ready, which can take minutes; a resume of a named run already knows it, and
+ * recording it keeps the resumed run on its earlier entry (with that entry's task).
+ */
+export function launchedRunId(launch: RunLaunch, reported: string | null): string | null {
+  if (reported !== null || launch.kind === 'start' || launch.run === '') return reported;
+  return launch.run;
+}
+
+/**
+ * The run id a live record reports for the attached server `instanceId`, when the attachment does
+ * not know one yet (`known` is null): a run started or resumed from the app is attached before its
+ * server reports the id. Null when there is nothing new to learn.
+ */
+export function learnedRunId(
+  known: string | null,
+  instanceId: string | null,
+  records: readonly InstanceRecord[],
+): string | null {
+  if (known !== null || instanceId === null) return null;
+  for (const record of records) {
+    if (record.kind === 'compatible' && record.instance.id === instanceId) {
+      return record.instance.runId;
+    }
+  }
+  return null;
 }
 
 /** What the welcome view says about a recent run after asking its host. */
