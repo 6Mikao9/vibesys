@@ -39,11 +39,6 @@
       "type": "string",
       "default": "/opt/vibesys-python",
       "description": "Absolute path of VibeSys's Python virtual environment; default mirrors vs_agent.provider_policy."
-    },
-    "pip_extras": {
-      "type": "string",
-      "default": "",
-      "description": "Space-separated extra pip requirements installed next to uv (for example `modal`). Empty installs nothing."
     }
   },
   "containerEnv": {
