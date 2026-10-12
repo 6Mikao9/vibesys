@@ -78,9 +78,6 @@ def inspect_turn(context: SessionsContext, invocation: Invocation) -> InspectTur
     return InspectTurn(
         request_id=identity,
         scope=invocation.scope,
-        deadline_at=min(
-            context.run.deadline_at, context.run.now_at + context.run.limits.reconciliation_bound
-        ),
         admission_id=owner.admission_id if owner is not None else None,
         invocation=invocation.invocation,
         dispatch=dispatching_request(context.records, invocation),

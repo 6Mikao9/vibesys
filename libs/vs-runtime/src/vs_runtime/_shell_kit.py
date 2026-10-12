@@ -82,11 +82,11 @@ if TYPE_CHECKING:
     from vs_core.api import (
         CoreEvent,
         CoreState,
-        Decision,
+        Command,
         OperationRegistry,
         Request,
         ResourceId,
-        RunView,
+        CoreView,
         SchemaRef,
         Strategy,
         StrategyEvent,
@@ -372,7 +372,7 @@ class ScriptedExecutors:
 class RecordingStrategy[S: StrategyState]:
     """A strategy that keeps every decision it proposed, in order, for the test to read."""
 
-    def __init__(self, inner: Strategy[S], decisions: list[Decision]) -> None:
+    def __init__(self, inner: Strategy[S], decisions: list[Command]) -> None:
         """Wrap ``inner``; every binding shares one list."""
         self._inner = inner
         self._decisions = decisions
@@ -387,11 +387,11 @@ class RecordingStrategy[S: StrategyState]:
         """The same strategy over another state."""
         return RecordingStrategy(self._inner.bind(state), self._decisions)
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> S:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> S:
         """The wrapped strategy's fold."""
         return self._inner.on_event(view, event)
 
-    def decide(self, view: RunView) -> Proposal[S]:
+    def decide(self, view: CoreView) -> Proposal[S]:
         """The wrapped strategy's proposal, recorded."""
         proposal = self._inner.decide(view)
         self._decisions.extend(proposal.decisions)
@@ -405,7 +405,7 @@ class Run:
     core: CoreState
     # The strategy state as the shell last persisted it.
     state: StrategyState
-    decisions: list[Decision] = field(default_factory=list)
+    decisions: list[Command] = field(default_factory=list)
     journal: Journal = field(default_factory=Journal)
     # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
     # stalled (open work and nothing to wake it).
@@ -458,7 +458,7 @@ class ScriptedHost[S: StrategyState]:
     host: CoreRunHost
     config: RunLoopConfig
     clock: VirtualClock
-    decisions: list[Decision]
+    decisions: list[Command]
     journal: Journal
 
     def run(self) -> Run:
@@ -506,7 +506,7 @@ def scripted_host[S: StrategyState](  # noqa: PLR0913  # lint-waiver: LW-994707 
     successor over them. ``clock_at`` is the new host's virtual time.
     """
     options = host_options or HostOptions()
-    decisions: list[Decision] = []
+    decisions: list[Command] = []
     recorded = RecordingStrategy(strategy, decisions)
     store = FakeStateStore() if store is None else store
     journal = Journal()

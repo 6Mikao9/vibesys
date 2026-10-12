@@ -42,6 +42,7 @@ from .evaluation_history import (
 )
 from .scheduling import AttemptRequest
 from .sessions import SessionSpec
+from .until import Until
 
 
 class WorkspacePlan(Value):
@@ -170,6 +171,7 @@ class RevisionOperationRequested(Value):
     kind: Literal["revision_operation_requested"] = "revision_operation_requested"
     request: ExecuteRegisteredOperation
     authority: RevisionAuthority
+    until: Until
 
 
 class RevisionOperationObserved(Value):

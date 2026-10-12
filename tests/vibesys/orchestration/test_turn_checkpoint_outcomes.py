@@ -58,7 +58,7 @@ from vs_core.api import (
     ObservationStatus,
     RequestId,
     RevisionRef,
-    RunView,
+    CoreView,
     Scope,
     Strategy,
     StrategyState,
@@ -110,7 +110,7 @@ def _event(invocation: InvocationRef, payload: str) -> TurnResult:
     )
 
 
-def _view(invocation: InvocationRef, outcome: str) -> RunView:
+def _view(invocation: InvocationRef, outcome: str) -> CoreView:
     """A public run view where this invocation is pending, retained, or failed."""
     base = project(initial_state())
     if outcome == "pending":

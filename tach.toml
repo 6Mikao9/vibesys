@@ -864,7 +864,7 @@ expose = ["api", "api\\..*"]
 from = ["vs_dst"]
 
 [[interfaces]]
-expose = ["PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
+expose = ["PluginProjection", "ProfilerKind", "ResumeRef", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "CoreView"]
 from = ["vibesys.run.contracts"]
 
 [[interfaces]]

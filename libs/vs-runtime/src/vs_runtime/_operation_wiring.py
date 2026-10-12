@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from vs_core.api import (
         OperationRegistration,
         RevisionRef,
-        StrategyDeclaration,
+        SearchDeclaration,
         StrategyOperations,
     )
     from vs_project.api import StateNamespace
@@ -203,7 +203,7 @@ def build_operation_catalog(
 
 
 def bind_operations(
-    declaration: StrategyDeclaration,
+    declaration: SearchDeclaration,
     catalog: OperationCatalog,
     receipts: StateNamespace,
     *,

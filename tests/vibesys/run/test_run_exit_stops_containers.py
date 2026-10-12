@@ -30,7 +30,7 @@ from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
-from vs_core.api import AttemptReady, RunView, StrategyEvent
+from vs_core.api import AttemptReady, CoreView, StrategyEvent
 from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
@@ -109,7 +109,7 @@ class _ProbeStrategy(SkeletonStrategy):
     signals) reach the test through a module-level hook the test installs for one run.
     """
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
         state = super().on_event(view, event)
         if isinstance(event, AttemptReady) and _LIVE_HOOK is not None:
             return state.model_copy(update={"phase": _LIVE_HOOK(str(view.run.run_id.root))})

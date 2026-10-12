@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 from . import _request_ledger, _request_recovery
 from .types.kernel import AreaChange
 from .types.records import (
-    DecisionDependencyResolved,
     DispatchAuthorized,
     OperationRetireRequested,
     ReconciliationDeadline,
@@ -57,7 +56,6 @@ EVENT_TO_SUBAREA: Mapping[type[RecordsEvent], Reducer] = MappingProxyType(
         RequestPrepared: _request_ledger.advance,
         DispatchAuthorized: _request_ledger.advance,
         RequestObserved: _observation,
-        DecisionDependencyResolved: _request_ledger.advance,
         OperationRetireRequested: _request_ledger.advance,
         RecoveryStarted: _request_recovery.advance,
         RecoveryReady: _request_recovery.advance,

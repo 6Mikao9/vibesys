@@ -52,7 +52,7 @@ def corrupt_origin(state: core.CoreState, fault: str) -> core.CoreState:
         case "membership":
             receipt = receipt.model_copy(update={"request_ids": ()})
         case "decision-type":
-            decision = core.Stop(
+            decision = core.Finish(
                 decision_id=decision.decision_id,
                 scope=decision.scope,
                 mode="drain",

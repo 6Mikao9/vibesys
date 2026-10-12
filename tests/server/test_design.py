@@ -24,7 +24,7 @@ from vs_project.api.testing import run_execution_record
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.api import RunView
+    from vibesys.api import CoreView
 
 
 class _RoundFields(TypedDict, total=False):
@@ -87,10 +87,10 @@ def _hypothesis(
     return Hypothesis(**fields)
 
 
-def _view(state: HypothesisState, *, run_id: str = "run-1") -> RunView:
-    """Project a hand-built `HypothesisState` into the `RunView` `DesignLog.rounds` reads.
+def _view(state: HypothesisState, *, run_id: str = "run-1") -> CoreView:
+    """Project a hand-built `HypothesisState` into the `CoreView` `DesignLog.rounds` reads.
 
-    `DesignLog.rounds` now consumes `vibesys.api`'s `RunView`, not raw core
+    `DesignLog.rounds` now consumes `vibesys.api`'s `CoreView`, not raw core
     state directly (see `server.api.experiments._view`, the same fixture
     pattern), so a state fixture built by hand still needs this projection
     step before reaching it.

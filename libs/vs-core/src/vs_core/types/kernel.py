@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
@@ -40,10 +40,10 @@ from .evaluation import (
 from .records import (
     OperationResult,
     OperationView,
+    Outbound,
     RecordsEvent,
     RecordsState,
     Request,
-    RequestBlocked,
 )
 from .scheduling import (
     AdmitAttempt,
@@ -76,14 +76,25 @@ from .settlement import (
     SettlementEvent,
     SettlementState,
 )
-from .strategy import Decision, DecisionFeedback, Proposal, StrategyDeclaration, StrategyState
+from .strategy import (
+    Command,
+    DecisionFeedback,
+    Finish,
+    SearchDeclaration,
+    StrategyState,
+    Submission,
+    Wait,
+)
+from .until import Failed, Until
 
 
 class DecisionReceipt(Value):
-    """Decision receipt lifecycle contract."""
+    """Command receipt lifecycle contract."""
 
     decision_id: DecisionId
-    decision: Decision | None = None
+    decision: Command | None = None
+    until: Until | None = None
+    """What core stored for the decision's ``Within``; None for a ``Finish``, which has none."""
     payload_digest: str
     feedback: DecisionFeedback
     request_ids: tuple[RequestId, ...] = ()
@@ -102,7 +113,7 @@ class RunState(Value):
     capabilities: Capabilities = Capabilities()
     limits: Limits = Limits()
     requirements: EvidenceRequirements = EvidenceRequirements()
-    declaration: StrategyDeclaration
+    declaration: SearchDeclaration
     controls: tuple[ControlInput, ...] = ()
     artifacts: tuple[ArtifactRef, ...] = ()
     receipts: tuple[DecisionReceipt, ...] = ()
@@ -134,7 +145,7 @@ class CoreState(Value):
     records: RecordsState = RecordsState()
 
 
-class RunView(Value):
+class CoreView(Value):
     """Run view lifecycle contract."""
 
     revision: RevisionNumber
@@ -158,18 +169,23 @@ class RunView(Value):
 
 
 class DecisionSubmitted(Value):
-    """Decision submitted lifecycle contract."""
+    """Command submitted lifecycle contract."""
 
     kind: Literal["decision_submitted"] = "decision_submitted"
-    decision: Decision
+    decision: Submission
     expected_revision: RevisionNumber
+
+    @property
+    def command(self) -> Command:
+        """The request or finish the decision asks core to act on."""
+        return self.decision.request if isinstance(self.decision, Wait) else self.decision
 
 
 class ProposalSubmitted(Value):
     """Ordered decisions observe one revision and commit with one revision increment."""
 
     kind: Literal["proposal_submitted"] = "proposal_submitted"
-    decisions: tuple[Decision, ...]
+    decisions: tuple[Submission, ...]
     expected_revision: RevisionNumber
 
 
@@ -248,7 +264,7 @@ type StrategyEvent = Annotated[
     | YieldPublicationFailed
     | InterruptFailed
     | OperationResult
-    | RequestBlocked
+    | Failed
     | ControlChanged
     | AdoptionResult
     | AdoptionFailed
@@ -277,7 +293,7 @@ class AreaChange[S: Value](Value):
 
     state: S
     signals: tuple[Signal, ...] = ()
-    requests: tuple[Request, ...] = ()
+    requests: tuple[Outbound, ...] = ()
     events: tuple[StrategyEvent, ...] = ()
 
 
@@ -360,11 +376,9 @@ class Transition(Value):
 class RunEnvelope[S: StrategyState](Value):
     """Atomic core, strategy, fence and cursor envelope with explicit versioning.
 
-    Version 3 adds explicit history, source receipts and run-owned lifecycle
-    authority. Version 2 requires the selected v2_to_v3_migration(registry). Earlier
-    envelopes require an
-    explicitly selected pure migration before nested models are decoded; new
-    defaults never stand in for missing historical ownership proof.
+    Version 4 stores each request's ``until`` on its ``RequestRecord`` and no deadline on
+    the request. Decoding an envelope of any other version is refused with an error that
+    names the version; there is no migration from the strategy-API envelopes.
     """
 
     schema_version: int = Field(ge=1)
@@ -379,29 +393,3 @@ class RunEnvelope[S: StrategyState](Value):
     def revision(self) -> RevisionNumber:
         """Core owns revision; the envelope only projects it."""
         return self.core.revision
-
-
-class Strategy[S: StrategyState](Protocol):
-    """Strategy lifecycle contract."""
-
-    @property
-    def state(self) -> S:
-        """State lifecycle contract."""
-        ...
-
-    @property
-    def declaration(self) -> StrategyDeclaration:
-        """Declaration lifecycle contract."""
-        ...
-
-    def bind(self, state: S) -> Strategy[S]:
-        """Bind lifecycle contract."""
-        ...
-
-    def decide(self, view: RunView) -> Proposal[S]:
-        """Decide lifecycle contract."""
-        ...
-
-    def on_event(self, view: RunView, event: StrategyEvent) -> S:
-        """On_event lifecycle contract."""
-        ...

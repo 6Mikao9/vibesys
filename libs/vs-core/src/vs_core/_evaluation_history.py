@@ -301,7 +301,6 @@ def _registered_identity(
         and receipt.feedback.decision_id == receipt.decision_id
         and row.request_id in receipt.request_ids
         and decision.scope == request.scope
-        and decision.deadline_at == request.deadline_at
         and decision.registered_wire == request.operation
         and decision.registered_measurement is not None
         and decision.registered_measurement == decision.normalized_measurement

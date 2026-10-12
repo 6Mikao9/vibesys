@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from ._deadlines import bound_to_run, time_remains
+from ._deadlines import bound_to_run, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
 from ._registry import ContractError
 from ._session_scope import dispatching_request
@@ -52,7 +52,7 @@ from .types.evaluation import (
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.job_observations import JobTimeout, TimedOut
 from .types.kernel import AreaChange, EvaluationContext
-from .types.records import InspectRequest, RequestPhase
+from .types.records import InspectRequest, Outbound, RequestPhase, within
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn, SessionPhase
 from .types.strategy import Accepted, Operation
@@ -231,6 +231,17 @@ def commit_refusal_in(
     if not time_remains(context.run, wait.deadline_at):
         return SuspensionRefusal.DEADLINE_EXCEEDED
     return None
+
+
+def _until_run_end(context: EvaluationContext, request: Request) -> Outbound:
+    return within(request, limit_to(context.run, context.run.deadline_at))
+
+
+def _until_wait_ends(
+    context: EvaluationContext, continuation: Continuation, request: Request
+) -> Outbound:
+    """A poll of a job an agent waits on ends when that wait's deadline passes."""
+    return within(request, limit_to(context.run, continuation.deadline_at))
 
 
 def bounded_wait(run: RunState, wait: Continuation) -> Continuation:
@@ -964,12 +975,16 @@ def _suspend(
         return AreaChange(
             state=state,
             requests=(
-                InspectTurn(
-                    request_id=RequestId(root=f"{continuation.continuation_id.root}/inspect-yield"),
-                    scope=invocation.scope,
-                    deadline_at=context.run.deadline_at,
-                    invocation=invocation.invocation,
-                    dispatch=dispatching_request(context.records, invocation),
+                _until_run_end(
+                    context,
+                    InspectTurn(
+                        request_id=RequestId(
+                            root=f"{continuation.continuation_id.root}/inspect-yield"
+                        ),
+                        scope=invocation.scope,
+                        invocation=invocation.invocation,
+                        dispatch=dispatching_request(context.records, invocation),
+                    ),
                 ),
             ),
         )
@@ -997,7 +1012,7 @@ def _suspend(
     if _ready(updated, continuation):
         change = _authorize(updated, context, continuation)
         return change.model_copy(update={"events": (*notice, *change.events)})
-    requests: list[Request] = []
+    requests: list[Outbound] = []
     for job in _jobs(state, continuation):
         if _settled(job):
             continue
@@ -1005,8 +1020,10 @@ def _suspend(
             InspectOwnedJob if job.status == ObservationStatus.UNKNOWN else ObserveOwnedJob
         )
         requests.append(
-            request_type(
-                scope=job.scope, resource_id=_resource(job), deadline_at=continuation.deadline_at
+            _until_wait_ends(
+                context,
+                continuation,
+                request_type(scope=job.scope, resource_id=_resource(job)),
             )
         )
     return AreaChange(state=updated, requests=tuple(requests), events=notice)
@@ -1064,7 +1081,7 @@ def _changed(
 ) -> AreaChange[EvaluationState]:
     events: list[StrategyEvent] = []
     signals: list[Signal] = []
-    requests: list[Request] = []
+    requests: list[Outbound] = []
     for continuation in state.continuations:
         if (
             event.resource_id not in continuation.jobs
@@ -1080,13 +1097,16 @@ def _changed(
         _deadline_proof(state, continuation)
         if job.status == ObservationStatus.UNKNOWN:
             requests.append(
-                InspectOwnedJob(
-                    request_id=RequestId(
-                        root=f"inspect-job:{len(continuation.continuation_id.root)}:{continuation.continuation_id.root}:{len(_resource(job).root)}:{_resource(job).root}:{event.observation_sequence}"
+                _until_wait_ends(
+                    context,
+                    continuation,
+                    InspectOwnedJob(
+                        request_id=RequestId(
+                            root=f"inspect-job:{len(continuation.continuation_id.root)}:{continuation.continuation_id.root}:{len(_resource(job).root)}:{_resource(job).root}:{event.observation_sequence}"
+                        ),
+                        scope=job.scope,
+                        resource_id=_resource(job),
                     ),
-                    scope=job.scope,
-                    resource_id=_resource(job),
-                    deadline_at=continuation.deadline_at,
                 )
             )
         change = _authorize(state, context, continuation)
@@ -1192,7 +1212,6 @@ def _reopen_decision(
             and decision.registered_wire == request.operation
             and decision.normalized_scope_reopen == decision.registered_scope_reopen
             and decision.scope == request.scope
-            and decision.deadline_at == request.deadline_at
             and request.scope == Scope(owner=context.run.run_id, generation=context.run.generation)
             and request.operation_id == OperationId(root=identity)
             and request.request_id == RequestId(root=identity)
@@ -1352,11 +1371,13 @@ def _reopened(
         return AreaChange(
             state=state,
             requests=(
-                InspectRequest(
-                    request_id=RequestId(root=f"{observation.request_id.root}/inspect-reopen"),
-                    scope=authority.request.scope,
-                    deadline_at=context.run.deadline_at,
-                    target=observation.request_id,
+                _until_run_end(
+                    context,
+                    InspectRequest(
+                        request_id=RequestId(root=f"{observation.request_id.root}/inspect-reopen"),
+                        scope=authority.request.scope,
+                        target=observation.request_id,
+                    ),
                 ),
             ),
         )

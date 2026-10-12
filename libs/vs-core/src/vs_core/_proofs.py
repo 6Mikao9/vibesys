@@ -17,7 +17,6 @@ from .types.common import (
     AttemptRef,
     Capabilities,
     ChargeKind,
-    CompletionStatus,
     DecisionId,
     DependencyStatus,
     ExecuteRegisteredOperation,
@@ -53,7 +52,7 @@ from .types.records import (
 )
 from .types.scheduling import AdmissionRequest, AttemptReopenRequest, Slot
 from .types.sessions import CloseSession, Invocation, SessionPhase, SessionView, TurnSpec
-from .types.strategy import Accepted, Decision, Operation, Stop
+from .types.strategy import Accepted, Command, Finish, Operation
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -174,7 +173,7 @@ def _identity_mismatch(checks: tuple[tuple[ProofField, object, object], ...]) ->
 def accepted_receipt_for(
     receipts: tuple[DecisionReceipt, ...],
     identity: DecisionId | None,
-    canonical: Decision | None,
+    canonical: Command | None,
 ) -> Verdict[DecisionReceipt]:
     """Prove accepted identity; a supplied ingress decision also proves payload equality.
 
@@ -208,7 +207,7 @@ def accepted_receipt_for(
 
 
 def _receipt_payload(
-    receipt: DecisionReceipt, canonical: Decision | None
+    receipt: DecisionReceipt, canonical: Command | None
 ) -> Verdict[DecisionReceipt]:
     try:
         if receipt.decision is None:
@@ -578,7 +577,6 @@ def _operation_request(
             (ProofField.SCOPE, request.scope.owner, operation.scope.owner),
             (ProofField.GENERATION, request.scope.generation, operation.scope.generation),
             (ProofField.PAYLOAD, request.operation, operation.registered_wire),
-            (ProofField.PAYLOAD, request.deadline_at, operation.deadline_at),
             (
                 ProofField.LIFECYCLE,
                 expected.lifecycle
@@ -599,18 +597,13 @@ def _operation_request(
     return Proven(operation)
 
 
-def dependencies_for(
-    request: RequestBase, receipts: tuple[DecisionReceipt, ...], records: RecordsState
-) -> Verdict[RequestBase]:
+def dependencies_for(request: RequestBase, records: RecordsState) -> Verdict[RequestBase]:
     """Prove optional dependencies; known denials outrank unfinished obligations.
 
     Inspect every declared obligation. Within concrete denials, declaration order
     is deterministic. An unfinished obligation cannot hide a later known failure.
     """
     proofs = tuple(
-        _decision_dependency(receipts, identity) for identity in request.decision_dependencies
-    )
-    proofs += tuple(
         _request_dependency(tuple(row for row in records.records if row.request_id == identity))
         for identity in request.depends_on
     )
@@ -640,7 +633,7 @@ def request_dependency_status(
         accepted_receipt_for(receipts, request.decision_id, None), Proven
     ):
         return DependencyStatus.FAILED
-    proof = dependencies_for(request, receipts, records)
+    proof = dependencies_for(request, records)
     if isinstance(proof, Proven):
         return DependencyStatus.SUCCEEDED
     if isinstance(proof, Missing) and proof.reason in (
@@ -654,17 +647,13 @@ def request_dependency_status(
 _NOT_YET_KNOWN = (ProofReason.UNRESOLVED, ProofReason.ABSENT_REQUEST, ProofReason.ABSENT_RECEIPT)
 
 
-def dependency_failed(
-    request: Request, receipts: tuple[DecisionReceipt, ...], records: RecordsState
-) -> bool:
+def dependency_failed(request: Request, records: RecordsState) -> bool:
     """Whether a decision or request this one depends on has ended without succeeding.
 
     Only a dependency that has concluded counts: one that is unfinished, or not yet recorded,
     may still succeed. A concluded failure is final, so the request can never be dispatched.
     """
     proofs = tuple(
-        _decision_dependency(receipts, identity) for identity in request.decision_dependencies
-    ) + tuple(
         _request_dependency(tuple(row for row in records.records if row.request_id == identity))
         for identity in request.depends_on
     )
@@ -673,19 +662,6 @@ def dependency_failed(
         or (isinstance(proof, Missing) and proof.reason not in _NOT_YET_KNOWN)
         for proof in proofs
     )
-
-
-def _decision_dependency(
-    receipts: tuple[DecisionReceipt, ...], identity: DecisionId
-) -> Verdict[DecisionReceipt]:
-    proof = accepted_receipt_for(receipts, identity, None)
-    if not isinstance(proof, Proven):
-        return proof
-    if proof.value.completion is None:
-        return Missing(ProofReason.UNRESOLVED)
-    if proof.value.completion != CompletionStatus.SUCCEEDED:
-        return Mismatch(ProofField.STATUS)
-    return proof
 
 
 def _request_dependency(rows: tuple[RequestRecord, ...]) -> Verdict[RequestRecord]:
@@ -733,11 +709,11 @@ def admission_remaining(
 
 
 def draining(run: RunState) -> bool:
-    """Whether the run is CLOSING under a proved drain Stop.
+    """Whether the run is CLOSING under a proved drain Finish.
 
     The one definition of the drain rule: a drain starts no new requests, but
     the already accepted queue still starts and runs to completion (legacy
-    FinishSearch). A cancel Stop starts nothing. Scheduling admits under this
+    FinishSearch). A cancel Finish starts nothing. Scheduling admits under this
     rule and Attempts accepts those admissions under the same predicate.
     """
     match committed_stop(run):
@@ -747,18 +723,18 @@ def draining(run: RunState) -> bool:
             return False
 
 
-def committed_stop(run: RunState) -> Verdict[Stop]:
-    """Select the first committed Stop, preserving that command's dependencies.
+def committed_stop(run: RunState) -> Verdict[Finish]:
+    """Select the first committed Finish, preserving that command's dependencies.
 
-    A Stop stays committed after dependency failure rewrites its feedback to
+    A Finish stays committed after dependency failure rewrites its feedback to
     Rejected: completion is only recorded for an accepted decision. A failed
-    first commitment denies finality; a later Stop never replaces it.
+    first commitment denies finality; a later Finish never replaces it.
     """
     receipt = next(
         (
             row
             for row in run.receipts
-            if isinstance(row.decision, Stop)
+            if isinstance(row.decision, Finish)
             and (isinstance(row.feedback, Accepted) or row.completion is not None)
         ),
         None,
@@ -771,7 +747,7 @@ def committed_stop(run: RunState) -> Verdict[Stop]:
     if not isinstance(proof, Proven):
         return proof
     stop = receipt.decision
-    if not isinstance(stop, Stop):
+    if not isinstance(stop, Finish):
         return Mismatch(ProofField.PAYLOAD)
     if run.result is None:
         return Missing(ProofReason.UNRESOLVED)

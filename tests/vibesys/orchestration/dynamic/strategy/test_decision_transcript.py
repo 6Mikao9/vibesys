@@ -1,6 +1,6 @@
 """Every decision `dynamic` makes over fixed scenarios, pinned by id and payload digest.
 
-Decision ids and payloads are persisted in run envelopes, and core deduplicates a replayed
+Command ids and payloads are persisted in run envelopes, and core deduplicates a replayed
 proposal by both. A refactor of the strategy's building blocks must therefore not change a
 single byte of what it proposes. The golden file was recorded before the extraction of the
 shared strategy building blocks; a change to it is a change of the persisted contract and

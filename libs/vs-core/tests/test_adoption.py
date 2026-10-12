@@ -269,7 +269,7 @@ def test_a_successful_result_must_name_the_verified_adopted_winner() -> None:
     result = core.RunResultProposal(outcome="success", reason="done", selection=selection)
 
     def stop() -> list[core.Rejected]:
-        decision = core.Stop(
+        decision = core.Finish(
             decision_id=core.DecisionId(root=f"stop-{len(run.state.run.receipts)}"),
             scope=RUN_SCOPE,
             mode="drain",

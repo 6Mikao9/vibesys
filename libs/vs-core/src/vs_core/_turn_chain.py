@@ -34,7 +34,7 @@ from vs_core.types.common import (
 if TYPE_CHECKING:
     from vs_core._evidence_views import TurnCandidate
     from vs_core.types.common import AttemptId, RevisionRef
-    from vs_core.types.kernel import RunView
+    from vs_core.types.kernel import CoreView
 
 type Charge = Literal["free", "paid", "correction", "resume"]
 
@@ -122,13 +122,13 @@ class TurnChain[C: Value](Value):
         )
 
     def candidate(
-        self, view: RunView, attempt: AttemptId, invocation: InvocationRef
+        self, view: CoreView, attempt: AttemptId, invocation: InvocationRef
     ) -> RevisionRef | None:
         """The exact invocation's retained revision, preserving the published v1 API."""
         return turn_candidate(view, attempt, invocation, predecessors=self.lineage)
 
     def candidate_outcome(
-        self, view: RunView, attempt: AttemptId, invocation: InvocationRef
+        self, view: CoreView, attempt: AttemptId, invocation: InvocationRef
     ) -> TurnCandidate:
         """The exact invocation's typed checkpoint outcome for strategy decisions."""
         return resolve_turn_candidate(view, attempt, invocation)

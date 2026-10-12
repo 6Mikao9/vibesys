@@ -1,7 +1,7 @@
 """Run-owned sessions are closed once a stop commits, however controls and answers interleave.
 
 A run-owned session (the planner's) belongs to no attempt, so attempt retirement never
-closes it. The first committed Stop is the authority that does, but every stop, cancel
+closes it. The first committed Finish is the authority that does, but every stop, cancel
 and deadline control reaches the same drain, and a session can become closable only
 after a drain already ran: its cancelled turn ends, or its creation is answered, later.
 A generator drives the public `step` with well-formed inputs in random orders (turn
@@ -103,7 +103,7 @@ class Executor:
         self.stops += 1
         self.feed(
             core.DecisionSubmitted(
-                decision=core.Stop(
+                decision=core.Finish(
                     decision_id=core.DecisionId(root=f"stop-{self.stops}"),
                     scope=RUN_SCOPE,
                     mode=mode,

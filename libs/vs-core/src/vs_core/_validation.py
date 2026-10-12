@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
-from ._deadlines import has_time_for
 from ._proofs import Proven, accepted_receipt_for, descriptor_matches
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
@@ -24,7 +24,8 @@ from .types.common import (
 from .types.records import RecoveryPhase
 from .types.strategy import (
     Cancel,
-    Decision,
+    Command,
+    Finish,
     Interrupt,
     Measure,
     Operation,
@@ -32,16 +33,18 @@ from .types.strategy import (
     Rejected,
     RequestTurn,
     StartAttempt,
-    Stop,
+    Submission,
+    Wait,
     Withdraw,
 )
+from .types.until import WhileAlive, WhileOpen, Within
 
 if TYPE_CHECKING:
     from .types.kernel import CoreState, DecisionSubmitted
 
 
 def _reject(
-    decision: Decision, code: RejectionCode, path: tuple[str | int, ...], detail: str
+    decision: Command, code: RejectionCode, path: tuple[str | int, ...], detail: str
 ) -> Rejected:
     return Rejected(decision_id=decision.decision_id, code=code, path=path, detail=detail)
 
@@ -49,13 +52,14 @@ def _reject(
 def validate_decision(
     state: CoreState, event: DecisionSubmitted, *, check_revision: bool = True
 ) -> Rejected | None:
-    decision = event.decision
+    submission = event.decision
+    decision = event.command
     if check_revision and event.expected_revision != state.revision:
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
     if (state.run.status != RunStatus.RUNNING or state.run.result is not None) and not (
-        isinstance(decision, Stop | Withdraw) and state.run.status != RunStatus.TERMINAL
+        isinstance(decision, Finish | Withdraw) and state.run.status != RunStatus.TERMINAL
     ):
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
@@ -63,31 +67,42 @@ def validate_decision(
     rejection = validate_scope(state, decision) or _validate_root_fence(state, decision)
     if rejection is not None:
         return rejection
-    for dependency in decision.depends_on:
-        proof = accepted_receipt_for(state.run.receipts, dependency, None)
-        if not isinstance(proof, Proven) or proof.value.completion in (
-            CompletionStatus.FAILED,
-            CompletionStatus.CANCELLED,
-        ):
-            return _reject(
-                decision, RejectionCode.DEPENDENCY, ("depends_on",), "dependency not accepted"
-            )
-    if isinstance(decision, Stop):
+    if isinstance(decision, Finish):
         rejection = _validate_stop_result(state, decision)
         if rejection is not None:
             return rejection
-    return _validate_time_left(state, decision) or validate_offer(state, decision)
+    return _validate_until(state, submission, decision) or validate_offer(state, decision)
 
 
-def _validate_time_left(state: CoreState, decision: Decision) -> Rejected | None:
-    if has_time_for(state.run, decision):
+def _validate_until(state: CoreState, submission: Submission, decision: Command) -> Rejected | None:
+    """Runtime backstop for the types: a wait has a positive limit and the run has time left.
+
+    The types already make a bare request, a missing ``until`` and a watch used as the
+    ``until`` unrepresentable; this catches values built around them.
+    """
+    if isinstance(submission, Finish):
         return None
-    return _reject(
-        decision, RejectionCode.BUDGET, ("deadline_at",), "run has no time left for the request"
-    )
+    if not isinstance(submission, Wait):
+        return _reject(
+            decision, RejectionCode.UNKNOWN_KIND, ("kind",), "only Wait and Finish start work"
+        )
+    if not isinstance(submission.until, Within) or not all(
+        isinstance(watch, WhileOpen | WhileAlive) for watch in submission.until.watches
+    ):
+        return _reject(decision, RejectionCode.UNKNOWN_KIND, ("until",), "until must be a Within")
+    if not submission.until.limit > 0 or not isfinite(submission.until.limit):
+        return _reject(decision, RejectionCode.BUDGET, ("until", "limit"), "limit must be positive")
+    if not state.run.deadline_at > state.run.now_at:
+        return _reject(
+            decision,
+            RejectionCode.BUDGET,
+            ("until", "limit"),
+            "run has no time left for the request",
+        )
+    return None
 
 
-def _validate_stop_result(state: CoreState, decision: Stop) -> Rejected | None:
+def _validate_stop_result(state: CoreState, decision: Finish) -> Rejected | None:
     """A claimed success needs completed work, and a named winner needs its verified adoption."""
     result = decision.result
     if result.outcome != "success":
@@ -112,7 +127,7 @@ def _validate_stop_result(state: CoreState, decision: Stop) -> Rejected | None:
     return None
 
 
-def _required_capability(decision: Decision) -> LifecycleCapability | None:
+def _required_capability(decision: Command) -> LifecycleCapability | None:
     """The host capability a decision depends on, if any."""
     if isinstance(decision, Withdraw):
         if isinstance(decision.disposition, Park):
@@ -124,9 +139,9 @@ def _required_capability(decision: Decision) -> LifecycleCapability | None:
     return None
 
 
-def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
+def validate_offer(state: CoreState, decision: Command) -> Rejected | None:
     if (
-        isinstance(decision, Stop)
+        isinstance(decision, Finish)
         and state.run.result is not None
         and decision.result != state.run.result
     ):
@@ -174,7 +189,7 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
     return None
 
 
-def _validate_root_fence(state: CoreState, decision: Decision) -> Rejected | None:
+def _validate_root_fence(state: CoreState, decision: Command) -> Rejected | None:
     """No decision takes the root workspace while an adoption is rewriting it."""
     if not fences_root_mutation(state.settlement, state.records):
         return None
@@ -197,9 +212,9 @@ def _validate_root_fence(state: CoreState, decision: Decision) -> Rejected | Non
     )
 
 
-def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
+def validate_scope(state: CoreState, decision: Command) -> Rejected | None:
     if state.records.recovery.phase != RecoveryPhase.READY and not isinstance(
-        decision, Stop | Withdraw
+        decision, Finish | Withdraw
     ):
         return _reject(
             decision,

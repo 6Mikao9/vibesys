@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from . import _session_checkpoints
 from ._acquisition_stall import stalled_acquisition
 from ._continuations import bounded_wait, wait_refused_at_turn_end
-from ._deadlines import bound_to_run, time_remains
+from ._deadlines import limit_to
 from ._evaluation_history import produce_history
 from ._proofs import (
     Proven,
@@ -76,7 +76,13 @@ from .types.common import (
 from .types.evaluation import ContinuationPhase, ResumeAuthorizationReceipt
 from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.kernel import AreaChange, DecisionCompleted
-from .types.records import ExecuteRegisteredOperation, InspectRequest, RequestPhase
+from .types.records import (
+    ExecuteRegisteredOperation,
+    InspectRequest,
+    Outbound,
+    RequestPhase,
+    within,
+)
 from .types.sessions import (
     Access,
     CancelTurn,
@@ -155,6 +161,16 @@ def _session_id(session: SessionView, action: str) -> RequestId:
     return RequestId(root=encode_identity("session", *parts))
 
 
+def _by_run_end(context: SessionsContext, request: Request) -> Outbound:
+    """Session setup and cleanup run until the run ends (bounded cleanup after it)."""
+    return within(request, limit_to(context.run, context.run.deadline_at))
+
+
+def _reconciling(context: SessionsContext, request: Request) -> Outbound:
+    """An inspection gets the reconciliation bound."""
+    return within(request, context.run.limits.reconciliation_bound)
+
+
 def _record(context: SessionsContext, identity: RequestId | None) -> RequestRecord | None:
     return next((row for row in context.records.records if row.request_id == identity), None)
 
@@ -164,14 +180,13 @@ def _episode(context: SessionsContext, scope: Scope) -> DecisionId | None:
     return owner.admission_id if owner is not None else None
 
 
-def _ensure(session: SessionView, context: SessionsContext, deadline: float) -> EnsureSession:
+def _ensure(session: SessionView, context: SessionsContext) -> EnsureSession:
     episode = _episode(context, session.scope)
     action = "ensure" if episode is None else f"ensure:{episode.root}"
     return EnsureSession(
         request_id=_session_id(session, action),
         scope=session.scope,
         admission_id=_episode(context, session.scope),
-        deadline_at=deadline,
         spec=session.spec,
         required_resource=session.resource_id,
     )
@@ -433,7 +448,6 @@ def _registered_request(
     if (
         not isinstance(decision, Operation)
         or decision.scope != request.scope
-        or decision.deadline_at != request.deadline_at
         or decision.registered_wire != request.operation
         or decision.normalized_turn != turn
         or decision.registered_turn != turn
@@ -449,8 +463,8 @@ def _registered_request(
 def _validate_turn_admission(context: SessionsContext, scope: Scope, turn: TurnSpec) -> None:
     if not scope_active(context, scope):
         raise ContractValidationError("scope", "turn requires current active ownership")
-    if not time_remains(context.run, turn.deadline_at):
-        raise ContractValidationError("turn.deadline_at", "run has no time left for the turn")
+    if not context.run.deadline_at > context.run.now_at:
+        raise ContractValidationError("until", "run has no time left for the turn")
     if turn.charge_class == "paid" and attempt_for(context, scope) is None:
         raise ContractValidationError(
             "turn.charge_class", "run-scoped paid turn lacks ATTEMPT authority"
@@ -557,6 +571,7 @@ def _turn_requested(
         registered_operation=operation,
         phase=SessionPhase.ACQUIRING,
         evaluation_prefix=_evaluation_prefix(state, context, scope, turn),
+        until=event.until,
     )
     state = _replace_invocation(state, invocation)
     signals: list[Signal] = []
@@ -569,7 +584,7 @@ def _turn_requested(
                 invocation=ref,
             )
         )
-    requests: tuple[Request, ...] = ()
+    requests: tuple[Outbound, ...] = ()
     if session is None:
         session = SessionView(
             spec=turn.session,
@@ -578,9 +593,9 @@ def _turn_requested(
             phase=SessionPhase.ACQUIRING,
             invocation=turn.invocation_id,
         )
-        ensure = _ensure(session, context, bound_to_run(context.run, turn.deadline_at))
+        ensure = _ensure(session, context)
         session = session.model_copy(update={"pending_records": (ensure.request_id,)})
-        requests = (ensure,)
+        requests = (Outbound(request=ensure, until=event.until),)
     else:
         session = session.model_copy(
             update={
@@ -708,7 +723,6 @@ def _dispatch_reserved(
         request = ResumeSessionTurn(
             request_id=turn_request_id(event.invocation, "dispatch"),
             scope=invocation.scope,
-            deadline_at=bound_to_run(context.run, invocation.turn.deadline_at),
             admission_id=_episode(context, invocation.scope),
             turn=invocation.turn,
             inputs=inputs,
@@ -719,7 +733,6 @@ def _dispatch_reserved(
         request = DispatchTurn(
             request_id=turn_request_id(event.invocation, "dispatch"),
             scope=invocation.scope,
-            deadline_at=bound_to_run(context.run, invocation.turn.deadline_at),
             admission_id=_episode(context, invocation.scope),
             turn=invocation.turn,
             inputs=inputs,
@@ -739,7 +752,7 @@ def _dispatch_reserved(
         }
     )
     state = _replace_session(_replace_invocation(state, invocation), session)
-    return AreaChange(state=state, requests=(request,))
+    return AreaChange(state=state, requests=(Outbound(request=request, until=invocation.until),))
 
 
 def _acquisition_session(
@@ -825,11 +838,11 @@ def _acquire(
         session_ids=ids,
         phase="acquiring" if ids else "ready",
     )
-    requests: list[Request] = []
+    requests: list[Outbound] = []
     for spec in event.specs:
         session = _acquisition_session(state, context, event, spec)
         session = session.model_copy(update={"phase": SessionPhase.ACQUIRING})
-        request = _ensure(session, context, context.run.deadline_at).model_copy(
+        request = _ensure(session, context).model_copy(
             update={
                 "request_id": _session_id(session, f"ensure:{event.admission_id.root}"),
                 "admission_id": event.admission_id,
@@ -837,7 +850,7 @@ def _acquire(
         )
         session = session.model_copy(update={"pending_records": (request.request_id,)})
         state = _replace_session(state, session)
-        requests.append(request)
+        requests.append(_by_run_end(context, request))
     state = state.model_copy(update={"acquisition_groups": (*state.acquisition_groups, group)})
     signals = (
         ()
@@ -883,7 +896,6 @@ def _inspect_session(
     return InspectRequest(
         request_id=identity,
         scope=session.scope,
-        deadline_at=context.run.deadline_at,
         admission_id=original.request.admission_id
         if original is not None
         else _episode(context, session.scope),
@@ -896,7 +908,6 @@ def _close(session: SessionView, context: SessionsContext, authority: RequestId)
     return CloseSession(
         request_id=_session_id(session, f"close:{authority.root}"),
         scope=session.scope,
-        deadline_at=context.run.deadline_at,
         admission_id=_episode(context, session.scope),
         session_id=session.spec.session_id,
         resource_id=session.resource_id,
@@ -948,7 +959,9 @@ def _group_observed(
                 "pending_records": (*session.pending_records, close.request_id),
             }
         )
-        return AreaChange(state=_replace_session(state, session), requests=(close,))
+        return AreaChange(
+            state=_replace_session(state, session), requests=(_by_run_end(context, close),)
+        )
     if (
         observation.terminal
         and not observation.accepted
@@ -968,7 +981,7 @@ def _group_observed(
                 )
             }
         )
-        requests: list[Request] = []
+        requests: list[Outbound] = []
         for identity in group.session_ids:
             member = _session(state, identity)
             if member is None or member.phase in (SessionPhase.CLOSING, SessionPhase.TERMINAL):
@@ -982,7 +995,7 @@ def _group_observed(
                     }
                 )
                 state = _replace_session(state, member)
-                requests.append(request)
+                requests.append(_by_run_end(context, request))
         return AreaChange(
             state=state,
             requests=tuple(requests),
@@ -1036,7 +1049,10 @@ def _close_observed(
         and observation.resource_id == session.resource_id
     ):
         return AreaChange(
-            state=state, requests=(_inspect_session(session, context, observation.request_id),)
+            state=state,
+            requests=(
+                _by_run_end(context, _inspect_session(session, context, observation.request_id)),
+            ),
         )
     session = session.model_copy(
         update={
@@ -1185,7 +1201,9 @@ def _after_ensure(
         )
         signals = () if invocation is None else _prepared_completion(context, invocation)
         return AreaChange(
-            state=_replace_session(grouped.state, closing), requests=(request,), signals=signals
+            state=_replace_session(grouped.state, closing),
+            requests=(_by_run_end(context, request),),
+            signals=signals,
         )
     if session.invocation is not None:
         return _reservation_after_acquisition(grouped, context, session)
@@ -1229,7 +1247,9 @@ def _ensure_observed(
         )
         return AreaChange(
             state=_replace_session(state, session),
-            requests=(_inspect_session(session, context, observation.request_id),),
+            requests=(
+                _by_run_end(context, _inspect_session(session, context, observation.request_id)),
+            ),
         )
     if observation.accepted:
         if (
@@ -1398,7 +1418,9 @@ def _after_turn_cleanup(
     if _run_reusable(session, context):
         observation = invocation.observation
         if observation is None or not (observation.released and observation.children_complete):
-            return AreaChange(state=state, requests=(inspect_turn(context, invocation),))
+            return AreaChange(
+                state=state, requests=(_reconciling(context, inspect_turn(context, invocation)),)
+            )
         dependency = ReleaseDependency(kind="request", identity=observation.request_id)
         signals = (
             ()
@@ -1421,7 +1443,9 @@ def _after_turn_cleanup(
             "pending_records": (*session.pending_records, request.request_id),
         }
     )
-    return AreaChange(state=_replace_session(state, closing), requests=(request,))
+    return AreaChange(
+        state=_replace_session(state, closing), requests=(_by_run_end(context, request),)
+    )
 
 
 def _late_turn_observed(
@@ -1489,7 +1513,11 @@ def _late_turn_observed(
     )
     state = _replace_session(state, session)
     cleanup = _after_turn_cleanup(state, context, invocation, session)
-    requests = (inspect_turn(context, invocation),) if acceptance_unresolved(invocation) else ()
+    requests = (
+        (_reconciling(context, inspect_turn(context, invocation)),)
+        if acceptance_unresolved(invocation)
+        else ()
+    )
     return cleanup.model_copy(
         update={
             "signals": (*signals, *cleanup.signals),
@@ -1642,9 +1670,9 @@ def _apply_turn_observation(
     )
     state = _replace_session(state, session)
     signals = acceptance_signals(invocation, event, observation)
-    requests: tuple[Request, ...] = ()
+    requests: tuple[Outbound, ...] = ()
     if phase == SessionPhase.UNKNOWN or acceptance_unresolved(invocation):
-        requests = (inspect_turn(context, invocation),)
+        requests = (_reconciling(context, inspect_turn(context, invocation)),)
     if not is_terminal(invocation):
         return AreaChange(state=state, signals=signals, requests=requests)
     signals = (*signals, *_terminal_signals(state, context, invocation, event))
@@ -1701,9 +1729,6 @@ def _cancel(
     request = CancelTurn(
         request_id=turn_request_id(event.invocation, f"cancel:{event.authority.root}"),
         scope=invocation.scope,
-        deadline_at=min(
-            context.run.deadline_at, context.run.now_at + context.run.limits.cancellation_bound
-        ),
         admission_id=_episode(context, invocation.scope),
         invocation=event.invocation,
     )
@@ -1715,7 +1740,10 @@ def _cancel(
             "pending_records": (*session.pending_records, request.request_id),
         }
     )
-    return AreaChange(state=_replace_session(state, session), requests=(request,))
+    return AreaChange(
+        state=_replace_session(state, session),
+        requests=(within(request, context.run.limits.cancellation_bound),),
+    )
 
 
 def _current_invocation(state: SessionsState, session: SessionView) -> Invocation | None:
@@ -1745,7 +1773,10 @@ def _drain_acquiring(
     if ensures:
         return AreaChange(
             state=state,
-            requests=tuple(_inspect_session(session, context, row.request_id) for row in ensures),
+            requests=tuple(
+                _by_run_end(context, _inspect_session(session, context, row.request_id))
+                for row in ensures
+            ),
         )
     if invocation is None:
         return AreaChange(state=state)
@@ -1782,7 +1813,10 @@ def _drain_lease(
         )
         return AreaChange(
             state=state,
-            requests=tuple(_inspect_session(session, context, row.request_id) for row in ensures),
+            requests=tuple(
+                _by_run_end(context, _inspect_session(session, context, row.request_id))
+                for row in ensures
+            ),
         )
     request = _close(session, context, authority)
     if request.request_id in session.pending_records:
@@ -1793,7 +1827,9 @@ def _drain_lease(
             "pending_records": (*session.pending_records, request.request_id),
         }
     )
-    return AreaChange(state=_replace_session(state, closing), requests=(request,))
+    return AreaChange(
+        state=_replace_session(state, closing), requests=(_by_run_end(context, request),)
+    )
 
 
 def _drain_session(
@@ -1841,7 +1877,7 @@ def _drain(
         or closure.value.disposition != event.disposition
     ):
         return AreaChange(state=state)
-    requests: list[Request] = []
+    requests: list[Outbound] = []
     signals: list[Signal] = []
     groups = tuple(
         group.model_copy(update={"phase": "failed", "failure_request": event.authority})
@@ -1960,7 +1996,7 @@ def _run_drain(
         or stop.value.scope != event.scope
     ):
         return AreaChange(state=state)
-    requests: list[Request] = []
+    requests: list[Outbound] = []
     signals: list[Signal] = []
     for session in state.sessions:
         if session.scope != event.scope or session.phase == SessionPhase.TERMINAL:

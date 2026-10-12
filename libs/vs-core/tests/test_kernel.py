@@ -23,7 +23,7 @@ from vs_core.api import (
     RunResultProposal,
     Scope,
     StartAttempt,
-    Stop,
+    Finish,
     Withdraw,
     WorkspaceMode,
     WorkspacePlan,
@@ -115,7 +115,7 @@ def test_kernel_clock_routes_to_owning_lane() -> None:
 
 def test_zero_completed_work_cannot_claim_success() -> None:
     state = initial_state()
-    decision = Stop(
+    decision = Finish(
         decision_id=DecisionId(root="premature"),
         scope=Scope(owner=state.run.run_id, generation=0),
         mode="drain",

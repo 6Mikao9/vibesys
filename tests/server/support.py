@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from server.chat.factory import ChatAgentBuilder
     from server.run_attachment import AgentSelection
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunRecord, RunView
+    from vibesys.api import RunRecord, CoreView
     from vs_project.api import Project
     from vs_sim.api import Condition, Threads, Worker
 
@@ -176,7 +176,7 @@ class ServerParts:
         self.integration.close()
 
     def publish_committed_view(
-        self, view: RunView, changed_keys: tuple[str, ...] | None = None
+        self, view: CoreView, changed_keys: tuple[str, ...] | None = None
     ) -> None:
         """Feed a projected view to the API as `RunSession.on_committed_view` would.
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 from server.api.design import DesignLog
 from server.api.experiments import build_experiment_log
 from server.api.performance import build_performance_context
-from vibesys.api import RunStatus, RunView
+from vibesys.api import RunStatus, CoreView
 
 
 def test_agent_readers_ignore_a_custom_projection() -> None:
-    view = RunView(
+    view = CoreView(
         run_id="team-run",
         loop="team-search",
         status=RunStatus.UNKNOWN,

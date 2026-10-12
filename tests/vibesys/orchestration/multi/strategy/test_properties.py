@@ -35,7 +35,7 @@ from vs_core.api import (
     RequestTurn,
     Settle,
     StartAttempt,
-    Stop,
+    Finish,
     Withdraw,
 )
 from vs_dst.api import simulate
@@ -313,7 +313,7 @@ def test_m2_an_advisory_failure_never_fails_the_round(
 
     assert len(_starts(run)) == 2
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     assert final.result.outcome == "success"
 
 
@@ -411,7 +411,7 @@ def test_a_continued_hypothesis_asks_no_designer() -> None:
 def test_the_search_survives_an_implementer_whose_every_reply_is_unparsable() -> None:
     run = _run(MultiWorld(implementations=["no"] * 12, max_rounds=2))
 
-    assert isinstance(run.decisions[-1], Stop)
+    assert isinstance(run.decisions[-1], Finish)
     assert all(not item.eligible for item in _settles(run))
 
 

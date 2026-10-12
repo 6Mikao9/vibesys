@@ -56,7 +56,7 @@ def test_ordered_batch_validates_revision_once_and_preserves_partial_acceptance(
         )
         for index in range(count)
     )
-    rejected = core.Stop(
+    rejected = core.Finish(
         decision_id=core.DecisionId(root="rejected"),
         scope=scope,
         mode="drain",

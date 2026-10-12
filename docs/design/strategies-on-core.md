@@ -35,7 +35,7 @@ Readers who know the product but not `vs-core` need these terms.
   the new strategy state) and `on_event(view, event) -> state`. No clock, I/O, asyncio or
   randomness: time comes from `view.run.now_at`, and any randomness is a seeded generator
   state stored in the strategy state.
-- **RunView**: the read-only projection of core state that a strategy sees (attempts,
+- **CoreView**: the read-only projection of core state that a strategy sees (attempts,
   sessions, measurements, settlements, controls, adoption).
 - **Decision**: what a strategy asks for: `RequestTurn`, `StartAttempt`, `Measure`,
   `Withdraw` (with a `Settle` disposition), `ProposeWinner`, `Stop`, `Operation`. Each has a
@@ -91,11 +91,11 @@ stop), `RunEnded`.
 
 These restate `CLAUDE.md` and `software-design` for this work; the sections below apply them.
 
-1. `decide` and `on_event` are pure functions of strategy state, `RunView` and static config.
+1. `decide` and `on_event` are pure functions of strategy state, `CoreView` and static config.
    Config is an input, not state: restarting with the same options reproduces every decision.
 2. Strategy state holds only policy memory that core cannot know. Lifecycle and accounting
    facts (attempt phases, slot use, charges, session phases, the evidence ledger,
-   settlements) are read from `RunView`, never copied. Where a copy is unavoidable (a round
+   settlements) are read from `CoreView`, never copied. Where a copy is unavoidable (a round
    record keeps the metric rows it accepted) the copy is of a fact core already committed and
    a property test checks the two agree.
 3. One external fact is one event. Live execution, recovery inspection and replay all fold
@@ -752,7 +752,7 @@ from 4 to 12:
   state; core holds attempts, settlements and evidence; each individual row copies the
   settlement id, candidate revision and decoded metrics; admission is a pure fold in slot order.
 - **E2. The population is derived from core.** Individuals are the settlements in
-  `RunView.settlements`, metrics are read from the evidence ledger; strategy state keeps only
+  `CoreView.settlements`, metrics are read from the evidence ledger; strategy state keeps only
   lineage and selector state.
 - **E3. The population is an external store.** A `PopulationStore` behind an `Operation`;
   the strategy asks it to admit and to propose.

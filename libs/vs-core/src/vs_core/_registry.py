@@ -28,9 +28,9 @@ from .types.common import (
 from .types.evaluation import MeasurementIdentity
 from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
-from .types.strategy import Decision, Operation, StrategyState
+from .types.strategy import Command, Operation, StrategyState
 
-ENVELOPE_SCHEMA_VERSION = 3
+ENVELOPE_SCHEMA_VERSION = 4
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from .types.kernel import CoreState, RunEnvelope
-    from .types.strategy import OperationRequest, StrategyDeclaration
+    from .types.strategy import OperationRequest, SearchDeclaration
 
 
 class ContractError(ValueError):
@@ -272,9 +272,9 @@ class OperationRegistry:
     def validate_decision(self, decision: Operation) -> Operation: ...
 
     @overload
-    def validate_decision(self, decision: Decision) -> Decision: ...
+    def validate_decision(self, decision: Command) -> Command: ...
 
-    def validate_decision(self, decision: Decision) -> Decision:
+    def validate_decision(self, decision: Command) -> Command:
         """The shell validates operation proposals before calling step."""
         if not isinstance(decision, Operation):
             return decision
@@ -373,7 +373,10 @@ def _read_envelope_version(source: str, path: tuple[str | int, ...]) -> int:
 
 def _validate_envelope_version(version: object) -> None:
     if type(version) is not int or version != ENVELOPE_SCHEMA_VERSION:
-        raise ContractError(("schema_version",), "explicit envelope migration required")
+        raise ContractError(
+            ("schema_version",),
+            f"envelope version {version!r} is not supported; version {ENVELOPE_SCHEMA_VERSION} required",
+        )
 
 
 def _normalize[M: BaseModel](
@@ -446,7 +449,7 @@ def _validate_operation(descriptor: OperationDescriptor, path: tuple[str | int, 
         raise ContractError((*path, "cancel/watch"), "owned lifecycle requires cancel and watch")
 
 
-def validate_startup(declaration: StrategyDeclaration, available: Capabilities) -> Capabilities:
+def validate_startup(declaration: SearchDeclaration, available: Capabilities) -> Capabilities:
     """Reject required absence; expose only the declared validated intersection."""
     if declaration.required & declaration.optional:
         raise ContractError(("declaration", "optional"), "capability also required")
@@ -461,7 +464,7 @@ def validate_startup(declaration: StrategyDeclaration, available: Capabilities) 
 
 
 def _select_operations(
-    declaration: StrategyDeclaration, available: Capabilities
+    declaration: SearchDeclaration, available: Capabilities
 ) -> tuple[OperationDescriptor, ...]:
     offered: dict[str, OperationDescriptor] = {}
     for index, descriptor in enumerate(available.operations):

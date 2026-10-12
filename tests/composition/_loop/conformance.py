@@ -56,10 +56,10 @@ if TYPE_CHECKING:
 
     from vs_core.api import (
         CoreState,
-        Decision,
+        Command,
         Request,
         RevisionRef,
-        RunView,
+        CoreView,
         SchemaRef,
         Strategy,
         StrategyEvent,
@@ -130,8 +130,8 @@ RECOVERY_ONLY = frozenset(
 class Tape:
     """Every call a run made on its strategy, with the state and view it was made on."""
 
-    decided: list[tuple[StrategyState, RunView, Proposal[Any]]] = field(default_factory=list)
-    folded: list[tuple[StrategyState, RunView, StrategyEvent, StrategyState]] = field(
+    decided: list[tuple[StrategyState, CoreView, Proposal[Any]]] = field(default_factory=list)
+    folded: list[tuple[StrategyState, CoreView, StrategyEvent, StrategyState]] = field(
         default_factory=list
     )
 
@@ -154,13 +154,13 @@ class Taped[S: StrategyState]:
         """The same strategy over another state."""
         return Taped(self._inner.bind(state), self._tape)
 
-    def decide(self, view: RunView) -> Proposal[S]:
+    def decide(self, view: CoreView) -> Proposal[S]:
         """The inner proposal, recorded with the state and view it was made on."""
         proposal = self._inner.decide(view)
         self._tape.decided.append((self._inner.state, view, proposal))
         return proposal
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> S:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> S:
         """The inner fold, recorded."""
         folded = self._inner.on_event(view, event)
         self._tape.folded.append((self._inner.state, view, event, folded))
@@ -463,7 +463,7 @@ def _headline(world: World, candidate: RevisionRef | None) -> float | None:
     return None if candidate is None else world.headline(candidate.revision_id.root)
 
 
-def _decisions(run: Run) -> Sequence[Decision]:
+def _decisions(run: Run) -> Sequence[Command]:
     return run.decisions
 
 

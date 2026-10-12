@@ -1,6 +1,6 @@
 """A confirmed core commit derives round and experiment events strategy-agnostically.
 
-After each confirmed commit the run diffs the previous projected `RunView` against the new
+After each confirmed commit the run diffs the previous projected `CoreView` against the new
 one and emits `ROUND_FINISHED` for newly observed rounds and `EXPERIMENTS_CHANGED` when what
 the projection shows changed. These tests never reference a specific strategy ID: the
 projector is a synthetic one over a minimal state.
@@ -13,7 +13,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 
 from vibesys.events import CoreEvent, CoreEventType
-from vibesys.run.contracts import RoundSummary, RunStatus, RunView
+from vibesys.run.contracts import RoundSummary, RunStatus, CoreView
 from vibesys.run.integration import LocalRunIntegration
 
 
@@ -29,14 +29,14 @@ class _FakeAgentState(BaseModel):
 class _FakeProjector:
     """Project `_FakeAgentState` into a view whose payload is what a frontend would show."""
 
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> CoreView | None:
         if namespace != "commit-probe" or not isinstance(state, _FakeAgentState):
             return None
         return _agent_view(state, run_id=run_id)
 
 
-def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
-    return RunView(
+def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> CoreView:
+    return CoreView(
         run_id=run_id,
         loop="commit-probe",
         status=RunStatus.ACTIVE,

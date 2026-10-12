@@ -21,7 +21,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     RoundRecord,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, project_run
-from vibesys.run.contracts import RunStatus, RunView
+from vibesys.run.contracts import RunStatus, CoreView
 from vs_core.api import AttemptId, EventCursor, HostFence, HostId, RunEnvelope
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
@@ -106,8 +106,8 @@ def test_projection_copies_recorded_rounds_and_only_measured_numbers(
     ]
 
 
-def _run_view(payload: dict[str, JsonValue] | None) -> RunView:
-    return RunView(run_id="r", loop="dynamic", status=RunStatus.ACTIVE, projection=payload)
+def _run_view(payload: dict[str, JsonValue] | None) -> CoreView:
+    return CoreView(run_id="r", loop="dynamic", status=RunStatus.ACTIVE, projection=payload)
 
 
 def _project_with_run(root: Path) -> tuple[Project, str]:

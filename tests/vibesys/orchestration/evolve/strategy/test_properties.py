@@ -25,7 +25,7 @@ from vs_core.api import (
     RevisionRef,
     Settle,
     StartAttempt,
-    Stop,
+    Finish,
     Withdraw,
 )
 
@@ -112,7 +112,7 @@ def test_e6_a_cold_start_that_never_passes_ends_without_a_selection() -> None:
     )
     run = run_to_end(world)
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     assert final.result.outcome == "failure"
     assert not any(isinstance(item, ProposeWinner) for item in run.decisions)
     assert sum(isinstance(item, StartAttempt) for item in run.decisions) == 2
@@ -154,7 +154,7 @@ def test_m2_a_failing_profiler_never_fails_the_child() -> None:
     assert all(item.passed for item in state.population.individuals)
     assert any(note.startswith("profiler:") for note in state.notes)
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     assert final.result.outcome == "success"
 
 
@@ -193,7 +193,7 @@ def test_a_candidate_the_machinery_could_not_measure_earns_no_individual() -> No
     assert state.population.individuals == ()
     assert state.bootstrap_spent == 2
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     assert final.result.outcome == "failure"
 
 

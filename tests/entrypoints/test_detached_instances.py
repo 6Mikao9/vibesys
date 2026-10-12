@@ -78,7 +78,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import BinaryIO
 
-    from vibesys.api import Runs, RunView
+    from vibesys.api import Runs, CoreView
     from vibesys.api.auxiliary import RunReady
 
 INSTANCE = "0123456789ab"
@@ -104,7 +104,7 @@ class _FinishedSession:
         pass
 
     def on_committed_view(
-        self, listener: Callable[[RunView, tuple[str, ...] | None], None]
+        self, listener: Callable[[CoreView, tuple[str, ...] | None], None]
     ) -> None:
         del listener
 

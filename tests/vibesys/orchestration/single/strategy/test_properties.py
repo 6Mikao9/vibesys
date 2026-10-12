@@ -21,7 +21,7 @@ from tests.vibesys.orchestration.single.strategy.world import (
 
 from vibesys.hypothesis import rounds
 from vibesys.orchestration.single.strategy.api import SingleStrategyState
-from vs_core.api import ProposeWinner, RequestTurn, Settle, StartAttempt, Stop, Withdraw
+from vs_core.api import ProposeWinner, RequestTurn, Settle, StartAttempt, Finish, Withdraw
 from vs_dst.api import simulate
 
 if TYPE_CHECKING:
@@ -61,7 +61,7 @@ def test_s5_paid_turns_of_a_round_never_exceed_the_retry_budget(
         if isinstance(item, RequestTurn) and item.turn.charge_class == "paid"
     ]
     assert len(paid) <= retries
-    assert isinstance(run.decisions[-1], Stop)
+    assert isinstance(run.decisions[-1], Finish)
 
 
 def test_s1_a_round_the_cadence_skipped_is_never_a_winner_and_is_the_next_base() -> None:
@@ -134,7 +134,7 @@ def test_a_designer_that_never_gives_a_valid_plan_ends_the_run_without_a_round()
     assert not run.liveness_violations
     assert not _starts(run)
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     assert final.result.outcome in {"failure", "success"}
 
 
@@ -168,7 +168,7 @@ def test_the_search_survives_an_implementer_whose_every_reply_is_unparsable() ->
 
     assert run.finished
     assert not run.liveness_violations
-    assert isinstance(run.decisions[-1], Stop)
+    assert isinstance(run.decisions[-1], Finish)
     assert all(not item.eligible for item in _settles(run))
 
 

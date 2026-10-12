@@ -22,7 +22,7 @@ from vs_core.api import (
     Request,
     RoleId,
     RunEnvelope,
-    RunView,
+    CoreView,
     Scope,
     SessionId,
     SessionPhase,
@@ -375,7 +375,7 @@ class _InvalidStateStrategy(CounterStrategy):
     def bind(self, state: CounterState) -> _InvalidStateStrategy:
         return _InvalidStateStrategy(state)
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> CounterState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> CounterState:
         del view, event
         return self.state.model_copy(update={"callbacks": "not a count"})
 

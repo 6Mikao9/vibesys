@@ -13,7 +13,7 @@ from vs_core.api import (
     IdScheme,
     InvocationId,
     InvocationRef,
-    RunView,
+    CoreView,
     SchemaRef,
     SessionId,
     TurnChain,
@@ -37,7 +37,7 @@ class Note(Value):
     text: str
 
 
-def _view() -> RunView:
+def _view() -> CoreView:
     return project(initial_state())
 
 

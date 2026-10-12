@@ -65,7 +65,7 @@ from vs_sim.api.testing import clock_from
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreState, RunView, StrategyEvent
+    from vs_core.api import CoreState, CoreView, StrategyEvent
     from vs_sim.api.testing import VirtualClock
 
 #: Event loop turns a stuck fake turn lasts, standing for "longer than anything the run waits".
@@ -77,7 +77,7 @@ INERT = SkeletonStrategy(state=SkeletonState(schema_version=1, phase="done"), me
 class BaselineOnly(SkeletonStrategy):
     """Measure the baseline, then cancel the run: no attempt is run."""
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
         """Skip the attempt: the baseline measurement is followed by the cancellation."""
         state = super().on_event(view, event)
         return state.model_copy(update={"phase": "cancel"}) if state.phase == "start" else state
@@ -395,7 +395,7 @@ class WaitsUntil(SkeletonStrategy):
 
     until: float = 0.0
 
-    def decide(self, view: RunView) -> Proposal[SkeletonState]:
+    def decide(self, view: CoreView) -> Proposal[SkeletonState]:
         """Ask to be woken at ``until``; from then on stop the run."""
         if view.run.now_at < self.until:
             return Proposal(state=self.state, decisions=(), wake_at=self.until)

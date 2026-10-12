@@ -45,7 +45,7 @@ from vs_core.api import (
     RequestBlocked,
     RequestId,
     RunId,
-    RunView,
+    CoreView,
     Scope,
     SessionId,
     TurnCandidatePending,
@@ -192,7 +192,7 @@ def _checkpoint(invocation: str, name: str) -> AttemptCheckpoint:
     )
 
 
-def _view(*checkpoints: AttemptCheckpoint) -> RunView:
+def _view(*checkpoints: AttemptCheckpoint) -> CoreView:
     attempt = AttemptView(
         attempt_id=AttemptId(root="attempt"),
         item_id=ItemId(root="item"),

@@ -510,7 +510,7 @@ def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(
 ) -> None:
     """Translate HostCore no starts after stop and exactly one EndSearch."""
     state = _state()
-    decision = core.Stop(
+    decision = core.Finish(
         decision_id=core.DecisionId(root="stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode=mode,
@@ -572,7 +572,7 @@ def test_drain_continues_already_registered_queue_at_attempts_boundary() -> None
     """Legacy _finishing permits FIFO starts; it only rejects new admissions."""
     request = _request(0)
     state = _state(owners=(_owner(request),), queue=(request,))
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -677,7 +677,7 @@ def test_charge_end_cannot_precede_matching_episode_admission(admitted: int, ear
 
 def test_first_terminal_stop_result_survives_a_distinct_later_stop() -> None:
     state = _state()
-    first = core.Stop(
+    first = core.Finish(
         decision_id=core.DecisionId(root="first-stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -707,7 +707,7 @@ def test_first_stop_during_cleanup_keeps_its_result_and_capacity() -> None:
     state = _state(
         owners=(_owner(request, phase=core.AttemptPhase.CLOSING),), slots=(_slot(request),)
     )
-    first = core.Stop(
+    first = core.Finish(
         decision_id=core.DecisionId(root="first-stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -1332,7 +1332,7 @@ def test_cancel_of_occupied_and_queued_work_requests_retirement_before_any_relea
         slots=(_slot(occupied),),
         queue=queued,
     )
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="cancel"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="cancel",
@@ -1375,7 +1375,7 @@ def _cancel_reentry_state() -> tuple[core.CoreState, core.OperationRegistry]:
         }
     )
     state, codec, reopen = _reopen_proof(_state(owners=(owner,)), owner)
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="cancel-reentry"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="cancel",
@@ -1465,7 +1465,7 @@ def _first_drain_state() -> core.CoreState:
     state = _state(
         owners=(_owner(request, phase=core.AttemptPhase.ACTIVE),), slots=(_slot(request),)
     )
-    first = core.Stop(
+    first = core.Finish(
         decision_id=core.DecisionId(root="first-drain"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",

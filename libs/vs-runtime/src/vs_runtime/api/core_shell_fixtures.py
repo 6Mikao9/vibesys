@@ -26,7 +26,7 @@ from vs_core.api import (
     RequestPhase,
     RoleId,
     RunControlEvent,
-    RunView,
+    CoreView,
     SchedulingChange,
     Scope,
     SessionId,
@@ -61,11 +61,11 @@ class CounterStrategy:
     def bind(self, state: CounterState) -> CounterStrategy:
         return CounterStrategy(state)
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> CounterState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> CounterState:
         del view, event
         return self.state.model_copy(update={"callbacks": self.state.callbacks + 1})
 
-    def decide(self, view: RunView) -> Proposal[CounterState]:
+    def decide(self, view: CoreView) -> Proposal[CounterState]:
         del view
         return Proposal[CounterState](
             state=self.state.model_copy(update={"proposals": self.state.proposals + 1}),

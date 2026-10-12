@@ -58,7 +58,6 @@ from .types.kernel import (
     Signal,
 )
 from .types.records import (
-    DecisionDependencyResolved,
     DispatchAuthorized,
     OperationRetireRequested,
     ReconciliationDeadline,
@@ -113,7 +112,6 @@ from .types.settlement import (
     AssessmentSubmitted,
     AttemptSettled,
     OwnershipSettled,
-    SettlementDependencyResolved,
     WinnerProposed,
 )
 
@@ -217,8 +215,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.EVALUATION
         case (
-            SettlementDependencyResolved()
-            | AssessmentSubmitted()
+            AssessmentSubmitted()
             | OwnershipSettled()
             | WinnerProposed()
             | AdoptionObserved()
@@ -226,8 +223,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.SETTLEMENT
         case (
-            DecisionDependencyResolved()
-            | RequestPrepared()
+            RequestPrepared()
             | DispatchAuthorized()
             | RequestObserved()
             | RecoveryStarted()

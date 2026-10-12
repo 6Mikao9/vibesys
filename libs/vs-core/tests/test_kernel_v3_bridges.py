@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 
-def accepted(decision: core.Decision) -> core.DecisionReceipt:
+def accepted(decision: core.Command) -> core.DecisionReceipt:
     return core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
@@ -124,7 +124,7 @@ def test_stop_control_records_canonical_result_before_run_drain_and_replays(now:
     assert result.state.run.status == core.RunStatus.TERMINAL
     assert result.state.run.result == proposal
     receipt = result.state.run.receipts[0]
-    assert isinstance(receipt.decision, core.Stop)
+    assert isinstance(receipt.decision, core.Finish)
     assert isinstance(receipt.feedback, core.Accepted)
     assert receipt.decision_id == core.DecisionId(root="control:stop")
     assert receipt.decision.result == proposal

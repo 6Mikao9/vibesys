@@ -10,7 +10,7 @@ answers (the Fake cluster answers instantly, a real cluster costs a Slurm call e
 design has three parts, so that a busy loop on a running job cannot happen:
 
 * Core decides when the next observation is due and exposes it as a core time
-  (``RunView.next_observe_at``, the default ``next_wake``). Core emits the next observe
+  (``CoreView.next_observe_at``, the default ``next_wake``). Core emits the next observe
   only once ``ClockAdvanced`` reaches that time.
 * The loop never calls the executor on its own. Between settles it either made progress
   (state changed) or it waits until the earliest of: the next time core asks for, the
@@ -100,7 +100,7 @@ class NextWake(Protocol):
     """The earliest core time at which a ``ClockAdvanced`` would make core emit work.
 
     ``None`` means core is waiting for nothing time-driven. The default reads core's
-    pacing (``RunView.next_observe_at``).
+    pacing (``CoreView.next_observe_at``).
     """
 
     def __call__(self, core: CoreState) -> float | None:

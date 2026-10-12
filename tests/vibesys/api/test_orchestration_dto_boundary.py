@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from vibesys.api import ResumeRef, RunRequest, RunResult, RunStatus, RunView
+from vibesys.api import ResumeRef, RunRequest, RunResult, RunStatus, CoreView
 from vibesys.api import contracts as api_contracts
 
 
@@ -14,7 +14,7 @@ def test_public_dtos_have_one_identity() -> None:
     assert ResumeRef is api_contracts.ResumeRef
     assert RunResult is api_contracts.RunResult
     assert RunStatus is api_contracts.RunStatus
-    assert RunView is api_contracts.RunView
+    assert CoreView is api_contracts.CoreView
 
 
 def test_orchestration_policy_imports_neither_public_api_nor_retired_hosts() -> None:

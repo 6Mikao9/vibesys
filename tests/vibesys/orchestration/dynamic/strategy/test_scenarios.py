@@ -24,7 +24,7 @@ from vs_core.api import (
     ProposeWinner,
     RequestTurn,
     StartAttempt,
-    Stop,
+    Finish,
     VerifyAdoption,
 )
 from vs_core.testing.drive import Failed
@@ -46,7 +46,7 @@ def test_single_hypothesis_runs_to_adoption() -> None:
     assert not run.liveness_violations
     assert _starts(run) == 1
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     assert final.result.outcome == "success"
     proposal = next(item for item in run.decisions if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "retained_candidate"
@@ -65,7 +65,7 @@ def test_invalid_plan_gets_one_correction_turn() -> None:
     ]
     assert len(planner_turns) == 2
     assert _starts(run) == 1
-    assert isinstance(run.decisions[-1], Stop)
+    assert isinstance(run.decisions[-1], Finish)
 
 
 def test_best_of_two_measured_candidates_is_proposed() -> None:
@@ -121,7 +121,7 @@ def test_a_correction_turn_speaks_in_its_predecessors_session() -> None:
 
     assert run.finished
     assert not run.liveness_violations
-    assert isinstance(run.decisions[-1], Stop)
+    assert isinstance(run.decisions[-1], Finish)
     turns = [item.turn for item in run.decisions if isinstance(item, RequestTurn)]
     corrections = [turn for turn in turns if turn.charge_class == "correction"]
     assert len(corrections) == 1
@@ -163,7 +163,7 @@ def test_a_wait_the_run_never_recorded_ends_its_turn_whichever_wait_it_names(
 
     assert run.finished
     assert not run.liveness_violations
-    assert isinstance(run.decisions[-1], Stop)
+    assert isinstance(run.decisions[-1], Finish)
 
 
 def test_an_adoption_core_gives_up_on_ends_the_run_without_a_winner() -> None:
@@ -177,6 +177,6 @@ def test_an_adoption_core_gives_up_on_ends_the_run_without_a_winner() -> None:
     assert run.finished
     assert not run.liveness_violations
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     assert final.result.outcome == "failure"
     assert final.result.selection is None

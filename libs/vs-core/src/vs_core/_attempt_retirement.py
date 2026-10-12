@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._acquisition_stall import is_stalled_acquisition
+from ._deadlines import limit_to
 from .types.attempts import (
     AttemptCheckpoint,
     AttemptClosure,
@@ -51,7 +52,7 @@ from .types.evaluation import (
     RegisteredOwnedJob,
 )
 from .types.kernel import AreaChange, DecisionCompleted
-from .types.records import InspectRequest
+from .types.records import InspectRequest, Outbound, inherit, within
 from .types.scheduling import (
     AttemptReopenRequest,
     AttemptReopenRequested,
@@ -554,7 +555,6 @@ def _retention_request(
             scope=_scope(owner),
             attempt=_ref(owner),
             admission_id=owner.closure.admission_id,
-            deadline_at=context.run.deadline_at,
         )
     if revision is not None:
         return RetainRevision(
@@ -563,7 +563,6 @@ def _retention_request(
             scope=_scope(owner),
             attempt=_ref(owner),
             admission_id=owner.closure.admission_id,
-            deadline_at=context.run.deadline_at,
             retention=retention,
             revision=revision,
         )
@@ -573,7 +572,6 @@ def _retention_request(
         scope=_scope(owner),
         attempt=_ref(owner),
         admission_id=owner.closure.admission_id,
-        deadline_at=context.run.deadline_at,
         retention=retention,
     )
 
@@ -589,7 +587,6 @@ def _discard_request(owner: AttemptView, context: AttemptsContext) -> DiscardWor
         attempt=_ref(owner),
         scope=_scope(owner),
         admission_id=owner.closure.admission_id,
-        deadline_at=context.run.deadline_at,
         depends_on=(owner.closure.authority, _identity(owner, "retention")),
     )
 
@@ -634,15 +631,7 @@ def _prepare_workspace_request(
 
 
 def _request_payload_matches(expected: Request, recorded: Request) -> bool:
-    return (
-        expected.model_copy(
-            update={
-                "decision_id": recorded.decision_id,
-                "decision_dependencies": recorded.decision_dependencies,
-            }
-        )
-        == recorded
-    )
+    return expected.model_copy(update={"decision_id": recorded.decision_id}) == recorded
 
 
 def _retention_done(owner: AttemptView, context: AttemptsContext) -> bool:
@@ -978,7 +967,6 @@ def _start_closure(
         scope=scope,
         attempt=event.attempt,
         admission_id=event.admission_id,
-        deadline_at=context.run.deadline_at,
     )
     owner, more, requests = _progress(owner, context)
     return owner, (*signals, *more), (request, *requests)
@@ -1175,17 +1163,7 @@ def _original_request_matches(
 ) -> bool:
     if request.decision_id not in (None, canonical.decision_id):
         return False
-    if request.decision_dependencies not in ((), canonical.decision_dependencies):
-        return False
-    return (
-        canonical.model_copy(
-            update={
-                "decision_id": request.decision_id,
-                "decision_dependencies": request.decision_dependencies,
-            }
-        )
-        == request
-    )
+    return canonical.model_copy(update={"decision_id": request.decision_id}) == request
 
 
 def _reopen_request(
@@ -1217,9 +1195,7 @@ def _reopen_request(
             request_id=identity,
             operation_id=OperationId(root=identity.root),
             scope=decision.scope,
-            deadline_at=decision.deadline_at,
             decision_id=receipt.decision_id,
-            decision_dependencies=decision.depends_on,
             operation=decision.registered_wire,
             retry_limit=context.run.limits.max_retries,
         )
@@ -1536,7 +1512,6 @@ def _reopened(
             scope=record.request.scope,
             target=record.request_id,
             admission_id=owner.admission_id,
-            deadline_at=context.run.deadline_at,
         )
         existing = _record(context, request.request_id) if request.request_id is not None else None
         return owner, (), (request,) if existing is None else ()
@@ -1702,7 +1677,6 @@ def _inspect_unknown(
         resource_id=observation.resource_id,
         scope=observation.scope,
         admission_id=observation.admission_id,
-        deadline_at=context.run.deadline_at,
     )
     identity = request.request_id
     if identity is None:
@@ -1712,7 +1686,6 @@ def _inspect_unknown(
         if existing.request != request.model_copy(
             update={
                 "decision_id": existing.request.decision_id,
-                "decision_dependencies": existing.request.decision_dependencies,
                 "depends_on": existing.request.depends_on,
             }
         ):
@@ -1838,6 +1811,13 @@ def _closure_event(
     return owner, signals, requests
 
 
+def _outbound(context: AttemptsContext, request: Request) -> Outbound:
+    """A reopened operation ends with its decision; every other retirement request, with the run."""
+    if isinstance(request, ExecuteRegisteredOperation):
+        return inherit(request)
+    return within(request, limit_to(context.run, context.run.deadline_at))
+
+
 def advance(
     state: AttemptsState, context: AttemptsContext, event: AttemptsEvent
 ) -> AreaChange[AttemptsState]:
@@ -1875,5 +1855,5 @@ def advance(
             }
         ),
         signals=signals,
-        requests=requests,
+        requests=tuple(_outbound(context, request) for request in requests),
     )

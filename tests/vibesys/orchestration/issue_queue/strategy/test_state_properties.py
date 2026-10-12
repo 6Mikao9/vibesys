@@ -40,21 +40,21 @@ from vs_core.api import (
     ProposeWinner,
     RunEnvelope,
     Settle,
-    Stop,
+    Finish,
     Withdraw,
 )
 from vs_core.testing.drive import new_run
 from vs_dst.api import simulate
 
 if TYPE_CHECKING:
-    from vs_core.api import Proposal, RunView, StrategyEvent
+    from vs_core.api import Proposal, CoreView, StrategyEvent
 
 
 @dataclass
 class Capture:
     """The (state, view) pair of every `decide` of one run."""
 
-    pairs: list[tuple[IssueQueueStrategyState, RunView]] = field(default_factory=list)
+    pairs: list[tuple[IssueQueueStrategyState, CoreView]] = field(default_factory=list)
 
 
 class CapturingStrategy:
@@ -72,10 +72,10 @@ class CapturingStrategy:
     def bind(self, state: IssueQueueStrategyState) -> CapturingStrategy:
         return CapturingStrategy(self._inner.bind(state), self._capture)
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> IssueQueueStrategyState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> IssueQueueStrategyState:
         return self._inner.on_event(view, event)
 
-    def decide(self, view: RunView) -> Proposal[IssueQueueStrategyState]:
+    def decide(self, view: CoreView) -> Proposal[IssueQueueStrategyState]:
         self._capture.pairs.append((self._inner.state, view))
         return self._inner.decide(view)
 
@@ -154,7 +154,7 @@ def test_after_an_operator_stop_the_strategy_starts_no_new_work() -> None:
         stopped = STRATEGY.bind(STRATEGY.bind(state).on_event(view, stop))
         proposal = stopped.decide(view)
         for decision in proposal.decisions:
-            assert isinstance(decision, Withdraw | ProposeWinner | Stop | Measure), decision
+            assert isinstance(decision, Withdraw | ProposeWinner | Finish | Measure), decision
             if isinstance(decision, Withdraw):
                 disposition = decision.disposition
                 assert isinstance(disposition, Settle)

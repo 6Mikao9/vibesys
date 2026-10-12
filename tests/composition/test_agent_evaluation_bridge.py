@@ -77,7 +77,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
-    from vs_core.api import RunView, StrategyEvent
+    from vs_core.api import CoreView, StrategyEvent
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import AccessGuardedWorkspace
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
@@ -111,7 +111,7 @@ class WaitingStrategy(SkeletonStrategy):
 
     state: WaitingState = WaitingState(schema_version=1)  # type: ignore[assignment]
 
-    def decide(self, view: RunView) -> Proposal[SkeletonState]:
+    def decide(self, view: CoreView) -> Proposal[SkeletonState]:
         """Hold while the turn is suspended; resume it with the invocation core named."""
         state = self.state
         if state.phase == "turn" and state.resume is not None:
@@ -136,13 +136,13 @@ class WaitingStrategy(SkeletonStrategy):
             return Proposal(state=state, decisions=())
         return super().decide(view)
 
-    def _turn_spec(self, view: RunView) -> TurnSpec:
+    def _turn_spec(self, view: CoreView) -> TurnSpec:
         proposal = SkeletonStrategy.decide(self, view)
         (decision,) = proposal.decisions
         assert isinstance(decision, RequestTurn)
         return decision.turn
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
         """Record the yield and the one resume; everything else is the skeleton's."""
         state = self.state
         if isinstance(event, TurnSuspended):

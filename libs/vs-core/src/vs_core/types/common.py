@@ -641,8 +641,6 @@ class RequestBase(Value):
     depends_on: tuple[RequestId, ...] = ()
     decision_id: DecisionId | None = None
     admission_id: DecisionId | None = None
-    decision_dependencies: tuple[DecisionId, ...] = ()
-    deadline_at: Seconds
 
 
 class ChildManifest(Value):

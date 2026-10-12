@@ -32,7 +32,7 @@ from .types.common import (
 )
 from .types.evaluation import TurnSuspended
 from .types.kernel import AreaChange, DecisionCompleted
-from .types.records import ExecuteRegisteredOperation, RequestPhase
+from .types.records import ExecuteRegisteredOperation, RequestPhase, within
 from .types.sessions import (
     CheckpointFailure,
     CheckpointStalled,
@@ -288,9 +288,6 @@ def _run_checkpoint_request(
         scope=event.scope,
         invocation=event.invocation,
         retention=event.retention,
-        deadline_at=min(
-            context.run.deadline_at, context.run.now_at + context.run.limits.reconciliation_bound
-        ),
     )
     if request.request_id in session.pending_records or any(
         row.invocation == event.invocation and row.retention == event.retention
@@ -306,7 +303,7 @@ def _run_checkpoint_request(
                 }
             ),
         ),
-        requests=(request,),
+        requests=(within(request, context.run.limits.reconciliation_bound),),
     )
 
 

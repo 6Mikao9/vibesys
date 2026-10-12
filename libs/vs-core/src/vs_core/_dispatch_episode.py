@@ -38,7 +38,7 @@ from .types.records import (
     request_lifecycle,
 )
 from .types.sessions import CancelTurn, CloseSession, InspectTurn
-from .types.strategy import Operation, StartAttempt, Stop, Withdraw
+from .types.strategy import Finish, Operation, StartAttempt, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState
@@ -129,11 +129,11 @@ def _episode_recorded(state: EpisodeFacts, request: Request) -> bool:
 
 
 def _retirement_target_matches(
-    state: EpisodeFacts, request: Request, decision: Withdraw | Stop
+    state: EpisodeFacts, request: Request, decision: Withdraw | Finish
 ) -> bool:
     if not _episode_recorded(state, request):
         return False
-    if isinstance(decision, Stop):
+    if isinstance(decision, Finish):
         stop = committed_stop(state.run)
         return isinstance(stop, Proven) and stop.value == decision
     target = decision.target
@@ -222,7 +222,7 @@ def registered_retirement(state: EpisodeFacts, request: Request) -> bool:
     authority = accepted_receipt_for(state.run.receipts, request.decision_id, None)
     decision_authority = (
         isinstance(authority, Proven)
-        and isinstance(authority.value.decision, Withdraw | Stop)
+        and isinstance(authority.value.decision, Withdraw | Finish)
         and _retirement_target_matches(state, request, authority.value.decision)
     )
     return (

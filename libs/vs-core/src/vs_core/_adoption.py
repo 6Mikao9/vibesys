@@ -45,6 +45,7 @@ from .types.common import (
     WorkspaceMode,
 )
 from .types.kernel import AreaChange, DecisionCompleted
+from .types.records import Outbound, within
 from .types.scheduling import AdoptionFenceLifted
 from .types.settlement import (
     Adoption,
@@ -183,26 +184,26 @@ def _run_scope(run: RunState) -> Scope:
     return Scope(owner=run.run_id, generation=run.generation)
 
 
-def _deadline(run: RunState) -> float:
-    return max(run.deadline_at, run.now_at + run.limits.reconciliation_bound)
+def _limit(run: RunState) -> float:
+    return max(run.deadline_at - run.now_at, run.limits.reconciliation_bound)
 
 
-def _adopt(context: SettlementContext, selection: Selection, round_: int) -> AdoptRevision:
-    return AdoptRevision(
+def _adopt(context: SettlementContext, selection: Selection, round_: int) -> Outbound:
+    request = AdoptRevision(
         request_id=_adopt_id(selection, round_),
         scope=_run_scope(context.run),
-        deadline_at=_deadline(context.run),
         selection=selection,
     )
+    return within(request, _limit(context.run))
 
 
-def _verify(context: SettlementContext, selection: Selection, round_: int) -> VerifyAdoption:
-    return VerifyAdoption(
+def _verify(context: SettlementContext, selection: Selection, round_: int) -> Outbound:
+    request = VerifyAdoption(
         request_id=_verify_id(selection, round_),
         scope=_run_scope(context.run),
-        deadline_at=_deadline(context.run),
         selection=selection,
     )
+    return within(request, _limit(context.run))
 
 
 def _canonical_receipt(context: SettlementContext, selection: Selection) -> DecisionId | None:
@@ -269,7 +270,7 @@ def _root_holder(context: SettlementContext) -> bool:
 
 
 def _with_adoption(
-    state: SettlementState, adoption: Adoption, *requests: AdoptRevision | VerifyAdoption
+    state: SettlementState, adoption: Adoption, *requests: Outbound
 ) -> AreaChange[SettlementState]:
     return AreaChange[SettlementState](
         state=state.model_copy(update={"adoption": adoption}), requests=requests

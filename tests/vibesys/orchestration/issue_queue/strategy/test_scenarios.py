@@ -15,7 +15,7 @@ from tests.vibesys.orchestration.issue_queue.strategy.world import (
     judged,
 )
 
-from vs_core.api import ProposeWinner, RequestTurn, Stop
+from vs_core.api import ProposeWinner, RequestTurn, Finish
 from vs_dst.api import SimulatedRun, simulate
 from vs_issue_tracker.api import IssueStatus
 
@@ -46,9 +46,9 @@ def _kinds(run: SimulatedRun) -> list[str]:
     return [type(item).__name__ for item in run.decisions]
 
 
-def _stop(run: SimulatedRun) -> Stop:
+def _stop(run: SimulatedRun) -> Finish:
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     return final
 
 

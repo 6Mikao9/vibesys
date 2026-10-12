@@ -12,7 +12,6 @@ from .types.settlement import (
     AssessmentSubmitted,
     AttemptSettled,
     OwnershipSettled,
-    SettlementDependencyResolved,
     WinnerProposed,
 )
 
@@ -29,7 +28,6 @@ type Reducer = Callable[
 EVENT_TO_SUBAREA: Mapping[type[SettlementEvent], Reducer] = MappingProxyType(
     {
         AssessmentSubmitted: _settlement.advance,
-        SettlementDependencyResolved: _settlement.advance,
         OwnershipSettled: _settlement.advance,
         AttemptSettled: _settlement.advance,
         WinnerProposed: _adoption.advance,

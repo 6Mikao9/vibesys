@@ -57,15 +57,16 @@ from .types.records import (
     ChildLease,
     ChildObservationWatermark,
     InspectRequest,
+    Outbound,
     ReconciliationDeadline,
     RecoveryBarrier,
     RecoveryCheck,
     RecoveryPhase,
     RecoveryReady,
     RecoveryStarted,
-    RequestBlocked,
     RequestObserved,
     RequestPhase,
+    within,
 )
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import (
@@ -76,6 +77,7 @@ from .types.sessions import (
     ResumeSessionTurn,
     SessionPhase,
 )
+from .types.until import Failed, FailureReason, WhileAlive, WhileOpen
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
@@ -572,8 +574,12 @@ def _inspection(record: RequestRecord, epoch: int) -> InspectRequest:
         scope=record.request.scope,
         admission_id=record.request.admission_id,
         target=record.request_id,
-        deadline_at=record.reconcile_deadline_at,
     )
+
+
+def _probe(request: Request, context: RecordsContext) -> Outbound:
+    """A reconciliation request goes out with the run's reconciliation bound."""
+    return within(request, context.run.limits.reconciliation_bound)
 
 
 def _child_inspection(record: RequestRecord, resource: ResourceId, epoch: int) -> InspectRequest:
@@ -782,7 +788,7 @@ def _start(
         if isinstance(proof, Proven):
             updated = _observe_children(updated, RequestObserved(observation=proof.value))
     checks: list[RecoveryCheck] = []
-    requests: list[Request] = []
+    requests: list[Outbound] = []
     targets = {record.request_id for record in state.records}
     _validate_children(updated)
     updated = _transfer_children(updated, context)
@@ -812,21 +818,9 @@ def _start(
             )
         )
         if inspection is not None:
-            requests.append(
-                inspection.model_copy(
-                    update={
-                        "deadline_at": max(context.run.now_at, event.now_at)
-                        + context.run.limits.reconciliation_bound
-                    }
-                )
-            )
+            requests.append(_probe(inspection, context))
         requests.extend(
-            _child_inspection(record, child.resource_id, event.epoch).model_copy(
-                update={
-                    "deadline_at": max(context.run.now_at, event.now_at)
-                    + context.run.limits.reconciliation_bound
-                }
-            )
+            _probe(_child_inspection(record, child.resource_id, event.epoch), context)
             for child in updated.children
             if record.request_id in child.source_requests and not _child_proven(child, updated)
         )
@@ -1065,7 +1059,7 @@ def _inspection_exists(state: RecordsState, inspection: InspectRequest) -> bool:
 
 def _pending_probes(
     state: RecordsState, context: RecordsContext, barrier: RecoveryBarrier
-) -> tuple[tuple[RecoveryCheck, ...], tuple[Request, ...]]:
+) -> tuple[tuple[RecoveryCheck, ...], tuple[Outbound, ...]]:
     checks = list(barrier.checks)
     requests = []
     for record in state.records:
@@ -1090,14 +1084,7 @@ def _pending_probes(
                 )
             )
             if inspection is not None and not _inspection_exists(state, inspection):
-                requests.append(
-                    inspection.model_copy(
-                        update={
-                            "deadline_at": context.run.now_at
-                            + context.run.limits.reconciliation_bound
-                        }
-                    )
-                )
+                requests.append(_probe(inspection, context))
         elif check.resolution not in ("pending", "blocked"):
             inspection = (
                 _inspection(record, barrier.epoch)
@@ -1117,25 +1104,11 @@ def _pending_probes(
                 and inspection is not None
                 and not _inspection_exists(state, inspection)
             ):
-                requests.append(
-                    inspection.model_copy(
-                        update={
-                            "deadline_at": context.run.now_at
-                            + context.run.limits.reconciliation_bound
-                        }
-                    )
-                )
+                requests.append(_probe(inspection, context))
         for child in children:
             inspection = _child_inspection(record, child.resource_id, barrier.epoch)
             if not _inspection_exists(state, inspection):
-                requests.append(
-                    inspection.model_copy(
-                        update={
-                            "deadline_at": context.run.now_at
-                            + context.run.limits.reconciliation_bound
-                        }
-                    )
-                )
+                requests.append(_probe(inspection, context))
     return tuple(checks), tuple(requests)
 
 
@@ -1201,7 +1174,6 @@ def _deadline_barrier(
             "request_id": RequestId(
                 root=f"recovery:deadline:{state.recovery.epoch}:{record.request_id.root}"
             ),
-            "deadline_at": now_at + context.run.limits.reconciliation_bound,
         }
     )
     checks = list(state.recovery.checks)
@@ -1287,8 +1259,13 @@ def _deadline(
         for child in state.children
     )
     resolution = _resolution(record, context)
-    if now_at < record.reconcile_deadline_at or (
-        resolution in ("terminal", "reattached") and not unresolved_children
+    # A passed limit ends a record that is still going on elsewhere only if nothing proves
+    # it terminal or reattached; a fired watch ends the wait even for a live executor,
+    # because the work is pointless whatever it is doing.
+    timed = event.reason == FailureReason.TIMED_OUT
+    if (timed and now_at < record.until.at) or (
+        (resolution == "terminal" or (timed and resolution == "reattached"))
+        and not unresolved_children
     ):
         return AreaChange(state=state)
     block_id = RequestId(root=f"recovery:block:{state.recovery.epoch}:{record.request_id.root}")
@@ -1306,21 +1283,17 @@ def _deadline(
         request_id=block_id,
         scope=record.request.scope,
         admission_id=record.request.admission_id,
-        deadline_at=max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound,
         target=record.request_id,
-        diagnostic="reconciliation deadline reached without conclusive ownership proof",
+        reason=event.reason,
     )
-    requests: list[Request] = []
-    events: tuple[RequestBlocked, ...] = ()
+    requests: list[Outbound] = []
+    events: tuple[Failed, ...] = ()
     if previous_block is None:
-        requests.append(block)
-        events = (
-            RequestBlocked(
-                request_id=block_id,
-                target=block.target,
-                scope=block.scope,
-                diagnostic=block.diagnostic,
-            ),
+        failed = _failure(record, event.reason)
+        requests.append(_probe(block, context))
+        events = (failed,)
+        state = _replace_record(
+            state, record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
         )
     observation = record.observation
     resources = []
@@ -1348,13 +1321,15 @@ def _deadline(
             ),
             scope=record.request.scope,
             admission_id=record.request.admission_id,
-            deadline_at=now_at + context.run.limits.cancellation_bound,
             resource_id=resource,
             target=record.request_id,
         )
         for resource in sorted(set(resources), key=lambda value: value.root)
     )
-    requests.extend(_pending_cancellations(state, tuple(cancellations)))
+    requests.extend(
+        within(cancellation, context.run.limits.cancellation_bound)
+        for cancellation in _pending_cancellations(state, tuple(cancellations))
+    )
     barrier = state.recovery
     if barrier.phase != RecoveryPhase.READY:
         # Recovery is gating the run: record the blocked check and inspect once more. A
@@ -1362,12 +1337,42 @@ def _deadline(
         # the record for the strategy to handle and leaves scheduling open.
         barrier, inspection = _deadline_barrier(state, context, record, now_at)
         if inspection is not None:
-            requests.append(inspection)
+            requests.append(_probe(inspection, context))
 
     return AreaChange(
         state=state.model_copy(update={"recovery": barrier}),
         requests=tuple(requests),
         events=events,
+    )
+
+
+def _failure(record: RequestRecord, reason: FailureReason) -> Failed:
+    """The typed result a record ends with: what ended it, and which watch or limit."""
+    watch = next(
+        (
+            watch
+            for watch in record.until.watches
+            if (isinstance(watch, WhileOpen) and reason == FailureReason.WORKSPACE_CLOSED)
+            or (isinstance(watch, WhileAlive) and reason == FailureReason.OWNER_GONE)
+        ),
+        None,
+    )
+    return Failed(
+        reason=reason,
+        decision=record.request.decision_id,
+        request=record.request_id,
+        watch=watch,
+        limit=record.until.at if reason == FailureReason.TIMED_OUT else None,
+    )
+
+
+def _replace_record(state: RecordsState, record: RequestRecord) -> RecordsState:
+    return state.model_copy(
+        update={
+            "records": tuple(
+                record if row.request_id == record.request_id else row for row in state.records
+            )
+        }
     )
 
 
@@ -1393,25 +1398,29 @@ def _canonical(record: RequestRecord) -> bool:
     return not isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
 
 
+def is_open(record: RequestRecord) -> bool:
+    """A canonical record that has not ended: core owes it a result by its ``until``."""
+    return _canonical(record) and record.phase in (
+        RequestPhase.PREPARED,
+        RequestPhase.DISPATCHED,
+        RequestPhase.RECONCILING,
+    )
+
+
 def overdue_reconciliations(
     state: RecordsState, now_at: float
 ) -> tuple[ReconciliationDeadline, ...]:
-    """One deadline event per answered-but-open canonical record whose bound has passed."""
+    """One deadline event per open canonical record whose limit has passed."""
     return tuple(
         ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
         for record in state.records
-        if _answered_open(record) and _canonical(record) and record.reconcile_deadline_at <= now_at
+        if is_open(record) and record.until.at <= now_at
     )
 
 
 def next_reconciliation_at(state: RecordsState) -> float | None:
-    """The earliest time a ``ClockAdvanced`` would block an answered-but-open record."""
-    due = [
-        record.reconcile_deadline_at
-        for record in state.records
-        if _answered_open(record) and _canonical(record)
-    ]
-    return min(due, default=None)
+    """The earliest time a ``ClockAdvanced`` would end an open record at its limit."""
+    return min((record.until.at for record in state.records if is_open(record)), default=None)
 
 
 def advance(

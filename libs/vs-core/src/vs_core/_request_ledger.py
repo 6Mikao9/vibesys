@@ -53,7 +53,6 @@ from .types.kernel import AreaChange, DecisionCompleted
 from .types.records import (
     BlockRequest,
     CancelOwnedResource,
-    DecisionDependencyResolved,
     DispatchAuthorized,
     InspectRequest,
     OperationResult,
@@ -68,7 +67,9 @@ from .types.records import (
     RequestUndispatchable,
     RetryDue,
     TargetObservation,
+    inherit,
     request_lifecycle,
+    within,
 )
 from .types.sessions import (
     CancelTurn,
@@ -114,8 +115,6 @@ def advance(
             change = _dispatched(state, event)
         case RequestObserved():
             change = _observed(state, context, event)
-        case DecisionDependencyResolved():
-            change = _dependency_resolved(state, context, event)
         case OperationRetireRequested():
             change = _retire(state, context, event)
         case RetryDue():
@@ -178,7 +177,7 @@ def _prepared(
                 raise ContractError(("request_id",), "request identity conflict")
             return AreaChange(state=state)
     if not isinstance(request, ExecuteRegisteredOperation):
-        return AreaChange(state=state, requests=(request,))
+        return AreaChange(state=state, requests=(inherit(request),))
     return _route_operation(state, context, event, request)
 
 
@@ -193,13 +192,15 @@ def _route_operation(
         raise ContractError(("operation",), "scope reopen enters through its own guarded event")
     if descriptor.revision_authority != RevisionAuthority.NONE:
         owner: Signal = RevisionOperationRequested(
-            request=request, authority=descriptor.revision_authority
+            request=request, authority=descriptor.revision_authority, until=event.until
         )
         return AreaChange(state=state, signals=(owner,))
     if descriptor.lifecycle == LifecycleClass.SESSION_TURN:
         if event.normalized_turn is None:
             raise ContractError(("normalized_turn",), "registered turn requires its normalization")
-        turn: Signal = RegisteredTurnRequested(request=request, turn=event.normalized_turn)
+        turn: Signal = RegisteredTurnRequested(
+            request=request, turn=event.normalized_turn, until=event.until
+        )
         return AreaChange(state=state, signals=(turn,))
     if descriptor.resource_pool is not None:
         job: Signal = RegisteredJobRequested(
@@ -208,7 +209,7 @@ def _route_operation(
             expected_measurement=event.normalized_measurement,
         )
         return AreaChange(state=state, signals=(job,))
-    return AreaChange(state=state, requests=(request,))
+    return AreaChange(state=state, requests=(inherit(request),))
 
 
 def _dispatched(state: RecordsState, event: DispatchAuthorized) -> AreaChange[RecordsState]:
@@ -588,10 +589,7 @@ def _undispatchable(
     facts = _EpisodeFacts(
         run=context.run, attempts=context.attempts, sessions=context.sessions, records=state
     )
-    if not (
-        dependency_failed(record.request, context.run.receipts, state)
-        or episode_ended(facts, record.request)
-    ):
+    if not (dependency_failed(record.request, state) or episode_ended(facts, record.request)):
         return AreaChange(state=state)
     return _cancel_prepared(state, context, (record,))
 
@@ -662,7 +660,7 @@ def _block_target(state: RecordsState, record: RequestRecord) -> RecordsState:
     return _replace(state, target.model_copy(update={"phase": RequestPhase.BLOCKED}))
 
 
-# --- Decision completion -----------------------------------------------------------
+# --- Command completion -----------------------------------------------------------
 
 
 def _completable(context: RecordsContext, record: RequestRecord) -> bool:
@@ -768,21 +766,6 @@ def _cancel_dependents(
     return _cancel_prepared(state, context, doomed)
 
 
-def _dependency_resolved(
-    state: RecordsState, context: RecordsContext, event: DecisionDependencyResolved
-) -> AreaChange[RecordsState]:
-    """A failed or cancelled decision releases no dependent: its prepared work is cancelled."""
-    if event.status == CompletionStatus.SUCCEEDED:
-        return AreaChange(state=state)
-    doomed = tuple(
-        row
-        for row in state.records
-        if row.phase == RequestPhase.PREPARED
-        and event.decision_id in row.request.decision_dependencies
-    )
-    return _cancel_prepared(state, context, doomed)
-
-
 def _retirement_decision(
     context: RecordsContext, event: OperationRetireRequested
 ) -> DecisionId | None:
@@ -833,16 +816,16 @@ def _retire(
             request_id=RequestId(root=f"retire:{record.request_id.root}"),
             scope=record.request.scope,
             admission_id=record.request.admission_id,
-            deadline_at=context.run.now_at + context.run.limits.cancellation_bound,
             resource_id=resource,
             target=record.request_id,
         )
+        limit = context.run.limits.cancellation_bound
     else:
         request = InspectRequest(
             request_id=RequestId(root=f"retire-inspect:{record.request_id.root}"),
             scope=record.request.scope,
             admission_id=record.request.admission_id,
-            deadline_at=context.run.now_at + context.run.limits.reconciliation_bound,
             target=record.request_id,
         )
-    return AreaChange(state=state, requests=(request,))
+        limit = context.run.limits.reconciliation_bound
+    return AreaChange(state=state, requests=(within(request, limit),))

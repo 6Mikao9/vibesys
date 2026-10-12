@@ -67,6 +67,7 @@ from .sessions import (
     TurnSpec,
 )
 from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
+from .until import Failed, FailureReason, Inherited, Until, Watch, Within
 
 
 class InspectRequest(RequestBase):
@@ -86,26 +87,11 @@ class CancelOwnedResource(RequestBase):
 
 
 class BlockRequest(RequestBase):
-    """Block record lifecycle contract."""
+    """Fence a record that reconciliation gave up on, for the typed reason it ended."""
 
     kind: Literal["block_request"] = "block_request"
     target: RequestId
-    diagnostic: str
-
-
-class RequestBlocked(Value):
-    """Diagnostic that reconciliation blocked one record, published once.
-
-    request_id is the BlockRequest request, target the blocked record. Emitted when
-    the block is first prepared, never on replay, so hosts and strategies can
-    surface it without reading the record ledger.
-    """
-
-    kind: Literal["request_blocked"] = "request_blocked"
-    request_id: RequestId
-    target: RequestId
-    scope: Scope
-    diagnostic: str
+    reason: FailureReason
 
 
 type RegisteredOperationRequest = ExecuteRegisteredOperation
@@ -121,6 +107,35 @@ type Request = Annotated[
     | ReconciliationRequest,
     Field(discriminator="kind"),
 ]
+
+
+class Outbound(Value):
+    """A request together with how long it may take: the one way core creates a request.
+
+    ``until`` is a ``Within`` (a duration from now, plus watches) or ``Inherited`` (the
+    same ``Until`` as the decision that caused the request). Requests carry no deadline;
+    core stores the resolved ``Until`` on the ``RequestRecord`` when it registers this.
+    """
+
+    request: Request
+    until: Within | Inherited | Until
+
+
+def within(request: Request, limit: float, *watches: Watch) -> Outbound:
+    """``Outbound(request, Within(limit, watches))`` for core's own internal requests."""
+    return Outbound(request=request, until=Within(limit=limit, watches=watches))
+
+
+def inherit(request: Request) -> Outbound:
+    """``Outbound`` that ends with the decision that caused ``request``."""
+    return Outbound(request=request, until=Inherited())
+
+
+class Scheduled(Value):
+    """An ``Outbound`` whose ``until`` core has resolved to an absolute time."""
+
+    request: Request
+    until: Until
 
 
 class RequestPhase(StrEnum):
@@ -159,7 +174,10 @@ class RequestRecord(OutcomeValue):
     retry_count: Count = 0
     retry_at: Seconds | None = None
     """Core time at which the request goes out again after a retryable failure, else None."""
-    reconcile_deadline_at: Seconds
+    until: Until
+    """When core ends this record if it is still open, and the watches that end it sooner."""
+    failure: Failed | None = None
+    """Why core ended it without a result (limit passed, watch fired), else None."""
 
     @property
     def retry_wait_until(self) -> float | None:
@@ -362,6 +380,7 @@ class RequestPrepared(Value):
 
     kind: Literal["request_prepared"] = "request_prepared"
     request: Request
+    until: Until
     lifecycle: LifecycleClass
     normalized_turn: TurnSpec | None = None
     normalized_measurement: MeasurementIdentity | None = None
@@ -525,6 +544,8 @@ class ReconciliationDeadline(Value):
     kind: Literal["reconciliation_deadline"] = "reconciliation_deadline"
     request_id: RequestId
     now_at: Seconds
+    reason: FailureReason = FailureReason.TIMED_OUT
+    """TIMED_OUT when the record's limit passed, else the reason of the watch that fired."""
 
 
 class RetryDue(Value):
@@ -549,14 +570,6 @@ class RequestUndispatchable(Value):
 
     kind: Literal["request_undispatchable"] = "request_undispatchable"
     request_id: RequestId
-
-
-class DecisionDependencyResolved(Value):
-    """Completion wakes records to release or reject prepared dependents."""
-
-    kind: Literal["decision_dependency_resolved"] = "decision_dependency_resolved"
-    decision_id: DecisionId
-    status: CompletionStatus
 
 
 class OperationRetireRequested(Value):
@@ -598,8 +611,7 @@ type RecordsEvent = Annotated[
     | ReconciliationDeadline
     | RetryDue
     | RequestUndispatchable
-    | OperationRetireRequested
-    | DecisionDependencyResolved,
+    | OperationRetireRequested,
     Field(discriminator="kind"),
 ]
 

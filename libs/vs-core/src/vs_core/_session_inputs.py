@@ -35,7 +35,7 @@ from .types.common import (
     Scope,
 )
 from .types.kernel import AreaChange, DecisionCompleted
-from .types.records import ExecuteRegisteredOperation
+from .types.records import ExecuteRegisteredOperation, within
 from .types.session_inputs import (
     InputDelivered,
     InputDropped,
@@ -184,13 +184,11 @@ def _inspection(
             invocation=ref,
             dispatch=dispatching_request(context.records, invocation),
             admission_id=owner.admission_id if owner is not None else None,
-            deadline_at=min(
-                context.run.deadline_at,
-                context.run.now_at + context.run.limits.reconciliation_bound,
-            ),
         )
     )
-    return AreaChange(state=state, requests=(request,))
+    return AreaChange(
+        state=state, requests=(within(request, context.run.limits.reconciliation_bound),)
+    )
 
 
 def _input_proof(

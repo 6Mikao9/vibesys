@@ -45,7 +45,7 @@ from vs_core.api import (
     RunFacts,
     RunResultProposal,
     RunStatus,
-    RunView,
+    CoreView,
     SchemaRef,
     Scope,
     SessionId,
@@ -53,8 +53,8 @@ from vs_core.api import (
     Settle,
     SnapshotAndRetain,
     StartAttempt,
-    Stop,
-    StrategyDeclaration,
+    Finish,
+    SearchDeclaration,
     StrategyEvent,
     StrategyId,
     StrategyState,
@@ -96,7 +96,7 @@ class Serial(Value):
     """Runs `ATTEMPTS` attempts one after another; each starts on the previous one's candidate."""
 
     state: SerialState
-    declaration: StrategyDeclaration
+    declaration: SearchDeclaration
     mode: WorkspaceMode
     retention: Retention
 
@@ -106,7 +106,7 @@ class Serial(Value):
     def _attempt(self) -> AttemptId:
         return AttemptId(root=f"attempt:{self.state.index}")
 
-    def decide(self, view: RunView) -> Proposal[SerialState]:
+    def decide(self, view: CoreView) -> Proposal[SerialState]:
         state, run = self.state, Scope(owner=view.run.run_id, generation=view.run.generation)
         attempt = self._attempt()
         scope = Scope(owner=attempt, generation=0)
@@ -160,7 +160,7 @@ class Serial(Value):
                 ),
             )
         elif state.phase == "finish":
-            decision = Stop(
+            decision = Finish(
                 decision_id=DecisionId(root="finish"),
                 scope=run,
                 mode="drain",
@@ -170,7 +170,7 @@ class Serial(Value):
             return Proposal(state=state, decisions=())
         return Proposal(state=state, decisions=(decision,))
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SerialState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SerialState:
         del view
         state = self.state
         if isinstance(event, AttemptReady):
@@ -225,7 +225,7 @@ def _lease(session: SessionId) -> ResourceId:
 
 def run(mode: WorkspaceMode, retention: Retention) -> Run:
     state = SerialState(schema_version=1)
-    declaration = StrategyDeclaration(
+    declaration = SearchDeclaration(
         strategy_id=StrategyId(root="serial"), state_schema=SchemaRef(name="serial", version=1)
     )
     strategy = Serial(state=state, declaration=declaration, mode=mode, retention=retention)

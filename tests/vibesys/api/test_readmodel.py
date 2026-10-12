@@ -269,7 +269,7 @@ def test_hypothesis_view_reports_active_before_a_round_finishes() -> None:
 
 
 def test_run_view_preserves_hypothesis_append_order_not_first_round_order() -> None:
-    """`RunView.hypotheses` is persisted order; `build_experiment_log` re-sorts, this must not."""
+    """`CoreView.hypotheses` is persisted order; `build_experiment_log` re-sorts, this must not."""
     state = HypothesisState(
         hypotheses=[
             _hypothesis("H-02", 5),

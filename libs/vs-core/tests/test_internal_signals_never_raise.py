@@ -63,7 +63,7 @@ class Session:
         self.requests.extend(transition.requests)
         self.results.extend(row for row in transition.events if isinstance(row, core.TurnResult))
 
-    def decide(self, decision: core.Decision) -> None:
+    def decide(self, decision: core.Command) -> None:
         self.feed(core.DecisionSubmitted(decision=decision, expected_revision=self.state.revision))
 
     def start(self, mode: core.WorkspaceMode) -> None:
@@ -248,7 +248,7 @@ class Session:
 
     def stop(self, mode: Literal["drain", "cancel"]) -> None:
         self.decide(
-            core.Stop(
+            core.Finish(
                 decision_id=core.DecisionId(root="stop"),
                 scope=RUN_SCOPE,
                 mode=mode,

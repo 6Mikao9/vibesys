@@ -1,4 +1,4 @@
-"""Constructed core `RunView`s and evidence for strategy tests (public core API only)."""
+"""Constructed core `CoreView`s and evidence for strategy tests (public core API only)."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
     RunId,
-    RunView,
+    CoreView,
     Scope,
     Settlement,
     SettlementId,
@@ -37,7 +37,7 @@ from vs_core.api import (
 from vs_core.testing.builders import initial_state
 
 
-def empty_view() -> RunView:
+def empty_view() -> CoreView:
     """A capability-disabled run with no attempts or evidence."""
     return project(initial_state())
 
@@ -109,7 +109,7 @@ def snapshot(value: float, ordinal: int, *, hypothesis: str = "source") -> Paren
     )
 
 
-def view_proving(*snapshots: ParentSnapshot, retained: bool = True) -> RunView:
+def view_proving(*snapshots: ParentSnapshot, retained: bool = True) -> CoreView:
     """A view whose evidence ledger and retained checkpoints prove the snapshots."""
     base = empty_view()
     measurements: list[EvidenceRef] = []
@@ -137,7 +137,7 @@ def view_proving(*snapshots: ParentSnapshot, retained: bool = True) -> RunView:
     return base.model_copy(update={"measurements": tuple(measurements), "settlements": settlements})
 
 
-def view_checkpointing(*snapshots: ParentSnapshot) -> RunView:
+def view_checkpointing(*snapshots: ParentSnapshot) -> CoreView:
     """A view whose evidence proves the snapshots but only still-running attempts hold them.
 
     Each revision is a checkpoint of a closing attempt and appears in no settlement, which is

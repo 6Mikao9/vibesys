@@ -1,4 +1,4 @@
-"""Decision completion remains a durable dependency beyond initial admission."""
+"""Command completion remains a durable dependency beyond initial admission."""
 
 from typing import ClassVar, Literal
 

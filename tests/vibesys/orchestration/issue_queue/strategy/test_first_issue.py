@@ -18,7 +18,7 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     IssueQueueStrategy,
     IssueQueueStrategyState,
 )
-from vs_core.api import Operation, Stop, project
+from vs_core.api import Operation, Finish, project
 from vs_core.testing.drive import new_run
 from vs_issue_tracker.api import ApplyIssueChanges, CreateIssue
 
@@ -115,6 +115,6 @@ def test_a_task_without_an_objective_fails_the_run_instead_of_seeding_an_unrelat
     blank: str,
 ) -> None:
     (decision,) = _first_decisions(blank)
-    assert isinstance(decision, Stop)
+    assert isinstance(decision, Finish)
     assert decision.result.outcome == "failure"
     assert "objective" in decision.result.reason

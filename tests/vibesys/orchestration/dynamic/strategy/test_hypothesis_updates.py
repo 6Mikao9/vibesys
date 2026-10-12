@@ -22,7 +22,7 @@ from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 from vibesys.hypothesis import HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
 from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState
-from vs_core.api import Stop
+from vs_core.api import Finish
 from vs_dst.api import simulate
 
 
@@ -62,7 +62,7 @@ def test_a_run_survives_the_planner_retiring_a_finished_hypothesis(disposition: 
     assert not run.liveness_violations
     assert world.unused["orchestrator"] == 0, "the retiring plan was never asked for"
     final = run.decisions[-1]
-    assert isinstance(final, Stop)
+    assert isinstance(final, Finish)
     assert final.result.outcome == "success"
 
 

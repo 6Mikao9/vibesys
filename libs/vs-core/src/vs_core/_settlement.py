@@ -326,24 +326,6 @@ def _settlement_receipt(
     return receipt if receipt is not None and _receipt_active(receipt) else None
 
 
-def _unfinished_dependency(
-    context: SettlementContext, receipt: DecisionReceipt | None
-) -> DecisionId | None:
-    if receipt is None or receipt.decision is None:
-        return None
-    completed = {
-        item.decision_id
-        for item in context.run.receipts
-        if isinstance(item.feedback, Accepted)
-        and item.feedback.decision_id == item.decision_id
-        and item.completion == CompletionStatus.SUCCEEDED
-    }
-    return next(
-        (dependency for dependency in receipt.decision.depends_on if dependency not in completed),
-        None,
-    )
-
-
 def _refuse_proposal(
     state: SettlementState,
     context: SettlementContext,
@@ -374,8 +356,6 @@ def _finalize(
     final = _normalize_choice(_accepted_settlement(pending, receipt), owner)
     final = final.model_copy(update={"eligible": _eligible(final, owner, context)})
     if not _released(owner, final):
-        return AreaChange[SettlementState](state=state)
-    if _unfinished_dependency(context, receipt) is not None:
         return AreaChange[SettlementState](state=state)
     return AreaChange[SettlementState](
         state=state.model_copy(
@@ -436,22 +416,6 @@ def _accept_proposal(
     receipt = _canonical_settlement_receipt(context, proposal)
     if receipt is not None and not _receipt_active(receipt):
         return AreaChange[SettlementState](state=state)
-    dependency = _unfinished_dependency(context, receipt)
-    if receipt is not None and dependency is not None:
-        # Frozen dependency notifications wake records only. Reject retriably
-        # instead of accepting a request-free settlement that cannot wake up.
-        return AreaChange[SettlementState](
-            state=state,
-            events=(
-                Rejected(
-                    decision_id=receipt.decision_id,
-                    code=RejectionCode.DEPENDENCY,
-                    path=("depends_on",),
-                    detail="settlement dependency has not completed successfully",
-                    retry_after=DependencyRef(decision_id=dependency),
-                ),
-            ),
-        )
     settlement = _normalize_choice(_accepted_settlement(proposal, receipt), owner)
     if settlement.retention != "discard" and settlement.candidate is None:
         raise ContractValidationError(

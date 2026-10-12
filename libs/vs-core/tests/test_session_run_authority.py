@@ -273,7 +273,7 @@ def test_pending_suspension_replays_once_with_reordered_duplicate_and_stale_even
 def run_drain_state() -> tuple[core.CoreState, core.RunSessionsDrainRequested]:
     state, _ = profiler_yield()
     result = core.RunResultProposal(outcome="cancelled", reason="stop")
-    decision = core.Stop(
+    decision = core.Finish(
         decision_id=core.DecisionId(root="first-stop"), scope=scope(), mode="cancel", result=result
     )
     receipt = core.DecisionReceipt(

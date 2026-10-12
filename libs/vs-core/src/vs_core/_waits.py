@@ -574,10 +574,7 @@ def undispatchable_requests(state: CoreState) -> tuple[RequestId, ...]:
         row.request_id
         for row in state.records.records
         if row.phase == RequestPhase.PREPARED
-        and (
-            dependency_failed(row.request, state.run.receipts, state.records)
-            or episode_ended(state, row.request)
-        )
+        and (dependency_failed(row.request, state.records) or episode_ended(state, row.request))
     )
 
 

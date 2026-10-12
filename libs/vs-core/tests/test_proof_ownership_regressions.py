@@ -18,7 +18,7 @@ def digest(value: core.Value) -> str:
 
 def stopped(state: core.CoreState) -> core.CoreState:
     proposal = core.RunResultProposal(outcome="cancelled", reason="cleanup")
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         result=proposal,

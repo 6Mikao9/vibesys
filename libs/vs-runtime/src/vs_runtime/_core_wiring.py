@@ -24,7 +24,7 @@ from vs_core.api import (
     RunFacts,
     RunId,
     RunState,
-    StrategyDeclaration,
+    SearchDeclaration,
     validate_startup,
 )
 from vs_runtime._core_loop import CoreRuntimeBindings
@@ -97,7 +97,7 @@ class CoreStartup:
 def new_core_state(
     run_id: str,
     facts: RunFacts,
-    declaration: StrategyDeclaration,
+    declaration: SearchDeclaration,
     *,
     offered: OperationCatalog,
     startup: CoreStartup,

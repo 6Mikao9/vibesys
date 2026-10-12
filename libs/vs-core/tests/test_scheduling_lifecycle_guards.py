@@ -148,7 +148,7 @@ def test_expired_accepted_fifo_requests_retirement_and_can_drain(
     state = _queued_state(count + 1, charge, generation)
     held, *queued = state.scheduling.queue
     assert isinstance(held, core.AttemptRequest)
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="drain-stop"),
         scope=core.Scope(owner=state.run.run_id, generation=generation),
         mode="drain",

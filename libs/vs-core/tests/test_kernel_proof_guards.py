@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 
-def receipt(decision: core.Decision) -> core.DecisionReceipt:
+def receipt(decision: core.Command) -> core.DecisionReceipt:
     """Persist a canonical decision as ingress would, independent of mutations."""
     payload = json.dumps(
         decision.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -25,9 +25,9 @@ def receipt(decision: core.Decision) -> core.DecisionReceipt:
 
 def stop(
     state: core.CoreState, name: str, depends_on: tuple[core.DecisionId, ...] = ()
-) -> core.Stop:
+) -> core.Finish:
     """Canonical run-scoped control with an explicit result."""
-    return core.Stop(
+    return core.Finish(
         decision_id=core.DecisionId(root=name),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -184,7 +184,7 @@ def test_run_finality_keeps_first_accepted_stop_dependencies(*, later_accepted: 
                     decision_id=later.decision_id,
                     code=core.RejectionCode.CLOSED_SCOPE,
                     path=("scope",),
-                    detail="rejected later Stop",
+                    detail="rejected later Finish",
                 ),
             }
         )

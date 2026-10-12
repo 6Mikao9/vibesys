@@ -34,7 +34,7 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
     SchemaRef,
-    StrategyDeclaration,
+    SearchDeclaration,
     StrategyId,
     Value,
     validate_startup,
@@ -521,7 +521,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         ),
     }
     interpret, retain = (r.descriptor for r in registrations.values())
-    declaration = StrategyDeclaration(
+    declaration = SearchDeclaration(
         strategy_id=StrategyId(root="s"),
         state_schema=SchemaRef(name="state", version=1),
         required_operations=(_schema(interpret),),

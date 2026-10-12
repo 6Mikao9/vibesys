@@ -43,6 +43,7 @@ from .common import (
 from .evaluation import Continuation, ResumeAuthorizationReceipt
 from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
+from .until import Until
 
 
 class Access(StrEnum):
@@ -85,7 +86,6 @@ class TurnSpec(Value):
     output_schema: SchemaRef
     tool_policy: ArtifactRef | None = None
     artifact_dependencies: tuple[ArtifactRef, ...] = ()
-    deadline_at: Seconds
     charge_class: Literal["paid", "correction", "resume", "free"]
     max_turns: int = Field(default=1, ge=1)
     predecessor: InvocationRef | None = None
@@ -166,6 +166,8 @@ class Invocation(Value):
     input_ids: tuple[InputId, ...] = ()
     evaluation_prefix: EvaluationHistoryCursor | None = None
     pending_suspension: Continuation | None = None
+    until: Until
+    """When core ends this turn, from the ``Within`` its decision was accepted with."""
 
     @model_validator(mode="after")
     def pending_suspension_identity(self) -> Invocation:
@@ -303,6 +305,7 @@ class TurnRequested(Value):
     kind: Literal["turn_requested"] = "turn_requested"
     scope: Scope
     turn: TurnSpec
+    until: Until
 
 
 class RegisteredTurnRequested(Value):
@@ -311,6 +314,7 @@ class RegisteredTurnRequested(Value):
     kind: Literal["registered_turn_requested"] = "registered_turn_requested"
     request: ExecuteRegisteredOperation
     turn: TurnSpec
+    until: Until
 
 
 class TurnObserved(Value):

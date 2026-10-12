@@ -43,7 +43,7 @@ def _accepted(result: core.Transition) -> bool:
     return any(isinstance(event, core.Accepted) for event in result.events)
 
 
-def _submit(state: core.CoreState, decision: core.Decision) -> core.Transition:
+def _submit(state: core.CoreState, decision: core.Command) -> core.Transition:
     return core.step(
         state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
     )

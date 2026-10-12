@@ -47,7 +47,7 @@ from vs_core.api import (
     RunEnded,
     RunResultProposal,
     RunStatus,
-    RunView,
+    CoreView,
     SchedulingChange,
     SchemaRef,
     Scope,
@@ -65,8 +65,8 @@ from vs_core.api import (
     Slot,
     SlotReleased,
     StartAttempt,
-    Stop,
-    StrategyDeclaration,
+    Finish,
+    SearchDeclaration,
     StrategyEvent,
     StrategyState,
     TraceFrame,
@@ -96,13 +96,13 @@ class SequentialState(StrategyState):
 
 class Sequential(Value):
     state: SequentialState
-    declaration: StrategyDeclaration
+    declaration: SearchDeclaration
     items: tuple[ItemId, ...]
 
     def bind(self, state: SequentialState) -> Sequential:
         return self.model_copy(update={"state": state})
 
-    def decide(self, view: RunView) -> Proposal[SequentialState]:
+    def decide(self, view: CoreView) -> Proposal[SequentialState]:
         scope = Scope(owner=view.run.run_id, generation=view.run.generation)
         index = self.state.next_index
         attempt = AttemptRef(attempt_id=AttemptId(root=f"attempt:{index}"), generation=0)
@@ -153,7 +153,7 @@ class Sequential(Value):
                 ),
             )
         elif self.state.phase == "finish":
-            decision = Stop(
+            decision = Finish(
                 decision_id=DecisionId(root="finish"),
                 scope=scope,
                 mode="drain",
@@ -163,7 +163,7 @@ class Sequential(Value):
             return Proposal(state=self.state, decisions=())
         return Proposal(state=self.state, decisions=(decision,))
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SequentialState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SequentialState:
         del view
         if isinstance(event, AttemptReady):
             return self.state.model_copy(update={"phase": "turn"})
@@ -399,7 +399,7 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
         state, strategy = exercise_item(state, strategy, index)
     assert strategy.state.completed_ids == strategy.items
     decision = strategy.decide(project(state)).decisions[0]
-    assert isinstance(decision, Stop)
+    assert isinstance(decision, Finish)
     terminal = CloseSession(
         scope=Scope(owner=state.run.run_id, generation=0),
         deadline_at=100.0,

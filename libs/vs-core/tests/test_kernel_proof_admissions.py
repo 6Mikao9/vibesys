@@ -226,10 +226,10 @@ def test_queued_retirement_requires_one_canonical_start_registration(
 def cleanup_facts(
     identity: int, variant: ReceiptVariant
 ) -> tuple[core.CoreState, core.RequestRecord]:
-    """Record a canonical Stop cleanup request in its source admission episode."""
+    """Record a canonical Finish cleanup request in its source admission episode."""
     state, start, _ = admission_facts(identity, variant)
     result = core.RunResultProposal(outcome="cancelled", reason="drain")
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",

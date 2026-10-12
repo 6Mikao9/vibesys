@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
+from ._deadlines import limit_to
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -81,7 +82,15 @@ from .types.common import (
 )
 from .types.evaluation import ContinuationPhase
 from .types.kernel import AreaChange, DecisionReceipt
-from .types.records import InspectRequest, RecordsState, RequestPhase, RequestPrepared
+from .types.records import (
+    InspectRequest,
+    Outbound,
+    RecordsState,
+    Request,
+    RequestPhase,
+    RequestPrepared,
+    within,
+)
 from .types.scheduling import AttemptReady
 from .types.sessions import (
     Access,
@@ -339,6 +348,11 @@ def _replace(state: AttemptsState, attempt: AttemptView) -> AttemptsState:
     )
 
 
+def _by_run_end(context: AttemptsContext, request: Request) -> Outbound:
+    """Workspace setup and cleanup run until the run ends (bounded cleanup after it)."""
+    return within(request, limit_to(context.run, context.run.deadline_at))
+
+
 def _record(context: AttemptsContext, identity: RequestId) -> RequestRecord | None:
     return next((row for row in context.records.records if row.request_id == identity), None)
 
@@ -388,17 +402,16 @@ def _inspection(
     return AreaChange(
         state=state,
         requests=(
-            InspectRequest(
-                request_id=identity,
-                scope=_scope(attempt),
-                admission_id=attempt.admission_id,
-                deadline_at=min(
-                    context.run.deadline_at,
-                    context.run.now_at + context.run.limits.reconciliation_bound,
+            within(
+                InspectRequest(
+                    request_id=identity,
+                    scope=_scope(attempt),
+                    admission_id=attempt.admission_id,
+                    target=observation.request_id,
+                    # Root lease identity remains in the original observation.
+                    resource_id=None,
                 ),
-                target=observation.request_id,
-                # Root lease identity remains in the original observation.
-                resource_id=None,
+                context.run.limits.reconciliation_bound,
             ),
         ),
     )
@@ -550,13 +563,15 @@ def _admit(
     return AreaChange(
         state=_replace(registered, attempt),
         requests=(
-            EnsureWorkspace(
-                request_id=identity,
-                scope=_scope(attempt),
-                admission_id=attempt.admission_id,
-                deadline_at=context.run.deadline_at,
-                attempt=_ref(attempt),
-                plan=attempt.workspace,
+            _by_run_end(
+                context,
+                EnsureWorkspace(
+                    request_id=identity,
+                    scope=_scope(attempt),
+                    admission_id=attempt.admission_id,
+                    attempt=_ref(attempt),
+                    plan=attempt.workspace,
+                ),
             ),
         ),
         signals=(
@@ -1296,13 +1311,12 @@ def _checkpoint_request(
         request_id=identity,
         scope=_scope(attempt),
         admission_id=attempt.admission_id,
-        deadline_at=context.run.deadline_at,
         attempt=_ref(attempt),
         retention=event.retention,
         invocation=event.invocation,
     )
     updated = attempt.model_copy(update={"pending_records": (*attempt.pending_records, identity)})
-    return AreaChange(state=_replace(state, updated), requests=(request,))
+    return AreaChange(state=_replace(state, updated), requests=(_by_run_end(context, request),))
 
 
 def _checkpoint_acknowledged(
@@ -1629,13 +1643,15 @@ def _reacquire(
     return AreaChange(
         state=_replace(state, updated),
         requests=(
-            RestoreRevision(
-                request_id=identity,
-                scope=_scope(attempt),
-                admission_id=attempt.admission_id,
-                deadline_at=context.run.deadline_at,
-                attempt=_ref(attempt),
-                revision=event.base,
+            _by_run_end(
+                context,
+                RestoreRevision(
+                    request_id=identity,
+                    scope=_scope(attempt),
+                    admission_id=attempt.admission_id,
+                    attempt=_ref(attempt),
+                    revision=event.base,
+                ),
             ),
         ),
         signals=(
@@ -1669,7 +1685,9 @@ def _revision_request(
             operation_for(
                 context.run.receipts,
                 RequestPrepared(
-                    request=event.request, lifecycle=event.request.operation.schema_ref.lifecycle
+                    request=event.request,
+                    until=event.until,
+                    lifecycle=event.request.operation.schema_ref.lifecycle,
                 ),
             ),
             Proven,
@@ -1708,7 +1726,10 @@ def _revision_request(
     updated = attempt.model_copy(
         update={"pending_records": (*attempt.pending_records, event.request.request_id)}
     )
-    return AreaChange(state=_replace(state, updated), requests=(event.request,))
+    return AreaChange(
+        state=_replace(state, updated),
+        requests=(Outbound(request=event.request, until=event.until),),
+    )
 
 
 type AcquisitionEvent = (

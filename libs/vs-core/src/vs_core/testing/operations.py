@@ -6,7 +6,7 @@ from vs_core.types.attempts import RevisionOperationRequested
 from vs_core.types.common import Area, ExecuteRegisteredOperation
 from vs_core.types.evaluation import RegisteredJobRequested
 from vs_core.types.kernel import CoreState
-from vs_core.types.records import RequestPrepared
+from vs_core.types.records import RequestPrepared, inherit
 from vs_core.types.sessions import RegisteredTurnRequested
 from vs_core.types.strategy import Operation
 
@@ -34,25 +34,28 @@ def operation_trace(state: CoreState, decision: Operation) -> ReducerTrace:
         return ReducerTrace(
             frames=(
                 TraceFrame(
-                    signal=prepared, change=RecordsChange(state=state.records, requests=(request,))
+                    signal=prepared,
+                    change=RecordsChange(state=state.records, requests=(inherit(request),)),
                 ),
             )
         )
     if owner == Area.SESSIONS:
         if prepared.normalized_turn is None:
             raise ContractError(("normalized_turn",), "registered turn missing normalization")
-        signal = RegisteredTurnRequested(request=request, turn=prepared.normalized_turn)
-        change = SessionsChange(state=state.sessions, requests=(request,))
+        signal = RegisteredTurnRequested(
+            request=request, turn=prepared.normalized_turn, until=prepared.until
+        )
+        change = SessionsChange(state=state.sessions, requests=(inherit(request),))
     elif owner == Area.EVALUATION:
         if descriptor.resource_pool is None:
             raise ContractError(("resource_pool",), "owned job missing declared pool")
         signal = RegisteredJobRequested(request=request, resource_pool=descriptor.resource_pool)
-        change = EvaluationChange(state=state.evaluation, requests=(request,))
+        change = EvaluationChange(state=state.evaluation, requests=(inherit(request),))
     else:
         signal = RevisionOperationRequested(
-            request=request, authority=descriptor.revision_authority
+            request=request, authority=descriptor.revision_authority, until=prepared.until
         )
-        change = AttemptsChange(state=state.attempts, requests=(request,))
+        change = AttemptsChange(state=state.attempts, requests=(inherit(request),))
     return ReducerTrace(
         frames=(
             TraceFrame(

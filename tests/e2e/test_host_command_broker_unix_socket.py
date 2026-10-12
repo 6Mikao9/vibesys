@@ -31,7 +31,7 @@ from vs_sandbox.api.slurm import (
 )
 
 # test-isolation: the client is a single-file CLI that is intentionally absent from the library API.
-from vs_sandbox.host_command_client import Stop, execute
+from vs_sandbox.host_command_client import Finish, execute
 from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, wait_or_fail
 
 if TYPE_CHECKING:
@@ -110,7 +110,7 @@ def test_a_gpu_job_runs_through_the_real_socket(
         monkeypatch.setenv(COMMAND_BROKER_SOCKET_ENV, str(broker.socket_path))
         monkeypatch.setenv(COMMAND_BROKER_TOKEN_ENV, broker.token)
 
-        status = execute(["--", "nvidia-smi"], stop=Stop())
+        status = execute(["--", "nvidia-smi"], stop=Finish())
 
     assert status == 3
     assert capsysbinary.readouterr().out == b"gpu job\n"
@@ -160,7 +160,7 @@ def test_a_broker_that_drops_a_request_unread_is_a_dropped_connection(
         monkeypatch.setenv(COMMAND_BROKER_SOCKET_ENV, str(path))
         monkeypatch.setenv(COMMAND_BROKER_TOKEN_ENV, "t")
         try:
-            status = execute(["--", "x" * argument_bytes], stop=Stop())
+            status = execute(["--", "x" * argument_bytes], stop=Finish())
         finally:
             join_or_fail(thread)
             server.close()

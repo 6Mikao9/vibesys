@@ -1,4 +1,4 @@
-"""Optional dependencies and the first accepted Stop retain exact durable authority."""
+"""Optional dependencies and the first accepted Finish retain exact durable authority."""
 
 import pytest
 from hypothesis import given
@@ -158,14 +158,14 @@ def _dependency_observation(variant: str, record: core.RequestRecord) -> core.Re
 def test_committed_stop_selects_first_accepted_command(
     variant: str,
     denial: Missing | Mismatch | None,
-    facts: tuple[core.RunState, core.Stop],
+    facts: tuple[core.RunState, core.Finish],
 ) -> None:
     run, expected = facts
     run = _stop_variant(variant, run, expected)
     assert committed_stop(run) == (Proven(expected) if denial is None else denial)
 
 
-def _stop_variant(variant: str, run: core.RunState, expected: core.Stop) -> core.RunState:
+def _stop_variant(variant: str, run: core.RunState, expected: core.Finish) -> core.RunState:
     match variant:
         case "receipt":
             return run.model_copy(update={"receipts": ()})
@@ -183,7 +183,7 @@ def _stop_variant(variant: str, run: core.RunState, expected: core.Stop) -> core
             return _stop_receipt_variant(variant, run, expected)
 
 
-def _stop_receipt_variant(variant: str, run: core.RunState, expected: core.Stop) -> core.RunState:
+def _stop_receipt_variant(variant: str, run: core.RunState, expected: core.Finish) -> core.RunState:
     receipt = run.receipts[0]
     match variant:
         case "feedback":
@@ -307,7 +307,7 @@ def test_a_pending_dependency_cannot_hide_a_rejected_dependency(
     assert core.dependency_status(state, dependent) == core.DependencyStatus.FAILED
 
 
-def _receipt(decision: core.Stop | core.StartAttempt) -> core.DecisionReceipt:
+def _receipt(decision: core.Finish | core.StartAttempt) -> core.DecisionReceipt:
     return core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
@@ -338,7 +338,7 @@ def _stop_after_dependency_failure(
         ("first", (prereq.decision_id,) if first_depends else ()),
         ("later", ()),
     ):
-        stop = core.Stop(
+        stop = core.Finish(
             decision_id=core.DecisionId(root=name),
             scope=scope,
             mode="drain",

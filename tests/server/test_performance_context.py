@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.api.service import RunApi
-    from vibesys.api import RunView
+    from vibesys.api import CoreView
 
 
 def _hypothesis(identifier: str, started_round: int, **overrides: object) -> Hypothesis:
@@ -87,8 +87,8 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
     return vibesys_project, manifest.run_id
 
 
-def _view(state: HypothesisState) -> RunView:
-    """Project a hand-built `HypothesisState` into the `RunView` `build_performance_context` reads."""
+def _view(state: HypothesisState) -> CoreView:
+    """Project a hand-built `HypothesisState` into the `CoreView` `build_performance_context` reads."""
     return project_run_view(
         state,
         run_id="run-1",

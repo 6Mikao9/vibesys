@@ -101,7 +101,7 @@ plugin with its own stable ID and options type.
 
 ## Testing a strategy
 
-Drive the strategy as the shell does: build `RunView`s, feed `StrategyEvent`s, and assert on
+Drive the strategy as the shell does: build `CoreView`s, feed `StrategyEvent`s, and assert on
 the proposals. `vs_runtime.api.testing` offers the runtime shell kit (`ScriptedExecutors`,
 `drive_shell`, restart-at-boundary) for tests that run a strategy against scripted
 executors, and `tests/support/core_plugins.py` offers stub core plugins for tests of the

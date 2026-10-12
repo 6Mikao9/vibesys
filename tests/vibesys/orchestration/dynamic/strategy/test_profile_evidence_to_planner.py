@@ -44,7 +44,7 @@ from vs_core.api import (
     ArtifactRef,
     AttemptId,
     EvidenceKind,
-    RunView,
+    CoreView,
 )
 from vs_prompts.api import TemplateRenderer
 
@@ -113,7 +113,7 @@ def _prompt(
         evidence=() if reading is None else (ref.key,),
         readings=() if reading is None else (reading,),
     )
-    view: RunView = empty_view().model_copy(update={"measurements": (ref,)})
+    view: CoreView = empty_view().model_copy(update={"measurements": (ref,)})
     state = DynamicStrategyState(attempts=(record,))
     return planner_prompt(state, _CONFIG, view)
 

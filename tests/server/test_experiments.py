@@ -57,7 +57,7 @@ from vs_sim.api.testing import SimThreads, wait_or_fail
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys.api import RunView
+    from vibesys.api import CoreView
 
 
 class _RoundFields(TypedDict, total=False):
@@ -133,7 +133,7 @@ class _HypothesisFields(TypedDict, total=False):
     last_experiment_revision: int
 
 
-def _committed_view(state: HypothesisState, *, run_id: str, loop: str) -> RunView:
+def _committed_view(state: HypothesisState, *, run_id: str, loop: str) -> CoreView:
     """Project a just-committed state into the active run view."""
     return project_run_view(
         state,
@@ -177,11 +177,11 @@ def _hypothesis(
     return Hypothesis(**fields)
 
 
-def _view(state: HypothesisState, *, run_id: str = "run-1") -> RunView:
-    """Project a hand-built `HypothesisState` into the `RunView` the server reads.
+def _view(state: HypothesisState, *, run_id: str = "run-1") -> CoreView:
+    """Project a hand-built `HypothesisState` into the `CoreView` the server reads.
 
     `build_experiment_log`/`ExperimentProjection` now consume `vibesys.api`'s
-    `RunView`, not raw core state directly, so unit tests that build a state
+    `CoreView`, not raw core state directly, so unit tests that build a state
     fixture by hand still need this projection step before calling them.
     """
     return project_run_view(

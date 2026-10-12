@@ -10,9 +10,9 @@ from vs_core.api.proofs import Mismatch, Missing, ProofField, ProofReason, Prove
 
 
 @st.composite
-def receipt_facts(draw: st.DrawFn) -> tuple[core.Stop, core.DecisionReceipt]:
+def receipt_facts(draw: st.DrawFn) -> tuple[core.Finish, core.DecisionReceipt]:
     suffix = draw(st.integers(min_value=0, max_value=10_000))
-    decision = core.Stop(
+    decision = core.Finish(
         decision_id=core.DecisionId(root=f"stop-{suffix}"),
         scope=core.Scope(
             owner=core.RunId(root=f"run-{suffix}"), generation=draw(st.integers(0, 20))
@@ -120,7 +120,7 @@ def dependency_facts(
 
 
 @st.composite
-def stop_facts(draw: st.DrawFn) -> tuple[core.RunState, core.Stop]:
+def stop_facts(draw: st.DrawFn) -> tuple[core.RunState, core.Finish]:
     canonical, receipt = draw(receipt_facts())
     run = core.initial_state().run.model_copy(
         update={

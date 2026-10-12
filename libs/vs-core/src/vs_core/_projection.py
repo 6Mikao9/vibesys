@@ -8,7 +8,7 @@ from ._adoption import view as adoption_view
 from ._request_ledger import next_retry_at
 from ._request_recovery import next_reconciliation_at
 from .types.common import ChargeKind
-from .types.kernel import CoreState, RunSummary, RunView
+from .types.kernel import CoreState, CoreView, RunSummary
 from .types.records import (
     ExecuteRegisteredOperation,
     OperationView,
@@ -120,7 +120,7 @@ def pending_requests(state: RecordsState) -> tuple[Request, ...]:
     )
 
 
-def project(state: CoreState) -> RunView:
+def project(state: CoreState) -> CoreView:
     """Expose only immutable lifecycle facts, never strategy population state."""
     run = state.run
     operations = tuple(
@@ -136,7 +136,7 @@ def project(state: CoreState) -> RunView:
         for record in state.records.records
         if isinstance(record.request, ExecuteRegisteredOperation)
     )
-    return RunView(
+    return CoreView(
         revision=state.revision,
         run=RunSummary(
             run_id=run.run_id,

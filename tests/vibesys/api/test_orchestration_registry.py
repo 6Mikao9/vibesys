@@ -20,7 +20,7 @@ from vibesys.api import (
     ProfilerKind,
     RunRequest,
     RunStatus,
-    RunView,
+    CoreView,
 )
 from vibesys.api.request import load_task
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
@@ -520,11 +520,11 @@ def test_registered_plugin_derives_roles_from_declaration() -> None:
 class _OwnProjector:
     """A projector that reads durable state this registration does not declare."""
 
-    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
+    def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> CoreView:
         del project
-        return RunView(run_id=run_id, loop=loop, status=status, experiment_revision=7)
+        return CoreView(run_id=run_id, loop=loop, status=status, experiment_revision=7)
 
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
+    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> CoreView | None:
         del namespace, state, run_id
         return None
 

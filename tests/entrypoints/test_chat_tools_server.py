@@ -19,7 +19,7 @@ from tests.support.multi_search import SearchRecord
 
 from entrypoints.chat_tools_server import build_parser, build_tools
 from launch import open_run_store
-from vibesys.api import RunStatus, RunView
+from vibesys.api import RunStatus, CoreView
 from vibesys.api.hypothesis import RoundRecord
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
@@ -205,9 +205,9 @@ class TestEndToEnd:
         project, run_id = _project_with_run(tmp_path)
 
         class CustomStore:
-            def get_run(self, requested: str) -> RunView:
+            def get_run(self, requested: str) -> CoreView:
                 assert requested == run_id
-                return RunView(
+                return CoreView(
                     run_id=run_id,
                     loop="team-search",
                     status=RunStatus.UNKNOWN,

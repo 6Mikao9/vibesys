@@ -46,7 +46,7 @@ from vs_core.api import (
     ObservationStatus,
     Operation,
     RevisionRef,
-    RunView,
+    CoreView,
     Scope,
 )
 from vs_dst.api import SimulatedRun, simulate
@@ -200,7 +200,7 @@ def _local(name: str, **changes: object) -> EvidenceRef:
     return base.model_copy(update=changes)
 
 
-def _view(*refs: EvidenceRef) -> RunView:
+def _view(*refs: EvidenceRef) -> CoreView:
     return empty_view().model_copy(update={"measurements": refs})
 
 

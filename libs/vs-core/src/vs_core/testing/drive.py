@@ -24,10 +24,11 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     Capabilities,
     ClockAdvanced,
+    Command,
     ContractError,
     CoreEvent,
     CoreState,
-    Decision,
+    CoreView,
     DispatchAuthorized,
     EventCursor,
     EventId,
@@ -48,7 +49,6 @@ from vs_core.api import (
     RevisionRef,
     RunEnvelope,
     RunFacts,
-    RunView,
     Strategy,
     StrategyEvent,
     StrategyState,
@@ -156,7 +156,7 @@ class Trace[S: StrategyState]:
 
     core: CoreState
     strategy: Strategy[S]
-    decisions: list[Decision] = field(default_factory=list)
+    decisions: list[Command] = field(default_factory=list)
     events: list[StrategyEvent] = field(default_factory=list)
     requests: list[Request] = field(default_factory=list)
     # Requests as dispatched and executor observations as delivered, interleaved in order.
@@ -165,7 +165,7 @@ class Trace[S: StrategyState]:
     steps: int = 0
 
     @property
-    def view(self) -> RunView:
+    def view(self) -> CoreView:
         """The run as the strategy sees it now."""
         return project(self.core)
 

@@ -16,13 +16,13 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
-from vs_core.api import CollectEvidence, ProposeWinner, Stop
+from vs_core.api import CollectEvidence, ProposeWinner, Finish
 from vs_dst.api import simulate
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_core.api import Decision, RunResultProposal
+    from vs_core.api import Command, RunResultProposal
 
 # A run asks core for a few dozen requests (workspaces, sessions, turns, measurements).
 # Generous, but far below a request loop that never ends.
@@ -45,9 +45,9 @@ def _world(measurement: Input, *, candidate_found: bool) -> DynamicWorld:
     )
 
 
-def _stop(decisions: Sequence[Decision]) -> RunResultProposal:
+def _stop(decisions: Sequence[Command]) -> RunResultProposal:
     final = decisions[-1]
-    assert isinstance(final, Stop), "the run never reached a terminal decision"
+    assert isinstance(final, Finish), "the run never reached a terminal decision"
     return final.result
 
 
