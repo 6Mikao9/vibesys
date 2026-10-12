@@ -423,7 +423,11 @@ class SessionLifecycleRequests:
         try:
             self._sessions.cancel(key, invocation_id)
             record = _journal_row(self._sessions, key, invocation_id)
-            if record is None or isinstance(record.outcome, Pending):
+            if record is None:
+                # The dispatch intent is journaled before any provider call, so a turn with
+                # no row never began: a refused dispatch leaves nothing to stop.
+                return _released(ObservationStatus.CANCELLED, binding)
+            if isinstance(record.outcome, Pending):
                 # Pending: the dispatch call has not returned, here or in an earlier
                 # host. Only this instance can reach a turn it runs, so a restarted
                 # host cannot prove the provider process stopped.

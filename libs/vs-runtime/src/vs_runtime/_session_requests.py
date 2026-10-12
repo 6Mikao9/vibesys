@@ -690,8 +690,21 @@ class RuntimeSessionRequests:
             ) as error:
                 message = f"invocation evidence is unreadable: {error}"
                 raise AccessSettlementError(message) from error
-            if isinstance(outcome, (Completed, InvalidResponse)):
+            if isinstance(outcome, (Completed, InvalidResponse)) or (
+                isinstance(outcome, Unknown)
+                and await asyncio.to_thread(self._never_journaled, binding, peer.invocation)
+            ):
                 await self.settlement.settle(peer)
+
+    def _never_journaled(self, binding: SessionBinding, invocation_id: str) -> bool:
+        """Whether the invocation has no journal row.
+
+        Dispatch intent is journaled before any provider call, so a turn with no row never
+        began (a refused resume, or a host that died before it dispatched): it wrote nothing.
+        """
+        with self._sessions.invocation_transaction() as slot:
+            state = slot.load_optional()
+        return state is None or invocation_id not in state.invocations
 
     async def _run_turn(
         self, request: DispatchTurn, bkey: str, binding: SessionBinding, dispatch: _Dispatch

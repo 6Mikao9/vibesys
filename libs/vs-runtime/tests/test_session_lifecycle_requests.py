@@ -58,12 +58,9 @@ class World:
         (base / "workspace").mkdir()
         self._project = Project.open(base / "project")
         sessions = self._project.state.state_store_namespace("sessions")
+        self.checkpoints = DurableSessionStore(sessions.slot("sessions.json", AgentSessionState))
         self.sessions: FakeAgentSessions | None = None
-        self.host: SessionHost = open_lifecycle_host(
-            base / "workspace",
-            DurableSessionStore(sessions.slot("sessions.json", AgentSessionState)),
-            gate=gate,
-        )
+        self.host: SessionHost = open_lifecycle_host(base / "workspace", self.checkpoints, gate=gate)
 
     def store(self) -> ReceiptStore:
         return ReceiptStore(self._project.state.state_store_namespace("run"))
@@ -168,6 +165,29 @@ async def test_a_restarted_host_cannot_claim_a_cancelled_turn_it_never_ran() -> 
         finally:
             gate.proceed.set()
         await running
+
+
+@pytest.mark.asyncio
+async def test_a_turn_refused_before_the_provider_call_is_cancelled_and_frees_the_workspace() -> (
+    None
+):
+    """A resume the restarted provider cannot continue left a dispatch record but no journal row.
+
+    No provider call began in any host, so its cancellation is proven (not "its dispatch has not
+    returned" for ever), and the access receipt it opened does not hold the workspace against the
+    turn that follows.
+    """
+    async with world() as w:
+        await w.started()
+        w.host = w.host.restart_lost_conversation(w.host.resolver.workspace)
+        refused = await w.execute(dispatch_request("req-two", "inv-2"))
+        assert status(refused) is ObservationStatus.REJECTED
+        cancelled = await w.execute(cancel_request("req-c2", invocation="inv-2"))
+        assert status(cancelled) is ObservationStatus.CANCELLED
+        assert cancelled.observation.observation.released
+        later = await w.execute(dispatch_request("req-three", "inv-3"))
+        assert "not judged" not in later.observation.observation.diagnostic
+        assert w.host.turns == []
 
 
 @pytest.mark.asyncio

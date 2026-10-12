@@ -67,10 +67,9 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
     clock = simulated_clock()
 
     def host_dies(_agent: Turn) -> dict[str, object]:
-        # The host dies once this planning turn is committed, before round 2 starts. The
-        # committed plan is what the resumed run executes; it does not ask the planner again.
+        # The host dies once this planning turn is committed, before round 2 starts.
         clock.crash_on_next_clock_call()
-        return portfolio(workstream("H2", parent_hypothesis_id="H1"))
+        return portfolio()
 
     first = (
         ScriptedAgents()
@@ -94,7 +93,12 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
         agent.set_value(3)
         return implemented("H2")
 
-    second = ScriptedAgents().implement("H2", build_on_first).judge("H2", PASS)
+    second = (
+        ScriptedAgents()
+        .plan(portfolio(workstream("H2", parent_hypothesis_id="H1")))
+        .implement("H2", build_on_first)
+        .judge("H2", PASS)
+    )
 
     resumed = run_request(
         resume_request(request, crashed.run_id),
@@ -110,8 +114,8 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
     assert first.unscripted == second.unscripted == []
     # The resumed run measures only the new candidate, never the input again.
     assert loop_input.sbatch_count() == _input_jobs() + _candidate_jobs(2)
-    # Both planning calls, the one whose plan survives the crash included, are told the input is unmeasurable.
-    for told in first.prompts(ORCHESTRATOR.id):
+    # Both planning calls, before and after the crash, are told the input is unmeasurable.
+    for told in (first.prompts(ORCHESTRATOR.id)[0], second.prompts(ORCHESTRATOR.id)[0]):
         assert all(part in told for part in _UNMEASURABLE)
     records = CoreRecords(loop_input, crashed.run_id)
     baseline = records.baseline
