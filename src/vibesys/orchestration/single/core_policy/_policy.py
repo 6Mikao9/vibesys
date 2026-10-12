@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.orchestration.single.core_policy._agents import build_search, reply_schemas
 from vibesys.orchestration.single.core_policy._limits import limits_for, run_deadline_at
-from vibesys.orchestration.single.core_policy._replies import reply_schemas
-from vibesys.orchestration.single.strategy.api import (
-    AttributionConfig,
-    SingleConfig,
-    SingleStrategy,
-)
+from vibesys.orchestration.single.search.api import AttributionConfig, SingleConfig
 from vs_core.api import (
     ArtifactRef,
     AssessmentKind,
@@ -27,7 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from vibesys.orchestration.single.models import ProfileGuidedSingleOptions, SingleOptions
-    from vs_core.api import Limits, SchemaRef
+    from vs_core.api import Limits, SchemaRef, Search
 
 type Seconds = Annotated[int, Field(gt=0)]
 
@@ -67,7 +63,8 @@ class PolicyInputs(_Value):
 class SingleCorePolicy:
     """What the shell needs to start, run and resume a single search on the core."""
 
-    strategy: SingleStrategy
+    search: Search[Any, Any]
+    config: SingleConfig
     facts: CoreRunFacts
     limits: Limits
     deadline_at: float
@@ -108,7 +105,6 @@ def config_for(
             "max_rounds": options.max_rounds,
             "max_retries_per_round": options.max_retries_per_round,
             "official_eval_every": options.official_eval_every,
-            "judge_every": options.judge_every,
             "metric_space": options.metric_space,
             "turn_drop_backoff_seconds": options.turn_drop_backoff_seconds,
             "profiler_id": inputs.profiler_id,
@@ -142,7 +138,8 @@ def build_core_policy(
     """The policy of one single run from its validated options and resolved inputs."""
     config = config_for(options, bounds, inputs)
     return SingleCorePolicy(
-        strategy=SingleStrategy(config=config),
+        search=build_search(config),
+        config=config,
         facts=CoreRunFacts(
             objective=inputs.objective,
             baseline=RevisionRef.of_git_commit(inputs.baseline_commit),
@@ -156,6 +153,6 @@ def build_core_policy(
             observe_backoff_cap=float(bounds.observe_backoff_cap_seconds),
         ),
         deadline_at=run_deadline_at(bounds.max_run_seconds),
-        reply_schemas=reply_schemas(),
+        reply_schemas=reply_schemas(config),
         requirements=requirements_for(config),
     )

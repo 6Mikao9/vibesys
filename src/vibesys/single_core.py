@@ -27,18 +27,20 @@ from vibesys.orchestration.single.core_policy.api import (
     project_strategy_state,
     prompts,
     run_prompt_variables,
+    single_operation_registry,
 )
 from vibesys.orchestration.single.models import ProfileGuidedSingleOptions, SingleOptions
-from vibesys.orchestration.single.strategy.api import (
+from vibesys.orchestration.single.search.api import (
     OPERATIONS,
-    SingleStrategyState,
+    PromptContext,
+    SingleState,
     measurement_recipe,
-    single_operation_registry,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
 from vibesys.single_roles import CORE_ROLES
+from vs_core.api import Piped
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
 from vs_runtime.api.core import (
     OperationCatalog,
@@ -92,14 +94,16 @@ def single_operation_catalog(ports: OperationPorts) -> OperationCatalog:
     return operation_catalog(OPERATIONS, ports)
 
 
-def single_projector(plugin_id: str) -> RuntimeRecordProjector[SingleStrategyState]:
-    """Read a single run's strategy state from its committed runtime record."""
+def single_projector(plugin_id: str) -> RuntimeRecordProjector[Piped[SingleState, PromptContext]]:
+    """Read a single run's search state from its committed runtime record."""
     return RuntimeRecordProjector(
         plugin_id=plugin_id,
-        state_type=SingleStrategyState,
-        record_type=RuntimeRecord[SingleStrategyState],
+        state_type=Piped[SingleState, PromptContext],
+        record_type=RuntimeRecord[Piped[SingleState, PromptContext]],
         operations=single_operation_registry(),
-        project=lambda state, revision: project_strategy_state(state, experiment_revision=revision),
+        project=lambda state, revision: project_strategy_state(
+            state.inner, experiment_revision=revision
+        ),
     )
 
 
@@ -128,9 +132,10 @@ def _plan_for(options_type: type[SingleRunOptions]) -> Callable[[CoreRunContext]
             ),
             isolated_candidates=context.environment.parallel_candidate_obstacle is None,
         )
-        config = policy.strategy.config
+        config = policy.config
         return CorePlan(
-            strategy=policy.strategy,
+            search=policy.search,
+            config=config,
             reply_schemas=policy.reply_schemas,
             facts=policy.facts,
             limits=policy.limits,

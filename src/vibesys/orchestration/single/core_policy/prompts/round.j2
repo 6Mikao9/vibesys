@@ -1,5 +1,12 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
+{% set meaning = {
+  'missing': 'a required field is missing',
+  'unexpected': 'this field is not allowed',
+  'wrong-type': 'the value has the wrong type',
+  'invalid-value': 'the value is not acceptable',
+  'not-json': 'the reply is not valid JSON',
+} -%}
 You own one complete inner-loop round: implement the typed plan, independently
 self-review it, and collect only the profile/evidence needed to classify it.
 
@@ -21,17 +28,20 @@ Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it f
 Read the code and the objective with tools. Do not rely on stale history.
 Reuse a matching framework validation PASS when its declared inputs are unchanged.
 
-{% if feedback %}
+{% if repair %}
 New retry feedback:
 
-{{ feedback }}
+{% if repair.text %}{{ repair.text }}{% elif repair.gate %}{{ repair.gate.value }} gate failed{% else %}self-review failed{% endif %}
 
 Address affected source/evidence and invariants without repeating unrelated
 expensive work.
 {% endif %}
-{% if no_valid_reply %}
-Your previous attempt returned no valid response ({{ no_valid_reply }}). Answer with the
+{% if no_reply %}
+Your previous attempt returned no valid response ({% if no_reply.kind.value == 'invalid-reply' %}the reply broke its output schema{% elif no_reply.ended %}the turn ended: {{ no_reply.ended.value }}{% elif no_reply.turn_failure %}the turn did not complete: {{ no_reply.turn_failure.value }}{% else %}the turn ended without a reply{% endif %}). Answer with the
 schema-valid JSON object this time.
+{% for item in no_reply.errors %}
+- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ meaning[item.code.value] }}
+{% endfor %}
 {% endif %}
 {% if dominated_by_rounds %}
 Your claimed `pareto_frontier` row was dominated by the live noise-aware archive (rounds
@@ -67,9 +77,9 @@ forecast. Classify Pareto retention separately: a feasible nondominated tradeoff
 may be retained without meeting all terminal gates. Canonical fields come only
 from one fresh canonical selected row; targeted values remain provisional.
 
-{% if official_due %}
+{% if official_reason %}
 Official evaluation is scheduled after this round because
-`{{ official_reason or 'framework policy' }}`. Do not duplicate
+`{{ official_reason.value }}`. Do not duplicate
 framework-owned commands.
 {% else %}
 Official evaluation is deferred; do not run a ceremonial full sweep or immutable
