@@ -21,7 +21,8 @@ from vs_sandbox.api.skypilot import (
     AttemptResourcesRecord,
     CancellableOutputSink,
     ClusterInfo,
-    ClusterStatus,
+    ClusterLife,
+    ClusterUp,
     ErrorFrame,
     EvaluationRequest,
     InvocationJournal,
@@ -35,6 +36,7 @@ from vs_sandbox.api.skypilot import (
     ResponseFrame,
     SkyPilotBridge,
     SkyPilotJobRunner,
+    SkyPilotOutputError,
     SubprocessCommandRunner,
     decode_response,
     encode_message,
@@ -100,7 +102,7 @@ class FakeRunner(SkyPilotJobRunner):
         self.cancel_calls: list[tuple[str, int]] = []
         self.workdirs: list[Path] = []
         self.commands: list[tuple[str, ...]] = []
-        self.cluster_status: ClusterStatus | None = ClusterStatus.UP
+        self.cluster_life: ClusterLife | None = ClusterUp()
 
     def ensure_cluster(
         self,
@@ -111,13 +113,13 @@ class FakeRunner(SkyPilotJobRunner):
     ) -> ClusterInfo:
         del resources, timeout
         self.ensure_calls += 1
-        return ClusterInfo(name, ClusterStatus.UP)
+        return ClusterInfo(name, ClusterUp())
 
     def inspect_cluster(self, name: str, *, timeout: float = 60) -> ClusterInfo | None:
         del timeout
-        if self.cluster_status is None:
+        if self.cluster_life is None:
             return None
-        return ClusterInfo(name, self.cluster_status)
+        return ClusterInfo(name, self.cluster_life)
 
     def run(  # noqa: PLR0913  # lint-waiver: LW-010051 [PLR0913]; this fake preserves the public SkyPilotJobRunner.run callback and resume controls so the bridge exercises the real runner contract.
         self,
@@ -632,9 +634,9 @@ def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
     journal = InvocationJournal(namespace)
     invocation_id = "f" * 32
     prepared = journal.prepare(invocation_id, "1" * 64, "2" * 64)
-    runner.cluster_status = None
+    runner.cluster_life = None
     bridge.start()
-    runner.cluster_status = ClusterStatus.UP
+    runner.cluster_life = ClusterUp()
     bridge._locally_prepared_invocations.add(invocation_id)  # noqa: SLF001  # LW-010027; marks an invocation prepared in this process for recovery discrimination
 
     assert bridge._recover_after_allocation_loss(prepared) is prepared  # noqa: SLF001  # LW-010028; verifies an unsubmitted journal record is retained after allocation loss
@@ -1501,7 +1503,7 @@ def _terminal_record(tmp_path: Path) -> tuple[InvocationJournal, InvocationRecor
     record = journal.submitting(record, "lease", _attempt_resources())
     record = journal.submitted(record, 9, "lease")
     result = InvocationResultRecord(
-        status="COMPLETED",
+        status=JobStatus.COMPLETED,
         sky_exit_code=0,
         provenance=InvocationProvenance(
             profile_name="test",
@@ -1553,3 +1555,35 @@ def test_snapshot_digest_and_staging_reject_special_files_and_oversized_workspac
     monkeypatch.setattr(bridge_module, "_MAX_STAGED_FILES", 0)
     with pytest.raises(ValueError, match="exceeds remote staging limits"):
         _private(bridge, "_stage_workspace")(tmp_path / "stage")
+
+
+def test_a_queue_record_without_a_status_ends_the_request_in_a_typed_failure(
+    tmp_path: Path, socket_dir: Path
+) -> None:
+    """An unreadable queue status is a permanent failure: no retry, no resubmission."""
+
+    class UnreadableQueueRunner(FakeRunner):
+        def query_job(
+            self,
+            cluster_name: str,
+            *,
+            job_name: str,
+            job_id: int | None = None,
+            timeout: float = 60,
+        ) -> RemoteJobInfo | None:
+            del cluster_name, job_name, job_id, timeout
+            raise SkyPilotOutputError.unknown_job_status(None)
+
+    runner = UnreadableQueueRunner()
+    bridge = _bridge(tmp_path, socket_dir, runner)
+    bridge.start()
+    try:
+        frame = _send_raw(
+            bridge, encode_message(EvaluationRequest(kind="accuracy", invocation_id="7" * 32))
+        )
+    finally:
+        bridge.close()
+
+    assert isinstance(frame, ErrorFrame)
+    assert frame.error == "SkyPilotOutputError"
+    assert runner.commands == []

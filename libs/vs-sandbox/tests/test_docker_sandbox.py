@@ -773,6 +773,59 @@ class TestCleanupOnExit:
         assert docker.argvs[1] == ("docker", "rm", "-f", "abc123")
         assert "abc123" not in _live_containers
 
+    @pytest.mark.parametrize(
+        ("returncode", "stderr", "outcome"),
+        [
+            (0, "", "released"),
+            (1, "Error response from daemon: No such container: abc123", "released"),
+            (
+                1,
+                "Error response from daemon: removal of container abc123 is already in progress",
+                "released",
+            ),
+            (1, "daemon unavailable", "kept"),
+            (1, "", "kept"),
+            (125, "Error: no such container", "kept"),
+        ],
+    )
+    def test_cleanup_and_stop_agree_on_when_a_container_is_released(
+        self,
+        returncode: int,
+        stderr: str,
+        outcome: str,
+        tmp_path: Path,
+    ) -> None:
+        """Regression: atexit cleanup kept a container whose removal was already in progress.
+
+        ``stop`` treated "removal ... is already in progress" as removed while the
+        atexit cleanup compared its own copy of the text, so the two disagreed.
+        """
+        rm = docker_result(returncode=returncode, stderr=stderr)
+
+        def settled_by(act: str) -> bool:
+            docker = ScriptedDockerCli()
+            docker.on(("docker", "rm"), rm)
+            docker.always(docker_result(stdout="abc123\n"))
+            sandbox = DockerSandbox(
+                docker=docker, host_workspace=str(tmp_path / "workspace"), image="test-image"
+            )
+            sandbox.start()
+            try:
+                if act == "stop":
+                    try:
+                        sandbox.stop()
+                    except RuntimeError:
+                        return False
+                else:
+                    _cleanup_containers(docker)
+                return "abc123" not in _live_containers
+            finally:
+                _live_containers.pop("abc123", None)
+
+        released = outcome == "released"
+        assert settled_by("stop") is released
+        assert settled_by("cleanup") is released
+
 
 class TestEnvVars:
     def test_env_vars_passed_to_docker_run(self, tmp_path: Path, docker: ScriptedDockerCli) -> None:

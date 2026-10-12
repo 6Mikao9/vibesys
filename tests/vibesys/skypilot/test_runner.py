@@ -11,7 +11,10 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_sandbox.api.skypilot import (
-    ClusterStatus,
+    ClusterUnknown,
+    ClusterUp,
+    JobEnd,
+    JobEnded,
     JobStatus,
     ProcessResult,
     ResolvedSkyPilotResources,
@@ -597,10 +600,10 @@ def test_inspect_cluster_parses_json_and_unknown_states() -> None:
 
     active = runner.inspect_cluster("lease")
     assert active is not None
-    assert active.status is ClusterStatus.UP
+    assert active.life == ClusterUp()
     unknown = runner.inspect_cluster("lease")
     assert unknown is not None
-    assert unknown.status is ClusterStatus.UNKNOWN
+    assert unknown.life == ClusterUnknown(raw="ODD")
     assert runner.inspect_cluster("lease") is None
     assert fake.calls[0] == (
         "sky",
@@ -617,7 +620,7 @@ def test_ensure_reuses_active_cluster_without_launch() -> None:
 
     cluster = SkyPilotJobRunner(fake).ensure_cluster("lease", _resources())
 
-    assert cluster.status is ClusterStatus.UP
+    assert cluster.life == ClusterUp()
     assert len(fake.calls) == 1
 
 
@@ -632,7 +635,7 @@ def test_ensure_replaces_stopped_cluster() -> None:
 
     cluster = SkyPilotJobRunner(fake).ensure_cluster("lease", _resources())
 
-    assert cluster.status is ClusterStatus.UP
+    assert cluster.life == ClusterUp()
     assert fake.calls[1] == ("sky", "down", "-y", "lease")
     assert fake.calls[2][1:7] == ("launch", "-y", "-d", "-c", "lease", fake.calls[2][6])
     assert fake.task_documents == [build_task_document(_resources(), command=("true",))]
@@ -656,7 +659,11 @@ def test_run_detaches_discovers_job_and_streams_logs(
     fake = FakeCommandRunner(
         [
             _result(),
-            _result(stdout=json.dumps({"lease": [{"job_name": "job-token", "job_id": 7}]})),
+            _result(
+                stdout=json.dumps(
+                    {"lease": [{"job_name": "job-token", "job_id": 7, "status": "RUNNING"}]}
+                )
+            ),
             _result(returncode, "stdout\n", "stderr\n"),
         ]
     )
@@ -698,7 +705,7 @@ def test_ensure_waits_for_init_to_become_up() -> None:
 
     cluster = threads.run(lambda: runner.ensure_cluster("lease", _resources()))
 
-    assert cluster.status is ClusterStatus.UP
+    assert cluster.life == ClusterUp()
     assert len(fake.calls) == 3
 
 
@@ -714,7 +721,7 @@ def test_ensure_polls_through_any_number_of_init_reports(inits: int, seed: int |
 
     cluster = threads.run(lambda: runner.ensure_cluster("lease", _resources(), timeout=None))
 
-    assert cluster.status is ClusterStatus.UP
+    assert cluster.life == ClusterUp()
     assert len(fake.calls) == inits + 2
 
 
@@ -734,7 +741,11 @@ def test_run_timeout_preserves_discovered_job_for_recovery(tmp_path: Path) -> No
     fake = FakeCommandRunner(
         [
             _result(),
-            _result(stdout=json.dumps({"lease": [{"job_name": "job-token", "job_id": 7}]})),
+            _result(
+                stdout=json.dumps(
+                    {"lease": [{"job_name": "job-token", "job_id": 7, "status": "RUNNING"}]}
+                )
+            ),
             ProcessTimeoutError(("sky", "logs"), 10),
             _result(),
         ]
@@ -759,7 +770,11 @@ def test_run_does_not_classify_cli_or_indeterminate_codes_as_application_failure
     fake = FakeCommandRunner(
         [
             _result(),
-            _result(stdout=json.dumps({"lease": [{"job_name": "job-token", "job_id": 7}]})),
+            _result(
+                stdout=json.dumps(
+                    {"lease": [{"job_name": "job-token", "job_id": 7, "status": "RUNNING"}]}
+                )
+            ),
             _result(returncode),
             _result(),
         ]
@@ -801,7 +816,7 @@ def test_successful_side_effect_commands_ignore_truncated_diagnostics(tmp_path: 
     )
     runner = SkyPilotJobRunner(fake, job_name_factory=lambda: "job")
 
-    assert runner.launch("lease", _resources()).status is ClusterStatus.UP
+    assert runner.launch("lease", _resources()).life == ClusterUp()
     result = runner.run("lease", _resources(), workdir=tmp_path, command=("true",))
     runner.cancel("lease", result.remote_job_id)
     runner.release("lease")
@@ -1043,7 +1058,7 @@ def test_query_job_rejects_duplicates_and_changed_ids() -> None:
 
 def test_query_job_returns_none_when_absent_and_parses_status() -> None:
     fake = FakeCommandRunner(
-        [_queue(), _queue({"job_name": "j", "job_id": 7, "status": "succeeded"})]
+        [_queue(), _queue({"job_name": "j", "job_id": 7, "status": "SUCCEEDED"})]
     )
     runner = SkyPilotJobRunner(fake)
 
@@ -1051,6 +1066,7 @@ def test_query_job_returns_none_when_absent_and_parses_status() -> None:
     found = runner.query_job("lease", job_name="j", job_id=7)
     assert found is not None
     assert (found.job_id, found.job_name) == (7, "j")
+    assert found.life == JobEnded(outcome=JobEnd.OK)
 
 
 def test_run_times_out_when_job_never_appears_in_queue(tmp_path: Path) -> None:
@@ -1069,3 +1085,75 @@ def test_run_times_out_when_job_never_appears_in_queue(tmp_path: Path) -> None:
 def test_task_document_rejects_empty_command() -> None:
     with pytest.raises(ValueError, match="command must not be empty"):
         build_task_document(_resources(), command=())
+
+
+# Regressions for status the runner used to guess: a missing job status read as
+# RUNNING, any case was folded to a known status, and a stale listing could take
+# a finished job back to running.
+
+
+def test_query_job_does_not_read_a_missing_status_as_running() -> None:
+    runner = SkyPilotJobRunner(
+        FakeCommandRunner([_queue({"job_name": "j", "job_id": 7})]),
+    )
+
+    with pytest.raises(SkyPilotOutputError, match="unknown job status None"):
+        runner.query_job("lease", job_name="j")
+
+
+_JOB_STATES = [
+    "INIT",
+    "PENDING",
+    "SETTING_UP",
+    "RUNNING",
+    "SUCCEEDED",
+    "FAILED",
+    "FAILED_SETUP",
+    "FAILED_DRIVER",
+    "CANCELLED",
+]
+
+
+@given(status=st.one_of(st.sampled_from(_JOB_STATES), st.text(max_size=14)))
+def test_query_job_accepts_exactly_the_documented_spellings(status: str) -> None:
+    runner = SkyPilotJobRunner(
+        FakeCommandRunner([_queue({"job_name": "j", "job_id": 7, "status": status})]),
+    )
+
+    if status in _JOB_STATES:
+        found = runner.query_job("lease", job_name="j")
+        assert found is not None
+        assert found.life.kind != "unknown"
+    else:
+        with pytest.raises(SkyPilotOutputError, match="unknown job status"):
+            runner.query_job("lease", job_name="j")
+
+
+@given(statuses=st.lists(st.sampled_from(_JOB_STATES), min_size=1, max_size=12))
+def test_a_job_the_queue_reported_finished_never_runs_again(statuses: list[str]) -> None:
+    fake = FakeCommandRunner(
+        [_queue({"job_name": "j", "job_id": 7, "status": status}) for status in statuses]
+    )
+    runner = SkyPilotJobRunner(fake)
+    ended: JobEnded | None = None
+
+    for _ in statuses:
+        found = runner.query_job("lease", job_name="j")
+        assert found is not None
+        if ended is not None:
+            assert found.life == ended
+        elif isinstance(found.life, JobEnded):
+            ended = found.life
+
+
+def test_cluster_status_is_not_matched_case_insensitively() -> None:
+    def runner() -> SkyPilotJobRunner:
+        listing = [{"name": "lease", "status": "up"}]
+        return SkyPilotJobRunner(FakeCommandRunner([_result(stdout=json.dumps(listing))]))
+
+    cluster = runner().inspect_cluster("lease")
+
+    assert cluster is not None
+    assert cluster.life == ClusterUnknown(raw="up")
+    with pytest.raises(SkyPilotClusterNotReadyError, match="unknown status 'up'"):
+        runner().ensure_cluster("lease", _resources())
