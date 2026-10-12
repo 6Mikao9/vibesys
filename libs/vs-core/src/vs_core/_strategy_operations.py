@@ -231,7 +231,8 @@ class StrategyOperations:
     """A subclass of `RenderRoleArtifactsBase` for the strategy's context type."""
     verify: type[VerifyParentRevisionBase]
     interpret: type[InterpretEvidenceBase]
-    retain: type[RetainVerifiedRevisionBase]
+    retain: type[RetainVerifiedRevisionBase] | None = None
+    """The optional retention of a verified revision, for a strategy whose producer may still edit it."""
     capture: type[CaptureCommandBase] | None = None
     """The optional command capture a profile-guided strategy declares."""
     validate_local: type[ValidateLocalBase] | None = None
@@ -251,8 +252,8 @@ class StrategyOperations:
             (RENDER_SUFFIX, self.render),
             (VERIFY_SUFFIX, self.verify),
             (INTERPRET_SUFFIX, self.interpret),
-            (RETAIN_SUFFIX, self.retain),
         )
+        retain = ((RETAIN_SUFFIX, self.retain),) if self.retain is not None else ()
         capture = ((CAPTURE_SUFFIX, self.capture),) if self.capture is not None else ()
         validate = (
             ((VALIDATE_LOCAL_SUFFIX, self.validate_local),)
@@ -262,7 +263,7 @@ class StrategyOperations:
         export = (
             ((EXPORT_PATCH_SUFFIX, self.export_patch),) if self.export_patch is not None else ()
         )
-        return (*required, *capture, *validate, *export)
+        return (*required, *retain, *capture, *validate, *export)
 
     def registration_of(self, suffix: str) -> OperationRegistration | None:
         """The registration of the operation with this suffix, or None when not declared."""
