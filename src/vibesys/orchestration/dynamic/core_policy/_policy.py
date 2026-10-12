@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.orchestration.dynamic.core_policy._limits import limits_for, run_deadline_at
 from vibesys.orchestration.dynamic.core_policy._replies import reply_schemas
+from vibesys.orchestration.dynamic.models import ProfileField
 from vibesys.orchestration.dynamic.strategy.api import (
     JUDGE_REPLY,
     DynamicConfig,
@@ -70,6 +71,7 @@ class PolicyInputs(_Value):
     profiling: bool
     profile_measurement: bool
     profile_capture_withheld: bool = False
+    profile_fields: tuple[ProfileField, ...] = ()
     accuracy_seconds: Seconds | None = None
     benchmark_seconds: Seconds | None = None
     profile_seconds: Seconds | None = None
@@ -142,6 +144,7 @@ def build_core_policy(
         # the evidence capability the workstream promises to the planner.
         profiling=inputs.profile_measurement,
         profile_measurement=inputs.profile_measurement,
+        profile_fields=inputs.profile_fields if inputs.profile_measurement else (),
         queue_allowance_seconds=float(bounds.queue_allowance_seconds),
         **stage_budgets,
     )
