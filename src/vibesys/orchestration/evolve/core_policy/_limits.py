@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from vs_core.api import Limits
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.evolve.strategy.api import EvolveConfig
+    from vibesys.orchestration.evolve.search.api import EvolveConfig
 
 # Core requires a finite deadline. An unset `[run] max_run_seconds` means unbounded, which is the
 # largest finite double: no run clock reaches it and nothing adds to it.
@@ -22,7 +22,7 @@ def run_deadline_at(max_run_seconds: int | None) -> float:
 def limits_for(
     config: EvolveConfig, *, observe_interval: float, observe_backoff_cap: float
 ) -> Limits:
-    """Bounds that fit the strategy's own budgets exactly.
+    """Bounds that fit the search's own budgets exactly.
 
     One child is one attempt, and a run starts at most every cold start plus every child of every
     generation, so attempts are `total_attempts` and a refund (an attempt core never admitted) can

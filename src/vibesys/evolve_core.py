@@ -2,7 +2,7 @@
 
 The pure policy lives in `orchestration/evolve/core_policy`. This module does the effects it
 cannot: store the evaluation recipe, read the evaluation identity, choose the workspace mode the
-run environment supports, bind the strategy's operation roles to the runtime's production owners
+run environment supports, bind the search's operation roles to the runtime's production owners
 and read a run's committed record.
 """
 
@@ -24,19 +24,21 @@ from vibesys.orchestration.evolve.core_policy.api import (
     PolicyInputs,
     RunBounds,
     build_core_policy,
+    evolve_operation_registry,
     project_strategy_state,
     prompts,
     run_prompt_variables,
 )
 from vibesys.orchestration.evolve.models import EvolveOptions
-from vibesys.orchestration.evolve.strategy.api import (
+from vibesys.orchestration.evolve.search.api import (
     OPERATIONS,
-    EvolveStrategyState,
-    evolve_operation_registry,
+    EvolveState,
+    PromptContext,
     measurement_recipe,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
+from vs_core.api import Piped
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
 from vs_runtime.api.core import (
     OperationCatalog,
@@ -82,18 +84,20 @@ def resolve_core_policy(
 
 
 def evolve_operation_catalog(ports: OperationPorts) -> OperationCatalog:
-    """The operations the evolve strategy requires, each owned by the production owner of its role."""
+    """The operations the evolve search requires, each owned by the production owner of its role."""
     return operation_catalog(OPERATIONS, ports)
 
 
-def evolve_projector(plugin_id: str) -> RuntimeRecordProjector[EvolveStrategyState]:
-    """Read an evolve run's strategy state from its committed runtime record."""
+def evolve_projector(plugin_id: str) -> RuntimeRecordProjector[Piped[EvolveState, PromptContext]]:
+    """Read an evolve run's search state from its committed runtime record."""
     return RuntimeRecordProjector(
         plugin_id=plugin_id,
-        state_type=EvolveStrategyState,
-        record_type=RuntimeRecord[EvolveStrategyState],
+        state_type=Piped[EvolveState, PromptContext],
+        record_type=RuntimeRecord[Piped[EvolveState, PromptContext]],
         operations=evolve_operation_registry(),
-        project=lambda state, revision: project_strategy_state(state, experiment_revision=revision),
+        project=lambda state, revision: project_strategy_state(
+            state.inner, experiment_revision=revision
+        ),
     )
 
 
@@ -121,9 +125,10 @@ def _plan(context: CoreRunContext) -> CorePlan:
         ),
         isolated_candidates=context.environment.parallel_candidate_obstacle is None,
     )
-    config = policy.strategy.config
+    config = policy.config
     return CorePlan(
-        strategy=policy.strategy,
+        search=policy.search,
+        config=config,
         reply_schemas=policy.reply_schemas,
         facts=policy.facts,
         limits=policy.limits,

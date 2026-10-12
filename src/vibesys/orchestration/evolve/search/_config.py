@@ -1,6 +1,6 @@
 """Static policy knobs of one evolve run, built from the validated options.
 
-Configuration is an input of the strategy, never persisted state: restarting the strategy with
+Configuration is an input of the search, never persisted state: restarting the search with
 the same options reproduces every decision.
 """
 
@@ -13,14 +13,14 @@ from vibesys.orchestration.evolve.population import (
     OpenEvolveSelectorConfig,
     PopulationConfig,
 )
-from vs_core.api import ArtifactRef, WorkspaceMode
+from vs_core.api.search import ArtifactRef, Backoff, WorkspaceMode
 
 type Positive = Annotated[int, Field(gt=0)]
 type Duration = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
 class EvolveConfig(CandidateConfig):
-    """Search policy: budgets, selection knobs, ranking space and per-role deadlines."""
+    """Scientific policy: budgets, selection knobs, ranking space and per-role deadlines."""
 
     # The evaluation recipe artifact every measurement plan cites.
     recipe: ArtifactRef
@@ -36,7 +36,7 @@ class EvolveConfig(CandidateConfig):
     # Cold-start attempts, each one a settled child; the first passing one seeds the population.
     bootstrap_max_attempts: Positive
     # Children in flight at once. Core admits no more than this (`Limits.max_parallel`), and the
-    # strategy starts a slot only when fewer are in flight, so no start waits in core's queue.
+    # search starts a slot only when fewer are in flight, so no start waits in core's queue.
     max_parallelism: Positive = 1
     # Reply correction bound per logical turn: the first reply plus this many corrections.
     max_corrections: Annotated[int, Field(ge=0)] = 1
@@ -63,9 +63,10 @@ class EvolveConfig(CandidateConfig):
     benchmark_seconds: Duration = 3600.0
     operation_seconds: Duration = 300.0
 
-    def drop_backoff(self, drops: int) -> float:
-        """Seconds to wait before re-asking a turn that was already lost ``drops`` times."""
-        return min(self.turn_drop_backoff_cap_seconds, self.turn_drop_backoff_seconds * 2**drops)
+    @property
+    def backoff(self) -> Backoff:
+        """How long a lost turn waits before it is asked again, doubling per drop up to the cap."""
+        return Backoff(first=self.turn_drop_backoff_seconds, cap=self.turn_drop_backoff_cap_seconds)
 
     @property
     def profiling(self) -> bool:

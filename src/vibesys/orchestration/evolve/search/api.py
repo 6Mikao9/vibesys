@@ -1,20 +1,13 @@
-"""Public surface of the evolve strategy package."""
+"""Public surface of the evolve search package."""
 
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
-from vibesys.orchestration.evolve.strategy._config import EvolveConfig
-from vibesys.orchestration.evolve.strategy._draft import measurement_recipe
-from vibesys.orchestration.evolve.strategy._ids import (
-    decision_id,
-    invocation_id,
-    role_id,
-    session_id,
-)
-from vibesys.orchestration.evolve.strategy._operations import (
+from vibesys.orchestration.evolve.search._config import EvolveConfig
+from vibesys.orchestration.evolve.search._ids import IDS, bootstrap_key, child_key
+from vibesys.orchestration.evolve.search._operations import (
     EXPORT_PATCH_KIND,
     INTERPRET_KIND,
     OPERATIONS,
     RENDER_KIND,
-    RETAIN_KIND,
     VERIFY_KIND,
     EvidenceReadings,
     ExportPatch,
@@ -23,13 +16,10 @@ from vibesys.orchestration.evolve.strategy._operations import (
     PatchExport,
     RenderedArtifacts,
     RenderRoleArtifacts,
-    RetainVerifiedRevision,
-    RetentionReceipt,
     VerifyParentRevision,
-    evolve_operation_registrations,
-    evolve_operation_registry,
 )
-from vibesys.orchestration.evolve.strategy._prompts import (
+from vibesys.orchestration.evolve.search._population import Stage, stage_of
+from vibesys.orchestration.evolve.search._prompts import (
     JudgePrompt,
     MutatePrompt,
     ObjectiveAxis,
@@ -37,40 +27,58 @@ from vibesys.orchestration.evolve.strategy._prompts import (
     PromptContext,
     PromptTemplate,
 )
-from vibesys.orchestration.evolve.strategy._schemas import (
+from vibesys.orchestration.evolve.search._recipe import measurement_recipe
+from vibesys.orchestration.evolve.search._schemas import (
     JUDGE_REPLY,
     MUTATOR_REPLY,
     PROFILER_REPLY,
     STRATEGY_ID,
 )
-from vibesys.orchestration.evolve.strategy._state import (
+from vibesys.orchestration.evolve.search._search import EvolveSearch
+from vibesys.orchestration.evolve.search._slot import Slot
+from vibesys.orchestration.evolve.search._state import (
     STATE_SCHEMA,
-    EvolveStrategyState,
-    Role,
-    SlotState,
-    Stage,
+    ColdStart,
+    EvolveState,
+    Finished,
+    Generation,
+    Selecting,
 )
-from vibesys.orchestration.evolve.strategy._strategy import EvolveStrategy
+from vibesys.orchestration.evolve.search._values import (
+    Advisory,
+    Failure,
+    FailureKind,
+    Finding,
+    Role,
+    SlotPlan,
+)
 
 __all__ = [
     "EXPORT_PATCH_KIND",
+    "IDS",
     "INTERPRET_KIND",
     "JUDGE_REPLY",
     "MUTATOR_REPLY",
     "OPERATIONS",
     "PROFILER_REPLY",
     "RENDER_KIND",
-    "RETAIN_KIND",
     "STATE_SCHEMA",
     "STRATEGY_ID",
     "VERIFY_KIND",
     "AcceptedReading",
+    "Advisory",
+    "ColdStart",
     "EvidenceReading",
     "EvidenceReadings",
     "EvolveConfig",
-    "EvolveStrategy",
-    "EvolveStrategyState",
+    "EvolveSearch",
+    "EvolveState",
     "ExportPatch",
+    "Failure",
+    "FailureKind",
+    "Finding",
+    "Finished",
+    "Generation",
     "InterpretEvidence",
     "JudgePrompt",
     "MetricRow",
@@ -84,17 +92,14 @@ __all__ = [
     "PromptTemplate",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
-    "RetainVerifiedRevision",
-    "RetentionReceipt",
     "Role",
-    "SlotState",
+    "Selecting",
+    "Slot",
+    "SlotPlan",
     "Stage",
     "VerifyParentRevision",
-    "decision_id",
-    "evolve_operation_registrations",
-    "evolve_operation_registry",
-    "invocation_id",
+    "bootstrap_key",
+    "child_key",
     "measurement_recipe",
-    "role_id",
-    "session_id",
+    "stage_of",
 ]

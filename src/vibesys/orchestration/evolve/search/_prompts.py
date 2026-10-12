@@ -1,10 +1,10 @@
-"""Typed data the strategy hands to the declared prompt-rendering operation.
+"""Typed data the search hands to the agent pipeline, which renders it into a prompt.
 
-The strategy never builds prompt text. It sends a `PromptContext`; the operation's executor
-renders the named template with `vs_prompts` and stores the artifacts. A child's workspace is an
-isolated child of its parent's revision, so what the legacy loop kept in the population file
-(the parent, the inspirations and the lessons of failed cold starts) is rendered from the typed
-rows below.
+The search never builds prompt text. It asks an agent with a `PromptContext`; the pipeline has
+the declared render operation render the named template with `vs_prompts` and store the
+artifacts. A child's workspace is an isolated child of its parent's revision, so what the legacy
+loop kept in the population file (the parent, the inspirations and the lessons of failed cold
+starts) is rendered from the typed rows below.
 """
 
 from enum import StrEnum
@@ -14,7 +14,7 @@ from pydantic import Field
 
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
-from vs_core.api import EvidenceRef, RevisionRef, Value
+from vs_core.api.search import EvidenceRef, RevisionRef, Value
 
 
 class PromptTemplate(StrEnum):

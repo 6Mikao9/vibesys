@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.orchestration.evolve.core_policy._agents import build_search, reply_schemas
 from vibesys.orchestration.evolve.core_policy._limits import limits_for, run_deadline_at
-from vibesys.orchestration.evolve.core_policy._replies import reply_schemas
-from vibesys.orchestration.evolve.strategy.api import (
+from vibesys.orchestration.evolve.search.api import (
+    IDS,
     JUDGE_REPLY,
     EvolveConfig,
-    EvolveStrategy,
     Role,
-    role_id,
 )
 from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
 from vs_core.api import (
@@ -31,7 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from vibesys.orchestration.evolve.models import EvolveOptions
-    from vs_core.api import Limits, SchemaRef
+    from vs_core.api import Limits, SchemaRef, Search
 
 type Seconds = Annotated[int, Field(gt=0)]
 
@@ -51,7 +50,7 @@ class RunBounds(_Value):
 
 
 class PolicyInputs(_Value):
-    """What the host resolved about the run before the strategy starts, as plain values."""
+    """What the host resolved about the run before the search starts, as plain values."""
 
     objective: Annotated[str, Field(min_length=1)]
     baseline_commit: Annotated[str, Field(min_length=1)]
@@ -73,9 +72,14 @@ class PolicyInputs(_Value):
 
 @dataclass(frozen=True)
 class EvolveCorePolicy:
-    """What the shell needs to start, run and resume an evolve search on the core."""
+    """What the shell needs to start, run and resume an evolve search on the core.
 
-    strategy: EvolveStrategy
+    `facts`, `limits` and `deadline_at` go into the core state; `reply_schemas` into
+    the session resolver; `search.declaration` names the operations to offer.
+    """
+
+    search: Search[Any, Any]
+    config: EvolveConfig
     facts: CoreRunFacts
     limits: Limits
     deadline_at: float
@@ -93,7 +97,7 @@ def requirements_for(config: EvolveConfig) -> EvidenceRequirements:
         assessment_authorities=(
             AssessmentAuthority(
                 kind=AssessmentKind.LOCAL_VALIDATION,
-                role_id=role_id(Role.JUDGE.value),
+                role_id=IDS.role_id(Role.JUDGE.value),
                 output_schema=JUDGE_REPLY,
             ),
         ),
@@ -105,7 +109,7 @@ def requirements_for(config: EvolveConfig) -> EvidenceRequirements:
 
 
 def config_for(options: EvolveOptions, bounds: RunBounds, inputs: PolicyInputs) -> EvolveConfig:
-    """Project the validated options and resolved inputs onto the strategy's static config."""
+    """Project the validated options and resolved inputs onto the search's static config."""
     stage_budgets = {
         name: float(seconds)
         for name, seconds in (
@@ -168,7 +172,8 @@ def build_core_policy(
     """The policy of one evolve run from its validated options and resolved inputs."""
     config = config_for(options, bounds, inputs)
     return EvolveCorePolicy(
-        strategy=EvolveStrategy(config=config),
+        search=build_search(config),
+        config=config,
         facts=CoreRunFacts(
             objective=inputs.objective,
             baseline=RevisionRef.of_git_commit(inputs.baseline_commit),
@@ -182,6 +187,6 @@ def build_core_policy(
             observe_backoff_cap=float(bounds.observe_backoff_cap_seconds),
         ),
         deadline_at=run_deadline_at(bounds.max_run_seconds),
-        reply_schemas=reply_schemas(),
+        reply_schemas=reply_schemas(config),
         requirements=requirements_for(config),
     )

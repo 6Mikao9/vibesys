@@ -4,22 +4,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.evolve.search.api import stage_of
 from vibesys.run.contracts import PluginProjection
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState
+    from vibesys.orchestration.evolve.search.api import EvolveState
 
 
-def project_strategy_state(
-    state: EvolveStrategyState, *, experiment_revision: int
-) -> PluginProjection:
-    """Project one strategy state; `experiment_revision` is the core revision it was read at."""
+def project_strategy_state(state: EvolveState, *, experiment_revision: int) -> PluginProjection:
+    """Project one search state; `experiment_revision` is the core revision it was read at."""
     population = state.population
     return PluginProjection(
         payload={
-            "population": None if population is None else population.model_dump(mode="json"),
-            "generation": 0 if population is None else population.generation,
-            "stage": state.stage.value,
+            "population": population.model_dump(mode="json"),
+            "generation": population.generation,
+            "stage": stage_of(population).value,
         },
         experiment_revision=experiment_revision,
     )

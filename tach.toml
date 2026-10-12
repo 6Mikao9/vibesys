@@ -1384,18 +1384,18 @@ expose = ["[A-Za-z][A-Za-z0-9_]*"]
 from = ["vibesys.orchestration.evolve.models"]
 
 [[modules]]
-path = "vibesys.orchestration.evolve.strategy"
+path = "vibesys.orchestration.evolve.search"
 layer = "loops"
 depends_on = ["vs_core", "vibesys.candidates", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.population", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.prompts"]
 
 [[interfaces]]
-from = ["vibesys.orchestration.evolve.strategy"]
+from = ["vibesys.orchestration.evolve.search"]
 expose = ["api", "api\\..*"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.strategy", "vibesys.orchestration.profilers", "vibesys.run.contracts"]
+depends_on = ["vs_core", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.search", "vibesys.orchestration.profilers", "vibesys.prompts", "vibesys.run.contracts"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.evolve.core_policy"]
@@ -1410,7 +1410,7 @@ expose = ["evolve_core_registration"]
 # stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.evolve_core"
 layer = "loops"
-depends_on = ["vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.evolve_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.strategy", "vibesys.plugin_registration", "vibesys.prompts"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.evolve_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.search", "vibesys.plugin_registration", "vibesys.prompts"]
 
 [[interfaces]]
 from = ["vibesys.evolve_roles"]
@@ -1421,7 +1421,7 @@ expose = ["CORE_ROLES", "JUDGE", "MUTATOR", "PROFILER"]
 # that the pure core_policy may not hold.
 path = "vibesys.evolve_roles"
 layer = "loops"
-depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.strategy"]
+depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.search"]
 
 [[modules]]
 path = "vs_core._session_scope"
