@@ -237,7 +237,7 @@ def begin(
     return Measuring(attempts=1), [_measure(0, facts, config, measuring, _NO_CLOCK)]
 
 
-def update(  # noqa: PLR0911  # LW-220406 [PLR0911]; one exhaustive match over (phase, event) is the machine; each arm returns its next phase.
+def update(  # LW-220406 [PLR0911]; one exhaustive match over (phase, event) is the machine; each arm returns its next phase.
     baseline: Baseline,
     event: Event,
     view: RunView,

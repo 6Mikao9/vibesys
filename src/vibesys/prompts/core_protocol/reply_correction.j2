@@ -7,7 +7,7 @@
 } -%}
 Your previous {{ role }} reply violated its output schema:
 {% for item in errors %}
-- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ meaning[item.code.value] }}
+- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ item.message or meaning[item.code.value] }}
 {% endfor %}
 
 Reply again with only schema-valid JSON.

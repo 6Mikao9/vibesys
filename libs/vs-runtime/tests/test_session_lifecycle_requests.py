@@ -60,7 +60,9 @@ class World:
         sessions = self._project.state.state_store_namespace("sessions")
         self.checkpoints = DurableSessionStore(sessions.slot("sessions.json", AgentSessionState))
         self.sessions: FakeAgentSessions | None = None
-        self.host: SessionHost = open_lifecycle_host(base / "workspace", self.checkpoints, gate=gate)
+        self.host: SessionHost = open_lifecycle_host(
+            base / "workspace", self.checkpoints, gate=gate
+        )
 
     def store(self) -> ReceiptStore:
         return ReceiptStore(self._project.state.state_store_namespace("run"))

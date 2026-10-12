@@ -109,7 +109,7 @@ the turn returned nothing usable{% if item.ended %} ({{ item.ended.value }}){% e
   'not-json': 'the reply is not valid JSON',
 } -%}
 {% for item in errors %}
-- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ meaning[item.code.value] }}
+- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ item.message or meaning[item.code.value] }}
 {% endfor %}
 {%- endmacro %}
 
