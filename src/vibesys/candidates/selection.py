@@ -54,6 +54,10 @@ if TYPE_CHECKING:
     from vs_core.api import Decision, Event
 
 
+PROPOSE = DecisionId(root="propose")
+FINISH = DecisionId(root="finish")
+
+
 class Winner(Value):
     """The retained candidate proposed for adoption, or the trusted baseline."""
 
@@ -117,7 +121,7 @@ def selection_of(winner: Winner) -> Selection:
 def begin(winner: Winner, view: RunView) -> tuple[Adopting, list[Decision]]:
     """Propose the winner for adoption, once."""
     proposal = ProposeWinner(
-        decision_id=DecisionId(root="propose"), scope=THIS_RUN, selection=selection_of(winner)
+        decision_id=PROPOSE, scope=THIS_RUN, selection=selection_of(winner)
     )
     return Adopting(winner=winner), [Wait(request=proposal, until=until_deadline(view))]
 
@@ -153,6 +157,4 @@ def finish(winner: Winner | None, *, stopping: bool, no_winner_reason: str) -> F
             reason=ending_reason(ending, winner.hypothesis_id or "kept the trusted input"),
             selection=selection_of(winner),
         )
-    return Finish(
-        decision_id=DecisionId(root="finish"), scope=THIS_RUN, mode="drain", result=result
-    )
+    return Finish(decision_id=FINISH, scope=THIS_RUN, mode="drain", result=result)

@@ -14,6 +14,7 @@ from pydantic import Field, model_validator
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
+from vibesys.orchestration.dynamic.models import StrategyReason
 from vs_core.api import (
     AttemptId,
     CheckpointDecline,
@@ -237,7 +238,7 @@ class HypothesisRecord(Value):
     first_sequence: int = Field(gt=0)
     lineage_parent_id: str | None = None
     strategy: HypothesisStrategy = HypothesisStrategy.AVAILABLE
-    reason_kind: str | None = None
+    reason_kind: StrategyReason | None = None
     reason: str = ""
     last_task: str = ""
     continuation_rounds: int = Field(default=0, ge=0)

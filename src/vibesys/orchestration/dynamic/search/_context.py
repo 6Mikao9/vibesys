@@ -1,205 +1,159 @@
-"""Budget arithmetic and prompt data derived from state and the run view.
+"""What the planning call reads of the search: budgets, offered parents and the compact history.
 
-Everything here is a pure function of `DynamicStrategyState`, `RunView` and
-`DynamicConfig`. Prompt contexts are typed values; the strategy never writes
-prompt text.
+`PlanWorld` is a read-only slice of the search's state and the run's view, built for one event.
+Everything on it is a pure function of that slice; the prompt it builds is a typed value, never
+text.
 """
 
-import hashlib
-import re
+from __future__ import annotations
 
-from vibesys.candidates.api import BaselineStage
-from vibesys.orchestration.dynamic.strategy import _review_evidence as review_evidence
-from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._parents import ParentOption, options
-from vibesys.orchestration.dynamic.strategy._prompts import (
+import hashlib
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from vibesys.candidates.api import Baseline, failure, reading
+from vibesys.metrics import reading_of
+from vibesys.orchestration.dynamic.search import _briefs as briefs
+from vibesys.orchestration.dynamic.search._parents import ParentOption, ParentSnapshot, options
+from vibesys.orchestration.dynamic.search._plan import PlanLedger
+from vibesys.orchestration.dynamic.search._prompts import (
     BuildableRow,
-    EvidenceCitation,
     HistoryRow,
-    ImplementPrompt,
     PlannerPrompt,
     ProfileHistoryRow,
     ProfileHistoryStatus,
-    ProfilePrompt,
-    ReviewPrompt,
+    WorkstreamHistoryRow,
 )
-from vibesys.orchestration.dynamic.strategy._state import (
-    AttemptRecord,
-    BlockerKind,
-    DynamicStrategyState,
+from vibesys.orchestration.dynamic.search._values import (
+    FinishedWork,
     HypothesisRecord,
-    RoundRecord,
     WorkKind,
-    WorkPhase,
 )
-from vs_core.api import EvidenceKind, RunView
+from vibesys.orchestration.dynamic.search._workstream import Workstream
+from vs_core.api import EvidenceKind, RevisionRef
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from vibesys.orchestration.dynamic.search._config import DynamicConfig
+    from vs_core.api import RunView
 
 _HISTORY_ROWS = 20
 _HISTORY_TITLE_CHARS = 200
 _HISTORY_SUMMARY_CHARS = 600
-_CUT = " [cut]"
-_HISTORY_FAILURE_CHARS = 1200
 _PROFILE_EVIDENCE_IDS = 8
-_RETRY_TEXT_CHARS = 1200
 
 
-def remaining(state: DynamicStrategyState, config: DynamicConfig) -> int:
+def remaining(config: DynamicConfig, *, started: int, refunded: int) -> int:
     """Workstreams the run may still schedule; a refund returns its slot to the budget."""
-    return max(config.start_budget - len(state.attempts) + state.refunded, 0)
+    return max(config.start_budget - started + refunded, 0)
 
 
-def active(state: DynamicStrategyState) -> tuple[AttemptRecord, ...]:
-    """Workstreams that have not finished."""
-    return tuple(item for item in state.attempts if item.phase is not WorkPhase.DONE)
-
-
-def capacity(state: DynamicStrategyState, config: DynamicConfig) -> int:
+def free_slots(config: DynamicConfig, *, active: int, left: int) -> int:
     """Free slots the next plan may fill, bounded by the remaining budget."""
-    return max(min(config.max_in_flight - len(active(state)), remaining(state, config)), 0)
+    return max(min(config.max_in_flight - active, left), 0)
 
 
-def baseline_resolved(state: DynamicStrategyState) -> bool:
-    """Whether the input measurement has reached a terminal stage."""
-    return state.baseline.stage in {
-        BaselineStage.MEASURED,
-        BaselineStage.UNMEASURABLE,
-        BaselineStage.NOT_CONFIGURED,
-    }
-
-
-def input_trusted(state: DynamicStrategyState) -> bool:
-    """Whether the input revision has a trusted reading, or no gate is configured to give one."""
-    return (
-        state.baseline.stage in {BaselineStage.MEASURED, BaselineStage.NOT_CONFIGURED}
-        and state.baseline.accuracy_passed is not False
-    )
-
-
-def offered(state: DynamicStrategyState, view: RunView) -> tuple[ParentOption, ...]:
+def offered_parents(
+    parents: Iterable[ParentSnapshot], withheld: tuple[str, ...], view: RunView
+) -> tuple[ParentOption, ...]:
     """Parents the planner may name: provable by core and not withheld."""
     return tuple(
         item
-        for item in options(state.parents, view)
-        if item.snapshot.revision.revision_id.root not in state.withheld
+        for item in options(parents, view)
+        if item.snapshot.revision.revision_id.root not in withheld
     )
 
 
-def offer_snapshot(state: DynamicStrategyState, view: RunView) -> str:
+def offer_snapshot(base: RevisionRef, offered: tuple[ParentOption, ...]) -> str:
     """Name the immutable offer so a reply cannot cite a parent that was not shown."""
-    facts = sorted(item.option_id for item in offered(state, view))
-    digest = hashlib.sha256("\n".join((view.facts.baseline.digest, *facts)).encode())
+    facts = sorted(item.option_id for item in offered)
+    digest = hashlib.sha256("\n".join((base.digest, *facts)).encode())
     return digest.hexdigest()
 
 
 def _status(record: HypothesisRecord, running: frozenset[str]) -> str:
-    if record.hypothesis_id in running:
-        return "running"
-    return record.strategy.value
-
-
-def _bounded(text: str, limit: int) -> str:
-    """Cut free agent text to ``limit`` characters for the planner's compact history.
-
-    The record keeps the whole text; only this rendered view is bounded, and a cut is
-    marked so the planner does not read a prefix as the whole.
-    """
-    return text if len(text) <= limit else f"{text[:limit]}{_CUT}"
-
-
-def _tail(text: str, limit: int) -> str:
-    """The last ``limit`` characters of a failure's output, where its cause usually is."""
-    return text if len(text) <= limit else f"{_CUT.strip()} {text[-limit:]}"
-
-
-def _fence(text: str) -> str:
-    """A Markdown code fence that no line of ``text`` can close.
-
-    It is longer than the longest run of backticks in the text, and at least three.
-    """
-    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
-    return "`" * max(3, longest + 1)
+    return "running" if record.hypothesis_id in running else record.strategy.value
 
 
 def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRow:
     last = record.rounds[-1] if record.rounds else None
-    tail = "" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS)
+    shown = "" if last is None else briefs.tail(last.failure_tail, briefs.FAILURE_CHARS)
     return HistoryRow(
         hypothesis_id=record.hypothesis_id,
         sequence=record.first_sequence,
-        title=_bounded(record.title, _HISTORY_TITLE_CHARS),
+        title=briefs.bounded(record.title, _HISTORY_TITLE_CHARS),
         status=_status(record, running),
         strategy=record.strategy.value,
         outcome=None if last is None or last.outcome is None else last.outcome.value,
-        summary="" if last is None else _bounded(last.summary, _HISTORY_SUMMARY_CHARS),
+        summary=""
+        if last is None
+        else briefs.bounded(last.summary, _HISTORY_SUMMARY_CHARS),
         review_passed=None if last is None else last.review_passed,
         accuracy_passed=None if last is None else last.accuracy_passed,
         benchmark_passed=None if last is None else last.benchmark_passed,
         candidate=None if last is None else last.candidate,
         metrics=() if last is None else last.metrics,
         partial=None if last is None else last.partial,
-        failure_tail=tail,
-        failure_fence=_fence(tail),
-        failure=_unexplained(last),
+        failure_tail=shown,
+        failure_fence=briefs.fence(shown),
+        failure=None if last is None else last.failure,
     )
 
 
-def _profile_history_row(record: AttemptRecord, view: RunView) -> ProfileHistoryRow:
-    """Project a profile attempt without copying its lifecycle into strategy state."""
-    reading = next(
-        (item for item in reversed(record.readings) if item.kind is EvidenceKind.PROFILING),
-        None,
-    )
-    finished = record.phase is WorkPhase.DONE
-    observed = finished and reading is not None and reading.passed
+def _profile_row(
+    sequence: int,
+    plan_fields: tuple[str, ...],
+    work: FinishedWork | None,
+    running: Workstream | None,
+) -> ProfileHistoryRow:
+    """A profile workstream as the planner sees it: running, or what its capture established."""
+    source = work if work is not None else running
+    if source is None:
+        message = "a profile row has a workstream or a finished record"
+        raise ValueError(message)
+    plan = source.plan
+    refs = () if work is None or work.proof is None else work.proof.refs
+    found = None if work is None else reading_of(work.readings, EvidenceKind.PROFILING)
+    observed = work is not None and found is not None and found.passed
     status = (
-        ProfileHistoryStatus.OBSERVED
+        ProfileHistoryStatus.RUNNING
+        if work is None
+        else ProfileHistoryStatus.OBSERVED
         if observed
         else ProfileHistoryStatus.FAILED
-        if finished
-        else ProfileHistoryStatus.RUNNING
     )
-    diagnosis = "" if not observed or reading is None else reading.feedback
-    # A failure explanation belongs to a profile that failed; an observed one has none.
-    failure = (
-        ""
-        if status is not ProfileHistoryStatus.FAILED
-        else record.failure
-        or ("" if reading is None or reading.passed else reading.feedback)
-        or "profile produced no trusted evidence"
-    )
-    detail = diagnosis or failure
+    diagnosis = "" if not observed or found is None else found.feedback
+    printed = "" if observed or work is None else _printed(work, found)
     return ProfileHistoryRow(
-        profile_id=record.plan.work_id,
-        sequence=record.sequence,
-        target_hypothesis_id=record.plan.parent_hypothesis_id,
-        revision=record.parent,
-        question=_bounded(record.plan.question, _HISTORY_SUMMARY_CHARS),
-        decision_impact=_bounded(record.plan.decision_impact, _HISTORY_SUMMARY_CHARS),
+        profile_id=plan.work_id,
+        sequence=sequence,
+        target_hypothesis_id=plan.parent_hypothesis_id,
+        revision=source.parent,
+        question=briefs.bounded(plan.question, _HISTORY_SUMMARY_CHARS),
+        decision_impact=briefs.bounded(plan.decision_impact, _HISTORY_SUMMARY_CHARS),
         status=status,
-        evidence_ids=tuple(item.evidence_id for item in record.evidence[:_PROFILE_EVIDENCE_IDS]),
-        captured_fields=record.plan.required_fields if observed else (),
-        metrics=() if not observed or reading is None else reading.metrics,
+        evidence_ids=tuple(item.evidence_id for item in refs[:_PROFILE_EVIDENCE_IDS]),
+        captured_fields=plan_fields if observed else (),
+        metrics=() if not observed or found is None else found.metrics,
         artifacts=(
             ()
             if not observed
-            else tuple(
-                artifact.artifact_id.root
-                for item in view.measurements
-                if item.key in record.evidence
-                for artifact in item.artifacts
-            )
+            else tuple(artifact.artifact_id.root for item in refs for artifact in item.artifacts)
         ),
-        diagnosis=_tail(diagnosis, _HISTORY_FAILURE_CHARS),
-        failure=_tail(failure, _HISTORY_FAILURE_CHARS),
-        detail_fence=_fence(detail),
+        diagnosis=briefs.tail(diagnosis, briefs.FAILURE_CHARS),
+        failure=None if work is None or observed else work.failure,
+        failure_output=briefs.tail(printed, briefs.FAILURE_CHARS),
+        detail_fence=briefs.fence(diagnosis or printed),
     )
 
 
-def _unexplained(last: RoundRecord | None) -> str:
-    """The reason a round ended, unless its failure tail already says it."""
-    if last is None or not last.failure or last.failure == last.failure_tail:
-        return ""
-    return _bounded(last.failure, _HISTORY_SUMMARY_CHARS)
+def _printed(work: FinishedWork, found: object) -> str:
+    """What a failed profile's evidence printed, else what its failure captured."""
+    feedback = getattr(found, "feedback", "")
+    if feedback:
+        return str(feedback)
+    return "" if work.failure is None else work.failure.output
 
 
 def _buildable(item: ParentOption) -> BuildableRow:
@@ -219,91 +173,85 @@ def _buildable(item: ParentOption) -> BuildableRow:
     )
 
 
-def planner_prompt(
-    state: DynamicStrategyState, config: DynamicConfig, view: RunView
-) -> PlannerPrompt:
-    """The free-slot planning request: budget, offered parents and compact history."""
-    running = frozenset(item.plan.work_id for item in active(state))
-    rows = tuple(_history_row(item, running) for item in state.hypotheses)
-    profiles = tuple(
-        _profile_history_row(item, view)
-        for item in state.attempts
-        if item.plan.kind is WorkKind.PROFILE
-    )
-    history = tuple(sorted((*rows, *profiles), key=lambda item: item.sequence))
-    shown = history[-_HISTORY_ROWS:]
-    shown_sequences = {item.sequence for item in shown}
-    return PlannerPrompt(
-        capacity=capacity(state, config),
-        in_flight=len(running),
-        remaining=remaining(state, config),
-        base_revision=view.facts.baseline,
-        base_accuracy_passed=state.baseline.accuracy_passed,
-        offer_snapshot=offer_snapshot(state, view),
-        buildable=tuple(_buildable(item) for item in offered(state, view)),
-        history=shown,
-        older_ids=tuple(
-            item.hypothesis_id for item in rows if item.sequence not in shown_sequences
-        ),
-        baseline=state.baseline.metrics,
-        input_failure=state.baseline.failure,
-        profiling=config.profiling,
-        profile_fields=config.profile_fields,
-    )
+@dataclass(frozen=True)
+class PlanWorld:
+    """Everything one planning event reads of the search."""
 
+    config: DynamicConfig
+    base: RevisionRef
+    baseline: Baseline
+    hypotheses: tuple[HypothesisRecord, ...]
+    running: tuple[Workstream, ...]
+    finished: tuple[FinishedWork, ...]
+    refunded: int
+    offered: tuple[ParentOption, ...]
 
-def implement_prompt(record: AttemptRecord, state: DynamicStrategyState) -> ImplementPrompt:
-    """One isolated implementation request for a scheduled workstream."""
-    prior = next(
-        (item for item in state.hypotheses if item.hypothesis_id == record.plan.work_id), None
-    )
-    last = prior.rounds[-1] if prior is not None and prior.rounds else None
-    failed = next(
-        (item for item in reversed(record.blockers) if item.kind is BlockerKind.FAILED), None
-    )
-    tail = "" if last is None else _tail(last.failure_tail, _HISTORY_FAILURE_CHARS)
-    return ImplementPrompt(
-        hypothesis_id=record.plan.work_id,
-        hypothesis=record.plan.hypothesis,
-        task=record.plan.task,
-        pass_criteria=record.plan.pass_criteria,
-        parent_revision=record.parent,
-        evidence=tuple(EvidenceCitation(location=item) for item in record.plan.evidence),
-        worktree_revision=None if last is None else last.candidate,
-        prior_revision=None if last is None else last.candidate,
-        feedback=None if record.feedback is None else _bounded(record.feedback, _RETRY_TEXT_CHARS),
-        prior_failure_tail=tail,
-        prior_failure_fence=_fence(tail),
-        blocker=None if failed is None else _bounded(failed.summary, _RETRY_TEXT_CHARS),
-        narrowed_step=(
-            None
-            if failed is None or not failed.next_step.strip()
-            else _bounded(failed.next_step, _RETRY_TEXT_CHARS)
-        ),
-        turns_without_candidate=len(record.blockers),
-    )
+    @property
+    def active(self) -> int:
+        """Workstreams that have not finished."""
+        return len(self.running)
 
+    @property
+    def done(self) -> int:
+        """Workstreams that have finished."""
+        return len(self.finished)
 
-def review_prompt(record: AttemptRecord, view: RunView) -> ReviewPrompt:
-    """Independent review of the exact candidate, with every trusted evaluation of it."""
-    if record.candidate is None:
-        message = "review requires a retained candidate"
-        raise ValueError(message)
-    return ReviewPrompt(
-        hypothesis_id=record.plan.work_id,
-        hypothesis=record.plan.hypothesis,
-        pass_criteria=record.plan.pass_criteria,
-        candidate=record.candidate,
-        summary=record.summary,
-        evidence=tuple(EvidenceCitation(location=item) for item in record.plan.evidence),
-        evaluations=review_evidence.evaluations(record, view),
-    )
+    @property
+    def remaining(self) -> int:
+        """Workstreams the run may still schedule."""
+        return remaining(self.config, started=self.active + self.done, refunded=self.refunded)
 
+    @property
+    def capacity(self) -> int:
+        """Free slots the next plan may fill."""
+        return free_slots(self.config, active=self.active, left=self.remaining)
 
-def profile_prompt(record: AttemptRecord) -> ProfilePrompt:
-    """Measurement-only request against the frozen target revision."""
-    return ProfilePrompt(
-        question=record.plan.question,
-        required_fields=record.plan.required_fields,
-        target=record.parent,
-    )
+    @property
+    def ledger(self) -> PlanLedger:
+        """What plan validation reads: hypotheses, what runs and which IDs are profiles."""
+        profiles = {item.plan.work_id for item in self.finished if item.plan.kind is WorkKind.PROFILE}
+        profiles |= {item.plan.work_id for item in self.running if item.plan.kind is WorkKind.PROFILE}
+        return PlanLedger(
+            hypotheses=self.hypotheses,
+            running=frozenset(item.plan.work_id for item in self.running),
+            profile_ids=frozenset(profiles),
+        )
+
+    def prompt(self) -> PlannerPrompt:
+        """The free-slot planning request: budget, offered parents and compact history."""
+        running = frozenset(item.plan.work_id for item in self.running)
+        rows: list[WorkstreamHistoryRow] = [_history_row(item, running) for item in self.hypotheses]
+        implement_rows = tuple(rows)
+        profiles = [
+            _profile_row(item.sequence, item.plan.required_fields, item, None)
+            for item in self.finished
+            if item.plan.kind is WorkKind.PROFILE
+        ]
+        profiles += [
+            _profile_row(item.sequence, item.plan.required_fields, None, item)
+            for item in self.running
+            if item.plan.kind is WorkKind.PROFILE
+        ]
+        history = tuple(sorted((*rows, *profiles), key=lambda row: row.sequence))
+        shown = history[-_HISTORY_ROWS:]
+        shown_sequences = {row.sequence for row in shown}
+        seen = reading(self.baseline)
+        return PlannerPrompt(
+            capacity=self.capacity,
+            in_flight=len(running),
+            remaining=self.remaining,
+            base_revision=self.base,
+            base_accuracy_passed=None if seen is None else seen.accuracy_passed,
+            offer_snapshot=offer_snapshot(self.base, self.offered),
+            buildable=tuple(_buildable(item) for item in self.offered),
+            history=shown,
+            older_ids=tuple(
+                row.hypothesis_id
+                for row in implement_rows
+                if isinstance(row, HistoryRow) and row.sequence not in shown_sequences
+            ),
+            baseline=() if seen is None else seen.metrics,
+            input_failure=failure(self.baseline),
+            profiling=self.config.profiling,
+            profile_fields=self.config.profile_fields,
+        )

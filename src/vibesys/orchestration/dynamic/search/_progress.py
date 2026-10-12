@@ -7,12 +7,18 @@ turn did: a retained revision other than the parent's and every earlier turn's, 
 output not seen before. What the agent says about its next step goes into the retry prompt
 but never earns a turn, because rewording is free. The policy is data: the history of such
 turns (`Blocker`) and one bound, `DynamicConfig.max_unmeasured_turns`. When it refuses, the
-workstream settles as failed with the returned reason, and its slot goes back to the planner.
+workstream settles as failed with the returned failure, and its slot goes back to the planner.
 """
 
-from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._state import Blocker
-from vs_core.api import RevisionRef
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from vibesys.orchestration.dynamic.search._values import Blocker, Failure, FailureKind
+
+if TYPE_CHECKING:
+    from vibesys.orchestration.dynamic.search._config import DynamicConfig
+    from vs_core.api import RevisionRef
 
 
 def _observed_news(
@@ -30,7 +36,7 @@ def _observed_news(
 
 def refusal(
     blockers: tuple[Blocker, ...], config: DynamicConfig, parent: RevisionRef | None
-) -> str | None:
+) -> Failure | None:
     """Why the workstream must not be asked again, or None when another turn may run.
 
     ``blockers`` includes the turn that just ended as its last item; ``parent`` is the
@@ -41,14 +47,12 @@ def refusal(
     latest = blockers[-1]
     spent = len(blockers)
     if spent >= config.max_unmeasured_turns:
-        return (
-            f"{spent} implementer turns ended without a candidate that reached measurement "
-            f"(limit {config.max_unmeasured_turns}); last blocker: {latest.summary}"
+        return Failure(
+            kind=FailureKind.TURN_LIMIT,
+            turns=spent,
+            limit=config.max_unmeasured_turns,
+            blocker=latest,
         )
     if spent > 1 and not _observed_news(blockers[:-1], latest, parent):
-        return (
-            "the last turn ended without a candidate that reached measurement and left no "
-            "retained revision or failure output that an earlier turn did not, so another "
-            f"turn would repeat it; its blocker: {latest.summary}"
-        )
+        return Failure(kind=FailureKind.REPEATED_TURN, blocker=latest)
     return None

@@ -21,6 +21,8 @@ from vibesys.candidates.baseline import (
 )
 from vibesys.candidates.config import CandidateConfig
 from vibesys.candidates.selection import (
+    FINISH,
+    PROPOSE,
     Adopting,
     EligibleRound,
     Winner,
@@ -42,6 +44,8 @@ from vibesys.candidates.settlement import (
 )
 
 __all__ = [
+    "FINISH",
+    "PROPOSE",
     "Adopting",
     "Baseline",
     "CandidateConfig",

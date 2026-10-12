@@ -1,16 +1,20 @@
-"""Operations the dynamic strategy declares; execution belongs to the owning libraries.
+"""Operations the dynamic search declares; execution belongs to the owning libraries.
 
 Core registers only a codec for each operation. The request and outcome shapes are the shared
 bases of `vs_core.api` (`vs_core.api.StrategyOperations`); this module pins dynamic's namespace
 (the persisted kind names), its prompt-context type and its decoded-reading type. A runtime
-executor performs each one and reports an outcome the strategy reads back as `OperationResult`.
+executor performs each one and reports an outcome the search reads back as `OperationFinished`.
+Rendering a prompt is core's: the agent pipeline asks for it, so the search never does.
 """
+
+from __future__ import annotations
 
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel
 
 from vibesys.metrics import EvidenceReading
+from vibesys.orchestration.dynamic.search._prompts import PromptContext
 from vs_core.api import (
     EvidenceReadingsBase,
     InterpretEvidenceBase,
@@ -19,32 +23,24 @@ from vs_core.api import (
     ParentVerification,
     RenderedArtifacts,
     RenderRoleArtifactsBase,
-    RetainVerifiedRevisionBase,
-    RetentionReceipt,
     StrategyOperations,
     VerifyParentRevisionBase,
 )
 
-from ._prompts import PromptContext
-
 RENDER_KIND = "dynamic.render_role_artifacts"
 VERIFY_KIND = "dynamic.verify_parent_revision"
 INTERPRET_KIND = "dynamic.interpret_evidence"
-RETAIN_KIND = "dynamic.retain_verified_revision"
 
 __all__ = [
     "INTERPRET_KIND",
     "OPERATIONS",
     "RENDER_KIND",
-    "RETAIN_KIND",
     "VERIFY_KIND",
     "EvidenceReadings",
     "InterpretEvidence",
     "ParentVerification",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
-    "RetainVerifiedRevision",
-    "RetentionReceipt",
     "VerifyParentRevision",
     "dynamic_operation_registrations",
     "dynamic_operation_registry",
@@ -68,16 +64,10 @@ class EvidenceReadings(EvidenceReadingsBase[EvidenceReading]):
 
 
 class InterpretEvidence(InterpretEvidenceBase):
-    """Decode accepted evidence into typed metrics; the strategy never parses artifacts."""
+    """Decode accepted evidence into typed metrics; the search never parses artifacts."""
 
     kind: Literal["dynamic.interpret_evidence"] = "dynamic.interpret_evidence"
     outcome_model: ClassVar[type[BaseModel]] = EvidenceReadings
-
-
-class RetainVerifiedRevision(RetainVerifiedRevisionBase):
-    """Retain an accuracy-verified exact revision while its producer may still edit."""
-
-    kind: Literal["dynamic.retain_verified_revision"] = "dynamic.retain_verified_revision"
 
 
 OPERATIONS = StrategyOperations(
@@ -85,7 +75,6 @@ OPERATIONS = StrategyOperations(
     render=RenderRoleArtifacts,
     verify=VerifyParentRevision,
     interpret=InterpretEvidence,
-    retain=RetainVerifiedRevision,
 )
 
 
@@ -95,5 +84,5 @@ def dynamic_operation_registrations() -> tuple[OperationRegistration, ...]:
 
 
 def dynamic_operation_registry() -> OperationRegistry:
-    """A closed codec holding only the dynamic strategy's operations."""
+    """A closed codec holding only the dynamic search's operations."""
     return OPERATIONS.registry()

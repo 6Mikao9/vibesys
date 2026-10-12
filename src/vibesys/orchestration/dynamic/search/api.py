@@ -1,33 +1,31 @@
-"""Public surface of the dynamic strategy package."""
+"""Public surface of the dynamic search package."""
 
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
-from vibesys.orchestration.dynamic.strategy._config import DynamicConfig
-from vibesys.orchestration.dynamic.strategy._draft import measurement_recipe
-from vibesys.orchestration.dynamic.strategy._evidence import accept_readings
-from vibesys.orchestration.dynamic.strategy._ids import (
-    decision_id,
-    invocation_id,
-    role_id,
-    session_id,
+from vibesys.orchestration.dynamic.search._agents import (
+    PROTOCOL,
+    ImplementerReplyModel,
+    JudgeReplyModel,
+    agents,
+    build_search,
+    reply_schemas,
 )
-from vibesys.orchestration.dynamic.strategy._operations import (
+from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._ids import IDS
+from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
     OPERATIONS,
     RENDER_KIND,
-    RETAIN_KIND,
     VERIFY_KIND,
     EvidenceReadings,
     InterpretEvidence,
     ParentVerification,
     RenderedArtifacts,
     RenderRoleArtifacts,
-    RetainVerifiedRevision,
-    RetentionReceipt,
     VerifyParentRevision,
     dynamic_operation_registrations,
     dynamic_operation_registry,
 )
-from vibesys.orchestration.dynamic.strategy._parents import (
+from vibesys.orchestration.dynamic.search._parents import (
     ParentConflictError,
     ParentOption,
     ParentSnapshot,
@@ -35,61 +33,69 @@ from vibesys.orchestration.dynamic.strategy._parents import (
     options,
     resolve,
 )
-from vibesys.orchestration.dynamic.strategy._plan import PlanCheck, PlanViolation, validate
-from vibesys.orchestration.dynamic.strategy._prompts import (
+from vibesys.orchestration.dynamic.search._plan import PlanCheck, PlanLedger, validate
+from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
-    PlannerCorrectionPrompt,
+    PlannerCorrection,
     PlannerPrompt,
+    PlannerReask,
     ProfileHistoryRow,
     ProfileHistoryStatus,
     ProfilePrompt,
     PromptContext,
     PromptTemplate,
-    ReplyCorrectionPrompt,
-    ResumePrompt,
     ReviewEvaluation,
     ReviewPrompt,
-    WaitUnrecordedPrompt,
 )
-from vibesys.orchestration.dynamic.strategy._schemas import (
+from vibesys.orchestration.dynamic.search._recipe import measurement_recipe
+from vibesys.orchestration.dynamic.search._schemas import (
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
     PLANNER_REPLY,
     PROFILER_REPLY,
 )
-from vibesys.orchestration.dynamic.strategy._state import (
-    STATE_SCHEMA,
-    DynamicStrategyState,
+from vibesys.orchestration.dynamic.search._search import DynamicSearch
+from vibesys.orchestration.dynamic.search._state import STATE_SCHEMA, DynamicState
+from vibesys.orchestration.dynamic.search._values import (
+    Failure,
+    FailureKind,
     HypothesisRecord,
+    PlanProblem,
+    PlanViolation,
     Role,
     RoundRecord,
-    Winner,
+    ViolationCode,
 )
-from vibesys.orchestration.dynamic.strategy._strategy import DynamicStrategy
-from vs_core.api import ledger_refs, trusted_keys, turn_candidate
+from vibesys.candidates.api import Winner
+from vs_core.api import ledger_refs, trusted_keys
 
 __all__ = [
+    "IDS",
     "IMPLEMENTER_REPLY",
     "INTERPRET_KIND",
     "JUDGE_REPLY",
     "OPERATIONS",
     "PLANNER_REPLY",
     "PROFILER_REPLY",
+    "PROTOCOL",
     "RENDER_KIND",
-    "RETAIN_KIND",
     "STATE_SCHEMA",
     "VERIFY_KIND",
     "AcceptedReading",
     "DynamicConfig",
-    "DynamicStrategy",
-    "DynamicStrategyState",
+    "DynamicSearch",
+    "DynamicState",
     "EvidenceCitation",
     "EvidenceReading",
     "EvidenceReadings",
+    "Failure",
+    "FailureKind",
     "HypothesisRecord",
     "ImplementPrompt",
+    "ImplementerReplyModel",
     "InterpretEvidence",
+    "JudgeReplyModel",
     "MetricRow",
     "ParentConflictError",
     "ParentOption",
@@ -97,9 +103,12 @@ __all__ = [
     "ParentVerification",
     "PartialRow",
     "PlanCheck",
+    "PlanLedger",
+    "PlanProblem",
     "PlanViolation",
-    "PlannerCorrectionPrompt",
+    "PlannerCorrection",
     "PlannerPrompt",
+    "PlannerReask",
     "ProfileHistoryRow",
     "ProfileHistoryStatus",
     "ProfilePrompt",
@@ -107,30 +116,23 @@ __all__ = [
     "PromptTemplate",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
-    "ReplyCorrectionPrompt",
-    "ResumePrompt",
-    "RetainVerifiedRevision",
-    "RetentionReceipt",
     "ReviewEvaluation",
     "ReviewPrompt",
     "Role",
     "RoundRecord",
     "VerifyParentRevision",
-    "WaitUnrecordedPrompt",
+    "ViolationCode",
     "Winner",
-    "accept_readings",
-    "decision_id",
+    "agents",
+    "build_search",
     "dynamic_operation_registrations",
     "dynamic_operation_registry",
     "ingest",
-    "invocation_id",
     "ledger_refs",
     "measurement_recipe",
     "options",
+    "reply_schemas",
     "resolve",
-    "role_id",
-    "session_id",
     "trusted_keys",
-    "turn_candidate",
     "validate",
 ]

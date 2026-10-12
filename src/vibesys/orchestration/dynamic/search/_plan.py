@@ -15,6 +15,7 @@ from vibesys.orchestration.dynamic.models import (
     PortfolioPlan,
     ProfileOffer,
     ProfilePlan,
+    StrategyReason,
     WorkstreamPlan,
     planned_id,
 )
@@ -46,7 +47,7 @@ class PlanUpdate(Value):
     hypothesis_id: str
     disposition: Literal[HypothesisStrategy.PARKED, HypothesisStrategy.ABANDONED]
     reason: str
-    reason_kind: str
+    reason_kind: StrategyReason
 
 
 class PlanCheck(Value):
@@ -234,7 +235,7 @@ def _updates(
                     hypothesis_id=update.hypothesis_id,
                     disposition=_RETIREMENTS[update.disposition],
                     reason=update.reason,
-                    reason_kind=update.reason_kind.value,
+                    reason_kind=update.reason_kind,
                 )
             )
             continue

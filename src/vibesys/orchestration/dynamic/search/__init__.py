@@ -1,1 +1,1 @@
-"""Dynamic search as a pure vs-core strategy; import through `api` only."""
+"""The dynamic search: a pure state machine over vs-core's search API; import through `api` only."""
