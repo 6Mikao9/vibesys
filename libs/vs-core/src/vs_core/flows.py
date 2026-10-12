@@ -34,21 +34,34 @@ from collections import deque
 from dataclasses import dataclass, field
 from functools import cache
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 
 from ._registry import ContractError
 from .children import Dropped
 from .types.agents import Checkpoint
 from .types.common import DecisionId, InvocationRef, RunFacts, Seconds, Value
 from .types.kinds import EventKind
+from .types.records import OperationResult
 from .types.search import (
     AdoptionFinished,
+    CheckpointKnown,
     Event,
+    Interrupted,
+    MeasurementFinished,
+    MessageDelivered,
+    MessageDropped,
+    OperationFinished,
+    ResumeReady,
     StopRequested,
     TimeReached,
+    TurnEnded,
     TurnFinished,
+    TurnYielded,
+    WorkspaceClosed,
+    WorkspaceOpened,
+    YieldFailed,
 )
 from .types.strategy import Decision, Finish, ProposeWinner, StrategyState, Wait, WakeAt, Work
 from .types.until import Failed, Within
@@ -56,6 +69,7 @@ from .types.until import Failed, Within
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Generator
 
+    from ._registry import OperationRegistry
     from .types.search import RunView
     from .types.strategy import SearchDeclaration
 
@@ -82,17 +96,53 @@ class FlowCodeChanged(Exception):  # noqa: N818  # LW-220424 [N818]; the name st
 class RecordedTurn(Value):
     """A ``TurnFinished`` as the journal keeps it: the reply as JSON, rebuilt by the waiter's model."""
 
+    kind: Literal["recorded_turn"] = "recorded_turn"
     decision: DecisionId
     invocation: InvocationRef
     reply_json: str
     checkpoint: Checkpoint | None = None
 
 
+class RecordedOperation(Value):
+    """An ``OperationFinished`` as the journal keeps it: the result as JSON.
+
+    The result's outcome is a registered model, which a state schema may not name, so it is
+    rebuilt through the operation registry the search was given.
+    """
+
+    kind: Literal["recorded_operation"] = "recorded_operation"
+    decision: DecisionId
+    result_json: str
+
+
+type Recorded = Annotated[RecordedTurn | RecordedOperation, Field(discriminator="kind")]
+
+type JournaledEvent = Annotated[
+    WorkspaceOpened
+    | WorkspaceClosed
+    | MeasurementFinished
+    | AdoptionFinished
+    | StopRequested
+    | TimeReached
+    | MessageDelivered
+    | MessageDropped
+    | Interrupted
+    | TurnEnded
+    | TurnYielded
+    | YieldFailed
+    | ResumeReady
+    | CheckpointKnown
+    | Failed,
+    Field(discriminator="kind"),
+]
+"""Every ``Event`` that is journaled as it is: not a ``TurnFinished`` or ``OperationFinished``."""
+
+
 class Step(Value):
     """What one ``init`` or ``update`` did: its input, the reads it made, its output's digest."""
 
-    event: Event | None = None
-    turn: RecordedTurn | None = None
+    event: JournaledEvent | None = None
+    recorded: Recorded | None = None
     reads: tuple[str, ...] = ()
     digest: str
 
@@ -110,7 +160,7 @@ _DECISIONS = TypeAdapter(list[Decision])
 
 
 def _digest(
-    before: str, item: Event | RecordedTurn | None, reads: tuple[str, ...], out: list[Decision]
+    before: str, item: Event | Recorded | None, reads: tuple[str, ...], out: list[Decision]
 ) -> str:
     """A hash chained over the history, so equal digests mean equal journals so far."""
     parts = [
@@ -280,8 +330,10 @@ class _Run:
         root: Callable[[Flow, Any], Coroutine[Any, Any, None]],
         config: object,
         facts: RunFacts,
+        registry: OperationRegistry | None,
     ) -> None:
         self.facts = facts
+        self._registry = registry
         self.stop_requested = False
         self.out: list[Decision] = []
         self.dropped: list[Dropped] = []
@@ -309,7 +361,7 @@ class _Run:
         return self._end()
 
     def feed(
-        self, item: Event | RecordedTurn, view: RunView | None, recorded: tuple[str, ...] | None
+        self, item: Event | Recorded, view: RunView | None, recorded: tuple[str, ...] | None
     ) -> list[Decision]:
         """Deliver one event; the flows it unblocks run until all are suspended again."""
         self._begin(view, recorded)
@@ -430,9 +482,9 @@ class _Run:
 
     # -- routing -----------------------------------------------------------------------------
 
-    def _route(self, item: Event | RecordedTurn) -> None:
+    def _route(self, item: Event | Recorded) -> None:
         match item:
-            case RecordedTurn(decision=decision):
+            case RecordedTurn(decision=decision) | RecordedOperation(decision=decision):
                 self._answer(decision, item)
             case TimeReached(time=now):
                 for task in list(self._sleeping):
@@ -454,21 +506,35 @@ class _Run:
                 if decision is not None:
                     self._answer(decision, item)
 
-    def _answer(self, decision: DecisionId, item: Event | RecordedTurn) -> None:
+    def _answer(self, decision: DecisionId, item: Event | Recorded) -> None:
         waiter = self._waiting.pop(decision, None)
         if waiter is None:
-            kind = EventKind.TURN_FINISHED if isinstance(item, RecordedTurn) else item.kind
+            kind = item.kind
+            if isinstance(item, RecordedTurn):
+                kind = EventKind.TURN_FINISHED
+            elif isinstance(item, RecordedOperation):
+                kind = EventKind.OPERATION_FINISHED
             self.dropped.append(Dropped(event=EventKind(kind), decision=decision))
             return
         task, block = waiter
-        if isinstance(item, RecordedTurn):
-            item = TurnFinished(
-                decision=decision,
-                invocation=item.invocation,
-                reply=block.reply.model_validate_json(item.reply_json),
-                checkpoint=item.checkpoint,
-            )
-        self._ready.append((task, item, None))
+        self._ready.append((task, self._rebuilt(item, block), None))
+
+    def _rebuilt(self, item: Event | Recorded, block: _OnDecision) -> Event:
+        """The event a recorded item stands for: live and replay both go through here."""
+        match item:
+            case RecordedTurn():
+                return TurnFinished(
+                    decision=item.decision,
+                    invocation=item.invocation,
+                    reply=block.reply.model_validate_json(item.reply_json),
+                    checkpoint=item.checkpoint,
+                )
+            case RecordedOperation():
+                context = {"operation_registry": self._registry, "persisted_operation": True}
+                result = OperationResult.model_validate_json(item.result_json, context=context)
+                return OperationFinished(decision=item.decision, result=result)
+            case _:
+                return item
 
     def _stop(self) -> None:
         self.stop_requested = True
@@ -495,17 +561,28 @@ class _Run:
 # -- the search --------------------------------------------------------------------------------
 
 
-def _recorded(event: Event) -> tuple[Event | None, RecordedTurn | None]:
-    """The journal's form of an event: a turn keeps its reply as JSON."""
-    if not isinstance(event, TurnFinished):
-        return event, None
-    turn = RecordedTurn(
-        decision=event.decision,
-        invocation=event.invocation,
-        reply_json=event.reply.model_dump_json(),
-        checkpoint=event.checkpoint,
-    )
-    return None, turn
+def _recorded(
+    event: Event, registry: OperationRegistry | None
+) -> tuple[JournaledEvent | None, Recorded | None]:
+    """The journal's form of an event: a turn or operation result is kept as JSON."""
+    match event:
+        case TurnFinished():
+            turn = RecordedTurn(
+                decision=event.decision,
+                invocation=event.invocation,
+                reply_json=event.reply.model_dump_json(),
+                checkpoint=event.checkpoint,
+            )
+            return None, turn
+        case OperationFinished():
+            if registry is None:
+                message = "a flow that waits on operations needs the operation registry"
+                raise ContractError(("registry",), message)
+            return None, RecordedOperation(
+                decision=event.decision, result_json=event.result.model_dump_json()
+            )
+        case _:
+            return event, None
 
 
 def _key(state: FlowState) -> tuple[int, str]:
@@ -525,16 +602,22 @@ class FlowSearch[C]:
         declaration: SearchDeclaration,
         root: Callable[[Flow, C], Coroutine[Any, Any, None]],
         config: C,
+        registry: OperationRegistry | None = None,
     ) -> None:
-        """Build the search from its declaration, its root flow and its configuration."""
+        """Build the search from its declaration, its root flow and its configuration.
+
+        ``registry`` is needed only by flows that wait on operations: it rebuilds their
+        results on replay.
+        """
         self.declaration = declaration
+        self._registry = registry
         self._root = root
         self._config = config
         self._cached: tuple[tuple[int, str], _Run] | None = None
 
     def fresh(self) -> FlowSearch[C]:
         """A search with the same flow and config and no live runtime, as a restart builds one."""
-        return FlowSearch(self.declaration, self._root, self._config)
+        return FlowSearch(self.declaration, self._root, self._config, self._registry)
 
     @property
     def state_model(self) -> type[FlowState]:
@@ -545,7 +628,7 @@ class FlowSearch[C]:
         """Start the root flow; the journal begins with the step that started it."""
         if config != self._config:
             raise ContractError(("config",), "init must get the config the search was built with")
-        run = _Run(self._root, self._config, facts)
+        run = _Run(self._root, self._config, facts, self._registry)
         decisions = run.start()
         step = Step(digest=_digest("", None, (), decisions))
         state = FlowState(schema_version=1, facts=facts, journal=(step,))
@@ -558,13 +641,13 @@ class FlowSearch[C]:
         """Deliver ``event`` to the flows it unblocks and return what they decided."""
         run = self._runtime(state)
         self._cached = None  # a failed update leaves the runtime half-way: never reuse it
-        recorded, turn = _recorded(event)
-        item = recorded or turn
+        recorded, kept = _recorded(event, self._registry)
+        item = recorded or kept
         assert item is not None  # noqa: S101  # LW-220426 [S101]; _recorded returns exactly one.
         decisions = run.feed(item, view, None)
         step = Step(
             event=recorded,
-            turn=turn,
+            recorded=kept,
             reads=run.reads,
             digest=_digest(state.journal[-1].digest, item, run.reads, decisions),
         )
@@ -578,10 +661,10 @@ class FlowSearch[C]:
         """The live runtime for ``state``: the cached one, or one rebuilt by replay."""
         if self._cached is not None and self._cached[0] == _key(state):
             return self._cached[1]
-        run = _Run(self._root, self._config, state.facts)
+        run = _Run(self._root, self._config, state.facts, self._registry)
         before = ""
         for index, step in enumerate(state.journal):
-            item = step.event or step.turn
+            item = step.event or step.recorded
             try:
                 decisions = run.start() if item is None else run.feed(item, None, step.reads)
             except FlowCodeChanged as changed:

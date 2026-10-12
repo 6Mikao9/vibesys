@@ -49,7 +49,7 @@ from vs_core.types.common import ControlId, DecisionId
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vs_core.api import Decision, OperationRegistry, RunView, Seconds, Within
+    from vs_core.api import Decision, RunView, Seconds, Within
     from vs_core.types.agents import Checkpoint
 
 
@@ -72,8 +72,9 @@ class Asked:
     """One wait the search opened: its decision, the request and its limit."""
 
     decision: DecisionId
-    request: Work
-    until: Within
+    request: Work | Finish
+    until: Within | None
+    """The limit of a wait; None for a ``Finish``, which core answers only by refusing it."""
 
     @property
     def label(self) -> str:
@@ -95,8 +96,6 @@ class FlowRun[C]:
         self.search = search
         self.view = view or FakeView()
         self.restarting = restarting
-        self.registry: OperationRegistry | None = None
-        """Set it when the journal holds operation results, so a restart can decode them."""
         self.state: FlowState
         self.decisions: list[Decision] = []
         """Every decision the search issued, in order."""
@@ -134,7 +133,7 @@ class FlowRun[C]:
         """The wake-up times asked for and not yet reached."""
         return tuple(self._sleeps)
 
-    def expect(self, kind: type[Work], *, label: str | None = None) -> Asked:
+    def expect(self, kind: type[Work | Finish], *, label: str | None = None) -> Asked:
         """The first open wait for a ``kind`` request (with this id root, if given)."""
         for asked in self._open:
             if isinstance(asked.request, kind) and label in (None, asked.label):
@@ -200,12 +199,7 @@ class FlowRun[C]:
     def restart(self) -> None:
         """Round-trip the state through JSON and continue with a new ``FlowSearch``."""
         self.restarts += 1
-        context = (
-            None
-            if self.registry is None
-            else {"operation_registry": self.registry, "persisted_operation": True}
-        )
-        self.state = FlowState.model_validate_json(self.state.model_dump_json(), context=context)
+        self.state = FlowState.model_validate_json(self.state.model_dump_json())
         self.search = self.search.fresh()
 
     # -- bookkeeping -------------------------------------------------------------------------
@@ -220,6 +214,7 @@ class FlowRun[C]:
                     self._sleeps.append(time)
                 case Finish():
                     self.finished = decision
+                    self._open.append(Asked(decision.decision_id, decision, None))
 
     def _close(self, asked: Asked) -> None:
         if asked in self._open:
