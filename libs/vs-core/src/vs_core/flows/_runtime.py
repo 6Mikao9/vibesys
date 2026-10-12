@@ -1,178 +1,59 @@
-"""Flows: a search written as straight-line async code whose effects are journaled and replayed.
-
-A flow is an ``async def`` that reads top to bottom::
-
-    async def root(ctx: Flow, config: Config) -> None:
-        plan = await ctx.wait(AskAgent(decision_id=..., agent="planner", ...), Within(600), reply=Plan)
-        match plan:
-            case TurnFinished(reply=Plan() as plan): ...
-            case Failed(): ...
-        child = ctx.spawn("a", workstream, plan, stoppable=True)
-        await ctx.join(child)
-        await ctx.finish(Finish(...))
-
-``FlowSearch`` runs it as an ordinary ``Search``. There is no asyncio: awaiting ``ctx.wait``,
-``ctx.wake_at``, ``ctx.until`` or ``ctx.join`` suspends the coroutine, and ``update`` resumes
-exactly the flows the incoming event unblocks, runs them (and the children they spawn) until
-every one is suspended again, and returns the decisions they issued, in issue order.
-
-Persistence is replay. The state is ``FlowState``: the run's facts and a journal with one
-``Step`` per event, holding the event, every ``ctx.read`` made while handling it, and a digest
-of the decisions it produced. To resume from a saved state (a restart, another process) the
-search runs the flow code again from ``init`` and feeds it the journaled events and reads; the
-code is deterministic, so it ends up suspended where it was. A digest that differs means the
-code no longer does what the journal recorded, and ``FlowCodeChanged`` is raised.
-
-Rules a flow must keep so that replay works: take every outside fact through ``ctx.read``
-(the clock, attempts, settlements), never from globals; do not branch on anything that
-differs between runs. Locals, loops and ``try`` blocks are free.
-"""
+"""The runtime: flows as coroutines driven by hand, and the ``Flow`` handle they receive."""
 
 from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cache
-from hashlib import sha256
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
-from ._registry import ContractError
-from .children import Dropped
-from .types.agents import Checkpoint
-from .types.common import DecisionId, InvocationRef, RunFacts, Seconds, Value
-from .types.kinds import EventKind
-from .types.records import OperationResult
-from .types.search import (
+from vs_core._registry import ContractError
+from vs_core.children import Dropped
+from vs_core.types.common import DecisionId, RunFacts, Seconds
+from vs_core.types.kinds import EventKind
+from vs_core.types.records import OperationResult
+from vs_core.types.search import (
     AdoptionFinished,
-    CheckpointKnown,
     Event,
-    Interrupted,
-    MeasurementFinished,
-    MessageDelivered,
-    MessageDropped,
     OperationFinished,
-    ResumeReady,
     StopRequested,
     TimeReached,
-    TurnEnded,
     TurnFinished,
-    TurnYielded,
-    WorkspaceClosed,
-    WorkspaceOpened,
-    YieldFailed,
 )
-from .types.strategy import Decision, Finish, ProposeWinner, StrategyState, Wait, WakeAt, Work
-from .types.until import Failed, Within
+from vs_core.types.strategy import Decision, Finish, ProposeWinner, Wait, WakeAt, Work
+from vs_core.types.until import Failed, Within
+
+from ._errors import FlowCodeChanged, Stopped
+from ._state import (
+    Issued,
+    LiveFlow,
+    LiveFlows,
+    Recorded,
+    RecordedOperation,
+    RecordedTurn,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Generator
 
-    from ._registry import OperationRegistry
-    from .types.search import RunView
-    from .types.strategy import SearchDeclaration
+    from vs_core._registry import OperationRegistry
+    from vs_core.types.search import RunView
 
 
-class Stopped(Exception):  # noqa: N818  # LW-220424 [N818]; read as an event ("the child was Stopped"), like asyncio's CancelledError, not as an error condition.
-    """Thrown at the await a ``stoppable`` child is suspended on when the operator stops the run.
+@dataclass(frozen=True)
+class FlowDef:
+    """A flow function registered by name, with the type of the snapshot it restarts from.
 
-    The child may catch it and await more (to wind down). Letting it escape is a bug.
+    A registered flow takes its snapshot as its argument (``async def worker(ctx, s: Snap)``),
+    so ``ctx.spawn("a", worker, Snap(...))`` starts it from that snapshot and
+    ``ctx.safe_point(snap)`` records a later one.
     """
 
-
-class FlowCodeChanged(Exception):  # noqa: N818  # LW-220424 [N818]; the name states what happened, as the replay check reports it.
-    """The flow code no longer reproduces the journal: replay diverged at ``step``."""
-
-    def __init__(self, step: int) -> None:
-        """Name the journal step at which the code and the journal disagree."""
-        super().__init__(f"the flow code diverged from its journal at step {step}")
-        self.step = step
-
-
-# -- the journal -------------------------------------------------------------------------------
-
-
-class RecordedTurn(Value):
-    """A ``TurnFinished`` as the journal keeps it: the reply as JSON, rebuilt by the waiter's model."""
-
-    kind: Literal["recorded_turn"] = "recorded_turn"
-    decision: DecisionId
-    invocation: InvocationRef
-    reply_json: str
-    checkpoint: Checkpoint | None = None
-
-
-class RecordedOperation(Value):
-    """An ``OperationFinished`` as the journal keeps it: the result as JSON.
-
-    The result's outcome is a registered model, which a state schema may not name, so it is
-    rebuilt through the operation registry the search was given.
-    """
-
-    kind: Literal["recorded_operation"] = "recorded_operation"
-    decision: DecisionId
-    result_json: str
-
-
-type Recorded = Annotated[RecordedTurn | RecordedOperation, Field(discriminator="kind")]
-
-type JournaledEvent = Annotated[
-    WorkspaceOpened
-    | WorkspaceClosed
-    | MeasurementFinished
-    | AdoptionFinished
-    | StopRequested
-    | TimeReached
-    | MessageDelivered
-    | MessageDropped
-    | Interrupted
-    | TurnEnded
-    | TurnYielded
-    | YieldFailed
-    | ResumeReady
-    | CheckpointKnown
-    | Failed,
-    Field(discriminator="kind"),
-]
-"""Every ``Event`` that is journaled as it is: not a ``TurnFinished`` or ``OperationFinished``."""
-
-
-class Step(Value):
-    """What one ``init`` or ``update`` did: its input, the reads it made, its output's digest."""
-
-    event: JournaledEvent | None = None
-    recorded: Recorded | None = None
-    reads: tuple[str, ...] = ()
-    digest: str
-
-
-class FlowState(StrategyState):
-    """The persisted state of a flow search: the run's facts and the journal replay needs."""
-
-    facts: RunFacts
-    journal: tuple[Step, ...] = ()
-    dropped: tuple[Dropped, ...] = ()
-    """Results that reached no waiting flow (an abandoned or unknown decision)."""
-
-
-_DECISIONS = TypeAdapter(list[Decision])
-
-
-def _digest(
-    before: str, item: Event | Recorded | None, reads: tuple[str, ...], out: list[Decision]
-) -> str:
-    """A hash chained over the history, so equal digests mean equal journals so far."""
-    parts = [
-        before,
-        item.model_dump_json() if item else "",
-        *reads,
-        _DECISIONS.dump_json(out).decode(),
-    ]
-    return sha256("\n".join(parts).encode()).hexdigest()
-
-
-# -- what a suspended flow waits for -------------------------------------------------------------
+    name: str
+    fn: Callable[..., Coroutine[Any, Any, Any]]
+    snapshot: type[Any]
 
 
 class _Block:
@@ -217,6 +98,20 @@ class _Task:
     result: Any = None
     stopped: bool = False
     joiners: list[_Task] = field(default_factory=list)
+    flow: FlowDef | None = None
+    snapshot: object | None = None
+    """The latest snapshot of a registered flow: what a restart resumes it from."""
+
+
+@dataclass(frozen=True)
+class _Spawn:
+    """What ``ctx.spawn`` asked for."""
+
+    key: str
+    fn: Callable[..., Coroutine[Any, Any, Any]]
+    args: tuple[object, ...]
+    stoppable: bool
+    then: Callable[[Any], None] | None
 
 
 class FlowChild[T]:
@@ -300,7 +195,23 @@ class Flow:
         ``then(result)`` runs in the caller when the child returns. A ``stoppable`` child gets
         ``Stopped`` thrown at its current await when the operator stops the run.
         """
-        return self._run.spawn(self._task, key, lambda ctx: fn(ctx, *args), stoppable, then)
+        return self._run.spawn(self._task, _Spawn(key, fn, args, stoppable, then))
+
+    async def safe_point(self, snapshot: BaseModel) -> None:
+        """Record ``snapshot`` as the state this flow can be restarted from after a code change.
+
+        Only registered flows (``FlowDef``) have snapshots. The flow takes the snapshot as its
+        argument, so after a restart it resumes here with the new code and the work since is
+        redone.
+        """
+        flow = self._task.flow
+        if flow is None:
+            raise ContractError(("safe_point",), "only a registered flow has safe points")
+        if not isinstance(snapshot, flow.snapshot):
+            raise ContractError(
+                ("safe_point",), f"{flow.name} snapshots are {flow.snapshot.__name__}"
+            )
+        self._task.snapshot = snapshot
 
     async def join[T](self, child: FlowChild[T]) -> T:
         """Wait for ``child`` to return and give its result."""
@@ -327,7 +238,7 @@ class _Run:
 
     def __init__(
         self,
-        root: Callable[[Flow, Any], Coroutine[Any, Any, None]],
+        defs: tuple[FlowDef, ...],
         config: object,
         facts: RunFacts,
         registry: OperationRegistry | None,
@@ -337,13 +248,15 @@ class _Run:
         self.stop_requested = False
         self.out: list[Decision] = []
         self.dropped: list[Dropped] = []
-        self._root = root
+        self._defs = defs  # the root first
         self._config = config
+        self._root = _Task(path="")
         self._ready: deque[tuple[_Task, object, BaseException | None]] = deque()
         self._waiting: dict[DecisionId, tuple[_Task, _OnDecision]] = {}
         self._sleeping: list[_Task] = []
         self._conditions: list[_Task] = []
         self._children: list[_Task] = []  # live spawned flows, in spawn order
+        self._pending: dict[str, LiveFlow] = {}  # restored children, started when respawned
         self._issued: dict[tuple[str, str], int] = {}
         self._ids: set[DecisionId] = set()
         self._view: RunView | None = None
@@ -354,11 +267,68 @@ class _Run:
 
     def start(self) -> list[Decision]:
         """Run the root flow until it first suspends."""
-        task = _Task(path="")
-        task.coro = self._root(Flow(self, task), self._config)
         self._begin(None, None)
-        self._resume(task, None, None)
+        root = self._defs[0]
+        self._launch(self._root, root, self._config)
         return self._end()
+
+    def restore(
+        self, base: LiveFlows, view: RunView | None, recorded: tuple[str, ...] | None
+    ) -> list[Decision]:
+        """Restart the flows of ``base`` from their snapshots with the current code.
+
+        The root starts first. Its children start as it spawns them again, each from its own
+        latest snapshot (not the arguments of the new spawn), keeping its decision numbering.
+        """
+        self._begin(view, recorded)
+        self.stop_requested = base.stopping
+        self._issued = {(i.path, i.label): i.count for i in base.issued}
+        self._pending = {live.path: live for live in base.flows if live.path}
+        root = next(live for live in base.flows if not live.path)
+        definition = self._defined(root.name)
+        self._launch(self._root, definition, self._snapshot_of(definition, root))
+        if base.stopping:
+            self._stop()
+        self._settle()
+        return self._end()
+
+    def checkpoint(self) -> LiveFlows:
+        """Where every running flow can be restarted from."""
+        flows = []
+        for task in (self._root, *self._children):
+            definition = task.flow
+            registered = definition is not None
+            text = (
+                _adapter(definition.snapshot).dump_json(task.snapshot).decode()
+                if definition
+                else ""
+            )
+            flows.append(
+                LiveFlow(
+                    path=task.path,
+                    name=definition.name if registered else None,
+                    stoppable=task.stoppable,
+                    snapshot_json=text,
+                )
+            )
+        issued = tuple(Issued(path=p, label=lb, count=n) for (p, lb), n in self._issued.items())
+        return LiveFlows(flows=tuple(flows), issued=issued, stopping=self.stop_requested)
+
+    def _defined(self, name: str | None) -> FlowDef:
+        found = next((d for d in self._defs if d.name == name), None)
+        if found is None:
+            raise FlowCodeChanged(0)  # the new code has no flow of that name to restart
+        return found
+
+    @staticmethod
+    def _snapshot_of(definition: FlowDef, live: LiveFlow) -> object:
+        return _adapter(definition.snapshot).validate_json(live.snapshot_json)
+
+    def _launch(self, task: _Task, definition: FlowDef, argument: object) -> None:
+        """Start ``task`` as a registered flow on ``argument`` (its first snapshot)."""
+        task.flow, task.snapshot = definition, argument
+        task.coro = definition.fn(Flow(self, task), argument)
+        self._resume(task, None, None)
 
     def feed(
         self, item: Event | Recorded, view: RunView | None, recorded: tuple[str, ...] | None
@@ -413,14 +383,8 @@ class _Run:
 
     # -- driving flows -----------------------------------------------------------------------
 
-    def spawn[T](
-        self,
-        parent: _Task,
-        key: str,
-        start: Callable[[Flow], Coroutine[Any, Any, T]],
-        stoppable: bool,  # noqa: FBT001  # LW-220425 [FBT001]; forwarded from the keyword-only `Flow.spawn` argument of the same name.
-        then: Callable[[T], None] | None,
-    ) -> FlowChild[T]:
+    def spawn[T](self, parent: _Task, request: _Spawn) -> FlowChild[T]:
+        key = request.key
         if not key or "/" in key:
             raise ContractError(
                 ("spawn", "key"), "a child key must be non-empty and contain no '/'"
@@ -428,15 +392,27 @@ class _Run:
         path = f"{parent.path}{key}/"
         if any(live.path == path for live in self._children):
             raise ContractError(("spawn", "key"), f"a child {path} is already running")
-        task = _Task(path=path, stoppable=stoppable, then=then)
-        task.coro = start(Flow(self, task))
+        task = _Task(path=path, stoppable=request.stoppable, then=request.then)
         self._children.append(task)
-        self._resume(task, None, None)
+        restored = self._pending.pop(path, None)
+        definition = next((d for d in self._defs if d.fn is request.fn), None)
+        if restored is not None:  # a restart: resume from the child's own latest snapshot
+            definition = self._defined(restored.name)
+            self._launch(task, definition, self._snapshot_of(definition, restored))
+        elif definition is not None:
+            if len(request.args) != 1 or not isinstance(request.args[0], definition.snapshot):
+                message = f"{definition.name} takes its {definition.snapshot.__name__} snapshot"
+                raise ContractError(("spawn", "args"), message)
+            self._launch(task, definition, request.args[0])
+        else:
+            task.coro = request.fn(Flow(self, task), *request.args)
+            self._resume(task, None, None)
         return FlowChild(task)
 
     def _resume(self, task: _Task, value: object, error: BaseException | None) -> None:
         """Run ``task`` to its next suspension, or to its end."""
-        assert task.coro is not None  # noqa: S101  # LW-220426 [S101]; set where every task is made.
+        if task.coro is None:
+            raise ContractError(("flow",), "a flow is resumed only after it was started")
         task.blocked = None
         try:
             block = task.coro.send(value) if error is None else task.coro.throw(error)
@@ -556,120 +532,3 @@ class _Run:
                 return
             self._conditions.remove(waiting)
             self._ready.append((waiting, None, None))
-
-
-# -- the search --------------------------------------------------------------------------------
-
-
-def _recorded(
-    event: Event, registry: OperationRegistry | None
-) -> tuple[JournaledEvent | None, Recorded | None]:
-    """The journal's form of an event: a turn or operation result is kept as JSON."""
-    match event:
-        case TurnFinished():
-            turn = RecordedTurn(
-                decision=event.decision,
-                invocation=event.invocation,
-                reply_json=event.reply.model_dump_json(),
-                checkpoint=event.checkpoint,
-            )
-            return None, turn
-        case OperationFinished():
-            if registry is None:
-                message = "a flow that waits on operations needs the operation registry"
-                raise ContractError(("registry",), message)
-            return None, RecordedOperation(
-                decision=event.decision, result_json=event.result.model_dump_json()
-            )
-        case _:
-            return event, None
-
-
-def _key(state: FlowState) -> tuple[int, str]:
-    return len(state.journal), state.journal[-1].digest
-
-
-class FlowSearch[C]:
-    """A ``Search`` whose behavior is one root flow function.
-
-    ``update`` keeps the live runtime of the newest state it produced. Given any other state
-    (after a restart, or a test branching from an older one) it rebuilds the runtime by replaying
-    the journal, and raises ``FlowCodeChanged`` if the code produces different decisions.
-    """
-
-    def __init__(
-        self,
-        declaration: SearchDeclaration,
-        root: Callable[[Flow, C], Coroutine[Any, Any, None]],
-        config: C,
-        registry: OperationRegistry | None = None,
-    ) -> None:
-        """Build the search from its declaration, its root flow and its configuration.
-
-        ``registry`` is needed only by flows that wait on operations: it rebuilds their
-        results on replay.
-        """
-        self.declaration = declaration
-        self._registry = registry
-        self._root = root
-        self._config = config
-        self._cached: tuple[tuple[int, str], _Run] | None = None
-
-    def fresh(self) -> FlowSearch[C]:
-        """A search with the same flow and config and no live runtime, as a restart builds one."""
-        return FlowSearch(self.declaration, self._root, self._config, self._registry)
-
-    @property
-    def state_model(self) -> type[FlowState]:
-        """The class of the persisted state."""
-        return FlowState
-
-    def init(self, config: C, facts: RunFacts) -> tuple[FlowState, list[Decision]]:
-        """Start the root flow; the journal begins with the step that started it."""
-        if config != self._config:
-            raise ContractError(("config",), "init must get the config the search was built with")
-        run = _Run(self._root, self._config, facts, self._registry)
-        decisions = run.start()
-        step = Step(digest=_digest("", None, (), decisions))
-        state = FlowState(schema_version=1, facts=facts, journal=(step,))
-        self._cached = (_key(state), run)
-        return state, decisions
-
-    def update(
-        self, state: FlowState, event: Event, view: RunView
-    ) -> tuple[FlowState, list[Decision]]:
-        """Deliver ``event`` to the flows it unblocks and return what they decided."""
-        run = self._runtime(state)
-        self._cached = None  # a failed update leaves the runtime half-way: never reuse it
-        recorded, kept = _recorded(event, self._registry)
-        item = recorded or kept
-        assert item is not None  # noqa: S101  # LW-220426 [S101]; _recorded returns exactly one.
-        decisions = run.feed(item, view, None)
-        step = Step(
-            event=recorded,
-            recorded=kept,
-            reads=run.reads,
-            digest=_digest(state.journal[-1].digest, item, run.reads, decisions),
-        )
-        new = state.model_copy(
-            update={"journal": (*state.journal, step), "dropped": tuple(run.dropped)}
-        )
-        self._cached = (_key(new), run)
-        return new, decisions
-
-    def _runtime(self, state: FlowState) -> _Run:
-        """The live runtime for ``state``: the cached one, or one rebuilt by replay."""
-        if self._cached is not None and self._cached[0] == _key(state):
-            return self._cached[1]
-        run = _Run(self._root, self._config, state.facts, self._registry)
-        before = ""
-        for index, step in enumerate(state.journal):
-            item = step.event or step.recorded
-            try:
-                decisions = run.start() if item is None else run.feed(item, None, step.reads)
-            except FlowCodeChanged as changed:
-                raise FlowCodeChanged(index) from changed
-            if _digest(before, item, step.reads, decisions) != step.digest:
-                raise FlowCodeChanged(index)
-            before = step.digest
-        return run

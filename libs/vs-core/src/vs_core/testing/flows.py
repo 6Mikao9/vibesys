@@ -141,7 +141,7 @@ class FlowRun[C]:
         wanted = f"{kind.__name__} {label or ''}".strip()
         have = [f"{type(a.request).__name__} {a.decision.root}" for a in self._open]
         message = f"no open wait for {wanted}; open: {have}"
-        raise AssertionError(message)
+        raise TypeError(message)
 
     # -- delivering events -------------------------------------------------------------------
 
@@ -149,7 +149,9 @@ class FlowRun[C]:
         self, asked: Asked, reply: BaseModel, *, checkpoint: Checkpoint | None = None
     ) -> None:
         """Deliver the agent's ``reply`` to an ``AskAgent`` wait."""
-        assert isinstance(asked.request, AskAgent), "only an AskAgent has a reply"  # noqa: S101  # LW-220426 [S101]; a story error, reported as the failed assertion it is.
+        if not isinstance(asked.request, AskAgent):
+            message = f"{asked.decision.root} is not an AskAgent: it has no reply"
+            raise TypeError(message)
         invocation = InvocationRef(
             session_id=SessionId(root="session"),
             invocation_id=InvocationId(root=f"invocation-{len(self.state.journal)}"),

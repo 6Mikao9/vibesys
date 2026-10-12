@@ -139,7 +139,7 @@ from vs_core.api.routing import EVENT_ROUTES
 from vs_core.attempts import advance_attempt
 from vs_core.children import Child, Children, Dropped
 from vs_core.evaluation import advance_evaluation
-from vs_core.flows import Flow, FlowChild, FlowCodeChanged, FlowSearch, FlowState, Stopped
+from vs_core.flows import Flow, FlowChild, FlowCodeChanged, FlowDef, FlowSearch, FlowState, Stopped
 from vs_core.records import advance_record, recover
 from vs_core.scheduling import schedule
 from vs_core.sessions import advance_session
@@ -788,6 +788,7 @@ __all__ = [
     "Flow",
     "FlowChild",
     "FlowCodeChanged",
+    "FlowDef",
     "FlowSearch",
     "FlowState",
     "Generation",
