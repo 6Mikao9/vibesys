@@ -49,6 +49,7 @@ from vs_core.api import (
     SnapshotAndRetain,
     SnapshotAndRetainRun,
     SubmitMeasurement,
+    Until,
     VerifyAdoption,
 )
 from vs_runtime._receipt_store import Settled, Transient
@@ -93,6 +94,13 @@ class ExecutionContext(BaseModel):
     fence: HostFence
     now_at: float = Field(ge=0, allow_inf_nan=False)
     payload_digest: str = Field(min_length=1)
+    until: Until
+    """When core ends the request: the run-clock time, and the watches that end it sooner.
+
+    An executor may use it to bound its own work. It need not enforce it: the loop cancels
+    a request that is still running once the time passes or a watch fires, and core
+    reports the request as ``Failed``.
+    """
     lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
 
 

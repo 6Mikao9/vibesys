@@ -235,6 +235,5 @@ def submission(
         request_id=RequestId(root=name),
         scope=SCOPE,
         admission_id=ADMISSION,
-        deadline_at=100.0,
         plan=override or plan(candidate=candidate),
     )

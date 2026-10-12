@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vs_core.api import (
     BlockRequest,
     ContractError,
+    FailureReason,
     ObservationStatus,
     RequestObserved,
     Scope,
@@ -52,7 +53,7 @@ class BlockDiagnostic(BaseModel):
     request_id: str = Field(min_length=1)
     target: str = Field(min_length=1)
     scope: Scope
-    diagnostic: str
+    reason: FailureReason
 
 
 # What every published (sealed) block reports; inspection reports the same facts.
@@ -106,7 +107,7 @@ class JournalSemanticEvents:
                         request_id=request_id.root,
                         target=request.target.root,
                         scope=request.scope,
-                        diagnostic=request.diagnostic,
+                        reason=request.reason,
                     ),
                 )
                 return Settled(Published(sequence=sequence))

@@ -487,8 +487,6 @@ class SessionLifecycleRequests:
             depends_on=request.depends_on,
             decision_id=request.decision_id,
             admission_id=request.admission_id,
-            decision_dependencies=request.decision_dependencies,
-            deadline_at=request.deadline_at,
             turn=turn,
             inputs=request.inputs,
         )

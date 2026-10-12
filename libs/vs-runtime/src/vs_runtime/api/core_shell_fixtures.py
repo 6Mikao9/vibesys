@@ -10,11 +10,12 @@ from vs_core.api import (
     ContractError,
     CoreEvent,
     CoreState,
+    Decision,
     DecisionId,
     DispatchAuthorized,
     EnsureSession,
+    Event,
     InputRecord,
-    Proposal,
     ProposalSubmitted,
     RecordsChange,
     RecordsContext,
@@ -26,20 +27,21 @@ from vs_core.api import (
     RequestPhase,
     RoleId,
     RunControlEvent,
-    CoreView,
+    RunFacts,
+    RunView,
     SchedulingChange,
     Scope,
     SessionId,
     SessionInputReceived,
     SessionsChange,
     SessionSpec,
-    StrategyEvent,
     StrategyState,
     TraceFrame,
     Transition,
     initial_state,
     recover,
     trace_step,
+    within,
 )
 from vs_project.api import Committed, FakeStateStore, Unknown
 from vs_runtime.api.core import CoreRuntime, CoreRuntimeBindings
@@ -50,27 +52,25 @@ if TYPE_CHECKING:
 
 class CounterState(StrategyState):
     callbacks: int = 0
-    proposals: int = 0
 
 
-class CounterStrategy:
-    def __init__(self, state: CounterState | None = None) -> None:
-        self.state = state or CounterState(schema_version=1)
+class CounterSearch:
+    """A search that only counts the events it receives and decides nothing."""
+
+    state_model = CounterState
+
+    def __init__(self) -> None:
         self.declaration = initial_state().run.declaration
 
-    def bind(self, state: CounterState) -> CounterStrategy:
-        return CounterStrategy(state)
+    def init(self, config: object, facts: RunFacts) -> tuple[CounterState, list[Decision]]:
+        del config, facts
+        return CounterState(schema_version=1), []
 
-    def on_event(self, view: CoreView, event: StrategyEvent) -> CounterState:
-        del view, event
-        return self.state.model_copy(update={"callbacks": self.state.callbacks + 1})
-
-    def decide(self, view: CoreView) -> Proposal[CounterState]:
-        del view
-        return Proposal[CounterState](
-            state=self.state.model_copy(update={"proposals": self.state.proposals + 1}),
-            decisions=(),
-        )
+    def update(
+        self, state: CounterState, event: Event, view: RunView
+    ) -> tuple[CounterState, list[Decision]]:
+        del event, view
+        return state.model_copy(update={"callbacks": state.callbacks + 1}), []
 
 
 class ShellTraceTransitions:
@@ -121,18 +121,20 @@ class ShellTraceTransitions:
                         state=state.scheduling,
                         events=(feedback,),
                         requests=(
-                            EnsureSession(
-                                scope=Scope(
-                                    owner=state.run.run_id, generation=state.run.generation
+                            within(
+                                EnsureSession(
+                                    scope=Scope(
+                                        owner=state.run.run_id, generation=state.run.generation
+                                    ),
+                                    spec=SessionSpec(
+                                        session_id=SessionId(root=f"session-{event.now_at}"),
+                                        role_id=RoleId(root="worker"),
+                                        policy="reuse",
+                                        lifetime="owner",
+                                        access=Access.WRITE_ARTIFACTS,
+                                    ),
                                 ),
-                                deadline_at=100,
-                                spec=SessionSpec(
-                                    session_id=SessionId(root=f"session-{event.now_at}"),
-                                    role_id=RoleId(root="worker"),
-                                    policy="reuse",
-                                    lifetime="owner",
-                                    access=Access.WRITE_ARTIFACTS,
-                                ),
+                                100,
                             ),
                         )
                         if self.with_requests
@@ -206,8 +208,9 @@ class ShellTraceTransitions:
 def runtime(store: StateStore) -> CoreRuntime[CounterState]:
     return CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
     )
 

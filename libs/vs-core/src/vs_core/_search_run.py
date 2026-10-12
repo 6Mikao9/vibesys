@@ -17,8 +17,10 @@ from typing import TYPE_CHECKING
 
 from ._registry import ContractError
 from ._search_events import run_view, search_events
+from .types.common import RunStatus
 from .types.kernel import ProposalSubmitted
 from .types.kinds import OPT_IN, EventKind, WorkKind
+from .types.records import RecoveryPhase
 from .types.strategy import Finish, Wait, WakeAt
 from .types.until import Within
 
@@ -80,14 +82,27 @@ def _deliverable(declaration: SearchDeclaration, event: Event) -> bool:
 
 
 @dataclass(frozen=True)
+class Inbox:
+    """What waits for the search: events to deliver, and decisions core could not take yet."""
+
+    events: tuple[Event, ...] = ()
+    held: tuple[Decision, ...] = ()
+
+
+@dataclass(frozen=True)
 class Advanced[S: StrategyState]:
-    """What one call changed: the search state, core, the events core published, the wakes."""
+    """What one call changed: the search state, core, the events core published, the wakes.
+
+    ``held`` are decisions the search made while core could not take them (recovery is not
+    ready); the shell keeps them and passes them back in the next ``Inbox``.
+    """
 
     state: S
     core: CoreState
     published: tuple[StrategyEvent, ...] = field(default=())
     wakes: tuple[Seconds, ...] = field(default=())
     submitted: tuple[Submission, ...] = field(default=())
+    held: tuple[Decision, ...] = field(default=())
 
 
 @dataclass(frozen=True)
@@ -107,17 +122,18 @@ class _Pass:
     published: list[StrategyEvent] = field(default_factory=list)
     wakes: list[Seconds] = field(default_factory=list)
     sent: list[Submission] = field(default_factory=list)
+    held: list[Decision] = field(default_factory=list)
 
     def submit(self, decisions: tuple[Decision, ...], core: CoreState) -> CoreState:
-        """Send the decisions to core; queue the events core publishes for the search."""
+        """Send the decisions to core, or hold them until recovery is ready."""
         self.wakes.extend(d.time for d in decisions if isinstance(d, WakeAt))
-        submissions = tuple(
-            self.host.registry.validate_submission(d)
-            for d in decisions
-            if isinstance(d, Wait | Finish)
-        )
-        if not submissions:
+        work = tuple(d for d in decisions if isinstance(d, Wait | Finish))
+        if not work or core.run.status == RunStatus.TERMINAL:
             return core
+        if core.records.recovery.phase != RecoveryPhase.READY:
+            self.held.extend(work)
+            return core
+        submissions = tuple(self.host.registry.validate_submission(d) for d in work)
         self.sent.extend(submissions)
         transition = self.host.step(
             core, ProposalSubmitted(decisions=submissions, expected_revision=core.revision)
@@ -143,14 +159,17 @@ class _Pass:
             published=tuple(self.published),
             wakes=tuple(self.wakes),
             submitted=tuple(self.sent),
+            held=tuple(self.held),
         )
 
 
 def advance[S: StrategyState, C](
-    search: Search[S, C], state: S, core: CoreState, incoming: tuple[Event, ...], host: SearchHost
+    search: Search[S, C], state: S, core: CoreState, host: SearchHost, inbox: Inbox
 ) -> Advanced[S]:
-    """Deliver ``incoming`` one by one; submit decisions; feed back the events they cause."""
-    return _Pass(host, list(incoming)).drain(search, state, core)
+    """Submit what was held, deliver the events one by one, and feed back what that causes."""
+    run = _Pass(host, list(inbox.events))
+    core = run.submit(inbox.held, core)
+    return run.drain(search, state, core)
 
 
 def begin[S: StrategyState, C](
@@ -158,10 +177,10 @@ def begin[S: StrategyState, C](
     config: C,
     core: CoreState,
     host: SearchHost,
-    incoming: tuple[Event, ...] = (),
+    events: tuple[Event, ...] = (),
 ) -> Advanced[S]:
-    """Start a new run: ``init`` on the run's facts, submit its decisions, then ``incoming``."""
+    """Start a new run: ``init`` on the run's facts, submit its decisions, then ``events``."""
     state, decisions = search.init(config, core.run.facts)
-    run = _Pass(host, list(incoming))
-    core = run.submit(check_decisions(search.declaration, decisions), core)
-    return run.drain(search, state, core)
+    return advance(
+        search, state, core, host, Inbox(events, check_decisions(search.declaration, decisions))
+    )

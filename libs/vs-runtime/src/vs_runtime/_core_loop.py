@@ -13,29 +13,36 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    ClockAdvanced,
     ContractError,
     CoreEvent,
     CoreState,
+    Decision,
     DispatchAuthorized,
     EventCursor,
     HostFence,
     HostId,
+    Inbox,
     KernelNotImplementedError,
     Observation,
     OperationRegistry,
-    ProposalSubmitted,
     RecoveryPhase,
     RecoveryStarted,
     RequestId,
     RequestPhase,
     RequestRecord,
     RunEnvelope,
-    Strategy,
+    Search,
+    SearchHost,
     StrategyState,
+    TimeReached,
     Transition,
     TurnObserved,
+    Until,
+    advance,
+    check_decisions,
     orphan_waits,
-    project,
+    search_events,
     step,
     validate_startup,
 )
@@ -57,7 +64,7 @@ from vs_runtime._core_requests import (
 from vs_runtime._evaluation_jobs import awaits_submissions
 
 if TYPE_CHECKING:
-    from vs_core.api import Request, Wait
+    from vs_core.api import OpenWait, Request
     from vs_project.api import Project
     from vs_runtime._core_requests import ExecutionOutcome
 
@@ -178,7 +185,7 @@ class OrphanWaitError(RuntimeCommitError):
     (or at start, for a restored one), naming each waiter, instead.
     """
 
-    def __init__(self, orphans: tuple[Wait, ...]) -> None:
+    def __init__(self, orphans: tuple[OpenWait, ...]) -> None:
         self.orphans = orphans
         named = ", ".join(f"{wait.waiter.value} {wait.subject}" for wait in orphans)
         super().__init__(f"orphan waits, nothing will end them: {named}")
@@ -240,7 +247,6 @@ class _Input[S: StrategyState](BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
     event: CoreEvent
     now_at: float = Field(ge=0, allow_inf_nan=False)
-    proposed_state: S | None = None
     # Executor owner events to commit with this observation, then apply in order.
     owner_events: tuple[OwnerEvent, ...] = ()
     # True for an event that is already in the durable pending_inputs outbox.
@@ -268,7 +274,9 @@ def _task_failure(task: asyncio.Task[Any]) -> BaseException | None:
 
 
 @dataclass(frozen=True)
-class _Decide:
+class _Flush:
+    """Deliver the wake-ups that are due and submit the decisions that were held."""
+
     now_at: float
 
 
@@ -281,6 +289,11 @@ class _Flight:
     record: RequestRecord
     now_at: float
     task: asyncio.Task[ExecutionOutcome]
+
+    @property
+    def until(self) -> Until:
+        """When core ends this request: the loop cancels the task once that has happened."""
+        return self.record.until
 
 
 @dataclass(frozen=True)
@@ -312,13 +325,15 @@ class CoreRuntime[S: StrategyState]:
     def __init__(
         self,
         store: StateStore,
-        strategy: Strategy[S],
+        search: Search[S, Any],
         initial: CoreState,
         *,
+        config: object,
         bindings: CoreRuntimeBindings | None = None,
     ) -> None:
         self._store = store
-        self._strategy = strategy
+        self._search = search
+        self._config = config
         self._initial = initial
         selected = bindings or CoreRuntimeBindings()
         self._registry = selected.registry
@@ -327,16 +342,16 @@ class CoreRuntime[S: StrategyState]:
         self._commits = selected.commits
         self._check_liveness = selected.check_liveness
         self._record_model = cast(
-            "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(type(strategy.state))
+            "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(search.state_model)
         )
         self._envelope_model = cast(
-            "type[RunEnvelope[S]]", RunEnvelope.__class_getitem__(type(strategy.state))
+            "type[RunEnvelope[S]]", RunEnvelope.__class_getitem__(search.state_model)
         )
+        self._host = SearchHost(step=self._transitions.step, registry=self._registry)
         self._record: RuntimeRecord[S] | None = None
         self._storage_revision: int | None = None
         self._fence: StoreFence | None = None
         self._halted = False
-        self._strategy_wake_at: float | None = None
         self._busy = False
         # Authorized requests whose executors are still running. They outlive the calls
         # that start them, so the run loop can decide, tick the clock and read controls
@@ -349,7 +364,7 @@ class CoreRuntime[S: StrategyState]:
         self._publication_failure: OSError | ContractError | None = None
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
-        self._queue: deque[_Input[S] | _Decide] = deque()
+        self._queue: deque[_Input[S] | _Flush] = deque()
         # Durable turn ends whose wait names a job its submission has not made core's yet.
         self._held: list[_Input[S]] = []
         # State after the admitted inputs still queued, valid while core stays at one revision
@@ -363,8 +378,9 @@ class CoreRuntime[S: StrategyState]:
     def resume(
         cls,
         project: Project,
-        strategy: Strategy[S],
+        search: Search[S, Any],
         *,
+        config: object,
         run_id: str | None = None,
         bindings: CoreRuntimeBindings | None = None,
     ) -> CoreRuntime[S]:
@@ -375,8 +391,10 @@ class CoreRuntime[S: StrategyState]:
         It never converts legacy identities or starts a fresh replacement run.
         """
         selected = bindings or CoreRuntimeBindings()
-        resolved = resolve_core_resume(project, strategy, run_id=run_id, registry=selected.registry)
-        return cls(resolved.store, strategy, resolved.record.envelope.core, bindings=selected)
+        resolved = resolve_core_resume(project, search, run_id=run_id, registry=selected.registry)
+        return cls(
+            resolved.store, search, resolved.record.envelope.core, config=config, bindings=selected
+        )
 
     @property
     def record(self) -> RuntimeRecord[S]:
@@ -410,13 +428,13 @@ class CoreRuntime[S: StrategyState]:
             and verified[1] is envelope.core.registry
         ):
             return
-        if envelope.core.run.declaration != self._strategy.declaration:
+        if envelope.core.run.declaration != self._search.declaration:
             raise ContractError(
                 ("declaration",), "offered strategy differs from durable declaration"
             )
         if envelope.core.run.run_id != self._initial.run.run_id:
             raise ContractError(("run_id",), "selected run differs from durable envelope")
-        selected = validate_startup(self._strategy.declaration, envelope.core.run.capabilities)
+        selected = validate_startup(self._search.declaration, envelope.core.run.capabilities)
         if selected.operations != envelope.core.registry:
             raise ContractError(("registry",), "durable registry differs from selected declaration")
         self._identity_verified = (envelope.core.run, envelope.core.registry)
@@ -444,20 +462,23 @@ class CoreRuntime[S: StrategyState]:
             raise RuntimeError(message)
         self._load()
         core = self._initial if self._record is None else self.record.envelope.core
-        if core.run.declaration != self._strategy.declaration:
+        if core.run.declaration != self._search.declaration:
             raise ContractError(("declaration",), "initial strategy declaration mismatch")
-        selected = validate_startup(self._strategy.declaration, core.run.capabilities)
+        selected = validate_startup(self._search.declaration, core.run.capabilities)
         if selected.operations != core.registry:
             raise ContractError(("registry",), "selected operations differ from durable registry")
         self._registry.validate_core(core)
-        strategy_state = (
-            self._strategy.state if self._record is None else self.record.envelope.strategy
-        )
+        decisions: tuple[Decision, ...] = ()
+        if self._record is None:
+            strategy_state, first = self._search.init(self._config, core.run.facts)
+            decisions = check_decisions(self._search.declaration, first)
+        else:
+            strategy_state = self.record.envelope.strategy
         provisional = RunEnvelope[S](
             schema_version=ENVELOPE_SCHEMA_VERSION,
             fence=HostFence(host_id=HostId(root=host_id), epoch=0),
-            strategy_id=self._strategy.declaration.strategy_id,
-            state_schema=self._strategy.declaration.state_schema,
+            strategy_id=self._search.declaration.strategy_id,
+            state_schema=self._search.declaration.state_schema,
             core=core,
             strategy=strategy_state,
             event_cursor=EventCursor(sequence=0)
@@ -478,7 +499,7 @@ class CoreRuntime[S: StrategyState]:
         previous_record = self._record
         previous_revision = self._storage_revision
         self._record = (
-            RuntimeRecord[S].fresh(provisional)
+            RuntimeRecord[S].fresh(provisional).model_copy(update={"pending_decisions": decisions})
             if self._record is None
             else self.record.model_copy(update={"envelope": provisional})
         )
@@ -589,16 +610,18 @@ class CoreRuntime[S: StrategyState]:
         return tail[1] if tail is not None and tail[0] == core.revision else core
 
     @property
-    def strategy_wake_at(self) -> float | None:
-        """The time the strategy's latest proposal waits for, or None when it waits for none."""
-        return self._strategy_wake_at
+    def next_wake_at(self) -> float | None:
+        """The earliest time the search asked to be woken at, or None when it asked for none."""
+        return min(self.record.wakes, default=None)
 
-    def decide(self, *, now_at: float) -> None:
-        """Queue a strategy call against the revision observed when it is consumed."""
+    def flush(self, *, now_at: float) -> None:
+        """Queue delivery of due wake-ups and submission of held decisions.
+
+        Runs against the state when it is consumed, so the loop calls it each iteration.
+        """
         self._require_active(queue_only=True)
-        # Reuse the supplied-time boundary before queueing the command.
-        _Input[S](event=ProposalSubmitted(decisions=(), expected_revision=0), now_at=now_at)
-        self._queue.append(_Decide(now_at))
+        _Input[S](event=ClockAdvanced(now_at=now_at), now_at=now_at)  # the supplied-time check
+        self._queue.append(_Flush(now_at))
 
     def advance(self) -> bool:
         """Commit the next queued input and callback state, with no I/O dispatch.
@@ -618,24 +641,9 @@ class CoreRuntime[S: StrategyState]:
         if isinstance(item, _Input) and self._awaits_submissions(item):
             self._held.append(item)
             return True
-        if isinstance(item, _Decide):
-            if self.record.envelope.core.records.recovery.phase != RecoveryPhase.READY:
-                raise ContractError(("recovery",), "strategy proposals require ready recovery")
-            proposal = self._strategy.bind(self.record.envelope.strategy).decide(
-                project(self.record.envelope.core)
-            )
-            self._strategy_wake_at = proposal.wake_at
-            item = _Input[S](
-                event=ProposalSubmitted(
-                    decisions=tuple(
-                        self._registry.validate_decision(decision)
-                        for decision in proposal.decisions
-                    ),
-                    expected_revision=self.record.envelope.revision,
-                ),
-                proposed_state=proposal.state,
-                now_at=item.now_at,
-            )
+        if isinstance(item, _Flush):
+            self._flush(item)
+            return True
         try:
             self._consume(item)
         except ContractError as error:
@@ -694,46 +702,92 @@ class CoreRuntime[S: StrategyState]:
     def _consume(self, item: _Input[S], transition: Transition | None = None) -> None:
         envelope = self.record.envelope
         transition = transition or self._transitions.step(envelope.core, item.event)
-        state = envelope.strategy if item.proposed_state is None else item.proposed_state
-        view = project(transition.state)
-        for event in transition.events:
-            state = self._strategy.bind(state).on_event(view, event)
         pending = self.record.pending_inputs
         if item.durable:
             index = pending.index(item.event)  # type: ignore[arg-type]
             pending = (*pending[:index], *pending[index + 1 :])
-        publications = tuple(
-            Publication(
-                publication_id=f"{transition.state.run.run_id.root}:{sequence}",
-                sequence=sequence,
-                event=event,
-            )
-            for sequence, event in enumerate(
-                transition.events, start=self.record.next_publication_sequence
-            )
+        self._apply(
+            transition,
+            item.now_at,
+            pending_inputs=(*pending, *item.owner_events),
+            due=(),
         )
-        candidate = self.record.model_copy(
-            update={
-                "envelope": envelope.model_copy(
-                    update={
-                        "core": transition.state,
-                        "strategy": state,
-                        "event_cursor": EventCursor(
-                            sequence=envelope.event_cursor.sequence + len(transition.events)
-                        ),
-                    }
-                ),
-                "pending_publications": (*self.record.pending_publications, *publications),
-                "next_publication_sequence": self.record.next_publication_sequence
-                + len(publications),
-                "pending_inputs": (*pending, *item.owner_events),
-            }
-        )
-        self._commit(candidate, item.now_at)
         self._queue.extend(
             _Input[S](event=event, now_at=item.now_at, durable=True) for event in item.owner_events
         )
         self._release_held()
+
+    def _flush(self, item: _Flush) -> None:
+        """Deliver due wake-ups and submit held decisions; commit only if there was any."""
+        record = self.record
+        due = tuple(wake for wake in record.wakes if wake <= item.now_at)
+        ready = record.envelope.core.records.recovery.phase == RecoveryPhase.READY
+        if not due and not (ready and record.pending_decisions):
+            return
+        self._apply(
+            Transition(state=record.envelope.core),
+            item.now_at,
+            pending_inputs=record.pending_inputs,
+            due=due,
+        )
+
+    def _apply(
+        self,
+        transition: Transition,
+        now_at: float,
+        *,
+        pending_inputs: tuple[OwnerEvent, ...],
+        due: tuple[float, ...],
+    ) -> None:
+        """Commit one core transition together with everything the search did about it.
+
+        The search sees the events one at a time, in order; the decisions it returns go to
+        core in the same pass, and the events those cause go back to the search, until it
+        has nothing more to say. The search state, core and published events then commit as
+        one record.
+        """
+        record = self.record
+        envelope = record.envelope
+        arrived = (
+            *search_events(transition.state, transition.events),
+            *(TimeReached(time=wake) for wake in due),
+        )
+        advanced = advance(
+            self._search,
+            envelope.strategy,
+            transition.state,
+            self._host,
+            Inbox(arrived, record.pending_decisions),
+        )
+        events = (*transition.events, *advanced.published)
+        publications = tuple(
+            Publication(
+                publication_id=f"{advanced.core.run.run_id.root}:{sequence}",
+                sequence=sequence,
+                event=event,
+            )
+            for sequence, event in enumerate(events, start=record.next_publication_sequence)
+        )
+        waiting = tuple(wake for wake in record.wakes if wake not in due)
+        candidate = record.model_copy(
+            update={
+                "envelope": envelope.model_copy(
+                    update={
+                        "core": advanced.core,
+                        "strategy": advanced.state,
+                        "event_cursor": EventCursor(
+                            sequence=envelope.event_cursor.sequence + len(events)
+                        ),
+                    }
+                ),
+                "pending_publications": (*record.pending_publications, *publications),
+                "next_publication_sequence": record.next_publication_sequence + len(publications),
+                "pending_inputs": pending_inputs,
+                "pending_decisions": advanced.held,
+                "wakes": tuple(sorted({*waiting, *advanced.wakes})),
+            }
+        )
+        self._commit(candidate, now_at)
 
     def _commit(self, candidate: RuntimeRecord[S], now_at: float) -> None:
         # One serialization per commit. What the candidate must satisfy is checked on the
@@ -902,6 +956,7 @@ class CoreRuntime[S: StrategyState]:
             fence=self.record.envelope.fence,
             now_at=now_at,
             payload_digest=record.payload_digest,
+            until=record.until,
             lease=_ShellLease(self),
         )
         self._authorizations += 1
@@ -1113,6 +1168,36 @@ class CoreRuntime[S: StrategyState]:
             flight.task.cancel()
         await asyncio.gather(*(f.task for f in flights), return_exceptions=True)
 
+    def _ended_by_core(self, flight: _Flight, now_at: float) -> bool:
+        """Whether core has ended this request, or its time has passed.
+
+        Core ends a record at its limit and when a watch fires (it becomes BLOCKED and
+        its owner hears ``Failed``). The executor may not know, so the loop stops it.
+        """
+        current = next(
+            (
+                row
+                for row in self.record.envelope.core.records.records
+                if row.request_id == flight.record.request_id
+            ),
+            None,
+        )
+        ended = current is None or current.phase in (RequestPhase.BLOCKED, RequestPhase.COMPLETED)
+        return ended or flight.until.at <= now_at
+
+    async def cancel_ended(self, now_at: float) -> bool:
+        """Cancel the running requests whose limit has passed or that core has ended.
+
+        This is the only place a running request is stopped because a limit or watch
+        fired. A cancelled request returns no observation; core already reported it.
+        """
+        ended = [f for f in self._flights if not f.task.done() and self._ended_by_core(f, now_at)]
+        for flight in ended:
+            self._flights.remove(flight)
+            flight.task.cancel()
+        await asyncio.gather(*(f.task for f in ended), return_exceptions=True)
+        return bool(ended)
+
     async def wait_for_flight(self) -> None:
         """Return once a running request has finished (at once when one already has).
 
@@ -1155,6 +1240,8 @@ class CoreRuntime[S: StrategyState]:
             while True:
                 # A failed request surfaces before anything else commits.
                 if self._finish_done():
+                    continue
+                if await self.cancel_ended(now_at):
                     continue
                 if self.advance():
                     continue

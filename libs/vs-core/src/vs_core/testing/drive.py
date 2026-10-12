@@ -29,6 +29,7 @@ from vs_core.api import (
     CoreEvent,
     CoreState,
     CoreView,
+    Decision,
     DispatchAuthorized,
     Event,
     EventCursor,
@@ -36,6 +37,7 @@ from vs_core.api import (
     EvidenceRequirements,
     HostFence,
     HostId,
+    Inbox,
     LifecycleCapability,
     Limits,
     MeasurementFailure,
@@ -194,6 +196,7 @@ class _Driver[S: StrategyState]:
         self.trace: Trace[S]
         self.core = core
         self.wakes: list[float] = []
+        self.held: tuple[Decision, ...] = ()
         self.clock = 1.0
         self.calls: dict[str, int] = {}
         self.envelope_type = harness.envelope_type
@@ -228,6 +231,7 @@ class _Driver[S: StrategyState]:
             advanced.submitted,
         )
         self.wakes.extend(advanced.wakes)
+        self.held = advanced.held
 
     def take(
         self,
@@ -374,7 +378,9 @@ class _Driver[S: StrategyState]:
             trace.log.append(event)
         transition = step(trace.core, event)
         incoming = (*search_events(transition.state, transition.events), *extra)
-        advanced = advance(trace.search, trace.state, transition.state, incoming, self.host)
+        advanced = advance(
+            trace.search, trace.state, transition.state, self.host, Inbox(incoming, self.held)
+        )
         self.take(
             advanced.state,
             advanced.core,
@@ -382,6 +388,7 @@ class _Driver[S: StrategyState]:
             advanced.submitted,
         )
         self.wakes.extend(advanced.wakes)
+        self.held = advanced.held
         if self.faults.reload:
             self.reload()
 

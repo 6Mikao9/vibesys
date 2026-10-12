@@ -801,7 +801,7 @@ class RuntimeSessionRequests:
         recorded = self._store.load(_DISPATCHES, "dispatch", record_key, DispatchRecord)
         if recorded is not None and recorded != link:
             return _rejected("invocation is dispatched by another request", binding.resource_id)
-        if turn.deadline_at <= call.context.now_at:
+        if call.context.until.at <= call.context.now_at:
             if recorded is None:
                 # No dispatch record proves no provider call began.
                 return _rejected("the turn deadline passed before dispatch", binding.resource_id)

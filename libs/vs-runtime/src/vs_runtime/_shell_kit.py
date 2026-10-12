@@ -34,7 +34,6 @@ from vs_core.api import (
     ObservationStatus,
     ObserveOwnedJob,
     OwnedJob,
-    Proposal,
     RequestObserved,
     RestoreRevision,
     ResumeSessionTurn,
@@ -82,14 +81,16 @@ if TYPE_CHECKING:
     from vs_core.api import (
         CoreEvent,
         CoreState,
-        Command,
+        Decision,
+        Event,
         OperationRegistry,
         Request,
         ResourceId,
-        CoreView,
+        RunFacts,
+        RunView,
         SchemaRef,
-        Strategy,
-        StrategyEvent,
+        Search,
+        SearchDeclaration,
         StrategyState,
         Transition,
     )
@@ -369,33 +370,43 @@ class ScriptedExecutors:
         )
 
 
-class RecordingStrategy[S: StrategyState]:
-    """A strategy that keeps every decision it proposed, in order, for the test to read."""
+@dataclass(frozen=True)
+class Launch[S: StrategyState, C]:
+    """A search and the config its run starts from."""
 
-    def __init__(self, inner: Strategy[S], decisions: list[Command]) -> None:
-        """Wrap ``inner``; every binding shares one list."""
+    search: Search[S, C]
+    config: C
+
+
+class RecordingSearch[S: StrategyState, C]:
+    """A search that keeps every decision it returned, in order, for the test to read."""
+
+    def __init__(self, inner: Search[S, C], decisions: list[Decision]) -> None:
+        """Wrap ``inner``."""
         self._inner = inner
         self._decisions = decisions
-        self.declaration = inner.declaration
 
     @property
-    def state(self) -> S:
-        """The wrapped strategy's state."""
-        return self._inner.state
+    def declaration(self) -> SearchDeclaration:
+        """The wrapped search's declaration."""
+        return self._inner.declaration
 
-    def bind(self, state: S) -> RecordingStrategy[S]:
-        """The same strategy over another state."""
-        return RecordingStrategy(self._inner.bind(state), self._decisions)
+    @property
+    def state_model(self) -> type[S]:
+        """The wrapped search's state class."""
+        return self._inner.state_model
 
-    def on_event(self, view: CoreView, event: StrategyEvent) -> S:
-        """The wrapped strategy's fold."""
-        return self._inner.on_event(view, event)
+    def init(self, config: C, facts: RunFacts) -> tuple[S, list[Decision]]:
+        """The wrapped search's first state and decisions, recorded."""
+        state, decisions = self._inner.init(config, facts)
+        self._decisions.extend(decisions)
+        return state, decisions
 
-    def decide(self, view: CoreView) -> Proposal[S]:
-        """The wrapped strategy's proposal, recorded."""
-        proposal = self._inner.decide(view)
-        self._decisions.extend(proposal.decisions)
-        return proposal
+    def update(self, state: S, event: Event, view: RunView) -> tuple[S, list[Decision]]:
+        """The wrapped search's next state and decisions, recorded."""
+        next_state, decisions = self._inner.update(state, event, view)
+        self._decisions.extend(decisions)
+        return next_state, decisions
 
 
 @dataclass
@@ -405,7 +416,7 @@ class Run:
     core: CoreState
     # The strategy state as the shell last persisted it.
     state: StrategyState
-    decisions: list[Command] = field(default_factory=list)
+    decisions: list[Decision] = field(default_factory=list)
     journal: Journal = field(default_factory=Journal)
     # The loop gave up on the run: its dispatch cap was hit (it never went idle) or it
     # stalled (open work and nothing to wake it).
@@ -458,7 +469,7 @@ class ScriptedHost[S: StrategyState]:
     host: CoreRunHost
     config: RunLoopConfig
     clock: VirtualClock
-    decisions: list[Command]
+    decisions: list[Decision]
     journal: Journal
 
     def run(self) -> Run:
@@ -488,9 +499,9 @@ class ScriptedHost[S: StrategyState]:
         )
 
 
-def scripted_host[S: StrategyState](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a restarted host inherits the dead one's store, delivery and start time beside the run's description.
+def scripted_host[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a restarted host inherits the dead one's store, delivery and start time beside the run's description.
     # > Bundling the three inherited values into one holder adds a type that only this signature uses, and splitting the function would repeat the shell wiring it exists to share.
-    strategy: Strategy[S],
+    launch: Launch[S, C],
     script: Script,
     harness: Harness,
     schemas: Mapping[SchemaRef, type[BaseModel]],
@@ -500,20 +511,22 @@ def scripted_host[S: StrategyState](  # noqa: PLR0913  # lint-waiver: LW-994707 
     delivery: FakePublicationDelivery | None = None,
     clock_at: float = 1.0,
 ) -> ScriptedHost[S]:
-    """A production shell and loop over ``strategy`` with every executor answered by ``script``.
+    """A production shell and loop over a search with every executor answered by ``script``.
 
     ``store`` and ``delivery`` default to new ones; pass the ones a dead host left to start its
     successor over them. ``clock_at`` is the new host's virtual time.
     """
     options = host_options or HostOptions()
-    decisions: list[Command] = []
-    recorded = RecordingStrategy(strategy, decisions)
+    decisions: list[Decision] = []
+    search = launch.search
+    recorded = RecordingSearch(search, decisions)
     store = FakeStateStore() if store is None else store
     journal = Journal()
     shell: CoreRuntime[S] = CoreRuntime(
         store,
         recorded,
-        new_run(strategy, harness),
+        new_run(search, harness),
+        config=launch.config,
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
             executors=request_executors(
@@ -549,15 +562,15 @@ def scripted_host[S: StrategyState](  # noqa: PLR0913  # lint-waiver: LW-994707 
     return ScriptedHost(shell, host, config, clock, decisions, journal)
 
 
-def drive_shell[S: StrategyState](
-    strategy: Strategy[S],
+def drive_shell[S: StrategyState, C](
+    launch: Launch[S, C],
     script: Script,
     harness: Harness,
     schemas: Mapping[SchemaRef, type[BaseModel]],
     host_options: HostOptions | None = None,
 ) -> Run:
-    """Run ``strategy`` to the end of its run on the production shell and loop."""
-    return scripted_host(strategy, script, harness, schemas, host_options).run()
+    """Run a search to the end of its run on the production shell and loop."""
+    return scripted_host(launch, script, harness, schemas, host_options).run()
 
 
 class _IgnoredTransitions:

@@ -416,7 +416,7 @@ class _Loop:
             before = self._signature()
             refusal = await self._settle(now)
             if refusal is None and self._core().records.recovery.phase == RecoveryPhase.READY:
-                self._shell.decide(now_at=now)
+                self._shell.flush(now_at=now)
                 refusal = await self._settle(now)
             if refusal is not None:
                 # Requests already running finish and commit before the refusal ends the run.
@@ -498,7 +498,7 @@ class _Loop:
     async def _wait(self, now: float) -> None:
         core = self._core()
         due = self._next_wake(core)
-        asked = self._shell.strategy_wake_at
+        asked = self._shell.next_wake_at
         if asked is not None and asked > now:
             due = asked if due is None else min(due, asked)
         if self._shell.in_flight:

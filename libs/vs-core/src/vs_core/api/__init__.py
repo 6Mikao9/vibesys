@@ -63,6 +63,7 @@ from vs_core._search_events import run_view, search_events
 from vs_core._search_run import (
     Advanced,
     CoreStep,
+    Inbox,
     SearchHost,
     advance,
     begin,
@@ -733,6 +734,7 @@ __all__ = [
     "IdScheme",
     "Identity",
     "IdentityTypeError",
+    "Inbox",
     "InitialSessionsFailed",
     "InitialSessionsReady",
     "InputAcceptanceObserved",
