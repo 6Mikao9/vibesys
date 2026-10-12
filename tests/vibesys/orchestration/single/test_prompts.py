@@ -14,20 +14,29 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from vibesys.orchestration.single.strategy.api import PlanPrompt, PromptTemplate, RoundPrompt
 
 import vibesys.orchestration.single.core_policy.prompts as templates
 from vibesys.orchestration.single.core_policy.api import run_prompt_variables
+from vibesys.orchestration.single.search.api import (
+    NoReply,
+    NoReplyKind,
+    PlanPrompt,
+    PromptTemplate,
+    Repair,
+    RepairKind,
+    RoundPrompt,
+)
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vibesys.serial_search.api import (
     PROMPTS_DIR,
     Bottleneck,
     FrontierRow,
     LastProfile,
+    OfficialReason,
     PendingClaim,
     RoundRow,
 )
-from vs_core.api import RevisionId, RevisionRef
+from vs_core.api import EvidenceKind, FailureReason, RevisionId, RevisionRef, TurnFailureKind
 from vs_prompts.api import TemplateRenderer
 
 _ROOT = Path(templates.__file__).parent
@@ -99,11 +108,25 @@ _ROUND = st.builds(
     task=_TEXT,
     pass_criteria=_TEXT,
     base_revision=_REVISIONS,
-    feedback=st.none() | _TEXT,
-    no_valid_reply=st.none() | _TEXT,
+    repair=st.none()
+    | st.builds(
+        Repair, kind=st.sampled_from((RepairKind.SELF_REVIEW, RepairKind.CARRIED)), text=_TEXT
+    )
+    | st.builds(
+        Repair,
+        kind=st.just(RepairKind.GATE),
+        text=st.just("") | _TEXT,
+        gate=st.sampled_from((EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK)),
+    ),
+    no_reply=st.none()
+    | st.builds(
+        NoReply,
+        kind=st.sampled_from(NoReplyKind),
+        ended=st.none() | st.sampled_from((FailureReason.TIMED_OUT,)),
+        turn_failure=st.none() | st.sampled_from(TurnFailureKind),
+    ),
     dominated_by_rounds=st.lists(st.integers(1, 5), max_size=2).map(tuple),
-    official_due=st.booleans(),
-    official_reason=st.none() | _TEXT,
+    official_reason=st.none() | st.sampled_from(OfficialReason),
     profiler_id=st.sampled_from(("none", "torch_profiler")),
 )
 
@@ -139,7 +162,11 @@ def test_the_round_prompt_renders_for_every_context(context: RoundPrompt) -> Non
     assert _OBJECTIVE in text
     assert context.task in text
     assert context.hypothesis_id in text
-    assert (context.feedback is None) or context.feedback in text
+    if context.repair is not None:
+        assert context.repair.sentence in text
+    assert (context.no_reply is None) or "returned no valid response" in text
+    assert (context.official_reason is None) or context.official_reason.value in text
+    assert (context.official_reason is None) == ("Official evaluation is deferred" in text)
 
 
 @pytest.mark.parametrize("template", [PromptTemplate.ROUND])
