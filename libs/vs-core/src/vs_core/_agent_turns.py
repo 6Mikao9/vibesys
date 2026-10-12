@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -30,14 +30,12 @@ from ._waitable import WaitableReply, WaitingForDependency
 from .types.agents import (
     Checkpoint,
     Correction,
-    Declined,
     ResumeFacts,
     Retained,
     Retry,
 )
 from .types.common import (
     THIS_RUN,
-    AttemptId,
     ContinuationId,
     DecisionId,
     InvocationRef,
@@ -89,7 +87,6 @@ if TYPE_CHECKING:
 
     from ._ids import IdScheme
     from ._strategy_operations import StrategyOperations
-    from .types.attempts import AttemptView
     from .types.evaluation import ResumeAuthorized
     from .types.search import Search
 
@@ -203,12 +200,20 @@ class Serial(Value):
     next: int = Field(ge=0)
 
 
+class KnownCheckpoint(Value):
+    """Core's outcome for one turn's checkpoint, kept until its ask ends."""
+
+    invocation: InvocationRef
+    checkpoint: Checkpoint
+
+
 class Piped[S: StrategyState, I: Value](StrategyState):
     """The wrapped search's state and the asks in flight."""
 
     inner: S
     flows: tuple[Flow[I], ...] = ()
     serials: tuple[Serial, ...] = ()
+    checkpoints: tuple[KnownCheckpoint, ...] = ()
 
 
 def _digest(text: str) -> str:
@@ -360,8 +365,11 @@ class AgentTurns[S: StrategyState, C]:
                 )
                 if waiting is None:
                     return state, [], []
-                return self._resume(state, waiting, authorization, view)
+                return self._resume(state, waiting, authorization)
             case CheckpointKnown(invocation=invocation, checkpoint=checkpoint):
+                kept = tuple(c for c in state.checkpoints if c.invocation != invocation)
+                known = KnownCheckpoint(invocation=invocation, checkpoint=checkpoint)
+                state = state.model_copy(update={"checkpoints": (*kept, known)})
                 holding = self._flow_with(state, invocation, Holding)
                 if holding is None or not isinstance(holding.phase, Holding):
                     return state, [], []
@@ -421,7 +429,9 @@ class AgentTurns[S: StrategyState, C]:
     ) -> tuple[Piped[S, Value], list[Decision], list[Event]]:
         """The ask is over: forget it and hand the search its one result."""
         flows = tuple(f for f in state.flows if f.ask != flow.ask)
-        return state.model_copy(update={"flows": flows}), [], [result]
+        session = None if flow.invocation is None else flow.invocation.session_id
+        kept = tuple(c for c in state.checkpoints if c.invocation.session_id != session)
+        return state.model_copy(update={"flows": flows, "checkpoints": kept}), [], [result]
 
     def _finish(
         self,
@@ -621,7 +631,7 @@ class AgentTurns[S: StrategyState, C]:
             return self._corrected(state, flow, self.protocol.wait_unrecorded(agent.role), refused)
         if agent.checkpoint is None or not agent.checkpoint(reply):
             return self._finish(state, flow, output, None)
-        known = _checkpoint_of(view, flow.scope, turn)
+        known = _checkpoint_of(state, turn)
         if known is None:
             return self._replace(state, flow, Holding(output=output))
         return self._finish(state, flow, output, known)
@@ -683,13 +693,10 @@ class AgentTurns[S: StrategyState, C]:
         state: Piped[S, Value],
         flow: Flow[Value],
         authorized: ResumeAuthorized,
-        view: RunView,
     ) -> tuple[Piped[S, Value], list[Decision], list[Event]]:
         """Core authorized the resume of a suspended turn: ask it to continue."""
         agent = self.agents[flow.agent]
-        retained = (
-            None if flow.invocation is None else _revision_of(view, flow.scope, flow.invocation)
-        )
+        retained = None if flow.invocation is None else _revision_of(state, flow.invocation)
         facts = ResumeFacts(
             agent=agent.role,
             retained=retained,
@@ -733,28 +740,16 @@ def _named(decision: DecisionId | None) -> tuple[DecisionId, str, int] | None:
     return DecisionId(root=head), tail[0], int(tail[1:])
 
 
-def _attempt_view(view: RunView, scope: Scope) -> AttemptView | None:
-    if not isinstance(scope.owner, AttemptId):
-        return None
-    return next((a for a in view.attempts if a.attempt_id == scope.owner), None)
+def _revision_of(state: Piped[Any, Value], invocation: InvocationRef) -> RevisionRef | None:
+    """The revision core retained for the invocation, if it has said so."""
+    known = _checkpoint_of(state, invocation)
+    return known.revision if isinstance(known, Retained) else None
 
 
-def _revision_of(view: RunView, scope: Scope, invocation: InvocationRef) -> RevisionRef | None:
-    live = _attempt_view(view, scope)
-    mine = () if live is None else tuple(c for c in live.checkpoints if c.invocation == invocation)
-    return mine[-1].revision if mine else None
-
-
-def _checkpoint_of(view: RunView, scope: Scope, invocation: InvocationRef) -> Checkpoint | None:
+def _checkpoint_of(state: Piped[Any, Value], invocation: InvocationRef) -> Checkpoint | None:
     """Core's outcome for the invocation's checkpoint, or None while it is still pending."""
-    live = _attempt_view(view, scope)
-    if live is None:
-        return None
-    kept = tuple(c for c in live.checkpoints if c.invocation == invocation)
-    if kept:
-        return Retained(revision=kept[-1].revision)
-    declined = tuple(d for d in live.checkpoint_declines if d.invocation == invocation)
-    return Declined(reason=declined[-1].reason) if declined else None
+    found = [c.checkpoint for c in state.checkpoints if c.invocation == invocation]
+    return found[-1] if found else None
 
 
 __all__ = ["Agent", "AgentProtocol", "AgentTurns", "TimeReached", "WakeAt", "reply_errors"]
