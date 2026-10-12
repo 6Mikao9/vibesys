@@ -32,21 +32,23 @@ from vibesys.orchestration.issue_queue.core_policy.api import (
     PolicyInputs,
     RunBounds,
     build_core_policy,
+    plain_operation_registry,
     project_strategy_state,
     prompts,
 )
 from vibesys.orchestration.issue_queue.models import IssueQueueOptions
-from vibesys.orchestration.issue_queue.strategy.api import (
+from vibesys.orchestration.issue_queue.search.api import (
+    IDS,
     OPERATIONS,
     STATE_SCHEMA,
-    IssueQueueStrategyState,
+    IssueQueueState,
+    PromptContext,
     Role,
     measurement_recipe,
-    plain_operation_registry,
-    role_id,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR
+from vs_core.api import Piped
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import (
     AgentCapability,
@@ -71,7 +73,7 @@ if TYPE_CHECKING:
 
     from vs_runtime.api import CoreRunContext
 
-_PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".strategy-state")
+_PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".search-state")
 # The label of the snapshot that retains a candidate.
 RETENTION_LABEL = "verified"
 _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
@@ -79,7 +81,7 @@ _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
 
 def _role(role: Role, template: str, kind: RoleKind) -> AgentRole:
     return core_role(
-        _RENDERER, role_id=role_id(role.value).root, system_template=template, kind=kind
+        _RENDERER, role_id=IDS.role_id(role.value).root, system_template=template, kind=kind
     )
 
 
@@ -138,14 +140,16 @@ def issue_queue_operation_catalog(
     return OperationCatalog(plain_operation_registry(), (*catalog.entries, *board))
 
 
-def issue_queue_projector() -> RuntimeRecordProjector[IssueQueueStrategyState]:
-    """Read an issue-queue run's strategy state from its committed runtime record."""
+def issue_queue_projector() -> RuntimeRecordProjector[Piped[IssueQueueState, PromptContext]]:
+    """Read an issue-queue run's search state from its committed runtime record."""
     return RuntimeRecordProjector(
         plugin_id=_PLUGIN_ID,
-        state_type=IssueQueueStrategyState,
-        record_type=RuntimeRecord[IssueQueueStrategyState],
+        state_type=Piped[IssueQueueState, PromptContext],
+        record_type=RuntimeRecord[Piped[IssueQueueState, PromptContext]],
         operations=plain_operation_registry(),
-        project=lambda state, revision: project_strategy_state(state, experiment_revision=revision),
+        project=lambda state, revision: project_strategy_state(
+            state.inner, experiment_revision=revision
+        ),
     )
 
 
@@ -175,7 +179,8 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         ),
     )
     return CorePlan(
-        strategy=policy.strategy,
+        search=policy.search,
+        config=policy.config,
         reply_schemas=policy.reply_schemas,
         facts=policy.facts,
         limits=policy.limits,
@@ -188,9 +193,9 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         },
         requirements=policy.requirements,
         agent_evaluation=agent_evaluation_policy(
-            measurement_recipe(policy.strategy.config, policy.facts),
-            accuracy=policy.strategy.config.accuracy_configured,
-            benchmark=policy.strategy.config.benchmark_configured,
+            measurement_recipe(policy.config, policy.facts),
+            accuracy=policy.config.accuracy_configured,
+            benchmark=policy.config.benchmark_configured,
         ),
     )
 

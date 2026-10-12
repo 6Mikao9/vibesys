@@ -28,7 +28,7 @@ class ResumePrompt(Value):
     """Continuation of a suspended turn after its awaited evaluations settled."""
 
     template: Literal[CoreProtocolTemplate.RESUME] = CoreProtocolTemplate.RESUME
-    role: Literal["implementer", "judge", "profiler"]
+    role: Literal["implementer", "judge", "profiler", "perf-evaluator"]
     retained_revision: RevisionRef | None
     timed_out: bool
     cited_evidence: tuple[EvidenceRef, ...] = ()
@@ -39,7 +39,7 @@ class ReplyCorrectionPrompt(Value):
     """Why the previous reply violated its output schema."""
 
     template: Literal[CoreProtocolTemplate.REPLY_CORRECTION] = CoreProtocolTemplate.REPLY_CORRECTION
-    role: Literal["planner", "implementer", "judge", "profiler"]
+    role: Literal["planner", "implementer", "judge", "profiler", "perf-evaluator"]
     errors: tuple[ReplyError, ...]
 
 

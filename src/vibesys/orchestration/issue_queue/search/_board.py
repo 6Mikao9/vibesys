@@ -4,7 +4,7 @@ These are the decisions the legacy loop made by querying the tracker; here they 
 of the last snapshot, so the stop decision of a run is a function of the board it saw.
 """
 
-from vibesys.orchestration.issue_queue.strategy._prompts import IssueBrief, IssueDetail
+from vibesys.orchestration.issue_queue.search._prompts import IssueBrief, IssueDetail
 from vs_issue_tracker.api import IssueRow, IssueStatus, IssueType
 
 _TYPE_RANK = {IssueType.BUG: 0, IssueType.FEATURE: 1, IssueType.PERF: 2}

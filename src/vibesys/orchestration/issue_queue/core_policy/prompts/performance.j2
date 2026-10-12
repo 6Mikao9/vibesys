@@ -13,7 +13,7 @@ Configured load levels: {% if load_levels_json is none %}"discover a low, medium
 Prior performance records:
 {% if prior %}
 {% for record in prior %}
-- iteration {{ record.iteration }}: throughput {{ record.throughput_trend }}, latency {{ record.latency_trend }}, {{ record.new_issues }} issues filed; metrics {{ record.metrics_json }}
+- iteration {{ record.iteration }}: throughput {{ record.primary_trend }}, latency {{ record.secondary_trend }}, {{ record.new_issues }} issues filed; metrics {{ record.metrics_json }}
 {% endfor %}
 {% else %}
 none yet
@@ -36,7 +36,7 @@ Configured workload hints: {% if load_levels_json is none %}"discover representa
 Prior performance records:
 {% if prior %}
 {% for record in prior %}
-- iteration {{ record.iteration }}: primary metric {{ record.throughput_trend }}{% if record.latency_trend %}, secondary metric {{ record.latency_trend }}{% endif %}, {{ record.new_issues }} issues filed; metrics {{ record.metrics_json }}
+- iteration {{ record.iteration }}: primary metric {{ record.primary_trend }}{% if record.secondary_trend %}, secondary metric {{ record.secondary_trend }}{% endif %}, {{ record.new_issues }} issues filed; metrics {{ record.metrics_json }}
 {% endfor %}
 {% else %}
 none yet

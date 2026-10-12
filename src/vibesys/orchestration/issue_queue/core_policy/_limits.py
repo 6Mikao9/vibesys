@@ -1,6 +1,6 @@
 """Run bounds and deadline derived from the validated issue-queue config, never from constants."""
 
-from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig
+from vibesys.orchestration.issue_queue.search.api import IssueQueueConfig
 from vs_core.api import DEFAULT_MAX_MEASUREMENT_SUBMISSIONS, Limits
 
 # Core requires a finite deadline. An unset `[run] max_run_seconds` means unbounded, which is the

@@ -4,24 +4,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.orchestration.issue_queue.core_policy._agents import build_search, reply_schemas
 from vibesys.orchestration.issue_queue.core_policy._limits import limits_for, run_deadline_at
-from vibesys.orchestration.issue_queue.models import (
-    ImplementerReplyModel,
-    JudgeReplyModel,
-    perf_result_model,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
-    IMPLEMENTER_REPLY,
+from vibesys.orchestration.issue_queue.search.api import (
+    IDS,
     JUDGE_REPLY,
-    PERF_REPLY,
     IssueQueueConfig,
-    IssueQueueStrategy,
     Role,
-    role_id,
 )
 from vs_core.api import (
     ArtifactRef,
@@ -36,7 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from vibesys.orchestration.issue_queue.models import IssueQueueOptions
-    from vs_core.api import Limits, SchemaRef
+    from vs_core.api import Limits, SchemaRef, Search
 
 type Seconds = Annotated[int, Field(gt=0)]
 
@@ -84,10 +77,11 @@ class IssueQueueCorePolicy:
     """What the shell needs to start, run and resume an issue-queue run on the core.
 
     `facts`, `limits` and `deadline_at` go into the core state; `reply_schemas` into the
-    session resolver; `strategy.declaration` names the operations to offer.
+    session resolver; `search.declaration` names the operations to offer.
     """
 
-    strategy: IssueQueueStrategy
+    search: Search[Any, Any]
+    config: IssueQueueConfig
     facts: CoreRunFacts
     limits: Limits
     deadline_at: float
@@ -106,25 +100,12 @@ def requirements_for() -> EvidenceRequirements:
         assessment_authorities=(
             AssessmentAuthority(
                 kind=AssessmentKind.LOCAL_VALIDATION,
-                role_id=role_id(Role.JUDGE.value),
+                role_id=IDS.role_id(Role.JUDGE.value),
                 output_schema=JUDGE_REPLY,
             ),
         ),
         required_assessments=(AssessmentKind.LOCAL_VALIDATION,),
     )
-
-
-def reply_schemas(config: IssueQueueConfig) -> Mapping[SchemaRef, type[BaseModel]]:
-    """The reply type of every schema the strategy asks a role to answer with.
-
-    The judge's schema admits one filed bug of type `bug`; the evaluator's admits at most
-    the configured number of issues, so a reply beyond either is not a valid reply.
-    """
-    return {
-        IMPLEMENTER_REPLY: ImplementerReplyModel,
-        JUDGE_REPLY: JudgeReplyModel,
-        PERF_REPLY: perf_result_model(config.max_issues_per_perf_eval, domain_id=config.domain_id),
-    }
 
 
 def config_from(
@@ -169,7 +150,8 @@ def build_core_policy(
     """The policy of one issue-queue run from its validated options and resolved inputs."""
     config = config_from(options, inputs, bounds)
     return IssueQueueCorePolicy(
-        strategy=IssueQueueStrategy(config=config),
+        search=build_search(config),
+        config=config,
         facts=CoreRunFacts(
             objective=inputs.objective,
             baseline=RevisionRef.of_git_commit(inputs.baseline_commit),

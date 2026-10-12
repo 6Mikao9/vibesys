@@ -1,12 +1,18 @@
 """How the run measures a candidate: the single source of every measurement plan.
 
-The strategy's trusted plan (the accuracy gate on the final candidate, which adoption requires)
+The search's trusted plan (the accuracy gate on the final candidate, which adoption requires)
 and the plan an agent measures with through its in-turn tool are both built from this value, so
 an agent measurement and a trusted one share one identity.
 """
 
-from vibesys.orchestration.issue_queue.strategy._config import IssueQueueConfig
-from vs_core.api import MeasurementPlan, MeasurementRecipe, RevisionRef, RunFacts, StageBudget
+from vibesys.orchestration.issue_queue.search._config import IssueQueueConfig
+from vs_core.api.search import (
+    MeasurementPlan,
+    MeasurementRecipe,
+    RevisionRef,
+    RunFacts,
+    StageBudget,
+)
 
 
 def measurement_recipe(config: IssueQueueConfig, facts: RunFacts) -> MeasurementRecipe:

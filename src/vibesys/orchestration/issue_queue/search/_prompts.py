@@ -1,10 +1,11 @@
-"""Typed data the strategy hands to the declared prompt-rendering operation.
+"""Typed data the search hands to the prompt renderer.
 
-The strategy never builds prompt text. It sends a `PromptContext`; the operation's executor
-renders the named template with `vs_prompts` and stores the artifacts. Each context mirrors
+The search never builds prompt text. It sends a `PromptContext`; the agent pipeline asks the
+render operation to render the named template and store the artifacts. Each context mirrors
 the variables of one template. The board is part of the data: agents on the core lifecycle
-work in an isolated checkout, so they read the issue under work in full and every other
-issue as a list from the prompt, not from files.
+work in an isolated checkout, so they read the issue under work in full and every other issue
+as a list from the prompt, not from files. The contexts of the core protocol (a reply that
+broke its schema, a resumed turn, a wait nobody recorded) come from `vibesys.prompts`.
 """
 
 from enum import StrEnum
@@ -12,18 +13,17 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from vs_core.api import EvidenceRef, RevisionRef, Value
+from vibesys.metrics import MetricRow, PartialRow
+from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
+from vs_core.api.search import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef, Value
 
 
 class PromptTemplate(StrEnum):
-    """Closed set of templates the strategy can request."""
+    """Closed set of templates the search can request."""
 
     IMPLEMENT = "implement"
     REVIEW = "review"
     PERFORMANCE = "performance"
-    RESUME = "resume"
-    REPLY_CORRECTION = "reply_correction"
-    WAIT_UNRECORDED = "wait_unrecorded"
 
 
 class IssueBrief(Value):
@@ -53,6 +53,23 @@ class ImplementPrompt(Value):
     analysis: str | None = None
 
 
+class ReviewEvaluation(Value):
+    """One trusted evaluation record of the candidate under review, as the judge reads it.
+
+    The ledger holds identities and the observation's status; ``passed`` is None because the
+    issue queue never asks the evidence owner to decode a record.
+    """
+
+    evidence_id: EvidenceId
+    kind: EvidenceKind
+    revision: RevisionRef
+    status: ObservationStatus
+    passed: bool | None = None
+    metrics: tuple[MetricRow, ...] = ()
+    partial: PartialRow | None = None
+    feedback: str = ""
+
+
 class ReviewPrompt(Value):
     """Independent review of one issue's candidate."""
 
@@ -63,15 +80,15 @@ class ReviewPrompt(Value):
     files_touched: tuple[str, ...] = ()
     self_check: str = ""
     # The trusted evaluations this issue's candidate was measured by, stated at render time.
-    cited_evidence: tuple[EvidenceRef, ...] = ()
+    evaluations: tuple[ReviewEvaluation, ...] = ()
 
 
 class PriorPerformance(Value):
     """One finished performance evaluation, shown to the next one."""
 
     iteration: int = Field(gt=0)
-    throughput_trend: str
-    latency_trend: str
+    primary_trend: str
+    secondary_trend: str
     metrics_json: str
     new_issues: int = Field(ge=0)
 
@@ -87,31 +104,6 @@ class PerformancePrompt(Value):
     load_levels_json: str | None = None
 
 
-class ResumePrompt(Value):
-    """Continuation of a suspended turn after its awaited evaluations settled."""
-
-    template: Literal[PromptTemplate.RESUME] = PromptTemplate.RESUME
-    role: Literal["implementer", "judge", "perf-evaluator"]
-    retained_revision: RevisionRef | None
-    timed_out: bool
-    cited_evidence: tuple[EvidenceRef, ...] = ()
-    repeated_failure: str | None = None
-
-
-class ReplyCorrectionPrompt(Value):
-    """Why the previous reply violated its output schema."""
-
-    template: Literal[PromptTemplate.REPLY_CORRECTION] = PromptTemplate.REPLY_CORRECTION
-    role: Literal["implementer", "judge", "perf-evaluator"]
-    error: str
-
-
-class WaitUnrecordedPrompt(Value):
-    """The previous reply said it was waiting for an evaluation, but the run recorded no wait."""
-
-    template: Literal[PromptTemplate.WAIT_UNRECORDED] = PromptTemplate.WAIT_UNRECORDED
-
-
 type PromptContext = Annotated[
     ImplementPrompt
     | ReviewPrompt
@@ -121,3 +113,4 @@ type PromptContext = Annotated[
     | WaitUnrecordedPrompt,
     Field(discriminator="template"),
 ]
+"""The union the render operation carries; `AgentTurns` is typed by it."""

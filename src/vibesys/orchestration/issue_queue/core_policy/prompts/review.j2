@@ -11,11 +11,11 @@ Files touched: {% for path in files_touched %}`{{ path }}`{% if not loop.last %}
 {% endif %}
 Implementer self-check: {{ self_check or "<none>" }}
 
-{% if cited_evidence %}
+{% if evaluations %}
 Trusted evaluation results the framework recorded for this candidate (measured by the
 framework, not claimed by the implementer):
 
-{{ trusted_evaluations(cited_evidence) }}
+{{ trusted_evaluations(evaluations) }}
 {% endif %}
 {% include '_run_context.j2' %}
 {{ domain_section(domain_sections, 'judge') }}

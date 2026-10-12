@@ -27,7 +27,6 @@ UNPORTED = frozenset(
         "evolve/strategy",
         "issue_queue",
         "issue_queue/core_policy",
-        "issue_queue/strategy",
         "multi/core_policy",
         "multi/strategy",
         "single/core_policy",
