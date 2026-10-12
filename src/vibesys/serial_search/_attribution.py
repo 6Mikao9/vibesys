@@ -9,6 +9,7 @@ hypothesis ledger, shared by every strategy that offers the preset.
 from __future__ import annotations
 
 import shlex
+from enum import StrEnum
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,11 +17,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from vibesys.hypothesis import rounds
 from vibesys.profile_focus import (
     FocusView,
+    ProfileAttributionError,
     ProfileBottleneck,
     ProfileFocus,
     ProfileFocusConfig,
     parse_attribution,
 )
+from vs_core.api.search import CommandCapture, FailureReason, Value
 
 # The delimiters `parse_attribution` expects around the command's output.
 _BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
@@ -135,3 +138,75 @@ def record_round(
     return rounds.Ledger(
         ledger.search.model_copy(update={"profile_guidance": focused}), ledger.carry
     )
+
+
+class AttributionKind(StrEnum):
+    """How the attribution command failed. Closed."""
+
+    COMMAND = "command"
+    """It ran and did not succeed; ``exit_code``, ``detail`` and ``output`` say how."""
+    OUTPUT = "output"
+    """It succeeded but printed something that is not the result protocol; ``detail`` says what."""
+    ENDED = "ended"
+    """The request for it ended without a result; ``ended`` says why."""
+
+
+class AttributionFailure(Value):
+    """Why the profile-guided attribution could not steer the designer.
+
+    ``detail`` and ``output`` are what the command or its parser printed, kept as captured data.
+    """
+
+    kind: AttributionKind
+    exit_code: int | None = None
+    detail: str = ""
+    output: str = ""
+    ended: FailureReason | None = None
+
+
+def fold_capture(
+    ledger: rounds.Ledger,
+    attribution: AttributionConfig,
+    outcome: CommandCapture,
+    *,
+    round_number: int,
+) -> rounds.Ledger | AttributionFailure:
+    """The ledger once the command's ranked components steer the designer, else why they cannot.
+
+    Profile guidance is the preset's contract, so a command that did not print a valid result is
+    a failure of the run.
+    """
+    if outcome.status != "succeeded" or outcome.exit_code != 0:
+        return AttributionFailure(
+            kind=AttributionKind.COMMAND,
+            exit_code=outcome.exit_code,
+            detail=outcome.detail,
+            output=outcome.output,
+        )
+    try:
+        bottlenecks = bottlenecks_of(outcome.output)
+    except ProfileAttributionError as error:
+        return AttributionFailure(kind=AttributionKind.OUTPUT, detail=str(error))
+    policy = focus_policy(attribution)
+    if policy is None:
+        message = "an attribution config has a focus policy"
+        raise ValueError(message)
+    return observe(ledger, policy, round_number=round_number, bottlenecks=bottlenecks)
+
+
+def attribution_reason(failure: AttributionFailure, attribution: AttributionConfig) -> str:
+    """The operator-facing reason a run ends when its attribution failed."""
+    match failure.kind:
+        case AttributionKind.COMMAND:
+            detail = capture_failure(
+                attribution.command,
+                exit_code=failure.exit_code,
+                detail=failure.detail,
+                output=failure.output,
+            )
+        case AttributionKind.OUTPUT:
+            detail = failure.detail
+        case AttributionKind.ENDED:
+            ended = failure.ended.value if failure.ended else "unknown"
+            detail = f"the attribution command did not run ({ended})"
+    return f"profile-guided attribution failed: {detail}"
