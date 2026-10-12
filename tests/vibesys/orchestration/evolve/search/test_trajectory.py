@@ -56,6 +56,12 @@ def _population(state: object) -> list[dict[str, object]]:
     return rows
 
 
+def _population_of(state: object) -> PopulationState:
+    inner = getattr(state, "inner", state)
+    assert isinstance(inner, EvolveState)
+    return inner.population
+
+
 def _key(name: str) -> str:
     """The search's key for a scripted child: ``g2.c1`` is ``g000002.c000001``."""
     head, _, tail = name.partition(".")
@@ -221,4 +227,4 @@ def test_e3_both_selectors_propose_what_the_legacy_use_of_the_policy_proposes(
     key = "world=2,seed=7,objectives=one"
     expected = _reference_population(seed_world, seed_rng, _space(key), selector)
     run = run_to_end(_scripted(key, parallelism=2, delays=(0, 3, 1), selector=selector))
-    assert run.state.inner.population == expected
+    assert _population_of(run.state) == expected
