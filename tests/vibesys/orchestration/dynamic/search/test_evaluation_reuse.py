@@ -51,7 +51,7 @@ def assert_one_evaluation_per_workstream(
 
 def assert_every_review_passed_round_has_its_metric(finished: SimulatedRun) -> None:
     """A round whose review passed was measured: no null metric, no failure."""
-    state = finished.state
+    state = finished.state.inner
     assert isinstance(state, DynamicState)
     rounds = [r for h in state.hypotheses for r in h.rounds]
     assert rounds

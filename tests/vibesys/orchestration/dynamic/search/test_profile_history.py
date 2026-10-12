@@ -108,7 +108,7 @@ def test_the_next_plan_receives_a_completed_profiles_record_and_trusted_outcome(
     assert row.status == status
     assert len(row.evidence_ids) == 1
     assert row.evidence_ids[0].root.startswith("profile:profile:")
-    assert detail in (row.diagnosis or row.failure)
+    assert detail in (row.diagnosis or row.failure_output)
 
     rendered = _text(prompts[2])
     for expected in (
