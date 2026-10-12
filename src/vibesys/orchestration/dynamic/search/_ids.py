@@ -7,7 +7,7 @@ folds finished work in: workstreams first, in the order they were scheduled.
 
 from __future__ import annotations
 
-from vs_core.api import IdScheme, component
+from vs_core.api.search import IdScheme, component
 
 # The role prefix matches the role ids in `vibesys.dynamic_roles`.
 IDS = IdScheme("dyn", role_prefix="dynamic-")

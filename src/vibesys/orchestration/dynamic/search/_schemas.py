@@ -1,6 +1,6 @@
 """Identities the strategy declares to core: its id and the reply schema of each role."""
 
-from vs_core.api import SchemaRef, StrategyId
+from vs_core.api.search import SchemaRef, StrategyId
 
 STRATEGY_ID = StrategyId(root="dynamic")
 

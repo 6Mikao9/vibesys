@@ -17,17 +17,17 @@ from vibesys.orchestration.dynamic.models import (
     ReviewResult,
     planner_reply_type,
 )
-from vibesys.orchestration.dynamic.search._ids import IDS
-from vibesys.orchestration.dynamic.search._operations import OPERATIONS
-from vibesys.orchestration.dynamic.search._prompts import PromptContext
-from vibesys.orchestration.dynamic.search._schemas import (
+from vibesys.orchestration.dynamic.search.api import (
+    IDS,
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
+    OPERATIONS,
     PLANNER_REPLY,
     PROFILER_REPLY,
+    DynamicSearch,
+    PromptContext,
+    Role,
 )
-from vibesys.orchestration.dynamic.search._search import DynamicSearch
-from vibesys.orchestration.dynamic.search._values import Role
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
 from vs_core.api import (
     Access,
@@ -46,8 +46,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vibesys.orchestration.dynamic.search._config import DynamicConfig
-    from vibesys.orchestration.dynamic.search._state import DynamicState
+    from vibesys.orchestration.dynamic.search.api import DynamicConfig, DynamicState
     from vs_core.api import SchemaRef, Value
 
 

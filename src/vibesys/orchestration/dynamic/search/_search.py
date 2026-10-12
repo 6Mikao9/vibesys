@@ -50,7 +50,7 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
     WorkPlan,
 )
-from vs_core.api import (
+from vs_core.api.search import (
     THIS_RUN,
     AdoptionFinished,
     Children,
@@ -70,7 +70,7 @@ from vs_core.api import (
     TimeReached,
     UnexpectedEvent,
 )
-from vs_core.api import WorkKind as CoreWork
+from vs_core.api.search import WorkKind as CoreWork
 
 _FINISH_AGAIN = DecisionId(root="finish.1")
 

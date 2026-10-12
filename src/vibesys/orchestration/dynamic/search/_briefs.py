@@ -21,7 +21,7 @@ from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.search._values import RoundRecord, WorkPlan
-    from vs_core.api import RevisionRef
+    from vs_core.api.search import RevisionRef
 
 CUT = " [cut]"
 FAILURE_CHARS = 1200

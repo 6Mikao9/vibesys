@@ -13,7 +13,7 @@ from pydantic import Field, model_validator
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import StrategyReason
-from vs_core.api import (
+from vs_core.api.search import (
     AttemptId,
     CheckpointDecline,
     EvidenceRef,

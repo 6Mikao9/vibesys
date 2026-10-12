@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.orchestration.dynamic.core_policy._agents import build_search, reply_schemas
 from vibesys.orchestration.dynamic.core_policy._limits import limits_for, run_deadline_at
 from vibesys.orchestration.dynamic.models import ProfileField
 from vibesys.orchestration.dynamic.search.api import (
@@ -14,8 +15,6 @@ from vibesys.orchestration.dynamic.search.api import (
     JUDGE_REPLY,
     DynamicConfig,
     Role,
-    build_search,
-    reply_schemas,
 )
 from vs_core.api import (
     ArtifactRef,

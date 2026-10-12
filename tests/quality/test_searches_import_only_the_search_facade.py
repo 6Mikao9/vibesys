@@ -22,7 +22,6 @@ UNPORTED = frozenset(
     {
         "dynamic",
         "dynamic/core_policy",
-        "dynamic/strategy",
         "evolve/core_policy",
         "evolve/population",
         "evolve/strategy",

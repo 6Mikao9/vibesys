@@ -18,7 +18,7 @@ from vibesys.orchestration.dynamic.search._values import Blocker, Failure, Failu
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.search._config import DynamicConfig
-    from vs_core.api import RevisionRef
+    from vs_core.api.search import RevisionRef
 
 
 def _observed_news(

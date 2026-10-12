@@ -13,11 +13,9 @@ from pydantic import BaseModel
 
 from vibesys.metrics import EvidenceReading
 from vibesys.orchestration.dynamic.search._prompts import PromptContext
-from vs_core.api import (
+from vs_core.api.search import (
     EvidenceReadingsBase,
     InterpretEvidenceBase,
-    OperationRegistration,
-    OperationRegistry,
     ParentVerification,
     RenderedArtifacts,
     RenderRoleArtifactsBase,
@@ -40,8 +38,6 @@ __all__ = [
     "RenderRoleArtifacts",
     "RenderedArtifacts",
     "VerifyParentRevision",
-    "dynamic_operation_registrations",
-    "dynamic_operation_registry",
 ]
 
 
@@ -74,13 +70,3 @@ OPERATIONS = StrategyOperations(
     verify=VerifyParentRevision,
     interpret=InterpretEvidence,
 )
-
-
-def dynamic_operation_registrations() -> tuple[OperationRegistration, ...]:
-    """Codec registrations the launch assembles beside other libraries' operations."""
-    return OPERATIONS.registrations()
-
-
-def dynamic_operation_registry() -> OperationRegistry:
-    """A closed codec holding only the dynamic search's operations."""
-    return OPERATIONS.registry()

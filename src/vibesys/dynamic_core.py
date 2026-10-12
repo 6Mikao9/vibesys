@@ -25,6 +25,7 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     PolicyInputs,
     RunBounds,
     build_core_policy,
+    dynamic_operation_registry,
     project_strategy_state,
     prompts,
     run_prompt_variables,
@@ -35,7 +36,6 @@ from vibesys.orchestration.dynamic.search.api import (
     STATE_SCHEMA,
     DynamicState,
     PromptContext,
-    dynamic_operation_registry,
     measurement_recipe,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector

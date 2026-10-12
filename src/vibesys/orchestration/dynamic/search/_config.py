@@ -10,7 +10,7 @@ from pydantic import Field
 
 from vibesys.candidates.api import CandidateConfig
 from vibesys.orchestration.dynamic.models import ProfileField, ProfileOffer
-from vs_core.api import ArtifactRef, Backoff
+from vs_core.api.search import ArtifactRef, Backoff
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.models import DynamicOptions

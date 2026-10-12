@@ -26,7 +26,7 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
     WorkPlan,
 )
-from vs_core.api import Value
+from vs_core.api.search import Value
 
 _TERMINAL_OUTCOMES = frozenset(
     {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED, HypothesisOutcome.DISPROVEN}

@@ -23,7 +23,7 @@ from vibesys.orchestration.dynamic.search._values import (
     ProblemKind,
     Role,
 )
-from vs_core.api import (
+from vs_core.api.search import (
     THIS_RUN,
     AskAgent,
     Decision,

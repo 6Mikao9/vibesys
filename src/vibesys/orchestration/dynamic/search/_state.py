@@ -25,7 +25,7 @@ from vibesys.orchestration.dynamic.search._values import (
     Unreachable,
 )
 from vibesys.orchestration.dynamic.search._workstream import Workstream
-from vs_core.api import Children, SchemaRef, StrategyState, Value
+from vs_core.api.search import Children, SchemaRef, StrategyState, Value
 
 STATE_SCHEMA = SchemaRef(name="dynamic.search-state", version=2)
 

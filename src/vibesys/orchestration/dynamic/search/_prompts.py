@@ -16,7 +16,7 @@ from vibesys.metrics import MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import ProfileField
 from vibesys.orchestration.dynamic.search._values import Blocker, Failure, PlanProblem
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
-from vs_core.api import (
+from vs_core.api.search import (
     Correction,
     EvidenceId,
     EvidenceKind,

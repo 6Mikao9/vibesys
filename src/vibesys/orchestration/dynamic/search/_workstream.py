@@ -49,7 +49,7 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
     WorkPlan,
 )
-from vs_core.api import (
+from vs_core.api.search import (
     THIS_RUN,
     AskAgent,
     AssessmentKind,

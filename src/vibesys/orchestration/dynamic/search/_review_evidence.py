@@ -16,7 +16,7 @@ from vibesys.orchestration.dynamic.search._prompts import ReviewEvaluation
 
 if TYPE_CHECKING:
     from vibesys.metrics import AcceptedReading
-    from vs_core.api import AttemptRef, EvidenceKey, EvidenceRef, RevisionRef, RunView
+    from vs_core.api.search import AttemptRef, EvidenceKey, EvidenceRef, RevisionRef, RunView
 
 _FAILURE_TAIL_CHARS = 1500
 """A failure's cause is usually stated last, so a long one keeps only its end."""

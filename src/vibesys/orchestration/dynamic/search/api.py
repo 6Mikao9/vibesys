@@ -2,14 +2,6 @@
 
 from vibesys.candidates.api import Winner
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
-from vibesys.orchestration.dynamic.search._agents import (
-    PROTOCOL,
-    ImplementerReplyModel,
-    JudgeReplyModel,
-    agents,
-    build_search,
-    reply_schemas,
-)
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._ids import (
     BASELINE_KEY,
@@ -28,8 +20,6 @@ from vibesys.orchestration.dynamic.search._operations import (
     RenderedArtifacts,
     RenderRoleArtifacts,
     VerifyParentRevision,
-    dynamic_operation_registrations,
-    dynamic_operation_registry,
 )
 from vibesys.orchestration.dynamic.search._parents import (
     ParentConflictError,
@@ -87,7 +77,7 @@ from vibesys.orchestration.dynamic.search._values import (
     ViolationCode,
 )
 from vibesys.orchestration.dynamic.search._workstream import Workstream
-from vs_core.api import ledger_refs, trusted_keys
+from vs_core.api.search import ledger_refs, trusted_keys
 
 __all__ = [
     "BASELINE_KEY",
@@ -98,7 +88,6 @@ __all__ = [
     "OPERATIONS",
     "PLANNER_REPLY",
     "PROFILER_REPLY",
-    "PROTOCOL",
     "RENDER_KIND",
     "STATE_SCHEMA",
     "VERIFY_KIND",
@@ -117,9 +106,7 @@ __all__ = [
     "HistoryRow",
     "HypothesisRecord",
     "ImplementPrompt",
-    "ImplementerReplyModel",
     "InterpretEvidence",
-    "JudgeReplyModel",
     "MetricRow",
     "ParentConflictError",
     "ParentOption",
@@ -150,16 +137,11 @@ __all__ = [
     "ViolationCode",
     "Winner",
     "Workstream",
-    "agents",
-    "build_search",
-    "dynamic_operation_registrations",
-    "dynamic_operation_registry",
     "ingest",
     "ledger_refs",
     "measurement_recipe",
     "options",
     "planning_key",
-    "reply_schemas",
     "resolve",
     "review_evaluations",
     "review_refs",

@@ -15,7 +15,7 @@ as a parent but is never winner-eligible.
 from typing import TYPE_CHECKING, Literal
 
 from vibesys.metrics import AcceptedReading
-from vs_core.api import (
+from vs_core.api.search import (
     EvidenceKey,
     EvidenceKind,
     EvidenceRef,

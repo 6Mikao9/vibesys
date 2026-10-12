@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_core.api import MeasurementRecipe, StageBudget
+from vs_core.api.search import MeasurementRecipe, StageBudget
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.search._config import DynamicConfig
-    from vs_core.api import RunFacts
+    from vs_core.api.search import RunFacts
 
 
 def measurement_recipe(config: DynamicConfig, facts: RunFacts) -> MeasurementRecipe:

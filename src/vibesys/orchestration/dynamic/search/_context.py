@@ -29,7 +29,7 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
 )
 from vibesys.orchestration.dynamic.search._workstream import Workstream
-from vs_core.api import EvidenceKind, RevisionRef, RunView
+from vs_core.api.search import EvidenceKind, RevisionRef, RunView
 
 _HISTORY_ROWS = 20
 _HISTORY_TITLE_CHARS = 200
