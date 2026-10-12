@@ -199,7 +199,6 @@ def closing_fixture() -> tuple[core.CoreState, core.AttemptRef]:
         "scope": scope,
         "attempt": ref,
         "admission_id": event.admission_id,
-        "deadline_at": state.run.deadline_at,
     }
     requests = (
         core.CloseAttemptScope.model_validate({"request_id": event.authority, **fields}),
@@ -619,7 +618,6 @@ def test_every_writer_variant_requires_exact_complete_lease_release_before_dispo
         "request_id": writer_proof.request_id,
         "scope": invocation.scope,
         "admission_id": core.DecisionId(root="admission"),
-        "deadline_at": invocation.turn.deadline_at,
         "turn": invocation.turn,
     }
     request = (
@@ -1366,7 +1364,6 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
         "attempt": ref,
         "admission_id": owner.admission_id,
         "depends_on": (owner.closure.authority,),
-        "deadline_at": state.run.deadline_at,
     }
     if supplied == "discard":
         request: core.DiscardWorkspace | core.SnapshotAndRetain | core.RetainRevision = (

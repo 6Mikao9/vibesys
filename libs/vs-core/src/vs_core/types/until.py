@@ -16,7 +16,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import (
     AttemptRef,
@@ -42,7 +42,7 @@ class FailureReason(StrEnum):
     """A ``WhileAlive`` watch fired: the job it names is no longer alive."""
 
     REFUSED = "refused"
-    """Core rejected the decision; ``Failed.rejection`` says why."""
+    """Core rejected the decision; ``Failed.cause`` says why."""
 
     LOST = "lost"
     """Reconciliation could not prove what happened to the request."""
@@ -104,16 +104,57 @@ class Until(Value):
     watches: tuple[Watch, ...] = ()
 
 
+class ReplyErrorCode(StrEnum):
+    """Why a reply did not validate against the agent's reply model. Closed."""
+
+    MISSING = "missing"
+    UNEXPECTED = "unexpected"
+    WRONG_TYPE = "wrong-type"
+    INVALID_VALUE = "invalid-value"
+    NOT_JSON = "not-json"
+
+
+class ReplyError(Value):
+    """One typed problem in a reply: where it is and what is wrong."""
+
+    path: tuple[str | int, ...]
+    code: ReplyErrorCode
+
+
 class Failed(Value):
-    """A request ended without a result. Every field is typed; nothing is free text."""
+    """A request ended without a result. Every field is typed; nothing is free text.
+
+    Each reason carries its own fields, and only those: ``TIMED_OUT`` the ``limit`` that
+    passed, ``WORKSPACE_CLOSED`` / ``OWNER_GONE`` the ``watch`` that fired, ``REFUSED`` the
+    ``cause`` core gave, ``INVALID_REPLY`` the reply ``errors``.
+    """
 
     kind: Literal["failed"] = "failed"
     reason: FailureReason
     decision: DecisionId | None = None
     request: RequestId | None = None
     watch: Watch | None = None
-    """The watch that fired, for ``WORKSPACE_CLOSED`` and ``OWNER_GONE``."""
     limit: Limit | None = None
-    """The limit that passed, for ``TIMED_OUT``."""
-    rejection: RejectionCode | None = None
-    """Why core refused the decision, for ``REFUSED``."""
+    cause: RejectionCode | None = None
+    errors: tuple[ReplyError, ...] = ()
+
+    @model_validator(mode="after")
+    def fields_match_reason(self) -> Failed:
+        """Refuse a field that does not belong to the reason, or a reason missing its field."""
+        expected = {
+            "watch": self.reason in (FailureReason.WORKSPACE_CLOSED, FailureReason.OWNER_GONE),
+            "limit": self.reason == FailureReason.TIMED_OUT,
+            "cause": self.reason == FailureReason.REFUSED,
+            "errors": self.reason == FailureReason.INVALID_REPLY,
+        }
+        for name, allowed in expected.items():
+            present = (
+                bool(getattr(self, name)) if name == "errors" else getattr(self, name) is not None
+            )
+            if present and not allowed:
+                message = f"{name} does not belong to reason {self.reason.value}"
+                raise ValueError(message)
+            if allowed and not present:
+                message = f"reason {self.reason.value} needs {name}"
+                raise ValueError(message)
+        return self

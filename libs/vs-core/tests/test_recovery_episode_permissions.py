@@ -39,7 +39,6 @@ def episode_state(
         "request_id": identity,
         "scope": scope,
         "admission_id": admission if matching_admission else core.DecisionId(root="old"),
-        "deadline_at": 100.0,
     }
     session = core.SessionId(root="session")
     requests = {

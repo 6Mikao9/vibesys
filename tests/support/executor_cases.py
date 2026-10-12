@@ -392,7 +392,6 @@ def _attempt_request(name: str) -> dict[str, Any]:
         "request_id": RequestId(root=name),
         "scope": Scope(owner=_ATTEMPT.attempt_id, generation=_ATTEMPT.generation),
         "admission_id": DecisionId(root="admit"),
-        "deadline_at": 100.0,
         "attempt": _ATTEMPT,
     }
 
@@ -401,7 +400,6 @@ def _run_request(name: str) -> dict[str, Any]:
     return {
         "request_id": RequestId(root=name),
         "scope": Scope(owner=RunId(root="run-1"), generation=0),
-        "deadline_at": 100.0,
     }
 
 

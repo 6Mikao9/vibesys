@@ -1900,7 +1900,6 @@ def revision_operation_state() -> tuple[CoreState, OperationRegistry, RevisionOp
         {
             "decision_id": DecisionId(root="operation"),
             "scope": request.scope,
-            "deadline_at": request.deadline_at,
             "request": RetentionExtensionRequest(digest=state.run.facts.baseline.digest),
         },
         context={"operation_registry": codec},

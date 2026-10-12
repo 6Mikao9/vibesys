@@ -143,7 +143,6 @@ def test_deadline_rejects_corrupt_reconciliation_ancestry(command: str, fault: s
         if fault == "scope"
         else root.request.scope,
         "admission_id": core.DecisionId(root="foreign") if fault == "admission" else None,
-        "deadline_at": 100.0,
         "target": target,
     }
     requests = {

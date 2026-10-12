@@ -127,7 +127,7 @@ from vs_core._waits import (
 )
 from vs_core.api.routing import EVENT_ROUTES
 from vs_core.attempts import advance_attempt
-from vs_core.children import Child, Children
+from vs_core.children import Child, Children, Dropped
 from vs_core.evaluation import advance_evaluation
 from vs_core.records import advance_record, recover
 from vs_core.scheduling import schedule
@@ -559,7 +559,16 @@ from vs_core.types.strategy import (
     Withdraw,
     Work,
 )
-from vs_core.types.until import Failed, FailureReason, Until, WhileAlive, WhileOpen, Within
+from vs_core.types.until import (
+    Failed,
+    FailureReason,
+    ReplyError,
+    ReplyErrorCode,
+    Until,
+    WhileAlive,
+    WhileOpen,
+    Within,
+)
 
 __all__ = [
     "AMBIGUOUS_SUBMISSION_LIMIT",
@@ -697,6 +706,7 @@ __all__ = [
     "DispatchTurn",
     "Disposition",
     "Draft",
+    "Dropped",
     "EnsureSession",
     "EnsureWorkspace",
     "EnvelopeMigration",
@@ -865,6 +875,8 @@ __all__ = [
     "RenderRoleArtifactsBase",
     "RenderedArtifacts",
     "RepeatedFailureGuidance",
+    "ReplyError",
+    "ReplyErrorCode",
     "Request",
     "RequestBase",
     "RequestId",

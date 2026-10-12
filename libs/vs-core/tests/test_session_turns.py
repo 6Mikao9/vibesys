@@ -57,7 +57,6 @@ def turn(identity: str = "planner", charge: str = "free", max_turns: int = 1) ->
             "workspace": core.Scope(owner=state.run.run_id, generation=0),
             "prompts": (),
             "output_schema": core.SchemaRef(name="plan", version=1),
-            "deadline_at": 100.0,
             "charge_class": charge,
             "max_turns": max_turns,
         }

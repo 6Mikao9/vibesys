@@ -261,7 +261,6 @@ def _common(attempt: AttemptRef, name: str) -> _Common:
         "request_id": _rid(name),
         "scope": _scope(attempt),
         "admission_id": DecisionId(root="admit"),
-        "deadline_at": 100.0,
     }
 
 

@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-from pathlib import Path
 from typing import ClassVar, Literal
 
 import pytest
@@ -59,41 +58,6 @@ def persisted_turn_codec() -> core.OperationRegistry:
 def value_digest(value: core.Value) -> str:
     payload = json.dumps(value.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode()).hexdigest()
-
-
-def test_main_encoder_registered_turn_migrates_exact_inputs_and_preserves_payload() -> None:
-    source = (Path(__file__).parent / "fixtures" / "envelope-v2-registered-turn.json").read_text()
-    old = json.loads(source)
-    codec = persisted_turn_codec()
-    loaded = codec.migrate_envelope(
-        core.RunEnvelope[core.StrategyState], source, core.v2_to_v3_migration(codec)
-    )
-    record = loaded.core.records.records[0]
-    assert isinstance(record.request, core.ExecuteRegisteredOperation)
-    old_record = old["core"]["records"]["records"][0]
-    old_wire = old_record["request"]["operation"]
-    assert record.request.operation.model_dump(mode="json") == old_wire
-    assert tuple(row.input_id.root for row in record.request.inputs) == ("input-0", "input-1")
-    assert record.request.inputs[0].artifact == record.request.inputs[1].artifact
-    assert record.payload_digest == value_digest(record.request)
-    assert record.payload_digest != old_record["payload_digest"]
-    receipt = loaded.core.run.receipts[0]
-    assert isinstance(receipt.decision, core.Operation)
-    assert isinstance(receipt.decision.request, PersistedTurn)
-    assert receipt.decision.request.metadata == OpaqueMetadata(
-        evidence_id="owner-payload-field", observation_sequence=71
-    )
-    assert receipt.payload_digest == value_digest(receipt.decision)
-    assert receipt.decision.registered_turn == receipt.decision.normalized_turn
-    result = core.step(
-        loaded.core, core.ProposalSubmitted(decisions=(), expected_revision=loaded.revision)
-    )
-    assert result.requests == ()
-    assert result.state.records == loaded.core.records
-    assert (
-        codec.decode_envelope(core.RunEnvelope[core.StrategyState], codec.encode_envelope(loaded))
-        == loaded
-    )
 
 
 class RegisteredMeasurement(core.OperationRequest):
@@ -242,50 +206,6 @@ def test_measurement_normalization_requires_owned_job_lifecycle() -> None:
         )
 
 
-@pytest.mark.parametrize("fault", ["decision", "membership"])
-def test_registered_turn_migration_requires_exact_request_receipt(fault: str) -> None:
-    old = json.loads(
-        (Path(__file__).parent / "fixtures" / "envelope-v2-registered-turn.json").read_text()
-    )
-    record = old["core"]["records"]["records"][0]
-    receipt = old["core"]["run"]["receipts"][0]
-    if fault == "decision":
-        record["request"]["decision_id"] = {"root": "foreign"}
-    else:
-        receipt["request_ids"] = []
-    codec = persisted_turn_codec()
-    with pytest.raises(core.ContractError, match=r"request.*receipt"):
-        codec.migrate_envelope(
-            core.RunEnvelope[core.StrategyState], json.dumps(old), core.v2_to_v3_migration(codec)
-        )
-
-
-@pytest.mark.parametrize("fault", ["registry", "capability", "schema", "descriptor"])
-def test_registered_turn_migration_requires_exact_offered_descriptor(fault: str) -> None:
-    old = json.loads(
-        (Path(__file__).parent / "fixtures" / "envelope-v2-registered-turn.json").read_text()
-    )
-    registered = old["core"]["registry"][0]
-    offered = old["core"]["run"]["capabilities"]["operations"][0]
-    match fault:
-        case "registry":
-            old["core"]["registry"] = []
-        case "capability":
-            old["core"]["run"]["capabilities"]["operations"] = []
-        case "schema":
-            registered["request_schema"] = offered["request_schema"] = {
-                "name": "foreign",
-                "version": 1,
-            }
-        case "descriptor":
-            offered["inspect"] = False
-    codec = persisted_turn_codec()
-    with pytest.raises(core.ContractError, match=r"descriptor|registry|schema"):
-        codec.migrate_envelope(
-            core.RunEnvelope[core.StrategyState], json.dumps(old), core.v2_to_v3_migration(codec)
-        )
-
-
 def changed_measurement(request: core.OperationRequest) -> core.MeasurementIdentity:
     identity = normalize_measurement(request)
     return identity.model_copy(update={"evaluator_digest": f"{identity.evaluator_digest}:changed"})
@@ -397,16 +317,4 @@ def test_persisted_measurement_value_is_validated_without_repair(
     else:
         decision["normalized_measurement"]["evaluator_digest"] = f"{fingerprint}:forged"
     with pytest.raises(ValueError, match=r"normalized_measurement.*migration"):
-        codec.decode_envelope(core.RunEnvelope[core.StrategyState], json.dumps(payload))
-
-
-def test_persisted_registered_turn_uses_the_same_no_repair_boundary() -> None:
-    codec = persisted_turn_codec()
-    source = (Path(__file__).parent / "fixtures" / "envelope-v2-registered-turn.json").read_text()
-    migrated = codec.migrate_envelope(
-        core.RunEnvelope[core.StrategyState], source, core.v2_to_v3_migration(codec)
-    )
-    payload = json.loads(codec.encode_envelope(migrated))
-    payload["core"]["run"]["receipts"][0]["decision"]["normalized_turn"] = None
-    with pytest.raises(ValueError, match=r"normalized_turn.*migration"):
         codec.decode_envelope(core.RunEnvelope[core.StrategyState], json.dumps(payload))

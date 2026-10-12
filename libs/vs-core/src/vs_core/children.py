@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from ._registry import ContractError
 from .types.common import DecisionId, Value
+from .types.kinds import EventKind
 from .types.strategy import DecisionBase, Finish, Wait
 
 if TYPE_CHECKING:
@@ -42,10 +43,23 @@ class Child[K, M](Value):
     machine: M
 
 
+class Dropped(Value):
+    """An event that reached ``Children`` after its child had finished, and was dropped."""
+
+    event: EventKind
+    decision: DecisionId | None
+
+
 class Children[K, M](Value):
-    """Child machines keyed by ``K``; the parent folds them in key order."""
+    """Child machines keyed by ``K``; the parent folds them in key order.
+
+    An event for a child that has finished (removed) is dropped and recorded in
+    ``dropped``, never raised, because a result can legitimately arrive after its child
+    ended. Tests assert ``dropped`` is empty unless they expect the drop.
+    """
 
     members: tuple[Child[K, M], ...] = ()
+    dropped: tuple[Dropped, ...] = ()
 
     def keys(self) -> tuple[K, ...]:
         """The keys of the children, in key order."""
@@ -94,9 +108,31 @@ class Children[K, M](Value):
     ) -> tuple[Children[K, M], list[Decision]]:
         """Give ``event`` to the child whose decision it answers."""
         key = self.key_of(event)
-        if key is None:
+        if key is not None:
+            return self.route(key, event, update)
+        decision = getattr(event, "decision", None)
+        if decision is None:
             raise ContractError(("event",), "no child owns this event")
-        return self.route(key, event, update)
+        gone = Dropped(event=EventKind(event.kind), decision=decision)
+        return self.model_copy(update={"dropped": (*self.dropped, gone)}), []
+
+    def broadcast(
+        self,
+        event: Event,
+        update: Callable[[M, Event], tuple[M, list[Decision]]],
+    ) -> tuple[Children[K, M], list[Decision]]:
+        """Give ``event`` to every child in key order (an explicit stop, for example).
+
+        Nothing else reaches children but the events their own decisions cause, so a stop
+        has no priority over them: it is handled where it arrives, in commit order.
+        """
+        children: Children[K, M] = self
+        decisions: list[Decision] = []
+        for key in self.keys():
+            machine, more = update(children.get(key), event)
+            children = children.put(key, machine)
+            decisions.extend(_stamped(decision, _text(key)) for decision in more)
+        return children, decisions
 
     def key_of(self, event: Event) -> K | None:
         """The child that made the decision ``event`` answers, if any."""

@@ -105,7 +105,7 @@ def _failed(core: CoreState, event: Failed) -> Event:
 
 def _rejected(core: CoreState, event: Rejected) -> Event:
     del core
-    return Failed(reason=FailureReason.REFUSED, decision=event.decision_id, rejection=event.code)
+    return Failed(reason=FailureReason.REFUSED, decision=event.decision_id, cause=event.code)
 
 
 def _turn(core: CoreState, event: TurnResult) -> Event | None:
