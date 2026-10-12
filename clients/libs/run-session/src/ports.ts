@@ -6,12 +6,14 @@
  */
 import type {
   EventBatchMessage,
+  IterationResult,
   ProtocolResponse,
   RequestInput,
   RunSnapshot,
   TuiDefaults,
 } from '@vibesys/contracts';
 import type {
+  AbortSignalLike,
   BatchReconciliation,
   ControlChannelState,
   StreamConnectionState,
@@ -57,6 +59,12 @@ export type RunCommandOutcome =
 export interface RunConnection {
   /** Load an unfenced snapshot, or require the event store established by a stream batch. */
   loadSnapshot(storeId?: string): Promise<RunSnapshot>;
+  /** Load one page of the policy-owned iteration tree from the stream's store generation. */
+  loadIterations(
+    cursor: string | null,
+    expectedStoreId: string,
+    signal: AbortSignalLike,
+  ): Promise<IterationLoad>;
   /** Deliver one lifecycle command and resolve its wire response to a semantic outcome. */
   command(input: RunCommand): Promise<RunCommandOutcome>;
   /** Read the server's presentation defaults without making UI code name the transport. */
@@ -73,6 +81,11 @@ export interface RunConnection {
   redialControls(): void;
   close(): Promise<void>;
 }
+
+export type IterationLoad =
+  | {readonly kind: 'result'; readonly result: IterationResult}
+  | {readonly kind: 'not-ready'}
+  | {readonly kind: 'unsupported'};
 
 /** The page's visibility, as the browser reports it. */
 export type PageVisibility = 'visible' | 'hidden';

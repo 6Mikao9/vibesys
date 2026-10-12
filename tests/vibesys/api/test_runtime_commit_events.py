@@ -1,9 +1,9 @@
-"""A confirmed core commit derives round and experiment events strategy-agnostically.
+"""Confirmed core commits derive semantic projection events strategy-agnostically.
 
 After each confirmed commit the run diffs the previous projected `RunView` against the new
-one and emits `ROUND_FINISHED` for newly observed rounds and `EXPERIMENTS_CHANGED` when what
-the projection shows changed. These tests never reference a specific strategy ID: the
-projector is a synthetic one over a minimal state.
+one. It emits `ROUND_FINISHED` for newly observed rounds, `EXPERIMENTS_CHANGED` when the
+displayed experiment projection changes, and `ITERATIONS_CHANGED` when the policy-owned
+navigation changes. These tests use a synthetic projector and no concrete strategy ID.
 """
 
 from __future__ import annotations
@@ -12,7 +12,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from vibesys.events import CoreEvent, CoreEventType
+from vibesys.api import IterationKind, IterationStatus, IterationSummary, IterationTree
+from vibesys.events import CoreEvent, CoreEventType, IterationsChangedData
 from vibesys.run.contracts import RoundSummary, RunStatus, RunView
 from vibesys.run.integration import LocalRunIntegration
 
@@ -27,12 +28,27 @@ class _FakeAgentState(BaseModel):
 
 
 class _FakeProjector:
-    """Project `_FakeAgentState` into a view whose payload is what a frontend would show."""
+    """Project `_FakeAgentState` into the product view a frontend consumes."""
 
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         if namespace != "commit-probe" or not isinstance(state, _FakeAgentState):
             return None
         return _agent_view(state, run_id=run_id)
+
+
+def _iterations(round_numbers: tuple[int, ...]) -> IterationTree:
+    return IterationTree.from_nodes(
+        tuple(
+            IterationSummary(
+                id=f"round:{number}",
+                kind=IterationKind.ROUND,
+                label=f"Round {number}",
+                ordinal=number,
+                status=IterationStatus.COMPLETED,
+            )
+            for number in round_numbers
+        )
+    )
 
 
 def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
@@ -41,6 +57,7 @@ def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
         loop="commit-probe",
         status=RunStatus.ACTIVE,
         projection={"rounds": list(state.round_numbers), "active": state.active},
+        iterations=_iterations(state.round_numbers),
         rounds=tuple(
             RoundSummary(
                 number=number,
@@ -56,7 +73,7 @@ def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
     )
 
 
-def test_commit_projection_preserves_profile_skip_and_publication_order() -> None:
+def test_commit_projection_preserves_semantics_and_publication_order() -> None:
     integration = LocalRunIntegration()
     order: list[str] = []
     captured: list[CoreEvent] = []
@@ -71,13 +88,24 @@ def test_commit_projection_preserves_profile_skip_and_publication_order() -> Non
     integration.events.subscribe(capture_event)
     observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
 
-    observer.committed(None, _FakeAgentState(round_numbers=(1,), revision=1, profile_skipped=True))
+    state = _FakeAgentState(round_numbers=(1,), revision=1, profile_skipped=True)
+    observer.committed(None, state)
 
     round_finished = next(event for event in captured if event.type is CoreEventType.ROUND_FINISHED)
     assert round_finished.data is not None
     assert round_finished.data.kind == "round_finished"
     assert round_finished.data.profile_skipped is True
-    assert order[:2] == ["state_published", CoreEventType.ROUND_FINISHED.value]
+    iterations_changed = next(
+        event for event in captured if event.type is CoreEventType.ITERATIONS_CHANGED
+    )
+    assert iterations_changed.data == IterationsChangedData(
+        revision=_iterations(state.round_numbers).revision
+    )
+    assert order[:3] == [
+        "state_published",
+        CoreEventType.ROUND_FINISHED.value,
+        CoreEventType.ITERATIONS_CHANGED.value,
+    ]
 
 
 @given(
@@ -89,15 +117,10 @@ def test_commit_projection_preserves_profile_skip_and_publication_order() -> Non
     resume_at=st.integers(min_value=0, max_value=12),
 )
 @settings(max_examples=100)
-def test_commit_events_property_no_double_emission_and_experiments_iff_changed(
+def test_commit_events_property_no_double_emission_and_semantic_changes(
     steps: list[tuple[int, int]], resume_at: int
 ) -> None:
-    """Across any sequence of commits, each round fires once and experiments fire iff changed.
-
-    ``steps`` pairs the rounds a commit adds with how far it moves the active hypothesis.
-    ``resume_at`` recomputes the previous state from its durable value, as a restarted
-    process does, which must be indistinguishable from the in-memory object.
-    """
+    """Rounds emit once, while experiment and iteration events follow their own projections."""
     round_numbers: list[int] = []
     active = 0
     states: list[_FakeAgentState] = [_FakeAgentState()]
@@ -126,14 +149,26 @@ def test_commit_events_property_no_double_emission_and_experiments_iff_changed(
     ]
     assert announced == list(round_numbers)
 
-    changed_count = sum(1 for event in captured if event.type is CoreEventType.EXPERIMENTS_CHANGED)
-    expected_changes = sum(
+    experiment_changes = sum(
+        1 for event in captured if event.type is CoreEventType.EXPERIMENTS_CHANGED
+    )
+    expected_experiment_changes = sum(
         1
         for index in range(1, len(states))
         if (states[index - 1].round_numbers, states[index - 1].active)
         != (states[index].round_numbers, states[index].active)
     )
-    assert changed_count == expected_changes
+    assert experiment_changes == expected_experiment_changes
+
+    iteration_changes = sum(
+        1 for event in captured if event.type is CoreEventType.ITERATIONS_CHANGED
+    )
+    expected_iteration_changes = sum(
+        1
+        for index in range(1, len(states))
+        if states[index - 1].round_numbers != states[index].round_numbers
+    )
+    assert iteration_changes == expected_iteration_changes
 
 
 def test_a_commit_of_another_namespace_projects_nothing() -> None:
@@ -144,4 +179,8 @@ def test_a_commit_of_another_namespace_projects_nothing() -> None:
 
     observer.committed(None, _FakeAgentState(round_numbers=(1,), revision=1))
 
-    assert not [event for event in captured if event.type is CoreEventType.ROUND_FINISHED]
+    assert not [
+        event
+        for event in captured
+        if event.type in {CoreEventType.ROUND_FINISHED, CoreEventType.ITERATIONS_CHANGED}
+    ]

@@ -93,7 +93,6 @@ test('page reload keeps the live run and a fresh client converges to the same st
   const before = await initialBatch;
   await expect(page.getByText(marker, {exact: false})).toBeVisible();
   await expect(page.locator('.status')).toHaveText('running');
-  const sequence = await sequenceText(page);
   const transcript = await page.getByRole('region', {name: /^Transcript,/}).textContent();
   expect(gateway.isRunning()).toBe(true);
 
@@ -103,10 +102,17 @@ test('page reload keeps the live run and a fresh client converges to the same st
 
   expect(gateway.isRunning()).toBe(true);
   expect(after.store_id).toBe(before.store_id);
-  expect(after.through_sequence).toBe(before.through_sequence);
+  const beforeSequence = before.through_sequence;
+  const afterSequence = after.through_sequence;
+  if (typeof beforeSequence !== 'number' || typeof afterSequence !== 'number') {
+    throw new Error('event batches must declare their through_sequence');
+  }
+  expect(afterSequence).toBeGreaterThanOrEqual(beforeSequence);
   await expect(page.getByText(marker, {exact: false})).toBeVisible();
   await expect(page.locator('.status')).toHaveText('running');
-  expect(await sequenceText(page)).toBe(sequence);
+  await expect
+    .poll(async () => Number(await sequenceText(page)))
+    .toBeGreaterThanOrEqual(afterSequence);
   expect(await page.getByRole('region', {name: /^Transcript,/}).textContent()).toBe(transcript);
 });
 

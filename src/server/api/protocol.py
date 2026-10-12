@@ -6,6 +6,7 @@ from typing import Annotated, Literal, TypeAliasType
 
 from pydantic import Field, FiniteFloat
 
+from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
 from server.control_envelope import (
     ProtocolModel,
@@ -19,6 +20,7 @@ from server.execution import ActiveAgentExecution
 from server.host_api import PROTOCOL_VERSION
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
+from vibesys.api import IterationUnavailable
 from vibesys.api.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -148,6 +150,22 @@ class DesignQuery(Request):
     type: Literal["query.design"] = "query.design"
 
 
+class IterationQuery(Request):
+    """Request one bounded page of roots or direct children.
+
+    ``expected_store_id`` fences every page to the event store whose stream
+    established the navigation query. None preserves the unfenced request for
+    clients that do not combine iteration navigation with a live subscription.
+    An empty string is a real fence for the pre-attachment store.
+    """
+
+    type: Literal["query.iterations"] = "query.iterations"
+    expected_store_id: str | None = None
+    parent_id: str | None = None
+    cursor: str | None = None
+    limit: int = Field(default=100, ge=1, le=MAX_ITERATION_PAGE_SIZE)
+
+
 class DesignPatchQuery(Request):
     """Request one file's unified patch from a round's commit range.
 
@@ -209,6 +227,7 @@ ProtocolRequest = Annotated[
     | HistoryQuery
     | PerformanceQuery
     | ExperimentQuery
+    | IterationQuery
     | DesignQuery
     | DesignPatchQuery
     | EventsQuery
@@ -476,6 +495,8 @@ class Response(ResponseEnvelope):
     # readiness marker separate preserves the protocol-v1 list contract while
     # distinguishing bootstrap from an authoritative empty experiment log.
     experiments_ready: bool | None = None
+    iterations: IterationSlice | IterationUnavailable | None = None
+    iterations_ready: bool | None = None
     design: list[DesignRound] = Field(default_factory=list)
     # Same bootstrap-versus-empty distinction as ``experiments_ready``.
     design_ready: bool | None = None

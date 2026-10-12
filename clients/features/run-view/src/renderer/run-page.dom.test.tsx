@@ -4,7 +4,13 @@
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {event} from '@vibesys/contracts/testing';
 import {type RunCommand, type RunCommandOutcome, runStep} from '@vibesys/run-session';
-import {type CoreState, initialCoreState} from '@vibesys/run-state';
+import {
+  type CoreState,
+  type IterationNavigationState,
+  initialCoreState,
+  initialIterationNavigation,
+  reduceIterationResult,
+} from '@vibesys/run-state';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import type {Root} from 'react-dom/client';
@@ -40,6 +46,7 @@ interface MountedRun {
 async function mountRun(
   initial: CoreState,
   command: ((input: RunCommand) => Promise<RunCommandOutcome>) | null = null,
+  iterations: IterationNavigationState = initialIterationNavigation(),
 ): Promise<MountedRun> {
   const {createRoot} = await import('react-dom/client');
   const container = document.createElement('div');
@@ -49,6 +56,7 @@ async function mountRun(
     root.render(
       <RunPage
         run={run}
+        iterations={iterations}
         session={
           command === null
             ? null
@@ -56,6 +64,7 @@ async function mountRun(
                 hasSnapshot: true,
                 status: 'connected',
                 error: null,
+                iterationError: null,
                 controls: {status: 'connected'},
               }
         }
@@ -151,6 +160,74 @@ test('round rail buttons are keyboard-focusable navigation into the transcript',
   expect(roundOne.getAttribute('aria-pressed')).toBe('true');
   expect(mounted.container.textContent).toContain('first round');
   expect(mounted.container.textContent).not.toContain('second round');
+  await unmount(mounted);
+});
+
+test('legacy round navigation keeps planned roots selectable beside observed activity', async () => {
+  const run = runStep(initialCoreState(), {
+    type: 'events',
+    events: [
+      event(1, 'run_started', {
+        data: {kind: 'run_started', outer_loop: 'dynamic', input: '.', max_rounds: 3},
+      }),
+      event(2, 'agent_output_chunk', {
+        round_label: 'round-1-implementer',
+        data: {kind: 'agent_output_chunk', channel: 'assistant', content: 'first round'},
+      }),
+    ],
+  }).state;
+  const mounted = await mountRun(run);
+  const links = [...mounted.container.querySelectorAll<HTMLButtonElement>('.round-link')];
+  const roundTwo = links.find(button => button.textContent?.includes('Round 2') === true);
+  const roundThree = links.find(button => button.textContent?.includes('Round 3') === true);
+  if (roundTwo === undefined || roundThree === undefined) {
+    throw new Error('planned round navigation missing');
+  }
+
+  expect(roundTwo.textContent).toContain('pending');
+  expect(roundThree.textContent).toContain('pending');
+  await act(async () => roundTwo.click());
+  expect(roundTwo.getAttribute('aria-pressed')).toBe('true');
+  expect(mounted.container.textContent).not.toContain('first round');
+  expect(mounted.container.textContent).toContain(
+    'No activity has been recorded for this iteration.',
+  );
+  await unmount(mounted);
+});
+
+test('iteration rail selects a policy root by its stable id without requiring round semantics', async () => {
+  const iterations = reduceIterationResult(initialIterationNavigation(), {
+    kind: 'page',
+    schema_version: 1,
+    run_id: 'run-1',
+    projection_revision: 'generations',
+    parent_id: null,
+    from_cursor: null,
+    items: [
+      {
+        id: 'generation:alpha',
+        parent_id: null,
+        kind: 'generation',
+        label: 'Generation Alpha',
+        ordinal: 0,
+        status: 'active',
+        child_count: 2,
+        headline_metrics: [],
+      },
+    ],
+    next_cursor: null,
+  });
+  const mounted = await mountRun(outputRun(1), null, iterations);
+  const generation = [...mounted.container.querySelectorAll<HTMLButtonElement>('.round-link')].find(
+    button => button.textContent?.includes('Generation Alpha') === true,
+  );
+  if (generation === undefined) throw new Error('generation navigation missing');
+
+  expect(generation.getAttribute('aria-pressed')).toBe('false');
+  await act(async () => generation.click());
+  expect(generation.getAttribute('aria-pressed')).toBe('true');
+  expect(mounted.container.querySelector('[aria-label="Iterations and status"]')).not.toBeNull();
+  expect(mounted.container.textContent).toContain('activity 1');
   await unmount(mounted);
 });
 

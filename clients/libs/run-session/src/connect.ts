@@ -3,7 +3,7 @@
  * stream, placed by the stream reconciler. Runtime-neutral: the app supplies the transport (a
  * WebSocket, or the desktop shell's bridge shaped as one).
  */
-import {ServerError} from '@vibesys/contracts';
+import {isServerRejection, ServerError} from '@vibesys/contracts';
 import {
   type ControlChannelState,
   type ControlTransport,
@@ -14,6 +14,7 @@ import {
   StreamReconciler,
   sameControlChannelState,
 } from '@vibesys/transport';
+import {isIterationStoreReplaced} from './connection.js';
 import type {RunConnection, TransportHooks} from './ports.js';
 
 /** The event stream's tail and its redial timing; the defaults are the transport's. */
@@ -59,6 +60,7 @@ function openRunConnection(
   // The browser replays the whole log and exposes no backfill action, so the positive chunk is
   // dormant; it follows the configured tail so a future history action cannot drift from it.
   const reconciler = new StreamReconciler({backfillChunk: tail ?? 1});
+  let iterationCapability: 'unknown' | 'supported' | 'unsupported' = 'unknown';
   return {
     async loadSnapshot(storeId) {
       const response = await transport.request({
@@ -72,6 +74,34 @@ function openRunConnection(
         );
       }
       return response.snapshot;
+    },
+    async loadIterations(cursor, expectedStoreId, signal) {
+      if (iterationCapability === 'unsupported') return {kind: 'unsupported'};
+      try {
+        const response = await transport.request(
+          {
+            type: 'query.iterations',
+            expected_store_id: expectedStoreId,
+            ...(cursor === null ? {} : {cursor}),
+          },
+          {signal},
+        );
+        iterationCapability = 'supported';
+        if (response.iterations_ready === false || response.iterations == null) {
+          return {kind: 'not-ready'};
+        }
+        return {kind: 'result', result: response.iterations};
+      } catch (error) {
+        if (
+          iterationCapability === 'unknown' &&
+          isServerRejection(error) &&
+          !isIterationStoreReplaced(error)
+        ) {
+          iterationCapability = 'unsupported';
+          return {kind: 'unsupported'};
+        }
+        throw error;
+      }
     },
     async command(input) {
       const response = await transport.request(input);

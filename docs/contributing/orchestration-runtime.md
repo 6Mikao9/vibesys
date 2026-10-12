@@ -51,6 +51,13 @@ Registration validates the policy and names the offending key (for example
 carry a resume policy, a round-count projection and a projector that reads the run's
 committed record for live and historical views.
 
+The projector returns the strict `vibesys.api.PluginProjection` contract. Its `iterations`
+field is the policy-owned typed navigation tree; `RoundSummary` remains a compatibility
+projection for older consumers. Every built-in registration declares an `IterationSupport`
+disposition. Catalog construction rejects `UNMAPPED`, so a new built-in cannot silently
+publish empty navigation. A policy whose required state is held outside its durable model
+returns typed unavailability instead of reconstructing or duplicating that external state.
+
 ## What a strategy declares
 
 A strategy declares its phases, its turn table and its settle policy, and the runtime
@@ -91,7 +98,9 @@ Extract shared policy only when real callers need the same semantics.
 2. Construct one `OrchestrationPlugin` with a `CorePolicy`; its `agents` tuple is
    authoritative.
 3. Export its product registration and add it to `launch.built_in_orchestrations` through
-   the individual registration facade `vibesys.api.catalog`.
+   the individual registration facade `vibesys.api.catalog`. Declare its iteration
+   disposition and, when projected, map durable policy state to stable typed IDs, parent
+   links, sibling ordinals, status, and bounded headline metrics.
 4. Add the strategy to the conformance suite and its pure-tier tests (see the `testing`
    skill), and wiring tests only when the boundary itself changes.
 5. Add any new module edge to `tach.toml` and run `uv run python scripts/check_tach.py`.

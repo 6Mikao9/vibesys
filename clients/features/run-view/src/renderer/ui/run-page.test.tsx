@@ -1,7 +1,11 @@
 import {expect, test} from 'bun:test';
 import {event} from '@vibesys/contracts/testing';
 import {runStep} from '@vibesys/run-session';
-import {initialCoreState} from '@vibesys/run-state';
+import {
+  initialCoreState,
+  initialIterationNavigation,
+  reduceIterationResult,
+} from '@vibesys/run-state';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {RunPage} from '../index.js';
 
@@ -19,6 +23,7 @@ test('surfaces a server-truncated event beside its retained payload', () => {
   const html = renderToStaticMarkup(
     <RunPage
       run={run}
+      iterations={initialIterationNavigation()}
       session={null}
       replayFailure={null}
       onReattach={() => undefined}
@@ -46,6 +51,7 @@ ${'A'.repeat(256)}
   const html = renderToStaticMarkup(
     <RunPage
       run={run}
+      iterations={initialIterationNavigation()}
       session={null}
       replayFailure={null}
       onReattach={() => undefined}
@@ -61,6 +67,94 @@ ${'A'.repeat(256)}
   expect(html).not.toContain('<strong>not markup</strong>');
 });
 
+test('does not present a round budget as a limit on non-round iterations', () => {
+  const run = runStep(initialCoreState(), {
+    type: 'events',
+    events: [
+      event(1, 'run_started', {
+        run_id: 'run-1',
+        data: {kind: 'run_started', outer_loop: 'dynamic', input: '.', max_rounds: 3},
+      }),
+    ],
+  }).state;
+  const iterations = reduceIterationResult(initialIterationNavigation(), {
+    kind: 'page',
+    schema_version: 1,
+    run_id: 'run-1',
+    projection_revision: 'workstreams',
+    parent_id: null,
+    from_cursor: null,
+    items: [
+      {
+        id: 'workstream:cache',
+        parent_id: null,
+        kind: 'workstream',
+        label: 'Cache lookups',
+        ordinal: 1,
+        status: 'active',
+        child_count: 2,
+        headline_metrics: [],
+      },
+    ],
+    next_cursor: null,
+  });
+
+  const html = renderToStaticMarkup(
+    <RunPage
+      run={run}
+      iterations={iterations}
+      session={null}
+      replayFailure={null}
+      onReattach={() => undefined}
+      onReconnectControls={() => undefined}
+      onRetryReplay={() => undefined}
+      onCommand={null}
+    />,
+  );
+
+  expect(html).toContain('<span>Iterations</span><strong>1</strong>');
+  expect(html).not.toContain('1 / 3');
+});
+
+test('does not infer round semantics from an empty policy projection', () => {
+  const run = runStep(initialCoreState(), {
+    type: 'events',
+    events: [
+      event(1, 'run_started', {
+        run_id: 'run-1',
+        data: {kind: 'run_started', outer_loop: 'dynamic', input: '.', max_rounds: 3},
+      }),
+    ],
+  }).state;
+
+  const iterations = reduceIterationResult(initialIterationNavigation(), {
+    kind: 'page',
+    schema_version: 1,
+    run_id: 'run-1',
+    projection_revision: 'empty-policy',
+    parent_id: null,
+    from_cursor: null,
+    items: [],
+    next_cursor: null,
+  });
+
+  const html = renderToStaticMarkup(
+    <RunPage
+      run={run}
+      iterations={iterations}
+      session={null}
+      replayFailure={null}
+      onReattach={() => undefined}
+      onReconnectControls={() => undefined}
+      onRetryReplay={() => undefined}
+      onCommand={null}
+    />,
+  );
+
+  expect(html).toContain('<span>Iterations</span><strong>0</strong>');
+  expect(html).not.toContain('0 / 3');
+});
+
 test('windows a large folded transcript and exposes replay controls as read-only', () => {
   const events = Array.from({length: 80}, (_, index) =>
     event(index + 1, 'agent_output_chunk', `activity ${index + 1}`),
@@ -70,6 +164,7 @@ test('windows a large folded transcript and exposes replay controls as read-only
   const html = renderToStaticMarkup(
     <RunPage
       run={run}
+      iterations={initialIterationNavigation()}
       session={null}
       replayFailure={null}
       onReattach={() => undefined}
@@ -104,6 +199,7 @@ test('renders typed tool data as a card instead of reparsing its display text', 
   const html = renderToStaticMarkup(
     <RunPage
       run={run}
+      iterations={initialIterationNavigation()}
       session={null}
       replayFailure={null}
       onReattach={() => undefined}

@@ -22,7 +22,12 @@ import {resolveStartupTrace} from './boot-trace.js';
 import {fuzzyMatchCommands} from './commands.js';
 import {readNote, writeNote} from './notes-store.js';
 import {SocketSessionController} from './session-controller.js';
-import {chatPaneFocused, chatPaneVisible, experimentLogVisible} from './session-model.js';
+import {
+  chatPaneFocused,
+  chatPaneVisible,
+  experimentLogVisible,
+  iterationRailRounds,
+} from './session-model.js';
 import {rightPaneContent, rightPaneTitle} from './ui/right-pane.js';
 
 const NOTE_PROJECT_SCOPE = 'a'.repeat(64);
@@ -239,7 +244,12 @@ describe('session controller', () => {
 
     // The event replay is the long pole; nothing waits behind it, and nothing
     // waits behind the two independent queries either.
-    expect([...started].sort()).toEqual(['query.experiments', 'query.snapshot', 'subscribe']);
+    expect([...started].sort()).toEqual([
+      'query.experiments',
+      'query.iterations',
+      'query.snapshot',
+      'subscribe',
+    ]);
     for (const resolve of pending.splice(0)) resolve();
 
     // The design log deliberately rides behind the experiments answer rather
@@ -248,6 +258,406 @@ describe('session controller', () => {
     expect(started).toContain('query.design');
     for (const resolve of pending.splice(0)) resolve();
     await boot;
+  });
+
+  it('uses queried evolve generations as the rail navigation roots', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run',
+      projection_revision: 'evolve-1',
+      parent_id: null,
+      from_cursor: null,
+      items: [
+        {
+          id: 'generation:4',
+          parent_id: null,
+          kind: 'generation',
+          label: 'Generation 4',
+          ordinal: 4,
+          status: 'active',
+          child_count: 3,
+          headline_metrics: [],
+        },
+      ],
+      next_cursor: null,
+    };
+    const controller = new SocketSessionController(transport);
+
+    await controller.start();
+
+    expect(transport.requests).toContainEqual({
+      type: 'query.iterations',
+      expected_store_id: '',
+    });
+    expect(iterationRailRounds(controller.state)).toMatchObject([
+      {iterationLabel: 'Generation 4', number: null, status: 'active'},
+    ]);
+  });
+
+  it('keeps legacy round navigation when policy iterations are explicitly unavailable', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = {
+      kind: 'unavailable',
+      schema_version: 1,
+      reason: 'external_state_unavailable',
+    };
+    const controller = new SocketSessionController(transport);
+
+    await controller.start();
+    transport.emit({type: 'event', event: roundFinished(13, 1)});
+
+    expect(controller.state.iterations.unavailable?.reason).toBe('external_state_unavailable');
+    expect(iterationRailRounds(controller.state).map(round => round.number)).toEqual([1]);
+  });
+
+  it('refreshes policy navigation on a semantic iteration invalidation', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = iterationPage('evolve-1', 1);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.iterations = iterationPage('evolve-2', 2);
+
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'evolve-2'},
+      },
+    });
+    await settleMicrotasks();
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      2,
+    );
+    expect(iterationRailRounds(controller.state)).toMatchObject([
+      {iterationLabel: 'Generation 2', status: 'completed'},
+    ]);
+  });
+
+  it('suppresses an initial iteration result superseded by an invalidation', async () => {
+    const transport = new FakeTransport();
+    const initial = deferred<ProtocolResponse>();
+    const current = deferred<ProtocolResponse>();
+    transport.iterationResponses.push(initial.promise, current.promise);
+    const controller = new SocketSessionController(transport);
+    const revisions: Array<string | null> = [];
+    controller.subscribe(state => revisions.push(state.iterations.revision));
+
+    const started = controller.start();
+    await settleMicrotasks();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'current'},
+      },
+    });
+    initial.resolve(iterationPageResponse('stale', null, 0, 1, null));
+    await settleMicrotasks();
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(revisions).not.toContain('stale');
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      2,
+    );
+
+    current.resolve(iterationPageResponse('current', null, 1, 1, null));
+    await started;
+    expect(controller.state.iterations.revision).toBe('current');
+    expect(revisions).not.toContain('stale');
+    await controller.stop();
+  });
+
+  it('suppresses an initial iteration failure superseded by a successful invalidation', async () => {
+    const transport = new FakeTransport();
+    const initial = deferred<ProtocolResponse>();
+    const current = deferred<ProtocolResponse>();
+    transport.iterationResponses.push(initial.promise, current.promise);
+    const controller = new SocketSessionController(transport);
+
+    const started = controller.start();
+    await settleMicrotasks();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'current'},
+      },
+    });
+    initial.reject(new ServerError('superseded iteration failure'));
+    await settleMicrotasks();
+
+    expect(controller.state.errorBanner).toBeNull();
+    current.resolve(iterationPageResponse('current', null, 1, 1, null));
+    await started;
+    expect(controller.state.iterations.revision).toBe('current');
+    expect(controller.state.errorBanner).toBeNull();
+    await controller.stop();
+  });
+
+  it('loads iteration navigation again when the stream store replaces an in-flight query', async () => {
+    const transport = new FakeTransport();
+    const stale = deferred<ProtocolResponse>();
+    const current = deferred<ProtocolResponse>();
+    transport.iterationResponses.push(stale.promise, current.promise);
+    const controller = new SocketSessionController(transport);
+
+    const started = controller.start();
+    await settleMicrotasks();
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'server_ready')],
+      store_id: 'bootstrap-store',
+      history_after_sequence: 0,
+    });
+    transport.emit({
+      type: 'event_batch',
+      events: [
+        {
+          ...event(1, 'run_started'),
+          data: {kind: 'run_started', outer_loop: 'evolve', input: '.', max_rounds: 3},
+        },
+      ],
+      store_id: 'run-store',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+
+    stale.resolve(iterationPageResponse('bootstrap', null, 0, 1, null));
+    await settleMicrotasks();
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      2,
+    );
+
+    current.resolve(iterationPageResponse('run', null, 1, 1, null));
+    await started;
+    expect(controller.state.iterations.revision).toBe('run');
+    await controller.stop();
+  });
+
+  it('suppresses a fenced iteration rejection until the stream proves the next store', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = iterationPage('store-a', 1);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.iterationResponses.push(
+      new ServerError('The run event store changed before iterations were captured', {
+        code: 'iteration_store_replaced',
+        summary: 'The run event store changed before iterations were captured',
+        scope: 'request',
+      }),
+      iterationPageResponse('store-c', null, 3, 1, null),
+    );
+
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'server_ready')],
+      store_id: 'store-2',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+    await settleMicrotasks();
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(controller.state.errorBanner).toBeNull();
+
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'server_ready')],
+      store_id: 'store-3',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+    await waitForController(controller, state => state.iterations.revision === 'store-c');
+
+    expect(
+      transport.requests.filter(request => request.type === 'query.iterations').slice(-2),
+    ).toEqual([
+      {type: 'query.iterations', expected_store_id: 'store-2'},
+      {type: 'query.iterations', expected_store_id: 'store-3'},
+    ]);
+    expect(controller.state.errorBanner).toBeNull();
+    await controller.stop();
+  });
+
+  it.each([
+    'success',
+    'failure',
+  ] as const)('retires a pending iteration %s after stop', async outcome => {
+    const transport = new FakeTransport();
+    const pending = deferred<ProtocolResponse>();
+    if (outcome === 'success') {
+      transport.iterationResponses.push(pending.promise);
+    } else {
+      transport.iterationResponses.push(
+        iterationPageResponse('late', null, 0, 100, 'page-2'),
+        pending.promise,
+      );
+    }
+    const controller = new SocketSessionController(transport);
+
+    const started = controller.start();
+    await settleMicrotasks();
+    await controller.stop();
+    if (outcome === 'success') {
+      pending.resolve(iterationPageResponse('late', null, 0, 1, null));
+    } else {
+      pending.reject(new ServerError('late iteration failure'));
+    }
+    await started;
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(controller.state.errorBanner).toBeNull();
+  });
+
+  it('publishes more than one hundred iteration roots only after the last page', async () => {
+    const transport = new FakeTransport();
+    const lastPage = deferred<ProtocolResponse>();
+    transport.iterationResponses.push(
+      iterationPageResponse('bulk', null, 0, 100, 'page-2'),
+      lastPage.promise,
+    );
+    const controller = new SocketSessionController(transport);
+
+    const started = controller.start();
+    await settleMicrotasks();
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(iterationRailRounds(controller.state)).toEqual([]);
+
+    lastPage.resolve(iterationPageResponse('bulk', 'page-2', 100, 25, null));
+    await started;
+
+    expect(controller.state.iterations.revision).toBe('bulk');
+    expect(iterationRailRounds(controller.state)).toHaveLength(125);
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toEqual([
+      {type: 'query.iterations', expected_store_id: ''},
+      {type: 'query.iterations', expected_store_id: '', cursor: 'page-2'},
+    ]);
+  });
+
+  it('reports an initial second-page rejection without rejecting bootstrap or publishing a partial tree', async () => {
+    const transport = new FakeTransport();
+    transport.iterationResponses.push(
+      iterationPageResponse('initial', null, 0, 100, 'page-2'),
+      new ServerError('initial second iteration page failed'),
+    );
+    const controller = new SocketSessionController(transport);
+
+    await expect(controller.start()).resolves.toBeUndefined();
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(iterationRailRounds(controller.state)).toEqual([]);
+    expect(controller.state.errorBanner).toMatchObject({
+      scope: 'request',
+      message: 'initial second iteration page failed',
+    });
+  });
+
+  it('reports an initial repeated cursor without rejecting bootstrap or publishing a partial tree', async () => {
+    const transport = new FakeTransport();
+    transport.iterationResponses.push(
+      iterationPageResponse('initial', null, 0, 100, 'page-2'),
+      iterationPageResponse('initial', 'page-2', 100, 1, 'page-2'),
+    );
+    const controller = new SocketSessionController(transport);
+
+    await expect(controller.start()).resolves.toBeUndefined();
+
+    expect(controller.state.iterations.revision).toBeNull();
+    expect(iterationRailRounds(controller.state)).toEqual([]);
+    expect(controller.state.errorBanner).toMatchObject({
+      scope: 'request',
+      message: 'iteration query repeated a paging cursor',
+    });
+  });
+
+  it('retains the last complete iteration tree when a later page fails', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = iterationPage('complete', 0);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.iterationResponses.push(
+      iterationPageResponse('replacement', null, 0, 100, 'page-2'),
+      new ServerError('second iteration page failed'),
+    );
+    const failed = waitForController(
+      controller,
+      state => state.errorBanner?.message === 'second iteration page failed',
+    );
+
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'replacement'},
+      },
+    });
+    await failed;
+
+    expect(controller.state.iterations.revision).toBe('complete');
+    expect(iterationRailRounds(controller.state).map(row => row.iterationId)).toEqual([
+      'generation:0',
+    ]);
+  });
+
+  it('retains the last complete iteration tree when paging repeats a cursor', async () => {
+    const transport = new FakeTransport();
+    transport.iterationsReady = true;
+    transport.iterations = iterationPage('complete', 0);
+    const controller = new SocketSessionController(transport);
+    await controller.start();
+    transport.iterationResponses.push(
+      iterationPageResponse('replacement', null, 0, 100, 'page-2'),
+      iterationPageResponse('replacement', 'page-2', 100, 1, 'page-2'),
+    );
+    const failed = waitForController(
+      controller,
+      state => state.errorBanner?.message === 'iteration query repeated a paging cursor',
+    );
+
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'replacement'},
+      },
+    });
+    await failed;
+
+    expect(controller.state.iterations.revision).toBe('complete');
+    expect(iterationRailRounds(controller.state).map(row => row.iterationId)).toEqual([
+      'generation:0',
+    ]);
+  });
+
+  it('falls back only when the initial iteration capability probe is rejected', async () => {
+    const transport = new FakeTransport();
+    transport.iterationResponses.push(new ServerError('Unsupported protocol request'));
+    const controller = new SocketSessionController(transport);
+
+    await controller.start();
+    expect(controller.state.errorBanner).toBeNull();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'ignored'},
+      },
+    });
+    await settleMicrotasks();
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      1,
+    );
+    expect(controller.state.errorBanner).toBeNull();
   });
 
   it('applies a replay batch before reconciling its active execution checkpoint', async () => {
@@ -1127,6 +1537,7 @@ describe('session controller', () => {
 
     expect(transport.requests).toEqual([
       {type: 'query.snapshot'},
+      {type: 'query.iterations', expected_store_id: ''},
       {type: 'query.experiments'},
       {type: 'query.design'},
     ]);
@@ -3678,6 +4089,113 @@ describe('stream reconnect', () => {
   });
 });
 
+function iterationPage(
+  revision: string,
+  generation: number,
+): Exclude<ProtocolResponse['iterations'], undefined | null> {
+  return {
+    kind: 'page',
+    schema_version: 1,
+    run_id: 'run',
+    projection_revision: revision,
+    parent_id: null,
+    from_cursor: null,
+    items: [
+      {
+        id: `generation:${generation}`,
+        parent_id: null,
+        kind: 'generation',
+        label: `Generation ${generation}`,
+        ordinal: generation,
+        status: 'completed',
+        child_count: 0,
+        headline_metrics: [],
+      },
+    ],
+    next_cursor: null,
+  };
+}
+
+function iterationPageResponse(
+  revision: string,
+  fromCursor: string | null,
+  start: number,
+  count: number,
+  nextCursor: string | null,
+): ProtocolResponse {
+  return {
+    protocol_version: 1,
+    request_id: `iterations-${revision}-${fromCursor ?? 'first'}`,
+    timestamp: '2026-01-01T00:00:00Z',
+    ok: true,
+    iterations_ready: true,
+    iterations: {
+      kind: 'page',
+      schema_version: 1,
+      run_id: 'run',
+      projection_revision: revision,
+      parent_id: null,
+      from_cursor: fromCursor,
+      items: Array.from({length: count}, (_, offset) => {
+        const generation = start + offset;
+        return {
+          id: `generation:${generation}`,
+          parent_id: null,
+          kind: 'generation' as const,
+          label: `Generation ${generation}`,
+          ordinal: generation,
+          status: 'completed' as const,
+          child_count: 0,
+          headline_metrics: [],
+        };
+      }),
+      next_cursor: nextCursor,
+    },
+  };
+}
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+} {
+  let resolvePromise: ((value: T) => void) | undefined;
+  let rejectPromise: ((error: unknown) => void) | undefined;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return {
+    promise,
+    resolve(value) {
+      if (resolvePromise === undefined) throw new Error('deferred promise is not initialized');
+      resolvePromise(value);
+    },
+    reject(error) {
+      if (rejectPromise === undefined) throw new Error('deferred promise is not initialized');
+      rejectPromise(error);
+    },
+  };
+}
+
+async function settleMicrotasks(): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+}
+
+function waitForController(
+  controller: SocketSessionController,
+  predicate: (state: typeof controller.state) => boolean,
+): Promise<void> {
+  if (predicate(controller.state)) return Promise.resolve();
+  return new Promise(resolve => {
+    const unsubscribe = controller.subscribe(state => {
+      if (!predicate(state)) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
 class FakeTransport implements ServerTransport {
   closed = false;
   closeCalls = 0;
@@ -3688,6 +4206,9 @@ class FakeTransport implements ServerTransport {
   experimentsReady = true;
   design: NonNullable<ProtocolResponse['design']> = [];
   designReady = true;
+  iterations: Exclude<ProtocolResponse['iterations'], undefined> = null;
+  iterationsReady = false;
+  readonly iterationResponses: Array<ProtocolResponse | Error | Promise<ProtocolResponse>> = [];
   /** Patch text `query.design_patch` echoes back; null omits the field. */
   designPatchText: string | null = null;
   designPatchTruncated = false;
@@ -3707,12 +4228,27 @@ class FakeTransport implements ServerTransport {
     private readonly responseError?: Error,
   ) {}
 
-  request(input: RequestInput): Promise<ProtocolResponse> {
-    this.requests.push(input);
-    if (this.responseError) return Promise.reject(this.responseError);
+  #raiseConfiguredError(input: RequestInput): void {
+    if (this.responseError) throw this.responseError;
     if (input.type === 'query.design_patch' && this.designPatchError) {
-      return Promise.reject(this.designPatchError);
+      throw this.designPatchError;
     }
+  }
+
+  #nextIterationResponse(
+    input: RequestInput,
+  ): ProtocolResponse | Promise<ProtocolResponse> | undefined {
+    if (input.type !== 'query.iterations' || this.iterationResponses.length === 0) return undefined;
+    const response = this.iterationResponses.shift();
+    if (response instanceof Error) throw response;
+    return response;
+  }
+
+  async request(input: RequestInput): Promise<ProtocolResponse> {
+    this.requests.push(input);
+    this.#raiseConfiguredError(input);
+    const iterationResponse = this.#nextIterationResponse(input);
+    if (iterationResponse !== undefined) return await iterationResponse;
     const response: ProtocolResponse = {
       protocol_version: 1,
       request_id: 'request',
@@ -3724,6 +4260,9 @@ class FakeTransport implements ServerTransport {
       experiments_ready: this.experimentsReady,
       design: this.design,
       design_ready: this.designReady,
+      ...(input.type === 'query.iterations'
+        ? {iterations: this.iterations, iterations_ready: this.iterationsReady}
+        : {}),
       ...(input.type === 'query.chat'
         ? {
             chat: this.responseChat ?? {
@@ -3753,7 +4292,7 @@ class FakeTransport implements ServerTransport {
         ...(this.projectScope === undefined ? {} : {project_scope: this.projectScope}),
       },
     };
-    if (input.type !== 'query.snapshot' || !this.deferSnapshot) return Promise.resolve(response);
+    if (input.type !== 'query.snapshot' || !this.deferSnapshot) return response;
     if (this.#releaseSnapshot !== null) throw new Error('Snapshot request is already pending');
     return new Promise(resolve => {
       this.#releaseSnapshot = () => {

@@ -15,11 +15,23 @@
  * rejected stream batch are reported as `projection-rejected`.
  */
 import type {RunSnapshot, TuiDefaults} from '@vibesys/contracts';
-import {type CoreState, hasRunEnded} from '@vibesys/run-state';
+import {
+  type CoreState,
+  hasRunEnded,
+  type IterationNavigationState,
+  initialIterationNavigation,
+  reduceIterationResult,
+} from '@vibesys/run-state';
+import type {AbortSignalLike} from '@vibesys/transport';
 import {type Actor, createActor, fromPromise} from 'xstate';
-import {isSnapshotStoreReplaced, type WebSessionState} from './connection.js';
+import {
+  isIterationStoreReplaced,
+  isSnapshotStoreReplaced,
+  type WebSessionState,
+} from './connection.js';
 import type {
   BrowserLifecycle,
+  IterationLoad,
   RunCommand,
   RunCommandOutcome,
   RunConnection,
@@ -28,6 +40,7 @@ import type {
 } from './ports.js';
 import {createRunStore, type RunStore, runStep} from './run.js';
 import {
+  type IterationQueryOutcome,
   type Reachability,
   type RefreshOutcome,
   type SessionEvent,
@@ -212,6 +225,9 @@ export class WebSession {
         loadReplacementSnapshot: fromPromise<SnapshotResult, {readonly storeId: string}>(
           ({input, signal}) => this.#loadSnapshot(signal, input.storeId),
         ),
+        loadIterations: fromPromise<IterationQueryOutcome, {readonly storeId: string}>(
+          ({input, signal}) => this.#collectIterationPages(signal, input.storeId),
+        ),
       },
       actions: {
         applySnapshot: (_, {snapshot}) => {
@@ -225,6 +241,9 @@ export class WebSession {
           }
         },
         redialControls: () => this.#guarded(() => this.#connection.redialControls()),
+        publishIterations: (_, {navigation}) => {
+          if (navigation !== null) this.store.publishIterations(navigation);
+        },
         closeShell: () => void this.#release(),
       },
     });
@@ -268,6 +287,48 @@ export class WebSession {
       // the stream owner, so retry its fenced snapshot instead of waiting for a generation change
       // that will not occur.
       this.#send({type: 'stream-established', storeId: this.#streamStoreId});
+      this.#send({type: 'iterations-refresh', storeId: this.#streamStoreId});
+    }
+  }
+
+  /** Fold one batch and refresh the iteration projection owned by its stream store. */
+  #foldBatch(
+    ...[message, reconciliation, context]: Parameters<RunStreamHandlers['onBatch']>
+  ): void {
+    const storeId = message.store_id ?? '';
+    const previousStoreId = this.#streamStoreId;
+    const boundary = this.#freshBoundaryAfterConnection;
+    const requestedFreshGeneration =
+      boundary !== undefined &&
+      !context.resumed &&
+      (boundary === null || context.connectionGeneration > boundary);
+    const firstGeneration = previousStoreId === null;
+    const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
+    const previousRun = this.store.getState();
+    this.store.dispatch({type: 'batch', message, reconciliation});
+    const rejection = runIdentityRejection(previousRun, this.store.getState());
+    this.#streamStoreId = storeId;
+    if (storeReplaced) {
+      // Store identity, not connection or chunk identity, proves a replacement. Retire old
+      // evidence, then query through the server's atomic store precondition.
+      this.#snapshotWatermark = null;
+    }
+    if (firstGeneration || requestedFreshGeneration || storeReplaced) {
+      this.#send({type: 'stream-established', storeId});
+    }
+    if (requestedFreshGeneration) this.#freshBoundaryAfterConnection = undefined;
+    this.#lastBatchConnection = context.connectionGeneration;
+    if (rejection !== null) {
+      this.#send({type: 'projection-rejected', error: rejection});
+      return;
+    }
+    if (
+      firstGeneration ||
+      requestedFreshGeneration ||
+      storeReplaced ||
+      message.events.some(event => event.type === 'iterations_changed')
+    ) {
+      this.#send({type: 'iterations-refresh', storeId});
     }
   }
 
@@ -276,35 +337,11 @@ export class WebSession {
     return {
       cursor: () => this.store.getState().sequence,
       shouldReconnect: () => this.#streamNeedsRecovery(),
-      onBatch: (message, reconciliation, context) => {
-        const storeId = message.store_id ?? '';
-        const previousStoreId = this.#streamStoreId;
-        const boundary = this.#freshBoundaryAfterConnection;
-        const requestedFreshGeneration =
-          boundary !== undefined &&
-          !context.resumed &&
-          (boundary === null || context.connectionGeneration > boundary);
-        const firstGeneration = previousStoreId === null;
-        const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
-        const previousRun = this.store.getState();
-        this.store.dispatch({type: 'batch', message, reconciliation});
-        const rejection = runIdentityRejection(previousRun, this.store.getState());
-        this.#streamStoreId = storeId;
-        if (storeReplaced) {
-          // Store identity, not connection or chunk identity, proves a replacement. Retire old
-          // evidence, then query through the server's atomic store precondition.
-          this.#snapshotWatermark = null;
-        }
-        if (firstGeneration || requestedFreshGeneration || storeReplaced) {
-          this.#send({type: 'stream-established', storeId});
-        }
-        if (requestedFreshGeneration) this.#freshBoundaryAfterConnection = undefined;
-        this.#lastBatchConnection = context.connectionGeneration;
-        // A live socket does not make discarded foreign-run data trustworthy.
-        if (rejection !== null) this.#send({type: 'projection-rejected', error: rejection});
-      },
+      onBatch: (...args) => this.#foldBatch(...args),
       onFault: error => this.#send({type: 'fault', error}),
-      onConnectionState: state => this.#send({type: 'stream', state}),
+      onConnectionState: state => {
+        this.#send({type: 'stream', state});
+      },
     };
   }
 
@@ -348,5 +385,43 @@ export class WebSession {
     if (rejection === null) return {ok: true, snapshot};
     if (!signal.aborted) this.store.dispatch({type: 'snapshot', snapshot});
     return {ok: false, error: rejection};
+  }
+
+  async #collectIterationPages(
+    signal: AbortSignalLike,
+    expectedStoreId: string,
+  ): Promise<IterationNavigationState | null> {
+    let cursor: string | null = null;
+    const seen = new Set<string>();
+    let staged = initialIterationNavigation();
+    do {
+      const loaded = await this.#loadIterationPage(cursor, expectedStoreId, signal);
+      if (loaded === null || loaded.kind !== 'result') return null;
+      staged = reduceIterationResult(staged, loaded.result);
+      if (!('items' in loaded.result)) return staged;
+      cursor = loaded.result.next_cursor ?? null;
+      if (cursor !== null && seen.has(cursor)) {
+        throw new Error('iteration query repeated a paging cursor');
+      }
+      if (cursor !== null) seen.add(cursor);
+    } while (cursor !== null);
+    return staged;
+  }
+
+  async #loadIterationPage(
+    cursor: string | null,
+    expectedStoreId: string,
+    signal: AbortSignalLike,
+  ): Promise<IterationLoad | null> {
+    if (signal.aborted) return null;
+    try {
+      const loaded = await this.#connection.loadIterations(cursor, expectedStoreId, signal);
+      // A Fake or an adapter predating request cancellation can still settle after ownership was
+      // lost. Fence the continuation here so an abandoned first page never launches page two.
+      return signal.aborted ? null : loaded;
+    } catch (error) {
+      if (isIterationStoreReplaced(error)) return null;
+      throw error;
+    }
   }
 }

@@ -14,7 +14,12 @@ from typing import Never, TypedDict, Unpack
 import pytest
 from tests.server.support import ServerParts, build_server_parts
 
-from server.api.protocol import EventsQuery, SnapshotQuery, SubscribeRequest
+from server.api.protocol import (
+    EventsQuery,
+    IterationQuery,
+    SnapshotQuery,
+    SubscribeRequest,
+)
 from server.api.service import RunApi
 from server.events import (
     ChatData,
@@ -406,6 +411,28 @@ def test_snapshot_store_fence_rejects_a_replaced_sequence_space(tmp_path: Path) 
     assert parts.api.execute(SnapshotQuery()).snapshot is not None
     assert (
         parts.api.execute(SnapshotQuery(expected_store_id=replacement_store)).snapshot is not None
+    )
+
+
+def test_iteration_store_fence_rejects_a_replaced_sequence_space(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path / "server")
+    bootstrap_store = parts.journal.store_id_locked()
+
+    assert (
+        parts.api.execute(IterationQuery(expected_store_id=bootstrap_store)).iterations_ready
+        is False
+    )
+
+    parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
+    replacement_store = parts.journal.store_id_locked()
+    assert replacement_store != bootstrap_store
+
+    with pytest.raises(RuntimeError) as failure:
+        parts.api.execute(IterationQuery(expected_store_id=bootstrap_store))
+    assert getattr(failure.value, "diagnostic_code", None) == "iteration_store_replaced"
+    assert (
+        parts.api.execute(IterationQuery(expected_store_id=replacement_store)).iterations_ready
+        is False
     )
 
 

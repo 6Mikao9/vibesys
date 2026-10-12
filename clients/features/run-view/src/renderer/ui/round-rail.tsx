@@ -1,57 +1,51 @@
-/** The semantic run-map navigation rail. It reads the shared round projection instead of parsing
- * labels, so live and replayed runs retain one meaning. */
+/** The policy-owned iteration navigation rail. */
 
-import type {CoreState} from '@vibesys/run-state';
-import {type RoundKey, roundsWithPlan, sameRoundKey} from '@vibesys/run-state/rounds';
+import type {CoreState, IterationNavigationState} from '@vibesys/run-state';
 import type {JSX} from 'react';
+
+type IterationRoot = IterationNavigationState['byId'][string];
 
 export interface RoundRailProps {
   readonly run: CoreState;
-  readonly selected: RoundKey | null;
-  readonly onSelect: (round: RoundKey | null) => void;
+  readonly roots: readonly IterationRoot[];
+  readonly selectedId: string | null;
+  readonly onSelect: (iterationId: string | null) => void;
 }
 
-export function RoundRail({run, selected, onSelect}: RoundRailProps): JSX.Element {
-  const rounds = roundsWithPlan(run.rounds, run.maxRounds);
+export function RoundRail({run, roots, selectedId, onSelect}: RoundRailProps): JSX.Element {
   return (
-    <aside className="round-rail panel" aria-label="Rounds and status">
+    <aside className="round-rail panel" aria-label="Iterations and status">
       <div className="panel-heading">
-        <h2>Rounds</h2>
-        <span>{rounds.length} tracked</span>
+        <h2>Iterations</h2>
+        <span>{roots.length} tracked</span>
       </div>
-      {rounds.length === 0 ? (
-        <p className="empty">Waiting for the run to open its first round.</p>
+      {roots.length === 0 ? (
+        <p className="empty">Waiting for the run to open its first iteration.</p>
       ) : (
         <ol className="round-list">
           <li>
             <button
               type="button"
               className="round-link"
-              aria-pressed={selected === null}
+              aria-pressed={selectedId === null}
               onClick={() => onSelect(null)}
             >
               <span>All activity</span>
               <span className="round-status">{run.transcript.length} events</span>
             </button>
           </li>
-          {rounds.map(round => (
-            <li
-              key={
-                round.key.kind === 'number'
-                  ? `number:${round.key.number}`
-                  : `label:${round.key.label}`
-              }
-            >
+          {roots.map(iteration => (
+            <li key={iteration.id}>
               <button
                 type="button"
                 className="round-link"
-                aria-pressed={sameRoundKey(selected, round.key)}
-                onClick={() => onSelect(round.key)}
+                aria-pressed={selectedId === iteration.id}
+                onClick={() => onSelect(iteration.id)}
               >
-                <span>
-                  {round.key.kind === 'label' ? round.key.label : `Round ${round.number}`}
+                <span>{iteration.label}</span>
+                <span className={`round-status round-status-${iteration.status}`}>
+                  {iteration.status}
                 </span>
-                <span className={`round-status round-status-${round.status}`}>{round.status}</span>
               </button>
             </li>
           ))}

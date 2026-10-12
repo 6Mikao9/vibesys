@@ -4,7 +4,12 @@
  */
 
 import type {RunCommand, RunCommandOutcome, WebSessionState} from '@vibesys/run-session';
-import type {CoreState} from '@vibesys/run-state';
+import {
+  type CoreState,
+  type IterationNavigationState,
+  iterationRoots,
+  iterationRootsForCore,
+} from '@vibesys/run-state';
 import {type RoundKey, roundsWithPlan, sameRoundKey} from '@vibesys/run-state/rounds';
 import {type JSX, useState} from 'react';
 import {
@@ -21,6 +26,7 @@ import {Transcript} from './transcript.js';
 
 export interface RunPageProps {
   readonly run: CoreState;
+  readonly iterations: IterationNavigationState;
   /** The live session's state; null on the replay page. */
   readonly session: WebSessionState | null;
   readonly replayFailure: string | null;
@@ -31,18 +37,23 @@ export interface RunPageProps {
   readonly onCommand: ((input: RunCommand) => Promise<RunCommandOutcome>) | null;
 }
 
-export function RunPage({run, session, replayFailure, ...events}: RunPageProps): JSX.Element {
-  const [requestedRound, setRequestedRound] = useState<RoundKey | null>(null);
+export function RunPage({
+  run,
+  iterations,
+  session,
+  replayFailure,
+  ...events
+}: RunPageProps): JSX.Element {
+  const [requestedIterationId, setRequestedIterationId] = useState<string | null>(null);
   const banners = connectionBanners(run, session ?? REPLAY_SESSION);
   const header = pageHeader(run, session);
-  const availableRounds = roundsWithPlan(run.rounds, run.maxRounds);
-  const selectedRound =
-    requestedRound !== null &&
-    availableRounds.some(round => sameRoundKey(round.key, requestedRound))
-      ? requestedRound
-      : null;
+  const roots = iterationRoots(iterations, run);
+  const selectedIterationId = roots.some(root => root.id === requestedIterationId)
+    ? requestedIterationId
+    : null;
+  const selectedRound = compatibilityRoundKey(run, selectedIterationId);
   const transcript =
-    selectedRound === null
+    selectedIterationId === null || selectedRound === null
       ? run.transcript
       : run.transcript.filter(entry => sameRoundKey(entry.roundKey ?? null, selectedRound));
   return (
@@ -55,9 +66,14 @@ export function RunPage({run, session, replayFailure, ...events}: RunPageProps):
         <span className={`status ${header.status.className}`}>{header.status.label}</span>
       </header>
       <Banners banners={banners} replayFailure={replayFailure} {...events} />
-      <RunSummary run={run} />
+      <RunSummary run={run} iterations={iterations} />
       <div className="run-layout">
-        <RoundRail run={run} selected={selectedRound} onSelect={setRequestedRound} />
+        <RoundRail
+          run={run}
+          roots={roots}
+          selectedId={selectedIterationId}
+          onSelect={setRequestedIterationId}
+        />
         <div className="run-main">
           <RunControls run={run} command={events.onCommand} />
           <section className="panel">
@@ -70,7 +86,7 @@ export function RunPage({run, session, replayFailure, ...events}: RunPageProps):
               emptyCopy={
                 selectedRound === null
                   ? emptyTranscriptCopy(run, banners)
-                  : 'No activity has been recorded for this round.'
+                  : 'No activity has been recorded for this iteration.'
               }
             />
           </section>
@@ -78,4 +94,12 @@ export function RunPage({run, session, replayFailure, ...events}: RunPageProps):
       </div>
     </main>
   );
+}
+
+/** Resolve only compatibility roots to a transcript round; generic policy roots remain selectable
+ * without inventing a relationship the iteration contract does not declare. */
+function compatibilityRoundKey(run: CoreState, iterationId: string | null): RoundKey | null {
+  if (iterationId === null) return null;
+  const index = iterationRootsForCore(run).findIndex(root => root.id === iterationId);
+  return index < 0 ? null : (roundsWithPlan(run.rounds, run.maxRounds)[index]?.key ?? null);
 }

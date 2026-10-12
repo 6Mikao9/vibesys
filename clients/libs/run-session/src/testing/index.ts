@@ -13,6 +13,7 @@ import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
 import {
   type ControlChannelState,
   type ControlTransport,
+  type RequestOptions,
   type SubscribeOptions,
   sameControlChannelState,
 } from '@vibesys/transport';
@@ -81,8 +82,10 @@ export interface SubscriptionRecord {
  */
 export class FakeTransport implements ControlTransport {
   readonly requests: RequestInput[] = [];
+  readonly requestOptions: Array<RequestOptions | undefined> = [];
   readonly subscriptions: SubscriptionRecord[] = [];
   readonly snapshots: Array<ProtocolResponse | Error | Promise<ProtocolResponse>> = [];
+  readonly iterations: Array<ProtocolResponse | Error | Promise<ProtocolResponse>> = [];
   readonly #subscriptionWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
   readonly #subscriptionCloseWaiters: Array<(subscription: SubscriptionRecord) => void> = [];
   #deferNextSubscription = false;
@@ -146,11 +149,23 @@ export class FakeTransport implements ControlTransport {
     this.#hooks.onConnectionState(state);
   }
 
-  async request(input: RequestInput): Promise<ProtocolResponse> {
+  async request(input: RequestInput, options?: RequestOptions): Promise<ProtocolResponse> {
     this.requests.push(input);
-    const response = this.snapshots.shift();
+    this.requestOptions.push(options);
+    const response =
+      input.type === 'query.iterations' ? this.iterations.shift() : this.snapshots.shift();
     if (response instanceof Error) throw response;
-    return (await response) ?? snapshotResponse();
+    if (response !== undefined) return await response;
+    if (input.type === 'query.iterations') {
+      return {
+        protocol_version: 1,
+        request_id: 'iterations',
+        timestamp: '2026-01-01T00:00:00Z',
+        ok: true,
+        iterations_ready: false,
+      };
+    }
+    return snapshotResponse();
   }
 
   async subscribe(
@@ -230,7 +245,13 @@ export function lost(message: string, retrying = false): ControlChannelState {
 
 /** The state of a session whose stream and control channel are both healthy. */
 export function healthy(): ReturnType<WebSession['getState']> {
-  return {hasSnapshot: true, status: 'connected', error: null, controls: {status: 'connected'}};
+  return {
+    hasSnapshot: true,
+    status: 'connected',
+    error: null,
+    iterationError: null,
+    controls: {status: 'connected'},
+  };
 }
 
 /**

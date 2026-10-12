@@ -1,11 +1,18 @@
 import {
   type ExperimentCursor,
+  isServerRejection,
+  type ProtocolResponse,
   type RunEvent,
   type RunSnapshot,
   ServerError,
   type ServerMessage,
 } from '@vibesys/contracts';
-import {hasRunEnded} from '@vibesys/run-state';
+import {
+  hasRunEnded,
+  type IterationNavigationState,
+  initialIterationNavigation,
+  reduceIterationResult,
+} from '@vibesys/run-state';
 import {recordsBenchmark} from '@vibesys/run-state/performance';
 import {DEFAULT_CHAT_THREAD_ID} from '@vibesys/run-state/transcript';
 import {
@@ -67,6 +74,7 @@ import {
   setDesignLog,
   setExperiments,
 } from './experiments.js';
+import {LatestQueryOwner} from './latest-query-owner.js';
 import {type NoteIdentity, readNote, writeNote} from './notes-store.js';
 import {
   activeCommandSurface,
@@ -79,6 +87,7 @@ import {renderCommandResponse} from './response-renderer.js';
 import {
   clearAgentSelection,
   selectAgent,
+  selectIteration,
   selectNextAgent,
   selectNextRound,
   selectPreviousAgent,
@@ -172,6 +181,7 @@ export interface SessionController {
   selectPreviousAgent(): void;
   selectNextRound(): void;
   selectPreviousRound(): void;
+  selectIteration(iterationId: string): void;
   selectRound(roundNumber: number): void;
   selectAgent(kind: string): void;
   selectNextEntry(delta: number, id?: string): void;
@@ -259,6 +269,15 @@ export interface SessionController {
 const BOOTSTRAP_TAIL = 1_000;
 const BACKFILL_CHUNK = 1_000;
 
+type IterationQueryOutcome =
+  | {readonly kind: 'unsupported'}
+  | {readonly kind: 'store-replaced'}
+  | {
+      readonly kind: 'supported';
+      readonly storeId: string;
+      readonly navigation: IterationNavigationState | null;
+    };
+
 export class SocketSessionController implements SessionController {
   #state: SessionState;
   readonly #listeners = new Set<(state: SessionState) => void>();
@@ -303,6 +322,22 @@ export class SocketSessionController implements SessionController {
       const message = errorMessage(error);
       this.#setState(reportCaughtError(failPane(this.#state, 'design', message), error, 'request'));
     },
+  });
+  #iterationCapability: 'unknown' | 'supported' | 'unsupported' = 'unknown';
+  /** Owns the optional policy-navigation capability probe and latest refresh. */
+  readonly #iterationQuery = new LatestQueryOwner<IterationQueryOutcome>({
+    request: () => this.#requestIterations(),
+    publish: outcome => {
+      if (outcome.kind === 'store-replaced') return;
+      this.#iterationCapability = outcome.kind;
+      if (outcome.kind !== 'supported' || outcome.navigation === null) return;
+      if (outcome.storeId !== this.#reconciler.storeId()) {
+        void this.#loadIterations();
+        return;
+      }
+      this.#setState({...this.#state, iterations: outcome.navigation});
+    },
+    report: error => this.#reportIterationError(error),
   });
   readonly #reconciler = new StreamReconciler({backfillChunk: BACKFILL_CHUNK});
   /** Serializes the consumer effect of applying one shared backfill outcome. */
@@ -365,6 +400,7 @@ export class SocketSessionController implements SessionController {
   async start(): Promise<void> {
     await Promise.all([
       this.#loadSnapshot(),
+      this.#loadIterations(),
       // The log is the landing view, so it is populated before the first frame
       // rather than on demand.
       this.#loadExperiments(),
@@ -413,6 +449,7 @@ export class SocketSessionController implements SessionController {
         this.#experimentForceRefresh = true;
         if (this.#experimentFetch !== null) this.#experimentRefreshPending = true;
         void this.#loadExperiments();
+        void this.#loadIterations();
       }
     } else if (!this.#streamProtocolError) {
       this.#setState(
@@ -480,6 +517,64 @@ export class SocketSessionController implements SessionController {
     }
   }
 
+  #loadIterations(): Promise<void> {
+    if (this.#iterationCapability === 'unsupported') return Promise.resolve();
+    return this.#iterationQuery.refresh();
+  }
+
+  async #requestIterations(): Promise<IterationQueryOutcome> {
+    const expectedStoreId = this.#reconciler.storeId();
+    let response: ProtocolResponse;
+    try {
+      response = await this.client.request({
+        type: 'query.iterations',
+        expected_store_id: expectedStoreId,
+      });
+    } catch (error) {
+      if (isIterationStoreReplaced(error)) return {kind: 'store-replaced'};
+      if (this.#iterationCapability === 'unknown' && isServerRejection(error)) {
+        return {kind: 'unsupported'};
+      }
+      throw error;
+    }
+    try {
+      return {
+        kind: 'supported',
+        storeId: expectedStoreId,
+        navigation: await this.#collectIterationPages(response, expectedStoreId),
+      };
+    } catch (error) {
+      if (isIterationStoreReplaced(error)) return {kind: 'store-replaced'};
+      throw error;
+    }
+  }
+
+  async #collectIterationPages(
+    response: ProtocolResponse,
+    expectedStoreId: string,
+  ): Promise<IterationNavigationState | null> {
+    const seen = new Set<string>();
+    let staged = initialIterationNavigation();
+    while (response.iterations_ready !== false && response.iterations != null) {
+      staged = reduceIterationResult(staged, response.iterations);
+      if (!('items' in response.iterations)) return staged;
+      const cursor = response.iterations.next_cursor ?? null;
+      if (cursor === null) return staged;
+      if (seen.has(cursor)) throw new Error('iteration query repeated a paging cursor');
+      seen.add(cursor);
+      response = await this.client.request({
+        type: 'query.iterations',
+        expected_store_id: expectedStoreId,
+        cursor,
+      });
+    }
+    return null;
+  }
+
+  #reportIterationError(error: unknown): void {
+    this.#setState(reportCaughtError(this.#state, error, 'request'));
+  }
+
   /** Loads the chunk of history just older than what is folded. */
   loadOlderHistory(): Promise<boolean> {
     if (this.#historyFetch !== null) return this.#historyFetch;
@@ -514,6 +609,7 @@ export class SocketSessionController implements SessionController {
   stop(): Promise<void> {
     if (this.#closing !== null) return this.#closing;
     this.#designQuery.stop();
+    this.#iterationQuery.stop();
     this.#chatThreadCreateGeneration += 1;
     const closing = closeStreamAndTransport(this.#stream, this.client);
     this.#closing = closing;
@@ -568,6 +664,10 @@ export class SocketSessionController implements SessionController {
 
   selectPreviousRound(): void {
     this.#setState(selectPreviousRound(this.#state));
+  }
+
+  selectIteration(iterationId: string): void {
+    this.#setState(selectIteration(this.#state, iterationId));
   }
 
   selectRound(roundNumber: number): void {
@@ -1464,18 +1564,26 @@ export class SocketSessionController implements SessionController {
   }
 
   #onMessage(message: ServerMessage, resumed: boolean): void {
-    const events = this.#dispatchMessage(message, resumed);
-    if (events === null) return;
+    const dispatched = this.#dispatchMessage(message, resumed);
+    if (dispatched === null) return;
+    const {events, iterationStoreReplaced} = dispatched;
     this.#refreshExperimentsFor(events);
+    if (iterationStoreReplaced || events.some(event => event.type === 'iterations_changed')) {
+      void this.#loadIterations();
+    }
     this.#refreshPaneFor(events);
   }
 
-  #dispatchMessage(message: ServerMessage, resumed: boolean): readonly RunEvent[] | null {
+  #dispatchMessage(
+    message: ServerMessage,
+    resumed: boolean,
+  ): {readonly events: readonly RunEvent[]; readonly iterationStoreReplaced: boolean} | null {
     switch (message.type) {
       case 'event':
         this.#setState(applyEvent(this.#state, message.event));
-        return [message.event];
+        return {events: [message.event], iterationStoreReplaced: false};
       case 'event_batch': {
+        const previousIterationStore = this.#reconciler.storeId();
         const reconciliation = this.#reconciler.reconcileBatch(message, {resumed});
         if (reconciliation.kind === 'rebootstrap') {
           this.#streamGeneration += 1;
@@ -1490,7 +1598,12 @@ export class SocketSessionController implements SessionController {
             reconciliation.historyFloor,
           ),
         );
-        return message.events;
+        return {
+          events: message.events,
+          iterationStoreReplaced:
+            reconciliation.kind === 'rebootstrap' ||
+            previousIterationStore !== this.#reconciler.storeId(),
+        };
       }
       case 'protocol_error':
         this.#streamProtocolError = true;
@@ -1596,6 +1709,10 @@ function reportCaughtError(
     scope,
     diagnostic: error instanceof ServerError ? error.diagnostic : null,
   });
+}
+
+function isIterationStoreReplaced(error: unknown): error is ServerError {
+  return error instanceof ServerError && error.diagnostic?.code === 'iteration_store_replaced';
 }
 
 function errorMessage(error: unknown): string {

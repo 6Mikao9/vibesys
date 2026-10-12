@@ -1,8 +1,17 @@
-import type {CoreState} from '@vibesys/run-state';
+import {type CoreState, type IterationNavigationState, iterationRoots} from '@vibesys/run-state';
 import type {JSX} from 'react';
 
 /** The run's counters: sequence, rounds, and transcript length. */
-export function RunSummary({run}: {readonly run: CoreState}): JSX.Element {
+export function RunSummary({
+  run,
+  iterations,
+}: {
+  readonly run: CoreState;
+  readonly iterations: IterationNavigationState;
+}): JSX.Element {
+  const roots = iterationRoots(iterations, run);
+  const roundBudget =
+    roots.length > 0 && roots.every(root => root.kind === 'round') ? run.maxRounds : null;
   return (
     <section className="summary" aria-label="Run summary">
       <div>
@@ -10,10 +19,10 @@ export function RunSummary({run}: {readonly run: CoreState}): JSX.Element {
         <strong>{run.sequence}</strong>
       </div>
       <div>
-        <span>Rounds</span>
+        <span>Iterations</span>
         <strong>
-          {run.rounds.length}
-          {run.maxRounds === null ? '' : ` / ${run.maxRounds}`}
+          {roots.length}
+          {roundBudget === null ? '' : ` / ${roundBudget}`}
         </strong>
       </div>
       <div>
