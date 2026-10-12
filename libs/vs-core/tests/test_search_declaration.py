@@ -9,17 +9,25 @@ import vs_core.api as core
 W, E = core.WorkKind, core.EventKind
 
 # The contract: the result event each kind of work ends with.
+PIPELINE = {
+    E.TURN_ENDED,
+    E.TURN_YIELDED,
+    E.YIELD_FAILED,
+    E.RESUME_READY,
+    E.CHECKPOINT_KNOWN,
+}
 RESULT = {
-    W.REQUEST_TURN: E.TURN_FINISHED,
-    W.START_ATTEMPT: E.WORKSPACE_OPENED,
-    W.WITHDRAW: E.WORKSPACE_CLOSED,
-    W.MEASURE: E.MEASUREMENT_FINISHED,
-    W.PROPOSE_WINNER: E.ADOPTION_FINISHED,
-    W.OPERATION: E.OPERATION_FINISHED,
-    W.WAKE_AT: E.TIME_REACHED,
+    W.ASK_AGENT: {E.TURN_FINISHED},
+    W.REQUEST_TURN: PIPELINE,
+    W.START_ATTEMPT: {E.WORKSPACE_OPENED},
+    W.WITHDRAW: {E.WORKSPACE_CLOSED},
+    W.MEASURE: {E.MEASUREMENT_FINISHED},
+    W.PROPOSE_WINNER: {E.ADOPTION_FINISHED},
+    W.OPERATION: {E.OPERATION_FINISHED},
+    W.WAKE_AT: {E.TIME_REACHED},
 }
 ALWAYS = {E.FAILED, E.STOP_REQUESTED}
-OPT_IN = {E.MESSAGE_DELIVERED, E.MESSAGE_DROPPED, E.INTERRUPTED}
+OPT_IN = {E.MESSAGE_DELIVERED, E.MESSAGE_DROPPED, E.INTERRUPTED} | PIPELINE
 USES = st.frozensets(st.sampled_from(list(W)))
 
 
@@ -31,7 +39,7 @@ def _declaration(
 
 
 def _needed(uses: frozenset[core.WorkKind]) -> set[core.EventKind]:
-    return ALWAYS | {RESULT[kind] for kind in uses}
+    return ALWAYS | set().union(*(RESULT[kind] for kind in uses))
 
 
 @given(uses=USES, opted=st.sets(st.sampled_from(sorted(OPT_IN))))
