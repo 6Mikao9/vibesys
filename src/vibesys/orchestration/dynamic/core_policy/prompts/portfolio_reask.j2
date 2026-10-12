@@ -1,0 +1,8 @@
+{#- The planning request in a new turn, with why the previous call's plan was not accepted. -#}
+{% from '_macros.j2' import plan_problem %}
+{% with capacity=planner.capacity, in_flight=planner.in_flight, remaining=planner.remaining, base_revision=planner.base_revision, base_accuracy_passed=planner.base_accuracy_passed, offer_snapshot=planner.offer_snapshot, buildable=planner.buildable, history=planner.history, older_ids=planner.older_ids, baseline=planner.baseline, input_failure=planner.input_failure, profiling=planner.profiling, profile_fields=planner.profile_fields %}
+{% include 'portfolio.j2' %}
+{% endwith %}
+
+
+Your previous planning call did not produce a usable plan: {{ plan_problem(problem) }}

@@ -35,3 +35,123 @@ none
 none: no trusted evaluation of this candidate exists yet
 {% endif %}
 {%- endmacro %}
+
+{% macro blocker(item) -%}
+{%- if item.kind.value == 'failed' -%}
+the implementer said: {{ item.summary }}
+{%- elif item.kind.value == 'rejected' -%}
+the reviewer rejected the candidate: {{ item.summary }}
+{%- else -%}
+the turn returned nothing usable{% if item.ended %} ({{ item.ended.value }}){% endif %}{% if item.turn_failure %} ({{ item.turn_failure.value }}){% endif %}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro failure(item) -%}
+{%- set what = {
+  'stopped': 'the run was stopped',
+  'parent-unverified': 'its parent revision could not be reproduced',
+  'refused': 'the run refused a step of it',
+  'ended': 'a step of it ended without a result',
+  'out-of-budget': 'it ran out of budget',
+  'turn-failed': 'a turn ended without a reply',
+  'invalid-reply': 'a reply violated its output schema',
+  'render-failed': 'a prompt of it could not be rendered',
+  'wait-refused': 'a turn asked to wait for evaluations and the run could not honor it',
+  'checkpoint-declined': 'a turn could not be checkpointed',
+  'no-changed-candidate': 'the implementer produced no changed candidate',
+  'implementation-failed': 'the implementer could not finish',
+  'review-rejected': 'the reviewer rejected the candidate',
+  'no-trusted-evidence': 'the trusted check produced no usable evidence',
+  'evidence-refused': 'the evidence of the candidate was refused',
+  'evidence-undecodable': 'the evidence of the candidate could not be decoded',
+  'profile-capture-unavailable': 'the run cannot capture a profile',
+  'turn-limit': 'too many turns ended without a candidate',
+  'repeated-turn': 'the last turn left nothing an earlier turn had not',
+}[item.kind.value] -%}
+{{ what }}
+{%- if item.role %} ({{ item.role.value }}){% endif %}
+{%- if item.cause %}: {{ item.cause.value }}{% endif %}
+{%- if item.ended %}: {{ item.ended.value }}{% endif %}
+{%- if item.turn_failure %}: {{ item.turn_failure.value }}{% endif %}
+{%- if item.refusal %}: {{ item.refusal.value }}{% endif %}
+{%- if item.declined %}: {{ item.declined.value }}{% endif %}
+{%- if item.status %} (observation {{ item.status.value }}){% endif %}
+{%- if item.turns is not none %} ({{ item.turns }} of {{ item.limit }} allowed){% endif %}
+{%- if item.revision %}: `{{ rev(item.revision) }}`{% endif %}
+{%- if item.blocker %}; the last blocker: {{ blocker(item.blocker) }}{% endif %}
+{%- endmacro %}
+
+{% macro input_failure(item) -%}
+{%- set what = {
+  'no-evidence': 'the measurement ended without trusted evidence',
+  'readings-refused': 'the decoded readings did not match the evidence',
+  'readings-undecodable': 'the evidence could not be decoded',
+  'benchmark-failed': 'the benchmark failed on the input',
+  'wait-ended': 'the measurement ended without a result',
+}[item.kind.value] -%}
+{{ what }}
+{%- if item.status %} (observation {{ item.status.value }}){% endif %}
+{%- if item.ended %}: {{ item.ended.value }}{% endif %}
+{%- if item.cause %}: {{ item.cause.value }}{% endif %}
+{%- if item.output %}. It printed (data, backticks shown as '):
+```
+{{ item.output | replace("`", "'") }}
+```
+{%- endif %}
+{%- endmacro %}
+
+{% macro reply_errors(errors) -%}
+{%- set meaning = {
+  'missing': 'a required field is missing',
+  'unexpected': 'this field is not allowed',
+  'wrong-type': 'the value has the wrong type',
+  'invalid-value': 'the value is not acceptable',
+  'not-json': 'the reply is not valid JSON',
+} -%}
+{% for item in errors %}
+- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ meaning[item.code.value] }}
+{% endfor %}
+{%- endmacro %}
+
+{% macro violation(item) -%}
+{%- set subject = '`' ~ item.subject ~ '`' -%}
+{%- set what = {
+  'over-capacity': 'the reply schedules ' ~ item.requested ~ ' workstreams for ' ~ item.capacity ~ ' free slots',
+  'duplicate-id': subject ~ ' appears twice in the reply',
+  'hypothesis-id-used': 'hypothesis ' ~ subject ~ ' already exists: use a new ID, or set continue_hypothesis to continue it',
+  'hypothesis-abandoned': subject ~ ' was abandoned and cannot be continued',
+  'hypothesis-in-flight': subject ~ ' is still running',
+  'hypothesis-unknown': subject ~ ' is not in the history',
+  'hypothesis-terminal': subject ~ ' is finished and cannot be continued',
+  'hypothesis-blocked': subject ~ ' cannot be continued: its turns stopped producing a candidate',
+  'revision-without-parent': 'parent_revision is set without parent_hypothesis_id',
+  'continuation-has-parent': 'a continued hypothesis names no parent',
+  'revision-not-offered': 'revision `' ~ item.revision ~ '` of ' ~ subject ~ ' is not offered as a parent',
+  'parent-not-buildable': subject ~ ' has no offered buildable revision',
+  'profile-not-offered': 'profile workstreams are not offered in this run',
+  'profile-fields-unsupported': 'the capture does not supply ' ~ (item.fields | join(', ')) ~ '; it supplies ' ~ (item.supplied | join(', ') or 'no named field'),
+  'profile-id-used': 'profile ' ~ subject ~ ' already exists',
+  'update-running': subject ~ ' is running and cannot be updated',
+  'update-duplicate': subject ~ ' is updated twice',
+  'update-unknown': subject ~ ' is not in the history',
+  'update-incomplete': 'the update of ' ~ subject ~ ' needs reason_kind and a nonempty reason',
+}[item.code.value] -%}
+- {% if item.path %}`{{ item.path | join('.') }}`: {% endif %}{{ what }}
+{%- if item.usable %}. Usable parents:{% for option in item.usable %} hypothesis `{{ option.hypothesis_id }}` at `{{ option.revision }}`{% if not loop.last %};{% endif %}{% endfor %}{% endif %}
+{%- endmacro %}
+
+{% macro plan_problem(item) -%}
+{%- if item.kind.value == 'unparseable' -%}
+the reply violated the planner's output schema:
+{{ reply_errors(item.errors) }}
+{%- elif item.kind.value == 'violations' -%}
+the portfolio cannot be scheduled:
+{% for found in item.violations %}
+{{ violation(found) }}
+{% endfor %}
+{%- elif item.kind.value == 'underfilled' -%}
+the portfolio schedules {{ item.scheduled }} of {{ item.wanted }} free slots, and a free slot idles until a running workstream finishes. Fill every free slot with an independent workstream; return the same portfolio only if no independent work would be useful now
+{%- else -%}
+the planner's turn ended without a reply{% if item.ended %} ({{ item.ended.value }}){% endif %}{% if item.turn_failure %} ({{ item.turn_failure.value }}){% endif %}
+{%- endif -%}
+{%- endmacro %}
