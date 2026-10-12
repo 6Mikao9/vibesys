@@ -91,6 +91,12 @@ class Children[K, M](Value):
     def _ordered(self) -> tuple[Child[K, M], ...]:
         return tuple(sorted(self.members, key=lambda member: _text(member.key)))
 
+    def spawn(
+        self, key: K, machine: M, decisions: list[Decision]
+    ) -> tuple[Children[K, M], list[Decision]]:
+        """Add a child and stamp the decisions its start returned with its key."""
+        return self.put(key, machine), [_stamped(decision, _text(key)) for decision in decisions]
+
     def route(
         self,
         key: K,
