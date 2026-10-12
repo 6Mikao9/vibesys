@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from vs_core.api import Limits
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.strategy.api import DynamicConfig
+    from vibesys.orchestration.dynamic.search.api import DynamicConfig
 
 # Core requires a finite deadline. An unset `[run] max_run_seconds` means unbounded,
 # which is the largest finite double: no run clock reaches it and nothing adds to it.

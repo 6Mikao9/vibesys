@@ -7,8 +7,6 @@ executor performs each one and reports an outcome the search reads back as `Oper
 Rendering a prompt is core's: the agent pipeline asks for it, so the search never does.
 """
 
-from __future__ import annotations
-
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel

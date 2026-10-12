@@ -10,13 +10,12 @@ The agent's own retries are off (`Retry.none()`): every ask carries a prompt bui
 state at that moment, and every correction names the problem as typed data.
 """
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 
 from vibesys.orchestration.dynamic.models import PortfolioPlan
+from vibesys.orchestration.dynamic.search._context import PlanWorld
 from vibesys.orchestration.dynamic.search._plan import PlanCheck, validate
 from vibesys.orchestration.dynamic.search._prompts import PlannerCorrection, PlannerReask
 from vibesys.orchestration.dynamic.search._values import (
@@ -27,7 +26,9 @@ from vibesys.orchestration.dynamic.search._values import (
 from vs_core.api import (
     THIS_RUN,
     AskAgent,
+    Decision,
     DecisionId,
+    Event,
     Failed,
     FailureReason,
     InvocationRef,
@@ -41,10 +42,6 @@ from vs_core.api import (
     WakeAt,
     Within,
 )
-
-if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.search._context import PlanWorld
-    from vs_core.api import Decision, Event
 
 
 class Ask(Value):
@@ -127,7 +124,7 @@ def begin(world: PlanWorld, problem: PlanProblem | None) -> tuple[Asking, list[D
     return Asking(ask=ask), [decision]
 
 
-def update(
+def update(  # noqa: PLR0911  # LW-220405 [PLR0911]; one exhaustive match over (call phase, event) is the machine; each arm returns its next phase.
     planning: Planning, event: Event, world: PlanWorld, view: RunView
 ) -> tuple[Planning, list[Decision]]:
     """One event of a planning call."""

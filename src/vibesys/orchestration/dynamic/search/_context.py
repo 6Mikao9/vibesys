@@ -5,15 +5,14 @@ Everything on it is a pure function of that slice; the prompt it builds is a typ
 text.
 """
 
-from __future__ import annotations
-
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from vibesys.candidates.api import Baseline, failure, reading
 from vibesys.metrics import reading_of
 from vibesys.orchestration.dynamic.search import _briefs as briefs
+from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._parents import ParentOption, ParentSnapshot, options
 from vibesys.orchestration.dynamic.search._plan import PlanLedger
 from vibesys.orchestration.dynamic.search._prompts import (
@@ -30,13 +29,7 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
 )
 from vibesys.orchestration.dynamic.search._workstream import Workstream
-from vs_core.api import EvidenceKind, RevisionRef
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-
-    from vibesys.orchestration.dynamic.search._config import DynamicConfig
-    from vs_core.api import RunView
+from vs_core.api import EvidenceKind, RevisionRef, RunView
 
 _HISTORY_ROWS = 20
 _HISTORY_TITLE_CHARS = 200
@@ -86,9 +79,7 @@ def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRo
         status=_status(record, running),
         strategy=record.strategy.value,
         outcome=None if last is None or last.outcome is None else last.outcome.value,
-        summary=""
-        if last is None
-        else briefs.bounded(last.summary, _HISTORY_SUMMARY_CHARS),
+        summary="" if last is None else briefs.bounded(last.summary, _HISTORY_SUMMARY_CHARS),
         review_passed=None if last is None else last.review_passed,
         accuracy_passed=None if last is None else last.accuracy_passed,
         benchmark_passed=None if last is None else last.benchmark_passed,
@@ -209,8 +200,12 @@ class PlanWorld:
     @property
     def ledger(self) -> PlanLedger:
         """What plan validation reads: hypotheses, what runs and which IDs are profiles."""
-        profiles = {item.plan.work_id for item in self.finished if item.plan.kind is WorkKind.PROFILE}
-        profiles |= {item.plan.work_id for item in self.running if item.plan.kind is WorkKind.PROFILE}
+        profiles = {
+            item.plan.work_id for item in self.finished if item.plan.kind is WorkKind.PROFILE
+        }
+        profiles |= {
+            item.plan.work_id for item in self.running if item.plan.kind is WorkKind.PROFILE
+        }
         return PlanLedger(
             hypotheses=self.hypotheses,
             running=frozenset(item.plan.work_id for item in self.running),

@@ -11,11 +11,10 @@ A search embeds the machine as a child: ``begin`` returns the first phase and de
 ``update`` takes one event at a time. The phase says what is awaited; nothing else is kept.
 """
 
-from __future__ import annotations
-
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
@@ -29,7 +28,9 @@ from vibesys.metrics import (
 )
 from vs_core.api import (
     THIS_RUN,
+    Decision,
     DecisionId,
+    Event,
     EvidenceKind,
     EvidenceReadingsBase,
     EvidenceRef,
@@ -52,11 +53,6 @@ from vs_core.api import (
     may_resubmit,
     trusted_keys,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from vs_core.api import Decision, Event
 
 _INTERPRET = DecisionId(root="interpret")
 _NO_CLOCK = 0.0
@@ -96,7 +92,7 @@ class InputFailure(Value):
     cause: RejectionCode | None = None
 
     @model_validator(mode="after")
-    def fields_match_kind(self) -> InputFailure:
+    def fields_match_kind(self) -> "InputFailure":
         """Refuse a field that does not belong to the kind, or a kind missing its field."""
         wanted = {
             "status": self.kind is InputFailureKind.NO_EVIDENCE,
@@ -241,7 +237,7 @@ def begin(
     return Measuring(attempts=1), [_measure(0, facts, config, measuring, _NO_CLOCK)]
 
 
-def update(
+def update(  # noqa: PLR0911  # LW-220406 [PLR0911]; one exhaustive match over (phase, event) is the machine; each arm returns its next phase.
     baseline: Baseline,
     event: Event,
     view: RunView,
@@ -262,7 +258,9 @@ def update(
                 return _again(baseline, view, config, measuring)
             if evidence:
                 refs = tuple(item for item in result.evidence if item.key in evidence)
-                return Interpreting(attempts=submitted, evidence=refs), [_interpret(refs, measuring)]
+                return Interpreting(attempts=submitted, evidence=refs), [
+                    _interpret(refs, measuring)
+                ]
             if submitted >= config.max_input_measurement_attempts:
                 none = InputFailure(
                     kind=InputFailureKind.NO_EVIDENCE,

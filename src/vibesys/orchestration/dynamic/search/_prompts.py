@@ -6,8 +6,6 @@ one dynamic template. The contexts of the core protocol (a reply that broke its 
 turn, a wait nobody recorded) come from `vibesys.prompts`.
 """
 
-from __future__ import annotations
-
 from enum import StrEnum
 from typing import Annotated, Literal
 

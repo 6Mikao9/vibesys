@@ -18,10 +18,8 @@ what is chosen, proposed and finished with. ``Adopting`` is the one phase of the
 proposal is out and its result is awaited.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from vibesys.candidates.config import CandidateConfig
 from vibesys.candidates.settlement import measurement
@@ -32,7 +30,9 @@ from vs_core.api import (
     AdoptionFailed,
     AdoptionFinished,
     AdoptionResult,
+    Decision,
     DecisionId,
+    Event,
     Failed,
     Finish,
     ObservationStatus,
@@ -49,10 +49,6 @@ from vs_core.api import (
     Wait,
     Within,
 )
-
-if TYPE_CHECKING:
-    from vs_core.api import Decision, Event
-
 
 PROPOSE = DecisionId(root="propose")
 FINISH = DecisionId(root="finish")
@@ -120,9 +116,7 @@ def selection_of(winner: Winner) -> Selection:
 
 def begin(winner: Winner, view: RunView) -> tuple[Adopting, list[Decision]]:
     """Propose the winner for adoption, once."""
-    proposal = ProposeWinner(
-        decision_id=PROPOSE, scope=THIS_RUN, selection=selection_of(winner)
-    )
+    proposal = ProposeWinner(decision_id=PROPOSE, scope=THIS_RUN, selection=selection_of(winner))
     return Adopting(winner=winner), [Wait(request=proposal, until=until_deadline(view))]
 
 

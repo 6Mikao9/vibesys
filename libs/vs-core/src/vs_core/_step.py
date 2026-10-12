@@ -144,6 +144,7 @@ from .types.settlement import (
 )
 from .types.strategy import (
     Accepted,
+    AskAgent,
     Cancel,
     Command,
     Finish,
@@ -911,6 +912,9 @@ def _decision_signal(state: CoreState, decision: Command) -> tuple[Signal, ...]:
             signals = (AdmissionControl(action=decision.mode),)
         case Operation():
             signals = (_operation_prepared(state, decision),)
+        case AskAgent():
+            # the agent pipeline lowers every ask to its operations before the kernel sees it
+            raise ContractError(("request",), "an AskAgent reached the kernel unlowered")
         case _:
             assert_never(decision)
 

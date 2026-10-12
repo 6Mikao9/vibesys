@@ -30,15 +30,17 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     run_prompt_variables,
 )
 from vibesys.orchestration.dynamic.models import DynamicOptions
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
     OPERATIONS,
     STATE_SCHEMA,
-    DynamicStrategyState,
+    DynamicState,
+    PromptContext,
     dynamic_operation_registry,
     measurement_recipe,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR
+from vs_core.api import Piped
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
@@ -59,7 +61,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.core_policy.api import DynamicCorePolicy
     from vs_runtime.api import CoreRunContext
 
-_PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".strategy-state")
+_PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".search-state")
 
 
 def resolve_core_policy(
@@ -83,14 +85,16 @@ def dynamic_operation_catalog(ports: OperationPorts) -> OperationCatalog:
     return operation_catalog(OPERATIONS, ports)
 
 
-def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
-    """Read a dynamic run's strategy state from its committed runtime record."""
+def dynamic_projector() -> RuntimeRecordProjector[Piped[DynamicState, PromptContext]]:
+    """Read a dynamic run's search state from its committed runtime record."""
     return RuntimeRecordProjector(
         plugin_id=_PLUGIN_ID,
-        state_type=DynamicStrategyState,
-        record_type=RuntimeRecord[DynamicStrategyState],
+        state_type=Piped[DynamicState, PromptContext],
+        record_type=RuntimeRecord[Piped[DynamicState, PromptContext]],
         operations=dynamic_operation_registry(),
-        project=lambda state, revision: project_strategy_state(state, experiment_revision=revision),
+        project=lambda state, revision: project_strategy_state(
+            state.inner, experiment_revision=revision
+        ),
     )
 
 
@@ -124,7 +128,8 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         ),
     )
     return CorePlan(
-        strategy=policy.strategy,
+        search=policy.search,
+        config=policy.config,
         reply_schemas=policy.reply_schemas,
         facts=policy.facts,
         limits=policy.limits,
@@ -145,7 +150,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
 
 def _agent_evaluation(policy: DynamicCorePolicy) -> AgentEvaluationPolicy:
     """The plan an implementer or judge measures with: the run's configured gates, once each."""
-    config = policy.strategy.config
+    config = policy.config
     return agent_evaluation_policy(
         measurement_recipe(config, policy.facts),
         accuracy=config.accuracy_configured,

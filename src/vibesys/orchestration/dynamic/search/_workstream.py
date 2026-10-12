@@ -9,10 +9,8 @@ progress policy (`_progress`) says another turn is worth it.
 When the workstream is over its phase is `Done`; the search records it and drops the child.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 
@@ -29,6 +27,7 @@ from vibesys.metrics import AcceptedReading, accept_readings, reading_of
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search import _briefs as briefs
 from vibesys.orchestration.dynamic.search import _review_evidence as review_evidence
+from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._operations import (
     EvidenceReadings,
     InterpretEvidence,
@@ -57,8 +56,10 @@ from vs_core.api import (
     AttemptBudget,
     AttemptId,
     AttemptRef,
-    Declined,
+    Decision,
     DecisionId,
+    Declined,
+    Event,
     EvidenceKind,
     EvidenceRef,
     Failed,
@@ -83,20 +84,16 @@ from vs_core.api import (
     Wait,
     WaitRefusal,
     Withdraw,
+    Within,
     WorkspaceClosed,
     WorkspaceMode,
     WorkspaceOpened,
     WorkspacePlan,
-    Within,
     attempt_id,
     item_id,
     may_resubmit,
     trusted_keys,
 )
-
-if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.search._config import DynamicConfig
-    from vs_core.api import Decision, Event
 
 VERIFY = DecisionId(root="verify")
 START = DecisionId(root="start")
@@ -354,7 +351,7 @@ def _start(ws: Workstream, env: Env) -> Decision:
     return Wait(request=request, until=until_deadline(env.view))
 
 
-def _ask(
+def _ask(  # noqa: PLR0913  # LW-220403 [PLR0913]; each argument is a distinct fact of the ask; bundling them in a throwaway record only renames the parameters.
     ws: Workstream, role: Role, name: str, prompt: Value, revision: RevisionRef, seconds: float
 ) -> Decision:
     request = AskAgent(
@@ -370,13 +367,15 @@ def _ask(
 def _ask_implementer(ws: Workstream, env: Env, spent: Spent) -> Decision:
     prompt = briefs.implement_prompt(ws.plan, ws.parent, ws.prior, spent.blockers)
     name = f"implementer.{spent.turns - 1}"
-    return _ask(
-        ws, Role.IMPLEMENTER, name, prompt, ws.parent, env.config.implementer_turn_seconds
-    )
+    return _ask(ws, Role.IMPLEMENTER, name, prompt, ws.parent, env.config.implementer_turn_seconds)
 
 
-def _ask_judge(
-    ws: Workstream, env: Env, spent: Spent, result: Result, refs: tuple[EvidenceRef, ...],
+def _ask_judge(  # noqa: PLR0913  # LW-220404 [PLR0913]; the judge ask reads the workstream, environment and four distinct review facts; a wrapper record adds no meaning.
+    ws: Workstream,
+    env: Env,
+    spent: Spent,
+    result: Result,
+    refs: tuple[EvidenceRef, ...],
     readings: tuple[AcceptedReading, ...],
 ) -> tuple[Workstream, list[Decision]]:
     revision = _candidate_of(result)
@@ -435,7 +434,7 @@ def _decode(env: Env, name: str, refs: tuple[EvidenceRef, ...], ws: Workstream) 
 # -- failure -----------------------------------------------------------------------------------------
 
 
-def failure_of(event: Failed, role: Role | None) -> Failure:
+def failure_of(event: Failed, role: Role | None) -> Failure:  # noqa: PLR0911  # LW-220402 [PLR0911]; one return per wait-failure reason keeps the mapping to the typed failure exhaustive and visible.
     """The typed account of a wait that ended without a result."""
     match event.reason:
         case FailureReason.REFUSED:
@@ -523,9 +522,7 @@ def _close(settling: Settling, ws: Workstream, env: Env) -> Decision:
     else:
         disposition = _disposition(ws, settling, env)
         name = SETTLE
-    request = Withdraw(
-        decision_id=name, scope=THIS_RUN, target=ws.ref, disposition=disposition
-    )
+    request = Withdraw(decision_id=name, scope=THIS_RUN, target=ws.ref, disposition=disposition)
     return Wait(request=request, until=until_deadline(env.view))
 
 
@@ -547,7 +544,7 @@ def _disposition(ws: Workstream, settling: Settling, env: Env) -> Settle:
     return candidate_settle_for(settling, env.baseline, env.config)
 
 
-def settle(
+def settle(  # noqa: PLR0913  # LW-220410 [PLR0913]; settling reads the workstream, environment and four distinct facts of the finished attempt; a record only renames them.
     ws: Workstream,
     env: Env,
     result: Result | None,
@@ -564,7 +561,7 @@ def settle(
     return _moved(ws, settling), [_close(settling, ws, env)]
 
 
-def fail(
+def fail(  # noqa: PLR0913  # LW-220411 [PLR0913]; a failure carries the workstream, environment, the typed failure and its settlement facts; a record only renames them.
     ws: Workstream,
     env: Env,
     failure: Failure,
@@ -582,7 +579,7 @@ def fail(
 # -- the first decisions of a workstream -----------------------------------------------------------
 
 
-def begin(
+def begin(  # noqa: PLR0913  # LW-220412 [PLR0913]; a workstream starts from its plan, position, parent, scope and environment, all distinct facts; a record only renames them.
     plan: WorkPlan,
     sequence: int,
     parent: RevisionRef,
@@ -624,7 +621,7 @@ def _first_turn(ws: Workstream, env: Env) -> tuple[Workstream, list[Decision]]:
 # -- update ---------------------------------------------------------------------------------------
 
 
-def update(ws: Workstream, event: Event, env: Env) -> tuple[Workstream, list[Decision]]:
+def update(ws: Workstream, event: Event, env: Env) -> tuple[Workstream, list[Decision]]:  # noqa: C901, PLR0911, PLR0912  # LW-220401 [C901, PLR0911, PLR0912]; one exhaustive match over (phase, event) is the machine; splitting it across handlers would hide which phases take which events.
     """One event: move to the next phase and say what that phase needs."""
     match ws.phase, event:
         # an operator stop reaches every phase; it never cancels a turn, it settles around it
@@ -635,7 +632,12 @@ def update(ws: Workstream, event: Event, env: Env) -> tuple[Workstream, list[Dec
         case Settling(), StopRequested():
             return ws, []
         case (
-            Implementing() | Profiling() | ReadingEvidence() | Judging() | Measuring() | Interpreting(),
+            Implementing()
+            | Profiling()
+            | ReadingEvidence()
+            | Judging()
+            | Measuring()
+            | Interpreting(),
             StopRequested(),
         ):
             stopped = Failure(kind=FailureKind.STOPPED)
@@ -711,7 +713,10 @@ def update(ws: Workstream, event: Event, env: Env) -> tuple[Workstream, list[Dec
 
         case Settling() as settling, WorkspaceClosed(settlement=settlement):
             return _done(ws, _finished(settling, settlement))
-        case Settling() as settling, Failed(decision=decision) if decision in (SETTLE, SETTLE_AGAIN):
+        case Settling() as settling, Failed(decision=decision) if decision in (
+            SETTLE,
+            SETTLE_AGAIN,
+        ):
             return _close_refused(ws, env, settling, event)
         case Settling() as settling, Failed():
             # a late failure of work the settlement already went around: it only fills in why
@@ -724,10 +729,12 @@ def update(ws: Workstream, event: Event, env: Env) -> tuple[Workstream, list[Dec
             raise UnexpectedEvent(ws.phase, event)
 
 
-def _verified(
-    ws: Workstream, env: Env, outcome: object
-) -> tuple[Workstream, list[Decision]]:
-    if isinstance(outcome, ParentVerification) and outcome.status == "succeeded" and outcome.verified:
+def _verified(ws: Workstream, env: Env, outcome: object) -> tuple[Workstream, list[Decision]]:
+    if (
+        isinstance(outcome, ParentVerification)
+        and outcome.status == "succeeded"
+        and outcome.verified
+    ):
         return _moved(ws, Opening()), [_start(ws, env)]
     unverified = Failure(kind=FailureKind.PARENT_UNVERIFIED, revision=ws.parent)
     return _done(ws, Done(failure=unverified, refunded=True, withheld=ws.parent))
@@ -975,7 +982,12 @@ def snapshot_of(ws: Workstream, done: Done) -> ParentSnapshot | None:
     """The exact candidate offered as a parent, once it is settled with accuracy proven."""
     accuracy = reading_of(done.readings, EvidenceKind.CORRECTNESS)
     result = done.result
-    if accuracy is None or not accuracy.passed or result is None or result.candidate.revision is None:
+    if (
+        accuracy is None
+        or not accuracy.passed
+        or result is None
+        or result.candidate.revision is None
+    ):
         return None
     return ParentSnapshot(
         hypothesis_id=ws.plan.work_id,

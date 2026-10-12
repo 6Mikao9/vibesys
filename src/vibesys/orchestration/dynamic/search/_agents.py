@@ -113,7 +113,7 @@ def agents(config: DynamicConfig) -> tuple[Agent, ...]:
 
 def _resume(facts: ResumeFacts) -> Value:
     return ResumePrompt(
-        role=facts.agent,  # type: ignore[arg-type]
+        role=facts.agent,  # ty: ignore[invalid-argument-type]
         retained_revision=facts.retained,
         timed_out=facts.timed_out,
         cited_evidence=facts.evidence,
@@ -122,13 +122,13 @@ def _resume(facts: ResumeFacts) -> Value:
 
 
 def _correction(role: str, errors: tuple[ReplyError, ...]) -> Value:
-    return ReplyCorrectionPrompt(role=role, errors=errors)  # type: ignore[arg-type]
+    return ReplyCorrectionPrompt(role=role, errors=errors)  # ty: ignore[invalid-argument-type]
 
 
 PROTOCOL = AgentProtocol(
     correction=_correction,
     resume=_resume,
-    wait_unrecorded=lambda role: WaitUnrecordedPrompt(),
+    wait_unrecorded=lambda _role: WaitUnrecordedPrompt(),
 )
 
 

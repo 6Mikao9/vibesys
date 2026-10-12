@@ -1,5 +1,6 @@
 """Public surface of the dynamic search package."""
 
+from vibesys.candidates.api import Winner
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search._agents import (
     PROTOCOL,
@@ -10,7 +11,7 @@ from vibesys.orchestration.dynamic.search._agents import (
     reply_schemas,
 )
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
-from vibesys.orchestration.dynamic.search._ids import IDS
+from vibesys.orchestration.dynamic.search._ids import BASELINE_KEY, IDS
 from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
     OPERATIONS,
@@ -56,7 +57,12 @@ from vibesys.orchestration.dynamic.search._schemas import (
     PROFILER_REPLY,
 )
 from vibesys.orchestration.dynamic.search._search import DynamicSearch
-from vibesys.orchestration.dynamic.search._state import STATE_SCHEMA, DynamicState
+from vibesys.orchestration.dynamic.search._state import (
+    STATE_SCHEMA,
+    DynamicState,
+    Finished,
+    Selecting,
+)
 from vibesys.orchestration.dynamic.search._values import (
     Failure,
     FailureKind,
@@ -67,10 +73,11 @@ from vibesys.orchestration.dynamic.search._values import (
     RoundRecord,
     ViolationCode,
 )
-from vibesys.candidates.api import Winner
+from vibesys.orchestration.dynamic.search._workstream import Workstream
 from vs_core.api import ledger_refs, trusted_keys
 
 __all__ = [
+    "BASELINE_KEY",
     "IDS",
     "IMPLEMENTER_REPLY",
     "INTERPRET_KIND",
@@ -91,6 +98,7 @@ __all__ = [
     "EvidenceReadings",
     "Failure",
     "FailureKind",
+    "Finished",
     "HypothesisRecord",
     "ImplementPrompt",
     "ImplementerReplyModel",
@@ -120,9 +128,11 @@ __all__ = [
     "ReviewPrompt",
     "Role",
     "RoundRecord",
+    "Selecting",
     "VerifyParentRevision",
     "ViolationCode",
     "Winner",
+    "Workstream",
     "agents",
     "build_search",
     "dynamic_operation_registrations",

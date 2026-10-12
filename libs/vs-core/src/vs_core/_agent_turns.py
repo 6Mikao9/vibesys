@@ -18,7 +18,7 @@ gets ``Failed(INVALID_REPLY)`` (or ``Failed(LOST)``) at once and asks again itse
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -93,6 +93,7 @@ if TYPE_CHECKING:
     from .types.evaluation import ResumeAuthorized
     from .types.search import Search
 
+_MIN_ASK_SUFFIX = 2
 _SEPARATOR = "~"
 _RENDER_LIMIT = 300.0
 
@@ -109,7 +110,7 @@ class Agent:
     workspace: WorkspaceMode | None
     """The mode of the agent's workspace revision, or None for an agent that works in the run."""
     charge: Literal["free", "paid"]
-    retry: Retry = Retry()
+    retry: Retry = field(default_factory=Retry)
     waits: bool = False
     """Whether the agent may end a turn waiting for its evaluations (its reply is waitable)."""
     checkpoint: Callable[[BaseModel], bool] | None = None
@@ -225,7 +226,7 @@ def reply_errors(error: ValidationError) -> tuple[ReplyError, ...]:
             code = ReplyErrorCode.UNEXPECTED
         elif kind == "json_invalid":
             code = ReplyErrorCode.NOT_JSON
-        elif kind.endswith("_type") or kind.endswith("_parsing"):
+        elif kind.endswith(("_type", "_parsing")):
             code = ReplyErrorCode.WRONG_TYPE
         else:
             code = ReplyErrorCode.INVALID_VALUE
@@ -237,7 +238,7 @@ def reply_errors(error: ValidationError) -> tuple[ReplyError, ...]:
 class AgentTurns[S: StrategyState, C]:
     """A search plus the pipeline that answers its ``AskAgent`` requests (itself a ``Search``)."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # LW-220420 [PLR0913]; the pipeline is wired from its search, agents, protocol, operations, id scheme and input type, all distinct and keyword-only.
         self,
         inner: Search[S, C],
         *,
@@ -255,8 +256,8 @@ class AgentTurns[S: StrategyState, C]:
         self.operations = operations
         self.ids = ids
         self.render_limit = render_limit
-        self.state_model = Piped[inner.state_model, inputs]  # type: ignore[misc, valid-type, name-defined]
-        self._flow_type = Flow[inputs]  # type: ignore[valid-type]
+        self.state_model = Piped[inner.state_model, inputs]  # ty: ignore[invalid-type-form]
+        self._flow_type = Flow[inputs]  # ty: ignore[invalid-type-form]
         declaration = inner.declaration
         if WorkKind.ASK_AGENT not in declaration.uses:
             raise ContractError(("declaration", "uses"), "a search wrapped in agents asks agents")
@@ -316,7 +317,7 @@ class AgentTurns[S: StrategyState, C]:
 
     # -- routing ----------------------------------------------------------------------------
 
-    def _route(
+    def _route(  # noqa: C901, PLR0911, PLR0912  # LW-220421 [C901, PLR0911, PLR0912]; one dispatch over the flow phases, each arm returning its next flow, is the routing table.
         self, state: Piped[S, Value], event: Event, view: RunView
     ) -> tuple[Piped[S, Value], list[Decision], list[Event]]:
         """Handle what belongs to a flow; whatever is not a flow's is the wrapped search's."""
@@ -384,9 +385,7 @@ class AgentTurns[S: StrategyState, C]:
     # -- flows ------------------------------------------------------------------------------
 
     @staticmethod
-    def _flow_of(
-        state: Piped[S, Value], named: tuple[DecisionId, str, int]
-    ) -> Flow[Value] | None:
+    def _flow_of(state: Piped[S, Value], named: tuple[DecisionId, str, int]) -> Flow[Value] | None:
         ask, step, attempt = named
         flow = next((f for f in state.flows if f.ask == ask), None)
         if flow is None or flow.attempt != attempt:
@@ -488,7 +487,7 @@ class AgentTurns[S: StrategyState, C]:
     def _render(self, flow: Flow[Value]) -> Wait:
         """Ask the renderer for the prompt of the flow's next turn."""
         subject = f"{self._subject(flow.ask)}.{flow.agent}"
-        request = self.operations.render(subject=subject, ordinal=flow.serial, context=flow.input)
+        request = self.operations.render(subject=subject, ordinal=flow.serial, context=flow.input)  # ty: ignore[missing-argument]
         return Wait(
             request=Operation(
                 decision_id=_decision(flow.ask, "r", flow.attempt),
@@ -573,7 +572,7 @@ class AgentTurns[S: StrategyState, C]:
             case TurnEnded(result=result):
                 return self._ended(state, flow, result, view)
 
-    def _ended(
+    def _ended(  # noqa: PLR0911  # LW-220422 [PLR0911]; one return per way a turn can end keeps the mapping to the next flow phase exhaustive.
         self, state: Piped[S, Value], flow: Flow[Value], result: TurnResult, view: RunView
     ) -> tuple[Piped[S, Value], list[Decision], list[Event]]:
         agent = self.agents[flow.agent]
@@ -724,7 +723,12 @@ def _named(decision: DecisionId | None) -> tuple[DecisionId, str, int] | None:
     if decision is None:
         return None
     head, separator, tail = decision.root.rpartition(_SEPARATOR)
-    if not separator or len(tail) < 2 or tail[0] not in "rt" or not tail[1:].isdigit():
+    if (
+        not separator
+        or len(tail) < _MIN_ASK_SUFFIX
+        or tail[0] not in "rt"
+        or not tail[1:].isdigit()
+    ):
         return None
     return DecisionId(root=head), tail[0], int(tail[1:])
 

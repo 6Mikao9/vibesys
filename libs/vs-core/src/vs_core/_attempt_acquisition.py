@@ -1286,9 +1286,7 @@ def _decline_checkpoint(
     return AreaChange(
         state=_replace(state, updated),
         events=(
-            CheckpointResolved(
-                invocation=event.invocation, checkpoint=Declined(reason=reason)
-            ),
+            CheckpointResolved(invocation=event.invocation, checkpoint=Declined(reason=reason)),
         ),
     )
 

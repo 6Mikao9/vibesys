@@ -286,7 +286,7 @@ type Submission = Annotated[Wait | Finish, Field(discriminator="kind")]
 """What the kernel accepts from a search: a ``Wait`` (with its ``until``) or a ``Finish``."""
 
 type Command = Annotated[
-    RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation | Finish,
+    AskAgent | RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation | Finish,
     Field(discriminator="kind"),
 ]
 """What the kernel acts on: a ``Work`` or the ``Finish``. ``Wait`` supplies the ``until``."""

@@ -6,8 +6,6 @@ implementer's summary, a reviewer's feedback, what a failed check printed), carr
 a later prompt and never written by the search.
 """
 
-from __future__ import annotations
-
 from enum import StrEnum
 
 from pydantic import Field, model_validator
@@ -20,7 +18,6 @@ from vs_core.api import (
     CheckpointDecline,
     EvidenceRef,
     FailureReason,
-    InvocationRef,
     ObservationStatus,
     RejectionCode,
     ReplyError,
@@ -175,7 +172,7 @@ class Failure(Value):
     revision: RevisionRef | None = None
 
     @model_validator(mode="after")
-    def fields_match_kind(self) -> Failure:
+    def fields_match_kind(self) -> "Failure":
         """Refuse a field that does not belong to the kind, or a kind missing its field."""
         required, optional = _FIELDS.get(self.kind, (frozenset(), frozenset()))
         present = {
@@ -339,7 +336,7 @@ class PlanProblem(Value):
     turn_failure: TurnFailureKind | None = None
 
     @model_validator(mode="after")
-    def fields_match_kind(self) -> PlanProblem:
+    def fields_match_kind(self) -> "PlanProblem":
         """Refuse facts that do not belong to the kind."""
         belongs = {
             "errors": self.kind is ProblemKind.UNPARSEABLE,

@@ -11,8 +11,6 @@ envelope codec unchanged. The state is version 2; a state saved by the flag-base
 (version 1) is refused with an error naming its version.
 """
 
-from __future__ import annotations
-
 from typing import Annotated, Literal
 
 from pydantic import Field

@@ -16,9 +16,9 @@ from vibesys.orchestration.dynamic.core_policy._policy import (
 from vibesys.orchestration.dynamic.core_policy._projection import project_strategy_state
 from vibesys.orchestration.dynamic.core_policy._replies import (
     planner_reply_example,
-    reply_schemas,
     run_prompt_variables,
 )
+from vibesys.orchestration.dynamic.search.api import reply_schemas
 
 __all__ = [
     "UNBOUNDED_DEADLINE_AT",

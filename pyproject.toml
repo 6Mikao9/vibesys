@@ -187,11 +187,11 @@ allowlist = [
     # xfails until the core gaps named there close (EVAL-PATH #1333, SESSION-WIRING,
     # CORE-P2), so these modules report low coverage. Remove each entry when the
     # xfails are removed.
-    "src/vibesys/orchestration/dynamic/strategy/_attempt_events.py",
-    "src/vibesys/orchestration/dynamic/strategy/_attempts.py",
-    "src/vibesys/orchestration/dynamic/strategy/_planner.py",
-    "src/vibesys/orchestration/dynamic/strategy/_run.py",
-    "src/vibesys/orchestration/dynamic/strategy/_settlement.py",
+    "src/vibesys/orchestration/dynamic/search/_attempt_events.py",
+    "src/vibesys/orchestration/dynamic/search/_attempts.py",
+    "src/vibesys/orchestration/dynamic/search/_planner.py",
+    "src/vibesys/orchestration/dynamic/search/_run.py",
+    "src/vibesys/orchestration/dynamic/search/_settlement.py",
 ]
 
 [tool.vibesys.file_length]

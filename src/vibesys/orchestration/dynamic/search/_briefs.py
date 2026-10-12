@@ -74,7 +74,9 @@ def implement_prompt(
     ``blockers`` are the turns of this workstream that ended without a measurable candidate.
     """
     latest = blockers[-1] if blockers else None
-    stuck = next((item for item in reversed(blockers) if item.kind is not BlockerKind.REJECTED), None)
+    stuck = next(
+        (item for item in reversed(blockers) if item.kind is not BlockerKind.REJECTED), None
+    )
     prior_tail = "" if prior is None else tail(prior.failure_tail, FAILURE_CHARS)
     return ImplementPrompt(
         hypothesis_id=plan.work_id,

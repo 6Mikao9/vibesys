@@ -51,7 +51,7 @@ class ContractError(ValueError):
         super().__init__(f"{'.'.join(map(str, path))}: {detail}")
 
 
-class UnexpectedEvent(ContractError):
+class UnexpectedEvent(ContractError):  # noqa: N818  # LW-220423 [N818]; the name states the situation it reports, as the search API reads `raise UnexpectedEvent(phase, event)`.
     """A search machine received an event its phase has no transition for.
 
     Every machine ends its ``match`` with this, so a pair nobody planned for stops the run

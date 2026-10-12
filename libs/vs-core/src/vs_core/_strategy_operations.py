@@ -19,7 +19,7 @@ registrations, the registry, the role mapping and the schema references.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
@@ -227,7 +227,7 @@ class StrategyOperations:
     """The operations of one strategy namespace, by the role the runtime performs for each."""
 
     namespace: str
-    render: type[OperationRequest]
+    render: type[RenderRoleArtifactsBase[Any]]
     """A subclass of `RenderRoleArtifactsBase` for the strategy's context type."""
     verify: type[VerifyParentRevisionBase]
     interpret: type[InterpretEvidenceBase]

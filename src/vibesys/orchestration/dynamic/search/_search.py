@@ -9,15 +9,15 @@ nothing left to run, which proposes its winner.
 Everything it knows about the run besides its own children it reads from the `RunView`.
 """
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, cast
+from collections.abc import Callable
+from typing import cast
 
 from vibesys.candidates import api as candidates
 from vibesys.hypothesis import RunEnding
 from vibesys.orchestration.dynamic.search import _context as context
 from vibesys.orchestration.dynamic.search import _portfolio as portfolio
 from vibesys.orchestration.dynamic.search import _workstream as workstream
+from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._ids import (
     BASELINE_KEY,
     PLANNING_PREFIX,
@@ -54,25 +54,23 @@ from vs_core.api import (
     THIS_RUN,
     AdoptionFinished,
     Children,
+    Decision,
     DecisionId,
+    Event,
     EventKind,
     Failed,
-    Finish,
     FailureReason,
+    Finish,
     RevisionRef,
+    RunFacts,
     RunResultProposal,
+    RunView,
     SearchDeclaration,
     StopRequested,
     TimeReached,
     UnexpectedEvent,
 )
 from vs_core.api import WorkKind as CoreWork
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from vibesys.orchestration.dynamic.search._config import DynamicConfig
-    from vs_core.api import Decision, Event, RunFacts, RunView
 
 _FINISH_AGAIN = DecisionId(root="finish.1")
 
@@ -173,11 +171,7 @@ class DynamicSearch:
         self, state: DynamicState, event: TimeReached, view: RunView
     ) -> tuple[DynamicState, list[Decision]]:
         key = next(
-            (
-                key
-                for key, part in state.parts.in_order()
-                if isinstance(part, portfolio.BackingOff)
-            ),
+            (key for key, part in state.parts.in_order() if isinstance(part, portfolio.BackingOff)),
             None,
         )
         if key is None:
@@ -236,9 +230,7 @@ class DynamicSearch:
 
     # -- folding finished children ----------------------------------------------------------------
 
-    def _fold(
-        self, state: DynamicState, view: RunView
-    ) -> tuple[DynamicState, list[Decision]]:
+    def _fold(self, state: DynamicState, view: RunView) -> tuple[DynamicState, list[Decision]]:
         """Record every child that finished, in key order, until none is left."""
         decisions: list[Decision] = []
         while True:
@@ -298,7 +290,9 @@ class DynamicSearch:
             child, started = workstream.begin(
                 plan, sequence, parent, lineage, prior, stopping=state.stopping, env=env
             )
-            parts, stamped = state.parts.spawn(workstream_key(sequence, plan.work_id), child, started)
+            parts, stamped = state.parts.spawn(
+                workstream_key(sequence, plan.work_id), child, started
+            )
             state = state.model_copy(update={"parts": parts})
             decisions.extend(stamped)
         return state, decisions
@@ -398,9 +392,7 @@ class DynamicSearch:
         return gate.blocked_at_done is None or len(state.finished) > gate.blocked_at_done
 
     def _capacity(self, state: DynamicState) -> int:
-        left = context.remaining(
-            self._config, started=_started(state), refunded=state.refunded
-        )
+        left = context.remaining(self._config, started=_started(state), refunded=state.refunded)
         return context.free_slots(self._config, active=len(_running(state)), left=left)
 
     def _search_over(self, state: DynamicState) -> bool:
@@ -418,9 +410,7 @@ class DynamicSearch:
         self, state: DynamicState, base: RevisionRef, view: RunView | None
     ) -> context.PlanWorld:
         offered = (
-            ()
-            if view is None
-            else context.offered_parents(state.parents, state.withheld, view)
+            () if view is None else context.offered_parents(state.parents, state.withheld, view)
         )
         return context.PlanWorld(
             config=self._config,
@@ -518,7 +508,8 @@ def _running(state: DynamicState) -> tuple[workstream.Workstream, ...]:
 
 
 def _planning(state: DynamicState) -> bool:
-    return any(key.startswith(PLANNING_PREFIX) for key in state.parts.keys())
+    keys = state.parts.keys()
+    return any(key.startswith(PLANNING_PREFIX) for key in keys)
 
 
 def _started(state: DynamicState) -> int:
@@ -542,9 +533,7 @@ def _eligible(state: DynamicState) -> tuple[candidates.EligibleRound, ...]:
 
 
 def _prior_round(state: DynamicState, plan: WorkPlan) -> RoundRecord | None:
-    record = next(
-        (item for item in state.hypotheses if item.hypothesis_id == plan.work_id), None
-    )
+    record = next((item for item in state.hypotheses if item.hypothesis_id == plan.work_id), None)
     return record.rounds[-1] if record is not None and record.rounds else None
 
 
@@ -567,9 +556,7 @@ def _parent_of(
     return view.facts.baseline, None
 
 
-def _with_round(
-    state: DynamicState, ws: workstream.Workstream, row: RoundRecord
-) -> DynamicState:
+def _with_round(state: DynamicState, ws: workstream.Workstream, row: RoundRecord) -> DynamicState:
     hypotheses = list(state.hypotheses)
     index = next(
         (i for i, item in enumerate(hypotheses) if item.hypothesis_id == ws.plan.work_id), None

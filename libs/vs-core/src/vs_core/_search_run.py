@@ -151,9 +151,7 @@ class _Pass:
             self.held.extend(work)
             return core
         own = Scope(owner=core.run.run_id, generation=core.run.generation)
-        submissions = tuple(
-            self.host.registry.validate_submission(_in_scope(d, own)) for d in work
-        )
+        submissions = tuple(self.host.registry.validate_submission(_in_scope(d, own)) for d in work)
         self.sent.extend(submissions)
         transition = self.host.step(
             core, ProposalSubmitted(decisions=submissions, expected_revision=core.revision)

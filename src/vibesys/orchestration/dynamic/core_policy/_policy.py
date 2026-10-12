@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.orchestration.dynamic.core_policy._limits import limits_for, run_deadline_at
-from vibesys.orchestration.dynamic.core_policy._replies import reply_schemas
 from vibesys.orchestration.dynamic.models import ProfileField
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
+    IDS,
     JUDGE_REPLY,
     DynamicConfig,
-    DynamicStrategy,
     Role,
-    role_id,
+    build_search,
+    reply_schemas,
 )
 from vs_core.api import (
     ArtifactRef,
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from vibesys.orchestration.dynamic.models import DynamicOptions
-    from vs_core.api import Limits, SchemaRef
+    from vs_core.api import Limits, SchemaRef, Search
 
 type Seconds = Annotated[int, Field(gt=0)]
 
@@ -82,10 +82,11 @@ class DynamicCorePolicy:
     """What the shell needs to start, run and resume a dynamic search on the core.
 
     `facts`, `limits` and `deadline_at` go into the core state; `reply_schemas` into
-    the session resolver; `strategy.declaration` names the operations to offer.
+    the session resolver; `search.declaration` names the operations to offer.
     """
 
-    strategy: DynamicStrategy
+    search: Search[Any, Any]
+    config: DynamicConfig
     facts: CoreRunFacts
     limits: Limits
     deadline_at: float
@@ -105,7 +106,7 @@ def requirements_for(config: DynamicConfig) -> EvidenceRequirements:
         assessment_authorities=(
             AssessmentAuthority(
                 kind=AssessmentKind.LOCAL_VALIDATION,
-                role_id=role_id(Role.JUDGE.value),
+                role_id=IDS.role_id(Role.JUDGE.value),
                 output_schema=JUDGE_REPLY,
             ),
         ),
@@ -149,7 +150,8 @@ def build_core_policy(
         **stage_budgets,
     )
     return DynamicCorePolicy(
-        strategy=DynamicStrategy(config=config),
+        search=build_search(config),
+        config=config,
         facts=CoreRunFacts(
             objective=inputs.objective,
             baseline=RevisionRef.of_git_commit(inputs.baseline_commit),

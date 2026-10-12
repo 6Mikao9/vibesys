@@ -9,8 +9,9 @@ and no provisional number can reach the frontier.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
+from vibesys.candidates.api import reading
 from vibesys.hypothesis import derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -18,11 +19,13 @@ from vibesys.hypothesis.readmodel import (
     HypothesisView,
     RoundView,
 )
+from vibesys.orchestration.dynamic.search.api import BASELINE_KEY, Finished, Selecting, Workstream
 from vibesys.run.contracts import PluginProjection, RoundSummary
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.strategy.api import (
-        DynamicStrategyState,
+    from vibesys.candidates.api import Baseline
+    from vibesys.orchestration.dynamic.search.api import (
+        DynamicState,
         HypothesisRecord,
         MetricRow,
         RoundRecord,
@@ -32,9 +35,7 @@ if TYPE_CHECKING:
 type Verdict = Literal["pass", "fail", "skipped"]
 
 
-def project_strategy_state(
-    state: DynamicStrategyState, *, experiment_revision: int
-) -> PluginProjection:
+def project_strategy_state(state: DynamicState, *, experiment_revision: int) -> PluginProjection:
     """Project one strategy state; `experiment_revision` is the core revision it was read at."""
     rounds = sorted(
         (record for item in state.hypotheses for record in item.rounds),
@@ -42,13 +43,12 @@ def project_strategy_state(
     )
     in_flight = tuple(
         record.plan.work_id
-        for record in sorted(state.attempts, key=lambda record: record.sequence)
-        if record.phase.value != "done" and not record.withdrawn
+        for record in sorted(_running(state), key=lambda record: record.sequence)
     )
     active = in_flight[-1] if in_flight else None
     projection = AgentRunProjection(
         current_round=len(rounds),
-        objectives=tuple(f"{row.name}:{row.direction}" for row in state.baseline.metrics),
+        objectives=tuple(f"{row.name}:{row.direction}" for row in _baseline_metrics(state)),
         active_hypothesis_id=active,
         experiment_revision=experiment_revision,
         hypotheses=[
@@ -147,12 +147,12 @@ def _winner_hypothesis(winner: Winner | None) -> str | None:
 
 
 def _hypothesis_view(
-    item: HypothesisRecord, *, active: bool, state: DynamicStrategyState
+    item: HypothesisRecord, *, active: bool, state: DynamicState
 ) -> HypothesisView:
     rounds = item.rounds
     measured = next((record for record in reversed(rounds) if record.metrics), None)
     headline = _headline(measured.metrics) if measured is not None else None
-    base = _headline(state.baseline.metrics)
+    base = _headline(_baseline_metrics(state))
     comparable = (
         base if base is not None and headline is not None and base.name == headline.name else None
     )
@@ -182,9 +182,28 @@ def _hypothesis_view(
         perf_metric_name=headline.name if headline is not None else None,
         perf_direction=headline.direction if headline is not None else None,
         perf_baseline_value=comparable.value if comparable is not None else None,
-        kept=True if _winner_hypothesis(state.winner) == item.hypothesis_id else None,
+        kept=True if _winner_hypothesis(_winner(state)) == item.hypothesis_id else None,
         strategy_disposition=item.strategy.value,
         strategy_reason=item.reason or None,
         active=active,
         last_experiment_revision=0,
     )
+
+
+def _running(state: DynamicState) -> tuple[Workstream, ...]:
+    return tuple(part for _, part in state.parts.in_order() if isinstance(part, Workstream))
+
+
+def _baseline_metrics(state: DynamicState) -> tuple[MetricRow, ...]:
+    seen = reading(cast("Baseline", state.parts.get(BASELINE_KEY)))
+    return () if seen is None else seen.metrics
+
+
+def _winner(state: DynamicState) -> Winner | None:
+    match state.run:
+        case Selecting(adopting=adopting):
+            return adopting.winner
+        case Finished(winner=winner):
+            return winner
+        case _:
+            return None

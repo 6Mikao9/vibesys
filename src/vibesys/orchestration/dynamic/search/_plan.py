@@ -5,8 +5,6 @@ correction can quote it from a template. Validation never raises: it splits a po
 entries that may be scheduled and the violations that explain the rest.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Literal
 
