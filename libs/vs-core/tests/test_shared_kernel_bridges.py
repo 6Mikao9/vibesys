@@ -281,7 +281,9 @@ def test_acquisition_episode_reaches_prepared_requests() -> None:
                 ),
                 core.TraceFrame(
                     signal=admitted,
-                    change=core.AttemptsChange(state=state.attempts, requests=(workspace,)),
+                    change=core.AttemptsChange(
+                        state=state.attempts, requests=(core.within(workspace, 60.0),)
+                    ),
                 ),
             )
         ),
@@ -317,7 +319,9 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
             frames=(
                 core.TraceFrame(
                     signal=preparation,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(request, 60.0),)
+                    ),
                 ),
             )
         ),

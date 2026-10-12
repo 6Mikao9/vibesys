@@ -50,7 +50,8 @@ class World:
 
     @property
     def due(self) -> float | None:
-        return core.project(self.state).next_observe_at
+        """When the job's pacing next asks for a poll; None while a poll is outstanding."""
+        return self.job.pacing.next_at
 
     def tick(self, now: float) -> list[core.ObserveOwnedJob]:
         self.clock = max(self.clock, now)
@@ -89,14 +90,20 @@ class World:
 
     def check(self) -> None:
         """Post-step invariant: a live job has a poll outstanding or one due in the future."""
+        wake = core.project(self.state).next_observe_at
         if self.job.terminal:
             assert self.due is None
             return
         if self.outstanding:
             assert self.due is None
+            # The only wake-up is an open poll request's own limit, never another poll.
+            assert wake is None or wake > self.state.run.now_at
         else:
             assert self.due is not None
             assert self.due > self.state.run.now_at
+            # Earlier polls whose records this world never commits may still hold a limit.
+            assert wake is not None
+            assert wake <= self.due
 
 
 def polls(result: core.Transition) -> list[core.ObserveOwnedJob]:

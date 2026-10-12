@@ -71,7 +71,6 @@ def _request(name: str) -> DiscardWorkspace:
         request_id=RequestId(root=name),
         scope=Scope(owner=attempt.attempt_id, generation=0),
         admission_id=DecisionId(root="admit"),
-        deadline_at=100.0,
         attempt=attempt,
     )
 

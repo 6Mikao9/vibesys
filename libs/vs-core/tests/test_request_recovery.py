@@ -42,6 +42,8 @@ from vs_core.api import (
     EventCursor,
     EventId,
     ExecuteRegisteredOperation,
+    Failed,
+    FailureReason,
     HostFence,
     HostId,
     InputDelivered,
@@ -77,7 +79,6 @@ from vs_core.api import (
     RecoveryStarted,
     RegisteredOwnedJob,
     ReissueProof,
-    RequestBlocked,
     RequestId,
     RequestObserved,
     RequestPhase,
@@ -387,9 +388,31 @@ def test_query_completion_without_target_proof_cannot_complete_recovery() -> Non
     assert result.state.records.records[0] == original
 
 
+def timed_out(record: RequestRecord) -> RequestRecord:
+    """The record as core leaves it when its limit passed: BLOCKED with a typed failure."""
+    return record.model_copy(
+        update={
+            "phase": RequestPhase.BLOCKED,
+            "failure": Failed(
+                reason=FailureReason.TIMED_OUT,
+                decision=record.request.decision_id,
+                request=record.request_id,
+                limit=record.until.at,
+            ),
+        }
+    )
+
+
+def request_until(state: CoreState, request: object) -> float:
+    """The absolute limit core stored on the record it registered for an emitted request."""
+    request_id = getattr(request, "request_id", None)
+    record = next(row for row in state.records.records if row.request_id == request_id)
+    return record.until.at
+
+
 def non_diagnostic(result: Transition) -> tuple[object, ...]:
-    """Strategy events other than the RequestBlocked diagnostic a deadline publishes."""
-    return tuple(event for event in result.events if not isinstance(event, RequestBlocked))
+    """Strategy events other than the Failed result a deadline publishes."""
+    return tuple(event for event in result.events if not isinstance(event, Failed))
 
 
 @given(st.integers(min_value=0, max_value=99))
@@ -414,23 +437,17 @@ def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_
     result = step(reload(started.state), event)
     assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED
     assert result.state.records.recovery.checks[0].resolution == "blocked"
-    assert result.state.records.records[0] == original
+    expected_failure = timed_out(original).failure
+    assert result.state.records.records[0] == timed_out(original)
     assert result.state.run.status == RunStatus.PAUSED
     blocks = [request for request in result.requests if isinstance(request, BlockRequest)]
     inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
     assert len(blocks) == 1
     assert blocks[0].target == original.request_id
     assert blocks[0].request_id is not None
-    assert result.events == (
-        RequestBlocked(
-            request_id=blocks[0].request_id,
-            target=original.request_id,
-            scope=blocks[0].scope,
-            diagnostic=blocks[0].diagnostic,
-        ),
-    )
+    assert result.events == (expected_failure,)
     wire = result.events[0].model_dump_json()
-    assert RequestBlocked.model_validate_json(wire) == result.events[0]
+    assert Failed.model_validate_json(wire) == result.events[0]
     assert len(inspections) == 1
     assert inspections[0].target == original.request_id
     assert inspections[0].request_id == result.state.records.recovery.checks[0].inspection
@@ -485,7 +502,7 @@ def test_child_ownership_survives_parent_deadline_and_cleanup_requests() -> None
         if isinstance(request, CancelOwnedResource)
     }
     assert cancelled == {root, child}
-    assert result.state.records.records[0] == original
+    assert result.state.records.records[0] == timed_out(original)
     assert result.state.run.status == RunStatus.PAUSED
     assert reload(result.state) == result.state
 
@@ -548,6 +565,7 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
     original = pending_record()
     state = recovering_state(original)
     seen: set[RequestId] = set()
+    ended = False
     for kind, epoch, now_at in sequence:
         event = (
             RecoveryStarted(epoch=epoch, now_at=float(now_at))
@@ -556,7 +574,9 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
         )
         result = step(state, event)
         assert result == step(reload(state), event)
-        assert result.state.records.records[0] == original
+        # Only a deadline event past the limit ends the record; startup alone never does.
+        ended = ended or (kind == "deadline" and result.state.run.now_at >= original.until.at)
+        assert result.state.records.records[0] == (timed_out(original) if ended else original)
         assert result.state.records.recovery.phase != RecoveryPhase.READY
         assert result.state.run.status == RunStatus.PAUSED
         assert not non_diagnostic(result)
@@ -571,7 +591,7 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
             assert request.request_id not in seen
             seen.add(request.request_id)
             if isinstance(request, BlockRequest):
-                assert result.state.run.now_at >= original.reconcile_deadline_at
+                assert result.state.run.now_at >= original.until.at
         assert len(seen) <= 15
         state = reload(result.state)
 
@@ -657,7 +677,7 @@ def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
         if isinstance(request, CancelOwnedResource)
     } == {child}
     assert result.state.records.children == (lease,)
-    assert result.state.records.records[0] == original
+    assert result.state.records.records[0] == timed_out(original)
     assert result.state.run.status == RunStatus.PAUSED
 
 
@@ -996,7 +1016,7 @@ def test_composite_resource_ids_cannot_alias_another_targets_cleanup(
         cancels.append(requests[0])
         state = reload(result.state)
     assert cancels[0].request_id != cancels[1].request_id
-    assert state.records.records[:2] == records
+    assert state.records.records[:2] == tuple(timed_out(record) for record in records)
 
 
 def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreState:
@@ -1227,7 +1247,9 @@ def test_known_resource_deadline_requires_conclusive_release_before_skipping_can
         if isinstance(request, CancelOwnedResource)
     }
     assert resources == (set() if positive_release else {resource})
-    assert result.state.records.records[0] == original
+    assert result.state.records.records[0] == (
+        original if positive_release else timed_out(original)
+    )
     assert result.state.sessions == state.sessions
     assert result.state.attempts == state.attempts
 
@@ -1253,10 +1275,10 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=1.0))
     assert result.state.run.now_at == float(logical_now)
     assert all(
-        request.deadline_at == logical_now + state.run.limits.reconciliation_bound
+        request_until(result.state, request) == logical_now + state.run.limits.reconciliation_bound
         for request in result.requests
     )
-    assert result.state.records.records[0].reconcile_deadline_at == original.reconcile_deadline_at
+    assert result.state.records.records[0].until.at == original.until.at
     blocked = step(
         reload(result.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
     )
@@ -1267,9 +1289,9 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
             if isinstance(request, CancelOwnedResource)
             else state.run.limits.reconciliation_bound
         )
-        assert request.deadline_at == logical_now + bound
+        assert request_until(blocked.state, request) == logical_now + bound
     assert any(isinstance(request, CancelOwnedResource) for request in blocked.requests)
-    assert blocked.state.records.records[0] == original
+    assert blocked.state.records.records[0] == timed_out(original)
 
 
 def registered_record(
@@ -1436,7 +1458,7 @@ def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cl
         for request in blocked.requests
     )
     assert not non_diagnostic(blocked)
-    assert blocked.state.records.records[0] == original
+    assert blocked.state.records.records[0] == timed_out(original)
 
 
 @given(
@@ -1484,7 +1506,7 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
             generation=0,
         ),
         scope=original.request.scope,
-        turn=turn.request.turn.model_copy(update={"deadline_at": 99.0})
+        turn=turn.request.turn.model_copy(update={"max_turns": turn.request.turn.max_turns + 1})
         if case == "foreign-turn"
         else turn.request.turn,
         phase=SessionPhase.EXECUTING,
@@ -1862,8 +1884,8 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
         event = ReconciliationDeadline(request_id=selected.request_id, now_at=float(110 + index))
         result = step(reload(state), event)
         assert result == step(state, event)
-        assert result.state.records.records[0] == original
-        assert result.state.records.records[: len(records)] == records
+        assert result.state.records.records[0] == timed_out(original)
+        assert result.state.records.records[1 : len(records)] == records[1:]
         assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED
         assert {check.target for check in result.state.records.recovery.checks} == {
             original.request_id
@@ -1873,16 +1895,12 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
             assert request.target == original.request_id
             assert request.request_id is not None
             assert request.request_id not in emitted
-            assert request.deadline_at == (
+            assert request_until(result.state, request) == (
                 result.state.run.now_at + state.run.limits.reconciliation_bound
             )
             emitted.add(request.request_id)
         assert len(emitted) <= 2
         assert len(result.state.records.records) <= 3
-        assert all(
-            record.reconcile_deadline_at == record.request.deadline_at
-            for record in result.state.records.records[1:]
-        )
         assert not non_diagnostic(result)
         state = reload(result.state)
 
@@ -1912,7 +1930,7 @@ def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests()
     # Persisted late discovery is a public state input. Full observation delivery
     # remains blocked by the frozen records A wrapper in this isolated slice.
     assert original.observation is not None
-    latest = original.model_copy(
+    latest = initial.state.records.records[0].model_copy(
         update={
             "observation": original.observation.model_copy(
                 update={"sequence": 2, "observed_at": 120.0, "children": (child,)}

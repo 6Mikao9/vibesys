@@ -1,13 +1,7 @@
-"""Command completion remains a durable dependency beyond initial admission."""
-
-from typing import ClassVar, Literal
-
-import pytest
-from pydantic import BaseModel
+"""A queued decision still owns the requests of its later admission."""
 
 import vs_core.api as core
 from vs_core.api import (
-    Accepted,
     AttemptBudget,
     AttemptId,
     AttemptRequest,
@@ -16,7 +10,6 @@ from vs_core.api import (
     DecisionId,
     DecisionSubmitted,
     ItemId,
-    Operation,
     ReducerTrace,
     SchedulingChange,
     Scope,
@@ -26,43 +19,6 @@ from vs_core.api import (
     WorkspacePlan,
     trace_step,
 )
-
-
-class WriteOutcome(core.Value):
-    status: Literal["succeeded"] = "succeeded"
-
-
-class ArtifactPut(core.OperationRequest):
-    kind: Literal["test.write"] = "test.write"
-    lifecycle: Literal[core.LifecycleClass.IDEMPOTENT_WRITE] = core.LifecycleClass.IDEMPOTENT_WRITE
-    outcome_model: ClassVar[type[BaseModel]] = WriteOutcome
-    content: str
-
-
-def operation_state() -> tuple[core.OperationRegistry, core.CoreState]:
-    descriptor = core.OperationDescriptor(
-        kind="test.write",
-        lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        request_schema=core.SchemaRef(name="write", version=1),
-        outcome_schema=core.SchemaRef(name="outcome", version=1),
-        inspect=True,
-    )
-    codec = core.OperationRegistry(
-        (
-            core.OperationRegistration(
-                descriptor=descriptor, request_model=ArtifactPut, outcome_model=WriteOutcome
-            ),
-        )
-    )
-    state = core.initial_state()
-    return codec, state.model_copy(
-        update={
-            "registry": codec.descriptors,
-            "run": state.run.model_copy(
-                update={"capabilities": core.Capabilities(operations=codec.descriptors)}
-            ),
-        }
-    )
 
 
 def queued_start(state: core.CoreState) -> tuple[core.Transition, StartAttempt]:
@@ -95,80 +51,8 @@ def queued_start(state: core.CoreState) -> tuple[core.Transition, StartAttempt]:
     return result, start
 
 
-def test_queued_start_dependency_survives_without_initial_requests() -> None:
-    codec, state = operation_state()
-    queued, start = queued_start(state)
-    assert isinstance(queued.events[0], Accepted)
-    assert queued.events[0].request_ids == ()
-    operation = codec.validate_decision(
-        Operation(
-            decision_id=DecisionId(root="dependent"),
-            scope=start.scope,
-            depends_on=(start.decision_id,),
-            request=ArtifactPut(content="after attempt"),
-        )
-    )
-    trace = (
-        core.operation_trace(queued.state, operation)
-        if hasattr(core, "operation_trace")
-        else ReducerTrace(frames=())
-    )
-    dependent = trace_step(
-        queued.state,
-        DecisionSubmitted(
-            decision=core.Wait(request=operation, until=core.Within(limit=100.0)),
-            expected_revision=1,
-        ),
-        trace,
-    )
-    assert getattr(dependent.requests[0], "decision_dependencies", ()) == (start.decision_id,)
-    assert isinstance(dependent.events[0], core.Accepted)
-    assert dependent.events[0].dependencies == (core.DependencyRef(decision_id=start.decision_id),)
-    assert (
-        core.dependency_status(dependent.state, dependent.requests[0])
-        == core.DependencyStatus.PENDING
-    )
-    identity = dependent.requests[0].request_id
-    assert identity is not None
-    with pytest.raises(core.ContractError, match="dependency"):
-        trace_step(
-            dependent.state,
-            core.DispatchAuthorized(request_id=identity),
-            ReducerTrace(frames=()),
-        )
-    completion = core.DecisionCompleted(
-        decision_id=start.decision_id, status=core.CompletionStatus.SUCCEEDED
-    )
-    event = ClockAdvanced(now_at=11.0)
-    resolved = core.DecisionDependencyResolved(
-        decision_id=start.decision_id, status=core.CompletionStatus.SUCCEEDED
-    )
-    completed = trace_step(
-        dependent.state,
-        event,
-        ReducerTrace(
-            frames=(
-                TraceFrame(
-                    signal=event,
-                    change=SchedulingChange(
-                        state=dependent.state.scheduling, signals=(completion,)
-                    ),
-                ),
-                TraceFrame(
-                    signal=resolved, change=core.RecordsChange(state=dependent.state.records)
-                ),
-            )
-        ),
-    )
-    assert (
-        core.dependency_status(completed.state, dependent.requests[0])
-        == core.DependencyStatus.SUCCEEDED
-    )
-
-
 def test_later_admission_requests_keep_the_queued_decision_owner() -> None:
-    codec, state = operation_state()
-    queued, start = queued_start(state)
+    queued, start = queued_start(core.initial_state())
     request = core.EnsureWorkspace(
         scope=start.scope,
         attempt=core.AttemptRef(attempt_id=start.attempt_id, generation=0),
@@ -202,102 +86,12 @@ def test_later_admission_requests_keep_the_queued_decision_owner() -> None:
                 ),
                 TraceFrame(
                     signal=admitted,
-                    change=core.AttemptsChange(state=queued.state.attempts, requests=(request,)),
+                    change=core.AttemptsChange(
+                        state=queued.state.attempts, requests=(core.within(request, 100.0),)
+                    ),
                 ),
             )
         ),
     )
     assert getattr(result.requests[0], "decision_id", None) == start.decision_id
     assert result.state.run.receipts[0].request_ids == (result.requests[0].request_id,)
-    del codec
-
-
-@pytest.mark.parametrize("status", ["failed", "cancelled"])
-def test_new_dependent_rejects_failed_or_cancelled_completion(status: str) -> None:
-    codec, state = operation_state()
-    queued, start = queued_start(state)
-    receipt = queued.state.run.receipts[0].model_copy(
-        update={"completion": core.CompletionStatus(status)}
-    )
-    state = queued.state.model_copy(
-        update={"run": queued.state.run.model_copy(update={"receipts": (receipt,)})}
-    )
-    decision = codec.validate_decision(
-        Operation(
-            decision_id=DecisionId(root="dependent"),
-            scope=start.scope,
-            depends_on=(start.decision_id,),
-            request=ArtifactPut(content="dependent"),
-        )
-    )
-    result = core.step(
-        state,
-        DecisionSubmitted(
-            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
-            expected_revision=state.revision,
-        ),
-    )
-    assert isinstance(result.events[0], core.Rejected)
-    assert result.events[0].code == core.RejectionCode.DEPENDENCY
-    assert result.requests == ()
-    assert result.state.records == state.records
-
-
-@pytest.mark.parametrize("status", ["failed", "cancelled"])
-def test_failed_completion_rejects_already_prepared_dependent_and_notifies_records(
-    status: str,
-) -> None:
-    codec, state = operation_state()
-    queued, start = queued_start(state)
-    decision = codec.validate_decision(
-        Operation(
-            decision_id=DecisionId(root="dependent"),
-            scope=start.scope,
-            depends_on=(start.decision_id,),
-            request=ArtifactPut(content="dependent"),
-        )
-    )
-    dependent = trace_step(
-        queued.state,
-        DecisionSubmitted(
-            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
-            expected_revision=1,
-        ),
-        core.operation_trace(queued.state, decision),
-    )
-    dependent_id = dependent.requests[0].request_id
-    assert dependent_id is not None
-    completion = core.DecisionCompleted(
-        decision_id=start.decision_id, status=core.CompletionStatus(status)
-    )
-    notification = core.DecisionDependencyResolved(
-        decision_id=start.decision_id, status=completion.status
-    )
-    event = ClockAdvanced(now_at=10.0)
-    result = trace_step(
-        dependent.state,
-        event,
-        ReducerTrace(
-            frames=(
-                TraceFrame(
-                    signal=event,
-                    change=SchedulingChange(
-                        state=dependent.state.scheduling, signals=(completion,)
-                    ),
-                ),
-                TraceFrame(
-                    signal=notification, change=core.RecordsChange(state=dependent.state.records)
-                ),
-                TraceFrame(
-                    signal=core.RequestUndispatchable(request_id=dependent_id),
-                    change=core.RecordsChange(state=dependent.state.records),
-                ),
-            )
-        ),
-    )
-    assert isinstance(result.events[0], core.Rejected)
-    assert result.events[0].decision_id == decision.decision_id
-    assert isinstance(result.state.run.receipts[1].feedback, core.Rejected)
-    assert (
-        core.dependency_status(result.state, dependent.requests[0]) == core.DependencyStatus.FAILED
-    )

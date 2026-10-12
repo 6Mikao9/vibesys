@@ -716,7 +716,18 @@ def propagate(
             for outbound in change.requests
         )
         events.extend(change.events)
-    return _registered_transition(state, requests, events)
+    transition = _registered_transition(state, requests, events)
+    # A watch can already have fired for work requested in this step, which only now has a
+    # record to end.
+    fired = watch_deadlines(transition.state)
+    if not fired:
+        return transition
+    follow = propagate(transition.state, fired, dispatch)
+    return Transition(
+        state=follow.state,
+        requests=(*transition.requests, *follow.requests),
+        events=(*transition.events, *follow.events),
+    )
 
 
 def _registered_transition(
@@ -968,7 +979,7 @@ def _decision_replay(state: CoreState, submission: Submission) -> Transition | N
     )
     if previous is None:
         return None
-    if previous.payload_digest == digest(submission):
+    if previous.payload_digest == digest(decision):
         return Transition(state=state)
     return Transition(
         state=state,
@@ -992,7 +1003,7 @@ def _submitted(
 ) -> Transition:
     submission = event.decision
     decision = event.command
-    payload_digest = digest(submission)
+    payload_digest = digest(decision)
     replay = _decision_replay(state, submission)
     if replay is not None:
         return replay
@@ -1070,7 +1081,7 @@ def _stale_proposal(state: CoreState, event: ProposalSubmitted) -> Transition:
         )
         receipt = DecisionReceipt(
             decision_id=decision.decision_id,
-            payload_digest=digest(submission),
+            payload_digest=digest(decision),
             feedback=rejection,
         )
         state = state.model_copy(

@@ -56,7 +56,6 @@ def _inspect(target: str) -> InspectRequest:
     return InspectRequest(
         request_id=RequestId(root=f"inspect-{target}"),
         scope=SCOPE,
-        deadline_at=100.0,
         target=RequestId(root=target),
         resource_id=None,
     )

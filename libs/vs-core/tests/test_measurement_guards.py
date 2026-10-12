@@ -506,6 +506,7 @@ def registered_state(
         payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
         request_ids=(request_id,),
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={

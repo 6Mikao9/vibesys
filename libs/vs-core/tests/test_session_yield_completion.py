@@ -328,7 +328,7 @@ def test_yielded_success_ignores_uncommitted_or_mismatched_checkpoint(mismatch: 
         core.ObservationStatus.CANCELLED,
     ],
 )
-def test_failed_yield_retention_keeps_decision_and_dependencies_pending(
+def test_failed_yield_retention_keeps_decision_pending(
     status: core.ObservationStatus,
 ) -> None:
     state, event, request = yielded_checkpoint()
@@ -349,10 +349,6 @@ def test_failed_yield_retention_keeps_decision_and_dependencies_pending(
     failed = core.step(state, failure, reducers=REDUCERS)
     assert failed.state.attempts.attempts[0].phase == core.AttemptPhase.BLOCKED
     assert failed.state.run.receipts[0].completion is None
-    dependent = request.model_copy(
-        update={"decision_dependencies": (failed.state.run.receipts[0].decision_id,)}
-    )
-    assert core.dependency_status(failed.state, dependent) == core.DependencyStatus.PENDING
     result = core.step(failed.state, event, reducers=REDUCERS)
     assert result.state.run.receipts[0].completion is None
     assert result.state.attempts.attempts[0].checkpoints == ()

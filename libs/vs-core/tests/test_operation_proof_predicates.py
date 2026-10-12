@@ -44,7 +44,6 @@ def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestRecord
         "scope",
         "generation",
         "payload",
-        "deadline",
         "normalization",
         "codec",
     ],
@@ -93,7 +92,7 @@ def test_operation_proof_checks_every_origin_field(
         "feedback_membership",
     ):
         receipt, expected_verdict = _wrong_receipt(receipt, decision, field)
-    elif field in ("operation_id", "scope", "generation", "payload", "deadline"):
+    elif field in ("operation_id", "scope", "generation", "payload"):
         expected, expected_verdict = _wrong_request(request, field)
     elif field in ("normalization", "codec"):
         decision = (
@@ -187,7 +186,6 @@ def _wrong_request(
             request.operation.model_copy(update={"payload_json": "{}"}),
             ProofField.PAYLOAD,
         ),
-        "deadline": ("deadline_at", 99.0, ProofField.PAYLOAD),
     }
     name, wrong, verdict_field = fields[field]
     return request.model_copy(update={name: wrong}), Mismatch(verdict_field)
@@ -409,7 +407,7 @@ def _wrong_invocation(row: core.Invocation, field: str) -> tuple[core.Invocation
             }
         ), ProofField.GENERATION
     return row.model_copy(
-        update={"turn": row.turn.model_copy(update={"deadline_at": 99.0})}
+        update={"turn": row.turn.model_copy(update={"max_turns": row.turn.max_turns + 1})}
     ), ProofField.PAYLOAD
 
 
@@ -600,7 +598,9 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
             frames=(
                 core.TraceFrame(
                     signal=event,
-                    change=core.RecordsChange(state=state.records, requests=(request,)),
+                    change=core.RecordsChange(
+                        state=state.records, requests=(core.within(request, 60.0),)
+                    ),
                 ),
             )
         ),

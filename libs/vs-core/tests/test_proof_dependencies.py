@@ -1,4 +1,4 @@
-"""Optional dependencies and the first accepted Finish retain exact durable authority."""
+"""Request dependencies and the first accepted Finish retain exact durable authority."""
 
 import pytest
 from hypothesis import given
@@ -21,73 +21,6 @@ from .proof_facts import dependency_facts, fact_digest, stop_facts
     ("variant", "denial"),
     [
         ("exact", None),
-        ("optional_empty", None),
-        ("receipt", Missing(ProofReason.ABSENT_RECEIPT)),
-        ("decision", Missing(ProofReason.ABSENT_RECEIPT)),
-        ("feedback", Mismatch(ProofField.FEEDBACK_ID)),
-        ("duplicate_receipt", Mismatch(ProofField.RECEIPT_ID)),
-        ("rejected", Missing(ProofReason.NOT_ACCEPTED)),
-        ("pending_decision", Missing(ProofReason.UNRESOLVED)),
-        ("failed_decision", Mismatch(ProofField.STATUS)),
-        ("digest", Mismatch(ProofField.DIGEST)),
-    ],
-)
-@given(dependency_facts())
-def test_decision_dependencies_require_exact_completion(
-    variant: str,
-    denial: Missing | Mismatch | None,
-    facts: tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord],
-) -> None:
-    request, receipt, record = facts
-    receipts = (receipt,)
-    match variant:
-        case "optional_empty":
-            request = request.model_copy(update={"decision_dependencies": (), "depends_on": ()})
-        case "receipt":
-            receipts = ()
-        case "duplicate_receipt":
-            receipts = (receipt, receipt)
-        case _:
-            receipt = _dependency_receipt(variant, receipt)
-    if variant not in ("receipt", "duplicate_receipt"):
-        receipts = (receipt,)
-    assert dependencies_for(request, receipts, core.RecordsState(records=(record,))) == (
-        Proven(request) if denial is None else denial
-    )
-
-
-def _dependency_receipt(variant: str, receipt: core.DecisionReceipt) -> core.DecisionReceipt:
-    match variant:
-        case "decision":
-            return receipt.model_copy(update={"decision": None})
-        case "feedback":
-            return receipt.model_copy(
-                update={"feedback": core.Accepted(decision_id=core.DecisionId(root="other"))}
-            )
-        case "rejected":
-            return receipt.model_copy(
-                update={
-                    "feedback": core.Rejected(
-                        decision_id=receipt.decision_id,
-                        code=core.RejectionCode.DEPENDENCY,
-                        path=(),
-                        detail="denied",
-                    )
-                }
-            )
-        case "pending_decision":
-            return receipt.model_copy(update={"completion": None})
-        case "failed_decision":
-            return receipt.model_copy(update={"completion": core.CompletionStatus.FAILED})
-        case "digest":
-            receipt = receipt.model_copy(update={"payload_digest": "other"})
-    return receipt
-
-
-@pytest.mark.parametrize(
-    ("variant", "denial"),
-    [
-        ("exact", None),
         ("request", Missing(ProofReason.ABSENT_REQUEST)),
         ("duplicate", Mismatch(ProofField.REQUEST_ID)),
         ("observation", Missing(ProofReason.ABSENT_OBSERVATION)),
@@ -104,7 +37,7 @@ def test_request_dependencies_require_exact_success(
     denial: Missing | Mismatch | None,
     facts: tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord],
 ) -> None:
-    request, receipt, record = facts
+    request, _, record = facts
     records = (record,)
     match variant:
         case "request":
@@ -119,7 +52,7 @@ def test_request_dependencies_require_exact_success(
             record = _dependency_observation(variant, record)
     if variant not in ("request", "duplicate"):
         records = (record,)
-    assert dependencies_for(request, (receipt,), core.RecordsState(records=records)) == (
+    assert dependencies_for(request, core.RecordsState(records=records)) == (
         Proven(request) if denial is None else denial
     )
 
@@ -200,7 +133,6 @@ def _stop_receipt_variant(variant: str, run: core.RunState, expected: core.Finis
             later = expected.model_copy(
                 update={
                     "decision_id": core.DecisionId(root="later"),
-                    "depends_on": (core.DecisionId(root="unresolved"),),
                 }
             )
             feedback = (
@@ -231,154 +163,12 @@ def test_inflight_dependencies_wait_without_an_observation(
     phase: core.RequestPhase,
     facts: tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord],
 ) -> None:
-    request, receipt, record = facts
+    request, _, record = facts
     record = record.model_copy(update={"phase": phase, "observation": None})
-    verdict = dependencies_for(request, (receipt,), core.RecordsState(records=(record,)))
+    verdict = dependencies_for(request, core.RecordsState(records=(record,)))
     reason = (
         ProofReason.ABSENT_OBSERVATION
         if phase == core.RequestPhase.COMPLETED
         else ProofReason.UNRESOLVED
     )
     assert verdict == Missing(reason)
-    dependent = core.InspectRequest(
-        scope=request.scope,
-        target=record.request_id,
-        depends_on=request.depends_on,
-    )
-    state = core.initial_state()
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(update={"receipts": (receipt,)}),
-            "records": core.RecordsState(records=(record,)),
-        }
-    )
-    status = (
-        core.DependencyStatus.FAILED
-        if phase == core.RequestPhase.COMPLETED
-        else core.DependencyStatus.PENDING
-    )
-    assert core.dependency_status(state, dependent) == status
-
-
-@pytest.mark.parametrize("order", ["pending-first", "rejected-first"])
-@given(dependency_facts())
-def test_a_pending_dependency_cannot_hide_a_rejected_dependency(
-    order: str,
-    facts: tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord],
-) -> None:
-    request, receipt, record = facts
-    assert receipt.decision is not None
-    rejected_decision = receipt.decision.model_copy(
-        update={"decision_id": core.DecisionId(root="rejected")}
-    )
-    rejected = core.DecisionReceipt(
-        decision_id=rejected_decision.decision_id,
-        decision=rejected_decision,
-        payload_digest=fact_digest(rejected_decision),
-        feedback=core.Rejected(
-            decision_id=rejected_decision.decision_id,
-            code=core.RejectionCode.DEPENDENCY,
-            path=(),
-            detail="denied",
-        ),
-    )
-    pending = receipt.model_copy(update={"completion": None})
-    ids = (
-        (rejected.decision_id, pending.decision_id)
-        if order == "rejected-first"
-        else (pending.decision_id, rejected.decision_id)
-    )
-    request = request.model_copy(update={"decision_dependencies": ids})
-    assert dependencies_for(
-        request, (pending, rejected), core.RecordsState(records=(record,))
-    ) == Missing(ProofReason.NOT_ACCEPTED)
-    dependent = core.InspectRequest(
-        scope=request.scope,
-        target=record.request_id,
-    )
-    state = core.initial_state()
-    state = state.model_copy(
-        update={"run": state.run.model_copy(update={"receipts": (pending, rejected)})}
-    )
-    assert core.dependency_status(state, dependent) == core.DependencyStatus.FAILED
-
-
-def _receipt(decision: core.Finish | core.StartAttempt) -> core.DecisionReceipt:
-    return core.DecisionReceipt(
-        decision_id=decision.decision_id,
-        decision=decision,
-        payload_digest=fact_digest(decision),
-        feedback=core.Accepted(decision_id=decision.decision_id),
-    )
-
-
-def _stop_after_dependency_failure(
-    *, first_depends: bool, dependency_fails: bool
-) -> core.CoreState:
-    state = core.initial_state()
-    scope = core.Scope(owner=state.run.run_id, generation=0)
-    prereq = core.StartAttempt(
-        decision_id=core.DecisionId(root="prereq"),
-        scope=scope,
-        attempt_id=core.AttemptId(root="attempt"),
-        item_id=core.ItemId(root="item"),
-        workspace=core.WorkspacePlan(
-            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
-        ),
-        budget=core.AttemptBudget(),
-    )
-    state = state.model_copy(
-        update={"run": state.run.model_copy(update={"receipts": (_receipt(prereq),)})}
-    )
-    for name, dependencies in (
-        ("first", (prereq.decision_id,) if first_depends else ()),
-        ("later", ()),
-    ):
-        stop = core.Finish(
-            decision_id=core.DecisionId(root=name),
-            scope=scope,
-            mode="drain",
-            result=core.RunResultProposal(outcome="cancelled", reason="review"),
-            depends_on=dependencies,
-        )
-        event = core.DecisionSubmitted(decision=stop, expected_revision=state.revision)
-        control = core.AdmissionControl(action="drain")
-        frame = core.TraceFrame(
-            signal=control, change=core.SchedulingChange(state=state.scheduling)
-        )
-        state = core.trace_step(state, event, core.ReducerTrace(frames=(frame,))).state
-    status = core.CompletionStatus.FAILED if dependency_fails else core.CompletionStatus.SUCCEEDED
-    ingress = core.AttemptEvaluationHistoryUpdated(
-        attempt=core.AttemptRef(attempt_id=core.AttemptId(root="attempt"), generation=0),
-        history=core.AttemptEvaluationHistory(),
-    )
-    completed = core.DecisionCompleted(decision_id=prereq.decision_id, status=status)
-    frame = core.TraceFrame(
-        signal=ingress,
-        change=core.AttemptsChange(state=state.attempts, signals=(completed,)),
-    )
-    return core.trace_step(state, ingress, core.ReducerTrace(frames=(frame,))).state
-
-
-@pytest.mark.parametrize("dependency_fails", [True, False])
-@pytest.mark.parametrize("first_depends", [True, False])
-def test_failed_first_stop_commitment_is_not_replaced_by_a_later_stop(
-    *, first_depends: bool, dependency_fails: bool
-) -> None:
-    state = _stop_after_dependency_failure(
-        first_depends=first_depends, dependency_fails=dependency_fails
-    )
-    clock = core.ClockAdvanced(now_at=1.0)
-    frame = core.TraceFrame(
-        signal=clock,
-        change=core.SchedulingChange(state=state.scheduling, signals=(core.RunDrained(),)),
-    )
-    result = core.trace_step(state, clock, core.ReducerTrace(frames=(frame,)))
-    stop = committed_stop(state.run)
-    if first_depends and dependency_fails:
-        assert stop == Mismatch(ProofField.DISPOSITION)
-        assert result.state.run.status != core.RunStatus.TERMINAL
-        assert not any(isinstance(event, core.RunEnded) for event in result.events)
-    else:
-        assert isinstance(stop, Proven)
-        assert stop.value.decision_id == core.DecisionId(root="first")

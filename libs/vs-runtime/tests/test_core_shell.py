@@ -12,25 +12,31 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
     Access,
     ClockAdvanced,
     CoreState,
+    Decision,
+    Event,
     EventCursor,
+    EventKind,
     HostFence,
     HostId,
     OperationRegistry,
     Request,
     RoleId,
     RunEnvelope,
-    CoreView,
+    RunFacts,
+    RunView,
     Scope,
     SessionId,
     SessionPhase,
     SessionSpec,
     SessionsState,
     SessionView,
-    StrategyEvent,
     StrategyState,
+    WakeAt,
+    WorkKind,
     initial_state,
 )
 from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope, StoreFence
@@ -44,8 +50,8 @@ from vs_runtime.api.core import (
     RuntimeRecord,
 )
 from vs_runtime.api.core_shell_fixtures import (
+    CounterSearch,
     CounterState,
-    CounterStrategy,
     ShellTraceTransitions,
     runtime,
 )
@@ -107,17 +113,51 @@ def test_unknown_startup_commit_reloads_but_grants_no_dispatch(fault: CommitFaul
         shell.start("host", now_at=0, lease_duration=100)
     assert error.value.candidate_visible == (fault != CommitFault.UNKNOWN_BEFORE)
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=1)
+        shell.flush(now_at=1)
 
 
-def test_proposed_state_commits_with_receipts_and_callbacks() -> None:
+class _WakingSearch(CounterSearch):
+    """A search that asks to be woken at time 1 and decides nothing else."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.declaration = self.declaration.model_copy(
+            update={
+                "uses": frozenset({WorkKind.WAKE_AT}),
+                "handles": self.declaration.handles | {EventKind.TIME_REACHED},
+            }
+        )
+
+    def init(self, config: object, facts: RunFacts) -> tuple[CounterState, list[Decision]]:
+        state, _ = super().init(config, facts)
+        return state, [WakeAt(time=1)]
+
+
+def _waking_initial() -> CoreState:
+    core = initial_state()
+    return core.model_copy(
+        update={"run": core.run.model_copy(update={"declaration": _WakingSearch().declaration})}
+    )
+
+
+def test_woken_search_state_commits_with_receipts_and_callbacks() -> None:
     store = FakeStateStore()
-    shell = runtime(store)
+    shell = CoreRuntime(
+        store,
+        _WakingSearch(),
+        _waking_initial(),
+        config=None,
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
     shell.start("host", now_at=0, lease_duration=100)
-    shell.decide(now_at=1)
+    assert shell.next_wake_at == 1
+    revision = shell.storage_revision
+    assert revision is not None
+    shell.flush(now_at=1)
     assert shell.advance()
-    assert shell.record.envelope.strategy.proposals == 1
-    assert shell.record.envelope.core.revision == 2
+    assert shell.next_wake_at is None
+    assert shell.record.envelope.strategy.callbacks == 1
+    assert shell.storage_revision == revision + 1
     assert shell.record.envelope.event_cursor == EventCursor(sequence=0)
 
 
@@ -126,12 +166,12 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
     fence = store.acquire("writer", now=0, duration=1)
     assert fence is not None
     envelope = RunEnvelope[CounterState](
-        schema_version=3,
+        schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="writer"), epoch=1),
-        strategy_id=CounterStrategy().declaration.strategy_id,
-        state_schema=CounterStrategy().declaration.state_schema,
+        strategy_id=CounterSearch().declaration.strategy_id,
+        state_schema=CounterSearch().declaration.state_schema,
         core=initial_state(),
-        strategy=CounterStrategy().state,
+        strategy=CounterSearch().init(None, initial_state().run.facts)[0],
         event_cursor=EventCursor(sequence=0),
     )
     payload = (
@@ -148,7 +188,7 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
 def test_default_core_runs_scheduling_events_on_the_real_kernel() -> None:
     """Scheduling is implemented, so the default core starts and commits clock events."""
     store = FakeStateStore()
-    shell = CoreRuntime(store, CounterStrategy(), initial_state())
+    shell = CoreRuntime(store, CounterSearch(), initial_state(), config=None)
     shell.start("host", now_at=0, lease_duration=10)
     assert store.load() is not None
     started = shell.record
@@ -182,7 +222,7 @@ def test_failed_or_uncertain_renewal_grants_no_dispatch(fault: CommitFault) -> N
         shell.renew(now_at=1, lease_duration=10)
     assert store.load() == before
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=2)
+        shell.flush(now_at=2)
 
 
 def test_definite_startup_write_failure_never_admits() -> None:
@@ -192,7 +232,7 @@ def test_definite_startup_write_failure_never_admits() -> None:
         shell.start("host", now_at=0, lease_duration=10)
     assert store.load() is None
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=1)
+        shell.flush(now_at=1)
 
 
 def test_lost_fence_commit_reloads_and_never_admits() -> None:
@@ -206,7 +246,7 @@ def test_lost_fence_commit_reloads_and_never_admits() -> None:
         shell.advance()
     assert store.load() == before
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=1)
+        shell.flush(now_at=1)
 
 
 @pytest.mark.parametrize("version", [True, False, 1.0, "1", 0, 2])
@@ -271,8 +311,9 @@ def test_a_commit_validates_once_and_never_round_trips_the_envelope(times: list[
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(registry=registry, transitions=ShellTraceTransitions()),
     )
     shell.start("host", now_at=0, lease_duration=100)
@@ -308,23 +349,23 @@ def test_a_host_that_starts_over_a_run_with_an_orphan_wait_refuses_it() -> None:
     store = FakeStateStore()
     fence = store.acquire("writer", now=0, duration=1)
     assert fence is not None
-    strategy = CounterStrategy()
+    strategy = CounterSearch()
     envelope = RunEnvelope[CounterState](
-        schema_version=3,
+        schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="writer"), epoch=1),
         strategy_id=strategy.declaration.strategy_id,
         state_schema=strategy.declaration.state_schema,
         core=_closing_session_with_nothing_to_end_it(),
-        strategy=strategy.state,
+        strategy=strategy.init(None, initial_state().run.facts)[0],
         event_cursor=EventCursor(sequence=0),
     )
     payload = RuntimeRecord[CounterState].fresh(envelope).model_dump_json().encode()
     store.commit(None, StoredEnvelope(revision=0, schema_version=1, payload=payload), fence, now=0)
-    shell = CoreRuntime(store, CounterStrategy(), initial_state())
+    shell = CoreRuntime(store, CounterSearch(), initial_state(), config=None)
     with pytest.raises(OrphanWaitError):
         shell.start("reader", now_at=1, lease_duration=1)
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=2)
+        shell.flush(now_at=2)
 
 
 class _ReleaseFails(FakeStateStore):
@@ -366,18 +407,17 @@ def test_a_failed_lease_release_never_raises_and_ends_the_shell(error: Exception
     shell.release_lease(now_at=1)
 
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=2)
+        shell.flush(now_at=2)
 
 
-class _InvalidStateStrategy(CounterStrategy):
+class _InvalidStateSearch(CounterSearch):
     """A strategy whose fold builds its state with `model_copy`, which skips validators."""
 
-    def bind(self, state: CounterState) -> _InvalidStateStrategy:
-        return _InvalidStateStrategy(state)
-
-    def on_event(self, view: CoreView, event: StrategyEvent) -> CounterState:
-        del view, event
-        return self.state.model_copy(update={"callbacks": "not a count"})
+    def update(
+        self, state: CounterState, event: Event, view: RunView
+    ) -> tuple[CounterState, list[Decision]]:
+        del event, view
+        return state.model_copy(update={"callbacks": "not a count"}), []
 
 
 def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() -> None:
@@ -385,8 +425,9 @@ def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() 
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        _InvalidStateStrategy(),
+        _InvalidStateSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
     )
     shell.start("host", now_at=0, lease_duration=100)

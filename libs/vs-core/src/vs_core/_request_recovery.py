@@ -1288,13 +1288,13 @@ def _deadline(
     )
     requests: list[Outbound] = []
     events: tuple[Failed, ...] = ()
+    failed = record.failure or _failure(record, event.reason)
     if previous_block is None:
-        failed = _failure(record, event.reason)
         requests.append(_probe(block, context))
         events = (failed,)
-        state = _replace_record(
-            state, record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
-        )
+    state = _replace_record(
+        state, record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
+    )
     observation = record.observation
     resources = []
     if (

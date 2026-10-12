@@ -133,7 +133,7 @@ def test_terminal_transition_cannot_hide_new_outbox_work_not_yet_registered() ->
                         signal=clock,
                         change=core.SchedulingChange(
                             state=state.scheduling,
-                            requests=(request,),
+                            requests=(core.within(request, 60.0),),
                             signals=(core.RunDrained(),),
                         ),
                     ),

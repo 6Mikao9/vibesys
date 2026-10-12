@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import BaseModel
 
 import vs_core.api as core
 from vs_core.api import (
@@ -33,13 +34,49 @@ from vs_core.api import (
     step,
 )
 
-from .test_completion_dependencies import ArtifactPut, WriteOutcome, operation_state
 from .test_falsification import initial_state
 
 type Action = tuple[Literal["dispatch", "reload", "observe"], int, str]
 
 REQUEST = RequestId(root="write")
 KINDS = ("unknown", "retry", "success")
+
+
+class WriteOutcome(core.Value):
+    status: Literal["succeeded"] = "succeeded"
+
+
+class ArtifactPut(core.OperationRequest):
+    kind: Literal["test.write"] = "test.write"
+    lifecycle: Literal[core.LifecycleClass.IDEMPOTENT_WRITE] = core.LifecycleClass.IDEMPOTENT_WRITE
+    outcome_model: ClassVar[type[BaseModel]] = WriteOutcome
+    content: str
+
+
+def operation_state() -> tuple[core.OperationRegistry, core.CoreState]:
+    descriptor = core.OperationDescriptor(
+        kind="test.write",
+        lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
+        request_schema=core.SchemaRef(name="write", version=1),
+        outcome_schema=core.SchemaRef(name="outcome", version=1),
+        inspect=True,
+    )
+    codec = core.OperationRegistry(
+        (
+            core.OperationRegistration(
+                descriptor=descriptor, request_model=ArtifactPut, outcome_model=WriteOutcome
+            ),
+        )
+    )
+    state = core.initial_state()
+    return codec, state.model_copy(
+        update={
+            "registry": codec.descriptors,
+            "run": state.run.model_copy(
+                update={"capabilities": core.Capabilities(operations=codec.descriptors)}
+            ),
+        }
+    )
 
 
 def _ready() -> CoreState:
@@ -368,45 +405,6 @@ def test_every_request_class_round_trips_through_the_ledger(index: int) -> None:
     (record,) = closed.records.records
     assert record.phase == RequestPhase.COMPLETED
     assert record.observation == done
-
-
-def _dependent() -> CoreState:
-    state = _ready()
-    (record,) = state.records.records
-    request = record.request.model_copy(
-        update={
-            "request_id": RequestId(root="dependent"),
-            "decision_dependencies": (core.DecisionId(root="upstream"),),
-        }
-    )
-    return step(
-        state,
-        RequestPrepared(
-            until=Until(at=100.0), request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE
-        ),
-    ).state
-
-
-@given(st.sampled_from(list(core.CompletionStatus)))
-def test_only_an_unsuccessful_upstream_decision_cancels_prepared_dependents(
-    status: core.CompletionStatus,
-) -> None:
-    state = _dependent()
-    resolved = step(
-        state,
-        core.DecisionDependencyResolved(
-            decision_id=core.DecisionId(root="upstream"), status=status
-        ),
-    ).state
-    dependent = next(
-        row for row in resolved.records.records if row.request_id == RequestId(root="dependent")
-    )
-    expected = (
-        RequestPhase.PREPARED
-        if status == core.CompletionStatus.SUCCEEDED
-        else RequestPhase.COMPLETED
-    )
-    assert dependent.phase == expected
 
 
 def test_events_naming_unknown_requests_or_wrong_classes_are_rejected() -> None:

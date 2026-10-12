@@ -29,6 +29,7 @@ from vs_core.api import (
     ResourceId,
     RevisionId,
     RevisionRef,
+    Until,
 )
 from vs_project.api import Project
 from vs_runtime.api.core import (
@@ -98,6 +99,7 @@ def context_for(request: Request) -> ExecutionContext:
         now_at=5.0,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
         lease=_Lease(),
+        until=Until(at=100.0),
     )
 
 
@@ -393,7 +395,11 @@ async def test_same_identity_with_another_payload_is_a_rejected_observation() ->
         runner = executor(items, namespace)
         await runner.execute(request, context_for(request))
         other = ExecutionContext(
-            fence=FENCE, now_at=5.0, payload_digest="different", lease=_Lease()
+            fence=FENCE,
+            now_at=5.0,
+            payload_digest="different",
+            lease=_Lease(),
+            until=Until(at=100.0),
         )
         rejected = observed(await runner.execute(request, other)).observation
         assert rejected.status is ObservationStatus.REJECTED
@@ -422,7 +428,6 @@ async def inspect_of(
     request = InspectRequest(
         request_id=RequestId(root=f"inspect:{target}"),
         scope=SCOPE,
-        deadline_at=100.0,
         target=RequestId(root=target),
         resource_id=None if resource is None else ResourceId(root=resource),
     )
@@ -528,7 +533,6 @@ def cancel_request(target: str, name: str) -> CancelOwnedResource:
     return CancelOwnedResource(
         request_id=RequestId(root=name),
         scope=SCOPE,
-        deadline_at=100.0,
         resource_id=ResourceId(root="resource"),
         target=RequestId(root=target),
     )
@@ -679,7 +683,6 @@ async def _inspect_before_and_after_the_target_ran() -> list[ExecutionResult]:
         inspect = InspectRequest(
             request_id=RequestId(root="inspect-run"),
             scope=SCOPE,
-            deadline_at=100.0,
             target=RequestId(root="req-run"),
         )
         before = await executor(items, namespace).execute(inspect, context_for(inspect))
@@ -738,7 +741,11 @@ async def test_same_identity_with_another_payload_is_rejected_after_every_regist
         runner = executor(items, namespace)
         first = await runner.execute(request, context_for(request))
         other = ExecutionContext(
-            fence=FENCE, now_at=6.0, payload_digest="different", lease=_Lease()
+            fence=FENCE,
+            now_at=6.0,
+            payload_digest="different",
+            lease=_Lease(),
+            until=Until(at=100.0),
         )
         second = await runner.execute(request, other)
         assert observed(second).observation.status is ObservationStatus.REJECTED

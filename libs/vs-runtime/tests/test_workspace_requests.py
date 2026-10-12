@@ -46,6 +46,7 @@ from vs_core.api import (
     SnapshotAndRetain,
     SnapshotAndRetainRun,
     TrustedBaseline,
+    Until,
     VerifyAdoption,
     WorkspaceMode,
     WorkspaceObserved,
@@ -127,7 +128,6 @@ class _Common(TypedDict):
     request_id: RequestId
     scope: Scope
     admission_id: DecisionId
-    deadline_at: float
 
 
 @pytest.fixture(autouse=True)
@@ -273,6 +273,7 @@ def _context(
         now_at=1.0,
         payload_digest=digest,
         lease=lease or RevocableLease(),
+        until=Until(at=100.0),
     )
 
 
@@ -625,7 +626,6 @@ def test_run_snapshot_binds_invocation_request_and_retention(tmp_path: Path) -> 
         request = SnapshotAndRetainRun(
             request_id=_rid("run-snap-1"),
             scope=run_scope,
-            deadline_at=100.0,
             invocation=invocation,
             retention="candidate",
         )
@@ -654,7 +654,6 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
         request = SnapshotAndRetainRun(
             request_id=_rid("run-snap-wait"),
             scope=Scope(owner=RunId(root="run-1"), generation=3),
-            deadline_at=100.0,
             invocation=InvocationRef(
                 session_id=SessionId(root="s1"),
                 invocation_id=InvocationId(root="i1"),
@@ -779,17 +778,13 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         selection = RetainedCandidate(settlement_id=SettlementId(root="settle"), revision=winner)
 
         def verify(name: str) -> VerifyAdoption:
-            return VerifyAdoption(
-                request_id=_rid(name), scope=run_scope, deadline_at=100.0, selection=selection
-            )
+            return VerifyAdoption(request_id=_rid(name), scope=run_scope, selection=selection)
 
         before = await _run(executor, verify("verify-0"))
         assert before.observation.observation.status is ObservationStatus.FAILED
         assert before.observation.observation.terminal
         assert before.observation.revision is None
-        adopt = AdoptRevision(
-            request_id=_rid("adopt-1"), scope=run_scope, deadline_at=100.0, selection=selection
-        )
+        adopt = AdoptRevision(request_id=_rid("adopt-1"), scope=run_scope, selection=selection)
         applied = await _run(executor, adopt)
         assert applied.observation.observation.status is ObservationStatus.SUCCEEDED
         assert applied.observation.revision == winner
@@ -802,9 +797,7 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         assert proof.observation.revision == winner
         # Interrupted before the result was recorded: the root already proves the
         # content, so the retry reports success instead of applying again.
-        again = AdoptRevision(
-            request_id=_rid("adopt-2"), scope=run_scope, deadline_at=100.0, selection=selection
-        )
+        again = AdoptRevision(request_id=_rid("adopt-2"), scope=run_scope, selection=selection)
         crashing = _failing(_ENVS[workspaces])
         flaky, _ = _executor(workspaces, crashing)
         crashing.fail_done = True
@@ -836,7 +829,6 @@ def test_adoption_rejects_foreign_revisions_and_non_baseline_baselines(tmp_path:
             AdoptRevision(
                 request_id=_rid("adopt-baseline"),
                 scope=run_scope,
-                deadline_at=100.0,
                 selection=TrustedBaseline(revision=revision_ref(baseline)),
             ),
         )
@@ -854,7 +846,6 @@ def test_adoption_rejects_foreign_revisions_and_non_baseline_baselines(tmp_path:
                 AdoptRevision(
                     request_id=_rid(f"adopt-bad-{index}"),
                     scope=run_scope,
-                    deadline_at=100.0,
                     selection=selection,
                 ),
             )
@@ -985,7 +976,6 @@ def _adopt[Kind: (AdoptRevision, VerifyAdoption)](
     return kind(
         request_id=_rid(name),
         scope=Scope(owner=RunId(root="run-1"), generation=0),
-        deadline_at=100.0,
         selection=RetainedCandidate(settlement_id=SettlementId(root="s"), revision=revision),
     )
 
@@ -1676,7 +1666,6 @@ async def _prepare_run_snapshot(
     return SnapshotAndRetainRun(
         request_id=_rid("target"),
         scope=Scope(owner=RunId(root="run-1"), generation=3),
-        deadline_at=100.0,
         invocation=InvocationRef(
             session_id=SessionId(root="s1"), invocation_id=InvocationId(root="i1"), generation=3
         ),
@@ -1758,6 +1747,7 @@ def test_the_same_request_identity_with_another_payload_is_a_rejected_observatio
                 fence=HostFence(host_id=HostId(root="host"), epoch=1),
                 now_at=2.0,
                 payload_digest="another-payload",
+                until=Until(at=100.0),
             )
             outcome = await executor.execute(request, other)
             assert isinstance(outcome, ExecutionResult)

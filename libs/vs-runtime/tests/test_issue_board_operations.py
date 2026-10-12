@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_core.api import HostFence, HostId, OperationRegistry
+from vs_core.api import HostFence, HostId, OperationRegistry, Until
 from vs_issue_tracker.api import (
     AppliedChanges,
     ApplyIssueChanges,
@@ -73,6 +73,7 @@ def _context(request: OperationRequest) -> ExecutionContext:
         now_at=5.0,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
         lease=RevocableLease(),
+        until=Until(at=100.0),
     )
 
 

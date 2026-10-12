@@ -20,6 +20,10 @@ class Query(core.OperationRequest):
     value: int
 
 
+def waiting(request: core.Work) -> core.Wait:
+    return core.Wait(request=request, until=core.Within(limit=100.0))
+
+
 @given(st.integers(min_value=2, max_value=8))
 def test_ordered_batch_validates_revision_once_and_preserves_partial_acceptance(count: int) -> None:
     descriptor = core.OperationDescriptor(
@@ -61,7 +65,7 @@ def test_ordered_batch_validates_revision_once_and_preserves_partial_acceptance(
         mode="drain",
         result=core.RunResultProposal(outcome="success", reason="no work"),
     )
-    ordered = (decisions[0], rejected, *decisions[1:])
+    ordered = (waiting(decisions[0]), rejected, *map(waiting, decisions[1:]))
     if hasattr(core, "ProposalSubmitted"):
         frames = tuple(
             core.operation_trace(state, decision)
@@ -121,7 +125,7 @@ def start_signal(start: core.StartAttempt) -> core.AttemptRequested:
 def test_batch_replay_suppresses_callbacks_before_stale_view_validation() -> None:
     state = core.initial_state()
     start = start_fixture(state, "start")
-    event = core.ProposalSubmitted(decisions=(start,), expected_revision=0)
+    event = core.ProposalSubmitted(decisions=(waiting(start),), expected_revision=0)
     result = core.trace_step(
         state,
         event,
@@ -139,7 +143,7 @@ def test_batch_replay_suppresses_callbacks_before_stale_view_validation() -> Non
     assert replay.requests == ()
     conflict = start.model_copy(update={"attempt_id": core.AttemptId(root="changed")})
     changed = core.step(
-        result.state, core.ProposalSubmitted(decisions=(conflict,), expected_revision=0)
+        result.state, core.ProposalSubmitted(decisions=(waiting(conflict),), expected_revision=0)
     )
     assert isinstance(changed.events[0], core.Rejected)
     assert changed.events[0].code == core.RejectionCode.IDENTITY_CONFLICT
@@ -148,7 +152,7 @@ def test_batch_replay_suppresses_callbacks_before_stale_view_validation() -> Non
 def test_stale_batch_rejections_are_persisted_and_not_redelivered() -> None:
     state = core.initial_state().model_copy(update={"revision": 5})
     start = start_fixture(state, "stale")
-    event = core.ProposalSubmitted(decisions=(start,), expected_revision=0)
+    event = core.ProposalSubmitted(decisions=(waiting(start),), expected_revision=0)
     result = core.step(state, event)
     assert isinstance(result.events[0], core.Rejected)
     assert result.events[0].code == core.RejectionCode.STALE_VIEW
@@ -170,7 +174,7 @@ def test_leaf_rejection_rolls_back_only_its_decision_in_an_ordered_batch() -> No
     request = core.InspectRequest(scope=rejected.scope, target=core.RequestId(root="target"))
     result = core.trace_step(
         state,
-        core.ProposalSubmitted(decisions=(accepted, rejected), expected_revision=0),
+        core.ProposalSubmitted(decisions=(waiting(accepted), waiting(rejected)), expected_revision=0),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -180,7 +184,7 @@ def test_leaf_rejection_rolls_back_only_its_decision_in_an_ordered_batch() -> No
                     signal=start_signal(rejected),
                     change=core.SchedulingChange(
                         state=committed.model_copy(update={"released_slot_seconds": 2.0}),
-                        requests=(request,),
+                        requests=(core.inherit(request),),
                         events=(rejection,),
                     ),
                 ),

@@ -662,7 +662,7 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
             "observation": proof,
             "outcome_schema": request.operation.schema_ref.outcome_schema,
             "outcome_json": codec.encode_outcome(request.operation.schema_ref, outcome),
-            "reconcile_deadline_at": 100.0,
+            "until": core.Until(at=100.0),
         },
         context={"operation_registry": codec},
     )
@@ -1933,7 +1933,7 @@ def test_reopen_normalization_and_exact_cancelled_set_are_required_before_forwar
             }
         )
     elif guard == "wire":
-        request = event.request.model_copy(update={"deadline_at": 99.0})
+        request = event.request.model_copy(update={"retry_limit": event.request.retry_limit + 1})
         event = event.model_copy(update={"request": request})
     elif guard == "park-authority":
         event = event.model_copy(

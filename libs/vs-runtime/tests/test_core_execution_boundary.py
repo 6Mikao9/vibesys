@@ -35,6 +35,7 @@ from vs_core.api import (
     SessionInputReceived,
     SessionObserved,
     Transition,
+    Until,
     initial_state,
 )
 from vs_project.api import FakeStateStore, StoredEnvelope
@@ -59,7 +60,7 @@ from vs_runtime.api.core import (
     RuntimeCommitError,
     RuntimeExecutionError,
 )
-from vs_runtime.api.core_shell_fixtures import CounterState, CounterStrategy, ShellTraceTransitions
+from vs_runtime.api.core_shell_fixtures import CounterSearch, CounterState, ShellTraceTransitions
 from vs_runtime.api.testing import FakePublicationDelivery, FakeRequestExecution
 
 if TYPE_CHECKING:
@@ -89,8 +90,9 @@ def make_shell(
 ) -> CoreRuntime[CounterState]:
     return CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(
             transitions=ShellTraceTransitions(with_requests=True),
             executors=RequestExecutors(
@@ -256,8 +258,9 @@ async def test_unbound_role_is_refused_before_authorization_is_committed() -> No
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions(with_requests=True)),
     )
     shell.start("host", now_at=0, lease_duration=100)
@@ -395,7 +398,9 @@ async def test_unrouted_request_type_is_a_typed_contract_error() -> None:
         pass
 
     clone = Unrouted(**{name: getattr(request, name) for name in type(request).model_fields})
-    context = ExecutionContext(fence=shell.record.envelope.fence, now_at=1, payload_digest="digest")
+    context = ExecutionContext(
+        fence=shell.record.envelope.fence, now_at=1, payload_digest="digest", until=Until(at=100.0)
+    )
     with pytest.raises(ContractError, match="no executor role"):
         await RequestExecutors().dispatch(clone, context)
 
@@ -467,8 +472,9 @@ async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() 
     sessions = ScriptedExecution()
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(
             transitions=RejectingObservations(with_requests=True),
             executors=RequestExecutors(
@@ -517,8 +523,9 @@ async def test_an_owner_event_core_rejects_halts_the_shell_instead_of_being_drop
 
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(
             transitions=RejectingOwnerInputs(with_requests=True),
             executors=RequestExecutors(

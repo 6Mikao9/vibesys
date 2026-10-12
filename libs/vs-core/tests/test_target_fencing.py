@@ -67,7 +67,10 @@ def prepare(state: core.CoreState, requests: tuple[core.Request, ...]) -> core.C
             frames=(
                 core.TraceFrame(
                     signal=recovery,
-                    change=core.RecordsChange(state=state.records, requests=requests),
+                    change=core.RecordsChange(
+                        state=state.records,
+                        requests=tuple(core.within(item, 60.0) for item in requests),
+                    ),
                 ),
             )
         ),
@@ -274,7 +277,7 @@ def test_turn_inspection_cannot_name_an_unrelated_original_invocation() -> None:
         core.step(state, event)
 
 
-def test_inspected_turn_successors_restore_original_cause_dependencies_and_episode() -> None:
+def test_inspected_turn_successors_restore_original_cause_and_episode() -> None:
     state, event, invocation = turn_fixture()
     assert event.target is not None
     signal = core.TurnObserved(invocation=invocation, observation=event.target.observation)
@@ -289,14 +292,15 @@ def test_inspected_turn_successors_restore_original_cause_dependencies_and_episo
                 ),
                 core.TraceFrame(
                     signal=signal,
-                    change=core.SessionsChange(state=state.sessions, requests=(request,)),
+                    change=core.SessionsChange(
+                        state=state.sessions, requests=(core.within(request, 60.0),)
+                    ),
                 ),
             )
         ),
     )
     successor = result.requests[0]
     assert successor.decision_id == core.DecisionId(root="original-cause")
-    assert successor.decision_dependencies == (core.DecisionId(root="original-dependency"),)
     assert successor.admission_id == core.DecisionId(root="original-episode")
 
 
@@ -459,7 +463,9 @@ def test_query_episode_cannot_replace_an_original_targets_absent_episode() -> No
                 ),
                 core.TraceFrame(
                     signal=signal,
-                    change=core.SessionsChange(state=state.sessions, requests=(request,)),
+                    change=core.SessionsChange(
+                        state=state.sessions, requests=(core.within(request, 60.0),)
+                    ),
                 ),
             )
         ),
