@@ -1,9 +1,9 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
 import {ConnectionManager} from '@vibesys/connection';
-import {FakeLink} from '@vibesys/connection/testing';
+import {FakeLink, record} from '@vibesys/connection/testing';
 import type {HostId, HostListing} from '@vibesys/hosts';
-import {SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
+import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Hosts, type SshConfigFilesystem} from './index.js';
@@ -103,6 +103,7 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
     localCheckout: '/vibesys',
     sshConfigPath: SSH_CONFIG,
     sshConfigFilesystem: filesystem,
+    log: () => {},
     push: () => {},
     retire: () => {},
   });
@@ -138,7 +139,6 @@ describe('Hosts.aliases', () => {
     }
   });
 });
-
 describe('Hosts checkout changes', () => {
   test('cancelling checkout validation cannot persist or replace a newer operation', async () => {
     const directory = '/settings';
@@ -166,6 +166,7 @@ describe('Hosts checkout changes', () => {
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
+      log: () => {},
       push: () => {},
       retire: () => {},
     });
@@ -215,6 +216,7 @@ describe('Hosts checkout changes', () => {
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
+      log: () => {},
       push: () => {},
       retire: () => {},
     });
@@ -264,6 +266,7 @@ describe('Hosts desired set', () => {
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
+      log: () => {},
       push: listing => pushed.push(listing),
       retire: host => retired.push(host),
     });
@@ -311,6 +314,7 @@ describe('Hosts desired set', () => {
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
+      log: () => {},
       push: () => {},
       retire: () => {},
     });
@@ -362,6 +366,7 @@ describe('Hosts desired set', () => {
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
+      log: () => {},
       push: listing => pushed.push(listing),
       retire: () => {},
     });
@@ -415,6 +420,7 @@ describe('Hosts desired set', () => {
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
+      log: () => {},
       push: () => {},
       retire: () => {},
     });
@@ -429,5 +435,162 @@ describe('Hosts desired set', () => {
     filesystem.release();
     await olderRecent;
     expect(manager.existing('ssh:beta')).not.toBeNull();
+  });
+});
+
+describe('Hosts inspection changes', () => {
+  test('a newer completed inspection keeps its locator when the older reply arrives last', async () => {
+    const directory = '/settings';
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: join(directory, 'hosts.json'),
+      recentPath: join(directory, 'recent.json'),
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateRecent(current =>
+      remember(current, {
+        host: 'local',
+        project: '/p',
+        task: null,
+        runId: 'run-1',
+        instanceId: null,
+        attachedAt: 1,
+      }),
+    );
+    const link = new FakeLink();
+    const firstInstance = '000000000001';
+    const secondInstance = '000000000002';
+    link.helper.publish(record(firstInstance, 'run-1'));
+    link.helper.publish(record(secondInstance, 'run-1'));
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    const held = link.helper.deferNext('instances.inspect');
+
+    const first = hosts.inspect(LOCAL, firstInstance, false, {owner: '10:100', sequence: 1});
+    await held.received;
+    await hosts.inspect(LOCAL, secondInstance, false, {owner: '10:100', sequence: 2});
+    held.release();
+    await first;
+
+    expect((await settings.recent()).runs[0]?.instanceId).toBe(secondInstance);
+  });
+
+  test('retiring a renderer document revokes its pending inspection at the commit boundary', async () => {
+    const directory = '/settings';
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: join(directory, 'hosts.json'),
+      recentPath: join(directory, 'recent.json'),
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateRecent(current =>
+      remember(current, {
+        host: 'local',
+        project: '/p',
+        task: null,
+        runId: 'run-1',
+        instanceId: null,
+        attachedAt: 1,
+      }),
+    );
+    const link = new FakeLink();
+    const instance = '000000000001';
+    link.helper.publish(record(instance, 'run-1'));
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    const held = link.helper.deferNext('instances.inspect');
+
+    const inspecting = hosts.inspect(LOCAL, instance, false, {owner: '10:100', sequence: 1});
+    await held.received;
+    hosts.retireInspectionOwner('10:100');
+    held.release();
+    await inspecting;
+
+    expect((await settings.recent()).runs[0]?.instanceId).toBeNull();
+    await expect(
+      hosts.inspect(LOCAL, instance, false, {owner: '10:100', sequence: 2}),
+    ).rejects.toThrow('inspection owner was retired');
+  });
+
+  test('closing an inspector revokes only its pending locator write', async () => {
+    const directory = '/settings';
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: join(directory, 'hosts.json'),
+      recentPath: join(directory, 'recent.json'),
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateRecent(current =>
+      remember(current, {
+        host: 'local',
+        project: '/p',
+        task: null,
+        runId: 'run-1',
+        instanceId: null,
+        attachedAt: 1,
+      }),
+    );
+    const link = new FakeLink();
+    const instance = '000000000001';
+    link.helper.publish(record(instance, 'run-1'));
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    const held = link.helper.deferNext('instances.inspect');
+    const change = {owner: '10:100', sequence: 1};
+
+    const inspecting = hosts.inspect(LOCAL, instance, false, change);
+    await held.received;
+    hosts.cancelInspection(change);
+    held.release();
+    await inspecting;
+
+    expect((await settings.recent()).runs[0]?.instanceId).toBeNull();
+    await hosts.inspect(LOCAL, instance, false, {owner: change.owner, sequence: 2});
+    expect((await settings.recent()).runs[0]?.instanceId).toBe(instance);
   });
 });

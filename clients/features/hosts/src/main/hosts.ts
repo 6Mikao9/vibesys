@@ -22,10 +22,17 @@ import {
   hostKey,
   hostLabel,
   hostListing,
+  inspectionReply,
   validHostPath,
 } from '@vibesys/hosts';
-import type {PathCompletion} from '@vibesys/ipc';
-import {type SettingsStore, settingsFor, sshConfigHosts, withHostSettings} from '@vibesys/settings';
+import type {PathCompletion, WelcomeInspection} from '@vibesys/ipc';
+import {
+  rememberInstance,
+  type SettingsStore,
+  settingsFor,
+  sshConfigHosts,
+  withHostSettings,
+} from '@vibesys/settings';
 
 export interface HostsDeps {
   readonly manager: ConnectionManager;
@@ -35,6 +42,7 @@ export interface HostsDeps {
   readonly localCheckout: string;
   readonly sshConfigPath: string;
   readonly sshConfigFilesystem?: SshConfigFilesystem;
+  readonly log: (message: string) => void;
   /** Send a host's listing to the welcome view. */
   readonly push: (listing: HostListing) => void;
   /** Forget a host's retained listing when it leaves the desired set. */
@@ -56,6 +64,18 @@ interface CheckoutChangeId {
   readonly sequence: number;
 }
 
+/** One inspection intent, unique within the renderer document that issued it. */
+export interface InspectionChangeId {
+  readonly owner: string;
+  readonly sequence: number;
+}
+
+/** The latest inspection operation for a renderer document and whether it may persist. */
+interface InspectionLease {
+  readonly sequence: number;
+  readonly active: boolean;
+}
+
 export class Hosts {
   readonly #deps: HostsDeps;
   readonly #sshConfigFilesystem: SshConfigFilesystem;
@@ -63,6 +83,10 @@ export class Hosts {
   readonly #watched = new Map<HostKey, WatchedHost>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
   readonly #checkoutChanges = new Map<string, CheckoutChange>();
+  /** Latest inspection lease admitted for each renderer document. */
+  readonly #inspectionChanges = new Map<string, InspectionLease>();
+  /** Renderer documents whose outstanding inspection writes have been revoked. */
+  readonly #retiredInspectionOwners = new Set<string>();
   /** The current panel, owned by the renderer document that selected it. */
   #visible: {readonly owner: string; readonly host: HostKey} | null = null;
   /** Hosts mentioned by the bounded recent-run file. */
@@ -227,6 +251,86 @@ export class Hosts {
         project: entry.vibesys_project,
       })),
       truncated: reply.truncated,
+    };
+  }
+
+  /** One coherent observation, persisting its locator only while this renderer intent is current. */
+  async inspect(
+    id: HostId,
+    instanceId: string,
+    includeLog: boolean,
+    change: InspectionChangeId,
+  ): Promise<WelcomeInspection> {
+    const current = this.#claimInspection(change);
+    await using lease = await this.connection(id);
+    let inspection: WelcomeInspection;
+    try {
+      const reply = await lease.connection.request({
+        type: 'instances.inspect',
+        instance_id: instanceId,
+        include_log: includeLog,
+      });
+      inspection = inspectionReply(instanceId, reply.inspection);
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        throw new Error(
+          `Run inspection is unavailable on ${hostLabel(id)}. Update its VibeSys checkout.`,
+        );
+      }
+      throw plain(error, `Could not inspect ${instanceId}`);
+    }
+    const identity = inspection.metadata ?? inspection.record;
+    if (identity !== null) {
+      try {
+        await this.#deps.settings.updateRecent(
+          recent =>
+            rememberInstance(recent, {
+              host: hostKey(id),
+              project: identity.project_root,
+              runId: identity.run_id,
+              instanceId,
+            }),
+          current,
+        );
+      } catch (error) {
+        this.#deps.log(`could not remember the inspected run: ${(error as Error).message}`);
+      }
+    }
+    return inspection;
+  }
+
+  /** Revoke every outstanding inspection write owned by a renderer document that went away. */
+  retireInspectionOwner(owner: string): void {
+    this.#inspectionChanges.delete(owner);
+    this.#retiredInspectionOwners.add(owner);
+  }
+
+  /** Revoke one pending inspection, without preventing a later inspection from this document. */
+  cancelInspection(change: InspectionChangeId): void {
+    const lease = this.#inspectionChanges.get(change.owner);
+    if (lease?.sequence === change.sequence) {
+      this.#inspectionChanges.set(change.owner, {...lease, active: false});
+    }
+  }
+
+  /** Revoke this document's current inspection when Chrome leaves the welcome surface. */
+  cancelInspectionOwner(owner: string): void {
+    const lease = this.#inspectionChanges.get(owner);
+    if (lease !== undefined) this.#inspectionChanges.set(owner, {...lease, active: false});
+  }
+
+  #claimInspection(change: InspectionChangeId): () => boolean {
+    if (this.#retiredInspectionOwners.has(change.owner)) {
+      throw new Error('the inspection owner was retired');
+    }
+    const latest = this.#inspectionChanges.get(change.owner);
+    if (latest !== undefined && change.sequence <= latest.sequence) {
+      throw new Error('the inspection was superseded');
+    }
+    this.#inspectionChanges.set(change.owner, {sequence: change.sequence, active: true});
+    return () => {
+      const lease = this.#inspectionChanges.get(change.owner);
+      return lease?.sequence === change.sequence && lease.active;
     };
   }
 

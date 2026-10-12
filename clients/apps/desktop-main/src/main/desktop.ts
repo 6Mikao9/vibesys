@@ -47,11 +47,16 @@ export class Desktop {
   readonly #deps: DesktopDeps;
   /** The host whose panel the welcome view shows first. */
   #firstHost: HostKey = 'local';
+  /** The document that may still own an inspection write. */
+  #welcomeRenderer: string | null = null;
+  /** The last Chrome mode published to the welcome renderer. */
+  #publishedMode: ChromeState['mode'];
   /** Fences a disk snapshot that overlaps a newer recent-run change event. */
   #recentGeneration = 0;
 
   constructor(deps: DesktopDeps) {
     this.#deps = deps;
+    this.#publishedMode = deps.window.mode;
     deps.settings.onRecentChanged(recent => {
       const generation = ++this.#recentGeneration;
       const value = welcomeRecent(recent);
@@ -89,6 +94,10 @@ export class Desktop {
       WELCOME_URL,
       (request, rendererGeneration) => this.#answer(request, rendererGeneration),
       async rendererGeneration => {
+        // Inspection writes are independently guarded, so revoke them before awaiting checkout
+        // teardown. A pending checkout must not extend a replaced document's commit authority.
+        deps.hosts.retireInspectionOwner(rendererGeneration);
+        if (this.#welcomeRenderer === rendererGeneration) this.#welcomeRenderer = null;
         try {
           await Promise.all([
             deps.hosts.cancelCheckoutOwner(rendererGeneration),
@@ -117,7 +126,12 @@ export class Desktop {
 
   /** Send the window's state to the welcome view. */
   chromeChanged(): void {
-    this.#deps.window.sendWelcome(WELCOME_EVENTS.chrome, this.#deps.welcome.chrome(this.chrome()));
+    const chrome = this.chrome();
+    if (this.#publishedMode !== 'run' && chrome.mode === 'run' && this.#welcomeRenderer !== null) {
+      this.#deps.hosts.cancelInspectionOwner(this.#welcomeRenderer);
+    }
+    this.#publishedMode = chrome.mode;
+    this.#deps.window.sendWelcome(WELCOME_EVENTS.chrome, this.#deps.welcome.chrome(chrome));
   }
 
   /** Open what the launch asked for. */
@@ -174,6 +188,7 @@ export class Desktop {
   /** Answer one validated welcome request. */
   async #answer(request: WelcomeRequest, rendererGeneration: string): Promise<unknown> {
     const {hosts, runs} = this.#deps;
+    this.#welcomeRenderer = rendererGeneration;
     switch (request.kind) {
       case 'overview':
         return this.#overview();
@@ -188,6 +203,9 @@ export class Desktop {
         });
       case 'cancel-checkout':
         await hosts.cancelCheckout({owner: rendererGeneration, sequence: request.change});
+        return null;
+      case 'cancel-inspection':
+        hosts.cancelInspection({owner: rendererGeneration, sequence: request.inspection});
         return null;
       case 'sign-in':
         await hosts.signIn(request.host);
@@ -218,6 +236,11 @@ export class Desktop {
       case 'stop':
         await runs.stop(request.host, request.instance, request.force);
         return null;
+      case 'inspect':
+        return hosts.inspect(request.host, request.instance, request.includeLog, {
+          owner: rendererGeneration,
+          sequence: request.inspection,
+        });
       case 'show-run':
       case 'show-welcome':
         this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');

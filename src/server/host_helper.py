@@ -48,6 +48,7 @@ from server.host_api import (
     HelperRequest,
     InstanceList,
     InstancesChanged,
+    InstancesInspectRequest,
     InstancesUnwatchReply,
     InstancesUnwatchRequest,
     InstancesWatchReply,
@@ -248,6 +249,7 @@ class Close:
 type ChannelOutput = Send | Execute | Watch | Unwatch | Relay | Release | StopStartedRun | Close
 
 _GATED: Final[Mapping[type[object], HelperFeature]] = {
+    InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
     InstancesUnwatchRequest: HelperFeature.INSTANCES_WATCH,
     PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
