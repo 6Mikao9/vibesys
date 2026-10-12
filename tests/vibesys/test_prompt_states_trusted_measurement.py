@@ -19,7 +19,7 @@ from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 from vibesys.orchestration.evolve.core_policy.api import prompts as evolve_prompts
-from vibesys.orchestration.evolve.strategy.api import JudgePrompt as EvolveJudgePrompt
+from vibesys.orchestration.evolve.search.api import JudgePrompt as EvolveJudgePrompt
 from vibesys.orchestration.issue_queue.core_policy.api import prompts as issue_queue_prompts
 from vibesys.orchestration.issue_queue.strategy.api import (
     IssueDetail,

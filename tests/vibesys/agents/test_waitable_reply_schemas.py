@@ -18,8 +18,9 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vibesys.orchestration.dynamic.search.api import DynamicConfig
 from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_schemas
-from vibesys.orchestration.evolve.strategy.api import JUDGE_REPLY as EVOLVE_JUDGE_REPLY
-from vibesys.orchestration.evolve.strategy.api import MUTATOR_REPLY as EVOLVE_MUTATOR_REPLY
+from vibesys.orchestration.evolve.search.api import JUDGE_REPLY as EVOLVE_JUDGE_REPLY
+from vibesys.orchestration.evolve.search.api import MUTATOR_REPLY as EVOLVE_MUTATOR_REPLY
+from vibesys.orchestration.evolve.search.api import EvolveConfig
 from vibesys.orchestration.issue_queue.core_policy import prompts as issue_queue_prompts
 from vibesys.orchestration.issue_queue.core_policy.api import (
     reply_schemas as issue_queue_schemas,
@@ -52,7 +53,7 @@ _DYNAMIC = dynamic_schemas(
         max_rounds=1,
     )
 )
-_EVOLVE = evolve_schemas()
+_EVOLVE = evolve_schemas(EvolveConfig())
 _SINGLE = single_schemas()
 _MULTI = multi_schemas()
 _ISSUE_QUEUE = issue_queue_schemas(

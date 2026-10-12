@@ -17,7 +17,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.evolve import world
-from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld, commit_of, run_to_end
+from tests.vibesys.orchestration.evolve.search.world import EvolveWorld, commit_of, run_to_end
 
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.population import (
@@ -27,7 +27,7 @@ from vibesys.orchestration.evolve.population import (
     PopulationState,
     Proposal,
 )
-from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState
+from vibesys.orchestration.evolve.search.api import EvolveState, bootstrap_key, child_key
 from vs_core.api import component
 
 GOLDEN = json.loads(
@@ -44,8 +44,8 @@ def _names() -> list[str]:
 
 
 def _population(state: object) -> list[dict[str, object]]:
-    assert isinstance(state, EvolveStrategyState)
-    assert state.population is not None
+    state = getattr(state, "inner", state)
+    assert isinstance(state, EvolveState)
     rows: list[dict[str, object]] = []
     for item in state.population.individuals:
         row = item.model_dump(mode="json")
@@ -54,6 +54,14 @@ def _population(state: object) -> list[dict[str, object]]:
         row["has_commit"] = item.commit is not None
         rows.append(row)
     return rows
+
+
+def _key(name: str) -> str:
+    """The search's key for a scripted child: ``g2.c1`` is ``g000002.c000001``."""
+    head, _, tail = name.partition(".")
+    if head == "bootstrap":
+        return bootstrap_key(int(tail))
+    return child_key(int(head.removeprefix("g")), int(tail.removeprefix("c")))
 
 
 def _expected(key: str) -> tuple[int, int, list[dict[str, object]]]:
@@ -150,7 +158,7 @@ def _reference_population(
     )
     search = PopulationSearch(config)
     state = search.initial()
-    commits = {name: commit_of(f"attempt:{component(name)}:1") for name in _names()}
+    commits = {name: commit_of(f"attempt:{component(_key(name))}:1") for name in _names()}
 
     def outcome(name: str, proposal: Proposal | None) -> CandidateOutcome:
         child = world.child(seed_world, name)
@@ -213,5 +221,4 @@ def test_e3_both_selectors_propose_what_the_legacy_use_of_the_policy_proposes(
     key = "world=2,seed=7,objectives=one"
     expected = _reference_population(seed_world, seed_rng, _space(key), selector)
     run = run_to_end(_scripted(key, parallelism=2, delays=(0, 3, 1), selector=selector))
-    assert isinstance(run.state, EvolveStrategyState)
-    assert run.state.population == expected
+    assert run.state.inner.population == expected

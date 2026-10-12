@@ -515,7 +515,7 @@ The best individual is adopted at the end. Two selectors exist (`vibesys`, `open
 
 ### 6.3 State
 
-`EvolveStrategyState` (schema `evolve.strategy-state`, version 1):
+`EvolveState` (schema `evolve.search-state`, version 2):
 
 | Field | Meaning |
 |---|---|

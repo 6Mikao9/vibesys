@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.checkpoint_faults import CHECKPOINTS
-from tests.vibesys.orchestration.evolve.strategy.world import (
+from tests.vibesys.orchestration.evolve.search._decisions import works
+from tests.vibesys.orchestration.evolve.search.world import (
     ENDINGS,
     Ending,
     EvolveWorld,
@@ -61,7 +62,7 @@ def test_a_child_whose_turn_waited_adopts_the_candidate_it_checkpointed() -> Non
     assert run.core.evaluation.continuations != ()
     settles = [
         item.disposition
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     assert settles
@@ -117,8 +118,8 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         # Whether core records a wait on an invalid reply is core's own rule, so only the other
         # replies are compared.
         assert finished.core.evaluation.continuations != ()
-        assert [type(item).__name__ for item in finished.decisions] == [
-            type(item).__name__ for item in run(("wait",)).decisions
+        assert [type(item).__name__ for item in works(finished.decisions)] == [
+            type(item).__name__ for item in works(run(("wait",)).decisions)
         ]
 
 
@@ -192,6 +193,6 @@ def test_a_role_may_answer_in_the_bare_or_the_enveloped_form(
     )
     baseline = run_to_end(_world(waits=waits, polls=(1,), parallelism=2))
 
-    assert [type(item).__name__ for item in run.decisions] == [
-        type(item).__name__ for item in baseline.decisions
+    assert [type(item).__name__ for item in works(run.decisions)] == [
+        type(item).__name__ for item in works(baseline.decisions)
     ]

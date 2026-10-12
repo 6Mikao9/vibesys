@@ -18,7 +18,7 @@ from tests.vibesys.orchestration.dynamic.search._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
-from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld
+from tests.vibesys.orchestration.evolve.search.world import EvolveWorld
 from tests.vibesys.orchestration.issue_queue.strategy.world import (
     IssueQueueWorld,
 )

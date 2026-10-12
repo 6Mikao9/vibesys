@@ -17,7 +17,7 @@ from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 import vibesys.orchestration.evolve.core_policy.prompts as templates
 from vibesys.orchestration.evolve.core_policy.api import run_prompt_variables
 from vibesys.orchestration.evolve.population import Individual
-from vibesys.orchestration.evolve.strategy.api import (
+from vibesys.orchestration.evolve.search.api import (
     JudgePrompt,
     MutatePrompt,
     ObjectiveAxis,

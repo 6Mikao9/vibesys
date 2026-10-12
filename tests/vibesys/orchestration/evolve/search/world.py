@@ -24,19 +24,23 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from tests.support.checkpoint_faults import FaultyCheckpoints
 from tests.vibesys.orchestration.evolve import world as legacy
-from tests.vibesys.orchestration.evolve.strategy._waiting import (
+from tests.vibesys.orchestration.evolve.search._refusals import Refuses, Refusing, as_search
+from tests.vibesys.orchestration.evolve.search._waiting import (
     ENVELOPED_WAITING,
     WAITING,
     WaitingTurns,
 )
 
-from vibesys.orchestration.evolve.core_policy.api import reply_schemas, requirements_for
-from vibesys.orchestration.evolve.strategy.api import (
+from vibesys.orchestration.evolve.core_policy.api import (
+    build_search,
+    evolve_operation_registry,
+    reply_schemas,
+    requirements_for,
+)
+from vibesys.orchestration.evolve.search.api import (
     EvidenceReading,
     EvidenceReadings,
     EvolveConfig,
-    EvolveStrategy,
-    EvolveStrategyState,
     ExportPatch,
     InterpretEvidence,
     MetricRow,
@@ -46,7 +50,8 @@ from vibesys.orchestration.evolve.strategy.api import (
     RenderedArtifacts,
     RenderRoleArtifacts,
     VerifyParentRevision,
-    evolve_operation_registry,
+    bootstrap_key,
+    child_key,
 )
 from vs_core.api import (
     AdoptRevision,
@@ -77,6 +82,7 @@ from vs_core.api import (
     RunEnvelope,
     RunFacts,
     RunResultProposal,
+    Search,
     SessionId,
     SnapshotAndRetain,
     SubmitMeasurement,
@@ -86,6 +92,7 @@ from vs_core.api import (
 from vs_core.testing.drive import Answer, Failed, Harness, Running, Succeeded, Unknown
 from vs_dst.api import RunSetup, simulate
 from vs_runtime.api.core import handle_for
+from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -167,9 +174,18 @@ def _lease(session_id: SessionId) -> ResourceId:
     return ResourceId(root=f"lease:{session_id.root}")
 
 
-def _child_key(subject: str) -> str:
-    """The child (`g2.c1`, `bootstrap.1`) a turn's invocation or session names."""
-    return subject.rsplit(".", 1)[0]
+def _search(selected: EvolveConfig, refuses: Refuses | None) -> Search[Any, Any]:
+    """The evolve search, with the decisions ``refuses`` names refused."""
+    search = build_search(selected)
+    return search if refuses is None else as_search(Refusing(search, refuses))
+
+
+def legacy_name(key: str) -> str:
+    """The name the scripted population knows a child by: ``g000002.c000001`` is ``g2.c1``."""
+    head, _, tail = key.partition(".")
+    if head == "bootstrap":
+        return legacy.bootstrap_name(int(tail))
+    return legacy.child_name(int(head.removeprefix("g")), int(tail.removeprefix("c")))
 
 
 class EvolveWorld:
@@ -200,6 +216,7 @@ class EvolveWorld:
         checkpoints: Sequence[str] = (),
         attempt_cap: int | None = None,
         stop_at: int | None = None,
+        refuses: Refuses | None = None,
         **settings: object,
     ) -> None:
         """Script a run.
@@ -222,22 +239,24 @@ class EvolveWorld:
         answers the n-th checkpoint request ``succeeded``, ``failed`` or ``retryable``
         (cycling). ``attempt_cap`` lowers core's attempt limit below what the config needs, so
         core refuses the starts past it (`Rejected`). ``stop_at`` has the operator's stop arrive
-        while the n-th request executes (0-based), as a control does mid-run. Any other option is
-        an `EvolveConfig` field.
+        while the n-th request executes (0-based), as a control does mid-run. ``refuses`` names the
+        decisions core refuses, by identity, with the code it answers (see `Refusing`). Any other
+        option is an `EvolveConfig` field.
         """
         config = evolve_config(**settings)
         self._bridge = bool(waits) or bool(submit_only)
+        state_model = build_search(config).state_model
         self.setup = RunSetup(
-            new_strategy=lambda: EvolveStrategy(config=config),
+            new_launch=lambda: Launch(search=_search(config, refuses), config=config),
             harness=Harness(
                 registry=evolve_operation_registry(),
                 facts=FACTS,
                 limits=_limits(config, attempt_cap),
-                envelope_type=RunEnvelope[EvolveStrategyState],
+                envelope_type=RunEnvelope[state_model],
                 requirements=requirements_for(config),
                 lifecycle=frozenset({"suspend"}) if self._bridge else frozenset(),
             ),
-            schemas=reply_schemas(),
+            schemas=reply_schemas(config),
             # A turn that waits is resumed while another request runs, and the evaluation it
             # waits for is admitted to the shell by the loop's control poll.
             max_concurrent=max(2, config.max_parallelism)
@@ -361,9 +380,8 @@ class EvolveWorld:
     def _turn(self, request: DispatchTurn | ResumeSessionTurn) -> Answer:
         session = request.turn.session
         role = session.role_id.root.removeprefix("evolve-")
-        # `inv:<role>:<key>.<role>:<serial>`
-        _, _, subject, _ = request.turn.invocation_id.root.split(":")
-        key = _child_key(subject)
+        # `inv:<role>:<key>:<serial>`
+        _, _, key, _ = request.turn.invocation_id.root.split(":")
         lease = _lease(session.session_id)
         if isinstance(request, DispatchTurn):
             assert request.request_id is not None
@@ -418,12 +436,13 @@ class EvolveWorld:
 
     def _scripted(self, role: str, key: str) -> str:
         assert self._population_seed is not None
-        child = legacy.child(self._population_seed, key)
+        child = legacy.child(self._population_seed, legacy_name(key))
         if role == "mutator":
             return mutated(child.summary)
         if role == "judge":
             return reviewed(
-                passed=child.judge_passes, feedback="" if child.judge_passes else f"fails {key}"
+                passed=child.judge_passes,
+                feedback="" if child.judge_passes else f"fails {legacy_name(key)}",
             )
         return profiled(metrics={"cache_hit": child.cache_hit})
 
@@ -575,8 +594,17 @@ def _population(seed: int | None, config: EvolveConfig) -> dict[str, legacy.Chil
     """The scripted children by the commit the workspace retains for them, or None."""
     if seed is None:
         return None
-    names = [
-        *(legacy.bootstrap_name(number) for number in range(1, config.bootstrap_max_attempts + 1)),
-        *legacy.generation_names(config.max_generations, config.children_per_generation),
+    named = [
+        *(
+            (bootstrap_key(number), legacy.bootstrap_name(number))
+            for number in range(1, config.bootstrap_max_attempts + 1)
+        ),
+        *(
+            (child_key(generation, slot), legacy.child_name(generation, slot))
+            for generation in range(1, config.max_generations + 1)
+            for slot in range(1, config.children_per_generation + 1)
+        ),
     ]
-    return {commit_of(f"attempt:{component(name)}:1"): legacy.child(seed, name) for name in names}
+    return {
+        commit_of(f"attempt:{component(key)}:1"): legacy.child(seed, name) for key, name in named
+    }

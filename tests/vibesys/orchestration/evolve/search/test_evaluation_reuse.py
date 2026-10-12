@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld, run_to_end
+from tests.vibesys.orchestration.evolve.search._decisions import works
+from tests.vibesys.orchestration.evolve.search.world import EvolveWorld, run_to_end
 
 from vibesys.evolve_roles import JUDGE, MUTATOR
 from vs_core.api import AttemptPhase, Settle, Withdraw
@@ -61,7 +62,7 @@ def test_a_judge_asking_for_the_mutators_evaluation_gets_its_handle() -> None:
     assert any(role.endswith("judge") and reply["repeat"] for _, role, reply in world.asked)
     settles = [
         item.disposition
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     assert settles

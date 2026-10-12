@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.evolve.strategy.world import (
+from tests.vibesys.orchestration.evolve.search._decisions import works
+from tests.vibesys.orchestration.evolve.search.world import (
     EvolveWorld,
     evolve_config,
     mutated,
@@ -16,7 +17,7 @@ from tests.vibesys.orchestration.evolve.strategy.world import (
     run_to_end,
 )
 
-from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState
+from vibesys.orchestration.evolve.search.api import EvolveState, Finished, Role
 from vs_core.api import (
     DispatchTurn,
     Finish,
@@ -37,9 +38,10 @@ if TYPE_CHECKING:
 RUNS = settings(max_examples=3, deadline=None, derandomize=True, database=None)
 
 
-def _state(trace: SimulatedRun) -> EvolveStrategyState:
-    assert isinstance(trace.state, EvolveStrategyState)
-    return trace.state
+def _state(trace: SimulatedRun) -> EvolveState:
+    inner = getattr(trace.state, "inner", None)
+    assert isinstance(inner, EvolveState)
+    return inner
 
 
 # Candidates whose commits rank differently, so selection has something to choose between.
@@ -93,10 +95,10 @@ def test_e6_a_cold_start_builds_on_the_previous_attempts_work_in_progress() -> N
         children_per_generation=1,
     )
     run = run_to_end(world)
-    starts = [item for item in run.decisions if isinstance(item, StartAttempt)][:3]
+    starts = [item for item in works(run.decisions) if isinstance(item, StartAttempt)][:3]
     settles = [
         item.disposition
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ][:2]
     assert [item.retention for item in settles] == ["wip", "wip"]
@@ -111,17 +113,19 @@ def test_e6_a_cold_start_that_never_passes_ends_without_a_selection() -> None:
         bootstrap_max_attempts=2,
     )
     run = run_to_end(world)
-    final = run.decisions[-1]
+    final = works(run.decisions)[-1]
     assert isinstance(final, Finish)
     assert final.result.outcome == "failure"
-    assert not any(isinstance(item, ProposeWinner) for item in run.decisions)
-    assert sum(isinstance(item, StartAttempt) for item in run.decisions) == 2
+    assert not any(isinstance(item, ProposeWinner) for item in works(run.decisions))
+    assert sum(isinstance(item, StartAttempt) for item in works(run.decisions)) == 2
 
 
 def test_a_run_without_a_profiler_asks_no_profiler_turn() -> None:
     run = run_to_end(_passing_world({"max_generations": 1}))
     roles = {
-        item.turn.session.role_id.root for item in run.decisions if isinstance(item, RequestTurn)
+        item.turn.session.role_id.root
+        for item in works(run.decisions)
+        if isinstance(item, RequestTurn)
     }
     assert roles == {"evolve-mutator", "evolve-judge"}
 
@@ -132,7 +136,7 @@ def test_a_profiler_turn_is_asked_once_per_passing_child_when_the_run_has_one() 
     )
     profiles = [
         item
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, RequestTurn) and item.turn.session.role_id.root == "evolve-profiler"
     ]
     assert len(profiles) == 3  # the cold start and two children
@@ -150,10 +154,9 @@ def test_m2_a_failing_profiler_never_fails_the_child() -> None:
     )
     run = run_to_end(world)
     state = _state(run)
-    assert state.population is not None
     assert all(item.passed for item in state.population.individuals)
-    assert any(note.startswith("profiler:") for note in state.notes)
-    final = run.decisions[-1]
+    assert any(item.failure.role == Role.PROFILER for item in state.advisories)
+    final = works(run.decisions)[-1]
     assert isinstance(final, Finish)
     assert final.result.outcome == "success"
 
@@ -167,12 +170,11 @@ def test_a_failed_review_skips_the_trusted_gates_and_keeps_the_feedback() -> Non
     )
     run = run_to_end(world)
     state = _state(run)
-    assert state.population is not None
     failed = [item for item in state.population.individuals if not item.passed]
     assert [item.feedback for item in failed] == ["tests fail"]
     measured = {
         item.plan.candidate.revision_id.root
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, Measure) and isinstance(item.plan.candidate, RevisionRef)
     }
     assert len(measured) == 2  # the failed child was never measured
@@ -189,10 +191,9 @@ def test_a_candidate_the_machinery_could_not_measure_earns_no_individual() -> No
     )
     run = run_to_end(world)
     state = _state(run)
-    assert state.population is not None
     assert state.population.individuals == ()
-    assert state.bootstrap_spent == 2
-    final = run.decisions[-1]
+    assert state.run == Finished(winner=None)
+    final = works(run.decisions)[-1]
     assert isinstance(final, Finish)
     assert final.result.outcome == "failure"
 
@@ -216,7 +217,9 @@ def test_the_state_grows_linearly_in_individuals() -> None:
 def test_a_dispatch_is_never_repeated_for_one_invocation() -> None:
     run = run_to_end(_passing_world({"max_generations": 2}))
     dispatched = [
-        item.turn.invocation_id.root for item in run.decisions if isinstance(item, RequestTurn)
+        item.turn.invocation_id.root
+        for item in works(run.decisions)
+        if isinstance(item, RequestTurn)
     ]
     assert len(dispatched) == len(set(dispatched))
     assert DispatchTurn is not None
@@ -245,7 +248,6 @@ def test_every_trusted_individual_records_a_unit_label_whatever_the_profiler_say
         **_PROFILER,
     )
     state = _state(run_to_end(world))
-    assert state.population is not None
     measured = [item for item in state.population.individuals if item.perf_metric is not None]
     assert measured
     assert all(item.perf_unit == (unit or "throughput") for item in measured)
