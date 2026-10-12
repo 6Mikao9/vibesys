@@ -272,7 +272,6 @@ def dispatch_episode_current(state: EpisodeFacts, request: Request) -> bool:
 
 
 _CLEANUP_KINDS = (
-    ExecuteRegisteredOperation,
     CloseAttemptScope,
     CloseSession,
     DiscardWorkspace,

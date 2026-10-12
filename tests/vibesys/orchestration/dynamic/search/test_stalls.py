@@ -24,7 +24,6 @@ from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.api import (
     AttemptPhase,
-    ContractError,
     ControlId,
     ControlInput,
     RejectionCode,
@@ -32,7 +31,6 @@ from vs_core.api import (
     RunResultProposal,
 )
 from vs_dst.api import SimulatedRun, simulate
-from vs_runtime.api.core import ObservationRejectedError
 
 if TYPE_CHECKING:
     from tests.vibesys.orchestration.dynamic.search._refusals import Refuses
@@ -185,32 +183,8 @@ def _requests_of_a_whole_run() -> int:
     return len(simulate(DynamicWorld(**_options())).executed_effects)
 
 
-# Positions at which the stop lands while a turn's first requests are prepared or in flight. Core
-# closes the attempts the stop settles but leaves a prepared request of their old episode, which
-# the loop then cannot authorize (it raises instead of skipping or cancelling it), or an inspection
-# of the half-started session is rejected. Fix it in vs-core and vs-runtime, then delete the pair.
-STOP_GAP = (
-    "gap (owner: vs-core, vs-runtime): a stop settles attempts that still have a prepared or "
-    "in-flight request, and the loop halts on it instead of cancelling it"
-)
-KNOWN_OPEN = frozenset({7, 8, 9, 10, 15, 16, 17, 18})
-HALTS = (ContractError, ObservationRejectedError)
-
-
 @pytest.mark.parametrize(
-    "position",
-    [
-        pytest.param(
-            at,
-            marks=(
-                [pytest.mark.xfail(raises=HALTS, strict=True, reason=STOP_GAP)]
-                if at in KNOWN_OPEN
-                else []
-            ),
-            id=f"after-{at}-requests",
-        )
-        for at in range(_requests_of_a_whole_run() + 1)
-    ],
+    "position", range(_requests_of_a_whole_run() + 1), ids=lambda at: f"after-{at}-requests"
 )
 def test_a_stop_at_any_position_ends_the_run_with_every_attempt_closed(position: int) -> None:
     run = simulate(StopAfter(position, _options()))

@@ -1044,14 +1044,29 @@ def _group_observed(
     return AreaChange(state=state)
 
 
+def _never_acquired(context: SessionsContext, session: SessionView) -> bool:
+    """Whether the session holds no conversation and none can still appear.
+
+    Every ensure it asked for ended without one (core cancelled it unsent, or it was
+    rejected), so closing it has nothing to release and the close is complete.
+    """
+    return not any(
+        row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
+        for row in context.records.records
+    )
+
+
 def _close_observed(
     state: SessionsState, context: SessionsContext, session: SessionView, event: SessionObserved
 ) -> AreaChange[SessionsState]:
     observation = event.observation
     if not (
         isinstance(resolved_observation(observation), Proven)
-        and session.resource_id is not None
-        and observation.resource_id == session.resource_id
+        and (
+            observation.resource_id == session.resource_id
+            if session.resource_id is not None
+            else _never_acquired(context, session)
+        )
     ):
         return AreaChange(
             state=state,
@@ -1095,12 +1110,12 @@ def _abandon_turn_acquisition(
     invocation = _invocation(state, ref)
     if invocation is None or invocation.phase != SessionPhase.ACQUIRING:
         return AreaChange(state=state)
+    owner = attempt_for(context, invocation.scope)
     invocation = invocation.model_copy(
         update={"phase": SessionPhase.TERMINAL, "observation": observation}
     )
     state = _replace_invocation(state, invocation)
     signals: list[Signal] = [InputReservationReleased(invocation=ref, observation=observation)]
-    owner = attempt_for(context, invocation.scope)
     if owner is not None:
         signals.append(
             AttemptSetupFailed(
@@ -1773,7 +1788,9 @@ def _drain_acquiring(
     ensures = tuple(
         row
         for row in context.records.records
-        if row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
+        if row.request_id in session.pending_records
+        and isinstance(row.request, EnsureSession)
+        and row.phase != RequestPhase.PREPARED
     )
     if ensures:
         return AreaChange(
@@ -1785,7 +1802,14 @@ def _drain_acquiring(
         )
     if invocation is None:
         return AreaChange(state=state)
-    abandoned = invocation.model_copy(update={"phase": SessionPhase.TERMINAL})
+    # Nothing was dispatched, and a closing attempt counts a turn drained only on an
+    # observation: the turn ends as one that never started, as in `_after_ensure`.
+    abandoned = invocation.model_copy(
+        update={
+            "phase": SessionPhase.TERMINAL,
+            "observation": stalled_acquisition(invocation, context.run.now_at),
+        }
+    )
     state = _replace_invocation(state, abandoned)
     if _run_reusable(session, context):
         detached = session.model_copy(
@@ -1814,7 +1838,9 @@ def _drain_lease(
         ensures = tuple(
             row
             for row in context.records.records
-            if row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
+            if row.request_id in session.pending_records
+            and isinstance(row.request, EnsureSession)
+            and row.phase != RequestPhase.PREPARED
         )
         return AreaChange(
             state=state,
