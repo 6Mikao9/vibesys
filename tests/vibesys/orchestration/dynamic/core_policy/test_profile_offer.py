@@ -13,8 +13,8 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.dynamic.strategy._replies import plan_reply, profile
-from tests.vibesys.orchestration.dynamic.strategy._run import config
+from tests.vibesys.orchestration.dynamic.search._replies import plan_reply, profile
+from tests.vibesys.orchestration.dynamic.search._run import config
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
 from vibesys.orchestration.dynamic.core_policy.api import (
@@ -23,9 +23,9 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     run_prompt_variables,
 )
 from vibesys.orchestration.dynamic.models import PortfolioPlan, ProfileOffer, planner_response_type
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
     PLANNER_REPLY,
-    DynamicStrategyState,
+    DynamicState,
     PlannerCorrectionPrompt,
     PlannerPrompt,
     validate,
@@ -124,7 +124,7 @@ def test_a_plan_requiring_an_unsupported_field_is_a_violation_naming_it(
         plan_reply(profile("p1", required_fields=[field.value for field in requested]))
     )
 
-    check = validate(plan, DynamicStrategyState(), (), capacity=1, offer=ProfileOffer(supported))
+    check = validate(plan, DynamicState(), (), capacity=1, offer=ProfileOffer(supported))
 
     unsupported = set(requested) - set(supported)
     assert check.valid is not bool(unsupported)

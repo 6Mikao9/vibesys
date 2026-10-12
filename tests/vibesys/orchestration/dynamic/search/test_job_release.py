@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._replies import implemented, reviewed
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search._replies import implemented, reviewed
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.api import AttemptPhase, ObserveOwnedJob, OwnedJob
 from vs_core.testing.drive import Failed, Running

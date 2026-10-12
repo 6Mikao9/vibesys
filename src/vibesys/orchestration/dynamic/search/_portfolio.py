@@ -54,7 +54,7 @@ class Ask(Value):
     corrections: int = Field(default=0, ge=0)
     drops: int = Field(default=0, ge=0)
     fresh: int = Field(default=0, ge=0)
-    held: PortfolioPlan | None = None
+    held: PlanCheck | None = None
     """The first valid plan that left slots free, kept in case a correction does not improve it."""
     problem: PlanProblem | None = None
     """Why the last reply was not taken; the next prompt shows it."""
@@ -208,7 +208,7 @@ def _judge(
         return Scheduled(check=check), []
     problem = _problem(check, found, want)
     if turn is not None and ask.corrections < world.config.max_corrections:
-        held = plan if check is not None and check.valid and check.accepted else None
+        held = check if check is not None and check.valid and check.accepted else None
         again = ask.model_copy(
             update={
                 "corrections": ask.corrections + 1,
@@ -238,10 +238,30 @@ def _final_choice(ask: Ask, world: PlanWorld, check: PlanCheck | None) -> PlanCh
     """The best valid outcome once corrections are exhausted."""
     if check is not None and check.valid and check.accepted:
         return check
-    if ask.held is not None:
-        kept = _check(ask.held, world)
-        if kept.valid and kept.accepted:
-            return kept
+    if ask.held is not None and _schedulable(ask.held, world):
+        return ask.held
     if check is not None and check.accepted:
         return check
     return None
+
+
+def _schedulable(held: PlanCheck, world: PlanWorld) -> bool:
+    """Whether a plan that was valid when it was held still fits what the search has now.
+
+    The search may have moved while the corrections ran: a slot may have filled, an ID may have
+    been taken, a parent may no longer be offered.
+    """
+    ledger = world.ledger
+    taken = {item.hypothesis_id for item in ledger.hypotheses} | ledger.running | ledger.profile_ids
+    offered = {
+        (item.snapshot.hypothesis_id, item.snapshot.revision.revision_id.root)
+        for item in world.offered
+    }
+    fresh = all(item.continue_hypothesis or item.work_id not in taken for item in held.accepted)
+    parents = all(
+        item.parent_hypothesis_id is None
+        or item.parent_revision is None
+        or (item.parent_hypothesis_id, item.parent_revision) in offered
+        for item in held.accepted
+    )
+    return len(held.accepted) <= world.capacity and fresh and parents

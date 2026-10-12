@@ -11,7 +11,12 @@ from vibesys.orchestration.dynamic.search._agents import (
     reply_schemas,
 )
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
-from vibesys.orchestration.dynamic.search._ids import BASELINE_KEY, IDS
+from vibesys.orchestration.dynamic.search._ids import (
+    BASELINE_KEY,
+    IDS,
+    planning_key,
+    workstream_key,
+)
 from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
     OPERATIONS,
@@ -37,6 +42,7 @@ from vibesys.orchestration.dynamic.search._parents import (
 from vibesys.orchestration.dynamic.search._plan import PlanCheck, PlanLedger, validate
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
+    HistoryRow,
     ImplementPrompt,
     PlannerCorrection,
     PlannerPrompt,
@@ -50,6 +56,10 @@ from vibesys.orchestration.dynamic.search._prompts import (
     ReviewPrompt,
 )
 from vibesys.orchestration.dynamic.search._recipe import measurement_recipe
+from vibesys.orchestration.dynamic.search._review_evidence import (
+    evaluations as review_evaluations,
+)
+from vibesys.orchestration.dynamic.search._review_evidence import review_refs
 from vibesys.orchestration.dynamic.search._schemas import (
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
@@ -64,11 +74,14 @@ from vibesys.orchestration.dynamic.search._state import (
     Selecting,
 )
 from vibesys.orchestration.dynamic.search._values import (
+    Blocker,
+    BlockerKind,
     Failure,
     FailureKind,
     HypothesisRecord,
     PlanProblem,
     PlanViolation,
+    ProblemKind,
     Role,
     RoundRecord,
     ViolationCode,
@@ -90,6 +103,8 @@ __all__ = [
     "STATE_SCHEMA",
     "VERIFY_KIND",
     "AcceptedReading",
+    "Blocker",
+    "BlockerKind",
     "DynamicConfig",
     "DynamicSearch",
     "DynamicState",
@@ -99,6 +114,7 @@ __all__ = [
     "Failure",
     "FailureKind",
     "Finished",
+    "HistoryRow",
     "HypothesisRecord",
     "ImplementPrompt",
     "ImplementerReplyModel",
@@ -117,6 +133,7 @@ __all__ = [
     "PlannerCorrection",
     "PlannerPrompt",
     "PlannerReask",
+    "ProblemKind",
     "ProfileHistoryRow",
     "ProfileHistoryStatus",
     "ProfilePrompt",
@@ -141,8 +158,12 @@ __all__ = [
     "ledger_refs",
     "measurement_recipe",
     "options",
+    "planning_key",
     "reply_schemas",
     "resolve",
+    "review_evaluations",
+    "review_refs",
     "trusted_keys",
     "validate",
+    "workstream_key",
 ]

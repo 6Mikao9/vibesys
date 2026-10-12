@@ -9,20 +9,23 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue
 from tests.support.core_plugins import failing_plugin
-from tests.vibesys.orchestration.dynamic.strategy._harness import envelope
+from tests.vibesys.orchestration.dynamic.search._harness import envelope
 
 from vibesys.dynamic_core import dynamic_projector
 from vibesys.hypothesis.readmodel import agent_projection
 from vibesys.orchestration.dynamic.core_policy.api import project_strategy_state
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategyState,
+from vibesys.orchestration.dynamic.search.api import (
+    DynamicState,
+    Failure,
+    FailureKind,
     HypothesisRecord,
     MetricRow,
+    PromptContext,
     RoundRecord,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, project_run
 from vibesys.run.contracts import CoreView, RunStatus
-from vs_core.api import AttemptId, EventCursor, HostFence, HostId, RunEnvelope
+from vs_core.api import AttemptId, EventCursor, HostFence, HostId, Piped, RunEnvelope
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import RuntimeRecord
@@ -46,7 +49,7 @@ _metrics = st.lists(_row, max_size=2).map(tuple)
 
 
 @st.composite
-def _states(draw: st.DrawFn) -> DynamicStrategyState:
+def _states(draw: st.DrawFn) -> DynamicState:
     counts = draw(st.lists(st.integers(0, 3), max_size=4))
     sequence = 0
     hypotheses = []
@@ -61,7 +64,7 @@ def _states(draw: st.DrawFn) -> DynamicStrategyState:
                     attempt=AttemptId(root=f"attempt-{sequence}"),
                     review_passed=draw(st.none() | st.booleans()),
                     metrics=draw(_metrics),
-                    failure=draw(st.none() | st.just("boom")),
+                    failure=draw(st.none() | st.just(Failure(kind=FailureKind.OUT_OF_BUDGET))),
                 )
             )
         hypotheses.append(
@@ -73,13 +76,13 @@ def _states(draw: st.DrawFn) -> DynamicStrategyState:
                 rounds=tuple(rounds),
             )
         )
-    return DynamicStrategyState(hypotheses=tuple(hypotheses))
+    return DynamicState(hypotheses=tuple(hypotheses))
 
 
 @settings(max_examples=60, deadline=None)
 @given(_states(), st.integers(0, 50))
 def test_projection_copies_recorded_rounds_and_only_measured_numbers(
-    state: DynamicStrategyState, revision: int
+    state: DynamicState, revision: int
 ) -> None:
     projection = project_strategy_state(state, experiment_revision=revision)
     view = agent_projection(_run_view(projection.payload))
@@ -127,18 +130,19 @@ def _project_with_run(root: Path) -> tuple[Project, str]:
     return project, manifest.run_id
 
 
-def _commit(
-    project: Project, run_id: str, state: DynamicStrategyState
-) -> RuntimeRecord[DynamicStrategyState]:
+type _Stored = Piped[DynamicState, PromptContext]
+
+
+def _commit(project: Project, run_id: str, state: DynamicState) -> RuntimeRecord[_Stored]:
     _, saved = envelope(state)
-    record = RuntimeRecord[DynamicStrategyState].fresh(
-        RunEnvelope[DynamicStrategyState](
+    record = RuntimeRecord[_Stored].fresh(
+        RunEnvelope[_Stored](
             schema_version=saved.schema_version,
             fence=HostFence(host_id=HostId(root="writer"), epoch=1),
             strategy_id=saved.strategy_id,
             state_schema=saved.state_schema,
             core=saved.core,
-            strategy=state,
+            strategy=Piped[DynamicState, PromptContext](inner=state),
             event_cursor=EventCursor(sequence=0),
         )
     )
@@ -154,14 +158,14 @@ def _commit(
     return record
 
 
-def _state() -> DynamicStrategyState:
+def _state() -> DynamicState:
     round_ = RoundRecord(
         sequence=1,
         attempt=AttemptId(root="attempt-1"),
         review_passed=True,
         metrics=(MetricRow(name="throughput", value=81.5, direction="max", unit="tok/s"),),
     )
-    return DynamicStrategyState(
+    return DynamicState(
         hypotheses=(
             HypothesisRecord(
                 hypothesis_id="fuse",

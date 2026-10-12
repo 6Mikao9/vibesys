@@ -17,27 +17,49 @@ from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
+from vibesys.candidates.api import InputFailure, InputFailureKind
 from vibesys.orchestration.dynamic.core_policy.api import (
     planner_reply_example,
     run_prompt_variables,
 )
 from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, PortfolioPlan
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
+    Blocker,
+    BlockerKind,
     EvidenceCitation,
+    Failure,
+    FailureKind,
+    HistoryRow,
     ImplementPrompt,
     MetricRow,
-    PlannerCorrectionPrompt,
+    PlannerCorrection,
     PlannerPrompt,
+    PlannerReask,
+    PlanProblem,
+    PlanViolation,
+    ProblemKind,
     ProfilePrompt,
     PromptContext,
     PromptTemplate,
+    ReviewPrompt,
+    ViolationCode,
+)
+from vibesys.prompts import (
+    CORE_PROTOCOL_DIR,
+    CoreProtocolTemplate,
     ReplyCorrectionPrompt,
     ResumePrompt,
-    ReviewPrompt,
     WaitUnrecordedPrompt,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
-from vs_core.api import RevisionId, RevisionRef
+from vs_core.api import (
+    InvocationId,
+    InvocationRef,
+    ReplyError,
+    ReplyErrorCode,
+    RevisionId,
+    RevisionRef,
+    SessionId,
+)
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
@@ -55,6 +77,7 @@ def _revision(name: str) -> RevisionRef:
 
 _REVISIONS = st.sampled_from(("a1", "b2", "c3")).map(_revision)
 _TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
+_WORD = st.text(alphabet="abcdefghij", min_size=1, max_size=8)
 _CITATIONS = st.lists(
     st.builds(EvidenceCitation, location=_TEXT, revision=st.none() | _TEXT, purpose=_TEXT),
     max_size=2,
@@ -69,8 +92,76 @@ _METRICS = st.lists(
     ),
     max_size=2,
 ).map(tuple)
+_TURNS = st.builds(
+    InvocationRef,
+    session_id=st.builds(SessionId, root=_WORD),
+    invocation_id=st.builds(InvocationId, root=_WORD),
+    generation=st.integers(0, 2),
+)
+_ERRORS = st.lists(
+    st.builds(
+        ReplyError,
+        path=st.lists(_TEXT | st.integers(0, 3), max_size=3).map(tuple),
+        code=st.sampled_from(ReplyErrorCode),
+    ),
+    min_size=1,
+    max_size=2,
+).map(tuple)
+_BLOCKERS = st.builds(
+    Blocker,
+    kind=st.sampled_from(BlockerKind),
+    summary=_TEXT,
+    next_step=st.none().map(lambda _: "") | _TEXT,
+)
+_VIOLATIONS = st.builds(
+    PlanViolation,
+    path=st.lists(_TEXT | st.integers(0, 3), max_size=3).map(tuple),
+    code=st.sampled_from(ViolationCode),
+    subject=_TEXT,
+    revision=_TEXT,
+    requested=st.integers(1, 5),
+    capacity=st.integers(0, 3),
+)
+_PROBLEMS = st.one_of(
+    st.builds(PlanProblem, kind=st.just(ProblemKind.UNPARSEABLE), errors=_ERRORS),
+    st.builds(
+        PlanProblem,
+        kind=st.just(ProblemKind.VIOLATIONS),
+        violations=st.lists(_VIOLATIONS, min_size=1, max_size=3).map(tuple),
+    ),
+    st.builds(
+        PlanProblem,
+        kind=st.just(ProblemKind.UNDERFILLED),
+        scheduled=st.integers(0, 2),
+        wanted=st.integers(1, 3),
+    ),
+    st.builds(PlanProblem, kind=st.just(ProblemKind.NO_REPLY)),
+)
+_FAILURES = st.one_of(
+    st.builds(Failure, kind=st.just(FailureKind.STOPPED)),
+    st.builds(Failure, kind=st.just(FailureKind.OUT_OF_BUDGET)),
+    st.builds(Failure, kind=st.just(FailureKind.REPEATED_TURN), blocker=_BLOCKERS),
+    st.builds(
+        Failure,
+        kind=st.just(FailureKind.TURN_LIMIT),
+        turns=st.integers(1, 5),
+        limit=st.integers(1, 5),
+        blocker=_BLOCKERS,
+    ),
+)
+_HISTORY = st.builds(
+    HistoryRow,
+    hypothesis_id=_TEXT,
+    sequence=st.integers(1, 9),
+    title=_TEXT,
+    status=_TEXT,
+    strategy=_TEXT,
+    failure=st.none() | _FAILURES,
+    failure_tail=_TEXT | st.just(""),
+)
 _PLANNER = st.builds(
     PlannerPrompt,
+    history=st.lists(_HISTORY, max_size=2).map(tuple),
     capacity=st.integers(0, 3),
     in_flight=st.integers(0, 3),
     remaining=st.integers(0, 9),
@@ -79,17 +170,19 @@ _PLANNER = st.builds(
     offer_snapshot=_TEXT,
     older_ids=st.lists(_TEXT, max_size=2).map(tuple),
     baseline=_METRICS,
-    input_failure=st.none() | _TEXT,
+    input_failure=st.none()
+    | st.builds(InputFailure, kind=st.just(InputFailureKind.BENCHMARK_FAILED), output=_TEXT),
     profiling=st.booleans(),
 )
 _CONTEXTS: dict[PromptTemplate | CoreProtocolTemplate, st.SearchStrategy[PromptContext]] = {
     PromptTemplate.PORTFOLIO: _PLANNER,
     PromptTemplate.PORTFOLIO_CORRECTION: st.builds(
-        PlannerCorrectionPrompt,
+        PlannerCorrection,
+        of=_TURNS,
         planner=_PLANNER,
-        error=st.none() | _TEXT,
-        scheduled=st.integers(0, 3),
+        problem=st.none() | _PROBLEMS,
     ),
+    PromptTemplate.PORTFOLIO_REASK: st.builds(PlannerReask, planner=_PLANNER, problem=_PROBLEMS),
     PromptTemplate.IMPLEMENT: st.builds(
         ImplementPrompt,
         hypothesis_id=_TEXT,
@@ -100,9 +193,8 @@ _CONTEXTS: dict[PromptTemplate | CoreProtocolTemplate, st.SearchStrategy[PromptC
         evidence=_CITATIONS,
         worktree_revision=st.none() | _REVISIONS,
         prior_revision=st.none() | _REVISIONS,
-        feedback=st.none() | _TEXT,
-        blocker=st.none() | _TEXT,
-        narrowed_step=st.none() | _TEXT,
+        rejection=st.none() | _TEXT,
+        last_blocker=st.none() | _BLOCKERS,
         turns_without_candidate=st.integers(0, 3),
     ),
     PromptTemplate.REVIEW: st.builds(
@@ -122,12 +214,11 @@ _CONTEXTS: dict[PromptTemplate | CoreProtocolTemplate, st.SearchStrategy[PromptC
         role=st.sampled_from(("implementer", "judge", "profiler")),
         retained_revision=st.none() | _REVISIONS,
         timed_out=st.booleans(),
-        repeated_failure=st.none() | _TEXT,
     ),
     CoreProtocolTemplate.REPLY_CORRECTION: st.builds(
         ReplyCorrectionPrompt,
         role=st.sampled_from(("planner", "implementer", "judge", "profiler")),
-        error=_TEXT,
+        errors=_ERRORS,
     ),
     CoreProtocolTemplate.WAIT_UNRECORDED: st.builds(WaitUnrecordedPrompt),
 }
@@ -183,10 +274,15 @@ def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
 
 
 def _planner_texts(context: PlannerPrompt) -> list[str]:
-    correction = PlannerCorrectionPrompt(planner=context, error=None, scheduled=0)
+    invocation = InvocationRef(
+        session_id=SessionId(root="s"), invocation_id=InvocationId(root="i"), generation=0
+    )
+    correction = PlannerCorrection(of=invocation, planner=context, problem=None)
+    reask = PlannerReask(planner=context, problem=PlanProblem(kind=ProblemKind.NO_REPLY))
     return [
         _RENDERER.render_template("portfolio.j2", **_variables(context)),
         _RENDERER.render_template("portfolio_correction.j2", **_variables(correction)),
+        _RENDERER.render_template("portfolio_reask.j2", **_variables(reask)),
     ]
 
 
@@ -247,20 +343,23 @@ def test_strategy_prompts_name_no_domain_command() -> None:
         assert "cpu_check" not in template.read_text(), template.name
 
 
-@given(data=st.data(), blocker=_TEXT, step=st.none() | _TEXT)
+@given(data=st.data(), summary=_TEXT, step=st.none() | _TEXT)
 def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
-    data: st.DataObject, blocker: str, step: str | None
+    data: st.DataObject, summary: str, step: str | None
 ) -> None:
     # live-2: three turns in a row ended "not ready for trusted evaluation" on one workstream;
     # the retry received only the previous summary and no narrower step.
     context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT]).model_copy(
-        update={"blocker": blocker, "narrowed_step": step, "turns_without_candidate": 1}
+        update={
+            "last_blocker": Blocker(kind=BlockerKind.FAILED, summary=summary, next_step=step or ""),
+            "turns_without_candidate": 1,
+        }
     )
 
     text = _RENDERER.render_template("implement.j2", **_variables(context))
 
-    assert "The blocker you stated:" in text
-    assert blocker in text
+    assert "What ended that turn:" in text
+    assert summary in text
     assert (step is not None and "The narrower step you named for this turn:" in text) or (
         step is None and "The narrower step you named" not in text
     )
@@ -271,12 +370,12 @@ def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
 @given(data=st.data())
 def test_a_first_attempt_is_not_shown_a_blocker(data: st.DataObject) -> None:
     context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT]).model_copy(
-        update={"blocker": None, "narrowed_step": None, "turns_without_candidate": 0}
+        update={"last_blocker": None, "turns_without_candidate": 0}
     )
 
     text = _RENDERER.render_template("implement.j2", **_variables(context))
 
-    assert "The blocker you stated:" not in text
+    assert "What ended that turn:" not in text
 
 
 @given(data=st.data())

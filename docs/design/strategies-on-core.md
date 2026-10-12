@@ -134,7 +134,7 @@ limits, reply schemas, projection and prompts, and `src/vibesys/dynamic_core.py`
 | settle | `Withdraw(attempt, Settle(...))` | `AttemptSettled` |
 | select and finish | `ProposeWinner`, then `Stop(drain)` | `AdoptionResult`, `RunEnded` |
 
-The pieces the ports reuse, by file in `src/vibesys/orchestration/dynamic/strategy/`:
+The pieces the ports reuse, by file in `src/vibesys/orchestration/dynamic/search/`:
 
 - `_draft.py`: `Draft` (ordered decisions, state update, earliest wake time) and the pure
   builders `run_scope`, `attempt_scope`, `session_for`, `request_turn`, `measurement_plan`.
@@ -192,7 +192,7 @@ code sits in `dynamic`.
 | B14 | `CaptureCommand` operation: run a configured argv in a revision's workspace with a timeout and return bounded output | none; two copies of the legacy call in `single/attribution.py` and `multi/attribution.py` | contract in `vs_runtime.api.core`, owner in `vs_runtime` | single, multi (profile-guided) | none |
 | B15 | Stateless tool admission: a role may name a tool server that holds no run state (profiler diagnostics) | none; `_refuse_unbridged_tools` rejects all but `evaluation` | `vs_runtime.api.core` (`AgentTool` declares its class), `vibesys.run.core_services` | multi, evolve, issue_queue | none |
 | B16 | Exclusive-root executor: ending an exclusive-root attempt releases the root, and granting the root restores the plan's base while preserving the configured artifact directories (A2, A4) | none; `RuntimeWorkspaceRequests` rejects the discard of a root attempt and `_ensure_root` binds without restoring | `vs_runtime` workspace executor (`_workspace_requests.py`, `_workspace_receipts.py`) | single, multi, issue_queue (the serial strategies on a host without candidate sandboxes) | none (`dynamic` always uses isolated children) |
-| T1 | Runtime shell test kit: `ScriptedExecutors`, `run_shell`, restart-at-boundary | `tests/vibesys/orchestration/dynamic/strategy/_shell.py`, `_executors.py`, `_run.py` (about 1,000 lines) | `vs_runtime.api.testing` | all five | import it |
+| T1 | Runtime shell test kit: `ScriptedExecutors`, `run_shell`, restart-at-boundary | `tests/vibesys/orchestration/dynamic/search/_shell.py`, `_executors.py`, `_run.py` (about 1,000 lines) | `vs_runtime.api.testing` | all five | import it |
 | T2 | Whole-loop harness and invariants: `_harness.py`, `_chaos.py`, `loop_invariants.py`, smoke e2e | `tests/composition/dynamic/`, `tests/support/loop_invariants.py`, `tests/e2e/test_dynamic_loop_smoke_e2e.py` | `tests/composition/_loop/` and `tests/support/` parametrized by plugin id | all five | become one parametrization |
 
 ### 3.2 Contracts of the blocks that carry new rules

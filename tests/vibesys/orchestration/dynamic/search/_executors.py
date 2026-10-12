@@ -14,7 +14,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
     EvidenceReading,
     EvidenceReadings,
     InterpretEvidence,

@@ -8,14 +8,14 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.vibesys.orchestration.dynamic.strategy._run import config
-from tests.vibesys.orchestration.dynamic.strategy._views import (
+from tests.vibesys.orchestration.dynamic.search._run import config
+from tests.vibesys.orchestration.dynamic.search._views import (
     empty_view,
     evidence_ref,
     revision,
 )
 
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
     AcceptedReading,
     DynamicStrategy,
     EvidenceReading,

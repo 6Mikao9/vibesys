@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._run import config
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search._run import config
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.api import DispatchTurn, RequestTurn, ResumeSessionTurn
 from vs_dst.api import SimulatedRun, simulate
@@ -36,7 +37,7 @@ def test_a_run_shorter_than_a_turn_budget_asks_its_turns_within_the_run(
     result = trace.core.run.result
     assert result is not None
     assert result.outcome == "success", result.reason
-    turns = [item for item in trace.decisions if isinstance(item, RequestTurn)]
+    turns = [item for item in works(trace.decisions) if isinstance(item, RequestTurn)]
     assert {item.turn.session.role_id.root for item in turns} >= {
         "dynamic-orchestrator",
         "dynamic-implementer",

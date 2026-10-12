@@ -5,24 +5,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from tests.vibesys.orchestration.dynamic.strategy._replies import implemented
-from tests.vibesys.orchestration.dynamic.strategy._run import config as dynamic_config
 from tests.vibesys.orchestration.multi.strategy.world import implemented as multi_implemented
 from tests.vibesys.orchestration.multi.strategy.world import multi_config
 from tests.vibesys.orchestration.multi.strategy.world import plan_reply as multi_plan_reply
 from tests.vibesys.orchestration.single.strategy.world import implemented as combined
 from tests.vibesys.orchestration.single.strategy.world import plan_reply, single_config
 
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategy,
-    DynamicStrategyState,
-)
-from vibesys.orchestration.dynamic.strategy.api import (
-    invocation_id as dynamic_invocation_id,
-)
-from vibesys.orchestration.dynamic.strategy.api import (
-    session_id as dynamic_session_id,
-)
 from vibesys.orchestration.multi.strategy.api import (
     MultiStrategy,
     MultiStrategyState,
@@ -79,7 +67,6 @@ _CANDIDATE = RevisionRef.of_git_commit("b" * 40)
 
 def _invocation(role: str, subject: str, *, namespace: str) -> InvocationRef:
     identities = {
-        "dynamic": (dynamic_session_id, dynamic_invocation_id),
         "multi": (multi_session_id, multi_invocation_id),
         "single": (single_session_id, single_invocation_id),
     }
@@ -180,39 +167,6 @@ def _assert_checkpoint_outcomes[S: StrategyState](
     assert _record(settled, collection)["failure"] == (
         "implementer checkpoint declined (snapshot_failed)"
     )
-
-
-def test_dynamic_consumes_pending_failed_and_retained_checkpoint_outcomes() -> None:
-    subject = "h1.1.implementer"
-    invocation = _invocation("implementer", subject, namespace="dynamic")
-    state = DynamicStrategyState.model_validate_json(
-        json.dumps(
-            {
-                "attempts": [
-                    {
-                        "attempt": {"root": _ATTEMPT.root},
-                        "step": "awaiting",
-                        "turn": {"role": "implementer", "serial": 0, "charge": "paid"},
-                        "ready": True,
-                        "plan": {
-                            "kind": "implement",
-                            "work_id": "h1",
-                            "title": "title h1",
-                            "hypothesis": "claim h1",
-                            "task": "task h1",
-                            "pass_criteria": "faster",
-                        },
-                        "sequence": 1,
-                        "parent": _BASE.model_dump(mode="json"),
-                        "phase": "implement",
-                    }
-                ]
-            }
-        )
-    )
-    strategy = DynamicStrategy(config=dynamic_config(), state=state)
-
-    _assert_checkpoint_outcomes(strategy, _event(invocation, implemented()), collection="attempts")
 
 
 def test_multi_consumes_pending_failed_and_retained_checkpoint_outcomes() -> None:

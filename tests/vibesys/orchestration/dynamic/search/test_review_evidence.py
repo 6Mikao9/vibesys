@@ -14,39 +14,32 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.dynamic.strategy._replies import reviewed
-from tests.vibesys.orchestration.dynamic.strategy._views import empty_view, evidence_ref, revision
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search._replies import reviewed
+from tests.vibesys.orchestration.dynamic.search._views import empty_view, evidence_ref, revision
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
+from vibesys.metrics import AcceptedReading
 from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
-
-# test-isolation: evidence selection and the failure bound are strategy internals with no
-# public entry that accepts a hand-built ledger; the production shell cannot inject
-# another attempt's or a stale generation's evidence.
-from vibesys.orchestration.dynamic.strategy._context import review_prompt
-from vibesys.orchestration.dynamic.strategy._rows import AcceptedReading, ReviewEvidence
-from vibesys.orchestration.dynamic.strategy._state import (
-    AttemptRecord,
-    WorkKind,
-    WorkPhase,
-    WorkPlan,
-)
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
     RenderRoleArtifacts,
     ReviewEvaluation,
     ReviewPrompt,
+    review_evaluations,
+    review_refs,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import (
     AttemptId,
-    CoreView,
+    AttemptRef,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
     ObservationStatus,
     Operation,
     RevisionRef,
+    RunView,
     Scope,
 )
 from vs_dst.api import SimulatedRun, simulate
@@ -61,7 +54,7 @@ def _world(*, agent_evaluation: bool = False, throughput: float | None = 100.0) 
 
 
 def _review_prompts(run: SimulatedRun) -> list[ReviewPrompt]:
-    renders = [item.request for item in run.decisions if isinstance(item, Operation)]
+    renders = [item.request for item in works(run.decisions) if isinstance(item, Operation)]
     return [
         item.context
         for item in renders
@@ -175,38 +168,26 @@ def test_every_evaluation_of_the_candidate_is_listed_oldest_first() -> None:
 
 # -- which evaluations the judge is shown, and how much of a failure text ------------------
 
-ATTEMPT = AttemptId(root="attempt-1")
-
-
-def _record(candidate: RevisionRef | None = None) -> AttemptRecord:
-    return AttemptRecord(
-        plan=WorkPlan(kind=WorkKind.IMPLEMENT, work_id="h1", hypothesis="claim"),
-        sequence=1,
-        attempt=ATTEMPT,
-        parent=revision("parent"),
-        phase=WorkPhase.REVIEW,
-        candidate=candidate or _candidate(),
-        generation=2,
-    )
+ATTEMPT = AttemptRef(attempt_id=AttemptId(root="attempt-1"), generation=2)
 
 
 def _local(name: str, **changes: object) -> EvidenceRef:
     base = evidence_ref(name, EvidenceKind.LOCAL_VALIDATION, _candidate()).model_copy(
         update={
             "purpose": "local-validation",
-            "scope": Scope(owner=ATTEMPT, generation=2),
+            "scope": Scope(owner=ATTEMPT.attempt_id, generation=2),
         }
     )
     return base.model_copy(update=changes)
 
 
-def _view(*refs: EvidenceRef) -> CoreView:
+def _view(*refs: EvidenceRef) -> RunView:
     return empty_view().model_copy(update={"measurements": refs})
 
 
 def _listed(*refs: EvidenceRef) -> list[str]:
-    prompt = review_prompt(_record(), _view(*refs))
-    return [item.evidence_id.root for item in prompt.evaluations]
+    held = review_refs(_view(*refs), ATTEMPT, _candidate())
+    return [item.evidence_id.root for item in review_evaluations(held, ())]
 
 
 def test_only_this_attempts_current_trusted_local_evidence_of_the_candidate_is_listed() -> None:
@@ -215,7 +196,7 @@ def test_only_this_attempts_current_trusted_local_evidence_of_the_candidate_is_l
         "another attempt": _local(
             "a", scope=Scope(owner=AttemptId(root="attempt-2"), generation=2)
         ),
-        "stale generation": _local("b", scope=Scope(owner=ATTEMPT, generation=1)),
+        "stale generation": _local("b", scope=Scope(owner=ATTEMPT.attempt_id, generation=1)),
         "the parent": _local("c", candidate=revision("parent")),
         "another candidate": _local("d", candidate=revision("elsewhere")),
         "official": _local("e", purpose="official"),
@@ -235,25 +216,15 @@ def test_listed_evaluations_follow_observation_order(order: list[int]) -> None:
 @given(tail=st.text(max_size=4000))
 def test_a_failure_text_is_bounded_and_marked_when_cut(tail: str) -> None:
     ref = _local("only")
-    record = _record().model_copy(
-        update={
-            "review_evidence": ReviewEvidence(
-                candidate=_candidate(),
-                keys=(ref.key,),
-                readings=(
-                    AcceptedReading(
-                        source_request=ref.source_request,
-                        evidence_id=ref.evidence_id,
-                        kind=ref.kind,
-                        passed=False,
-                        stage="benchmark",
-                        feedback=tail,
-                    ),
-                ),
-            )
-        }
+    reading = AcceptedReading(
+        source_request=ref.source_request,
+        evidence_id=ref.evidence_id,
+        kind=ref.kind,
+        passed=False,
+        stage="benchmark",
+        feedback=tail,
     )
-    (item,) = review_prompt(record, _view(ref)).evaluations
+    (item,) = review_evaluations((ref,), (reading,))
     assert len(item.feedback) <= 1500
     assert item.feedback_cut == (len(tail) > 1500)
     assert tail.endswith(item.feedback)

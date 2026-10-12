@@ -1,4 +1,4 @@
-"""The dynamic strategy's world: what its agents reply and what its benchmarks measure.
+"""The dynamic search's world: what its agents reply and what its benchmarks measure.
 
 `DynamicWorld` is a vs-dst `World`. A test builds one from plain data, simulates it and asserts
 on the run::
@@ -22,14 +22,14 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any, Literal
 
 from tests.support.checkpoint_faults import FaultyCheckpoints
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
-from tests.vibesys.orchestration.dynamic.strategy._waiting import (
+from tests.vibesys.orchestration.dynamic.search._run import FACTS, LIMITS, config
+from tests.vibesys.orchestration.dynamic.search._waiting import (
     WAITING,
     Hosting,
     Measure,
@@ -37,9 +37,7 @@ from tests.vibesys.orchestration.dynamic.strategy._waiting import (
 )
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategy,
-    DynamicStrategyState,
+from vibesys.orchestration.dynamic.search.api import (
     EvidenceReading,
     EvidenceReadings,
     InterpretEvidence,
@@ -49,6 +47,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     RenderedArtifacts,
     RenderRoleArtifacts,
     VerifyParentRevision,
+    build_search,
     dynamic_operation_registry,
 )
 from vs_core.api import (
@@ -82,6 +81,7 @@ from vs_core.api import (
 from vs_core.testing.drive import Answer, Failed, Harness, Running, Succeeded, Unknown
 from vs_dst.api import RunSetup
 from vs_runtime.api.core import handle_for
+from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
@@ -193,12 +193,12 @@ class DynamicWorld:
             suspend: LifecycleCapability = "suspend"
             capabilities |= {suspend}
         self.setup = RunSetup(
-            new_strategy=lambda: DynamicStrategy(config=selected),
+            new_launch=lambda: Launch(search=build_search(selected), config=selected),
             harness=Harness(
                 registry=dynamic_operation_registry(),
                 facts=FACTS,
                 limits=limits,
-                envelope_type=RunEnvelope[DynamicStrategyState],
+                envelope_type=RunEnvelope[build_search(selected).state_model],
                 requirements=requirements_for(selected),
                 deadline_at=deadline_at,
                 lifecycle=capabilities,

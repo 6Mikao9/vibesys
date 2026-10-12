@@ -1,13 +1,14 @@
-"""Run `DynamicStrategy` on the real core with scripted executors."""
+"""Run the dynamic search on the real core with scripted executors."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from vibesys.orchestration.dynamic.strategy.api import (
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+
+from vibesys.orchestration.dynamic.search.api import (
     DynamicConfig,
-    DynamicStrategy,
-    DynamicStrategyState,
+    build_search,
     dynamic_operation_registry,
 )
 from vs_core.api import (
@@ -22,7 +23,7 @@ from vs_core.testing.drive import Faults, Harness, Trace, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 
 if TYPE_CHECKING:
-    from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
+    from tests.vibesys.orchestration.dynamic.search._executors import Executors
 
 
 def config(**overrides: object) -> DynamicConfig:
@@ -57,7 +58,7 @@ def run(
     live: bool = True,
     end: End = End.TERMINAL,
     **overrides: object,
-) -> Trace[DynamicStrategyState]:
+) -> Trace[Any]:
     """Drive a fresh strategy to quiescence against ``executors``.
 
     The run must satisfy the liveness invariants (`vs_core.testing.liveness`) unless ``live``
@@ -65,13 +66,15 @@ def run(
     this driver cannot take to the end of the run (it answers no agent turn).
     """
     chosen = limits or LIMITS
+    selected = config(**overrides)
+    search = build_search(selected)
     harness = Harness(
         registry=dynamic_operation_registry(),
         facts=FACTS,
         limits=chosen,
-        envelope_type=RunEnvelope[DynamicStrategyState],
+        envelope_type=RunEnvelope[search.state_model],
     )
-    trace = drive(DynamicStrategy(config=config(**overrides)), executors, harness, faults)
+    trace = drive(search, selected, executors, harness, faults)
     if live:
         assert_live(
             Journal.from_log(trace.log),
@@ -82,5 +85,5 @@ def run(
     return trace
 
 
-def kinds(trace: Trace[DynamicStrategyState]) -> list[str]:
-    return [type(item).__name__ for item in trace.decisions]
+def kinds(trace: Trace[Any]) -> list[str]:
+    return [type(item).__name__ for item in works(trace.decisions)]

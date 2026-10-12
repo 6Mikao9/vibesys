@@ -6,7 +6,7 @@ from itertools import pairwise
 
 from hypothesis import example, given
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._run import config
+from tests.vibesys.orchestration.dynamic.search._run import config
 
 _BASE = st.floats(min_value=0.01, max_value=600.0)
 _CAP = st.floats(min_value=0.01, max_value=3600.0)

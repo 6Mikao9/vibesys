@@ -17,19 +17,19 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._executors import Executors
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
+from tests.vibesys.orchestration.dynamic.search._run import FACTS, LIMITS, config
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
+    DynamicState,
     DynamicStrategy,
-    DynamicStrategyState,
     dynamic_operation_registry,
 )
 from vs_core.api import (
@@ -263,7 +263,7 @@ class _Finished:
 
 @dataclass(frozen=True)
 class _Built:
-    shell: CoreRuntime[DynamicStrategyState]
+    shell: CoreRuntime[DynamicState]
     host: CoreRunHost
     config: RunLoopConfig
     ledger: _Ledger
@@ -316,12 +316,12 @@ def _build(
         registry=dynamic_operation_registry(),
         facts=FACTS,
         limits=LIMITS,
-        envelope_type=RunEnvelope[DynamicStrategyState],
+        envelope_type=RunEnvelope[DynamicState],
         requirements=requirements_for(selected),
     )
     strategy = DynamicStrategy(config=selected)
     store = process.store or FakeStateStore()
-    shell: CoreRuntime[DynamicStrategyState] = CoreRuntime(
+    shell: CoreRuntime[DynamicState] = CoreRuntime(
         store,
         strategy,
         new_run(strategy, harness),
@@ -460,7 +460,7 @@ class _AdmittingDelivery(FakePublicationDelivery):
 
     def __init__(self, store: FakeStateStore, *, fails: bool) -> None:
         super().__init__(store)
-        self.shell: CoreRuntime[DynamicStrategyState] | None = None
+        self.shell: CoreRuntime[DynamicState] | None = None
         self.admitted: list[CoreEvent] = []
         self._fails = fails
 
@@ -532,7 +532,7 @@ class _Crash(BaseException):
     """The process died: raised by the observer right after a durable commit."""
 
 
-def _implementer_turns(record: RuntimeRecord[DynamicStrategyState]) -> list[RequestPhase]:
+def _implementer_turns(record: RuntimeRecord[DynamicState]) -> list[RequestPhase]:
     return [
         row.phase
         for row in record.envelope.core.records.records
@@ -549,8 +549,8 @@ class _DiesWhen:
 
     def committed(
         self,
-        previous: RuntimeRecord[DynamicStrategyState] | None,
-        current: RuntimeRecord[DynamicStrategyState],
+        previous: RuntimeRecord[DynamicState] | None,
+        current: RuntimeRecord[DynamicState],
     ) -> None:
         del previous
         if not self.fired and self.when(_implementer_turns(current)):

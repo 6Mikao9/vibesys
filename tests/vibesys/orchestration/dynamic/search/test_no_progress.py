@@ -19,14 +19,15 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import config
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search._run import config
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.api import ProposeWinner, RequestTurn, Withdraw
 from vs_core.testing.drive import Failed
@@ -51,7 +52,7 @@ def _implementer_turns(finished: SimulatedRun) -> Counter[str]:
     """Paid and corrected implementer turns the run requested, by agent session."""
     return Counter(
         item.turn.session.session_id.root
-        for item in finished.decisions
+        for item in works(finished.decisions)
         if isinstance(item, RequestTurn) and item.turn.session.role_id.root.endswith("implementer")
     )
 
@@ -59,7 +60,7 @@ def _implementer_turns(finished: SimulatedRun) -> Counter[str]:
 def _planner_turns(finished: SimulatedRun) -> int:
     return sum(
         1
-        for item in finished.decisions
+        for item in works(finished.decisions)
         if isinstance(item, RequestTurn) and item.turn.session.role_id.root.endswith("orchestrator")
     )
 
@@ -94,7 +95,7 @@ def test_the_first_failure_without_a_next_step_or_evidence_still_gets_one_more_t
     assert finished.finished
     assert not finished.liveness_violations
     assert list(_implementer_turns(finished).values()) == [2]
-    proposal = next(item for item in finished.decisions if isinstance(item, ProposeWinner))
+    proposal = next(item for item in works(finished.decisions) if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "retained_candidate"
 
 
@@ -130,7 +131,7 @@ def test_a_turn_that_retains_a_new_revision_is_asked_again_and_can_be_measured()
     assert finished.finished
     assert not finished.liveness_violations
     assert list(_implementer_turns(finished).values()) == [3]
-    proposal = next(item for item in finished.decisions if isinstance(item, ProposeWinner))
+    proposal = next(item for item in works(finished.decisions) if isinstance(item, ProposeWinner))
     assert proposal.selection.kind == "retained_candidate"
 
 
@@ -246,11 +247,11 @@ def test_the_planner_is_not_re_asked_while_nothing_it_sees_has_changed() -> None
     finished = simulate(world)
 
     assert finished.halted is None
-    ends = [i for i, item in enumerate(finished.decisions) if isinstance(item, Withdraw)]
+    ends = [i for i, item in enumerate(works(finished.decisions)) if isinstance(item, Withdraw)]
     assert len(ends) >= 2
     between = [
         item
-        for item in finished.decisions[ends[0] : ends[1]]
+        for item in works(finished.decisions)[ends[0] : ends[1]]
         if isinstance(item, RequestTurn) and item.turn.session.role_id.root.endswith("orchestrator")
     ]
     # From h1's end to h2's end: one planning call, whatever its replies.

@@ -36,7 +36,7 @@ from tests.support.owed_submissions import owed_namespace
 from tests.support.skeleton_strategy import ATTEMPT, DECLARATION, DIGEST
 from tests.support.synthesized_evidence import SynthesizedEvidence
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
+from tests.vibesys.orchestration.dynamic.search._executors import Executors
 
 from vs_core.api import (
     ArtifactId,

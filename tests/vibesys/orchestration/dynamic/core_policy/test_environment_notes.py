@@ -28,7 +28,7 @@ from tests.vibesys.orchestration.dynamic.core_policy.test_prompt_templates impor
 )
 
 from vibesys.orchestration.dynamic import PLUGIN
-from vibesys.orchestration.dynamic.strategy.api import PromptTemplate
+from vibesys.orchestration.dynamic.search.api import PromptTemplate
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import RevisionRef
 from vs_prompts.api import TemplateRenderer

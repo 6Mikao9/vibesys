@@ -6,15 +6,15 @@ import json
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._replies import implement, plan_reply
+from tests.vibesys.orchestration.dynamic.search._replies import implement, plan_reply
 
 from vibesys.orchestration.dynamic.models import PortfolioPlan
-from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState, PlanCheck, validate
+from vibesys.orchestration.dynamic.search.api import DynamicState, PlanCheck, validate
 
 
 def _check(*entries: dict[str, object], capacity: int = 8) -> PlanCheck:
     plan = PortfolioPlan.model_validate_json(plan_reply(*entries))
-    return validate(plan, DynamicStrategyState(), (), capacity=capacity, offer=None)
+    return validate(plan, DynamicState(), (), capacity=capacity, offer=None)
 
 
 def test_repeated_id_is_a_violation() -> None:

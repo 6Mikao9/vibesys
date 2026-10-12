@@ -16,13 +16,13 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.testing.drive import Retryable, Unknown
 from vs_dst.api import simulate

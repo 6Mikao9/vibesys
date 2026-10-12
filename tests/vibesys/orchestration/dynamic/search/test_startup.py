@@ -1,13 +1,13 @@
-"""Production startup accepts the strategy's own declaration, not a mirror of it."""
+"""Production startup accepts the search's own declaration, not a mirror of it."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.vibesys.orchestration.dynamic.strategy._run import config
+from tests.vibesys.orchestration.dynamic.search._run import config
 
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategy,
+from vibesys.orchestration.dynamic.search.api import (
+    build_search,
     dynamic_operation_registrations,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
@@ -31,7 +31,6 @@ _ROLES = {
     "dynamic.render_role_artifacts": OperationRole.RENDER_ARTIFACTS,
     "dynamic.verify_parent_revision": OperationRole.VERIFY_REVISION,
     "dynamic.interpret_evidence": OperationRole.INTERPRET_EVIDENCE,
-    "dynamic.retain_verified_revision": OperationRole.RETAIN_REVISION,
 }
 
 
@@ -52,7 +51,7 @@ def test_production_owners_cover_every_operation_the_strategy_requires(tmp_path:
         retention_label="verified",
     )
     catalog = build_operation_catalog(registrations, production_owners(registrations, ports))
-    declaration = DynamicStrategy(config=config()).declaration
+    declaration = build_search(config()).declaration
     catalog.require_owned(declaration)
     validate_startup(declaration, Capabilities(operations=catalog.offered_operations))
     bind_operations(declaration, catalog, namespace)

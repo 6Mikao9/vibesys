@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, Any
 
 from hypothesis import strategies as st
 from tests.composition._loop.conformance import Subject, World
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld
 from tests.vibesys.orchestration.issue_queue.strategy.world import (
     IssueQueueWorld,

@@ -14,7 +14,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.api import CollectEvidence, Finish, ProposeWinner
 from vs_dst.api import simulate
@@ -63,8 +64,8 @@ def test_every_input_measurement_outcome_ends_the_run_with_its_status(
     requests = [record.request for record in run.core.records.records]
     assert len(requests) <= MAX_REQUESTS
     assert sum(isinstance(request, CollectEvidence) for request in requests) <= 3
-    result = _stop(run.decisions)
-    proposals = [item for item in run.decisions if isinstance(item, ProposeWinner)]
+    result = _stop(works(run.decisions))
+    proposals = [item for item in works(run.decisions) if isinstance(item, ProposeWinner)]
     if candidate_found:
         assert result.outcome == "success"
         assert [item.selection.kind for item in proposals] == ["retained_candidate"]

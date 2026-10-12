@@ -264,7 +264,7 @@ class AgentTurns[S: StrategyState, C]:
         render = operations.schema_ref(f"{operations.namespace}.render_role_artifacts")
         self.declaration: SearchDeclaration = declaration.model_copy(
             update={
-                "required_operations": (*declaration.required_operations, render),
+                "required_operations": (render, *declaration.required_operations),
                 "uses": (declaration.uses - {WorkKind.ASK_AGENT})
                 | {WorkKind.REQUEST_TURN, WorkKind.OPERATION, WorkKind.WAKE_AT},
                 "handles": (declaration.handles - {EventKind.TURN_FINISHED})

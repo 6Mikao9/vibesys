@@ -15,13 +15,14 @@ from dataclasses import dataclass, replace
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.checkpoint_faults import CHECKPOINTS
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy.world import ENDINGS, DynamicWorld, Ending
+from tests.vibesys.orchestration.dynamic.search.world import ENDINGS, DynamicWorld, Ending
 
 from vs_core.api import AttemptPhase, Settle, Withdraw
 from vs_dst.api import SimulatedRun, simulate
@@ -178,7 +179,7 @@ def test_an_implementer_resumed_after_waiting_keeps_the_candidate_it_checkpointe
     assert finished.core.evaluation.continuations != ()
     (settle,) = [
         item.disposition
-        for item in finished.decisions
+        for item in works(finished.decisions)
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     assert settle.candidate is not None
@@ -213,7 +214,7 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         # Whether core records a wait on an invalid reply is core's own rule, so only the other
         # replies are compared.
         assert finished.core.evaluation.continuations != ()
-        assert [type(item).__name__ for item in finished.decisions] == [
+        assert [type(item).__name__ for item in works(finished.decisions)] == [
             type(item).__name__ for item in run(("wait",)).decisions
         ]
 

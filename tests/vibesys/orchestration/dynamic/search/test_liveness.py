@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.api import (
     DispatchTurn,

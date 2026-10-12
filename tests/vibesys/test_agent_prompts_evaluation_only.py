@@ -23,7 +23,7 @@ from tests.vibesys.orchestration.dynamic.core_policy.test_environment_notes impo
 )
 from tests.vibesys.orchestration.dynamic.core_policy.test_prompt_templates import _CONTEXTS
 
-from vibesys.orchestration.dynamic.strategy.api import PromptTemplate
+from vibesys.orchestration.dynamic.search.api import PromptTemplate
 from vibesys.prompts import PROMPTS_DIR, render_template
 
 if TYPE_CHECKING:

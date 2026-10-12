@@ -15,12 +15,12 @@ from typing import Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy.test_judge_waits import (
+from tests.vibesys.orchestration.dynamic.search.test_judge_waits import (
     JUDGE_WAITS,
     waiting_world,
 )
 
-from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState
+from vibesys.orchestration.dynamic.search.api import DynamicState
 from vs_core.api import AttemptPhase
 from vs_dst.api import SimulatedRun, simulate
 
@@ -52,7 +52,7 @@ def assert_one_evaluation_per_workstream(
 def assert_every_review_passed_round_has_its_metric(finished: SimulatedRun) -> None:
     """A round whose review passed was measured: no null metric, no failure."""
     state = finished.state
-    assert isinstance(state, DynamicStrategyState)
+    assert isinstance(state, DynamicState)
     rounds = [r for h in state.hypotheses for r in h.rounds]
     assert rounds
     for record in rounds:

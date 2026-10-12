@@ -14,7 +14,7 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.dynamic.strategy._views import empty_view, evidence_ref, revision
+from tests.vibesys.orchestration.dynamic.search._views import empty_view, evidence_ref, revision
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
 from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
@@ -22,15 +22,15 @@ from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
 # test-isolation: planner_prompt is the strategy's internal projection of its ledger into the
 # planner's typed context; no public entry accepts a hand-built ledger, and the production
 # shell cannot script a profile that finished with no reading or one with arbitrary statistics.
-from vibesys.orchestration.dynamic.strategy._context import planner_prompt
-from vibesys.orchestration.dynamic.strategy._state import (
+from vibesys.orchestration.dynamic.search._context import planner_prompt
+from vibesys.orchestration.dynamic.search._state import (
     AttemptRecord,
-    DynamicStrategyState,
+    DynamicState,
     WorkKind,
     WorkPhase,
     WorkPlan,
 )
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
     AcceptedReading,
     DynamicConfig,
     MetricRow,
@@ -114,7 +114,7 @@ def _prompt(
         readings=() if reading is None else (reading,),
     )
     view: CoreView = empty_view().model_copy(update={"measurements": (ref,)})
-    state = DynamicStrategyState(attempts=(record,))
+    state = DynamicState(attempts=(record,))
     return planner_prompt(state, _CONFIG, view)
 
 

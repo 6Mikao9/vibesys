@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.api import Settle, Withdraw
 from vs_dst.api import SimulatedRun, simulate
@@ -40,7 +41,7 @@ def _settled(finished: SimulatedRun) -> tuple[Settle, tuple[AttemptCheckpoint, .
     assert not finished.liveness_violations
     (settle,) = [
         item.disposition
-        for item in finished.decisions
+        for item in works(finished.decisions)
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     (attempt,) = finished.core.attempts.attempts

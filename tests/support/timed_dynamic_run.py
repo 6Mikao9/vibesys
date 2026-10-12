@@ -1,4 +1,4 @@
-"""The dynamic strategy on the production shell and loop, with durations on a virtual clock.
+"""The dynamic search on the production shell and loop, with durations on a virtual clock.
 
 ``vs_runtime.api.testing`` (the shell test kit) answers every request at once, so
 a lease that lapses, a stop that waits for a turn, or two turns that never overlap cannot
@@ -26,19 +26,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors, _lease
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._executors import Executors, _lease
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, LIMITS, config
+from tests.vibesys.orchestration.dynamic.search._run import FACTS, LIMITS, config
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategy,
-    DynamicStrategyState,
+from vibesys.orchestration.dynamic.search.api import (
+    build_search,
     dynamic_operation_registry,
 )
 from vs_core.api import (
@@ -412,21 +411,21 @@ def _run(
         submit=cluster.submit,
     )
     selected = config(max_in_flight=IMPLEMENTERS)
+    search = build_search(selected)
     harness = Harness(
         registry=dynamic_operation_registry(),
         facts=FACTS,
         limits=LIMITS.model_copy(update={"observe_interval": OBSERVE_INTERVAL_S}),
-        envelope_type=RunEnvelope[DynamicStrategyState],
+        envelope_type=RunEnvelope[search.state_model],
         requirements=requirements_for(selected),
     )
-    strategy = DynamicStrategy(config=selected)
     store = LeaseRecordingStore()
     paused: list[float] = []
     turns: list[TurnSpan] = []
-    shell: CoreRuntime[DynamicStrategyState] = CoreRuntime(
+    shell: CoreRuntime[Any] = CoreRuntime(
         store,
-        strategy,
-        new_run(strategy, harness),
+        search,
+        new_run(search, harness),
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
             commits=_PauseClock(clock, paused),

@@ -7,30 +7,31 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     profile,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
 from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
-from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, RenderRoleArtifacts
+from vibesys.orchestration.dynamic.search.api import PlannerPrompt, RenderRoleArtifacts
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import Operation
 from vs_dst.api import simulate
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.strategy.api import ProfileHistoryRow
+    from vibesys.orchestration.dynamic.search.api import ProfileHistoryRow
     from vs_dst.api import SimulatedRun
 
 
 def _planner_prompts(run: SimulatedRun) -> list[PlannerPrompt]:
-    renders = [item.request for item in run.decisions if isinstance(item, Operation)]
+    renders = [item.request for item in works(run.decisions) if isinstance(item, Operation)]
     return [
         item.context
         for item in renders

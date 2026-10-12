@@ -16,7 +16,7 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     resolved,
     run_request,
 )
-from tests.vibesys.orchestration.dynamic.strategy._run import config as _config
+from tests.vibesys.orchestration.dynamic.search._run import config as _config
 
 from vibesys.dynamic_core import (
     ResolvedRun,
@@ -30,12 +30,12 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     RunBounds,
     run_deadline_at,
 )
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
+    DynamicSearch,
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
     PLANNER_REPLY,
     PROFILER_REPLY,
-    DynamicStrategy,
 )
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_core.api import (
@@ -327,7 +327,7 @@ def test_core_accepts_the_deadline_and_the_state_round_trips(seconds: int | None
         workload_digest="w",
         environment_digest="v",
     )
-    declaration = DynamicStrategy(config=_config()).declaration
+    declaration = DynamicSearch(_config()).declaration
     state = RunState(
         run_id=RunId(root="r"),
         now_at=0.0,

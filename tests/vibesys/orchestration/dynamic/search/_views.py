@@ -1,10 +1,10 @@
-"""Constructed core `CoreView`s and evidence for strategy tests (public core API only)."""
+"""Constructed `RunView`s and evidence for strategy tests (public core API only)."""
 
 from __future__ import annotations
 
 from typing import Literal
 
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
     AcceptedReading,
     MetricRow,
     ParentSnapshot,
@@ -17,7 +17,6 @@ from vs_core.api import (
     AttemptPhase,
     AttemptRef,
     AttemptView,
-    CoreView,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
@@ -27,19 +26,20 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
     RunId,
+    RunView,
     Scope,
     Settlement,
     SettlementId,
     WorkspaceMode,
     WorkspacePlan,
-    project,
+    run_view,
 )
 from vs_core.testing.builders import initial_state
 
 
-def empty_view() -> CoreView:
+def empty_view() -> RunView:
     """A capability-disabled run with no attempts or evidence."""
-    return project(initial_state())
+    return run_view(initial_state())
 
 
 def revision(name: str) -> RevisionRef:
@@ -109,7 +109,7 @@ def snapshot(value: float, ordinal: int, *, hypothesis: str = "source") -> Paren
     )
 
 
-def view_proving(*snapshots: ParentSnapshot, retained: bool = True) -> CoreView:
+def view_proving(*snapshots: ParentSnapshot, retained: bool = True) -> RunView:
     """A view whose evidence ledger and retained checkpoints prove the snapshots."""
     base = empty_view()
     measurements: list[EvidenceRef] = []
@@ -137,7 +137,7 @@ def view_proving(*snapshots: ParentSnapshot, retained: bool = True) -> CoreView:
     return base.model_copy(update={"measurements": tuple(measurements), "settlements": settlements})
 
 
-def view_checkpointing(*snapshots: ParentSnapshot) -> CoreView:
+def view_checkpointing(*snapshots: ParentSnapshot) -> RunView:
     """A view whose evidence proves the snapshots but only still-running attempts hold them.
 
     Each revision is a checkpoint of a closing attempt and appears in no settlement, which is

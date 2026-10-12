@@ -261,14 +261,14 @@ def update(  # noqa: PLR0911  # LW-220406 [PLR0911]; one exhaustive match over (
                 return Interpreting(attempts=submitted, evidence=refs), [
                     _interpret(refs, measuring)
                 ]
-            if submitted >= config.max_input_measurement_attempts:
-                none = InputFailure(
-                    kind=InputFailureKind.NO_EVIDENCE,
-                    status=result.status,
-                    output=result.diagnostic,
-                )
-                return Unmeasurable(attempts=submitted, failure=none), []
-            return _again(baseline, view, config, measuring)
+            # Core accepts another submission only after a failure `may_resubmit` allows;
+            # anything else is final, and asking again would be refused.
+            none = InputFailure(
+                kind=InputFailureKind.NO_EVIDENCE,
+                status=result.status,
+                output=result.diagnostic,
+            )
+            return Unmeasurable(attempts=submitted, failure=none), []
         case Interpreting(attempts=submitted, evidence=refs), OperationFinished(result=result):
             outcome = result.outcome
             if not isinstance(outcome, EvidenceReadingsBase):

@@ -8,12 +8,13 @@ first planner turn: core refuses a turn reply today (see test_scenarios).
 from __future__ import annotations
 
 import pytest
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
-from tests.vibesys.orchestration.dynamic.strategy._run import FACTS, config, kinds, run
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search._executors import Executors
+from tests.vibesys.orchestration.dynamic.search._run import FACTS, config, kinds, run
 
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategy,
+from vibesys.orchestration.dynamic.search.api import (
     RenderRoleArtifacts,
+    build_search,
     dynamic_operation_registry,
 )
 from vs_core.api import (
@@ -52,14 +53,16 @@ def _refused_baseline() -> Executors:
 
 def test_the_declaration_starts_up_on_the_real_core() -> None:
     """Startup validation accepts the strategy's own declaration and operation codec."""
-    strategy = DynamicStrategy(config=config())
-    core = new_run(strategy, Harness(registry=dynamic_operation_registry(), facts=FACTS))
-    assert core.run.declaration == strategy.declaration
+    search = build_search(config())
+    core = new_run(search, Harness(registry=dynamic_operation_registry(), facts=FACTS))
+    assert core.run.declaration == search.declaration
 
 
-def test_a_refused_baseline_is_retried_within_budget_then_planning_goes_on() -> None:
+def test_a_refused_baseline_is_final_and_planning_goes_on() -> None:
+    """A workload the evaluator refuses is not asked again: core would refuse a repeat."""
     trace = run(_refused_baseline(), end=End.CUT_SHORT)
-    assert kinds(trace)[:3] == ["Measure", "Measure", "Measure"]
+    assert kinds(trace)[:1] == ["Measure"]
+    assert kinds(trace).count("Measure") == 1
     assert "RequestTurn" in kinds(trace)
 
 
@@ -76,10 +79,10 @@ def test_every_prompt_goes_through_a_render_operation() -> None:
     trace = run(_refused_baseline(), end=End.CUT_SHORT)
     renders = [
         item
-        for item in trace.decisions
+        for item in works(trace.decisions)
         if isinstance(item, Operation) and isinstance(item.request, RenderRoleArtifacts)
     ]
-    turns = [item for item in trace.decisions if isinstance(item, RequestTurn)]
+    turns = [item for item in works(trace.decisions) if isinstance(item, RequestTurn)]
     assert renders
     assert len(renders) == len(turns)
 
@@ -88,7 +91,7 @@ def test_the_state_survives_a_codec_reload_after_every_step() -> None:
     """Reloading the whole envelope after each step yields the run an unbroken one reaches."""
     plain = run(_refused_baseline(), end=End.CUT_SHORT)
     reloaded = run(_refused_baseline(), end=End.CUT_SHORT, faults=Faults(reload=True))
-    assert reloaded.strategy.state == plain.strategy.state
+    assert reloaded.state == plain.state
     # Compare the written form: a decoded value drops private codec proofs that `==` sees.
     assert reloaded.core.model_dump_json() == plain.core.model_dump_json()
 
@@ -101,6 +104,7 @@ def test_a_stop_control_ends_the_run_without_starting_work() -> None:
         result=RunResultProposal(outcome="cancelled", reason="operator stop"),
     )
     harness = Harness(registry=dynamic_operation_registry(), facts=FACTS, events=(stop,))
-    trace = drive(DynamicStrategy(config=config()), _refused_baseline(), harness)
+    selected = config()
+    trace = drive(build_search(selected), selected, _refused_baseline(), harness)
     assert trace.finished
-    assert not any(isinstance(item, StartAttempt) for item in trace.decisions)
+    assert not any(isinstance(item, StartAttempt) for item in works(trace.decisions))

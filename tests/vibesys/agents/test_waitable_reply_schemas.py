@@ -9,14 +9,14 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys.orchestration.dynamic.core_policy.api import reply_schemas as dynamic_schemas
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import (
     IMPLEMENTER_REPLY as DYNAMIC_IMPLEMENTER_REPLY,
 )
-from vibesys.orchestration.dynamic.strategy.api import JUDGE_REPLY as DYNAMIC_JUDGE_REPLY
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.search.api import JUDGE_REPLY as DYNAMIC_JUDGE_REPLY
+from vibesys.orchestration.dynamic.search.api import (
     PROFILER_REPLY as DYNAMIC_PROFILER_REPLY,
 )
-from vibesys.orchestration.dynamic.strategy.api import DynamicConfig
+from vibesys.orchestration.dynamic.search.api import DynamicConfig
 from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_schemas
 from vibesys.orchestration.evolve.strategy.api import JUDGE_REPLY as EVOLVE_JUDGE_REPLY
 from vibesys.orchestration.evolve.strategy.api import MUTATOR_REPLY as EVOLVE_MUTATOR_REPLY

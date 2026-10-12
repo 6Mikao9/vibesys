@@ -11,17 +11,18 @@ import json
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.strategy._harness import envelope, round_trip
-from tests.vibesys.orchestration.dynamic.strategy._replies import (
+from tests.vibesys.orchestration.dynamic.search._decisions import works
+from tests.vibesys.orchestration.dynamic.search._harness import envelope, round_trip
+from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
 )
-from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
+from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vibesys.hypothesis import HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
-from vibesys.orchestration.dynamic.strategy.api import DynamicStrategyState
+from vibesys.orchestration.dynamic.search.api import DynamicState
 from vs_core.api import Finish
 from vs_dst.api import simulate
 
@@ -61,7 +62,7 @@ def test_a_run_survives_the_planner_retiring_a_finished_hypothesis(disposition: 
     assert run.finished
     assert not run.liveness_violations
     assert world.unused["orchestrator"] == 0, "the retiring plan was never asked for"
-    final = run.decisions[-1]
+    final = works(run.decisions)[-1]
     assert isinstance(final, Finish)
     assert final.result.outcome == "success"
 
@@ -86,11 +87,11 @@ def test_every_retirement_the_planner_schema_allows_leaves_a_persistable_state(
 
     assert run.finished
     assert not run.liveness_violations
-    assert isinstance(state, DynamicStrategyState)
+    assert isinstance(state, DynamicState)
 
     retired = next(item for item in state.hypotheses if item.hypothesis_id == "h1")
     assert retired.strategy is HypothesisStrategy(disposition)
     assert retired.reason_kind == reason_kind
-    assert DynamicStrategyState.model_validate(state.model_dump(mode="python")) == state
+    assert DynamicState.model_validate(state.model_dump(mode="python")) == state
     codec, saved = envelope(state)
     assert round_trip(codec, saved).strategy == state
