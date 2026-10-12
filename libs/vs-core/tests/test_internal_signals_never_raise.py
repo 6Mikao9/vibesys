@@ -64,9 +64,14 @@ class Session:
         self.results.extend(row for row in transition.events if isinstance(row, core.TurnResult))
 
     def decide(self, decision: core.Command) -> None:
+        submission = (
+            decision
+            if isinstance(decision, core.Finish)
+            else core.Wait(request=decision, until=core.Within(limit=100.0))
+        )
         self.feed(
             core.DecisionSubmitted(
-                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                decision=submission,
                 expected_revision=self.state.revision,
             )
         )

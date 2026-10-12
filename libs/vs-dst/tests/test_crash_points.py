@@ -21,7 +21,7 @@ from vs_dst.api import (
     using_crash_point_policy,
 )
 
-from ._tiny import TinyWorld
+from ._tiny import TinyWorld, decision_key
 
 pytest_plugins = ["pytester"]
 PLUGIN_DIR = Path(__file__).resolve().parents[1] / "pytest_plugin"
@@ -104,8 +104,8 @@ def test_a_recovered_run_offers_the_crash_points_of_its_own_hosts_and_can_be_cra
         assert again.finished, (first, second)
         assert again.result == normal.result, (first, second)
         assert again.no_effect_ran_twice(), (first, second)
-        assert {d.decision_id for d in again.decisions} == {
-            d.decision_id for d in normal.decisions
+        assert {decision_key(d) for d in again.decisions} == {
+            decision_key(d) for d in normal.decisions
         }, (first, second)
     with pytest.raises(ValueError, match="is not a crash point"):
         recovered.rerun_with_crash(first)

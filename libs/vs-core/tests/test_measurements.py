@@ -615,9 +615,18 @@ def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
         assert state.evaluation.jobs[0].observation == polled
         assert not [r for r in step.requests if isinstance(r, core.ObserveOwnedJob)]
         # Each poll of a live job comes due once, and an ended job is never polled again.
-        assert core.project(state).next_observe_at == (
-            None if terminal else state.evaluation.jobs[0].pacing.next_at
-        )
+        # The submission request stays open in the ledger (job observations never reach it),
+        # so the run loop also wakes at that request's limit.
+        job_due = None if terminal else state.evaluation.jobs[0].pacing.next_at
+        limits = [
+            row.until.at
+            for row in state.records.records
+            if row.phase in (core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED)
+        ]
+        wakes = [due for due in (job_due, *limits) if due is not None]
+        assert core.project(state).next_observe_at == min(wakes)
+        if terminal:
+            assert state.evaluation.jobs[0].pacing.next_at is None
         if not terminal:
             state = _tick_to_next_poll(state, resource)
         stale = core.step(

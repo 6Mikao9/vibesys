@@ -501,7 +501,7 @@ def registered_writer(
     if guard == "mutated":
         decision = changed(
             decision,
-            normalized_turn=changed(invocation.turn, deadline_at=invocation.turn.deadline_at - 1),
+            normalized_turn=changed(invocation.turn, max_turns=invocation.turn.max_turns + 1),
         )
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
@@ -862,6 +862,7 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
+        until=core.Until(at=100.0),
         payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
     )
@@ -1071,7 +1072,7 @@ def test_retention_crash_ack_requires_exact_checkpoint_history(
 @pytest.mark.parametrize("causal_decision", [False, True])
 @given(
     corruption=st.sampled_from(
-        ["none", "request", "operation", "wire", "scope", "deadline", "retry", "park", "target"]
+        ["none", "request", "operation", "wire", "scope", "retry", "park", "target"]
     )
 )
 @example(corruption="none")
@@ -1087,7 +1088,6 @@ def test_reopen_cannot_dispatch_a_modified_registered_command(
         "operation": {"operation_id": core.OperationId(root="other")},
         "wire": {"operation": changed(request.operation, payload_json="{}")},
         "scope": {"scope": core.Scope(owner=state.run.run_id, generation=1)},
-        "deadline": {"deadline_at": 99.0},
         "retry": {"retry_limit": state.run.limits.max_retries + 1},
     }
     request = request.model_copy(update=corruptions.get(corruption, {}))

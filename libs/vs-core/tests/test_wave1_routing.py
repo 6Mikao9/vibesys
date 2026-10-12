@@ -128,7 +128,6 @@ EXPECTED_TARGET = {
             "vs_core._settlement.advance",
             (
                 "assessment_submitted",
-                "settlement_dependency_resolved",
                 "ownership_settled",
                 "attempt_settled",
             ),
@@ -139,7 +138,6 @@ EXPECTED_TARGET = {
             (
                 "request_prepared",
                 "dispatch_authorized",
-                "decision_dependency_resolved",
                 "operation_retire_requested",
                 "retry_due",
                 "request_undispatchable",

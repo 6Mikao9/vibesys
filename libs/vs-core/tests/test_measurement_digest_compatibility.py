@@ -44,7 +44,9 @@ def test_stages_that_require_nothing_keep_the_digests_stored_by_main() -> None:
     assert digest(identity) == "90a714606a5a0ab0984d11502d70b1d75616bae4d5fd4e4f9b54ec8d50d8604f"
     assert digest(identity)[:24] == "90a714606a5a0ab0984d1150"  # the submission budget key
     assert digest(request) == "8604c1ab61451ba3fd312fdd7419c89d9c4b3cec5d0eeab6d2203479c94fb9ce"
-    assert digest(decision) == "23ee8b64fece1477f051306e0a3444efcdd1dd1224812fe137f94e86da00f1ac"
+    # A decision's own digest is not pinned: decisions no longer carry deadlines or
+    # dependencies, so envelopes stored by main are refused rather than resumed (version 4).
+    assert "required_outputs" not in decision.model_dump_json()
 
 
 @given(

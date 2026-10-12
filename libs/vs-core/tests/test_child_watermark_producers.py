@@ -462,8 +462,9 @@ def test_cached_old_epoch_inspection_cannot_recertify_missing_history(
     again = core.recover(state.records, context, core.RecoveryStarted(epoch=epoch + 1, now_at=1.0))
     assert again.state.recovery.phase == core.RecoveryPhase.RECOVERING
     assert any(
-        isinstance(request, core.InspectRequest) and request.resource_id == legacy.resource_id
-        for request in again.requests
+        isinstance(outbound.request, core.InspectRequest)
+        and outbound.request.resource_id == legacy.resource_id
+        for outbound in again.requests
     )
     # Correlate the real current-epoch query, preserving the same source fact.
     event, change = inspect_child(state, 0, sequence, query_epoch=epoch)

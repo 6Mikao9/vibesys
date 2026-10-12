@@ -57,6 +57,7 @@ from .types.records import (
     InspectRequest,
     OperationResult,
     OperationRetireRequested,
+    Outbound,
     RecordsState,
     RecoveryPhase,
     ReissueProof,
@@ -67,7 +68,6 @@ from .types.records import (
     RequestUndispatchable,
     RetryDue,
     TargetObservation,
-    inherit,
     request_lifecycle,
     within,
 )
@@ -177,7 +177,7 @@ def _prepared(
                 raise ContractError(("request_id",), "request identity conflict")
             return AreaChange(state=state)
     if not isinstance(request, ExecuteRegisteredOperation):
-        return AreaChange(state=state, requests=(inherit(request),))
+        return AreaChange(state=state, requests=(Outbound(request=request, until=event.until),))
     return _route_operation(state, context, event, request)
 
 
@@ -209,7 +209,7 @@ def _route_operation(
             expected_measurement=event.normalized_measurement,
         )
         return AreaChange(state=state, signals=(job,))
-    return AreaChange(state=state, requests=(inherit(request),))
+    return AreaChange(state=state, requests=(Outbound(request=request, until=event.until),))
 
 
 def _dispatched(state: RecordsState, event: DispatchAuthorized) -> AreaChange[RecordsState]:

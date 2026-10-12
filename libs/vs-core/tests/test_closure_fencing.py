@@ -260,7 +260,9 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
             frames=(
                 core.TraceFrame(
                     signal=clock,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(query,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(query, 100.0),)
+                    ),
                 ),
             )
         ),

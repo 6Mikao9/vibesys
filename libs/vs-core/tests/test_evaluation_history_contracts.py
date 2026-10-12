@@ -65,6 +65,7 @@ from vs_core.api import (
     TargetObservation,
     TimedOut,
     UnobservedJobFacts,
+    Until,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -480,7 +481,7 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
             payload_digest="payload",
             lifecycle=LifecycleClass.OWNED_JOB,
             phase=RequestPhase.COMPLETED,
-            reconcile_deadline_at=100.0,
+            until=Until(at=100.0),
         )
         with pytest.raises(ValidationError, match="evaluation_result"):
             RequestRecord.model_validate({**payload, "observation": None})

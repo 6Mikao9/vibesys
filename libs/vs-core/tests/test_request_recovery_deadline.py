@@ -10,6 +10,7 @@ from vs_core.api import (
     CoreState,
     DispatchTurn,
     EnsureSession,
+    FailureReason,
     EventId,
     Invocation,
     InvocationId,
@@ -40,6 +41,8 @@ from vs_core.api import (
     initial_state,
     step,
 )
+
+OWED = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 
 
 def pending_record(
@@ -156,7 +159,7 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
                 turn=turn,
             ),
             "lifecycle": LifecycleClass.SESSION_TURN,
-            "reconcile_deadline_at": 20_000.0,
+            "until": Until(at=20_000.0),
         }
     )
     live = live.model_copy(
@@ -236,7 +239,19 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
     assert cancellations == ({child.resource_id} if child_pending else set())
     assert result.state.sessions == state.sessions
     retained = {record.request_id: record for record in result.state.records.records}
-    assert all(retained[record.request_id] == record for record in state.records.records)
+    for record in state.records.records:
+        after = retained[record.request_id]
+        if child_pending and record.request_id == original.request_id and record.phase in OWED:
+            # The limit ends a record whose result is still owed.
+            assert after.failure is not None
+            assert after.failure.reason == FailureReason.TIMED_OUT
+            record_after = record.model_copy(
+                update={"phase": RequestPhase.BLOCKED, "failure": after.failure}
+            )
+        else:
+            # A record that already concluded keeps its result; only its child is cleaned up.
+            record_after = record
+        assert after == record_after
     assert result.state.records.children == state.records.children
     if not child_pending:
         assert result.requests == ()

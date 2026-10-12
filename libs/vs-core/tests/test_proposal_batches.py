@@ -67,8 +67,28 @@ def test_ordered_batch_validates_revision_once_and_preserves_partial_acceptance(
     )
     ordered = (waiting(decisions[0]), rejected, *map(waiting, decisions[1:]))
     if hasattr(core, "ProposalSubmitted"):
+        # The batch itself stores each decision's until; the trace only needs it to build the
+        # request the kernel prepares, so it reads the same value from a copy of the state.
+        until = core.Until(at=min(100.0, state.run.deadline_at))
+        stored = state.model_copy(
+            update={
+                "run": state.run.model_copy(
+                    update={
+                        "receipts": tuple(
+                            core.DecisionReceipt(
+                                decision_id=decision.decision_id,
+                                until=until,
+                                payload_digest="trace",
+                                feedback=core.Accepted(decision_id=decision.decision_id),
+                            )
+                            for decision in decisions
+                        )
+                    }
+                )
+            }
+        )
         frames = tuple(
-            core.operation_trace(state, decision)
+            core.operation_trace(stored, decision)
             .frames[0]
             .model_copy(update={"change": core.RecordsChange(state=state.records)})
             for decision in decisions
@@ -174,7 +194,9 @@ def test_leaf_rejection_rolls_back_only_its_decision_in_an_ordered_batch() -> No
     request = core.InspectRequest(scope=rejected.scope, target=core.RequestId(root="target"))
     result = core.trace_step(
         state,
-        core.ProposalSubmitted(decisions=(waiting(accepted), waiting(rejected)), expected_revision=0),
+        core.ProposalSubmitted(
+            decisions=(waiting(accepted), waiting(rejected)), expected_revision=0
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(

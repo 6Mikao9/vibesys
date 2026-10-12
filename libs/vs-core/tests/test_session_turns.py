@@ -549,7 +549,7 @@ def with_record(state: core.CoreState, request: core.Request) -> core.CoreState:
         ).hexdigest(),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.DISPATCHED,
-        until=core.Until(at=request.deadline_at),
+        until=core.Until(at=100.0),
     )
     return state.model_copy(
         update={"records": state.records.model_copy(update={"records": (record,)})}
@@ -1630,7 +1630,6 @@ def test_registered_turn_manifest_uses_original_canonical_request() -> None:
         "payload",
         "scope",
         "operation-id",
-        "deadline",
         "normalization",
         "lifecycle",
     ],
@@ -1655,8 +1654,6 @@ def test_registered_turn_cannot_admit_without_exact_canonical_operation(forgery:
         request = request.model_copy(
             update={"operation_id": core.OperationId(root="unrecorded-operation")}
         )
-    elif forgery == "deadline":
-        request = request.model_copy(update={"deadline_at": 101.0})
     elif forgery == "normalization":
         spec = spec.model_copy(update={"max_turns": 2})
     else:

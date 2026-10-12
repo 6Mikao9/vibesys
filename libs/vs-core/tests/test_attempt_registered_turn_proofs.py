@@ -257,7 +257,9 @@ def test_registered_turn_requires_exact_canonical_operation_authority(
         assert sum(row.charged for row in result.state.attempts[0].charges) == 2 * int(proven)
     elif action == "checkpoint":
         assert (
-            any(isinstance(request, core.SnapshotAndRetain) for request in result.requests)
+            any(
+                isinstance(outbound.request, core.SnapshotAndRetain) for outbound in result.requests
+            )
             == proven
         )
     else:

@@ -373,7 +373,7 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
             "payload_digest": "reopen",
             "lifecycle": LifecycleClass.IDEMPOTENT_WRITE,
             "phase": RequestPhase.COMPLETED,
-            "reconcile_deadline_at": 100.0,
+            "until": {"at": 100.0},
             "outcome_schema": descriptor.outcome_schema,
             "outcome_json": codec.encode_outcome(wire.schema_ref, outcome),
             "observation": Observation(

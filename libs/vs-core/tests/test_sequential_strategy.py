@@ -41,7 +41,6 @@ from vs_core.api import (
     ItemId,
     Observation,
     ObservationStatus,
-    Proposal,
     ReducerTrace,
     RequestTurn,
     RoleId,
@@ -103,7 +102,7 @@ class Sequential(Value):
     def bind(self, state: SequentialState) -> Sequential:
         return self.model_copy(update={"state": state})
 
-    def decide(self, view: CoreView) -> Proposal[SequentialState]:
+    def decide(self, view: CoreView) -> tuple[core.Command, ...]:
         scope = Scope(owner=view.run.run_id, generation=view.run.generation)
         index = self.state.next_index
         attempt = AttemptRef(attempt_id=AttemptId(root=f"attempt:{index}"), generation=0)
@@ -160,8 +159,8 @@ class Sequential(Value):
                 result=RunResultProposal(outcome="success", reason="two opaque items completed"),
             )
         else:
-            return Proposal(state=self.state, decisions=())
-        return Proposal(state=self.state, decisions=(decision,))
+            return ()
+        return (decision,)
 
     def on_event(self, view: CoreView, event: StrategyEvent) -> SequentialState:
         del view
@@ -179,6 +178,16 @@ class Sequential(Value):
                 }
             )
         return self.state
+
+
+def submitted(decision: core.Command, revision: int) -> DecisionSubmitted:
+    """A search submits work as a ``Wait`` with its limit, and a ``Finish`` as itself."""
+    if isinstance(decision, Finish):
+        return DecisionSubmitted(decision=decision, expected_revision=revision)
+    return DecisionSubmitted(
+        decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+        expected_revision=revision,
+    )
 
 
 def consume_trace(state: CoreState, event: CoreEvent, frames: list[TraceFrame]) -> Transition:
@@ -204,7 +213,7 @@ def exercise_item(
     state: CoreState, strategy: Sequential, index: int
 ) -> tuple[CoreState, Sequential]:
     """Replay one ordinary lifecycle item through declared area outputs."""
-    decision = strategy.decide(project(state)).decisions[0]
+    decision = strategy.decide(project(state))[0]
     assert isinstance(decision, StartAttempt)
     request = AttemptRequest(
         decision_id=decision.decision_id,
@@ -246,13 +255,16 @@ def exercise_item(
     active = AttemptsState(attempts=(*state.attempts.attempts, owned))
     result = consume_trace(
         state,
-        DecisionSubmitted(decision=decision, expected_revision=state.revision),
+        submitted(decision, state.revision),
         [
             TraceFrame(
                 signal=AttemptRequested(request=request),
                 change=SchedulingChange(state=scheduled, signals=(AdmitAttempt(request=request),)),
             ),
-            TraceFrame(signal=admitted, change=AttemptsChange(state=active, requests=(proposed,))),
+            TraceFrame(
+                signal=admitted,
+                change=AttemptsChange(state=active, requests=(core.inherit(proposed),)),
+            ),
         ],
     )
     strategy = deliver(strategy, result)
@@ -286,9 +298,11 @@ def exercise_item(
         ],
     )
     state, strategy = result.state, deliver(strategy, result)
-    decision = strategy.decide(project(state)).decisions[0]
+    decision = strategy.decide(project(state))[0]
     assert isinstance(decision, RequestTurn)
-    requested = TurnRequested(until=Until(at=100.0), scope=decision.scope, turn=decision.turn)
+    requested = TurnRequested(
+        until=Until(at=state.run.now_at + 100.0), scope=decision.scope, turn=decision.turn
+    )
     session = SessionView(
         spec=decision.turn.session,
         scope=Scope(owner=state.run.run_id, generation=0),
@@ -298,19 +312,21 @@ def exercise_item(
     )
     result = consume_trace(
         state,
-        DecisionSubmitted(decision=decision, expected_revision=state.revision),
+        submitted(decision, state.revision),
         [
             TraceFrame(
                 signal=requested,
                 change=SessionsChange(
                     state=SessionsState(sessions=(session,)),
-                    requests=(DispatchTurn(scope=decision.scope, turn=decision.turn),),
+                    requests=(
+                        core.inherit(DispatchTurn(scope=decision.scope, turn=decision.turn)),
+                    ),
                 ),
             )
         ],
     )
     state = result.state
-    duplicate = step(state, DecisionSubmitted(decision=decision, expected_revision=0))
+    duplicate = step(state, submitted(decision, 0))
     assert duplicate.requests == duplicate.events == ()
     request = result.requests[0]
     assert request.request_id is not None
@@ -349,7 +365,7 @@ def exercise_item(
         ],
     )
     state, strategy = result.state, deliver(strategy, result)
-    decision = strategy.decide(project(state)).decisions[0]
+    decision = strategy.decide(project(state))[0]
     assert isinstance(decision, Withdraw)
     settlement = Settlement(
         settlement_id=SettlementId(root=f"settlement:settle:{index}"),
@@ -363,7 +379,7 @@ def exercise_item(
     released = SlotReleased(attempt=attempt, admission_id=slot.admission_id)
     result = consume_trace(
         state,
-        DecisionSubmitted(decision=decision, expected_revision=state.revision),
+        submitted(decision, state.revision),
         [
             TraceFrame(
                 signal=AssessmentSubmitted(settlement=settlement),
@@ -395,7 +411,7 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
     for index in range(2):
         state, strategy = exercise_item(state, strategy, index)
     assert strategy.state.completed_ids == strategy.items
-    decision = strategy.decide(project(state)).decisions[0]
+    decision = strategy.decide(project(state))[0]
     assert isinstance(decision, Finish)
     terminal = CloseSession(
         scope=Scope(owner=state.run.run_id, generation=0),
@@ -403,13 +419,13 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
     )
     result = consume_trace(
         state,
-        DecisionSubmitted(decision=decision, expected_revision=state.revision),
+        submitted(decision, state.revision),
         [
             TraceFrame(
                 signal=AdmissionControl(action="drain"),
                 change=SchedulingChange(
                     state=state.scheduling.model_copy(update={"admission_closed": True}),
-                    requests=(terminal,),
+                    requests=(core.within(terminal, 100.0),),
                     signals=(RunDrained(),),
                 ),
             )
@@ -475,6 +491,4 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
     )
     assert result.state.run.status == RunStatus.TERMINAL
     assert sum(isinstance(event, RunEnded) for event in result.events) == 1
-    assert (
-        step(result.state, DecisionSubmitted(decision=decision, expected_revision=0)).requests == ()
-    )
+    assert step(result.state, submitted(decision, 0)).requests == ()

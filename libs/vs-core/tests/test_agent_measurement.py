@@ -30,6 +30,12 @@ def submissions(state: core.CoreState) -> list[core.SubmitMeasurement]:
     ]
 
 
+def limit_of(state: core.CoreState, request_id: core.RequestId | None) -> float:
+    """The absolute time core stored for the submission with this identity."""
+    (record,) = [r for r in state.records.records if r.request_id == request_id]
+    return record.until.at
+
+
 def test_call_allocates_one_submission_without_a_decision() -> None:
     result = call(core.initial_state(), "c1")
     assert len(result.requests) == 1
@@ -41,7 +47,7 @@ def test_call_allocates_one_submission_without_a_decision() -> None:
             call_id="c1",
             scope=request.scope,
             request_id=request.request_id,
-            deadline_at=request.deadline_at,
+            deadline_at=limit_of(result.state, request.request_id),
         ),
     )
     budget = result.state.evaluation.submission_budgets[0]
@@ -73,7 +79,7 @@ def test_agent_call_and_measure_decision_share_one_budget() -> None:
     assert len(submissions(result.state)) == 1
     (row,) = result.state.evaluation.agent_calls
     assert (row.request_id, row.repeat, row.rejection) == (measure.request_id, True, None)
-    assert row.deadline_at == measure.deadline_at
+    assert row.deadline_at == limit_of(result.state, measure.request_id)
 
 
 @given(

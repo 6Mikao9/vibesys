@@ -66,11 +66,11 @@ def test_step_determinism_immutability_and_revision(revision: int, identity: str
     assert project(result.state).revision == result.state.revision
     # A fresh start is admitted into the free slot and asks for its workspace.
     assert isinstance(result.events[0], Accepted)
-    assert result.events[0].decision_id == event.decision.decision_id
+    assert result.events[0].decision_id == event.command.decision_id
     assert [type(request).__name__ for request in result.requests] == ["EnsureWorkspace"]
     view = project(result.state).scheduling
     assert view.queue == ()
-    assert [slot.admission_id for slot in view.slots] == [event.decision.decision_id]
+    assert [slot.admission_id for slot in view.slots] == [event.command.decision_id]
 
 
 def test_disabled_capability_rejects_before_preparing_or_charging() -> None:

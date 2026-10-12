@@ -677,7 +677,8 @@ def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
         if isinstance(request, CancelOwnedResource)
     } == {child}
     assert result.state.records.children == (lease,)
-    assert result.state.records.records[0] == timed_out(original)
+    # The setup concluded and its owner heard; only its unreleased child is cleaned up.
+    assert result.state.records.records[0] == original
     assert result.state.run.status == RunStatus.PAUSED
 
 
@@ -1247,9 +1248,7 @@ def test_known_resource_deadline_requires_conclusive_release_before_skipping_can
         if isinstance(request, CancelOwnedResource)
     }
     assert resources == (set() if positive_release else {resource})
-    assert result.state.records.records[0] == (
-        original if positive_release else timed_out(original)
-    )
+    assert result.state.records.records[0] == original
     assert result.state.sessions == state.sessions
     assert result.state.attempts == state.attempts
 

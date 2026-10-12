@@ -23,16 +23,13 @@ def receipt(decision: core.Command) -> core.DecisionReceipt:
     )
 
 
-def stop(
-    state: core.CoreState, name: str, depends_on: tuple[core.DecisionId, ...] = ()
-) -> core.Finish:
+def stop(state: core.CoreState, name: str) -> core.Finish:
     """Canonical run-scoped control with an explicit result."""
     return core.Finish(
         decision_id=core.DecisionId(root=name),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
         result=core.RunResultProposal(outcome="cancelled", reason="proof guard"),
-        depends_on=depends_on,
     )
 
 
@@ -72,7 +69,6 @@ def test_dependency_dispatch_requires_exact_owner_receipt(defect: str, identity:
         target=core.RequestId(root="target"),
         decision_id=command.decision_id,
     )
-    assert core.dependency_status(state, request) == core.DependencyStatus.FAILED
     assert request.request_id is not None
     canonical = json.dumps(
         request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -98,31 +94,6 @@ def test_dependency_dispatch_requires_exact_owner_receipt(defect: str, identity:
             state.model_copy(update={"records": ready}),
             core.DispatchAuthorized(request_id=request.request_id),
         )
-    assert (
-        core.dependency_status(state, request.model_copy(update={"decision_id": None}))
-        == core.DependencyStatus.SUCCEEDED
-    )
-
-
-def test_completed_dependency_with_foreign_feedback_cannot_wake_dispatch() -> None:
-    state = core.initial_state()
-    command = stop(state, "prerequisite")
-    accepted = receipt(command).model_copy(
-        update={
-            "feedback": core.Accepted(decision_id=core.DecisionId(root="foreign")),
-            "completion": core.CompletionStatus.SUCCEEDED,
-        }
-    )
-    state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (accepted,)})})
-    request = core.InspectRequest(
-        scope=command.scope,
-        target=core.RequestId(root="target"),
-    )
-    assert core.dependency_status(state, request) == core.DependencyStatus.FAILED
-    decision = stop(state, "dependent", (command.decision_id,))
-    result = core.step(state, core.DecisionSubmitted(decision=decision, expected_revision=0))
-    assert isinstance(result.events[0], core.Rejected)
-    assert result.events[0].code == core.RejectionCode.DEPENDENCY
 
 
 def test_completion_rejects_mismatched_feedback_before_publishing_wake() -> None:
@@ -156,125 +127,6 @@ def test_completion_rejects_mismatched_feedback_before_publishing_wake() -> None
     with pytest.raises(core.ContractError, match="accepted decision"):
         core.trace_step(state, ingress, trace)
     assert state.run.receipts[0].completion is None
-
-
-@pytest.mark.parametrize("later_accepted", [False, True])
-def test_run_finality_keeps_first_accepted_stop_dependencies(*, later_accepted: bool) -> None:
-    state = core.initial_state()
-    prerequisite = core.StartAttempt(
-        decision_id=core.DecisionId(root="prerequisite"),
-        scope=core.Scope(owner=state.run.run_id, generation=0),
-        attempt_id=core.AttemptId(root="attempt"),
-        item_id=core.ItemId(root="item"),
-        workspace=core.WorkspacePlan(
-            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
-        ),
-        budget=core.AttemptBudget(),
-    )
-    first = stop(state, "first", (prerequisite.decision_id,))
-    later = stop(state, "later")
-    later_row = receipt(later)
-    if not later_accepted:
-        later_row = later_row.model_copy(
-            update={
-                "feedback": core.Rejected(
-                    decision_id=later.decision_id,
-                    code=core.RejectionCode.CLOSED_SCOPE,
-                    path=("scope",),
-                    detail="rejected later Finish",
-                ),
-            }
-        )
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={
-                    "status": core.RunStatus.CLOSING,
-                    "result": first.result,
-                    "receipts": (receipt(prerequisite), receipt(first), later_row),
-                }
-            )
-        }
-    )
-    clock = core.ClockAdvanced(now_at=1.0)
-    trace = core.ReducerTrace(
-        frames=(
-            core.TraceFrame(
-                signal=clock,
-                change=core.SchedulingChange(state=state.scheduling, signals=(core.RunDrained(),)),
-            ),
-        )
-    )
-    result = core.trace_step(state, clock, trace)
-    assert result.state.run.status == core.RunStatus.CLOSING
-    assert not any(isinstance(event, core.RunEnded) for event in result.events)
-    completed = state.run.receipts[0].model_copy(
-        update={"completion": core.CompletionStatus.SUCCEEDED}
-    )
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={
-                    "receipts": (completed, *state.run.receipts[1:]),
-                }
-            )
-        }
-    )
-    result = core.trace_step(state, clock, trace)
-    assert result.state.run.status == core.RunStatus.TERMINAL
-    assert isinstance(result.events[-1], core.RunEnded)
-
-
-@pytest.mark.parametrize("status", list(core.CompletionStatus))
-def test_dependency_completion_never_wakes_a_foreign_feedback_command(
-    status: core.CompletionStatus,
-) -> None:
-    state = core.initial_state()
-    command = stop(state, "prerequisite")
-    dependent = core.Withdraw(
-        decision_id=core.DecisionId(root="dependent"),
-        scope=command.scope,
-        target=core.AttemptRef(attempt_id=core.AttemptId(root="attempt"), generation=0),
-        disposition=core.Settle(
-            assessments=(), eligible=False, retention="discard", outcome="failed"
-        ),
-        depends_on=(command.decision_id,),
-    )
-    foreign = receipt(dependent).model_copy(
-        update={
-            "feedback": core.Accepted(decision_id=core.DecisionId(root="foreign")),
-        }
-    )
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={
-                    "receipts": (receipt(command), foreign),
-                }
-            )
-        }
-    )
-    assert isinstance(dependent.target, core.AttemptRef)
-    ingress = core.AttemptEvaluationHistoryUpdated(
-        attempt=dependent.target,
-        history=core.AttemptEvaluationHistory(),
-    )
-    trace = core.ReducerTrace(
-        frames=(
-            core.TraceFrame(
-                signal=ingress,
-                change=core.AttemptsChange(
-                    state=state.attempts,
-                    signals=(
-                        core.DecisionCompleted(decision_id=command.decision_id, status=status),
-                    ),
-                ),
-            ),
-        )
-    )
-    result = core.trace_step(state, ingress, trace)
-    assert result.state.run.receipts[1] == foreign
-    assert result.state.settlement == state.settlement
 
 
 @pytest.mark.parametrize("episode", [None, core.DecisionId(root="foreign")])

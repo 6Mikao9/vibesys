@@ -1361,113 +1361,6 @@ def test_settle_decision_without_current_owner_authority_has_a_typed_rejection(
     assert result.state.settlement == state.settlement
 
 
-def prerequisite_receipt(completion: core.CompletionStatus | None = None) -> core.DecisionReceipt:
-    identity = core.DecisionId(root="prerequisite")
-    state = core.initial_state()
-    decision = core.StartAttempt(
-        decision_id=identity,
-        scope=core.Scope(owner=state.run.run_id, generation=0),
-        attempt_id=core.AttemptId(root="prerequisite"),
-        item_id=core.ItemId(root="prerequisite"),
-        workspace=core.WorkspacePlan(
-            mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
-        ),
-        budget=core.AttemptBudget(),
-    )
-    return core.DecisionReceipt(
-        decision_id=identity,
-        decision=decision,
-        payload_digest=value_digest(decision),
-        feedback=core.Accepted(decision_id=identity),
-        completion=completion,
-    )
-
-
-@pytest.mark.parametrize("completed", [False, True])
-def test_settle_dependency_requires_semantic_completion_before_acknowledgement(
-    *, completed: bool
-) -> None:
-    value = settlement()
-    state = pending_state(value)
-    prerequisite = prerequisite_receipt(core.CompletionStatus.SUCCEEDED if completed else None)
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(update={"receipts": (prerequisite,)}),
-            "settlement": state.settlement.model_copy(update={"pending": ()}),
-        }
-    )
-    decision = settlement_decision(state, value).model_copy(
-        update={"depends_on": (prerequisite.decision_id,)}
-    )
-    result = core.step(
-        reload(state),
-        core.DecisionSubmitted(
-            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
-            expected_revision=state.revision,
-        ),
-    )
-    receipt = next(
-        row for row in result.state.run.receipts if row.decision_id == decision.decision_id
-    )
-    if completed:
-        assert isinstance(receipt.feedback, core.Accepted)
-        assert receipt.completion == core.CompletionStatus.SUCCEEDED
-        assert len(result.state.settlement.settlements) == 1
-    else:
-        assert isinstance(receipt.feedback, core.Rejected)
-        assert receipt.feedback.code == core.RejectionCode.DEPENDENCY
-        assert receipt.feedback.path == ("depends_on",)
-        assert receipt.feedback.retry_after == core.DependencyRef(
-            decision_id=prerequisite.decision_id
-        )
-        assert result.state.settlement == state.settlement
-        assert result.events == (receipt.feedback,)
-    assert result.requests == ()
-
-
-def test_existing_pending_settlement_cannot_complete_an_unresolved_decision_dependency() -> None:
-    value = settlement().model_copy(
-        update={"settlement_id": core.SettlementId(root="settlement:settle")}
-    )
-    state = pending_state(value)
-    prerequisite = prerequisite_receipt()
-    decision = settlement_decision(state, value).model_copy(
-        update={"depends_on": (prerequisite.decision_id,)}
-    )
-    receipt = core.DecisionReceipt(
-        decision_id=decision.decision_id,
-        decision=decision,
-        payload_digest=value_digest(decision),
-        feedback=core.Accepted(decision_id=decision.decision_id),
-    )
-    state = state.model_copy(
-        update={"run": state.run.model_copy(update={"receipts": (prerequisite, receipt)})}
-    )
-    result = core.step(reload(state), released(value))
-    assert result.state.settlement.pending == (value,)
-    assert result.state.settlement.settlements == ()
-    assert result.state.run.receipts[1].completion is None
-    assert result.events == result.requests == ()
-    state = result.state.model_copy(
-        update={
-            "run": result.state.run.model_copy(
-                update={
-                    "receipts": (
-                        prerequisite.model_copy(
-                            update={"completion": core.CompletionStatus.SUCCEEDED}
-                        ),
-                        receipt,
-                    ),
-                }
-            )
-        }
-    )
-    final = core.step(reload(state), released(value))
-    assert final.state.settlement.settlements == (value,)
-    assert final.state.run.receipts[1].completion == core.CompletionStatus.SUCCEEDED
-    assert final.events == (core.AttemptSettled(settlement=value),)
-
-
 @given(field=st.sampled_from(["candidate", "assessments"]))
 def test_canonical_settlement_event_cannot_rewrite_the_accepted_proposal(field: str) -> None:
     value = settlement("failed", "wip").model_copy(
@@ -1509,9 +1402,7 @@ def test_canonical_settlement_event_cannot_rewrite_the_accepted_proposal(field: 
     assert state == before
 
 
-@given(
-    mode=st.sampled_from(["failed", "cancelled", "succeeded", "rejected", "failed-prerequisite"])
-)
+@given(mode=st.sampled_from(["failed", "cancelled", "succeeded", "rejected"]))
 def test_recovered_pending_settlement_cannot_fall_back_from_its_terminal_decision(
     mode: str,
 ) -> None:
@@ -1520,9 +1411,6 @@ def test_recovered_pending_settlement_cannot_fall_back_from_its_terminal_decisio
     )
     state = pending_state(value)
     decision = settlement_decision(state, value)
-    prerequisite = prerequisite_receipt(core.CompletionStatus.FAILED)
-    if mode == "failed-prerequisite":
-        decision = decision.model_copy(update={"depends_on": (prerequisite.decision_id,)})
     statuses = {
         "failed": core.CompletionStatus.FAILED,
         "cancelled": core.CompletionStatus.CANCELLED,
@@ -1543,7 +1431,7 @@ def test_recovered_pending_settlement_cannot_fall_back_from_its_terminal_decisio
         feedback=feedback,
         completion=statuses.get(mode),
     )
-    receipts = (prerequisite, receipt) if mode == "failed-prerequisite" else (receipt,)
+    receipts = (receipt,)
     state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": receipts})})
     for event in (released(value), core.AttemptSettled(settlement=value)):
         result = core.step(state, event)
@@ -1769,73 +1657,6 @@ def test_pending_preserves_requested_eligibility_until_all_proofs_arrive(
     immediate = core.step(reload(ready), core.AssessmentSubmitted(settlement=value))
     assert final.state.settlement.settlements == immediate.state.settlement.settlements
     assert final.state.settlement.settlements[0].eligible == requested
-
-
-@given(
-    count=st.integers(min_value=1, max_value=5),
-    mismatch=st.integers(min_value=0, max_value=4),
-    wake=st.sampled_from(["submit", "release"]),
-)
-def test_prerequisite_acceptance_must_identify_its_own_receipt(
-    count: int, mismatch: int, wake: str
-) -> None:
-    value = settlement().model_copy(
-        update={"settlement_id": core.SettlementId(root="settlement:settle")}
-    )
-    state = pending_state(value)
-    prerequisites = tuple(
-        core.DecisionReceipt(
-            decision_id=core.DecisionId(root=f"prerequisite-{index}"),
-            payload_digest=f"prerequisite-{index}",
-            feedback=core.Accepted(
-                decision_id=core.DecisionId(
-                    root="wrong" if index == mismatch % count else f"prerequisite-{index}"
-                )
-            ),
-            completion=core.CompletionStatus.SUCCEEDED,
-        )
-        for index in range(count)
-    )
-    decision = settlement_decision(state, value).model_copy(
-        update={"depends_on": tuple(row.decision_id for row in prerequisites)}
-    )
-    receipt = core.DecisionReceipt(
-        decision_id=decision.decision_id,
-        decision=decision,
-        payload_digest=value_digest(decision),
-        feedback=core.Accepted(decision_id=decision.decision_id),
-    )
-    state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={
-                    "receipts": prerequisites if wake == "submit" else (*prerequisites, receipt)
-                }
-            ),
-            "settlement": state.settlement.model_copy(
-                update={"pending": () if wake == "submit" else (value,)}
-            ),
-        }
-    )
-    event = (
-        core.DecisionSubmitted(
-            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
-            expected_revision=state.revision,
-        )
-        if wake == "submit"
-        else released(value)
-    )
-    result = core.step(reload(state), event)
-    assert result.state.settlement.settlements == ()
-    resulting_receipt = next(
-        row for row in result.state.run.receipts if row.decision_id == decision.decision_id
-    )
-    assert resulting_receipt.completion is None
-    if wake == "submit":
-        assert isinstance(resulting_receipt.feedback, core.Rejected)
-        assert resulting_receipt.feedback.code == core.RejectionCode.DEPENDENCY
-    else:
-        assert result.state.settlement.pending == (value,)
 
 
 @given(

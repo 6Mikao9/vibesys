@@ -1053,7 +1053,6 @@ __all__ = [
     "component",
     "decision_of_operation",
     "declared_operation",
-    "dependency_status",
     "evidence_view",
     "inherit",
     "initial_state",

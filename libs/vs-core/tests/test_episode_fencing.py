@@ -71,7 +71,9 @@ def turn_proposal(state: core.CoreState, scope: core.Scope) -> core.Transition:
             frames=(
                 core.TraceFrame(
                     signal=signal,
-                    change=core.SessionsChange(state=state.sessions, requests=(request,)),
+                    change=core.SessionsChange(
+                        state=state.sessions, requests=(core.inherit(request),)
+                    ),
                 ),
             )
         ),
@@ -112,7 +114,9 @@ def test_separately_proposed_measurement_keeps_current_admission_episode() -> No
             frames=(
                 core.TraceFrame(
                     signal=signal,
-                    change=core.EvaluationChange(state=state.evaluation, requests=(request,)),
+                    change=core.EvaluationChange(
+                        state=state.evaluation, requests=(core.inherit(request),)
+                    ),
                 ),
             )
         ),
@@ -169,7 +173,9 @@ def test_separately_proposed_registered_mutation_keeps_current_admission_episode
             frames=(
                 core.TraceFrame(
                     signal=signal,
-                    change=core.RecordsChange(state=state.records, requests=(request,)),
+                    change=core.RecordsChange(
+                        state=state.records, requests=(core.inherit(request),)
+                    ),
                 ),
             )
         ),
@@ -249,7 +255,9 @@ def test_old_recorded_cleanup_remains_dispatchable_after_reentry() -> None:
             frames=(
                 core.TraceFrame(
                     signal=clock,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(request, 100.0),)
+                    ),
                 ),
             )
         ),
@@ -294,7 +302,9 @@ def test_ordinary_retention_and_discard_cannot_bypass_mutation_fences(
             frames=(
                 core.TraceFrame(
                     signal=clock,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(request, 100.0),)
+                    ),
                 ),
             )
         ),
@@ -410,7 +420,9 @@ def test_previous_cleanup_cannot_close_a_reused_session_in_a_new_episode() -> No
             frames=(
                 core.TraceFrame(
                     signal=clock,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(request, 100.0),)
+                    ),
                 ),
             )
         ),
@@ -468,7 +480,9 @@ def test_cleanup_cause_for_another_attempt_cannot_authorize_snapshot() -> None:
             frames=(
                 core.TraceFrame(
                     signal=clock,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(request, 100.0),)
+                    ),
                 ),
             )
         ),
@@ -529,7 +543,9 @@ def test_recorded_retirement_cannot_mutate_a_reused_workspace_after_reentry(kind
             frames=(
                 core.TraceFrame(
                     signal=event,
-                    change=core.RecordsChange(state=state.records, requests=(request,)),
+                    change=core.RecordsChange(
+                        state=state.records, requests=(core.within(request, 100.0),)
+                    ),
                 ),
             )
         ),
@@ -581,7 +597,9 @@ def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> N
             frames=(
                 core.TraceFrame(
                     signal=clock,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(request, 100.0),)
+                    ),
                 ),
             )
         ),
@@ -644,7 +662,9 @@ def test_recorded_closure_authorizes_exact_settlement_and_setup_release_work(pro
             frames=(
                 core.TraceFrame(
                     signal=clock,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(request, 100.0),)
+                    ),
                 ),
             )
         ),

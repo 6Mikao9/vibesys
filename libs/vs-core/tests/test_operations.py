@@ -10,7 +10,6 @@ from pydantic import BaseModel, ValidationError
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
-    Accepted,
     Capabilities,
     ContractError,
     DecisionId,
@@ -39,9 +38,7 @@ from vs_core.api import (
     Wait,
     Within,
     initial_state,
-    operation_trace,
     step,
-    trace_step,
     validate_startup,
 )
 
@@ -157,12 +154,11 @@ def test_library_owned_write_round_trips_atomic_envelope_and_stable_outbox(conte
         request=request,
     )
     decision = codec.validate_decision(decision)
-    result = trace_step(
+    result = step(
         envelope.core,
         DecisionSubmitted(
             decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
         ),
-        operation_trace(envelope.core, decision),
     )
     assert len(result.requests) == 1
     assert result.requests[0].request_id == result.state.records.records[0].request_id
@@ -216,7 +212,7 @@ def test_missing_changed_and_unknown_schemas_fail_closed() -> None:
         )
     with pytest.raises(ValidationError, match="registered codec"):
         Operation.model_validate_json(
-            '{"kind":"operation","decision_id":{"kind":"decision","root":"d"},"scope":{"owner":{"kind":"run","root":"run"},"generation":0},"request":{"kind":"project.artifact.put","lifecycle":"idempotent_external_write","content":"x"},"deadline_at":10.0}'
+            '{"kind":"operation","decision_id":{"kind":"decision","root":"d"},"scope":{"owner":{"kind":"run","root":"run"},"generation":0},"request":{"kind":"project.artifact.put","lifecycle":"idempotent_external_write","content":"x"}}'
         )
 
 
@@ -271,49 +267,6 @@ def test_unregistered_same_kind_model_cannot_enter_outbox_or_poison_receipts() -
     assert result.state.run.receipts[0].decision is None
     saved = envelope.model_copy(update={"core": result.state})
     assert codec.decode_envelope(RunEnvelope[StrategyState], codec.encode_envelope(saved)) == saved
-
-
-def test_decision_dependencies_keep_semantic_completion_identity() -> None:
-    codec, envelope = operation_state()
-    scope = Scope(owner=envelope.core.run.run_id, generation=0)
-    first = codec.validate_decision(
-        Operation(
-            decision_id=DecisionId(root="a"),
-            scope=scope,
-            request=ArtifactPut(content="first"),
-        )
-    )
-    result = trace_step(
-        envelope.core,
-        DecisionSubmitted(
-            decision=Wait(request=first, until=Within(limit=100.0)), expected_revision=0
-        ),
-        operation_trace(envelope.core, first),
-    )
-    assert isinstance(result.events[0], Accepted)
-    first_ids = result.events[0].request_ids
-    assert first_ids == (result.requests[0].request_id,)
-    second = codec.validate_decision(
-        Operation(
-            decision_id=DecisionId(root="b"),
-            scope=scope,
-            depends_on=(first.decision_id,),
-            request=ArtifactPut(content="dependent"),
-        )
-    )
-    dependent = trace_step(
-        result.state,
-        DecisionSubmitted(
-            decision=Wait(request=second, until=Within(limit=100.0)), expected_revision=1
-        ),
-        operation_trace(result.state, second),
-    )
-    assert dependent.requests[0].depends_on == ()
-    assert dependent.requests[0].decision_dependencies == (first.decision_id,)
-    assert isinstance(dependent.events[0], Accepted)
-    assert tuple(value.decision_id for value in dependent.events[0].dependencies) == (
-        first.decision_id,
-    )
 
 
 @given(st.text(min_size=1, max_size=30))

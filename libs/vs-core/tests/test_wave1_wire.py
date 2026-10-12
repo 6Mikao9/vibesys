@@ -108,9 +108,10 @@ def envelope() -> RunEnvelope[StrategyState]:
 def test_envelope_versions_are_rejected_before_decoding_new_contracts(version: int) -> None:
     codec = OperationRegistry()
     # Deliberately absent core proves the version barrier precedes nested decode.
-    with pytest.raises(ContractError, match=r"schema_version.*migration"):
+    named = rf"schema_version.*envelope version {version} is not supported"
+    with pytest.raises(ContractError, match=named):
         codec.decode_envelope(RunEnvelope[StrategyState], json.dumps({"schema_version": version}))
-    with pytest.raises(ContractError, match=r"schema_version.*migration"):
+    with pytest.raises(ContractError, match=named):
         codec.encode_envelope(envelope().model_copy(update={"schema_version": version}))
 
 
@@ -132,7 +133,7 @@ def test_previous_envelope_requires_selected_migration() -> None:
     codec = OperationRegistry()
     current = envelope()
     previous = current.model_copy(update={"schema_version": 1}).model_dump_json()
-    with pytest.raises(ContractError, match="migration"):
+    with pytest.raises(ContractError, match="envelope version 1 is not supported"):
         codec.decode_envelope(RunEnvelope[StrategyState], previous)
     loaded = codec.migrate_envelope(
         RunEnvelope[StrategyState],

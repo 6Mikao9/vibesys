@@ -113,7 +113,15 @@ class Cluster:
 
     def tick(self) -> None:
         due = core.project(self.state).next_observe_at
-        self.now = max(self.state.run.now_at + 1.0, due if due is not None else 0.0)
+        target = max(self.state.run.now_at + 1.0, due if due is not None else 0.0)
+        # The far side answers within each request's limit: time never jumps past the limit of
+        # a request it has not answered yet (that would end the request, which is another test).
+        limits = [
+            record.until.at
+            for record in self.state.records.records
+            if record.request in self.pending()
+        ]
+        self.now = max(self.state.run.now_at, min([target, *(at - 1.0 for at in limits)]))
         self.feed(core.ClockAdvanced(now_at=self.now))
 
 

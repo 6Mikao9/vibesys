@@ -43,7 +43,7 @@ def test_leaf_budget_rejection_preserves_no_charges_requests_or_acceptance() -> 
                     signal=signal,
                     change=core.SchedulingChange(
                         state=state.scheduling.model_copy(update={"released_slot_seconds": 1.0}),
-                        requests=(request,),
+                        requests=(core.within(request, 10.0),),
                         events=(rejection,),
                     ),
                 ),

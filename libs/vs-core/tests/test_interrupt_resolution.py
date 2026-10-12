@@ -45,7 +45,7 @@ def _answered(
     return reload_step(dispatched.state, core.RequestObserved(observation=observation))
 
 
-def _open_interrupt_waits(state: core.CoreState) -> list[core.Wait]:
+def _open_interrupt_waits(state: core.CoreState) -> list[core.OpenWait]:
     return [wait for wait in core.orphan_waits(state) if wait.waiter == core.WaitKind.INTERRUPT]
 
 

@@ -23,7 +23,6 @@ class RequestFields(TypedDict):
     request_id: core.RequestId
     scope: core.Scope
     admission_id: core.DecisionId
-    deadline_at: float
 
 
 def episode_state(

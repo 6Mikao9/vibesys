@@ -1288,13 +1288,17 @@ def _deadline(
     )
     requests: list[Outbound] = []
     events: tuple[Failed, ...] = ()
-    failed = record.failure or _failure(record, event.reason)
     if previous_block is None:
         requests.append(_probe(block, context))
-        events = (failed,)
-    state = _replace_record(
-        state, record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
-    )
+    if is_open(record):
+        # Only a record whose result is still owed ends with a failure. One that already
+        # concluded (it is here for its unreleased children) has told its owner already.
+        failed = record.failure or _failure(record, event.reason)
+        if previous_block is None:
+            events = (failed,)
+        state = _replace_record(
+            state, record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
+        )
     observation = record.observation
     resources = []
     if (

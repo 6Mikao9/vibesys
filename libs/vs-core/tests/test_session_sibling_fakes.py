@@ -231,7 +231,7 @@ def fake_attempts(
         state=state.model_copy(
             update={"attempts": tuple(updated if row == owner else row for row in state.attempts)}
         ),
-        requests=(request,),
+        requests=(core.within(request, 100.0),),
     )
 
 

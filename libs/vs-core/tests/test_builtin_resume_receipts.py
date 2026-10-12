@@ -67,8 +67,6 @@ def corrupt_origin(state: core.CoreState, fault: str) -> core.CoreState:
                 update={"output_schema": core.SchemaRef(name="foreign-output", version=1)}
             )
             state = replace_request(state, request.model_copy(update={"turn": turn}))
-        case "deadline":
-            state = replace_request(state, request.model_copy(update={"deadline_at": 99.0}))
         case "request-origin":
             state = replace_request(
                 state, request.model_copy(update={"decision_id": core.DecisionId(root="foreign")})
@@ -106,7 +104,6 @@ def assert_origin_rejected(state: core.CoreState, identity: core.RequestId) -> N
         "decision-type",
         "scope",
         "request-turn",
-        "deadline",
         "request-origin",
     ],
 )

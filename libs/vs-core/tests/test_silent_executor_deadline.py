@@ -1,9 +1,9 @@
-"""An executor that answered Unknown or a retryable failure and went silent is blocked on time.
+"""An open record ends at its limit, so an executor that went silent is blocked on time.
 
-Core learns time only from ``ClockAdvanced``. Any tick at or after an answered-but-open
-record's reconciliation bound blocks it (a ``BlockRequest`` request), earlier ticks do not,
-the run's recovery barrier stays open for scheduling, and the projected next wake names
-the bound so a shell sleeps toward it instead of stalling.
+Core learns time only from ``ClockAdvanced``. Any tick at or after an open record's
+``until`` blocks it (a ``BlockRequest`` request and a ``Failed(TIMED_OUT)`` event), earlier
+ticks do not, the run's recovery barrier stays open for scheduling, and the projected next
+wake names the limit so a shell sleeps toward it instead of stalling.
 """
 
 from hypothesis import given
@@ -16,6 +16,8 @@ from vs_core.api import (
     CoreState,
     EnsureSession,
     EventId,
+    Failed,
+    FailureReason,
     LifecycleClass,
     Observation,
     ObservationStatus,
@@ -103,7 +105,8 @@ def test_a_tick_blocks_a_silent_record_exactly_when_its_bound_has_passed(
     assert after.state.records.recovery.phase == RecoveryPhase.READY
 
 
-def test_an_record_still_executing_has_no_bound_to_wait_for() -> None:
+def test_a_record_still_executing_ends_at_its_limit_like_any_open_record() -> None:
+    """A limit bounds the request, not the executor's answers: no answer is no exception."""
     state = _silent(RequestPhase.DISPATCHED, ObservationStatus.PENDING, terminal=False)
     state = state.model_copy(
         update={
@@ -114,26 +117,38 @@ def test_an_record_still_executing_has_no_bound_to_wait_for() -> None:
             )
         }
     )
-    assert project(state).next_observe_at is None
-    assert not step(state, ClockAdvanced(now_at=10_000.0)).requests
+    assert project(state).next_observe_at == BOUND
+    assert not step(state, ClockAdvanced(now_at=BOUND - 1.0)).requests
+    after = step(state, ClockAdvanced(now_at=10_000.0))
+    assert [type(r) for r in after.requests] == [BlockRequest]
+    assert after.state.records.records[0].phase == RequestPhase.BLOCKED
 
 
 @given(
     status=st.sampled_from(list(ObservationStatus)), now=st.floats(min_value=1.0, max_value=1000.0)
 )
-def test_only_an_answered_open_record_is_blocked_and_progress_never_is(
+def test_every_open_record_ends_exactly_at_its_limit_whatever_the_executor_last_said(
     status: ObservationStatus, now: float
 ) -> None:
-    """A DISPATCHED record still reporting progress is never blocked at its bound."""
+    """The limit passing ends the record with ``Failed(TIMED_OUT)`` naming that limit."""
     state = _silent(RequestPhase.DISPATCHED, status, terminal=False)
-    blocks = [
-        r for r in step(state, ClockAdvanced(now_at=now)).requests if isinstance(r, BlockRequest)
-    ]
-    retryable = status in (
-        ObservationStatus.FAILED,
-        ObservationStatus.REJECTED,
-        ObservationStatus.CANCELLED,
+    assert project(state).next_observe_at == BOUND
+    after = step(state, ClockAdvanced(now_at=now))
+    blocks = [r for r in after.requests if isinstance(r, BlockRequest)]
+    record = after.state.records.records[0]
+    if now < BOUND:
+        assert not blocks
+        assert record.phase == RequestPhase.DISPATCHED
+        assert record.failure is None
+        assert after.events == ()
+        return
+    failed = Failed(
+        reason=FailureReason.TIMED_OUT,
+        decision=None,
+        request=record.request_id,
+        limit=BOUND,
     )
-    assert (len(blocks) == 1) == (retryable and now >= BOUND)
-    if not retryable:
-        assert project(state).next_observe_at is None
+    assert len(blocks) == 1
+    assert record.phase == RequestPhase.BLOCKED
+    assert record.failure == failed
+    assert after.events == (failed,)

@@ -112,7 +112,7 @@ def test_terminal_writer_requires_exact_owner_or_current_reusable_run_lease(
     )
     if authorized:
         assert len(result.requests) == 1
-        assert isinstance(result.requests[0], SnapshotAndRetain)
+        assert isinstance(result.requests[0].request, SnapshotAndRetain)
     else:
         assert result.requests == ()
         assert result.state == state.attempts

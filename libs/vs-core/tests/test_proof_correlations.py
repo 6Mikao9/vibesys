@@ -155,7 +155,7 @@ def _request_payload_variant(variant: str, expected: core.InspectRequest) -> cor
         case "admission":
             return expected.model_copy(update={"admission_id": core.DecisionId(root="other")})
         case "payload":
-            return expected.model_copy(update={"deadline_at": expected.deadline_at + 1})
+            return expected.model_copy(update={"target": core.RequestId(root="other-target")})
         case _:
             return expected
 

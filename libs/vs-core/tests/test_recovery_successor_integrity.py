@@ -13,7 +13,6 @@ class CommandFields(TypedDict):
     request_id: core.RequestId
     scope: core.Scope
     admission_id: core.DecisionId | None
-    deadline_at: float
     target: core.RequestId
 
 
@@ -148,7 +147,7 @@ def test_deadline_rejects_corrupt_reconciliation_ancestry(command: str, fault: s
     requests = {
         "inspect": core.InspectRequest(**common),
         "cancel": core.CancelOwnedResource(**common, resource_id=core.ResourceId(root="physical")),
-        "block": core.BlockRequest(**common, diagnostic="unresolved"),
+        "block": core.BlockRequest(**common, reason=core.FailureReason.TIMED_OUT),
     }
     record = persisted_command(root, requests[command])
     state = state.model_copy(

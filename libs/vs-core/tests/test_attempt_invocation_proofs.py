@@ -301,7 +301,10 @@ def test_checkpoint_requires_exact_current_terminal_invocation_proof(
         and observed_episode == "current"
         and correlation == "exact"
     )
-    assert any(isinstance(request, SnapshotAndRetain) for request in result.requests) == proven
+    assert (
+        any(isinstance(outbound.request, SnapshotAndRetain) for outbound in result.requests)
+        == proven
+    )
     if not proven:
         assert result.state == state.attempts
 
