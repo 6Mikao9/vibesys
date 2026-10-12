@@ -94,7 +94,7 @@ def episode_state(
         payload_digest="prepared",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.PREPARED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     anchor_request = requests["ensure"].model_copy(
         update={"request_id": core.RequestId(root="anchor")}
@@ -182,7 +182,6 @@ def test_prepared_registered_cleanup_uses_descriptor_and_exact_release_identity(
         request_id=prepared.request_id,
         scope=prepared.request.scope,
         admission_id=prepared.request.admission_id,
-        deadline_at=100.0,
         operation_id=operation,
         operation=codec.encode(CleanupRequest()),
         retry_limit=0,

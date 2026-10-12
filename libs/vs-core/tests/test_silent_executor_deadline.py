@@ -29,6 +29,7 @@ from vs_core.api import (
     Scope,
     SessionId,
     SessionSpec,
+    Until,
     initial_state,
     project,
     step,
@@ -43,7 +44,6 @@ def _silent(phase: RequestPhase, status: ObservationStatus, *, terminal: bool) -
     request = EnsureSession(
         request_id=request_id,
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=BOUND,
         spec=SessionSpec(
             session_id=SessionId(root="setup"),
             role_id=RoleId(root="worker"),
@@ -69,7 +69,7 @@ def _silent(phase: RequestPhase, status: ObservationStatus, *, terminal: bool) -
         phase=phase,
         sequence=0,
         observation=answered,
-        reconcile_deadline_at=BOUND,
+        until=Until(at=BOUND),
     )
     return state.model_copy(
         update={

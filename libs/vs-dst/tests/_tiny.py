@@ -128,7 +128,7 @@ def tiny_setup(items: int, max_concurrent: int = 1) -> RunSetup:
     declaration = initial_state().run.declaration
     names = tuple(ItemId(root=f"item:{n}") for n in range(items))
     return RunSetup(
-        new_strategy=lambda: TinyStrategy(
+        new_launch=lambda: TinyStrategy(
             state=TinyState(schema_version=1), declaration=declaration, items=names
         ),
         harness=Harness(

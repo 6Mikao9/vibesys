@@ -49,7 +49,6 @@ def reopen_fixture() -> tuple[core.CoreState, core.OperationRegistry, core.Opera
         core.Operation(
             decision_id=core.DecisionId(root="reopen"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
-            deadline_at=100.0,
             request=core.ScopedAdmissionReopen(
                 attempt=core.AttemptRef(attempt_id=core.AttemptId(root="parked"), generation=0),
                 continuation_id=core.ContinuationId(root="continuation"),
@@ -71,7 +70,6 @@ def test_reopened_admission_uses_canonical_target_request_and_capacity(
     original = core.ExecuteRegisteredOperation(
         request_id=core.RequestId(root="operation:reopen"),
         scope=decision.scope,
-        deadline_at=decision.deadline_at,
         operation_id=core.OperationId(root="operation:reopen"),
         operation=codec.encode(decision.request),
         retry_limit=state.run.limits.max_retries,
@@ -132,7 +130,9 @@ def test_reopened_admission_uses_canonical_target_request_and_capacity(
                 change=core.AttemptsChange(state=state.attempts),
             )
         )
-    event = core.DecisionSubmitted(decision=decision, expected_revision=0)
+    event = core.DecisionSubmitted(
+        decision=core.Wait(request=decision, until=core.Within(limit=100.0)), expected_revision=0
+    )
     trace = core.ReducerTrace(frames=tuple(frames))
     if corruption == "none":
         result = core.trace_step(state, event, trace)
@@ -166,7 +166,12 @@ def test_scope_reopening_rejects_attempt_scoped_registered_operation() -> None:
             }
         )
     )
-    result = core.step(state, core.DecisionSubmitted(decision=scoped, expected_revision=0))
+    result = core.step(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=scoped, until=core.Within(limit=100.0)), expected_revision=0
+        ),
+    )
     assert isinstance(result.events[0], core.Rejected)
     assert result.events[0].code == core.RejectionCode.OWNERSHIP
     assert result.events[0].path == ("scope", "owner")

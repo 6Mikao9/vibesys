@@ -31,7 +31,6 @@ def _with_prepared_mutation(
         scope=core.Scope(owner=ref.attempt_id, generation=ref.generation),
         attempt=ref,
         admission_id=owner.admission_id if current_admission else core.DecisionId(root="earlier"),
-        deadline_at=state.run.deadline_at,
         plan=core.WorkspacePlan(
             mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
         ),

@@ -117,7 +117,10 @@ def test_receipt_failure_precedence(facts: tuple[core.Finish, core.DecisionRecei
 def _receipt_variant(
     variant: str, canonical: core.Finish, receipt: core.DecisionReceipt
 ) -> tuple[
-    tuple[core.DecisionReceipt, ...], core.DecisionId | None, core.Finish | None, core.DecisionReceipt
+    tuple[core.DecisionReceipt, ...],
+    core.DecisionId | None,
+    core.Finish | None,
+    core.DecisionReceipt,
 ]:
     identity = canonical.decision_id
     rows = (receipt,)
@@ -220,7 +223,6 @@ def test_canonicalization_failure_is_a_payload_verdict(
     canonical = core.Operation(
         decision_id=ingress.decision_id,
         scope=ingress.scope,
-        deadline_at=100.0,
         request=BytesRequest(payload=b"\xff"),
     )
     receipt = receipt.model_copy(update={"decision": canonical})

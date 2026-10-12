@@ -85,7 +85,9 @@ def queued_start(state: core.CoreState) -> tuple[core.Transition, StartAttempt]:
     )
     result = trace_step(
         state,
-        DecisionSubmitted(decision=start, expected_revision=0),
+        DecisionSubmitted(
+            decision=core.Wait(request=start, until=core.Within(limit=100.0)), expected_revision=0
+        ),
         ReducerTrace(
             frames=(TraceFrame(signal=signal, change=SchedulingChange(state=state.scheduling)),)
         ),
@@ -104,7 +106,6 @@ def test_queued_start_dependency_survives_without_initial_requests() -> None:
             scope=start.scope,
             depends_on=(start.decision_id,),
             request=ArtifactPut(content="after attempt"),
-            deadline_at=100.0,
         )
     )
     trace = (
@@ -113,7 +114,12 @@ def test_queued_start_dependency_survives_without_initial_requests() -> None:
         else ReducerTrace(frames=())
     )
     dependent = trace_step(
-        queued.state, DecisionSubmitted(decision=operation, expected_revision=1), trace
+        queued.state,
+        DecisionSubmitted(
+            decision=core.Wait(request=operation, until=core.Within(limit=100.0)),
+            expected_revision=1,
+        ),
+        trace,
     )
     assert getattr(dependent.requests[0], "decision_dependencies", ()) == (start.decision_id,)
     assert isinstance(dependent.events[0], core.Accepted)
@@ -165,7 +171,6 @@ def test_later_admission_requests_keep_the_queued_decision_owner() -> None:
     queued, start = queued_start(state)
     request = core.EnsureWorkspace(
         scope=start.scope,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=start.attempt_id, generation=0),
         plan=start.workspace,
     )
@@ -223,11 +228,14 @@ def test_new_dependent_rejects_failed_or_cancelled_completion(status: str) -> No
             scope=start.scope,
             depends_on=(start.decision_id,),
             request=ArtifactPut(content="dependent"),
-            deadline_at=100.0,
         )
     )
     result = core.step(
-        state, DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     assert isinstance(result.events[0], core.Rejected)
     assert result.events[0].code == core.RejectionCode.DEPENDENCY
@@ -247,12 +255,14 @@ def test_failed_completion_rejects_already_prepared_dependent_and_notifies_recor
             scope=start.scope,
             depends_on=(start.decision_id,),
             request=ArtifactPut(content="dependent"),
-            deadline_at=100.0,
         )
     )
     dependent = trace_step(
         queued.state,
-        DecisionSubmitted(decision=decision, expected_revision=1),
+        DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=1,
+        ),
         core.operation_trace(queued.state, decision),
     )
     dependent_id = dependent.requests[0].request_id

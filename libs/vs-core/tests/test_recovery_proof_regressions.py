@@ -59,7 +59,7 @@ def _record(request: core.Request, lifecycle: core.LifecycleClass) -> core.Reque
         payload_digest=_digest(request),
         lifecycle=lifecycle,
         phase=core.RequestPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
         observation=core.Observation(
             event_id=core.EventId(root="fact"),
             request_id=request.request_id,
@@ -81,7 +81,6 @@ def _recovering(record: core.RequestRecord) -> core.CoreState:
         request_id=core.RequestId(root="anchor"),
         scope=record.request.scope,
         admission_id=record.request.admission_id,
-        deadline_at=100.0,
         spec=_spec(),
     )
     anchor = _record(anchor_request, core.LifecycleClass.IDEMPOTENT_WRITE).model_copy(
@@ -113,7 +112,6 @@ def _registered_turn(decision_root: str = "decision") -> tuple[core.CoreState, c
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="out", version=1),
-        deadline_at=100.0,
         charge_class="free",
     )
     descriptor = core.OperationDescriptor(
@@ -136,7 +134,6 @@ def _registered_turn(decision_root: str = "decision") -> tuple[core.CoreState, c
         core.Operation(
             decision_id=core.DecisionId(root=decision_root),
             scope=scope,
-            deadline_at=100.0,
             request=RegisteredTurn(turn=turn),
         )
     )
@@ -144,7 +141,6 @@ def _registered_turn(decision_root: str = "decision") -> tuple[core.CoreState, c
     request = core.ExecuteRegisteredOperation(
         request_id=identity,
         scope=scope,
-        deadline_at=100.0,
         decision_id=decision.decision_id,
         operation_id=core.OperationId(root=f"operation:{decision_root}"),
         operation=codec.encode(decision.request),
@@ -152,6 +148,7 @@ def _registered_turn(decision_root: str = "decision") -> tuple[core.CoreState, c
     )
     record = _record(request, core.LifecycleClass.SESSION_TURN)
     invocation = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=core.InvocationRef(
             session_id=turn.session.session_id,
             invocation_id=turn.invocation_id,
@@ -256,7 +253,6 @@ def measurement_fixture(
     request = core.SubmitMeasurement(
         request_id=core.RequestId(root="submission"),
         scope=scope,
-        deadline_at=1.0,
         plan=plan,
     )
     assert request.request_id is not None
@@ -335,7 +331,6 @@ def cleanup_fixture() -> tuple[core.CoreState, core.RequestRecord, core.Operatio
         request_id=core.RequestId(root="cleanup"),
         scope=scope,
         admission_id=episode,
-        deadline_at=100.0,
         operation_id=core.OperationId(root="operation:cleanup"),
         decision_id=core.DecisionId(root="cleanup"),
         operation=codec.encode(Cleanup()),
@@ -448,7 +443,6 @@ def registered_measurement_fixture(
         core.Operation(
             decision_id=core.DecisionId(root="measurement"),
             scope=request.scope,
-            deadline_at=100.0,
             request=RegisteredMeasurement(measurement=budget.identity),
         )
     )
@@ -456,7 +450,6 @@ def registered_measurement_fixture(
     execution = core.ExecuteRegisteredOperation(
         request_id=identity,
         scope=request.scope,
-        deadline_at=100.0,
         decision_id=decision.decision_id,
         operation_id=core.OperationId(root="operation:measurement"),
         operation=codec.encode(decision.request),

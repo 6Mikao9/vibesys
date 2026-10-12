@@ -220,7 +220,6 @@ def fake_attempts(
         request_id=request_id,
         scope=invocation.scope,
         admission_id=owner.admission_id,
-        deadline_at=min(context.run.deadline_at, invocation.turn.deadline_at),
         attempt=event.attempt,
         retention=event.retention,
         invocation=event.invocation,

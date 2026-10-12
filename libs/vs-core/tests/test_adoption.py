@@ -155,7 +155,10 @@ class Run:
             selection=selection,
         )
         return self.feed(
-            core.DecisionSubmitted(decision=decision, expected_revision=self.state.revision)
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=self.state.revision,
+            )
         )
 
     def answer(
@@ -344,8 +347,11 @@ def test_applied_but_unverified_is_recovered_by_verify_not_by_adopting_again() -
     recovered = core.step(
         lost,
         core.DecisionSubmitted(
-            decision=core.ProposeWinner(
-                decision_id=core.DecisionId(root="again"), scope=RUN_SCOPE, selection=selection
+            decision=core.Wait(
+                request=core.ProposeWinner(
+                    decision_id=core.DecisionId(root="again"), scope=RUN_SCOPE, selection=selection
+                ),
+                until=core.Within(limit=100.0),
             ),
             expected_revision=lost.revision,
         ),
@@ -482,7 +488,11 @@ def _start_root_attempt(run: Run) -> _FenceProbe:
         budget=core.AttemptBudget(),
     )
     transition = core.step(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     return _FenceProbe(
         run, [event for event in transition.events if isinstance(event, core.Rejected)]

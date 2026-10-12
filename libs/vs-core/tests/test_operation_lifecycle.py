@@ -57,10 +57,15 @@ def test_registered_turn_cannot_bypass_session_owner() -> None:
             decision_id=core.DecisionId(root="turn"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
             request=TurnRequest(max_turns=1),
-            deadline_at=100.0,
         )
     )
-    result = core.step(state, core.DecisionSubmitted(decision=decision, expected_revision=0))
+    result = core.step(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
+    )
     assert result.requests == ()
     assert isinstance(result.events[0], core.Rejected)
     assert result.events[0].path == ("turn", "charge_class")
@@ -81,7 +86,6 @@ def normalize_turn(request: core.OperationRequest) -> core.TurnSpec:
         workspace=core.Scope(owner=state.run.run_id, generation=0),
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="paid",
         max_turns=request.max_turns,
     )
@@ -105,7 +109,6 @@ def test_turn_normalization_rejects_zero_turns() -> None:
         decision_id=core.DecisionId(root="invalid-turn"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         request=TurnRequest(max_turns=0),
-        deadline_at=100.0,
     )
     with pytest.raises((core.ContractError, ValidationError), match="max_turns"):
         codec.validate_decision(decision)

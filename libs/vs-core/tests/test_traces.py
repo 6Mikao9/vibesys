@@ -36,7 +36,9 @@ from vs_core.api import (
     SessionsChange,
     SignalCycleError,
     TraceFrame,
+    Wait,
     Withdraw,
+    Within,
     initial_state,
     project,
     step,
@@ -50,7 +52,6 @@ def test_request_registration_is_deterministic_immutable_and_serializable(now: f
     signal = ClockAdvanced(now_at=now)
     request = InspectRequest(
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=100.0,
         target=RequestId(root="previous"),
     )
     trace = ReducerTrace(
@@ -119,7 +120,6 @@ def test_reusing_explicit_request_id_with_conflicting_payload_is_rejected() -> N
     request = InspectRequest(
         request_id=RequestId(root="stable"),
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=10.0,
         target=RequestId(root="one"),
     )
     conflict = request.model_copy(update={"target": RequestId(root="two")})
@@ -143,7 +143,6 @@ def test_a_request_proposed_again_with_another_deadline_is_the_same_request(late
     request = InspectRequest(
         request_id=RequestId(root="stable"),
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=10.0,
         target=RequestId(root="one"),
     )
     again = request.model_copy(update={"deadline_at": later})
@@ -202,7 +201,9 @@ def test_interrupt_refund_is_preserved_through_kernel_routing(refund: int) -> No
     )
     result = trace_step(
         state,
-        DecisionSubmitted(decision=decision, expected_revision=0),
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
         ReducerTrace(
             frames=(
                 TraceFrame(
@@ -231,7 +232,9 @@ def test_operation_retirement_routes_to_owning_records_area() -> None:
     )
     result = trace_step(
         state,
-        DecisionSubmitted(decision=decision, expected_revision=0),
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
         ReducerTrace(
             frames=(
                 TraceFrame(

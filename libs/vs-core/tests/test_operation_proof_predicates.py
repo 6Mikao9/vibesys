@@ -103,7 +103,6 @@ def test_operation_proof_checks_every_origin_field(
                 decision_id=decision.decision_id,
                 scope=decision.scope,
                 request=decision.request,
-                deadline_at=decision.deadline_at,
             )
         )
         receipt = receipt.model_copy(
@@ -437,7 +436,6 @@ def test_proposals_and_ingress_do_not_substitute_origin_or_normalization(
             decision_id=receipt.decision.decision_id,
             scope=receipt.decision.scope,
             request=receipt.decision.request,
-            deadline_at=receipt.decision.deadline_at,
             normalized_turn=state.sessions.invocations[0].turn
             if field == "absent_ingress_codec"
             else None,
@@ -445,6 +443,7 @@ def test_proposals_and_ingress_do_not_substitute_origin_or_normalization(
         verdict = Missing(ProofReason.ABSENT_DECLARATION)
     else:
         expected = core.RequestPrepared(
+            until=core.Until(at=100.0),
             request=record.request,
             lifecycle=core.LifecycleClass.SESSION_TURN,
             normalized_turn=state.sessions.invocations[0].turn,
@@ -562,7 +561,6 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
         core.Operation(
             decision_id=core.DecisionId(root="deferred"),
             scope=scope,
-            deadline_at=100.0,
             request=Cleanup(),
         )
     )
@@ -576,7 +574,6 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
     request = core.ExecuteRegisteredOperation(
         request_id=core.RequestId(root="deferred-write"),
         scope=scope,
-        deadline_at=100.0,
         decision_id=decision.decision_id,
         operation_id=core.OperationId(root="operation:deferred"),
         operation=codec.encode(decision.request),
@@ -593,7 +590,9 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
             ),
         }
     )
-    event = core.RequestPrepared(request=request, lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE)
+    event = core.RequestPrepared(
+        until=core.Until(at=100.0), request=request, lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE
+    )
     result = core.trace_step(
         state,
         event,

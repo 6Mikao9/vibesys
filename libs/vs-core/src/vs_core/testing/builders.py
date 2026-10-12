@@ -2,6 +2,7 @@
 
 from vs_core.types.common import RevisionId, RevisionRef, RunFacts, RunId, SchemaRef, StrategyId
 from vs_core.types.kernel import CoreState, RunState
+from vs_core.types.kinds import EventKind
 from vs_core.types.records import RecordsState, RecoveryBarrier, RecoveryPhase
 from vs_core.types.strategy import SearchDeclaration
 
@@ -24,6 +25,7 @@ def initial_state() -> CoreState:
             declaration=SearchDeclaration(
                 strategy_id=StrategyId(root="sequential"),
                 state_schema=SchemaRef(name="sequential", version=1),
+                handles=frozenset({EventKind.FAILED, EventKind.STOP_REQUESTED}),
             ),
         ),
     )

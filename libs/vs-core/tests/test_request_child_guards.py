@@ -61,6 +61,7 @@ from vs_core.api import (
     SessionSpec,
     StrategyState,
     SubmitMeasurement,
+    Until,
     Value,
     initial_state,
     step,
@@ -88,7 +89,6 @@ def pending_record(identity: str, phase: RequestPhase = RequestPhase.DISPATCHED)
     request = EnsureSession(
         request_id=request_id,
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=100.0,
         spec=SessionSpec(
             session_id=SessionId(root=identity),
             role_id=RoleId(root="worker"),
@@ -103,7 +103,7 @@ def pending_record(identity: str, phase: RequestPhase = RequestPhase.DISPATCHED)
         payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
     )
 
 
@@ -158,7 +158,6 @@ def registered_record(
     request = ExecuteRegisteredOperation(
         request_id=original.request_id,
         scope=original.request.scope,
-        deadline_at=100.0,
         decision_id=DecisionId(root=identity),
         operation_id=OperationId(root=f"operation:{identity}"),
         operation=codec.encode(JobRequest()),
@@ -203,7 +202,6 @@ def with_registered_origins(state: CoreState) -> CoreState:
                 decision_id=request.decision_id,
                 scope=request.scope,
                 request=codec.decode(request.operation),
-                deadline_at=request.deadline_at,
             )
         )
         receipts.append(
@@ -329,7 +327,6 @@ def test_child_transfer_requires_the_same_typed_correspondence_as_reattachment(
         request = SubmitMeasurement(
             request_id=submission.request_id,
             scope=scope,
-            deadline_at=100.0,
             plan=measurement_plan().model_copy(update={"evaluator_digest": payload}),
         )
     request = request.model_copy(update={"scope": scope})

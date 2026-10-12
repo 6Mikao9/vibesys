@@ -25,7 +25,6 @@ def cleanup_evaluation(
     request = core.CancelOwnedJob(
         scope=owner.scope,
         resource_id=event.resource_id,
-        deadline_at=context.run.now_at + context.run.limits.cancellation_bound,
     )
     return core.AreaChange(state=state, requests=(request,))
 

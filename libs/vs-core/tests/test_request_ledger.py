@@ -29,6 +29,7 @@ from vs_core.api import (
     RequestPrepared,
     SchemaRef,
     Scope,
+    Until,
     step,
 )
 
@@ -53,7 +54,6 @@ def _ready() -> CoreState:
     request = ExecuteRegisteredOperation(
         request_id=REQUEST,
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=100.0,
         operation_id=OperationId(root="operation"),
         operation=OperationWire(schema_ref=schema, payload_json='{"content":"x"}'),
         retry_limit=2,
@@ -67,7 +67,10 @@ def _ready() -> CoreState:
         }
     )
     return step(
-        state, RequestPrepared(request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE)
+        state,
+        RequestPrepared(
+            until=Until(at=100.0), request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE
+        ),
     ).state
 
 
@@ -280,7 +283,9 @@ def test_a_prepared_request_replays_inertly_and_conflicts_loudly() -> None:
     assert isinstance(record.request, ExecuteRegisteredOperation)
     replay = step(
         state,
-        RequestPrepared(request=record.request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE),
+        RequestPrepared(
+            until=Until(at=100.0), request=record.request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE
+        ),
     )
     assert replay.state.records == state.records
     assert replay.requests == ()
@@ -292,7 +297,12 @@ def test_a_prepared_request_replays_inertly_and_conflicts_loudly() -> None:
         }
     )
     assert (
-        _try(state, RequestPrepared(request=changed, lifecycle=LifecycleClass.IDEMPOTENT_WRITE))
+        _try(
+            state,
+            RequestPrepared(
+                until=Until(at=100.0), request=changed, lifecycle=LifecycleClass.IDEMPOTENT_WRITE
+            ),
+        )
         is None
     )
 
@@ -300,40 +310,28 @@ def test_a_prepared_request_replays_inertly_and_conflicts_loudly() -> None:
 def _job_requests(scope: Scope) -> list[core.Request]:
     resource = core.ResourceId(root="job")
     return [
-        core.ObserveOwnedJob(
-            request_id=REQUEST, scope=scope, deadline_at=100.0, resource_id=resource
-        ),
-        core.InspectOwnedJob(
-            request_id=REQUEST, scope=scope, deadline_at=100.0, resource_id=resource
-        ),
-        core.CancelOwnedJob(
-            request_id=REQUEST, scope=scope, deadline_at=100.0, resource_id=resource
-        ),
-        core.CollectEvidence(
-            request_id=REQUEST, scope=scope, deadline_at=100.0, resource_id=resource
-        ),
+        core.ObserveOwnedJob(request_id=REQUEST, scope=scope, resource_id=resource),
+        core.InspectOwnedJob(request_id=REQUEST, scope=scope, resource_id=resource),
+        core.CancelOwnedJob(request_id=REQUEST, scope=scope, resource_id=resource),
+        core.CollectEvidence(request_id=REQUEST, scope=scope, resource_id=resource),
         core.CloseSession(
             request_id=REQUEST,
             scope=scope,
-            deadline_at=100.0,
             session_id=core.SessionId(root="session"),
         ),
         core.DiscardWorkspace(
             request_id=REQUEST,
             scope=scope,
-            deadline_at=100.0,
             attempt=core.AttemptRef(attempt_id=core.AttemptId(root="a"), generation=0),
         ),
         core.CloseAttemptScope(
             request_id=REQUEST,
             scope=scope,
-            deadline_at=100.0,
             attempt=core.AttemptRef(attempt_id=core.AttemptId(root="a"), generation=0),
         ),
         core.EnsureSession(
             request_id=REQUEST,
             scope=scope,
-            deadline_at=100.0,
             spec=core.SessionSpec(
                 session_id=core.SessionId(root="session"),
                 role_id=core.RoleId(root="worker"),
@@ -352,6 +350,7 @@ def test_every_request_class_round_trips_through_the_ledger(index: int) -> None:
     prepared = _try(
         base,
         RequestPrepared(
+            until=Until(at=100.0),
             request=request,
             lifecycle=(
                 LifecycleClass.QUERY
@@ -381,7 +380,10 @@ def _dependent() -> CoreState:
         }
     )
     return step(
-        state, RequestPrepared(request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE)
+        state,
+        RequestPrepared(
+            until=Until(at=100.0), request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE
+        ),
     ).state
 
 
@@ -410,7 +412,9 @@ def test_only_an_unsuccessful_upstream_decision_cancels_prepared_dependents(
 def test_events_naming_unknown_requests_or_wrong_classes_are_rejected() -> None:
     state = _ready()
     (record,) = state.records.records
-    wrong = RequestPrepared(request=record.request, lifecycle=LifecycleClass.QUERY)
+    wrong = RequestPrepared(
+        until=Until(at=100.0), request=record.request, lifecycle=LifecycleClass.QUERY
+    )
     assert _try(state, wrong) is None
     assert _try(initial_state(), DispatchAuthorized(request_id=REQUEST)) is None
     ghost = _obs(1, ObservationStatus.PENDING)
@@ -430,10 +434,15 @@ def test_a_registered_write_completes_its_decision_and_reports_once() -> None:
             decision_id=core.DecisionId(root="write-decision"),
             scope=scope,
             request=ArtifactPut(content="payload"),
-            deadline_at=100.0,
         )
     )
-    accepted = step(state, core.DecisionSubmitted(decision=decision, expected_revision=0))
+    accepted = step(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
+    )
     (request,) = accepted.requests
     assert isinstance(request, ExecuteRegisteredOperation)
     assert request.request_id is not None

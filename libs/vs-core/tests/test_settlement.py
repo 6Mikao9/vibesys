@@ -523,10 +523,10 @@ def judge_state() -> tuple[core.CoreState, core.Settlement]:
         ),
         prompts=(),
         output_schema=schema,
-        deadline_at=10.0,
         charge_class="free",
     )
     invocation = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=source,
         scope=scope,
         turn=turn,
@@ -557,16 +557,14 @@ def judge_state() -> tuple[core.CoreState, core.Settlement]:
             ),
         }
     )
-    request = core.DispatchTurn(
-        request_id=core.RequestId(root="judge"), scope=scope, deadline_at=10.0, turn=turn
-    )
+    request = core.DispatchTurn(request_id=core.RequestId(root="judge"), scope=scope, turn=turn)
     record = core.RequestRecord(
         request_id=core.RequestId(root="judge"),
         request=request,
         payload_digest="judge",
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
-        reconcile_deadline_at=10.0,
+        until=core.Until(at=10.0),
     )
     return state.model_copy(
         update={
@@ -791,7 +789,6 @@ def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.Oper
         core.Operation(
             decision_id=decision_id,
             scope=invocation.scope,
-            deadline_at=10.0,
             request=RegisteredJudgeRequest(turn=invocation.turn),
         )
     )
@@ -799,7 +796,6 @@ def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.Oper
     request = core.ExecuteRegisteredOperation(
         request_id=request_id,
         scope=invocation.scope,
-        deadline_at=10.0,
         decision_id=decision_id,
         operation_id=operation_id,
         operation=decision.registered_wire,
@@ -819,7 +815,7 @@ def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.Oper
         payload_digest="registered-judge",
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
-        reconcile_deadline_at=10.0,
+        until=core.Until(at=10.0),
     )
     return (
         state.model_copy(
@@ -1220,7 +1216,10 @@ def test_public_settle_decision_completes_cleanup_once_independent_of_scientific
         update={"settlement": state.settlement.model_copy(update={"pending": ()})}
     )
     decision = settlement_decision(state, value)
-    submitted = core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+    submitted = core.DecisionSubmitted(
+        decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+        expected_revision=state.revision,
+    )
     result = core.step(state, submitted)
     assert result == core.step(reload(state), submitted)
     receipt = next(
@@ -1237,7 +1236,10 @@ def test_public_settle_decision_completes_cleanup_once_independent_of_scientific
     assert result.requests == ()
     replay = core.step(
         reload(result.state),
-        core.DecisionSubmitted(decision=decision, expected_revision=result.state.revision),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=result.state.revision,
+        ),
     )
     assert replay.events == replay.requests == ()
     assert replay.state.run.receipts == result.state.run.receipts
@@ -1296,7 +1298,11 @@ def test_distinct_settle_decision_cannot_override_a_committed_result(*, finalize
         state = core.step(state, released(value)).state
     decision = settlement_decision(state, value, "competing")
     result = core.step(
-        reload(state), core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        reload(state),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     feedback = next(
         row.feedback for row in result.state.run.receipts if row.decision_id == decision.decision_id
@@ -1336,7 +1342,11 @@ def test_settle_decision_without_current_owner_authority_has_a_typed_rejection(
     )
     decision = settlement_decision(state, value)
     result = core.step(
-        reload(state), core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        reload(state),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     feedback = result.state.run.receipts[0].feedback
     assert isinstance(feedback, core.Rejected)
@@ -1390,7 +1400,11 @@ def test_settle_dependency_requires_semantic_completion_before_acknowledgement(
         update={"depends_on": (prerequisite.decision_id,)}
     )
     result = core.step(
-        reload(state), core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        reload(state),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     receipt = next(
         row for row in result.state.run.receipts if row.decision_id == decision.decision_id
@@ -1804,7 +1818,10 @@ def test_prerequisite_acceptance_must_identify_its_own_receipt(
         }
     )
     event = (
-        core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        )
         if wake == "submit"
         else released(value)
     )

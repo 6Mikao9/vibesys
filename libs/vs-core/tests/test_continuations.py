@@ -199,10 +199,10 @@ def fixture(
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
     record = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=invocation,
         scope=scope,
         turn=turn,
@@ -309,7 +309,6 @@ def fixture(
         request=core.DispatchTurn(
             request_id=core.RequestId(root="turn"),
             scope=scope,
-            deadline_at=100.0,
             admission_id=admission,
             turn=turn,
         ),
@@ -317,7 +316,7 @@ def fixture(
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
         observation=record.observation,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={
@@ -580,7 +579,6 @@ def test_retirement_records_exact_park_authority_without_resume(
         close = core.CloseAttemptScope(
             request_id=authority,
             scope=state.sessions.invocations[0].scope,
-            deadline_at=100.0,
             admission_id=owner.admission_id,
             attempt=core.AttemptRef(attempt_id=owner.attempt_id, generation=0),
         )
@@ -590,7 +588,7 @@ def test_retirement_records_exact_park_authority_without_resume(
             payload_digest="close",
             lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
             phase=core.RequestPhase.PREPARED,
-            reconcile_deadline_at=100.0,
+            until=core.Until(at=100.0),
         )
         state = state.model_copy(
             update={
@@ -637,7 +635,6 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
         core.Operation(
             decision_id=core.DecisionId(root="reopen"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
-            deadline_at=100.0,
             request=payload,
         )
     )
@@ -646,7 +643,6 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
         operation_id=core.OperationId(root="operation:reopen"),
         decision_id=decision.decision_id,
         scope=decision.scope,
-        deadline_at=decision.deadline_at,
         operation=codec.encode(payload),
         retry_limit=state.run.limits.max_retries,
         admission_id=owner.admission_id,
@@ -1102,7 +1098,6 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
         request: core.Request = core.DispatchTurn(
             request_id=record.request_id,
             scope=invocation.scope,
-            deadline_at=100.0,
             admission_id=record.request.admission_id,
             turn=turn,
         )
@@ -1110,7 +1105,6 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
         request = core.ResumeSessionTurn(
             request_id=record.request_id,
             scope=invocation.scope,
-            deadline_at=100.0,
             admission_id=record.request.admission_id,
             turn=turn,
             continuation_id=core.ContinuationId(root="prior-wait"),
@@ -1122,7 +1116,6 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
             core.Operation(
                 decision_id=core.DecisionId(root="registered-turn"),
                 scope=invocation.scope,
-                deadline_at=100.0,
                 request=payload,
             )
         )
@@ -1131,7 +1124,6 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
             operation_id=core.OperationId(root="operation:registered-turn"),
             decision_id=decision.decision_id,
             scope=invocation.scope,
-            deadline_at=100.0,
             admission_id=record.request.admission_id,
             operation=codec.encode(payload),
             retry_limit=state.run.limits.max_retries,
@@ -1444,7 +1436,6 @@ def parked_fixture() -> tuple[core.CoreState, core.ContinuationReopenRequested]:
     close = core.CloseAttemptScope(
         request_id=continuation.park_authority,
         scope=scope,
-        deadline_at=100.0,
         admission_id=admission,
         attempt=core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
     )
@@ -1461,7 +1452,7 @@ def parked_fixture() -> tuple[core.CoreState, core.ContinuationReopenRequested]:
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.COMPLETED,
         observation=close_proof,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     continuation = continuation.model_copy(
         update={

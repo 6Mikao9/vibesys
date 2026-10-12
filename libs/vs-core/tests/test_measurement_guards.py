@@ -50,7 +50,11 @@ def measure_scope(
         decision_id=core.DecisionId(root="scoped-measure"), scope=scope, plan=measurement
     )
     return transition(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
 
 
@@ -116,7 +120,6 @@ def test_snapshot_result_requires_exact_committed_checkpoint(
         admission_id=owner.admission_id if request_episode else None,
         attempt=ref,
         retention="candidate",
-        deadline_at=100.0,
     )
     observed = core.Observation(
         event_id=core.EventId(root="snapshot-done"),
@@ -136,7 +139,7 @@ def test_snapshot_result_requires_exact_committed_checkpoint(
         payload_digest=value_digest(request),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     owner = owner.model_copy(
         update={
@@ -484,7 +487,6 @@ def registered_state(
             decision_id=core.DecisionId(root="registered"),
             scope=scope,
             request=RegisteredMeasurement(identity=identity),
-            deadline_at=100.0,
         )
     )
     wire = decision.registered_wire
@@ -495,7 +497,6 @@ def registered_state(
         decision_id=decision.decision_id,
         operation_id=core.OperationId(root="operation:registered"),
         scope=scope,
-        deadline_at=100.0,
         operation=wire,
         retry_limit=0,
     )

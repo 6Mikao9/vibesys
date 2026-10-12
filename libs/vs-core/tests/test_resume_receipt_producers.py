@@ -60,7 +60,9 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
             evaluation=core.EvaluationState(),
             records=core.RecordsState(),
         ),
-        core.TurnRequested(scope=predecessor.scope, turn=predecessor.turn),
+        core.TurnRequested(
+            until=core.Until(at=100.0), scope=predecessor.scope, turn=predecessor.turn
+        ),
     )
     prefix = captured.state.invocations[0].evaluation_prefix
     assert prefix == core.EvaluationHistoryCursor()
@@ -85,7 +87,6 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
         request = core.SubmitMeasurement(
             request_id=job.submission_id,
             scope=job.scope,
-            deadline_at=100.0,
             plan=job.plan,
         )
         result = (
@@ -109,7 +110,7 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
                 phase=core.RequestPhase.COMPLETED,
                 observation=job.observation,
                 evaluation_result=result,
-                reconcile_deadline_at=100.0,
+                until=core.Until(at=100.0),
             )
         )
         identity = core.MeasurementIdentity(
@@ -162,7 +163,6 @@ def dispatch_publication(state: core.CoreState, wait: core.Continuation) -> core
         decision_id=decision.decision_id,
         admission_id=state.attempts.attempts[0].admission_id,
         scope=predecessor.scope,
-        deadline_at=turn.deadline_at,
         turn=turn,
         continuation_id=wait.continuation_id,
     )
@@ -180,7 +180,7 @@ def dispatch_publication(state: core.CoreState, wait: core.Continuation) -> core
         payload_digest=digest(request),
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.PREPARED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={
@@ -273,7 +273,6 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
         request_id=observation.request_id,
         scope=original.scope,
         admission_id=observation.admission_id,
-        deadline_at=100.0,
         turn=turn,
         continuation_id=first.continuation_id,
     )
@@ -284,7 +283,7 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
         observation=observation,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     owner = state.attempts.attempts[0]
     checkpoint = owner.checkpoints[0].model_copy(update={"invocation": current.invocation})
@@ -514,14 +513,12 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
             core.Operation(
                 decision_id=core.DecisionId(root=f"registered-{position}"),
                 scope=job.scope,
-                deadline_at=100.0,
                 request=RegisteredMeasurement(identity=budget.identity),
             )
         )
         request = core.ExecuteRegisteredOperation(
             request_id=job.submission_id,
             scope=job.scope,
-            deadline_at=100.0,
             decision_id=decision.decision_id,
             operation_id=core.OperationId(root=f"operation:{decision.decision_id.root}"),
             operation=codec.encode(decision.request),
@@ -646,7 +643,9 @@ def test_initial_paid_cycle_prefix_requires_unique_current_run_admission(
             evaluation=core.EvaluationState(),
             records=core.RecordsState(),
         ),
-        core.TurnRequested(scope=predecessor.scope, turn=predecessor.turn),
+        core.TurnRequested(
+            until=core.Until(at=100.0), scope=predecessor.scope, turn=predecessor.turn
+        ),
     )
     prefix = captured.state.invocations[0].evaluation_prefix
     assert prefix == (core.EvaluationHistoryCursor() if fault == "exact" else None)

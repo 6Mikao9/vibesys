@@ -211,7 +211,10 @@ def test_queued_retirement_requires_one_canonical_start_registration(
             ),
         )
     )
-    event = core.DecisionSubmitted(decision=withdrawal, expected_revision=state.revision)
+    event = core.DecisionSubmitted(
+        decision=core.Wait(request=withdrawal, until=core.Within(limit=100.0)),
+        expected_revision=state.revision,
+    )
     if variant != "exact":
         with pytest.raises(core.ContractError, match="admission"):
             core.trace_step(state, event, trace)
@@ -257,7 +260,6 @@ def cleanup_facts(
         attempt=target,
         admission_id=start.decision_id,
         decision_id=stop.decision_id,
-        deadline_at=100.0,
     )
     assert command.request_id is not None
     record = core.RequestRecord(
@@ -266,7 +268,7 @@ def cleanup_facts(
         payload_digest=value_digest(command),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.PREPARED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={

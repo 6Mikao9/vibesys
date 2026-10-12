@@ -64,7 +64,12 @@ class Session:
         self.results.extend(row for row in transition.events if isinstance(row, core.TurnResult))
 
     def decide(self, decision: core.Command) -> None:
-        self.feed(core.DecisionSubmitted(decision=decision, expected_revision=self.state.revision))
+        self.feed(
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=self.state.revision,
+            )
+        )
 
     def start(self, mode: core.WorkspaceMode) -> None:
         self.started += 1
@@ -106,7 +111,6 @@ class Session:
                     ),
                     prompts=(),
                     output_schema=core.SchemaRef(name="implementation", version=1),
-                    deadline_at=self.state.run.deadline_at,
                     charge_class="paid",
                 ),
             )

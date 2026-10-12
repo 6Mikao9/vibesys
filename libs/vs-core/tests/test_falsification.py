@@ -85,7 +85,10 @@ from vs_core.api import (
     SubmitMeasurement,
     Transition,
     TurnSpec,
+    Until,
+    Wait,
     Withdraw,
+    Within,
     WorkspaceMode,
     WorkspaceObserved,
     WorkspacePlan,
@@ -192,7 +195,6 @@ def measurement_ledger_row(job: OwnedJob) -> RequestRecord:
     submission = SubmitMeasurement(
         request_id=job.submission_id,
         scope=job.scope,
-        deadline_at=10.0,
         admission_id=job.observation.admission_id,
         plan=job.plan,
     )
@@ -203,7 +205,7 @@ def measurement_ledger_row(job: OwnedJob) -> RequestRecord:
         lifecycle=LifecycleClass.OWNED_JOB,
         phase=RequestPhase.COMPLETED,
         observation=job.observation,
-        reconcile_deadline_at=10.0,
+        until=Until(at=10.0),
     )
 
 
@@ -226,7 +228,6 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="judge", version=1),
-        deadline_at=100.0,
         charge_class="free",
     )
     evidence_scope = Scope(owner=AttemptId(root="attempt:3"), generation=0)
@@ -301,6 +302,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             "sessions": SessionsState(
                 invocations=(
                     Invocation(
+                        until=Until(at=100.0),
                         invocation=judge_ref,
                         scope=scope,
                         turn=judge_turn,
@@ -444,7 +446,10 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
         )
         cancelled = step(
             result.state,
-            DecisionSubmitted(decision=cancellation, expected_revision=result.state.revision),
+            DecisionSubmitted(
+                decision=Wait(request=cancellation, until=Within(limit=100.0)),
+                expected_revision=result.state.revision,
+            ),
         )
         state = acknowledge_cleanup(
             Transition(state=cancelled.state, requests=(*result.requests, *cancelled.requests)),
@@ -484,7 +489,11 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             disposition=Cancel(),
         )
         cancelled = step(
-            state, DecisionSubmitted(decision=cancel, expected_revision=state.revision)
+            state,
+            DecisionSubmitted(
+                decision=Wait(request=cancel, until=Within(limit=100.0)),
+                expected_revision=state.revision,
+            ),
         )
         assert cancelled.state.settlement.settlements == state.settlement.settlements
         early_cancel = cancellation.model_copy(
@@ -492,7 +501,10 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
         )
         early = step(
             initial_owned,
-            DecisionSubmitted(decision=early_cancel, expected_revision=initial_owned.revision),
+            DecisionSubmitted(
+                decision=Wait(request=early_cancel, until=Within(limit=100.0)),
+                expected_revision=initial_owned.revision,
+            ),
         )
         retired = acknowledge_cleanup(early, proposal.candidate)
         cancelled_settlements = tuple(
@@ -517,7 +529,6 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
     request = ExecuteRegisteredOperation(
         request_id=RequestId(root="write"),
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=100.0,
         operation_id=OperationId(root="operation"),
         operation=OperationWire(
             schema_ref=schema, payload_json='{"content":"same immutable payload"}'
@@ -539,7 +550,10 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
         }
     )
     prepared = step(
-        state, RequestPrepared(request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE)
+        state,
+        RequestPrepared(
+            until=Until(at=100.0), request=request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE
+        ),
     ).state
     assert request.request_id is not None
     dispatched = step(prepared, DispatchAuthorized(request_id=request.request_id)).state

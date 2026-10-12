@@ -250,7 +250,7 @@ def _run_host(
     setup = world.setup
     enactment = _Enactment(world)
     host = scripted_host(
-        setup.new_strategy(),
+        setup.new_launch(),
         world,
         setup.harness,
         setup.schemas,

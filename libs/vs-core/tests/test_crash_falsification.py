@@ -55,6 +55,7 @@ from vs_core.api import (
     TurnObserved,
     TurnResult,
     TurnSpec,
+    Until,
     initial_state,
     step,
 )
@@ -107,7 +108,6 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="result", version=1),
-        deadline_at=100.0,
         charge_class="free",
     )
     turn = TurnSpec(
@@ -117,7 +117,6 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="result", version=1),
-        deadline_at=100.0,
         charge_class="resume",
     )
     resource = ResourceId(root="owned-job")
@@ -144,8 +143,11 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
             }
         ),
         DecisionSubmitted(
-            decision=core.Measure(
-                decision_id=DecisionId(root="measure-decision"), scope=scope, plan=plan
+            decision=core.Wait(
+                request=core.Measure(
+                    decision_id=DecisionId(root="measure-decision"), scope=scope, plan=plan
+                ),
+                until=core.Within(limit=100.0),
             ),
             expected_revision=0,
         ),
@@ -180,9 +182,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         released=True,
         resource_id=ResourceId(root="conversation"),
     )
-    dispatch = DispatchTurn(
-        request_id=yielded.request_id, scope=scope, deadline_at=100.0, turn=original_turn
-    )
+    dispatch = DispatchTurn(request_id=yielded.request_id, scope=scope, turn=original_turn)
     job = OwnedJob(
         resource_id=resource,
         scope=scope,
@@ -205,6 +205,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
             "sessions": SessionsState(
                 invocations=(
                     core.Invocation(
+                        until=Until(at=100.0),
                         invocation=invocation,
                         scope=scope,
                         turn=original_turn,
@@ -250,7 +251,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         phase=core.RequestPhase.COMPLETED,
                         sequence=yielded.sequence,
                         observation=yielded,
-                        reconcile_deadline_at=100.0,
+                        until=core.Until(at=100.0),
                     ),
                     core.RequestRecord(
                         request_id=job_request,
@@ -258,7 +259,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         payload_digest=_digest(submission),
                         lifecycle=core.LifecycleClass.OWNED_JOB,
                         phase=core.RequestPhase.DISPATCHED,
-                        reconcile_deadline_at=10.0,
+                        until=core.Until(at=10.0),
                     ),
                 ),
             ),
@@ -368,7 +369,10 @@ def execute(
         scope=Scope(owner=current.core.run.run_id, generation=0),
         turn=turn,
     )
-    submitted = DecisionSubmitted(decision=decision, expected_revision=current.revision)
+    submitted = DecisionSubmitted(
+        decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+        expected_revision=current.revision,
+    )
     proposed = callback_commit(current, step(current.core, submitted))
     if boundary != CrashBoundary.BEFORE_COMMIT:
         durable = proposed.model_dump_json()

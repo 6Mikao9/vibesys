@@ -53,6 +53,7 @@ from vs_core.api import (
     SessionView,
     SnapshotAndRetain,
     TurnSpec,
+    Until,
     WorkspaceMode,
     WorkspacePlan,
     advance_attempt,
@@ -88,7 +89,6 @@ def invocation_fixture(
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=1000,
         charge_class="paid",
     )
     request = DispatchTurn(
@@ -96,7 +96,6 @@ def invocation_fixture(
         scope=scope,
         admission_id=episode,
         decision_id=DecisionId(root="request-turn"),
-        deadline_at=1000,
         turn=turn,
     )
     assert request.request_id is not None
@@ -120,7 +119,12 @@ def invocation_fixture(
         )
     )
     invocation = Invocation(
-        invocation=ref, scope=scope, turn=turn, phase=phase, observation=observed
+        until=Until(at=100.0),
+        invocation=ref,
+        scope=scope,
+        turn=turn,
+        phase=phase,
+        observation=observed,
     )
     owner = AttemptView(
         attempt_id=scope.owner,
@@ -146,7 +150,7 @@ def invocation_fixture(
         lifecycle=LifecycleClass.SESSION_TURN,
         phase=RequestPhase.COMPLETED,
         observation=observed if correlation == "exact" else None,
-        reconcile_deadline_at=1000,
+        until=Until(at=1000),
     )
     decision = RequestTurn(decision_id=request.decision_id, scope=scope, turn=turn)
     if receipt_kind == "mismatched":

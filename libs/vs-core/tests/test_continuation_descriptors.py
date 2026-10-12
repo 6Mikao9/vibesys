@@ -43,7 +43,6 @@ def registered_yield() -> tuple[core.CoreState, core.Continuation]:
         core.Operation(
             decision_id=core.DecisionId(root="registered-turn"),
             scope=invocation.scope,
-            deadline_at=100.0,
             request=payload,
         )
     )
@@ -52,7 +51,6 @@ def registered_yield() -> tuple[core.CoreState, core.Continuation]:
         operation_id=core.OperationId(root="operation:registered-turn"),
         decision_id=decision.decision_id,
         scope=invocation.scope,
-        deadline_at=100.0,
         admission_id=record.request.admission_id,
         operation=codec.encode(payload),
         retry_limit=state.run.limits.max_retries,

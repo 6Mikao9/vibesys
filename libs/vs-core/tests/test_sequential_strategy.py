@@ -29,11 +29,13 @@ from vs_core.api import (
     CloseSession,
     CoreEvent,
     CoreState,
+    CoreView,
     DecisionId,
     DecisionSubmitted,
     DispatchTurn,
     EnsureWorkspace,
     EventId,
+    Finish,
     InvocationId,
     InvocationRef,
     ItemId,
@@ -47,10 +49,10 @@ from vs_core.api import (
     RunEnded,
     RunResultProposal,
     RunStatus,
-    CoreView,
     SchedulingChange,
     SchemaRef,
     Scope,
+    SearchDeclaration,
     SessionId,
     SessionPhase,
     SessionsChange,
@@ -65,8 +67,6 @@ from vs_core.api import (
     Slot,
     SlotReleased,
     StartAttempt,
-    Finish,
-    SearchDeclaration,
     StrategyEvent,
     StrategyState,
     TraceFrame,
@@ -75,6 +75,7 @@ from vs_core.api import (
     TurnRequested,
     TurnResult,
     TurnSpec,
+    Until,
     Value,
     Withdraw,
     WorkspaceMode,
@@ -135,7 +136,6 @@ class Sequential(Value):
                 ),
                 prompts=(),
                 output_schema=SchemaRef(name="opaque-result", version=1),
-                deadline_at=100.0,
                 charge_class="paid",
             )
             decision = RequestTurn(
@@ -239,7 +239,6 @@ def exercise_item(
     )
     proposed = EnsureWorkspace(
         scope=Scope(owner=attempt.attempt_id, generation=0),
-        deadline_at=100.0,
         attempt=attempt,
         plan=decision.workspace,
     )
@@ -289,7 +288,7 @@ def exercise_item(
     state, strategy = result.state, deliver(strategy, result)
     decision = strategy.decide(project(state)).decisions[0]
     assert isinstance(decision, RequestTurn)
-    requested = TurnRequested(scope=decision.scope, turn=decision.turn)
+    requested = TurnRequested(until=Until(at=100.0), scope=decision.scope, turn=decision.turn)
     session = SessionView(
         spec=decision.turn.session,
         scope=Scope(owner=state.run.run_id, generation=0),
@@ -305,9 +304,7 @@ def exercise_item(
                 signal=requested,
                 change=SessionsChange(
                     state=SessionsState(sessions=(session,)),
-                    requests=(
-                        DispatchTurn(scope=decision.scope, deadline_at=100.0, turn=decision.turn),
-                    ),
+                    requests=(DispatchTurn(scope=decision.scope, turn=decision.turn),),
                 ),
             )
         ],
@@ -402,7 +399,6 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
     assert isinstance(decision, Finish)
     terminal = CloseSession(
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=100.0,
         session_id=SessionId(root="planner-session"),
     )
     result = consume_trace(

@@ -45,7 +45,11 @@ def _accepted(result: core.Transition) -> bool:
 
 def _submit(state: core.CoreState, decision: core.Command) -> core.Transition:
     return core.step(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
 
 
@@ -78,7 +82,6 @@ def test_a_turn_is_dispatched_within_the_run_deadline(requested: float) -> None:
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=requested,
         charge_class="free",
     )
     decision = core.RequestTurn(decision_id=core.DecisionId(root="turn"), scope=scope, turn=turn)
@@ -117,7 +120,6 @@ def test_an_operation_is_issued_within_the_run_deadline(requested: float) -> Non
             decision_id=core.DecisionId(root="write"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
             request=Write(),
-            deadline_at=requested,
         )
     )
     result = _submit(state, decision)
@@ -167,7 +169,6 @@ def test_a_request_with_no_time_left_is_refused_with_a_budget_rejection(
             decision_id=core.DecisionId(root="write"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
             request=Write(),
-            deadline_at=deadline_at,
         )
     )
     result = _submit(state, decision)

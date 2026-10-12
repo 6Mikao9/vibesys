@@ -58,6 +58,7 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         access=core.Access.READ_ONLY,
     )
     record = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=invocation,
         scope=scope,
         phase=core.SessionPhase.SUSPENDED,
@@ -67,7 +68,6 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="paid",
         ),
     )
@@ -110,7 +110,6 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         core.Operation(
             decision_id=core.DecisionId(root="reopen"),
             scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
-            deadline_at=100.0,
             request=core.ScopedAdmissionReopen(
                 attempt=attempt,
                 continuation_id=continuation.continuation_id,
@@ -124,14 +123,12 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         operation_id=core.OperationId(root="operation:reopen"),
         operation=codec.encode(decision.request),
         scope=decision.scope,
-        deadline_at=decision.deadline_at,
         retry_limit=state.run.limits.max_retries,
     )
     assert request.request_id is not None
     close = core.CloseAttemptScope(
         request_id=park,
         scope=scope,
-        deadline_at=100.0,
         attempt=attempt,
         admission_id=admission,
     )
@@ -142,7 +139,7 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         payload_digest="close",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
         observation=job.observation.model_copy(
             update={"request_id": park, "resource_id": None, "admission_id": admission}
         ),

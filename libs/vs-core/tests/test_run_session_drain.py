@@ -47,7 +47,6 @@ def _turn(index: int, *, reuse: bool) -> core.TurnSpec:
         workspace=RUN_SCOPE,
         prompts=(),
         output_schema=core.SchemaRef(name="plan", version=1),
-        deadline_at=100.0,
         charge_class="free",
     )
 
@@ -76,10 +75,13 @@ class Executor:
         self.turns += 1
         self.feed(
             core.DecisionSubmitted(
-                decision=core.RequestTurn(
-                    decision_id=core.DecisionId(root=f"turn-{self.turns}"),
-                    scope=RUN_SCOPE,
-                    turn=_turn(self.turns, reuse=reuse),
+                decision=core.Wait(
+                    request=core.RequestTurn(
+                        decision_id=core.DecisionId(root=f"turn-{self.turns}"),
+                        scope=RUN_SCOPE,
+                        turn=_turn(self.turns, reuse=reuse),
+                    ),
+                    until=core.Within(limit=100.0),
                 ),
                 expected_revision=self.state.revision,
             )

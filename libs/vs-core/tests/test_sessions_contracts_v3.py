@@ -176,7 +176,6 @@ def test_registered_input_manifest_preserves_distinct_equal_artifact_occurrences
     )
     request = core.ExecuteRegisteredOperation(
         scope=_scope(),
-        deadline_at=10.0,
         operation_id=core.OperationId(root="operation"),
         operation=core.OperationWire(
             schema_ref=core.OperationSchemaRef(
@@ -239,13 +238,15 @@ def test_run_paid_turn_is_rejected_without_spending_any_currency(max_turns: int)
         workspace=_scope(),
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=10.0,
         charge_class="paid",
         max_turns=max_turns,
     )
     event = core.DecisionSubmitted(
-        decision=core.RequestTurn(
-            decision_id=core.DecisionId(root="paid"), scope=_scope(), turn=turn
+        decision=core.Wait(
+            request=core.RequestTurn(
+                decision_id=core.DecisionId(root="paid"), scope=_scope(), turn=turn
+            ),
+            until=core.Within(limit=100.0),
         ),
         expected_revision=0,
     )
@@ -270,7 +271,6 @@ def test_run_checkpoint_pending_request_preserves_record_in_public_codec(generat
         scope=_scope(generation),
         invocation=_invocation(generation),
         retention="wip",
-        deadline_at=30.0,
     )
     record = core.RequestRecord(
         request_id=core.RequestId(root="checkpoint"),
@@ -278,7 +278,7 @@ def test_run_checkpoint_pending_request_preserves_record_in_public_codec(generat
         payload_digest="checkpoint-payload",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.PREPARED,
-        reconcile_deadline_at=30.0,
+        until=core.Until(at=30.0),
     )
     state = state.model_copy(
         update={"records": state.records.model_copy(update={"records": (record,)})}
@@ -355,7 +355,6 @@ def test_setup_classification_survives_root_target_and_canonical_record_codecs(
     request = core.EnsureSession(
         request_id=observation.request_id,
         scope=observation.scope,
-        deadline_at=10.0,
         spec=core.SessionSpec(
             session_id=core.SessionId(root="session"),
             role_id=core.RoleId(root="planner"),
@@ -373,7 +372,7 @@ def test_setup_classification_survives_root_target_and_canonical_record_codecs(
         observation=observation,
         setup_failure=failure,
         sequence=observation.sequence,
-        reconcile_deadline_at=10.0,
+        until=core.Until(at=10.0),
     )
     state = core.initial_state()
     state = state.model_copy(
@@ -422,10 +421,10 @@ def test_paid_cycle_prefix_stays_immutable_across_correction_resume_and_codecs(
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="result", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
     original = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=original_ref,
         scope=scope,
         turn=turn,
@@ -436,6 +435,7 @@ def test_paid_cycle_prefix_stays_immutable_across_correction_resume_and_codecs(
         update={"invocation_id": core.InvocationId(root="correction")}
     )
     correction = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=correction_ref,
         scope=scope,
         turn=turn.model_copy(
@@ -452,6 +452,7 @@ def test_paid_cycle_prefix_stays_immutable_across_correction_resume_and_codecs(
         update={"invocation_id": core.InvocationId(root="resume")}
     )
     resumed = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=resumed_ref,
         scope=scope,
         turn=turn.model_copy(

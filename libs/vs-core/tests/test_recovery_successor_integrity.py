@@ -25,7 +25,6 @@ def state_with_root() -> tuple[core.CoreState, core.RequestRecord]:
     request = core.EnsureSession(
         request_id=identity,
         scope=scope,
-        deadline_at=100.0,
         spec=core.SessionSpec(
             session_id=core.SessionId(root="session"),
             role_id=core.RoleId(root="worker"),
@@ -40,7 +39,7 @@ def state_with_root() -> tuple[core.CoreState, core.RequestRecord]:
         payload_digest="root",
         phase=core.RequestPhase.DISPATCHED,
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
         observation=core.Observation(
             event_id=core.EventId(root="live-root"),
             request_id=identity,
@@ -170,7 +169,6 @@ def test_prepared_query_remains_safe_without_live_mutation_admission(generation:
     request = core.InspectRequest(
         request_id=core.RequestId(root="read-only"),
         scope=root.request.scope.model_copy(update={"generation": generation}),
-        deadline_at=100.0,
         target=core.RequestId(root="historical-target"),
     )
     record = persisted_command(root, request).model_copy(

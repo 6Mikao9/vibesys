@@ -475,7 +475,6 @@ def test_authoritative_reopen_operation_codec_and_normalization(jobs: int) -> No
             decision_id=DecisionId(root="reopen"),
             scope=Scope(owner=RunId(root="run"), generation=0),
             request=request,
-            deadline_at=10.0,
         )
     )
     assert decision.registered_scope_reopen == _normalize_scoped_reopen(request)

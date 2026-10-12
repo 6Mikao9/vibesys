@@ -81,7 +81,6 @@ def registered_fixture() -> tuple[core.OperationRegistry, core.CoreState, core.R
     source = core.ExecuteRegisteredOperation(
         request_id=core.RequestId(root="original"),
         scope=scope,
-        deadline_at=100.0,
         operation_id=core.OperationId(root="alpha"),
         operation=registry.encode(Alpha()),
         retry_limit=0,
@@ -89,7 +88,6 @@ def registered_fixture() -> tuple[core.OperationRegistry, core.CoreState, core.R
     query = core.InspectRequest(
         request_id=core.RequestId(root="query"),
         scope=scope,
-        deadline_at=100.0,
         target=core.RequestId(root="original"),
     )
     state = state.model_copy(
@@ -197,7 +195,6 @@ def turn(scope: core.Scope) -> core.TurnSpec:
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
 
@@ -214,19 +211,15 @@ def turn_fixture(
     original = core.DispatchTurn(
         request_id=core.RequestId(root="original"),
         scope=scope,
-        deadline_at=100.0,
         turn=spec,
         decision_id=core.DecisionId(root="original-cause"),
-        decision_dependencies=(core.DecisionId(root="original-dependency"),),
         admission_id=admission_id,
     )
     query = core.InspectTurn(
         request_id=core.RequestId(root="query"),
         scope=scope,
-        deadline_at=100.0,
         invocation=invocation,
         decision_id=core.DecisionId(root="query-cause"),
-        decision_dependencies=(core.DecisionId(root="query-dependency"),),
         admission_id=core.DecisionId(root="query-episode"),
     )
     state = state.model_copy(
@@ -234,6 +227,7 @@ def turn_fixture(
             "sessions": core.SessionsState(
                 invocations=(
                     core.Invocation(
+                        until=core.Until(at=100.0),
                         invocation=invocation,
                         scope=scope,
                         turn=spec,
@@ -284,9 +278,7 @@ def test_inspected_turn_successors_restore_original_cause_dependencies_and_episo
     state, event, invocation = turn_fixture()
     assert event.target is not None
     signal = core.TurnObserved(invocation=invocation, observation=event.target.observation)
-    request = core.InspectTurn(
-        scope=signal.observation.scope, deadline_at=100.0, invocation=invocation
-    )
+    request = core.InspectTurn(scope=signal.observation.scope, invocation=invocation)
     result = core.trace_step(
         state,
         event,
@@ -325,7 +317,6 @@ def test_known_child_cannot_masquerade_as_root_target(inspection: str) -> None:
                 "request": core.InspectOwnedJob(
                     request_id=query.request_id,
                     scope=query.request.scope,
-                    deadline_at=100.0,
                     resource_id=child,
                 )
             }
@@ -431,7 +422,6 @@ def test_inspection_job_resource_must_match_the_recorded_owner() -> None:
             "request": core.InspectOwnedJob(
                 request_id=query.request_id,
                 scope=query.request.scope,
-                deadline_at=100.0,
                 resource_id=core.ResourceId(root="unrelated"),
             )
         }
@@ -458,9 +448,7 @@ def test_query_episode_cannot_replace_an_original_targets_absent_episode() -> No
     state, event, invocation = turn_fixture(None)
     assert event.target is not None
     signal = core.TurnObserved(invocation=invocation, observation=event.target.observation)
-    request = core.InspectTurn(
-        scope=signal.observation.scope, deadline_at=100.0, invocation=invocation
-    )
+    request = core.InspectTurn(scope=signal.observation.scope, invocation=invocation)
     result = core.trace_step(
         state,
         event,

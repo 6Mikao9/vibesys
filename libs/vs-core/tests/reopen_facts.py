@@ -19,7 +19,6 @@ def released_job(
         scope=scope,
         attempt=attempt,
         admission_id=owner.closure.admission_id,
-        deadline_at=100.0,
     )
     proof = core.Observation(
         event_id=core.EventId(root="job-released"),
@@ -53,7 +52,7 @@ def released_job(
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.COMPLETED,
         observation=proof,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     return job, record
 
@@ -94,6 +93,7 @@ def with_reopening_continuation(
         reopen_authority=reopen_authority,
     )
     suspended = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=continuation.invocation,
         scope=scope,
         turn=core.TurnSpec(
@@ -108,7 +108,6 @@ def with_reopening_continuation(
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="paid",
         ),
         phase=core.SessionPhase.SUSPENDED,

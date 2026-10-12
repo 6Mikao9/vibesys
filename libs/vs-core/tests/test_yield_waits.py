@@ -21,7 +21,6 @@ def _checkpoint(invocation: core.Invocation, phase: core.RequestPhase) -> core.R
     request = core.SnapshotAndRetain(
         request_id=core.RequestId(root="checkpoint"),
         scope=invocation.scope,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=OWNER, generation=0),
         retention="wip",
         invocation=invocation.invocation,

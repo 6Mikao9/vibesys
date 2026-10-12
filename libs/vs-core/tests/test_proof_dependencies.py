@@ -242,10 +242,8 @@ def test_inflight_dependencies_wait_without_an_observation(
     assert verdict == Missing(reason)
     dependent = core.InspectRequest(
         scope=request.scope,
-        deadline_at=request.deadline_at,
         target=record.request_id,
         depends_on=request.depends_on,
-        decision_dependencies=request.decision_dependencies,
     )
     state = core.initial_state()
     state = state.model_copy(
@@ -296,9 +294,7 @@ def test_a_pending_dependency_cannot_hide_a_rejected_dependency(
     ) == Missing(ProofReason.NOT_ACCEPTED)
     dependent = core.InspectRequest(
         scope=request.scope,
-        deadline_at=request.deadline_at,
         target=record.request_id,
-        decision_dependencies=ids,
     )
     state = core.initial_state()
     state = state.model_copy(

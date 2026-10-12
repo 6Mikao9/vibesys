@@ -21,6 +21,7 @@ from vs_core.api import (
     Scope,
     SessionId,
     SessionSpec,
+    Until,
     Value,
     initial_state,
     step,
@@ -39,7 +40,6 @@ def _session_record() -> RequestRecord:
     request = EnsureSession(
         request_id=request_id,
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=100.0,
         spec=SessionSpec(
             session_id=SessionId(root="target"),
             role_id=RoleId(root="worker"),
@@ -54,7 +54,7 @@ def _session_record() -> RequestRecord:
         payload_digest=_digest(request),
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
     )
 
 
@@ -63,7 +63,6 @@ def _lost_inspection(target: RequestRecord, phase: RequestPhase) -> RequestRecor
     request = InspectRequest(
         request_id=request_id,
         scope=target.request.scope,
-        deadline_at=100.0,
         target=target.request_id,
     )
     return RequestRecord(
@@ -72,7 +71,7 @@ def _lost_inspection(target: RequestRecord, phase: RequestPhase) -> RequestRecor
         payload_digest=_digest(request),
         lifecycle=LifecycleClass.QUERY,
         phase=phase,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
     )
 
 

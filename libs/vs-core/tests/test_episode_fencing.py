@@ -52,7 +52,6 @@ def turn_fixture(scope: core.Scope) -> core.TurnSpec:
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
 
@@ -60,11 +59,14 @@ def turn_fixture(scope: core.Scope) -> core.TurnSpec:
 def turn_proposal(state: core.CoreState, scope: core.Scope) -> core.Transition:
     turn = turn_fixture(scope)
     decision = core.RequestTurn(decision_id=core.DecisionId(root="turn"), scope=scope, turn=turn)
-    signal = core.TurnRequested(scope=scope, turn=turn)
-    request = core.DispatchTurn(scope=scope, deadline_at=100.0, turn=turn)
+    signal = core.TurnRequested(until=core.Until(at=100.0), scope=scope, turn=turn)
+    request = core.DispatchTurn(scope=scope, turn=turn)
     return core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=state.revision),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -99,10 +101,13 @@ def test_separately_proposed_measurement_keeps_current_admission_episode() -> No
     )
     decision = core.Measure(decision_id=core.DecisionId(root="measure"), scope=scope, plan=plan)
     signal = core.MeasurementRequested(scope=scope, plan=plan)
-    request = core.SubmitMeasurement(scope=scope, deadline_at=10.0, plan=plan)
+    request = core.SubmitMeasurement(scope=scope, plan=plan)
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -142,21 +147,24 @@ def test_separately_proposed_registered_mutation_keeps_current_admission_episode
         core.Operation(
             decision_id=core.DecisionId(root="write"),
             scope=scope,
-            deadline_at=100.0,
             request=AttemptWrite(content="content"),
         )
     )
     request = core.ExecuteRegisteredOperation(
         scope=scope,
-        deadline_at=100.0,
         operation_id=core.OperationId(root="operation:write"),
         operation=codec.encode(decision.request),
         retry_limit=0,
     )
-    signal = core.RequestPrepared(request=request, lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE)
+    signal = core.RequestPrepared(
+        until=core.Until(at=100.0), request=request, lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE
+    )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -229,7 +237,6 @@ def test_old_recorded_cleanup_remains_dispatchable_after_reentry() -> None:
     state, scope, withdraw = retirement_state()
     request = core.CloseAttemptScope(
         scope=scope,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=core.AttemptId(root="attempt"), generation=0),
         admission_id=core.DecisionId(root="admission"),
         decision_id=withdraw.decision_id,
@@ -267,17 +274,14 @@ def test_ordinary_retention_and_discard_cannot_bypass_mutation_fences(
     assert isinstance(scope.owner, core.AttemptId)
     attempt = core.AttemptRef(attempt_id=scope.owner, generation=scope.generation)
     constructors = {
-        "snapshot": core.SnapshotAndRetain(
-            scope=scope, deadline_at=100.0, attempt=attempt, retention="wip"
-        ),
+        "snapshot": core.SnapshotAndRetain(scope=scope, attempt=attempt, retention="wip"),
         "retain": core.RetainRevision(
             scope=scope,
-            deadline_at=100.0,
             attempt=attempt,
             revision=state.run.facts.baseline,
             retention="wip",
         ),
-        "discard": core.DiscardWorkspace(scope=scope, deadline_at=100.0, attempt=attempt),
+        "discard": core.DiscardWorkspace(scope=scope, attempt=attempt),
     }
     request = constructors[kind].model_copy(
         update={"admission_id": core.DecisionId(root="admission")}
@@ -357,7 +361,10 @@ def test_initial_admission_requires_exact_canonical_start(
     with pytest.raises(core.ContractError, match=field):
         core.trace_step(
             state,
-            core.DecisionSubmitted(decision=decision, expected_revision=0),
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=0,
+            ),
             core.ReducerTrace(
                 frames=(
                     core.TraceFrame(
@@ -391,7 +398,6 @@ def test_previous_cleanup_cannot_close_a_reused_session_in_a_new_episode() -> No
     )
     request = core.CloseSession(
         scope=scope,
-        deadline_at=100.0,
         session_id=spec.session_id,
         admission_id=core.DecisionId(root="admission"),
         decision_id=withdraw.decision_id,
@@ -449,7 +455,6 @@ def test_cleanup_cause_for_another_attempt_cannot_authorize_snapshot() -> None:
     assert isinstance(scope.owner, core.AttemptId)
     request = core.SnapshotAndRetain(
         scope=scope,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=scope.owner, generation=0),
         retention="wip",
         admission_id=core.DecisionId(root="admission"),
@@ -501,13 +506,10 @@ def test_recorded_retirement_cannot_mutate_a_reused_workspace_after_reentry(kind
         }
     )
     requests = {
-        "snapshot": core.SnapshotAndRetain(
-            scope=scope, deadline_at=100.0, attempt=attempt, retention="wip"
-        ),
-        "discard": core.DiscardWorkspace(scope=scope, deadline_at=100.0, attempt=attempt),
+        "snapshot": core.SnapshotAndRetain(scope=scope, attempt=attempt, retention="wip"),
+        "discard": core.DiscardWorkspace(scope=scope, attempt=attempt),
         "registered": core.ExecuteRegisteredOperation(
             scope=scope,
-            deadline_at=100.0,
             operation_id=core.OperationId(root="cleanup"),
             operation=registry.encode(AttemptWrite(content="cleanup")),
             retry_limit=0,
@@ -554,7 +556,6 @@ def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> N
     assert isinstance(scope.owner, core.AttemptId)
     request = core.SnapshotAndRetain(
         scope=scope,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=scope.owner, generation=0),
         retention="wip",
         admission_id=core.DecisionId(root="admission"),
@@ -631,7 +632,6 @@ def test_recorded_closure_authorizes_exact_settlement_and_setup_release_work(pro
     request = core.SnapshotAndRetain(
         request_id=identity,
         scope=request_scope,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=scope.owner, generation=request_scope.generation),
         retention="candidate",
         admission_id=core.DecisionId(root="admission"),

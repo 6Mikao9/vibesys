@@ -156,7 +156,10 @@ def test_settlement_forwards_exact_candidate_revision(digest: str) -> None:
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -183,7 +186,13 @@ def test_recovery_barrier_rejects_ordinary_decisions(phase: core.RecoveryPhase) 
             )
         }
     )
-    result = core.step(state, core.DecisionSubmitted(decision=start(state), expected_revision=0))
+    result = core.step(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=start(state), until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
+    )
     assert isinstance(result.events[0], core.Rejected)
     assert result.events[0].code == core.RejectionCode.CLOSED_SCOPE
     assert result.events[0].path == ("recovery",)
@@ -209,7 +218,10 @@ def test_queued_registration_is_separate_from_slot_admission() -> None:
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -250,13 +262,15 @@ def test_acquisition_episode_reaches_prepared_requests() -> None:
     )
     workspace = core.EnsureWorkspace(
         scope=core.Scope(owner=decision.attempt_id, generation=0),
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=decision.attempt_id, generation=0),
         plan=decision.workspace,
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -285,14 +299,12 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
         core.InspectRequest(
             request_id=request_id,
             scope=decision.scope,
-            deadline_at=100.0,
             target=core.RequestId(root="target"),
         )
         if inspection
         else core.EnsureWorkspace(
             request_id=request_id,
             scope=decision.scope,
-            deadline_at=100.0,
             attempt=core.AttemptRef(attempt_id=decision.attempt_id, generation=0),
             plan=decision.workspace,
         )
@@ -465,7 +477,10 @@ def test_queued_retirement_binds_exact_registration_generation() -> None:
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -491,4 +506,10 @@ def test_queued_retirement_without_registration_fails_with_typed_error() -> None
         disposition=core.Cancel(),
     )
     with pytest.raises(core.ContractError, match="canonical accepted registration"):
-        core.step(state, core.DecisionSubmitted(decision=decision, expected_revision=0))
+        core.step(
+            state,
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=0,
+            ),
+        )

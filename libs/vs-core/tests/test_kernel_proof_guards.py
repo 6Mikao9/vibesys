@@ -71,7 +71,6 @@ def test_dependency_dispatch_requires_exact_owner_receipt(defect: str, identity:
         scope=command.scope,
         target=core.RequestId(root="target"),
         decision_id=command.decision_id,
-        deadline_at=10.0,
     )
     assert core.dependency_status(state, request) == core.DependencyStatus.FAILED
     assert request.request_id is not None
@@ -84,7 +83,7 @@ def test_dependency_dispatch_requires_exact_owner_receipt(defect: str, identity:
         payload_digest=hashlib.sha256(canonical.encode()).hexdigest(),
         lifecycle=core.LifecycleClass.QUERY,
         phase=core.RequestPhase.PREPARED,
-        reconcile_deadline_at=20.0,
+        until=core.Until(at=20.0),
     )
     ready = state.records.model_copy(
         update={
@@ -118,8 +117,6 @@ def test_completed_dependency_with_foreign_feedback_cannot_wake_dispatch() -> No
     request = core.InspectRequest(
         scope=command.scope,
         target=core.RequestId(root="target"),
-        deadline_at=10.0,
-        decision_dependencies=(command.decision_id,),
     )
     assert core.dependency_status(state, request) == core.DependencyStatus.FAILED
     decision = stop(state, "dependent", (command.decision_id,))
@@ -297,7 +294,6 @@ def test_kernel_event_cause_requires_the_recorded_observation_episode(
         request_id=core.RequestId(root="request"),
         scope=scope,
         admission_id=core.DecisionId(root="canonical"),
-        deadline_at=10.0,
         spec=spec,
     )
     assert request.request_id is not None
@@ -308,7 +304,7 @@ def test_kernel_event_cause_requires_the_recorded_observation_episode(
         payload_digest=hashlib.sha256(serialized.encode()).hexdigest(),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.DISPATCHED,
-        reconcile_deadline_at=10.0,
+        until=core.Until(at=10.0),
     )
     state = state.model_copy(update={"records": core.RecordsState(records=(record,))})
     event = core.SessionObserved(

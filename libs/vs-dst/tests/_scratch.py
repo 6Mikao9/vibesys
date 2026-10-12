@@ -80,7 +80,7 @@ def run_with_crash(new_world: Callable[[], World], point: CrashPoint) -> Survive
     while True:
         setup = world.setup
         host = scripted_host(
-            setup.new_strategy(),
+            setup.new_launch(),
             world,
             setup.harness,
             setup.schemas,

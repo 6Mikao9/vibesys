@@ -96,7 +96,6 @@ def released_job(identity: int) -> tuple[core.CoreState, core.OwnedJob, core.Req
         request_id=core.RequestId(root=f"submission:{identity}"),
         scope=scope,
         admission_id=core.DecisionId(root=f"episode:{identity}"),
-        deadline_at=1.0,
         plan=plan,
     )
     assert request.request_id is not None
@@ -132,7 +131,7 @@ def released_job(identity: int) -> tuple[core.CoreState, core.OwnedJob, core.Req
         lifecycle=core.LifecycleClass.OWNED_JOB,
         phase=core.RequestPhase.COMPLETED,
         observation=observation,
-        reconcile_deadline_at=1.0,
+        until=core.Until(at=1.0),
     )
     return state, job, source
 
@@ -195,14 +194,12 @@ def test_accepted_session_turn_without_resource_keeps_run_closing(
         request_id=source.request_id,
         scope=source.request.scope,
         admission_id=source.request.admission_id,
-        deadline_at=100.0,
         turn=core.TurnSpec(
             session=session,
             invocation_id=core.InvocationId(root="invocation"),
             workspace=source.request.scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="free",
         ),
     )

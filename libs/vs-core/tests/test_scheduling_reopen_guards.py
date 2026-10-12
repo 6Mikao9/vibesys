@@ -69,7 +69,6 @@ def _fixture(
         core.Operation(
             decision_id=core.DecisionId(root=f"reopen-{index}"),
             scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
-            deadline_at=100.0,
             request=core.ScopedAdmissionReopen(
                 attempt=attempt,
                 continuation_id=core.ContinuationId(root=f"continuation-{index}"),

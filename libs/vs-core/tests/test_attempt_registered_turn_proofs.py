@@ -72,7 +72,6 @@ def registered_state(
         operation_id=operation_id,
         scope=invocation.scope,
         admission_id=core.DecisionId(root="current"),
-        deadline_at=1000,
         operation=codec.encode(payload),
         retry_limit=0,
     )
@@ -89,7 +88,6 @@ def registered_state(
         core.Operation(
             decision_id=decision_id,
             scope=invocation.scope,
-            deadline_at=1000,
             request=canonical_payload,
         )
     )
@@ -121,7 +119,7 @@ def registered_state(
         payload_digest="registered-turn",
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.DISPATCHED,
-        reconcile_deadline_at=1000,
+        until=core.Until(at=1000),
     )
     if receipt_kind == "no-membership":
         receipt = receipt.model_copy(update={"request_ids": ()})

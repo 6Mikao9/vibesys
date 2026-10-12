@@ -49,6 +49,7 @@ from vs_core.api import (
     SessionSpec,
     SessionView,
     TurnSpec,
+    Until,
     WorkspaceMode,
     WorkspaceObserved,
     WorkspacePlan,
@@ -100,10 +101,15 @@ def retained_reopen(
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=1000,
         charge_class="paid",
     )
-    invocation = Invocation(invocation=source, scope=scope, turn=turn, phase=SessionPhase.SUSPENDED)
+    invocation = Invocation(
+        until=Until(at=100.0),
+        invocation=source,
+        scope=scope,
+        turn=turn,
+        phase=SessionPhase.SUSPENDED,
+    )
     continuation = Continuation(
         continuation_id=ContinuationId(root="continuation"),
         invocation=source,
@@ -366,7 +372,6 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
         request_id=request_id,
         scope=session.scope,
         admission_id=event.admission_id,
-        deadline_at=1000,
         spec=session.spec,
         required_resource=session.resource_id,
     )
@@ -384,7 +389,7 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
         payload_digest=payload_digest,
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.COMPLETED,
-        reconcile_deadline_at=1000,
+        until=Until(at=1000),
     )
     observed = Observation(
         event_id=EventId(root="retained-proof"),

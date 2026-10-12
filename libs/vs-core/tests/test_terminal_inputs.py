@@ -117,7 +117,6 @@ def test_terminal_transition_cannot_hide_new_outbox_work_not_yet_registered() ->
     scope = core.Scope(owner=state.run.run_id, generation=0)
     request = core.EnsureWorkspace(
         scope=scope,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=core.AttemptId(root="attempt"), generation=0),
         plan=core.WorkspacePlan(
             mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline

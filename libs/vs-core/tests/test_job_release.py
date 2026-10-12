@@ -124,10 +124,13 @@ def started(running_polls: int, ending: core.ObservationStatus) -> Cluster:
     submitted = core.step(
         state,
         core.DecisionSubmitted(
-            decision=core.Measure(
-                decision_id=core.DecisionId(root="measure"),
-                scope=scope,
-                plan=plan(purpose="local-validation", candidate=state.run.facts.baseline),
+            decision=core.Wait(
+                request=core.Measure(
+                    decision_id=core.DecisionId(root="measure"),
+                    scope=scope,
+                    plan=plan(purpose="local-validation", candidate=state.run.facts.baseline),
+                ),
+                until=core.Within(limit=100.0),
             ),
             expected_revision=state.revision,
         ),

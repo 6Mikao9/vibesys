@@ -183,7 +183,10 @@ def test_queued_reopen_retirement_uses_queue_admission_over_old_parked_owner(ide
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(signal=signal, change=core.AttemptsChange(state=state.attempts)),

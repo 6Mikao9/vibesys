@@ -101,7 +101,11 @@ def requested(
         plan=measurement,
     )
     return transition(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
 
 
@@ -546,7 +550,6 @@ def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
         query = core.ObserveOwnedJob(
             request_id=source.request_id,
             scope=request.scope,
-            deadline_at=100.0,
             resource_id=core.ResourceId(root="job"),
         )
         codec_digest = sha256(

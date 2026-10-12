@@ -463,7 +463,6 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
             request=SubmitMeasurement(
                 request_id=observation.request_id,
                 scope=observation.scope,
-                deadline_at=100.0,
                 plan=MeasurementPlan(
                     purpose="official",
                     candidate=initial_state().run.facts.baseline,

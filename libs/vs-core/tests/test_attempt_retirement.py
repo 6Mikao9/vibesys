@@ -76,7 +76,7 @@ def proof_record(
         lifecycle=lifecycle,
         phase=core.RequestPhase.PREPARED if proof is None else core.RequestPhase.COMPLETED,
         observation=proof,
-        reconcile_deadline_at=deadline,
+        until=core.Until(at=deadline),
     )
 
 
@@ -477,7 +477,6 @@ def registered_writer(
         core.Operation(
             decision_id=core.DecisionId(root="writer"),
             scope=invocation.scope,
-            deadline_at=invocation.turn.deadline_at,
             request=RegisteredWriter(turn=invocation.turn),
         )
     )
@@ -487,7 +486,6 @@ def registered_writer(
         operation_id=core.OperationId(root="operation:writer"),
         scope=invocation.scope,
         admission_id=core.DecisionId(root="admission"),
-        deadline_at=invocation.turn.deadline_at,
         operation=codec.encode(decision.request),
         retry_limit=state.run.limits.max_retries,
     )
@@ -553,13 +551,13 @@ def writer_invocation(
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="implementation", version=1),
-        deadline_at=100.0,
         charge_class=charge,
         predecessor=changed(invocation, invocation_id=core.InvocationId(root="predecessor"))
         if predecessor
         else None,
     )
     return core.Invocation(
+        until=core.Until(at=100.0),
         invocation=invocation,
         scope=scope,
         turn=turn,
@@ -647,7 +645,6 @@ def test_every_writer_variant_requires_exact_complete_lease_release_before_dispo
             scope=invocation.scope,
             session_id=invocation.invocation.session_id,
             admission_id=core.DecisionId(root="admission"),
-            deadline_at=state.run.deadline_at,
         ),
         state.run.deadline_at,
         observation(ref, lease_id, resource_id=core.ResourceId(root="writer-conversation")),
@@ -814,7 +811,6 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
         core.Operation(
             decision_id=core.DecisionId(root="reopen"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
-            deadline_at=100.0,
             request=core.ScopedAdmissionReopen(
                 attempt=ref,
                 continuation_id=core.ContinuationId(root="continuation"),
@@ -829,7 +825,6 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
         request_id=core.RequestId(root="operation:reopen"),
         decision_id=decision.decision_id,
         scope=decision.scope,
-        deadline_at=decision.deadline_at,
         operation_id=core.OperationId(root="operation:reopen"),
         operation=codec.encode(decision.request),
         retry_limit=state.run.limits.max_retries,
@@ -1030,7 +1025,6 @@ def test_retention_crash_ack_requires_exact_checkpoint_history(
         depends_on=(owner.closure.authority,),
         scope=core.Scope(owner=ref.attempt_id, generation=ref.generation),
         admission_id=owner.admission_id,
-        deadline_at=state.run.deadline_at,
         attempt=ref,
         revision=state.run.facts.baseline,
         retention="wip",
@@ -1144,7 +1138,6 @@ def acquired_reopen_fixture() -> tuple[
             scope=scope,
             attempt=event.normalization.attempt,
             admission_id=owner.admission_id,
-            deadline_at=state.run.deadline_at,
             revision=owner.checkpoint,
         ),
         core.EnsureSession(
@@ -1152,14 +1145,12 @@ def acquired_reopen_fixture() -> tuple[
             scope=scope,
             spec=spec,
             admission_id=owner.closure.admission_id,
-            deadline_at=state.run.deadline_at,
         ),
         core.EnsureSession(
             request_id=core.RequestId(root="reacquired-session"),
             scope=scope,
             spec=spec,
             admission_id=owner.admission_id,
-            deadline_at=state.run.deadline_at,
             required_resource=resource,
         ),
     )
@@ -1531,7 +1522,6 @@ def test_opaque_inspection_identities_are_injective_across_sources_and_children(
             scope=scope,
             attempt=ref,
             admission_id=proof.admission_id,
-            deadline_at=state.run.deadline_at,
         )
         root_proof = proof if aggregate else changed(proof, resource_id=None, children=(resource,))
         records.append(
@@ -1647,13 +1637,12 @@ def test_child_release_requires_complete_positive_history_from_every_source(
                 scope=mark.scope,
                 attempt=ref,
                 admission_id=core.DecisionId(root="admission"),
-                deadline_at=state.run.deadline_at,
             ),
             payload_digest="source-proof",
             lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
             phase=core.RequestPhase.COMPLETED,
             observation=mark,
-            reconcile_deadline_at=state.run.deadline_at,
+            until=core.Until(at=state.run.deadline_at),
         )
         for mark in (first, second)
     )
@@ -1737,7 +1726,7 @@ def test_unknown_scope_reopen_inspects_before_reacquisition_or_typed_outcome(
         payload_digest="reopen",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.RECONCILING,
-        reconcile_deadline_at=state.run.deadline_at,
+        until=core.Until(at=state.run.deadline_at),
         observation=observed if canonical else None,
     )
     state = with_owner(state, owner, records=changed(state.records, records=(record,)))
@@ -1934,7 +1923,7 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
             lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
             phase=core.RequestPhase.COMPLETED,
             observation=observed,
-            reconcile_deadline_at=state.run.deadline_at,
+            until=core.Until(at=state.run.deadline_at),
         ),
         outcome_schema=None if outcome_identity == "missing" else schema.outcome_schema,
         outcome_json=None

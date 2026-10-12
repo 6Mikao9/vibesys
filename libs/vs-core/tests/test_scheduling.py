@@ -755,7 +755,11 @@ def test_exhausted_receipt_budget_rejects_reordered_duplicate_starts_once(order:
             budget=owner.budget,
         )
         result = _step(
-            state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+            state,
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=state.revision,
+            ),
         )
         state = result.state
         assert result.requests == ()
@@ -949,7 +953,11 @@ def test_updated_refund_receipts_authorize_only_the_restored_admission_budget(
         budget=candidate.budget,
     )
     result = _step(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     feedback = next(
         item for item in result.events if isinstance(item, core.Accepted | core.Rejected)
@@ -1184,7 +1192,6 @@ def _reopen_proof(
         core.Operation(
             decision_id=core.DecisionId(root="reentry"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
-            deadline_at=100.0,
             request=core.ScopedAdmissionReopen(
                 attempt=attempt,
                 continuation_id=core.ContinuationId(root="continuation"),

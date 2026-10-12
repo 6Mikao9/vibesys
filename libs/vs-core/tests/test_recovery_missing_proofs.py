@@ -64,6 +64,7 @@ from vs_core.api import (
     SessionView,
     StrategyState,
     TurnSpec,
+    Until,
     Value,
     WorkspaceMode,
     WorkspacePlan,
@@ -83,7 +84,6 @@ def _state(record: RequestRecord) -> CoreState:
     anchor_request = EnsureSession(
         request_id=RequestId(root="anchor"),
         scope=record.request.scope,
-        deadline_at=100.0,
         spec=SessionSpec(
             session_id=SessionId(root="anchor"),
             role_id=RoleId(root="worker"),
@@ -99,7 +99,7 @@ def _state(record: RequestRecord) -> CoreState:
         payload_digest="anchor",
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
     )
     return state.model_copy(
         update={
@@ -149,7 +149,6 @@ def test_accepted_resource_bearing_requests_need_identified_release(
     setup = EnsureSession(
         request_id=request_id,
         scope=scope,
-        deadline_at=100.0,
         spec=spec,
         required_resource=resource,
     )
@@ -159,7 +158,6 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         workspace=scope,
         prompts=(ArtifactRef(artifact_id=ArtifactId(root="prompt"), digest="digest"),),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="free",
     )
     request = (
@@ -168,14 +166,12 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         else DispatchTurn(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             turn=turn,
         )
         if kind == "turn"
         else ResumeSessionTurn(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             turn=turn,
             continuation_id=ContinuationId(root="continuation"),
         )
@@ -184,7 +180,6 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         request = EnsureWorkspace(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             attempt=AttemptRef(attempt_id=AttemptId(root="attempt"), generation=0),
             plan=WorkspacePlan(
                 mode=WorkspaceMode.ISOLATED_CHILD,
@@ -195,7 +190,6 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         request = CloseSession(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             session_id=spec.session_id,
         )
     observation = Observation(
@@ -223,7 +217,7 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         if kind in ("setup", "workspace", "close")
         else LifecycleClass.SESSION_TURN,
         phase=RequestPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
         observation=observation,
     )
     state = _state(record)
@@ -261,14 +255,12 @@ def test_resource_free_query_and_proven_nonacceptance_remain_terminal(
         InspectRequest(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             target=RequestId(root="target"),
         )
         if query
         else EnsureSession(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             required_resource=ResourceId(root="existing-lease"),
             spec=SessionSpec(
                 session_id=SessionId(root="session"),
@@ -285,7 +277,7 @@ def test_resource_free_query_and_proven_nonacceptance_remain_terminal(
         payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.QUERY if query else LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
         observation=Observation(
             event_id=EventId(root="negative-proof"),
             request_id=request_id,
@@ -356,7 +348,6 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
             decision_id=decision_id,
             scope=scope,
             request=payload,
-            deadline_at=100.0,
         )
     )
     wire = codec.encode(payload)
@@ -364,7 +355,6 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
     request = ExecuteRegisteredOperation(
         request_id=request_id,
         scope=scope,
-        deadline_at=100.0,
         decision_id=decision_id,
         operation_id=OperationId(root=f"operation:{decision_id.root}"),
         operation=wire,
@@ -497,19 +487,15 @@ def test_terminal_session_resource_matches_request_correlated_lease(
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="free",
     )
     requests = {
-        "setup": EnsureSession(request_id=request_id, scope=scope, deadline_at=100.0, spec=spec),
-        "close": CloseSession(
-            request_id=request_id, scope=scope, deadline_at=100.0, session_id=spec.session_id
-        ),
-        "turn": DispatchTurn(request_id=request_id, scope=scope, deadline_at=100.0, turn=turn),
+        "setup": EnsureSession(request_id=request_id, scope=scope, spec=spec),
+        "close": CloseSession(request_id=request_id, scope=scope, session_id=spec.session_id),
+        "turn": DispatchTurn(request_id=request_id, scope=scope, turn=turn),
         "resume": ResumeSessionTurn(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             turn=turn,
             continuation_id=ContinuationId(root="continuation"),
         ),
@@ -522,7 +508,7 @@ def test_terminal_session_resource_matches_request_correlated_lease(
         if kind in ("turn", "resume")
         else LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
         observation=Observation(
             event_id=EventId(root="release"),
             request_id=request_id,

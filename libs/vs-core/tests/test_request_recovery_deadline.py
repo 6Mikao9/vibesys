@@ -36,6 +36,7 @@ from vs_core.api import (
     SessionsState,
     SessionView,
     TurnSpec,
+    Until,
     initial_state,
     step,
 )
@@ -49,7 +50,6 @@ def pending_record(
     request = EnsureSession(
         request_id=request_id,
         scope=Scope(owner=initial_state().run.run_id, generation=0),
-        deadline_at=100.0,
         spec=SessionSpec(
             session_id=SessionId(root=identity),
             role_id=RoleId(root="worker"),
@@ -64,7 +64,7 @@ def pending_record(
         payload_digest=f"persisted-{identity}",
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
     )
 
 
@@ -146,7 +146,6 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
         workspace=request.scope,
         prompts=(),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=20_000.0,
         charge_class="paid",
     )
     live = pending_record(identity="successor").model_copy(
@@ -154,7 +153,6 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
             "request": DispatchTurn(
                 request_id=pending_record(identity="successor").request_id,
                 scope=request.scope,
-                deadline_at=20_000.0,
                 turn=turn,
             ),
             "lifecycle": LifecycleClass.SESSION_TURN,
@@ -181,6 +179,7 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
         resource_id=resource,
     )
     invocation = Invocation(
+        until=Until(at=100.0),
         invocation=InvocationRef(
             session_id=request.spec.session_id,
             invocation_id=turn.invocation_id,

@@ -107,6 +107,7 @@ from vs_core.api import (
     TrustedBaseline,
     TurnRequested,
     TurnSpec,
+    Until,
     Value,
     WorkspaceMode,
     WorkspaceObserved,
@@ -303,7 +304,6 @@ def canonical_turns(state: CoreState) -> CoreState:
             request_id=identity,
             scope=invocation.scope,
             admission_id=state.attempts.attempts[0].admission_id,
-            deadline_at=invocation.turn.deadline_at,
             turn=invocation.turn,
         )
         record = RequestRecord(
@@ -312,7 +312,7 @@ def canonical_turns(state: CoreState) -> CoreState:
             payload_digest="turn-proof",
             lifecycle=LifecycleClass.SESSION_TURN,
             phase=RequestPhase.DISPATCHED,
-            reconcile_deadline_at=1000.0,
+            until=Until(at=1000.0),
         )
         records = [
             row
@@ -404,7 +404,6 @@ def acquiring_state() -> CoreState:
         request_id=identity,
         scope=Scope(owner=owner.attempt_id, generation=owner.generation),
         admission_id=owner.admission_id,
-        deadline_at=1000.0,
         attempt=owner_ref(),
         plan=owner.workspace,
     )
@@ -415,7 +414,7 @@ def acquiring_state() -> CoreState:
         payload_digest="workspace-proof",
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.DISPATCHED,
-        reconcile_deadline_at=1000.0,
+        until=Until(at=1000.0),
     )
     owner = owner.model_copy(update={"pending_records": (identity,)})
     state = state.model_copy(
@@ -444,6 +443,7 @@ def invocation_state(
         access=Access.WRITE_CANDIDATE,
     )
     invocation = Invocation(
+        until=Until(at=100.0),
         invocation=InvocationRef(
             session_id=spec.session_id, invocation_id=InvocationId(root="invocation"), generation=0
         ),
@@ -454,7 +454,6 @@ def invocation_state(
             workspace=scope,
             prompts=(),
             output_schema=SchemaRef(name="output", version=1),
-            deadline_at=1000.0,
             charge_class=charge_class,
             predecessor=predecessor,
         ),
@@ -1109,7 +1108,6 @@ def test_unknown_invocation_acceptance_always_inspects(
         request_id=observed.request_id,
         scope=target.scope,
         admission_id=observed.admission_id,
-        deadline_at=1000.0,
         turn=target.turn,
     )
     assert request.request_id is not None
@@ -1120,7 +1118,7 @@ def test_unknown_invocation_acceptance_always_inspects(
         lifecycle=LifecycleClass.SESSION_TURN,
         phase=RequestPhase.RECONCILING,
         observation=observed,
-        reconcile_deadline_at=1000.0,
+        until=Until(at=1000.0),
     )
     state = state.model_copy(
         update={
@@ -1600,7 +1598,6 @@ def failed_group_state() -> CoreState:
     request = EnsureSession(
         request_id=RequestId(root="member"),
         scope=Scope(owner=owner.attempt_id, generation=0),
-        deadline_at=1000.0,
         admission_id=DecisionId(root="owner"),
         spec=state.sessions.sessions[0].spec,
     )
@@ -1611,7 +1608,7 @@ def failed_group_state() -> CoreState:
         payload_digest="member-proof",
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.COMPLETED,
-        reconcile_deadline_at=1000.0,
+        until=Until(at=1000.0),
         observation=observation(request.request_id, ObservationStatus.FAILED),
     )
     group = state.sessions.acquisition_groups[0].model_copy(
@@ -1895,7 +1892,6 @@ def revision_operation_state() -> tuple[CoreState, OperationRegistry, RevisionOp
         request_id=RequestId(root="revision"),
         scope=Scope(owner=AttemptId(root="owner"), generation=0),
         admission_id=DecisionId(root="owner"),
-        deadline_at=1000.0,
         operation_id=OperationId(root="operation:operation"),
         operation=wire,
         retry_limit=0,
@@ -1928,7 +1924,9 @@ def revision_operation_state() -> tuple[CoreState, OperationRegistry, RevisionOp
     return (
         state,
         codec,
-        RevisionOperationRequested(request=request, authority=RevisionAuthority.RETAIN),
+        RevisionOperationRequested(
+            until=Until(at=100.0), request=request, authority=RevisionAuthority.RETAIN
+        ),
     )
 
 
@@ -2512,7 +2510,7 @@ def test_attempt_turn_charges_before_session_acquisition_but_cannot_dispatch(
         feedback=Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (receipt,)})})
-    event = TurnRequested(scope=turn.workspace, turn=turn)
+    event = TurnRequested(until=Until(at=100.0), scope=turn.workspace, turn=turn)
     prepared = step(state, event)
     assert prepared == step(reload_state(state), event)
     assert len(prepared.requests) == 1

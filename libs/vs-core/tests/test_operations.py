@@ -36,6 +36,8 @@ from vs_core.api import (
     Scope,
     StrategyState,
     Value,
+    Wait,
+    Within,
     initial_state,
     operation_trace,
     step,
@@ -153,12 +155,13 @@ def test_library_owned_write_round_trips_atomic_envelope_and_stable_outbox(conte
         decision_id=DecisionId(root="write"),
         scope=Scope(owner=envelope.core.run.run_id, generation=0),
         request=request,
-        deadline_at=100.0,
     )
     decision = codec.validate_decision(decision)
     result = trace_step(
         envelope.core,
-        DecisionSubmitted(decision=decision, expected_revision=0),
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
         operation_trace(envelope.core, decision),
     )
     assert len(result.requests) == 1
@@ -171,7 +174,13 @@ def test_library_owned_write_round_trips_atomic_envelope_and_stable_outbox(conte
     assert type(stored_decision.request) is ArtifactPut
     assert loaded.core.records.records[0].request_id == result.requests[0].request_id
     assert (
-        step(loaded.core, DecisionSubmitted(decision=decision, expected_revision=0)).requests == ()
+        step(
+            loaded.core,
+            DecisionSubmitted(
+                decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+            ),
+        ).requests
+        == ()
     )
 
 
@@ -247,11 +256,15 @@ def test_unregistered_same_kind_model_cannot_enter_outbox_or_poison_receipts() -
         decision_id=DecisionId(root="invalid"),
         scope=Scope(owner=envelope.core.run.run_id, generation=0),
         request=WrongArtifactPut(wrong="wrong-schema"),
-        deadline_at=100.0,
     )
     with pytest.raises(ContractError, match="unregistered request model"):
         codec.validate_decision(proposal)
-    result = step(envelope.core, DecisionSubmitted(decision=proposal, expected_revision=0))
+    result = step(
+        envelope.core,
+        DecisionSubmitted(
+            decision=Wait(request=proposal, until=Within(limit=100.0)), expected_revision=0
+        ),
+    )
     assert isinstance(result.events[0], Rejected)
     assert result.events[0].code == RejectionCode.UNKNOWN_SCHEMA
     assert result.requests == ()
@@ -268,12 +281,13 @@ def test_decision_dependencies_keep_semantic_completion_identity() -> None:
             decision_id=DecisionId(root="a"),
             scope=scope,
             request=ArtifactPut(content="first"),
-            deadline_at=100.0,
         )
     )
     result = trace_step(
         envelope.core,
-        DecisionSubmitted(decision=first, expected_revision=0),
+        DecisionSubmitted(
+            decision=Wait(request=first, until=Within(limit=100.0)), expected_revision=0
+        ),
         operation_trace(envelope.core, first),
     )
     assert isinstance(result.events[0], Accepted)
@@ -285,12 +299,13 @@ def test_decision_dependencies_keep_semantic_completion_identity() -> None:
             scope=scope,
             depends_on=(first.decision_id,),
             request=ArtifactPut(content="dependent"),
-            deadline_at=100.0,
         )
     )
     dependent = trace_step(
         result.state,
-        DecisionSubmitted(decision=second, expected_revision=1),
+        DecisionSubmitted(
+            decision=Wait(request=second, until=Within(limit=100.0)), expected_revision=1
+        ),
         operation_trace(result.state, second),
     )
     assert dependent.requests[0].depends_on == ()
@@ -308,11 +323,15 @@ def test_copied_operation_cannot_reuse_proof_for_changed_payload(content: str) -
         decision_id=DecisionId(root="copied"),
         scope=Scope(owner=envelope.core.run.run_id, generation=0),
         request=ArtifactPut(content="original"),
-        deadline_at=100.0,
     )
     validated = codec.validate_decision(original)
     changed = validated.model_copy(update={"request": ArtifactPut(content="changed:" + content)})
-    result = step(envelope.core, DecisionSubmitted(decision=changed, expected_revision=0))
+    result = step(
+        envelope.core,
+        DecisionSubmitted(
+            decision=Wait(request=changed, until=Within(limit=100.0)), expected_revision=0
+        ),
+    )
     assert result.requests == ()
     assert isinstance(result.events[0], Rejected)
     assert result.events[0].code == RejectionCode.UNKNOWN_SCHEMA

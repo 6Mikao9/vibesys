@@ -141,7 +141,6 @@ def _version2_ensure_record() -> dict[str, object]:
     request = core.EnsureSession(
         request_id=core.RequestId(root="ensure"),
         scope=scope,
-        deadline_at=100.0,
         spec=core.SessionSpec(
             session_id=core.SessionId(root="session"),
             role_id=core.RoleId(root="planner"),
@@ -156,7 +155,7 @@ def _version2_ensure_record() -> dict[str, object]:
         payload_digest="payload",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.PREPARED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     ).model_dump(mode="json")
     record.pop("setup_failure")
     record.pop("evaluation_result", None)
@@ -207,7 +206,7 @@ def _version2_record(request: core.Request, phase: core.RequestPhase) -> dict[st
         payload_digest="legacy-payload",
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=phase,
-        reconcile_deadline_at=request.deadline_at,
+        until=core.Until(at=request.deadline_at),
     ).model_dump(mode="json")
     record.pop("setup_failure")
     record.pop("evaluation_result", None)
@@ -230,14 +229,12 @@ def _legacy_resume(deadline: float) -> core.ResumeSessionTurn:
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="result", version=1),
-        deadline_at=deadline,
         charge_class="resume",
     )
     return core.ResumeSessionTurn(
         request_id=core.RequestId(root="resume"),
         scope=scope,
         admission_id=core.DecisionId(root="admitted"),
-        deadline_at=deadline,
         turn=turn,
         continuation_id=continuation,
     )
@@ -299,7 +296,6 @@ def test_prepared_attempt_measurement_cannot_gain_complete_history_from_migratio
         request_id=core.RequestId(root="measurement"),
         scope=core.Scope(owner=core.AttemptId(root="historical"), generation=0),
         admission_id=core.DecisionId(root="admitted"),
-        deadline_at=float(deadline),
         plan=plan,
     )
     record = _version2_record(request, core.RequestPhase.PREPARED)
@@ -326,6 +322,7 @@ def test_legacy_invocation_cannot_claim_new_paid_cycle_history_prefix(deadline: 
     old = json.loads(_FIXTURE.read_text())
     request = _legacy_resume(float(deadline))
     invocation = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=core.InvocationRef(
             session_id=request.turn.session.session_id,
             invocation_id=request.turn.invocation_id,
@@ -405,7 +402,6 @@ def test_legacy_historical_measurement_does_not_fabricate_continuation_cursor(
             {"owner": attempt["attempt_id"], "generation": attempt["generation"]}
         ),
         admission_id=core.DecisionId.model_validate(attempt["admission_id"]),
-        deadline_at=float(deadline),
         plan=plan,
     )
     record = _version2_record(request, core.RequestPhase.COMPLETED)

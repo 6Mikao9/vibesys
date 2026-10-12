@@ -85,7 +85,6 @@ def test_registered_job_missing_identity_or_unknown_facts_retain_provisional_own
         core.ExecuteRegisteredOperation(
             request_id=observation.request_id,
             scope=scope,
-            deadline_at=100.0,
             operation_id=job.operation_id,
             operation=core.OperationWire(
                 schema_ref=core.OperationSchemaRef(
@@ -188,7 +187,6 @@ def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
                             core.SubmitMeasurement(
                                 request_id=observation.request_id,
                                 scope=scope,
-                                deadline_at=100.0,
                                 plan=plan,
                             ),
                             core.LifecycleClass.OWNED_JOB,
@@ -253,9 +251,7 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
         children=(child,),
         observation=observation,
     )
-    query = core.InspectRequest(
-        scope=scope, deadline_at=100.0, target=observation.request_id, resource_id=child
-    )
+    query = core.InspectRequest(scope=scope, target=observation.request_id, resource_id=child)
     clock = core.ClockAdvanced(now_at=0.0)
     state = core.trace_step(
         state,

@@ -29,7 +29,7 @@ def canonical_source(
         lifecycle=lifecycle,
         phase=core.RequestPhase.COMPLETED,
         observation=observation,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
 
 
@@ -38,7 +38,6 @@ def inspect_source(request_id: core.RequestId, scope: core.Scope) -> core.Reques
         core.InspectRequest(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             target=core.RequestId(root="target"),
         )
     )

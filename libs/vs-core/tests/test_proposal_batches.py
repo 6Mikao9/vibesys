@@ -51,7 +51,6 @@ def test_ordered_batch_validates_revision_once_and_preserves_partial_acceptance(
                 decision_id=core.DecisionId(root=f"d:{index}"),
                 scope=scope,
                 request=Query(value=index),
-                deadline_at=100.0,
             )
         )
         for index in range(count)
@@ -168,9 +167,7 @@ def test_leaf_rejection_rolls_back_only_its_decision_in_an_ordered_batch() -> No
         path=("max_attempts",),
         detail="exhausted",
     )
-    request = core.InspectRequest(
-        scope=rejected.scope, deadline_at=100.0, target=core.RequestId(root="target")
-    )
+    request = core.InspectRequest(scope=rejected.scope, target=core.RequestId(root="target"))
     result = core.trace_step(
         state,
         core.ProposalSubmitted(decisions=(accepted, rejected), expected_revision=0),

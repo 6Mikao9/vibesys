@@ -19,6 +19,7 @@ def _invocation(generation: int, owner: core.RunId | core.AttemptId) -> core.Inv
     )
     scope = core.Scope(owner=owner, generation=generation)
     return core.Invocation(
+        until=core.Until(at=100.0),
         invocation=ref,
         scope=scope,
         turn=core.TurnSpec(
@@ -33,7 +34,6 @@ def _invocation(generation: int, owner: core.RunId | core.AttemptId) -> core.Inv
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="reply", version=1),
-            deadline_at=100.0,
             charge_class="free",
         ),
         phase=core.SessionPhase.SUSPENDED,

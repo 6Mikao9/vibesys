@@ -83,7 +83,6 @@ def refund_state(
         request_id=inv.observation.request_id,
         scope=owner_scope,
         admission_id=admission,
-        deadline_at=100.0,
         turn=inv.turn,
     )
     snap_id = core.RequestId(root="wip-checkpoint")
@@ -91,7 +90,6 @@ def refund_state(
         request_id=snap_id,
         scope=owner_scope,
         admission_id=admission,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
         retention="wip",
         invocation=ref,
@@ -109,7 +107,7 @@ def refund_state(
             payload_digest=value_digest(req),
             lifecycle=lifecycle,
             phase=core.RequestPhase.COMPLETED,
-            reconcile_deadline_at=100.0,
+            until=core.Until(at=100.0),
             observation=obs,
         )
 
@@ -204,7 +202,6 @@ def release_after_closure(
         request_id=core.RequestId(root="old-dispatch"),
         scope=owner_scope,
         admission_id=adm,
-        deadline_at=100.0,
         turn=inv.turn,
         inputs=(item,),
     )
@@ -219,7 +216,7 @@ def release_after_closure(
         payload_digest=value_digest(req),
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
         observation=obs,
     )
     closure = core.AttemptClosure(

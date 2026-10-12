@@ -167,8 +167,11 @@ def test_profiler_yield_checkpoint_authorization_and_one_resumed_dispatch() -> N
         }
     )
     proposal = core.DecisionSubmitted(
-        decision=core.RequestTurn(
-            decision_id=core.DecisionId(root="profiler-next"), scope=scope(), turn=spec
+        decision=core.Wait(
+            request=core.RequestTurn(
+                decision_id=core.DecisionId(root="profiler-next"), scope=scope(), turn=spec
+            ),
+            until=core.Within(limit=100.0),
         ),
         expected_revision=settled_state.revision,
     )

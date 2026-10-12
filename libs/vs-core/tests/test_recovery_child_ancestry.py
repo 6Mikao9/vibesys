@@ -232,7 +232,6 @@ def test_workspace_reattachment_requires_the_owners_pending_request(*, pending: 
         request_id=original.request_id,
         scope=core.Scope(owner=owner.attempt_id, generation=owner.generation),
         admission_id=owner.admission_id,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
         plan=owner.workspace,
     )

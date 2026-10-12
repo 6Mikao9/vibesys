@@ -51,14 +51,12 @@ def release_facts(
         request_id=core.RequestId(root=f"request:{identity}"),
         scope=scope,
         admission_id=episode,
-        deadline_at=100.0,
         turn=core.TurnSpec(
             session=session,
             invocation_id=core.InvocationId(root=f"invocation:{identity}"),
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="free",
         ),
     )
@@ -67,7 +65,6 @@ def release_facts(
             request_id=request.request_id,
             scope=scope,
             admission_id=episode,
-            deadline_at=100.0,
             operation_id=core.OperationId(root=f"operation:{identity}"),
             operation=core.OperationWire(
                 schema_ref=core.OperationSchemaRef(
@@ -85,7 +82,6 @@ def release_facts(
             request_id=request.request_id,
             scope=scope,
             admission_id=episode,
-            deadline_at=100.0,
             plan=core.MeasurementPlan(
                 purpose="official",
                 candidate=core.initial_state().run.facts.baseline,
@@ -107,7 +103,6 @@ def release_facts(
             request_id=request.request_id,
             scope=scope,
             admission_id=episode,
-            deadline_at=100.0,
             session_id=session.session_id,
         )
     assert request.request_id is not None
@@ -138,7 +133,7 @@ def release_facts(
         }[kind],
         phase=core.RequestPhase.COMPLETED,
         observation=observation,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     if kind == "job":
         assert isinstance(request, core.ExecuteRegisteredOperation)

@@ -81,7 +81,6 @@ def resume_state(
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="resume",
     )
     prior_turn = turn.model_copy(
@@ -92,6 +91,7 @@ def resume_state(
         }
     )
     prior = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=before,
         scope=scope,
         turn=prior_turn,
@@ -124,7 +124,6 @@ def resume_state(
                 decision_id=decision_id,
                 scope=scope,
                 request=RegisteredResume(turn=turn),
-                deadline_at=100.0,
             )
         )
         request = core.ExecuteRegisteredOperation(
@@ -132,7 +131,6 @@ def resume_state(
             scope=scope,
             admission_id=admission,
             decision_id=decision_id,
-            deadline_at=100.0,
             operation_id=core.OperationId(root="operation:resume"),
             operation=codec.encode(decision.request),
             retry_limit=0,
@@ -152,7 +150,6 @@ def resume_state(
             scope=scope,
             admission_id=admission,
             decision_id=decision_id,
-            deadline_at=100.0,
             turn=turn,
             continuation_id=continuation_id,
         )
@@ -169,7 +166,7 @@ def resume_state(
         payload_digest=digest(request),
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.PREPARED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     owners = ()
     if attempt_owned:

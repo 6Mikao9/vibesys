@@ -46,7 +46,6 @@ def test_registered_root_outcome_rejects_another_owner_descriptor(schema_field: 
     request = core.ExecuteRegisteredOperation(
         request_id=request_id,
         scope=scope,
-        deadline_at=100.0,
         operation_id=core.OperationId(root="read"),
         operation=owner.encode(ReadRequest()),
         retry_limit=0,
@@ -57,7 +56,7 @@ def test_registered_root_outcome_rejects_another_owner_descriptor(schema_field: 
         payload_digest="read-payload",
         lifecycle=core.LifecycleClass.QUERY,
         phase=core.RequestPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={

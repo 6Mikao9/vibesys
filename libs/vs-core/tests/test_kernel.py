@@ -15,6 +15,7 @@ from vs_core.api import (
     ClockAdvanced,
     DecisionId,
     DecisionSubmitted,
+    Finish,
     ItemId,
     Park,
     Rejected,
@@ -23,8 +24,9 @@ from vs_core.api import (
     RunResultProposal,
     Scope,
     StartAttempt,
-    Finish,
+    Wait,
     Withdraw,
+    Within,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -53,7 +55,10 @@ def start(item: str) -> StartAttempt:
 def test_step_determinism_immutability_and_revision(revision: int, identity: str) -> None:
     state = initial_state().model_copy(update={"revision": revision})
     before = state.model_dump_json()
-    event = DecisionSubmitted(decision=start(identity), expected_revision=revision)
+    event = DecisionSubmitted(
+        decision=Wait(request=start(identity), until=Within(limit=100.0)),
+        expected_revision=revision,
+    )
     result = step(state, event)
     assert result == step(state, event)
     assert state.model_dump_json() == before
@@ -76,7 +81,12 @@ def test_disabled_capability_rejects_before_preparing_or_charging() -> None:
         target=AttemptRef(attempt_id=AttemptId(root="opaque"), generation=0),
         disposition=Park(),
     )
-    result = step(state, DecisionSubmitted(decision=decision, expected_revision=0))
+    result = step(
+        state,
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
+    )
     assert isinstance(result.events[0], Rejected)
     assert result.events[0].code == RejectionCode.CAPABILITY
     assert result.state.records == state.records
@@ -86,13 +96,28 @@ def test_disabled_capability_rejects_before_preparing_or_charging() -> None:
 def test_duplicate_receipt_has_no_callback_redelivery_and_conflict_is_rejected() -> None:
     state = initial_state()
     decision = start("one")
-    first = step(state, DecisionSubmitted(decision=decision, expected_revision=0))
-    repeated = step(first.state, DecisionSubmitted(decision=decision, expected_revision=0))
+    first = step(
+        state,
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
+    )
+    repeated = step(
+        first.state,
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
+    )
     assert repeated.events == ()
     assert repeated.requests == ()
     assert repeated.state.run.receipts == first.state.run.receipts
     conflict = decision.model_copy(update={"item_id": ItemId(root="other")})
-    result = step(first.state, DecisionSubmitted(decision=conflict, expected_revision=1))
+    result = step(
+        first.state,
+        DecisionSubmitted(
+            decision=Wait(request=conflict, until=Within(limit=100.0)), expected_revision=1
+        ),
+    )
     assert isinstance(result.events[0], Rejected)
     assert result.events[0].code == RejectionCode.IDENTITY_CONFLICT
 

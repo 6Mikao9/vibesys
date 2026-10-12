@@ -396,7 +396,11 @@ def test_profile_measurement_requires_the_profile_capture_capability(
         plan=plan(purpose=purpose, stages=stages, accuracy_stage=None),
     )
     result = core.step(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     refused = purpose == "profile" and not offered
     assert bool(result.requests) != refused

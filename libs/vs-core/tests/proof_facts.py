@@ -46,7 +46,6 @@ def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.RequestRec
         scope=scope,
         target=core.RequestId(root=f"target-{suffix}"),
         admission_id=core.DecisionId(root=f"episode-{suffix}"),
-        deadline_at=100.0,
     )
     assert request.request_id is not None
     return request, core.RequestRecord(
@@ -55,7 +54,7 @@ def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.RequestRec
         payload_digest=fact_digest(request),
         lifecycle=core.LifecycleClass.QUERY,
         phase=core.RequestPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
 
 
@@ -111,8 +110,6 @@ def dependency_facts(
     )
     request = core.RequestBase(
         scope=decision.scope,
-        deadline_at=100.0,
-        decision_dependencies=(decision.decision_id,),
         depends_on=(record.request_id,),
     )
     receipt = receipt.model_copy(update={"completion": core.CompletionStatus.SUCCEEDED})

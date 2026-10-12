@@ -37,7 +37,6 @@ def yield_state(
         workspace=owner_scope,
         prompts=(),
         output_schema=core.SchemaRef(name="worker", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
     ref = core.InvocationRef(
@@ -48,7 +47,6 @@ def yield_state(
         decision_id=core.DecisionId(root="yield-decision"),
         scope=owner_scope,
         admission_id=admission,
-        deadline_at=100.0,
         turn=spec,
     )
     if origin == "resume":
@@ -61,7 +59,6 @@ def yield_state(
             decision_id=request.decision_id,
             scope=owner_scope,
             admission_id=admission,
-            deadline_at=100.0,
             turn=spec,
             continuation_id=continuation_id,
         )
@@ -85,7 +82,7 @@ def yield_state(
         ).hexdigest(),
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     owner = core.AttemptView(
         attempt_id=attempt_id,
@@ -99,6 +96,7 @@ def yield_state(
         admission_id=admission,
     )
     invocation = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=ref,
         scope=owner_scope,
         turn=spec,

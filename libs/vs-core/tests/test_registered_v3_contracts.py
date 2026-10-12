@@ -160,7 +160,6 @@ def test_expected_measurement_is_bound_to_canonical_registered_payload(fingerpri
             decision_id=core.DecisionId(root="measurement"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
             request=RegisteredMeasurement(identity=identity),
-            deadline_at=100.0,
         )
     )
     assert decision.registered_measurement == decision.normalized_measurement == identity
@@ -171,7 +170,12 @@ def test_expected_measurement_is_bound_to_canonical_registered_payload(fingerpri
             )
         }
     )
-    result = core.step(state, core.DecisionSubmitted(decision=changed, expected_revision=0))
+    result = core.step(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=changed, until=core.Within(limit=100.0)), expected_revision=0
+        ),
+    )
     assert isinstance(result.events[0], core.Rejected)
     assert result.events[0].code == core.RejectionCode.UNKNOWN_SCHEMA
     assert result.requests == ()
@@ -296,7 +300,6 @@ def _measurement_envelope(
             decision_id=core.DecisionId(root="persisted-measurement"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
             request=RegisteredMeasurement(identity=expected_identity(fingerprint)),
-            deadline_at=100.0,
         )
     )
     receipt = core.DecisionReceipt(
@@ -367,7 +370,9 @@ def test_persisted_measurement_identity_and_replay_are_stable(
     replay = core.step(
         restored.core,
         core.DecisionSubmitted(
-            decision=codec.validate_decision(receipt.decision),
+            decision=core.Wait(
+                request=codec.validate_decision(receipt.decision), until=core.Within(limit=100.0)
+            ),
             expected_revision=restored.core.revision,
         ),
     )

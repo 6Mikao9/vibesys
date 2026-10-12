@@ -104,6 +104,7 @@ from vs_core.api import (
     TargetObservation,
     Transition,
     TurnSpec,
+    Until,
     Value,
     WorkspaceMode,
     WorkspacePlan,
@@ -169,7 +170,6 @@ def pending_record(
     request = EnsureSession(
         request_id=request_id,
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=100.0,
         spec=SessionSpec(
             session_id=SessionId(root=identity),
             role_id=RoleId(root="worker"),
@@ -184,7 +184,7 @@ def pending_record(
         payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
     )
 
 
@@ -232,7 +232,6 @@ def with_registered_origins(state: CoreState) -> CoreState:
                 decision_id=request.decision_id,
                 scope=request.scope,
                 request=codec.decode(request.operation),
-                deadline_at=request.deadline_at,
             )
         )
         receipts.append(
@@ -672,7 +671,6 @@ def turn_record() -> RequestRecord:
         workspace=original.request.scope,
         prompts=(),
         output_schema=SchemaRef(name="turn-output", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
     record = original.model_copy(
@@ -680,7 +678,6 @@ def turn_record() -> RequestRecord:
             "request": DispatchTurn(
                 request_id=original.request_id,
                 scope=original.request.scope,
-                deadline_at=100.0,
                 turn=turn,
             ),
             "lifecycle": LifecycleClass.SESSION_TURN,
@@ -714,6 +711,7 @@ def test_session_turn_recovery_requires_exact_typed_owner(case: str) -> None:
         }
     )
     invocation = Invocation(
+        until=Until(at=100.0),
         invocation=InvocationRef(
             session_id=SessionId(root="foreign-session")
             if case == "session"
@@ -809,7 +807,6 @@ def test_completed_query_resolves_itself_without_resolving_pending_target(
     request = InspectRequest(
         request_id=query.request_id,
         scope=query.request.scope,
-        deadline_at=100.0,
         target=RequestId(root="external-target"),
     )
     query = query.model_copy(
@@ -845,7 +842,6 @@ def test_accepted_owned_job_without_resource_identity_cannot_fabricate_terminal_
     request = ExecuteRegisteredOperation(
         request_id=original.request_id,
         scope=original.request.scope,
-        deadline_at=100.0,
         operation_id=OperationId(root="owned"),
         operation=OperationWire(schema_ref=schema, payload_json="{}"),
         retry_limit=0,
@@ -1076,6 +1072,7 @@ def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreStat
     sessions = SessionsState(
         invocations=(
             Invocation(
+                until=Until(at=100.0),
                 invocation=invocation,
                 scope=historical.request.scope,
                 turn=historical.request.turn,
@@ -1313,7 +1310,6 @@ def registered_record(
     request = ExecuteRegisteredOperation(
         request_id=original.request_id,
         scope=original.request.scope,
-        deadline_at=100.0,
         decision_id=DecisionId(root=identity),
         operation_id=OperationId(root=f"operation:{identity}"),
         operation=codec.encode(payload),
@@ -1350,7 +1346,6 @@ def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
             request_id=original.request_id,
             scope=original.request.scope,
             target=RequestId(root="external"),
-            deadline_at=100.0,
         )
         original = original.model_copy(update={"request": request, "lifecycle": lifecycle})
         registry = ()
@@ -1401,7 +1396,6 @@ def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cl
         scope=scope,
         attempt=old_attempt,
         admission_id=DecisionId(root="old-admission"),
-        deadline_at=100.0,
     )
     original = original.model_copy(update={"request": request})
     original = original.model_copy(
@@ -1479,6 +1473,7 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
     turn = turn_record()
     assert isinstance(turn.request, DispatchTurn)
     owner = Invocation(
+        until=Until(at=100.0),
         invocation=InvocationRef(
             session_id=SessionId(root="foreign-session")
             if case == "foreign-session"
@@ -1518,7 +1513,6 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
             decision_id=decision_id,
             scope=original.request.scope,
             request=codec.decode(original.request.operation),
-            deadline_at=100.0,
         )
     )
     receipt = DecisionReceipt(
@@ -1712,7 +1706,11 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
     decision_id = owner.admission_id
     scope = Scope(owner=state.run.run_id, generation=0)
     decision = codec.validate_decision(
-        Operation(decision_id=decision_id, scope=scope, request=payload, deadline_at=100.0)
+        Operation(
+            decision_id=decision_id,
+            scope=scope,
+            request=payload,
+        )
     )
     wire = codec.encode(payload)
     original = pending_record(identity="reopen", phase=RequestPhase.COMPLETED)
@@ -1721,7 +1719,6 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
         scope=scope,
         decision_id=decision_id,
         admission_id=decision_id,
-        deadline_at=100.0,
         operation_id=OperationId(root=f"operation:{decision_id.root}"),
         operation=wire,
         retry_limit=0,
@@ -1964,7 +1961,6 @@ def test_a_request_that_completed_before_the_restart_resolves_its_own_recovery_c
         scope=Scope(owner=attempt.attempt_id, generation=attempt.generation),
         attempt=attempt,
         admission_id=DecisionId(root="admission"),
-        deadline_at=100.0,
     )
     swapped = original.model_copy(
         update={"request": request, "lifecycle": LifecycleClass.IDEMPOTENT_WRITE}
@@ -2117,7 +2113,6 @@ def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
     inspect = InspectTurn(
         request_id=RequestId(root="turn-inspect"),
         scope=dispatch.request.scope,
-        deadline_at=100.0,
         invocation=InvocationRef(
             session_id=dispatch.request.turn.session.session_id,
             invocation_id=dispatch.request.turn.invocation_id,
@@ -2140,6 +2135,7 @@ def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
             "sessions": SessionsState(
                 invocations=(
                     Invocation(
+                        until=Until(at=100.0),
                         invocation=inspect.invocation,
                         scope=dispatch.request.scope,
                         turn=dispatch.request.turn,

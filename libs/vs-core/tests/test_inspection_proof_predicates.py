@@ -29,13 +29,11 @@ def inspection_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestObser
         request_id=source_id,
         scope=scope,
         admission_id=episode,
-        deadline_at=100.0,
         spec=spec,
     )
     query = core.InspectRequest(
         request_id=query_id,
         scope=scope,
-        deadline_at=100.0,
         admission_id=core.DecisionId(root="query-episode"),
         target=source_id,
     )
@@ -48,7 +46,7 @@ def inspection_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestObser
             if request == query
             else core.LifecycleClass.IDEMPOTENT_WRITE,
             phase=core.RequestPhase.DISPATCHED,
-            reconcile_deadline_at=100.0,
+            until=core.Until(at=100.0),
         )
         for identity, request in ((source_id, source), (query_id, query))
     )
@@ -120,7 +118,6 @@ def test_registered_turn_inspection_requires_accepted_declared_normalized_origin
     query = core.InspectTurn(
         request_id=query_id,
         scope=record.request.scope,
-        deadline_at=100.0,
         invocation=invocation.invocation,
     )
     query_record = core.RequestRecord(
@@ -129,7 +126,7 @@ def test_registered_turn_inspection_requires_accepted_declared_normalized_origin
         payload_digest=_digest(query),
         lifecycle=core.LifecycleClass.QUERY,
         phase=core.RequestPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     event = core.RequestObserved(
         observation=core.Observation(

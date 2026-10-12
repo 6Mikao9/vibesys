@@ -47,6 +47,8 @@ from vs_core.api import (
     StrategyState,
     TargetObservation,
     Value,
+    Wait,
+    Within,
     initial_state,
     step,
 )
@@ -160,7 +162,6 @@ def test_scope_reopen_normalization_is_bound_to_the_registered_payload(authority
         decision_id=DecisionId(root="reopen"),
         scope=Scope(owner=state.run.run_id, generation=0),
         request=ReopenRequest(target=target),
-        deadline_at=100.0,
     )
     validated = codec.validate_decision(decision)
     assert decision.registered_scope_reopen is None
@@ -334,7 +335,6 @@ def test_copied_scope_reopen_cannot_reuse_a_changed_registered_proof(change: str
             decision_id=DecisionId(root="reopen"),
             scope=Scope(owner=state.run.run_id, generation=0),
             request=ReopenRequest(target=target),
-            deadline_at=100.0,
         )
     )
     changed = target.model_copy(update={"park_authority": RequestId(root="new-park")})
@@ -345,7 +345,10 @@ def test_copied_scope_reopen_cannot_reuse_a_changed_registered_proof(change: str
     )
     result = step(
         state,
-        DecisionSubmitted(decision=proposal.model_copy(update=fields), expected_revision=0),
+        DecisionSubmitted(
+            decision=Wait(request=proposal.model_copy(update=fields), until=Within(limit=100.0)),
+            expected_revision=0,
+        ),
     )
     assert result.requests == ()
     assert isinstance(result.events[0], Rejected)

@@ -80,14 +80,12 @@ def legacy_payload(
             decision_id=core.DecisionId(root="registered"),
             scope=scope,
             request=request,
-            deadline_at=100.0,
         )
     )
     executable = core.ExecuteRegisteredOperation(
         request_id=core.RequestId(root="registered"),
         decision_id=decision.decision_id,
         scope=scope,
-        deadline_at=100.0,
         operation_id=core.OperationId(root="registered"),
         operation=codec.encode(request),
         retry_limit=0,
@@ -98,7 +96,7 @@ def legacy_payload(
         payload_digest="v2",
         lifecycle=request.lifecycle,
         phase=phase,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     ).model_dump(mode="json")
     record.pop("setup_failure")
     record.pop("evaluation_result")
@@ -197,7 +195,6 @@ def test_prepared_registered_resume_needs_publication_proof_before_invocation_ex
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="resume",
         )
     )
