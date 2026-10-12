@@ -124,7 +124,7 @@ class AttemptView(Value):
     checkpoints: tuple[AttemptCheckpoint, ...] = ()
     charges: tuple[ChargeReceipt, ...] = ()
     parent: AttemptRef | None = None
-    pending_intents: tuple[RequestId, ...] = ()
+    pending_records: tuple[RequestId, ...] = ()
     sessions: tuple[SessionId, ...] = ()
     release_dependencies: tuple[ReleaseDependency, ...] = ()
     evaluation_history: AttemptEvaluationHistory = AttemptEvaluationHistory()

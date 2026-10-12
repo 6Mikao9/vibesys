@@ -34,7 +34,6 @@ from vs_core.api import (
     EvidenceRequirements,
     HostFence,
     HostId,
-    IntentPhase,
     LifecycleCapability,
     Limits,
     MeasurementFailure,
@@ -44,6 +43,7 @@ from vs_core.api import (
     ProposalSubmitted,
     Request,
     RequestObserved,
+    RequestPhase,
     ResourceId,
     RevisionRef,
     RunEnvelope,
@@ -230,16 +230,16 @@ class _Driver[S: StrategyState]:
     def authorize_round(self) -> list[Request]:
         """Authorize every prepared request core lets go now, in ledger order."""
         batch: list[Request] = []
-        for intent in self.trace.core.intents.intents:
-            if intent.phase is not IntentPhase.PREPARED:
+        for record in self.trace.core.records.records:
+            if record.phase is not RequestPhase.PREPARED:
                 continue
             try:
-                self.consume(DispatchAuthorized(request_id=intent.request_id))
+                self.consume(DispatchAuthorized(request_id=record.request_id))
             except ContractError as error:
                 if error.path in (("dependency",), ("recovery",)):
                     continue
                 raise
-            batch.append(intent.request)
+            batch.append(record.request)
         return batch
 
     # -- executors --------------------------------------------------------

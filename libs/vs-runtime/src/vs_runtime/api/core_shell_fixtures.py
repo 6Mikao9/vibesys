@@ -14,16 +14,16 @@ from vs_core.api import (
     DispatchAuthorized,
     EnsureSession,
     InputRecord,
-    IntentPhase,
-    IntentsChange,
-    IntentsContext,
     Proposal,
     ProposalSubmitted,
+    RecordsChange,
+    RecordsContext,
     RecoveryStarted,
     ReducerTrace,
     Rejected,
     RejectionCode,
     RequestObserved,
+    RequestPhase,
     RoleId,
     RunControlEvent,
     RunView,
@@ -87,8 +87,8 @@ class ShellTraceTransitions:
         frames = []
         if isinstance(event, RecoveryStarted):
             change = recover(
-                state.intents,
-                IntentsContext(
+                state.records,
+                RecordsContext(
                     run=state.run,
                     registry=state.registry,
                     attempts=state.attempts,
@@ -98,7 +98,7 @@ class ShellTraceTransitions:
                 event,
             )
             frames.append(
-                TraceFrame(signal=event, change=IntentsChange(**change.model_dump(mode="python")))
+                TraceFrame(signal=event, change=RecordsChange(**change.model_dump(mode="python")))
             )
             if change.signals:
                 frames.append(
@@ -142,16 +142,16 @@ class ShellTraceTransitions:
             )
         elif isinstance(event, DispatchAuthorized):
             records = tuple(
-                row.model_copy(update={"phase": IntentPhase.DISPATCHED})
+                row.model_copy(update={"phase": RequestPhase.DISPATCHED})
                 if row.request_id == event.request_id
                 else row
-                for row in state.intents.intents
+                for row in state.records.records
             )
             frames.append(
                 TraceFrame(
                     signal=event,
-                    change=IntentsChange(
-                        state=state.intents.model_copy(update={"intents": records})
+                    change=RecordsChange(
+                        state=state.records.model_copy(update={"records": records})
                     ),
                 )
             )
@@ -159,20 +159,20 @@ class ShellTraceTransitions:
             records = tuple(
                 row.model_copy(
                     update={
-                        "phase": IntentPhase.RECONCILING,
+                        "phase": RequestPhase.RECONCILING,
                         "observation": event.observation,
                         "sequence": event.observation.sequence,
                     }
                 )
                 if row.request_id == event.observation.request_id
                 else row
-                for row in state.intents.intents
+                for row in state.records.records
             )
             frames.append(
                 TraceFrame(
                     signal=event,
-                    change=IntentsChange(
-                        state=state.intents.model_copy(update={"intents": records})
+                    change=RecordsChange(
+                        state=state.records.model_copy(update={"records": records})
                     ),
                 )
             )

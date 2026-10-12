@@ -97,25 +97,25 @@ def refund_state(
         invocation=ref,
     )
 
-    def intent(
+    def record(
         req: core.DispatchTurn | core.SnapshotAndRetain,
         lifecycle: core.LifecycleClass,
         obs: core.Observation | None = None,
-    ) -> core.Intent:
+    ) -> core.RequestRecord:
         assert req.request_id is not None
-        return core.Intent(
+        return core.RequestRecord(
             request_id=req.request_id,
             request=req,
             payload_digest=value_digest(req),
             lifecycle=lifecycle,
-            phase=core.IntentPhase.COMPLETED,
+            phase=core.RequestPhase.COMPLETED,
             reconcile_deadline_at=100.0,
             observation=obs,
         )
 
-    intents = (
-        intent(dispatch, core.LifecycleClass.SESSION_TURN, inv.observation),
-        intent(snap, core.LifecycleClass.IDEMPOTENT_WRITE),
+    records = (
+        record(dispatch, core.LifecycleClass.SESSION_TURN, inv.observation),
+        record(snap, core.LifecycleClass.IDEMPOTENT_WRITE),
     )
     charges = tuple(
         c.model_copy(update={"charged": charged}) if c.kind == core.ChargeKind.ATTEMPT else c
@@ -137,7 +137,7 @@ def refund_state(
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": core.IntentsState(intents=intents),
+            "records": core.RecordsState(records=records),
             "run": state.run.model_copy(
                 update={"limits": core.Limits(max_turns=10, max_refunds=5)}
             ),
@@ -213,12 +213,12 @@ def release_after_closure(
     ).model_copy(update={"admission_id": adm})
     inv = inv.model_copy(update={"observation": obs, "input_ids": (item.input_id,)})
     assert req.request_id is not None
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=req.request_id,
         request=req,
         payload_digest=value_digest(req),
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         reconcile_deadline_at=100.0,
         observation=obs,
     )
@@ -232,7 +232,7 @@ def release_after_closure(
     seeded = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": core.IntentsState(intents=(intent,)),
+            "records": core.RecordsState(records=(record,)),
             "sessions": state.sessions.model_copy(
                 update={
                     "invocations": (inv,),
@@ -281,8 +281,8 @@ def test_snapshot_request_of_another_invocation_never_completes_the_yield() -> N
                 "invocation": bound,
             }
         )
-        intent = next(i for i in state.intents.intents if i.request_id == request.request_id)
-        forged_intent = intent.model_copy(
+        record = next(i for i in state.records.records if i.request_id == request.request_id)
+        forged_record = record.model_copy(
             update={
                 "request_id": forged.request_id,
                 "request": forged,
@@ -291,8 +291,8 @@ def test_snapshot_request_of_another_invocation_never_completes_the_yield() -> N
         )
         seeded = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
-                    update={"intents": (*state.intents.intents, forged_intent)}
+                "records": state.records.model_copy(
+                    update={"records": (*state.records.records, forged_record)}
                 )
             }
         )

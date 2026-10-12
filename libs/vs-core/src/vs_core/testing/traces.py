@@ -16,8 +16,8 @@ from vs_core._step import consume
 from vs_core.types.attempts import AttemptsState
 from vs_core.types.common import Area, Value
 from vs_core.types.evaluation import EvaluationState
-from vs_core.types.intents import IntentsState
 from vs_core.types.kernel import AreaChange, CoreEvent, CoreState, Signal, Transition
+from vs_core.types.records import RecordsState
 from vs_core.types.scheduling import SchedulingState
 from vs_core.types.sessions import SessionsState
 from vs_core.types.settlement import SettlementState
@@ -53,10 +53,10 @@ class SettlementChange(AreaChange[SettlementState]):
     area: Literal[Area.SETTLEMENT] = Area.SETTLEMENT
 
 
-class IntentsChange(AreaChange[IntentsState]):
-    """Typed intents output in a declarative kernel trace."""
+class RecordsChange(AreaChange[RecordsState]):
+    """Typed records output in a declarative kernel trace."""
 
-    area: Literal[Area.INTENTS] = Area.INTENTS
+    area: Literal[Area.RECORDS] = Area.RECORDS
 
 
 type TraceChange = Annotated[
@@ -65,7 +65,7 @@ type TraceChange = Annotated[
     | SessionsChange
     | EvaluationChange
     | SettlementChange
-    | IntentsChange,
+    | RecordsChange,
     Field(discriminator="area"),
 ]
 

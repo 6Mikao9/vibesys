@@ -43,9 +43,9 @@ def test_a_run_shorter_than_a_turn_budget_asks_its_turns_within_the_run(
     }
     # Core bounds what it dispatches; the strategy's own turn budget stays an upper bound.
     dispatched = [
-        intent.request
-        for intent in trace.core.intents.intents
-        if isinstance(intent.request, DispatchTurn | ResumeSessionTurn)
+        record.request
+        for record in trace.core.records.records
+        if isinstance(record.request, DispatchTurn | ResumeSessionTurn)
     ]
     assert dispatched
     assert all(request.deadline_at <= deadline_at for request in dispatched)

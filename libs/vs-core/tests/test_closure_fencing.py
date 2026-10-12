@@ -104,7 +104,7 @@ def test_registered_job_missing_identity_or_unknown_facts_retain_provisional_own
     state = state.model_copy(
         update={
             "evaluation": core.EvaluationState(registered_jobs=(job,)),
-            "intents": state.intents.model_copy(update={"intents": (source,)}),
+            "records": state.records.model_copy(update={"records": (source,)}),
         }
     )
     conclusive = status not in (core.ObservationStatus.UNKNOWN, core.ObservationStatus.PENDING)
@@ -180,10 +180,10 @@ def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
     state = state.model_copy(
         update={
             "evaluation": core.EvaluationState(jobs=(job,)),
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
                     "children": (child,),
-                    "intents": (
+                    "records": (
                         canonical_source(
                             core.SubmitMeasurement(
                                 request_id=observation.request_id,
@@ -269,11 +269,13 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
             )
         ),
     ).state
-    intent = state.intents.intents[0]
+    record = state.records.records[0]
     command = released_observation(scope, child).model_copy(
-        update={"request_id": intent.request_id}
+        update={"request_id": record.request_id}
     )
-    intent = intent.model_copy(update={"phase": core.IntentPhase.COMPLETED, "observation": command})
+    record = record.model_copy(
+        update={"phase": core.RequestPhase.COMPLETED, "observation": command}
+    )
     children = (
         (core.ChildLease(resource_id=child, scope=scope, source_requests=(job.request_id,)),)
         if pending_child
@@ -282,8 +284,8 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
     state = state.model_copy(
         update={
             "evaluation": core.EvaluationState(registered_jobs=(job,)),
-            "intents": state.intents.model_copy(
-                update={"intents": (intent,), "children": children}
+            "records": state.records.model_copy(
+                update={"records": (record,), "children": children}
             ),
         }
     )
@@ -291,13 +293,13 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
 
 
 @given(accepted=st.booleans(), identified=st.booleans())
-def test_a_blocked_intent_releases_closure_only_when_it_was_never_accepted_and_unnamed(
+def test_a_blocked_record_releases_closure_only_when_it_was_never_accepted_and_unnamed(
     *, accepted: bool, identified: bool
 ) -> None:
-    state = _silent(core.IntentPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
-    intent = state.intents.intents[0]
-    assert intent.observation is not None
-    observation = intent.observation.model_copy(
+    state = _silent(core.RequestPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
+    record = state.records.records[0]
+    assert record.observation is not None
+    observation = record.observation.model_copy(
         update={
             "accepted": accepted,
             "resource_id": core.ResourceId(root="job") if identified else None,
@@ -305,8 +307,8 @@ def test_a_blocked_intent_releases_closure_only_when_it_was_never_accepted_and_u
     )
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
-                update={"intents": (intent.model_copy(update={"observation": observation}),)}
+            "records": state.records.model_copy(
+                update={"records": (record.model_copy(update={"observation": observation}),)}
             )
         }
     )

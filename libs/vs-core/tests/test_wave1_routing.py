@@ -123,7 +123,7 @@ EXPECTED_TARGET = {
         ),
         ("vs_core._session_stalls.advance_stalled_checkpoint_waits", ("checkpoint_stalled",)),
         ("vs_core._session_stalls.advance_stalled_acquisitions", ("acquisition_stalled",)),
-        ("vs_core.intents._observation", ("request_observed",)),
+        ("vs_core.records._observation", ("request_observed",)),
         (
             "vs_core._settlement.advance",
             (
@@ -135,7 +135,7 @@ EXPECTED_TARGET = {
         ),
         ("vs_core._adoption.advance", ("winner_proposed", "adoption_observed")),
         (
-            "vs_core._intent_ledger.advance",
+            "vs_core._request_ledger.advance",
             (
                 "request_prepared",
                 "dispatch_authorized",
@@ -146,7 +146,7 @@ EXPECTED_TARGET = {
             ),
         ),
         (
-            "vs_core._intent_recovery.advance",
+            "vs_core._request_recovery.advance",
             ("recovery_started", "recovery_ready", "reconciliation_deadline"),
         ),
         (
@@ -173,7 +173,7 @@ AREAS = (
     (core.SessionsEvent, core.Area.SESSIONS),
     (core.EvaluationEvent, core.Area.EVALUATION),
     (core.SettlementEvent, core.Area.SETTLEMENT),
-    (core.IntentsEvent, core.Area.INTENTS),
+    (core.RecordsEvent, core.Area.RECORDS),
     (core.SchedulingEvent, core.Area.SCHEDULING),
 )
 

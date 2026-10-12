@@ -136,12 +136,12 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         admission_id=admission,
     )
     assert job.observation is not None
-    close_intent = core.Intent(
+    close_record = core.RequestRecord(
         request_id=park,
         request=close,
         payload_digest="close",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         reconcile_deadline_at=100.0,
         observation=job.observation.model_copy(
             update={"request_id": park, "resource_id": None, "admission_id": admission}
@@ -183,7 +183,7 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
             "evaluation": core.EvaluationState(
                 registered_jobs=(job,), continuations=(continuation,)
             ),
-            "intents": state.intents.model_copy(update={"intents": (close_intent,)}),
+            "records": state.records.model_copy(update={"records": (close_record,)}),
         }
     )
     assert decision.normalized_scope_reopen is not None
@@ -211,13 +211,13 @@ def test_cleanup_requires_owner_closure_and_request_in_same_present_episode(
     owner = state.attempts.attempts[0].model_copy(
         update={"admission_id": admission_identity(owner_episode, episode)}
     )
-    intent = state.intents.intents[0]
-    assert intent.observation is not None
+    record = state.records.records[0]
+    assert record.observation is not None
     request_admission = admission_identity(request_episode, episode)
-    intent = intent.model_copy(
+    record = record.model_copy(
         update={
-            "request": intent.request.model_copy(update={"admission_id": request_admission}),
-            "observation": intent.observation.model_copy(
+            "request": record.request.model_copy(update={"admission_id": request_admission}),
+            "observation": record.observation.model_copy(
                 update={"admission_id": request_admission}
             ),
         }
@@ -225,7 +225,7 @@ def test_cleanup_requires_owner_closure_and_request_in_same_present_episode(
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     if action == "park":

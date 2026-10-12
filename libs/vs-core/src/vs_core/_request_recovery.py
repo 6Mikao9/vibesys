@@ -50,23 +50,23 @@ from .types.evaluation import (
     RegisteredOwnedJob,
     SubmitMeasurement,
 )
-from .types.intents import (
-    BlockIntent,
+from .types.kernel import AreaChange
+from .types.records import (
+    BlockRequest,
     CancelOwnedResource,
     ChildLease,
     ChildObservationWatermark,
     InspectRequest,
-    IntentBlocked,
-    IntentPhase,
     ReconciliationDeadline,
     RecoveryBarrier,
     RecoveryCheck,
     RecoveryPhase,
     RecoveryReady,
     RecoveryStarted,
+    RequestBlocked,
     RequestObserved,
+    RequestPhase,
 )
-from .types.kernel import AreaChange
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import (
     CancelTurn,
@@ -79,15 +79,15 @@ from .types.sessions import (
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
-    from .types.intents import Intent, IntentsEvent, IntentsState, Request, TargetObservation
-    from .types.kernel import IntentsContext
+    from .types.kernel import RecordsContext
+    from .types.records import RecordsEvent, RecordsState, Request, RequestRecord, TargetObservation
     from .types.sessions import Invocation, SessionView
     from .types.strategy import Operation
 
 type Resolution = Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"]
 
 
-def _child_sources(child: ChildLease, state: IntentsState) -> Verdict[tuple[Observation, ...]]:
+def _child_sources(child: ChildLease, state: RecordsState) -> Verdict[tuple[Observation, ...]]:
     """Complete, exact per-source facts are the only child ownership proof."""
     if not child.watermark_history_complete:
         return Missing(ProofReason.INCOMPLETE_HISTORY)
@@ -95,20 +95,20 @@ def _child_sources(child: ChildLease, state: IntentsState) -> Verdict[tuple[Obse
     if set(marks) != set(child.source_requests):
         return Mismatch(ProofField.REQUEST_ID)
     for source, observation in marks.items():
-        sources = tuple(intent for intent in state.intents if intent.request_id == source)
+        sources = tuple(record for record in state.records if record.request_id == source)
         if len(sources) != 1 or sources[0].request.scope != child.scope:
             return Mismatch(ProofField.REQUEST_ID)
-        intent = sources[0]
+        record = sources[0]
         if (
-            not isinstance(observation_for(intent, observation), Proven)
+            not isinstance(observation_for(record, observation), Proven)
             or observation.resource_id != child.resource_id
         ):
             return Mismatch(ProofField.ADMISSION_ID)
     return Proven(tuple(marks.values()))
 
 
-def _child_query(state: IntentsState, event: RequestObserved) -> Verdict[Intent]:
-    queries = tuple(row for row in state.intents if row.request_id == event.observation.request_id)
+def _child_query(state: RecordsState, event: RequestObserved) -> Verdict[RequestRecord]:
+    queries = tuple(row for row in state.records if row.request_id == event.observation.request_id)
     if len(queries) > 1:
         return Mismatch(ProofField.REQUEST_ID)
     if not queries:
@@ -119,7 +119,7 @@ def _child_query(state: IntentsState, event: RequestObserved) -> Verdict[Intent]
 
 
 def _child_inspection_fact(
-    state: IntentsState, event: RequestObserved
+    state: RecordsState, event: RequestObserved
 ) -> Verdict[tuple[Observation, ...]]:
     """A refreshed watermark requires its exact committed successful query."""
     target = event.target
@@ -139,7 +139,7 @@ def _child_inspection_fact(
     ):
         return Mismatch(ProofField.PAYLOAD)
     if (
-        query.phase != IntentPhase.COMPLETED
+        query.phase != RequestPhase.COMPLETED
         or not event.observation.terminal
         or not event.observation.accepted
         or event.observation.status != ObservationStatus.SUCCEEDED
@@ -155,7 +155,7 @@ def _child_inspection_fact(
         None,
     )
     source = next(
-        (row for row in state.intents if row.request_id == target.observation.request_id), None
+        (row for row in state.records if row.request_id == target.observation.request_id), None
     )
     if (
         lease is not None
@@ -170,8 +170,8 @@ def _child_inspection_fact(
     return Proven((target.observation,))
 
 
-def _operation_decision(intent: Intent, context: IntentsContext) -> Operation | None:
-    request = intent.request
+def _operation_decision(record: RequestRecord, context: RecordsContext) -> Operation | None:
+    request = record.request
     if not isinstance(request, ExecuteRegisteredOperation):
         return None
     proof = operation_for(context.run.receipts, request)
@@ -179,19 +179,19 @@ def _operation_decision(intent: Intent, context: IntentsContext) -> Operation | 
 
 
 def _invocation_owner(
-    intent: Intent, context: IntentsContext, invocation: Invocation, observation: Observation
+    record: RequestRecord, context: RecordsContext, invocation: Invocation, observation: Observation
 ) -> bool:
-    request = intent.request
+    request = record.request
     registered = None
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
         turn = request.turn
     elif isinstance(request, ExecuteRegisteredOperation):
-        decision = _operation_decision(intent, context)
+        decision = _operation_decision(record, context)
         if (
             decision is None
             or decision.registered_turn is None
             or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
-            or intent.lifecycle != LifecycleClass.SESSION_TURN
+            or record.lifecycle != LifecycleClass.SESSION_TURN
         ):
             return False
         turn = decision.registered_turn
@@ -207,7 +207,7 @@ def _invocation_owner(
         and (
             previous is None
             or (
-                isinstance(observation_for(intent, previous), Proven)
+                isinstance(observation_for(record, previous), Proven)
                 and previous.resource_id in (None, observation.resource_id)
             )
         )
@@ -215,21 +215,21 @@ def _invocation_owner(
 
 
 def _typed_job_owner(
-    intent: Intent,
-    context: IntentsContext,
+    record: RequestRecord,
+    context: RecordsContext,
     observation: Observation,
     job: OwnedJob | RegisteredOwnedJob,
 ) -> bool:
     """One canonical job correspondence for reattachment and lease transfer."""
-    request = intent.request
+    request = record.request
     if (
-        not isinstance(observation_for(intent, observation), Proven)
+        not isinstance(observation_for(record, observation), Proven)
         or job.scope != observation.scope
         or job.resource_id not in (None, observation.resource_id)
         or (
             job.observation is not None
             and (
-                not isinstance(observation_for(intent, job.observation), Proven)
+                not isinstance(observation_for(record, job.observation), Proven)
                 or job.observation.resource_id not in (None, observation.resource_id)
             )
         )
@@ -238,12 +238,12 @@ def _typed_job_owner(
     if isinstance(job, OwnedJob):
         return (
             isinstance(request, SubmitMeasurement)
-            and job.submission_id == intent.request_id
+            and job.submission_id == record.request_id
             and job.plan == request.plan
         )
     if not isinstance(request, ExecuteRegisteredOperation):
         return False
-    decision = _operation_decision(intent, context)
+    decision = _operation_decision(record, context)
     descriptor = descriptor_matches(
         context.registry,
         context.run.capabilities,
@@ -255,25 +255,27 @@ def _typed_job_owner(
         decision is not None
         and isinstance(descriptor, Proven)
         and descriptor.value.resource_pool == job.resource_pool
-        and job.request_id == intent.request_id
+        and job.request_id == record.request_id
         and job.operation_id == request.operation_id
         and job.expected_measurement == decision.registered_measurement
     )
 
 
-def _submission_owner(intent: Intent, context: IntentsContext) -> bool:
-    if not isinstance(intent.request, SubmitMeasurement):
+def _submission_owner(record: RequestRecord, context: RecordsContext) -> bool:
+    if not isinstance(record.request, SubmitMeasurement):
         return False
     return isinstance(
         submission_budget_for(
-            intent.request, context.evaluation.submission_budgets, context.run.receipts
+            record.request, context.evaluation.submission_budgets, context.run.receipts
         ),
         Proven,
     )
 
 
-def _workspace_owner(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
-    request = intent.request
+def _workspace_owner(
+    record: RequestRecord, context: RecordsContext, observation: Observation
+) -> bool:
+    request = record.request
     if not isinstance(request, EnsureWorkspace):
         return False
     # The attempt keeps the ensure request pending only while it acquires. Once it
@@ -281,7 +283,7 @@ def _workspace_owner(intent: Intent, context: IntentsContext, observation: Obser
     # and a restart must still recognise the resource as owned: otherwise the recovery
     # check of a completed ensure never resolves.
     consumed = (
-        intent.phase == IntentPhase.COMPLETED
+        record.phase == RequestPhase.COMPLETED
         and observation.accepted
         and observation.status == ObservationStatus.SUCCEEDED
     )
@@ -291,14 +293,14 @@ def _workspace_owner(intent: Intent, context: IntentsContext, observation: Obser
         and isinstance(current_admission(owner, observation.scope, request.admission_id), Proven)
         and owner.workspace == request.plan
         and (
-            intent.request_id in owner.pending_intents
+            record.request_id in owner.pending_records
             or (consumed and owner.phase != AttemptPhase.ACQUIRING)
         )
         for owner in context.attempts.attempts
     )
 
 
-def _session_created(intent: Intent, observation: Observation, session: SessionView) -> bool:
+def _session_created(record: RequestRecord, observation: Observation, session: SessionView) -> bool:
     """The session is the one this completed ensure created, and it is busy with its first turn.
 
     A session's own acceptance waits for that turn's reply, and the turn waits for recovery
@@ -306,7 +308,7 @@ def _session_created(intent: Intent, observation: Observation, session: SessionV
     An idle session has no turn to wait on, so it needs its acceptance as before.
     """
     return (
-        intent.phase == IntentPhase.COMPLETED
+        record.phase == RequestPhase.COMPLETED
         and observation.accepted
         and observation.status == ObservationStatus.SUCCEEDED
         and session.phase in (SessionPhase.ACQUIRING, SessionPhase.EXECUTING)
@@ -315,41 +317,41 @@ def _session_created(intent: Intent, observation: Observation, session: SessionV
     )
 
 
-def _known_owner(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
+def _known_owner(record: RequestRecord, context: RecordsContext, observation: Observation) -> bool:
     if any(
-        _typed_job_owner(intent, context, observation, job)
+        _typed_job_owner(record, context, observation, job)
         for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
     ):
         return True
-    if _submission_owner(intent, context) or _workspace_owner(intent, context, observation):
+    if _submission_owner(record, context) or _workspace_owner(record, context, observation):
         return True
-    if isinstance(intent.request, EnsureSession) and any(
+    if isinstance(record.request, EnsureSession) and any(
         session.scope == observation.scope
         and session.resource_id in (None, observation.resource_id)
-        and session.spec == intent.request.spec
+        and session.spec == record.request.spec
         and session.generation == observation.scope.generation
         and (
-            intent.request.required_resource is None
-            or observation.resource_id == intent.request.required_resource
+            record.request.required_resource is None
+            or observation.resource_id == record.request.required_resource
         )
         and (
             (session.accepted and session.resource_id is not None)
-            or intent.request_id in session.pending_intents
-            or _session_created(intent, observation, session)
+            or record.request_id in session.pending_records
+            or _session_created(record, observation, session)
         )
         for session in context.sessions.sessions
     ):
         return True
     return any(
-        _invocation_owner(intent, context, invocation, observation)
+        _invocation_owner(record, context, invocation, observation)
         for invocation in context.sessions.invocations
     )
 
 
-def _prepared_episode(intent: Intent, context: IntentsContext) -> bool:
-    request = intent.request
-    if intent.lifecycle == LifecycleClass.QUERY or isinstance(
-        request, CancelOwnedResource | CancelTurn | CancelOwnedJob | BlockIntent
+def _prepared_episode(record: RequestRecord, context: RecordsContext) -> bool:
+    request = record.request
+    if record.lifecycle == LifecycleClass.QUERY or isinstance(
+        request, CancelOwnedResource | CancelTurn | CancelOwnedJob | BlockRequest
     ):
         return True
     if not isinstance(request.scope.owner, AttemptId):
@@ -381,7 +383,7 @@ def _prepared_episode(intent: Intent, context: IntentsContext) -> bool:
             context.registry,
             context.run.capabilities,
             request.operation,
-            intent.lifecycle,
+            record.lifecycle,
             OperationNormalizationKind.NONE,
         )
         cleanup = isinstance(descriptor, Proven) and descriptor.value.revision_authority in (
@@ -391,20 +393,20 @@ def _prepared_episode(intent: Intent, context: IntentsContext) -> bool:
         )
     if not cleanup:
         return False
-    identities = {intent.request_id}
+    identities = {record.request_id}
     if isinstance(request, ExecuteRegisteredOperation):
         identities.add(request.operation_id)
     if isinstance(request, CloseSession):
         identities.add(request.session_id)
     closure = current_closure(owner, owner.closure)
     return isinstance(closure, Proven) and (
-        closure.value.authority == intent.request_id
+        closure.value.authority == record.request_id
         or any(edge.identity in identities for edge in owner.release_dependencies)
     )
 
 
-def _reopen_resolved(intent: Intent, context: IntentsContext) -> bool:
-    request = intent.request
+def _reopen_resolved(record: RequestRecord, context: RecordsContext) -> bool:
+    request = record.request
     if not isinstance(request, ExecuteRegisteredOperation):
         return True
     declarations = tuple(
@@ -418,17 +420,17 @@ def _reopen_resolved(intent: Intent, context: IntentsContext) -> bool:
         context.registry,
         context.run.capabilities,
         request.operation,
-        intent.lifecycle,
+        record.lifecycle,
         declarations[0].normalization,
     )
     if not isinstance(descriptor, Proven):
         return False
-    decision = _operation_decision(intent, context)
+    decision = _operation_decision(record, context)
     if decision is None:
         return False
     if descriptor.value.normalization != OperationNormalizationKind.SCOPE_REOPEN:
         return True
-    outcome = intent.outcome
+    outcome = record.outcome
     normalization = decision.normalized_scope_reopen if decision is not None else None
     return (
         isinstance(outcome, ScopedAdmissionReopenOutcome)
@@ -441,8 +443,8 @@ def _reopen_resolved(intent: Intent, context: IntentsContext) -> bool:
     )
 
 
-def _session_resources(intent: Intent, context: IntentsContext) -> set[ResourceId]:
-    request = intent.request
+def _session_resources(record: RequestRecord, context: RecordsContext) -> set[ResourceId]:
+    request = record.request
     if isinstance(request, EnsureSession):
         session_id = request.spec.session_id
     elif isinstance(request, DispatchTurn | ResumeSessionTurn):
@@ -457,27 +459,29 @@ def _session_resources(intent: Intent, context: IntentsContext) -> set[ResourceI
         if session.spec.session_id == session_id
         and session.scope == request.scope
         and session.generation == request.scope.generation
-        and intent.request_id in session.pending_intents
+        and record.request_id in session.pending_records
         and session.resource_id is not None
     }
 
 
-def _owns_resource(intent: Intent) -> bool:
+def _owns_resource(record: RequestRecord) -> bool:
     """Whether the request creates or ends the lifecycle of the resource it reports.
 
     Every other request only names a resource that another request owns (a snapshot, a
     retain or an adoption names the workspace), so its observation says nothing about
     that resource's release.
     """
-    return intent.lifecycle in (
+    return record.lifecycle in (
         LifecycleClass.OWNED_JOB,
         LifecycleClass.SESSION_TURN,
-    ) or isinstance(intent.request, EnsureSession | EnsureWorkspace | CloseSession)
+    ) or isinstance(record.request, EnsureSession | EnsureWorkspace | CloseSession)
 
 
-def _resource_identified(intent: Intent, context: IntentsContext, observation: Observation) -> bool:
-    request = intent.request
-    if not _owns_resource(intent):
+def _resource_identified(
+    record: RequestRecord, context: RecordsContext, observation: Observation
+) -> bool:
+    request = record.request
+    if not _owns_resource(record):
         return True
     if observation.resource_id is None:
         return not observation.accepted and observation.status in (
@@ -485,14 +489,14 @@ def _resource_identified(intent: Intent, context: IntentsContext, observation: O
             ObservationStatus.FAILED,
             ObservationStatus.CANCELLED,
         )
-    expected = _session_resources(intent, context)
+    expected = _session_resources(record, context)
     if isinstance(request, EnsureSession) and request.required_resource is not None:
         expected.add(request.required_resource)
     expected.update(
         invocation.observation.resource_id
         for invocation in context.sessions.invocations
         if invocation.observation is not None
-        and invocation.observation.request_id == intent.request_id
+        and invocation.observation.request_id == record.request_id
         and invocation.observation.scope == request.scope
         and invocation.observation.admission_id == request.admission_id
         and invocation.observation.resource_id is not None
@@ -500,24 +504,24 @@ def _resource_identified(intent: Intent, context: IntentsContext, observation: O
     return not expected or expected == {observation.resource_id}
 
 
-def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
-    observation = intent.observation
-    if intent.phase == IntentPhase.PREPARED and observation is None:
-        return "safe-prepared" if _prepared_episode(intent, context) else "pending"
+def _resolution(record: RequestRecord, context: RecordsContext) -> Resolution:
+    observation = record.observation
+    if record.phase == RequestPhase.PREPARED and observation is None:
+        return "safe-prepared" if _prepared_episode(record, context) else "pending"
     if (
-        not isinstance(observation_for(intent, observation), Proven)
+        not isinstance(observation_for(record, observation), Proven)
         or observation is None
         or observation.status == ObservationStatus.UNKNOWN
-        or not _reopen_resolved(intent, context)
+        or not _reopen_resolved(record, context)
     ):
         return "pending"
-    if not _resource_identified(intent, context, observation):
+    if not _resource_identified(record, context, observation):
         return "pending"
     terminal = observation.terminal and observation.status != ObservationStatus.PENDING
     # A completed request that does not own its resource has nothing left to recover: it
     # creates no children and its resource is another request's to release.
     names_only = (
-        not _owns_resource(intent)
+        not _owns_resource(record)
         and observation.accepted
         and observation.status == ObservationStatus.SUCCEEDED
     )
@@ -529,62 +533,62 @@ def _resolution(intent: Intent, context: IntentsContext) -> Resolution:
         and not observation.children
     )
     resource_free = (
-        intent.lifecycle not in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
+        record.lifecycle not in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
         and (observation.resource_id is None or names_only)
         and not observation.children
         and (observation.children_complete or names_only)
     )
     if terminal and (
-        intent.lifecycle == LifecycleClass.QUERY
+        record.lifecycle == LifecycleClass.QUERY
         or resource_free
         or refused
-        or isinstance(released_owner(intent, (intent,)), Proven)
+        or isinstance(released_owner(record, (record,)), Proven)
     ):
         return "terminal"
     if (
         observation.accepted
         and observation.resource_id is not None
         and observation.children_complete
-        and _known_owner(intent, context, observation)
+        and _known_owner(record, context, observation)
     ):
         return "reattached"
     return "pending"
 
 
-def _reports(intent: Intent, target: TargetObservation) -> bool:
-    """Whether the ledger committed this inspection's facts about the intent.
+def _reports(record: RequestRecord, target: TargetObservation) -> bool:
+    """Whether the ledger committed this inspection's facts about the record.
 
     A request proven never begun commits no observation: the ledger reissues it, so it is
     PREPARED again and the inspection has answered its check.
     """
-    if target.reissue is not None and intent.phase == IntentPhase.PREPARED:
+    if target.reissue is not None and record.phase == RequestPhase.PREPARED:
         return True
-    return intent.observation == target.observation
+    return record.observation == target.observation
 
 
-def _inspection(intent: Intent, epoch: int) -> InspectRequest:
+def _inspection(record: RequestRecord, epoch: int) -> InspectRequest:
     return InspectRequest(
-        request_id=RequestId(root=f"recovery:{epoch}:{intent.request_id.root}"),
-        scope=intent.request.scope,
-        admission_id=intent.request.admission_id,
-        target=intent.request_id,
-        deadline_at=intent.reconcile_deadline_at,
+        request_id=RequestId(root=f"recovery:{epoch}:{record.request_id.root}"),
+        scope=record.request.scope,
+        admission_id=record.request.admission_id,
+        target=record.request_id,
+        deadline_at=record.reconcile_deadline_at,
     )
 
 
-def _child_inspection(intent: Intent, resource: ResourceId, epoch: int) -> InspectRequest:
-    return _inspection(intent, epoch).model_copy(
+def _child_inspection(record: RequestRecord, resource: ResourceId, epoch: int) -> InspectRequest:
+    return _inspection(record, epoch).model_copy(
         update={
             "request_id": RequestId(
-                root=f"recovery:child:{epoch}:{len(intent.request_id.root)}:{intent.request_id.root}:{resource.root}"
+                root=f"recovery:child:{epoch}:{len(record.request_id.root)}:{record.request_id.root}:{resource.root}"
             ),
             "resource_id": resource,
         }
     )
 
 
-def _child_released(child: ChildLease, state: IntentsState) -> bool:
-    return isinstance(released_owner(child, state.intents), Proven)
+def _child_released(child: ChildLease, state: RecordsState) -> bool:
+    return isinstance(released_owner(child, state.records), Proven)
 
 
 def _child_ready(child: ChildLease) -> bool:
@@ -606,25 +610,25 @@ def _child_ready(child: ChildLease) -> bool:
     )
 
 
-def _child_proven(child: ChildLease, state: IntentsState) -> bool:
+def _child_proven(child: ChildLease, state: RecordsState) -> bool:
     proof = _child_sources(child, state)
     return isinstance(proof, Proven) and all(
         _child_ready(child.model_copy(update={"observation": row})) for row in proof.value
     )
 
 
-def _validate_children(state: IntentsState) -> None:
-    records = {intent.request_id: intent for intent in state.intents}
+def _validate_children(state: RecordsState) -> None:
+    records = {record.request_id: record for record in state.records}
     for index, child in enumerate(state.children):
         admissions = set()
         for source in child.source_requests:
-            intent = records.get(source)
-            if intent is None or intent.request.scope != child.scope:
+            record = records.get(source)
+            if record is None or record.request.scope != child.scope:
                 raise ContractError(
                     ("children", index, "source_requests", source.root),
                     "child requires a canonical source in its exact scope",
                 )
-            admissions.add(intent.request.admission_id)
+            admissions.add(record.request.admission_id)
         if len(admissions) > 1:
             raise ContractError(
                 ("children", index, "source_requests"),
@@ -632,7 +636,7 @@ def _validate_children(state: IntentsState) -> None:
             )
 
 
-def _transfer_children(state: IntentsState, context: IntentsContext) -> IntentsState:
+def _transfer_children(state: RecordsState, context: RecordsContext) -> RecordsState:
     _validate_children(state)
     retained = []
     for child in state.children:
@@ -648,10 +652,10 @@ def _transfer_children(state: IntentsState, context: IntentsContext) -> IntentsS
             retained.append(child)
             continue
         if any(
-            intent.request_id in child.source_requests
-            and intent.phase == IntentPhase.PREPARED
-            and intent.observation is None
-            for intent in state.intents
+            record.request_id in child.source_requests
+            and record.phase == RequestPhase.PREPARED
+            and record.observation is None
+            for record in state.records
         ):
             retained.append(child)
             continue
@@ -670,10 +674,10 @@ def _transfer_children(state: IntentsState, context: IntentsContext) -> IntentsS
                 job.request_id if isinstance(job, RegisteredOwnedJob) else job.submission_id
             )
             source = next(
-                (intent for intent in state.intents if intent.request_id == request_id), None
+                (record for record in state.records if record.request_id == request_id), None
             )
             ancestor = next(
-                intent for intent in state.intents if intent.request_id == child.source_requests[0]
+                record for record in state.records if record.request_id == child.source_requests[0]
             )
             observation = job.observation
             if (
@@ -707,22 +711,22 @@ def _transfer_children(state: IntentsState, context: IntentsContext) -> IntentsS
 
 
 def _aggregate_resolution(
-    intent: Intent, context: IntentsContext, state: IntentsState
+    record: RequestRecord, context: RecordsContext, state: RecordsState
 ) -> Resolution:
-    resolution = _resolution(intent, context)
+    resolution = _resolution(record, context)
     if resolution == "safe-prepared" and any(
-        intent.request_id in child.source_requests for child in state.children
+        record.request_id in child.source_requests for child in state.children
     ):
         return "pending"
     if any(
-        intent.request_id in child.source_requests and not _child_proven(child, state)
+        record.request_id in child.source_requests and not _child_proven(child, state)
         for child in state.children
     ):
         return "pending"
     return resolution
 
 
-def _finish(state: IntentsState, barrier: RecoveryBarrier) -> AreaChange[IntentsState]:
+def _finish(state: RecordsState, barrier: RecoveryBarrier) -> AreaChange[RecordsState]:
     ready = all(check.resolution not in ("pending", "blocked") for check in barrier.checks)
     phase = (
         RecoveryPhase.READY
@@ -741,31 +745,31 @@ def _finish(state: IntentsState, barrier: RecoveryBarrier) -> AreaChange[Intents
     return AreaChange(state=state.model_copy(update={"recovery": barrier}), signals=signals)
 
 
-def _requeue_lost_inspection(state: IntentsState, intent: Intent) -> IntentsState:
+def _requeue_lost_inspection(state: RecordsState, record: RequestRecord) -> RecordsState:
     """An earlier epoch's inspection that never reported is issued again, not left dispatched.
 
     Its target is inspected afresh by this epoch, but the old request would stay in flight
     for good and hold the run open. An inspection only reads, so issuing it again is safe.
     """
     if not (
-        isinstance(intent.request, InspectRequest)
-        and intent.phase in (IntentPhase.DISPATCHED, IntentPhase.RECONCILING)
-        and intent.observation is None
+        isinstance(record.request, InspectRequest)
+        and record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+        and record.observation is None
     ):
         return state
-    requeued = intent.model_copy(update={"phase": IntentPhase.PREPARED})
+    requeued = record.model_copy(update={"phase": RequestPhase.PREPARED})
     return state.model_copy(
         update={
-            "intents": tuple(
-                requeued if row.request_id == intent.request_id else row for row in state.intents
+            "records": tuple(
+                requeued if row.request_id == record.request_id else row for row in state.records
             )
         }
     )
 
 
 def _start(
-    state: IntentsState, context: IntentsContext, event: RecoveryStarted
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, event: RecoveryStarted
+) -> AreaChange[RecordsState]:
     barrier = state.recovery
     _validate_children(state)
     if event.epoch < barrier.epoch or (
@@ -773,36 +777,36 @@ def _start(
     ):
         return AreaChange(state=state)
     updated = state
-    for intent in state.intents:
-        proof = observation_for(intent, intent.observation)
+    for record in state.records:
+        proof = observation_for(record, record.observation)
         if isinstance(proof, Proven):
             updated = _observe_children(updated, RequestObserved(observation=proof.value))
     checks: list[RecoveryCheck] = []
     requests: list[Request] = []
-    targets = {intent.request_id for intent in state.intents}
+    targets = {record.request_id for record in state.records}
     _validate_children(updated)
     updated = _transfer_children(updated, context)
-    for intent in state.intents:
+    for record in state.records:
         if (
-            isinstance(intent.request, InspectRequest | CancelOwnedResource | BlockIntent)
-            and intent.request.target in targets
+            isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
+            and record.request.target in targets
             and not any(
-                intent.request_id in child.source_requests and not _child_proven(child, updated)
+                record.request_id in child.source_requests and not _child_proven(child, updated)
                 for child in updated.children
             )
         ):
-            updated = _requeue_lost_inspection(updated, intent)
+            updated = _requeue_lost_inspection(updated, record)
             continue
-        resolution = _aggregate_resolution(intent, context, updated)
+        resolution = _aggregate_resolution(record, context, updated)
         inspection = (
-            _inspection(intent, event.epoch)
+            _inspection(record, event.epoch)
             if resolution == "pending"
-            and _resolution(intent, context) not in ("terminal", "reattached")
+            and _resolution(record, context) not in ("terminal", "reattached")
             else None
         )
         checks.append(
             RecoveryCheck(
-                target=intent.request_id,
+                target=record.request_id,
                 inspection=inspection.request_id if inspection is not None else None,
                 resolution=resolution,
             )
@@ -817,14 +821,14 @@ def _start(
                 )
             )
         requests.extend(
-            _child_inspection(intent, child.resource_id, event.epoch).model_copy(
+            _child_inspection(record, child.resource_id, event.epoch).model_copy(
                 update={
                     "deadline_at": max(context.run.now_at, event.now_at)
                     + context.run.limits.reconciliation_bound
                 }
             )
             for child in updated.children
-            if intent.request_id in child.source_requests and not _child_proven(child, updated)
+            if record.request_id in child.source_requests and not _child_proven(child, updated)
         )
     change = _finish(
         updated,
@@ -884,10 +888,10 @@ def _merge_child(
         )
 
 
-def _source_observation(state: IntentsState, event: RequestObserved) -> Observation:
+def _source_observation(state: RecordsState, event: RequestObserved) -> Observation:
     observation = event.target.observation if event.target is not None else event.observation
     sources = tuple(
-        intent for intent in state.intents if intent.request_id == observation.request_id
+        record for record in state.records if record.request_id == observation.request_id
     )
     if len(sources) != 1:
         raise ContractError(
@@ -919,7 +923,7 @@ def _ignore_ownership_fact(
     return child and observation == canonical
 
 
-def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
+def _observe_fact(state: RecordsState, event: RequestObserved) -> RecordsState:
     children = list(state.children)
     observation = _source_observation(state, event)
     previous = None
@@ -962,12 +966,12 @@ def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
             )
         )
     else:
-        intent = next(
-            (row for row in state.intents if row.request_id == observation.request_id), None
+        record = next(
+            (row for row in state.records if row.request_id == observation.request_id), None
         )
-        if intent is None or observation.scope != intent.request.scope:
+        if record is None or observation.scope != record.request.scope:
             raise ContractError(("observation",), "unknown canonical ownership source")
-        canonical = intent.observation
+        canonical = record.observation
     if _ignore_ownership_fact(
         canonical,
         observation,
@@ -1002,7 +1006,7 @@ def _observe_fact(state: IntentsState, event: RequestObserved) -> IntentsState:
     )
 
 
-def _observe_children(state: IntentsState, event: RequestObserved) -> IntentsState:
+def _observe_children(state: RecordsState, event: RequestObserved) -> RecordsState:
     if event.target is not None:
         state = _observe_fact(state, event.model_copy(update={"target": None}))
     updated = _observe_fact(state, event)
@@ -1011,7 +1015,7 @@ def _observe_children(state: IntentsState, event: RequestObserved) -> IntentsSta
 
 
 def _child_release_signals(
-    before: IntentsState, after: IntentsState, context: IntentsContext
+    before: RecordsState, after: RecordsState, context: RecordsContext
 ) -> tuple[ReleaseDependencyObserved, ...]:
     signals = []
     for child in after.children:
@@ -1047,8 +1051,8 @@ def _child_release_signals(
     return tuple(signals)
 
 
-def _inspection_exists(state: IntentsState, inspection: InspectRequest) -> bool:
-    previous = next((row for row in state.intents if row.request_id == inspection.request_id), None)
+def _inspection_exists(state: RecordsState, inspection: InspectRequest) -> bool:
+    previous = next((row for row in state.records if row.request_id == inspection.request_id), None)
     if previous is None:
         return False
     if not isinstance(previous.request, InspectRequest) or any(
@@ -1060,28 +1064,28 @@ def _inspection_exists(state: IntentsState, inspection: InspectRequest) -> bool:
 
 
 def _pending_probes(
-    state: IntentsState, context: IntentsContext, barrier: RecoveryBarrier
+    state: RecordsState, context: RecordsContext, barrier: RecoveryBarrier
 ) -> tuple[tuple[RecoveryCheck, ...], tuple[Request, ...]]:
     checks = list(barrier.checks)
     requests = []
-    for intent in state.intents:
+    for record in state.records:
         children = tuple(
             child
             for child in state.children
-            if intent.request_id in child.source_requests and not _child_proven(child, state)
+            if record.request_id in child.source_requests and not _child_proven(child, state)
         )
         if not children:
             continue
-        check = next((check for check in checks if check.target == intent.request_id), None)
+        check = next((check for check in checks if check.target == record.request_id), None)
         if check is None:
             inspection = (
-                _inspection(intent, barrier.epoch)
-                if _resolution(intent, context) not in ("terminal", "reattached")
+                _inspection(record, barrier.epoch)
+                if _resolution(record, context) not in ("terminal", "reattached")
                 else None
             )
             checks.append(
                 RecoveryCheck(
-                    target=intent.request_id,
+                    target=record.request_id,
                     inspection=inspection.request_id if inspection is not None else None,
                 )
             )
@@ -1096,8 +1100,8 @@ def _pending_probes(
                 )
         elif check.resolution not in ("pending", "blocked"):
             inspection = (
-                _inspection(intent, barrier.epoch)
-                if _resolution(intent, context) not in ("terminal", "reattached")
+                _inspection(record, barrier.epoch)
+                if _resolution(record, context) not in ("terminal", "reattached")
                 else None
             )
             replacement = check.model_copy(
@@ -1122,7 +1126,7 @@ def _pending_probes(
                     )
                 )
         for child in children:
-            inspection = _child_inspection(intent, child.resource_id, barrier.epoch)
+            inspection = _child_inspection(record, child.resource_id, barrier.epoch)
             if not _inspection_exists(state, inspection):
                 requests.append(
                     inspection.model_copy(
@@ -1136,8 +1140,8 @@ def _pending_probes(
 
 
 def _observe(
-    state: IntentsState, context: IntentsContext, event: RequestObserved
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, event: RequestObserved
+) -> AreaChange[RecordsState]:
     observed = _observe_children(state, event)
     release_signals = _child_release_signals(state, observed, context)
     updated = _transfer_children(observed, context)
@@ -1155,11 +1159,11 @@ def _observe(
     checks = []
     for check in pending_checks:
         # An old host's query can update ownership, but cannot open this epoch's gate.
-        intent = next((row for row in state.intents if row.request_id == check.target), None)
+        record = next((row for row in state.records if row.request_id == check.target), None)
         child_resource = event.target.target_resource if event.target is not None else None
         expected_child = (
-            _child_inspection(intent, child_resource, barrier.epoch).request_id
-            if intent is not None and child_resource is not None
+            _child_inspection(record, child_resource, barrier.epoch).request_id
+            if record is not None and child_resource is not None
             else None
         )
         # One fact, one path: any committed observation about the target re-resolves its
@@ -1170,14 +1174,14 @@ def _observe(
             check.target == target
             and event.target is not None
             and (
-                intent is not None and _reports(intent, event.target)
+                record is not None and _reports(record, event.target)
                 if child_resource is None
                 else expected_child == event.observation.request_id
             )
         )
         resolution = (
-            _aggregate_resolution(intent, context, updated)
-            if matches and intent is not None
+            _aggregate_resolution(record, context, updated)
+            if matches and record is not None
             else check.resolution
         )
         checks.append(check.model_copy(update={"resolution": resolution}))
@@ -1188,34 +1192,34 @@ def _observe(
 
 
 def _deadline_barrier(
-    state: IntentsState, context: IntentsContext, intent: Intent, now_at: float
+    state: RecordsState, context: RecordsContext, record: RequestRecord, now_at: float
 ) -> tuple[RecoveryBarrier, InspectRequest | None]:
-    if _aggregate_resolution(intent, context, state) == "reattached":
+    if _aggregate_resolution(record, context, state) == "reattached":
         return state.recovery, None
-    inspection = _inspection(intent, state.recovery.epoch).model_copy(
+    inspection = _inspection(record, state.recovery.epoch).model_copy(
         update={
             "request_id": RequestId(
-                root=f"recovery:deadline:{state.recovery.epoch}:{intent.request_id.root}"
+                root=f"recovery:deadline:{state.recovery.epoch}:{record.request_id.root}"
             ),
             "deadline_at": now_at + context.run.limits.reconciliation_bound,
         }
     )
     checks = list(state.recovery.checks)
-    check = next((check for check in checks if check.target == intent.request_id), None)
+    check = next((check for check in checks if check.target == record.request_id), None)
     replacement = RecoveryCheck(
-        target=intent.request_id, inspection=inspection.request_id, resolution="blocked"
+        target=record.request_id, inspection=inspection.request_id, resolution="blocked"
     )
     if check is None:
         checks.append(replacement)
     else:
         checks[checks.index(check)] = replacement
-    existing = next((row for row in state.intents if row.request_id == inspection.request_id), None)
+    existing = next((row for row in state.records if row.request_id == inspection.request_id), None)
     if existing is not None and (
         not isinstance(existing.request, InspectRequest)
-        or existing.request.target != intent.request_id
+        or existing.request.target != record.request_id
         or existing.request.resource_id is not None
-        or existing.request.scope != intent.request.scope
-        or existing.request.admission_id != intent.request.admission_id
+        or existing.request.scope != record.request.scope
+        or existing.request.admission_id != record.request.admission_id
     ):
         raise ContractError(("request_id",), "inspection successor identity conflict")
     barrier = state.recovery.model_copy(
@@ -1225,12 +1229,12 @@ def _deadline_barrier(
 
 
 def _pending_cancellations(
-    state: IntentsState, cancellations: tuple[CancelOwnedResource, ...]
+    state: RecordsState, cancellations: tuple[CancelOwnedResource, ...]
 ) -> tuple[CancelOwnedResource, ...]:
     requests = []
     for cancellation in cancellations:
         previous = next(
-            (row for row in state.intents if row.request_id == cancellation.request_id), None
+            (row for row in state.records if row.request_id == cancellation.request_id), None
         )
         if previous is None:
             requests.append(cancellation)
@@ -1242,19 +1246,19 @@ def _pending_cancellations(
     return tuple(requests)
 
 
-def _deadline_target(state: IntentsState, request_id: RequestId) -> Intent:
-    records = {intent.request_id: intent for intent in state.intents}
+def _deadline_target(state: RecordsState, request_id: RequestId) -> RequestRecord:
+    records = {record.request_id: record for record in state.records}
     seen = set()
     while True:
         if request_id in seen:
             raise ContractError(("request", "target"), "cyclic reconciliation command ancestry")
         seen.add(request_id)
-        intent = records.get(request_id)
-        if intent is None:
+        record = records.get(request_id)
+        if record is None:
             raise ContractError(("request_id", request_id.root), "unknown reconciliation target")
-        request = intent.request
-        if not isinstance(request, InspectRequest | CancelOwnedResource | BlockIntent):
-            return intent
+        request = record.request
+        if not isinstance(request, InspectRequest | CancelOwnedResource | BlockRequest):
+            return record
         target = records.get(request.target)
         if target is None:
             raise ContractError(
@@ -1273,80 +1277,80 @@ def _deadline_target(state: IntentsState, request_id: RequestId) -> Intent:
 
 
 def _deadline(
-    state: IntentsState, context: IntentsContext, event: ReconciliationDeadline
-) -> AreaChange[IntentsState]:
-    intent = _deadline_target(state, event.request_id)
+    state: RecordsState, context: RecordsContext, event: ReconciliationDeadline
+) -> AreaChange[RecordsState]:
+    record = _deadline_target(state, event.request_id)
     now_at = max(context.run.now_at, event.now_at)
     _validate_children(state)
     unresolved_children = any(
-        intent.request_id in child.source_requests and not _child_released(child, state)
+        record.request_id in child.source_requests and not _child_released(child, state)
         for child in state.children
     )
-    resolution = _resolution(intent, context)
-    if now_at < intent.reconcile_deadline_at or (
+    resolution = _resolution(record, context)
+    if now_at < record.reconcile_deadline_at or (
         resolution in ("terminal", "reattached") and not unresolved_children
     ):
         return AreaChange(state=state)
-    block_id = RequestId(root=f"recovery:block:{state.recovery.epoch}:{intent.request_id.root}")
-    previous_block = next((row for row in state.intents if row.request_id == block_id), None)
+    block_id = RequestId(root=f"recovery:block:{state.recovery.epoch}:{record.request_id.root}")
+    previous_block = next((row for row in state.records if row.request_id == block_id), None)
     if previous_block is not None:
         request = previous_block.request
         if (
-            not isinstance(request, BlockIntent)
-            or request.target != intent.request_id
-            or request.scope != intent.request.scope
-            or request.admission_id != intent.request.admission_id
+            not isinstance(request, BlockRequest)
+            or request.target != record.request_id
+            or request.scope != record.request.scope
+            or request.admission_id != record.request.admission_id
         ):
             raise ContractError(("request_id",), "reconciliation successor identity conflict")
-    block = BlockIntent(
+    block = BlockRequest(
         request_id=block_id,
-        scope=intent.request.scope,
-        admission_id=intent.request.admission_id,
+        scope=record.request.scope,
+        admission_id=record.request.admission_id,
         deadline_at=max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound,
-        target=intent.request_id,
+        target=record.request_id,
         diagnostic="reconciliation deadline reached without conclusive ownership proof",
     )
     requests: list[Request] = []
-    events: tuple[IntentBlocked, ...] = ()
+    events: tuple[RequestBlocked, ...] = ()
     if previous_block is None:
         requests.append(block)
         events = (
-            IntentBlocked(
+            RequestBlocked(
                 request_id=block_id,
                 target=block.target,
                 scope=block.scope,
                 diagnostic=block.diagnostic,
             ),
         )
-    observation = intent.observation
+    observation = record.observation
     resources = []
     if (
         resolution != "reattached"
         and observation is not None
         and observation.accepted
         and observation.resource_id is not None
-        and isinstance(observation_for(intent, observation), Proven)
-        and _resource_identified(intent, context, observation)
+        and isinstance(observation_for(record, observation), Proven)
+        and _resource_identified(record, context, observation)
         and not isinstance(resolved_observation(observation), Proven)
     ):
         resources.append(observation.resource_id)
     resources.extend(
         child.resource_id
         for child in state.children
-        if child.scope == intent.request.scope
-        and intent.request_id in child.source_requests
+        if child.scope == record.request.scope
+        and record.request_id in child.source_requests
         and not _child_released(child, state)
     )
     cancellations = (
         CancelOwnedResource(
             request_id=RequestId(
-                root=f"recovery:cancel:{state.recovery.epoch}:{len(intent.request_id.root)}:{intent.request_id.root}:{resource.root}"
+                root=f"recovery:cancel:{state.recovery.epoch}:{len(record.request_id.root)}:{record.request_id.root}:{resource.root}"
             ),
-            scope=intent.request.scope,
-            admission_id=intent.request.admission_id,
+            scope=record.request.scope,
+            admission_id=record.request.admission_id,
             deadline_at=now_at + context.run.limits.cancellation_bound,
             resource_id=resource,
-            target=intent.request_id,
+            target=record.request_id,
         )
         for resource in sorted(set(resources), key=lambda value: value.root)
     )
@@ -1355,8 +1359,8 @@ def _deadline(
     if barrier.phase != RecoveryPhase.READY:
         # Recovery is gating the run: record the blocked check and inspect once more. A
         # bound passing while the run is live (an executor answered and went silent) blocks
-        # the intent for the strategy to handle and leaves scheduling open.
-        barrier, inspection = _deadline_barrier(state, context, intent, now_at)
+        # the record for the strategy to handle and leaves scheduling open.
+        barrier, inspection = _deadline_barrier(state, context, record, now_at)
         if inspection is not None:
             requests.append(inspection)
 
@@ -1367,51 +1371,53 @@ def _deadline(
     )
 
 
-def _answered_open(intent: Intent) -> bool:
-    """An intent whose executor answered without concluding, so nothing is in flight for it.
+def _answered_open(record: RequestRecord) -> bool:
+    """A record whose executor answered without concluding, so nothing is in flight for it.
 
     RECONCILING is an Unknown or an unproven acceptance; DISPATCHED with an observation is
     a retryable failure (never PENDING, which is progress). Both wait for an inspection or a later observation that no
-    live request is going to produce. A DISPATCHED intent with no observation may still be
+    live request is going to produce. A DISPATCHED record with no observation may still be
     executing, so it is not here.
     """
-    if intent.phase == IntentPhase.RECONCILING:
+    if record.phase == RequestPhase.RECONCILING:
         return True
-    observation = intent.observation
+    observation = record.observation
     return (
-        intent.phase == IntentPhase.DISPATCHED and observation is not None and observation.retryable
+        record.phase == RequestPhase.DISPATCHED
+        and observation is not None
+        and observation.retryable
     )
 
 
-def _canonical(intent: Intent) -> bool:
-    return not isinstance(intent.request, InspectRequest | CancelOwnedResource | BlockIntent)
+def _canonical(record: RequestRecord) -> bool:
+    return not isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
 
 
 def overdue_reconciliations(
-    state: IntentsState, now_at: float
+    state: RecordsState, now_at: float
 ) -> tuple[ReconciliationDeadline, ...]:
-    """One deadline event per answered-but-open canonical intent whose bound has passed."""
+    """One deadline event per answered-but-open canonical record whose bound has passed."""
     return tuple(
-        ReconciliationDeadline(request_id=intent.request_id, now_at=now_at)
-        for intent in state.intents
-        if _answered_open(intent) and _canonical(intent) and intent.reconcile_deadline_at <= now_at
+        ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
+        for record in state.records
+        if _answered_open(record) and _canonical(record) and record.reconcile_deadline_at <= now_at
     )
 
 
-def next_reconciliation_at(state: IntentsState) -> float | None:
-    """The earliest time a ``ClockAdvanced`` would block an answered-but-open intent."""
+def next_reconciliation_at(state: RecordsState) -> float | None:
+    """The earliest time a ``ClockAdvanced`` would block an answered-but-open record."""
     due = [
-        intent.reconcile_deadline_at
-        for intent in state.intents
-        if _answered_open(intent) and _canonical(intent)
+        record.reconcile_deadline_at
+        for record in state.records
+        if _answered_open(record) and _canonical(record)
     ]
     return min(due, default=None)
 
 
 def advance(
-    state: IntentsState, context: IntentsContext, event: IntentsEvent
-) -> AreaChange[IntentsState]:
-    """Own only recovery and children; canonical intent facts remain ledger-owned."""
+    state: RecordsState, context: RecordsContext, event: RecordsEvent
+) -> AreaChange[RecordsState]:
+    """Own only recovery and children; canonical record facts remain ledger-owned."""
     match event:
         case RecoveryStarted():
             return _start(state, context, event)
@@ -1428,4 +1434,4 @@ def advance(
                 )
             return AreaChange(state=state)
         case _:
-            raise ContractError(("event",), "event is not owned by intent recovery")
+            raise ContractError(("event",), "event is not owned by record recovery")

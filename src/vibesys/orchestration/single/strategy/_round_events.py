@@ -40,12 +40,12 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     EvidenceKind,
-    IntentBlocked,
     InvocationRef,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
     Rejected,
+    RequestBlocked,
     ResumeAuthorized,
     RunView,
     SuspendedTurn,
@@ -592,7 +592,7 @@ def on_exhausted(state: SingleStrategyState, event: AttemptExhausted) -> SingleS
     return fail(state, record, f"attempt budget exhausted ({event.reason})")
 
 
-def on_blocked(state: SingleStrategyState, event: IntentBlocked) -> SingleStrategyState:
+def on_blocked(state: SingleStrategyState, event: RequestBlocked) -> SingleStrategyState:
     """A blocked request leaves its effect unknown: end the round awaiting it."""
     detail = f"request blocked: {event.diagnostic}"
     record = _awaiting(state, ids.decision_of_operation(event.target.root))

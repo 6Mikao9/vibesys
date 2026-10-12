@@ -161,7 +161,7 @@ def test_separately_proposed_registered_mutation_keeps_current_admission_episode
             frames=(
                 core.TraceFrame(
                     signal=signal,
-                    change=core.IntentsChange(state=state.intents, requests=(request,)),
+                    change=core.RecordsChange(state=state.records, requests=(request,)),
                 ),
             )
         ),
@@ -220,9 +220,9 @@ def retirement_state() -> tuple[core.CoreState, core.Scope, core.Withdraw]:
     return state, scope, withdraw
 
 
-def _phase(state: core.CoreState, identity: core.RequestId) -> core.IntentPhase:
-    (intent,) = (row for row in state.intents.intents if row.request_id == identity)
-    return intent.phase
+def _phase(state: core.CoreState, identity: core.RequestId) -> core.RequestPhase:
+    (record,) = (row for row in state.records.records if row.request_id == identity)
+    return record.phase
 
 
 def test_old_recorded_cleanup_remains_dispatchable_after_reentry() -> None:
@@ -255,7 +255,7 @@ def test_old_recorded_cleanup_remains_dispatchable_after_reentry() -> None:
     dispatched = core.step(
         state, core.DispatchAuthorized(request_id=prepared.requests[0].request_id)
     )
-    assert _phase(dispatched.state, prepared.requests[0].request_id) == core.IntentPhase.DISPATCHED
+    assert _phase(dispatched.state, prepared.requests[0].request_id) == core.RequestPhase.DISPATCHED
 
 
 @pytest.mark.parametrize("kind", ["snapshot", "retain", "discard"])
@@ -311,7 +311,7 @@ def test_ordinary_retention_and_discard_cannot_bypass_mutation_fences(
     else:
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(update={"recovery": core.RecoveryBarrier()})
+                "records": state.records.model_copy(update={"recovery": core.RecoveryBarrier()})
             }
         )
     identity = prepared.requests[0].request_id
@@ -443,7 +443,7 @@ def test_cleanup_cause_for_another_attempt_cannot_authorize_snapshot() -> None:
                     )
                 }
             ),
-            "intents": state.intents.model_copy(update={"recovery": core.RecoveryBarrier()}),
+            "records": state.records.model_copy(update={"recovery": core.RecoveryBarrier()}),
         }
     )
     assert isinstance(scope.owner, core.AttemptId)
@@ -527,7 +527,7 @@ def test_recorded_retirement_cannot_mutate_a_reused_workspace_after_reentry(kind
             frames=(
                 core.TraceFrame(
                     signal=event,
-                    change=core.IntentsChange(state=state.intents, requests=(request,)),
+                    change=core.RecordsChange(state=state.records, requests=(request,)),
                 ),
             )
         ),
@@ -569,7 +569,7 @@ def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> N
                     ),
                 )
             ),
-            "intents": state.intents.model_copy(update={"recovery": core.RecoveryBarrier()}),
+            "records": state.records.model_copy(update={"recovery": core.RecoveryBarrier()}),
         }
     )
     clock = core.ClockAdvanced(now_at=0.0)
@@ -588,7 +588,7 @@ def test_current_episode_cleanup_can_dispatch_during_recovery_and_closing() -> N
     identity = prepared.requests[0].request_id
     assert identity is not None
     dispatched = core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
-    assert _phase(dispatched.state, identity) == core.IntentPhase.DISPATCHED
+    assert _phase(dispatched.state, identity) == core.RequestPhase.DISPATCHED
 
 
 @pytest.mark.parametrize(
@@ -624,7 +624,7 @@ def test_recorded_closure_authorizes_exact_settlement_and_setup_release_work(pro
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(update={"recovery": core.RecoveryBarrier()}),
+            "records": state.records.model_copy(update={"recovery": core.RecoveryBarrier()}),
         }
     )
     request_scope = scope.model_copy(update={"generation": 1}) if proof == "wrong-scope" else scope
@@ -651,7 +651,7 @@ def test_recorded_closure_authorizes_exact_settlement_and_setup_release_work(pro
     )
     if proof in ("dependency", "authority"):
         dispatched = core.step(prepared.state, core.DispatchAuthorized(request_id=identity))
-        assert _phase(dispatched.state, identity) == core.IntentPhase.DISPATCHED
+        assert _phase(dispatched.state, identity) == core.RequestPhase.DISPATCHED
     else:
         with pytest.raises(core.ContractError, match="recovery"):
             core.step(prepared.state, core.DispatchAuthorized(request_id=identity))

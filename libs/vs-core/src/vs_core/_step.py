@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, assert_never
 
 from pydantic import TypeAdapter
 
-from . import attempts, evaluation, intents, scheduling, sessions, settlement
+from . import attempts, evaluation, records, scheduling, sessions, settlement
 from ._continuations import SuspensionRefusal, exhausted, paid_prefix_refusal, wait_refusal_in
 from ._deadlines import bound_to_run, bounded_decision
 from ._dispatch_episode import (
@@ -73,23 +73,6 @@ from .types.evaluation import (
     MeasurementRequested,
 )
 from .types.evaluation_history import EvaluationHistoryAvailability
-from .types.intents import (
-    DecisionDependencyResolved,
-    DispatchAuthorized,
-    ExecuteRegisteredOperation,
-    Intent,
-    IntentPhase,
-    IntentsEvent,
-    OperationResult,
-    OperationRetireRequested,
-    RecoveryPhase,
-    RecoveryReady,
-    Request,
-    RequestObserved,
-    RequestPrepared,
-    RequestUndispatchable,
-    request_lifecycle,
-)
 from .types.kernel import (
     AreaChange,
     AreaContext,
@@ -101,8 +84,8 @@ from .types.kernel import (
     DecisionReceipt,
     DecisionSubmitted,
     EvaluationContext,
-    IntentsContext,
     ProposalSubmitted,
+    RecordsContext,
     RunControlEvent,
     RunEnded,
     SchedulingContext,
@@ -111,6 +94,23 @@ from .types.kernel import (
     Signal,
     StrategyEvent,
     Transition,
+)
+from .types.records import (
+    DecisionDependencyResolved,
+    DispatchAuthorized,
+    ExecuteRegisteredOperation,
+    OperationResult,
+    OperationRetireRequested,
+    RecordsEvent,
+    RecoveryPhase,
+    RecoveryReady,
+    Request,
+    RequestObserved,
+    RequestPhase,
+    RequestPrepared,
+    RequestRecord,
+    RequestUndispatchable,
+    request_lifecycle,
 )
 from .types.scheduling import (
     AdmissionControl,
@@ -263,11 +263,11 @@ def _dispatch(
                 _context(state, SettlementContext),
                 _event_adapter(SettlementEvent).validate_python(event),
             )
-        case Area.INTENTS:
-            change = intents.advance_intent(
-                state.intents,
-                _context(state, IntentsContext),
-                _event_adapter(IntentsEvent).validate_python(event),
+        case Area.RECORDS:
+            change = records.advance_record(
+                state.records,
+                _context(state, RecordsContext),
+                _event_adapter(RecordsEvent).validate_python(event),
             )
         case _:
             assert_never(area)
@@ -277,7 +277,7 @@ def _dispatch(
 def _reconcile_deadline(state: CoreState, request: Request) -> float:
     """Cap work before run expiry, preserving bounded cleanup after expiry.
 
-    New timers never precede the supplied transition time. Existing intents and
+    New timers never precede the supplied transition time. Existing records and
     the request's execution deadline are unchanged; elapsed work deadlines do
     not cancel the separate bounded reconciliation and cleanup authority.
     """
@@ -287,7 +287,7 @@ def _reconcile_deadline(state: CoreState, request: Request) -> float:
     return max(state.run.now_at, deadline)
 
 
-def _same_request(previous: Intent, proposal: Request) -> bool:
+def _same_request(previous: RequestRecord, proposal: Request) -> bool:
     """Whether a proposal names the request already prepared under its identity.
 
     The deadline is a field of the attempt, not of the identity: a host that restarts and
@@ -302,7 +302,7 @@ def register_requests(
     state: CoreState, requests: tuple[Request, ...]
 ) -> tuple[CoreState, tuple[Request, ...]]:
     """Allocate stable identities and persist every proposed request in the outbox."""
-    records = list(state.intents.intents)
+    records = list(state.records.records)
     allocated: list[Request] = []
     for index, proposal in enumerate(requests):
         request_id = proposal.request_id or RequestId(
@@ -317,12 +317,12 @@ def register_requests(
             continue
         lifecycle = request_lifecycle(request)
         records.append(
-            Intent(
+            RequestRecord(
                 request_id=request_id,
                 request=request,
                 payload_digest=payload_digest,
                 lifecycle=lifecycle,
-                phase=IntentPhase.PREPARED,
+                phase=RequestPhase.PREPARED,
                 reconcile_deadline_at=_reconcile_deadline(state, request),
             )
         )
@@ -348,7 +348,7 @@ def register_requests(
     )
     return state.model_copy(
         update={
-            "intents": state.intents.model_copy(update={"intents": tuple(records)}),
+            "records": state.records.model_copy(update={"records": tuple(records)}),
             "run": state.run.model_copy(update={"receipts": receipts}),
         }
     ), tuple(allocated)
@@ -444,7 +444,7 @@ def _activation_signal(
 ) -> tuple[Transition, tuple[Signal, ...]]:
     """Admissions resolve canonical decisions; recovery only wakes scheduling."""
     if isinstance(signal, RecoveryReady):
-        barrier = state.intents.recovery
+        barrier = state.records.recovery
         if signal.epoch != barrier.epoch:
             return Transition(state=state), ()
         if barrier.phase != RecoveryPhase.READY:
@@ -542,7 +542,7 @@ def _stop_dependencies_succeeded(state: CoreState) -> bool:
         deadline_at=state.run.deadline_at,
         decision_dependencies=stop.value.depends_on,
     )
-    return isinstance(dependencies_for(prerequisites, state.run.receipts, state.intents), Proven)
+    return isinstance(dependencies_for(prerequisites, state.run.receipts, state.records), Proven)
 
 
 def _kernel_signal(
@@ -602,9 +602,9 @@ def _signal_admission(
     """Keep an observation's original episode through successor signal propagation."""
     observation = getattr(signal, "observation", None)
     identity = getattr(observation, "request_id", None)
-    intent = next((row for row in state.intents.intents if row.request_id == identity), None)
-    if intent is not None:
-        return intent.request.admission_id
+    record = next((row for row in state.records.records if row.request_id == identity), None)
+    if record is not None:
+        return record.request.admission_id
     explicit = getattr(signal, "admission_id", None) or getattr(observation, "admission_id", None)
     scope = getattr(signal, "scope", None) or getattr(
         getattr(signal, "request", None), "scope", None
@@ -630,12 +630,12 @@ def _stall_entries(
         *(
             CheckpointStalled(invocation=invocation)
             for invocation in stalled_checkpoint_waits(
-                state.sessions, state.intents.intents, in_flight
+                state.sessions, state.records.records, in_flight
             )
         ),
         *(
             AcquisitionStalled(invocation=invocation)
-            for invocation in stalled_acquisitions(state.sessions, state.intents.intents, in_flight)
+            for invocation in stalled_acquisitions(state.sessions, state.records.records, in_flight)
         ),
         *(
             RequestUndispatchable(request_id=request_id)
@@ -669,7 +669,7 @@ def propagate(
         admission_id = _signal_admission(state, signal, admission_id)
         observation = getattr(signal, "observation", None)
         if observation is not None and any(
-            intent.request_id == observation.request_id for intent in state.intents.intents
+            record.request_id == observation.request_id for record in state.records.records
         ):
             cause, requires = _event_cause(state, signal)
         if isinstance(signal, DecisionCompleted):
@@ -748,7 +748,7 @@ def _registered_transition(
 
 def dependency_status(state: CoreState, request: Request) -> DependencyStatus:
     """Prepared requests remain fenced until all semantic prerequisites succeed."""
-    return request_dependency_status(request, state.run.receipts, state.intents)
+    return request_dependency_status(request, state.run.receipts, state.records)
 
 
 def _complete_decision(
@@ -792,8 +792,8 @@ def _complete_decision(
     notifications = (
         (DecisionDependencyResolved(decision_id=event.decision_id, status=event.status),)
         if any(
-            event.decision_id in intent.request.decision_dependencies
-            for intent in state.intents.intents
+            event.decision_id in record.request.decision_dependencies
+            for record in state.records.records
         )
         else ()
     )
@@ -829,13 +829,13 @@ def _event_cause(
 ) -> tuple[DecisionId | None, tuple[DecisionId, ...]]:
     observation = getattr(event, "observation", None)
     if observation is not None:
-        intent = _unique_intent(state, observation.request_id)
-        if intent is not None:
-            if not isinstance(observation_for(intent, observation), Proven):
+        record = _unique_record(state, observation.request_id)
+        if record is not None:
+            if not isinstance(observation_for(record, observation), Proven):
                 raise ContractError(
                     ("observation",), "differs from canonical request scope or episode"
                 )
-            return intent.request.decision_id, intent.request.decision_dependencies
+            return record.request.decision_id, record.request.decision_dependencies
     return None, ()
 
 
@@ -1011,8 +1011,8 @@ def operation_owner(state: CoreState, request: ExecuteRegisteredOperation) -> Ar
     ):
         return Area.ATTEMPTS
     owners = {
-        LifecycleClass.QUERY: Area.INTENTS,
-        LifecycleClass.IDEMPOTENT_WRITE: Area.INTENTS,
+        LifecycleClass.QUERY: Area.RECORDS,
+        LifecycleClass.IDEMPOTENT_WRITE: Area.RECORDS,
         LifecycleClass.OWNED_JOB: Area.EVALUATION,
         LifecycleClass.SESSION_TURN: Area.SESSIONS,
     }
@@ -1457,8 +1457,8 @@ def _validate_resume_owner(
             )
 
 
-def _unique_intent(state: CoreState, identity: RequestId) -> Intent | None:
-    candidates = tuple(item for item in state.intents.intents if item.request_id == identity)
+def _unique_record(state: CoreState, identity: RequestId) -> RequestRecord | None:
+    candidates = tuple(item for item in state.records.records if item.request_id == identity)
     if len(candidates) > 1:
         raise ContractError(("request_id",), "ambiguous canonical request identity")
     return candidates[0] if candidates else None
@@ -1467,20 +1467,20 @@ def _unique_intent(state: CoreState, identity: RequestId) -> Intent | None:
 def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
     """Only dependencies and recovery proof authorize ordinary dispatch."""
     if isinstance(event, DispatchAuthorized):
-        intent = _unique_intent(state, event.request_id)
+        record = _unique_record(state, event.request_id)
         if (
-            intent is not None
-            and state.intents.recovery.phase != RecoveryPhase.READY
-            and not retirement_dispatch(intent.request)
-            and not registered_retirement(state, intent.request)
+            record is not None
+            and state.records.recovery.phase != RecoveryPhase.READY
+            and not retirement_dispatch(record.request)
+            and not registered_retirement(state, record.request)
         ):
             raise ContractError(("recovery",), "ordinary dispatch requires ready recovery")
-        if intent is None or dependency_status(state, intent.request) != DependencyStatus.SUCCEEDED:
+        if record is None or dependency_status(state, record.request) != DependencyStatus.SUCCEEDED:
             raise ContractError(
                 ("dependency",), "dispatch requires successful dependency completion"
             )
-        _validate_dispatch_episode(state, intent.request)
-        _validate_resume_authority(state, intent.request)
+        _validate_dispatch_episode(state, record.request)
+        _validate_resume_authority(state, record.request)
 
 
 def _advance_event_time(state: CoreState, event: CoreEvent) -> CoreState:
@@ -1532,7 +1532,7 @@ def step(state: CoreState, event: CoreEvent, *, reducers: CoreReducers | None = 
     """Consume one event through explicit pure lifecycle implementations.
 
     Defaults use every production reducer. Optional sibling implementations keep
-    the same kernel authority, validation, propagation and durable intent path.
+    the same kernel authority, validation, propagation and durable record path.
     """
     dispatch = _dispatch if reducers is None else partial(_dispatch, reducers=reducers)
     return consume(state, event, dispatch)

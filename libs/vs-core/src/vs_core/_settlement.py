@@ -35,8 +35,8 @@ if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.common import AttemptRef, DecisionId, InvocationRef, RevisionRef
     from .types.evaluation import EvidenceRef
-    from .types.intents import Intent
     from .types.kernel import DecisionReceipt, SettlementContext
+    from .types.records import RequestRecord
     from .types.sessions import Invocation
     from .types.settlement import AssessmentProposal, SettlementEvent
 
@@ -88,8 +88,8 @@ def _evidence_valid(
     )
 
 
-def _turn_request_valid(intent: Intent, invocation: Invocation) -> bool:
-    request = intent.request
+def _turn_request_valid(record: RequestRecord, invocation: Invocation) -> bool:
+    request = record.request
     # SettlementContext has no registry descriptors. Receipt/wire agreement
     # cannot establish registered operation authority without that declaration.
     return (
@@ -130,11 +130,11 @@ def _invocation_valid(
     ):
         return False
     if not any(
-        intent.request_id == observation.request_id
-        and intent.request.request_id == observation.request_id
-        and intent.request.scope == scope
-        and _turn_request_valid(intent, invocation)
-        for intent in context.intents.intents
+        record.request_id == observation.request_id
+        and record.request.request_id == observation.request_id
+        and record.request.scope == scope
+        and _turn_request_valid(record, invocation)
+        for record in context.records.records
     ):
         return False
     # Sessions owns schema validation before accepting final output. Settlement
@@ -251,7 +251,7 @@ def _released(owner: AttemptView, settlement: Settlement) -> bool:
         or owner.closure.disposition not in ("settle", "cancel")
         or owner.closure.admission_id != owner.admission_id
         or owner.release_dependencies
-        or owner.pending_intents
+        or owner.pending_records
     ):
         return False
     return settlement.retention == "discard" or any(
@@ -438,7 +438,7 @@ def _accept_proposal(
         return AreaChange[SettlementState](state=state)
     dependency = _unfinished_dependency(context, receipt)
     if receipt is not None and dependency is not None:
-        # Frozen dependency notifications wake intents only. Reject retriably
+        # Frozen dependency notifications wake records only. Reject retriably
         # instead of accepting a request-free settlement that cannot wake up.
         return AreaChange[SettlementState](
             state=state,

@@ -7,7 +7,7 @@ the root holds exactly that revision). Only a positive verification publishes
 AdoptionResult, and it publishes it once.
 
 Request identities derive from the selection and a round number, and the round
-number is the count of AdoptRevision records already in the intent ledger. The
+number is the count of AdoptRevision records already in the record ledger. The
 ledger is durable, so a restarted run recomputes the same identities, never
 re-adopts when a verification is merely outstanding, and a retry gets a fresh
 identity that the executor answers by inspecting the root before restoring it.
@@ -63,8 +63,8 @@ from .types.settlement import (
 from .types.strategy import Accepted, ProposeWinner, Rejected
 
 if TYPE_CHECKING:
-    from .types.intents import IntentsState
     from .types.kernel import RunState, SettlementContext
+    from .types.records import RecordsState
     from .types.settlement import SettlementEvent
 
 
@@ -90,29 +90,29 @@ def _verify_id(selection: Selection, round_: int) -> RequestId:
     return RequestId(root=f"verify-adoption:{_key(selection)}:{round_}")
 
 
-def _rounds(intents: IntentsState, selection: Selection) -> int:
+def _rounds(records: RecordsState, selection: Selection) -> int:
     """How many AdoptRevision requests the ledger holds for this selection."""
     return sum(
         isinstance(row.request, AdoptRevision) and row.request.selection == selection
-        for row in intents.intents
+        for row in records.records
     )
 
 
 def _may_start_round(context: SettlementContext, selection: Selection) -> bool:
     """The one bound on rounds: the first round plus ``max_retries`` more."""
-    return _rounds(context.intents, selection) <= context.run.limits.max_retries
+    return _rounds(context.records, selection) <= context.run.limits.max_retries
 
 
-def _ledger_has(intents: IntentsState, request_id: RequestId, selection: Selection) -> bool:
+def _ledger_has(records: RecordsState, request_id: RequestId, selection: Selection) -> bool:
     return any(
         row.request_id == request_id
         and isinstance(row.request, AdoptRevision | VerifyAdoption)
         and row.request.selection == selection
-        for row in intents.intents
+        for row in records.records
     )
 
 
-def _phase(adoption: Adoption | None, intents: IntentsState) -> _Phase:
+def _phase(adoption: Adoption | None, records: RecordsState) -> _Phase:
     if adoption is None:
         return _Phase.IDLE
     if adoption.verified:
@@ -121,14 +121,14 @@ def _phase(adoption: Adoption | None, intents: IntentsState) -> _Phase:
         return _Phase.FAILED
     if adoption.observation is None:
         return _Phase.ADOPTING
-    return _observed_phase(adoption.selection, adoption.observation, intents)
+    return _observed_phase(adoption.selection, adoption.observation, records)
 
 
 def _observed_phase(
-    selection: Selection, observation: Observation, intents: IntentsState
+    selection: Selection, observation: Observation, records: RecordsState
 ) -> _Phase:
-    latest = max(_rounds(intents, selection) - 1, 0)
-    # A retryable answer is not an outcome: the intent ledger asks again under the same
+    latest = max(_rounds(records, selection) - 1, 0)
+    # A retryable answer is not an outcome: the record ledger asks again under the same
     # identity, and a conclusive failure arrives once its retries are spent.
     pending = observation.status == ObservationStatus.PENDING or observation.retryable
     if observation.request_id == _verify_id(selection, latest):
@@ -146,14 +146,14 @@ def _awaits_inspection(observation: Observation) -> bool:
     return observation.status in (ObservationStatus.SUCCEEDED, ObservationStatus.UNKNOWN)
 
 
-def fences_root_mutation(state: SettlementState, intents: IntentsState) -> bool:
+def fences_root_mutation(state: SettlementState, records: RecordsState) -> bool:
     """Whether an adoption is underway, so no other root mutation is authorized.
 
     The fence starts when the adoption is proposed and ends when it is verified or
     a round fails. Callers that authorize a mutation of the run's root workspace
     (an exclusive-root attempt, a root restore) must refuse while this is true.
     """
-    return _phase(state.adoption, intents) in (_Phase.ADOPTING, _Phase.VERIFYING)
+    return _phase(state.adoption, records) in (_Phase.ADOPTING, _Phase.VERIFYING)
 
 
 _VIEW_PHASE = {
@@ -165,16 +165,16 @@ _VIEW_PHASE = {
 }
 
 
-def view(state: SettlementState, intents: IntentsState) -> AdoptionView | None:
+def view(state: SettlementState, records: RecordsState) -> AdoptionView | None:
     """The strategy-facing summary of the current adoption."""
     adoption = state.adoption
     if adoption is None:
         return None
-    phase = _phase(adoption, intents)
+    phase = _phase(adoption, records)
     return AdoptionView(
         selection=adoption.selection,
         phase=cast("Literal['adopting', 'verifying', 'verified', 'failed']", _VIEW_PHASE[phase]),
-        rounds=_rounds(intents, adoption.selection),
+        rounds=_rounds(records, adoption.selection),
         failure=adoption.failure,
     )
 
@@ -262,7 +262,7 @@ def _root_holder(context: SettlementContext) -> bool:
         and (
             attempt.phase not in (AttemptPhase.QUEUED, AttemptPhase.TERMINAL, AttemptPhase.PARKED)
             or attempt.release_dependencies
-            or attempt.pending_intents
+            or attempt.pending_records
         )
         for attempt in context.attempts.attempts
     )
@@ -281,7 +281,7 @@ def _existing(
 ) -> AreaChange[SettlementState] | None:
     """Answer a proposal that meets an adoption already started or finished."""
     current = state.adoption
-    phase = _phase(current, context.intents)
+    phase = _phase(current, context.records)
     same = current is not None and current.selection == selection
     if phase == _Phase.DONE:
         if same:
@@ -312,7 +312,7 @@ def _propose(
     if not _may_start_round(context, selection):
         detail = "adoption retries are exhausted for this selection"
         return _refuse(state, context, selection, RejectionCode.BUDGET, detail)
-    round_ = _rounds(context.intents, selection)
+    round_ = _rounds(context.records, selection)
     return _with_adoption(state, Adoption(selection=selection), _adopt(context, selection, round_))
 
 
@@ -321,12 +321,12 @@ def _replay(
 ) -> AreaChange[SettlementState]:
     """Re-proposing the same winner only fills a request the ledger lost."""
     selection = current.selection
-    latest = max(_rounds(context.intents, selection) - 1, 0)
+    latest = max(_rounds(context.records, selection) - 1, 0)
     if phase == _Phase.ADOPTING:
-        missing = not _ledger_has(context.intents, _adopt_id(selection, latest), selection)
+        missing = not _ledger_has(context.records, _adopt_id(selection, latest), selection)
         requests = (_adopt(context, selection, latest),) if missing else ()
         return AreaChange[SettlementState](state=state, requests=requests)
-    missing = not _ledger_has(context.intents, _verify_id(selection, latest), selection)
+    missing = not _ledger_has(context.records, _verify_id(selection, latest), selection)
     requests = (_verify(context, selection, latest),) if missing else ()
     return AreaChange[SettlementState](state=state, requests=requests)
 
@@ -349,9 +349,9 @@ def _observe(
     if adoption is None or adoption.verified or observation.scope != _run_scope(context.run):
         return AreaChange[SettlementState](state=state)
     selection = adoption.selection
-    latest = max(_rounds(context.intents, selection) - 1, 0)
-    phase = _phase(adoption, context.intents)
-    ledger = context.intents
+    latest = max(_rounds(context.records, selection) - 1, 0)
+    phase = _phase(adoption, context.records)
+    ledger = context.records
     adopting = observation.request_id == _adopt_id(selection, latest) and _ledger_has(
         ledger, observation.request_id, selection
     )
@@ -386,7 +386,7 @@ def _adopt_observed(
     if not _awaits_inspection(observation):
         return _fail(state, context, recorded, AdoptionFailureReason.ADOPT_FAILED)
     selection = adoption.selection
-    if _ledger_has(context.intents, _verify_id(selection, round_), selection):
+    if _ledger_has(context.records, _verify_id(selection, round_), selection):
         return _with_adoption(state, recorded)
     return _with_adoption(state, recorded, _verify(context, selection, round_))
 
@@ -453,7 +453,7 @@ def _fail(
                 selection=adoption.selection,
                 reason=reason,
                 observation=observation,
-                rounds=_rounds(context.intents, adoption.selection),
+                rounds=_rounds(context.records, adoption.selection),
             ),
         ),
     )
@@ -476,8 +476,8 @@ def _announce_fence_lift(
     before: SettlementState, context: SettlementContext, change: AreaChange[SettlementState]
 ) -> AreaChange[SettlementState]:
     """Tell Scheduling once when the root fence lifts, so queued admissions retry."""
-    if fences_root_mutation(before, context.intents) and not fences_root_mutation(
-        change.state, context.intents
+    if fences_root_mutation(before, context.records) and not fences_root_mutation(
+        change.state, context.records
     ):
         return change.model_copy(update={"signals": (*change.signals, AdoptionFenceLifted())})
     return change

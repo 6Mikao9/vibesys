@@ -1,4 +1,4 @@
-"""Strict kernel rejection before charging or preparing intent."""
+"""Strict kernel rejection before charging or preparing record."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from .types.common import (
     RunStatus,
     WorkspaceMode,
 )
-from .types.intents import RecoveryPhase
+from .types.records import RecoveryPhase
 from .types.strategy import (
     Cancel,
     Decision,
@@ -176,7 +176,7 @@ def validate_offer(state: CoreState, decision: Decision) -> Rejected | None:
 
 def _validate_root_fence(state: CoreState, decision: Decision) -> Rejected | None:
     """No decision takes the root workspace while an adoption is rewriting it."""
-    if not fences_root_mutation(state.settlement, state.intents):
+    if not fences_root_mutation(state.settlement, state.records):
         return None
     if isinstance(decision, StartAttempt):
         takes_root = decision.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
@@ -198,7 +198,7 @@ def _validate_root_fence(state: CoreState, decision: Decision) -> Rejected | Non
 
 
 def validate_scope(state: CoreState, decision: Decision) -> Rejected | None:
-    if state.intents.recovery.phase != RecoveryPhase.READY and not isinstance(
+    if state.records.recovery.phase != RecoveryPhase.READY and not isinstance(
         decision, Stop | Withdraw
     ):
         return _reject(

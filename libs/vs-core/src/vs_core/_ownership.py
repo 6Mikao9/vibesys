@@ -11,9 +11,9 @@ from .types.evaluation import ContinuationPhase
 
 if TYPE_CHECKING:
     from .types.evaluation import OwnedJob, RegisteredOwnedJob
-    from .types.intents import ChildLease, Intent
+    from .types.records import ChildLease, RequestRecord
     from .types.sessions import Invocation
-from .types.intents import IntentPhase
+from .types.records import RequestPhase
 from .types.sessions import SessionPhase
 
 if TYPE_CHECKING:
@@ -39,27 +39,27 @@ def cleanup_pending(state: CoreState) -> bool:
             ),
             any(session.phase != SessionPhase.TERMINAL for session in state.sessions.sessions),
             any(
-                not _job_release_confirmed(job, state.intents.intents)
+                not _job_release_confirmed(job, state.records.records)
                 for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs)
             ),
             any(
-                not _blocked_unnamed(intent)
+                not _blocked_unnamed(record)
                 and (
-                    intent.phase != IntentPhase.COMPLETED
+                    record.phase != RequestPhase.COMPLETED
                     or (
-                        intent.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
-                        and (not _intent_release_confirmed(intent, state.intents.intents))
+                        record.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
+                        and (not _record_release_confirmed(record, state.records.records))
                     )
                 )
-                for intent in state.intents.intents
+                for record in state.records.records
             ),
             bool(state.settlement.pending),
             any(claim.phase != "completed" for claim in state.sessions.interrupts),
             _unreleased_children(state),
             any(group.phase == "acquiring" for group in state.sessions.acquisition_groups),
             any(
-                not _child_release_confirmed(child, state.intents.intents)
-                for child in state.intents.children
+                not _child_release_confirmed(child, state.records.records)
+                for child in state.records.children
             ),
             any(
                 _invocation_pending(state, invocation) for invocation in state.sessions.invocations
@@ -68,18 +68,18 @@ def cleanup_pending(state: CoreState) -> bool:
     )
 
 
-def _blocked_unnamed(intent: Intent) -> bool:
-    """A blocked intent that was never accepted and named nothing owns nothing to release.
+def _blocked_unnamed(record: RequestRecord) -> bool:
+    """A blocked record that was never accepted and named nothing owns nothing to release.
 
     Reconciliation blocked it after its executor answered without a conclusion. With the
     launch unaccepted and no resource or children in that answer there is no identity left
-    to cancel or wait on, so the block ends the intent's claim on the run's closure; the strategy has
-    already been told (``IntentBlocked``). A blocked intent that named a resource still
+    to cancel or wait on, so the block ends the record's claim on the run's closure; the strategy has
+    already been told (``RequestBlocked``). A blocked record that named a resource still
     holds closure until that resource is proven released.
     """
-    observation = intent.observation
+    observation = record.observation
     return (
-        intent.phase == IntentPhase.BLOCKED
+        record.phase == RequestPhase.BLOCKED
         and observation is not None
         and not observation.accepted
         and observation.resource_id is None
@@ -87,15 +87,17 @@ def _blocked_unnamed(intent: Intent) -> bool:
     )
 
 
-def _job_release_confirmed(job: OwnedJob | RegisteredOwnedJob, sources: tuple[Intent, ...]) -> bool:
+def _job_release_confirmed(
+    job: OwnedJob | RegisteredOwnedJob, sources: tuple[RequestRecord, ...]
+) -> bool:
     return isinstance(released_owner(job, sources), Proven)
 
 
-def _intent_release_confirmed(intent: Intent, sources: tuple[Intent, ...]) -> bool:
-    return isinstance(released_owner(intent, sources), Proven)
+def _record_release_confirmed(record: RequestRecord, sources: tuple[RequestRecord, ...]) -> bool:
+    return isinstance(released_owner(record, sources), Proven)
 
 
-def _child_release_confirmed(child: ChildLease, sources: tuple[Intent, ...]) -> bool:
+def _child_release_confirmed(child: ChildLease, sources: tuple[RequestRecord, ...]) -> bool:
     return isinstance(released_owner(child, sources), Proven)
 
 
@@ -104,31 +106,31 @@ def _unreleased_children(state: CoreState) -> bool:
     released = {
         (job.resource_id, job.scope)
         for job in jobs
-        if _job_release_confirmed(job, state.intents.intents)
+        if _job_release_confirmed(job, state.records.records)
     }
     released.update(
         (child.resource_id, child.scope)
-        for child in state.intents.children
-        if _child_release_confirmed(child, state.intents.intents)
+        for child in state.records.children
+        if _child_release_confirmed(child, state.records.records)
     )
     observations = tuple(
-        intent.observation for intent in state.intents.intents if intent.observation is not None
+        record.observation for record in state.records.records if record.observation is not None
     )
     observations += tuple(job.observation for job in jobs if job.observation is not None)
     observations += tuple(
-        child.observation for child in state.intents.children if child.observation is not None
+        child.observation for child in state.records.children if child.observation is not None
     )
     observations += tuple(
         mark.observation
-        for child in state.intents.children
+        for child in state.records.children
         for mark in child.observation_watermarks
     )
     released.update(
-        (intent.observation.resource_id, intent.observation.scope)
-        for intent in state.intents.intents
-        if intent.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
-        and intent.observation is not None
-        and _intent_release_confirmed(intent, state.intents.intents)
+        (record.observation.resource_id, record.observation.scope)
+        for record in state.records.records
+        if record.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
+        and record.observation is not None
+        and _record_release_confirmed(record, state.records.records)
     )
     children = tuple((child, job.scope) for job in jobs for child in job.children)
     children += tuple(

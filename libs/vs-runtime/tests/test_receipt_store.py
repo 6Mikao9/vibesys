@@ -12,7 +12,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict
 
-from vs_core.api import BlockIntent, RequestId
+from vs_core.api import BlockRequest, RequestId
 from vs_project.api import Project, ProjectStateError
 from vs_runtime.api.core import (
     Conflict,
@@ -41,8 +41,8 @@ class Done(BaseModel):
     value: int
 
 
-def request(name: str = "r1") -> BlockIntent:
-    return BlockIntent(
+def request(name: str = "r1") -> BlockRequest:
+    return BlockRequest(
         request_id=RequestId(root=name),
         scope=SCOPE,
         deadline_at=100.0,

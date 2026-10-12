@@ -85,23 +85,23 @@ class CancelOwnedResource(RequestBase):
     target: RequestId
 
 
-class BlockIntent(RequestBase):
-    """Block intent lifecycle contract."""
+class BlockRequest(RequestBase):
+    """Block record lifecycle contract."""
 
-    kind: Literal["block_intent"] = "block_intent"
+    kind: Literal["block_request"] = "block_request"
     target: RequestId
     diagnostic: str
 
 
-class IntentBlocked(Value):
-    """Diagnostic that reconciliation blocked one intent, published once.
+class RequestBlocked(Value):
+    """Diagnostic that reconciliation blocked one record, published once.
 
-    request_id is the BlockIntent request, target the blocked intent. Emitted when
+    request_id is the BlockRequest request, target the blocked record. Emitted when
     the block is first prepared, never on replay, so hosts and strategies can
-    surface it without reading the intent ledger.
+    surface it without reading the record ledger.
     """
 
-    kind: Literal["intent_blocked"] = "intent_blocked"
+    kind: Literal["request_blocked"] = "request_blocked"
     request_id: RequestId
     target: RequestId
     scope: Scope
@@ -110,7 +110,7 @@ class IntentBlocked(Value):
 
 type RegisteredOperationRequest = ExecuteRegisteredOperation
 type ReconciliationRequest = Annotated[
-    InspectRequest | CancelOwnedResource | BlockIntent, Field(discriminator="kind")
+    InspectRequest | CancelOwnedResource | BlockRequest, Field(discriminator="kind")
 ]
 type Request = Annotated[
     WorkspaceRequest
@@ -123,8 +123,8 @@ type Request = Annotated[
 ]
 
 
-class IntentPhase(StrEnum):
-    """Intent phase lifecycle contract."""
+class RequestPhase(StrEnum):
+    """RequestRecord phase lifecycle contract."""
 
     PREPARED = "prepared"
     DISPATCHED = "dispatched"
@@ -133,21 +133,21 @@ class IntentPhase(StrEnum):
     BLOCKED = "blocked"
 
 
-class Intent(OutcomeValue):
+class RequestRecord(OutcomeValue):
     """Canonical outcome ledger including immutable typed setup classification.
 
-    Intents A retains root/target setup_failure with the corresponding observation
+    Records A retains root/target setup_failure with the corresponding observation
     and checks equality on replay before forwarding SessionObserved.failure.
     UNKNOWN never supplies nonacceptance, unsupported refund or success proof.
     evaluation_result retains the exact scientific ingress facts alongside its
-    observation for same-sequence equality; Intents A forwards them unchanged.
+    observation for same-sequence equality; Records A forwards them unchanged.
     """
 
     request_id: RequestId
     request: Request
     payload_digest: str
     lifecycle: LifecycleClass
-    phase: IntentPhase
+    phase: RequestPhase
     sequence: Count | None = None
     observation: Observation | None = None
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
@@ -165,7 +165,7 @@ class Intent(OutcomeValue):
     def retry_wait_until(self) -> float | None:
         """The core time at which a retryably failed request is sent again, else None."""
         if (
-            self.phase == IntentPhase.DISPATCHED
+            self.phase == RequestPhase.DISPATCHED
             and self.observation is not None
             and self.observation.retryable
         ):
@@ -173,7 +173,7 @@ class Intent(OutcomeValue):
         return None
 
     @model_validator(mode="after")
-    def registered_outcome(self, info: ValidationInfo) -> Intent:
+    def registered_outcome(self, info: ValidationInfo) -> RequestRecord:
         """Restore the owning subtype at the registered codec boundary."""
         if self.observation is None:
             if self.setup_failure != SetupFailureKind.UNKNOWN:
@@ -194,7 +194,7 @@ class Intent(OutcomeValue):
 class ChildObservationWatermark(Value):
     """Highest accepted observation from one child-discovery source.
 
-    The full immutable observation carries sequence and equality proof. Intents
+    The full immutable observation carries sequence and equality proof. Records
     B rejects an older sequence or conflicting facts at the same sequence before
     changing aggregate ownership, even when another source supplies that proof.
     """
@@ -211,11 +211,11 @@ class ChildObservationWatermark(Value):
 
 
 class ChildLease(Value):
-    """Discovered descendant ownership, distinct from its ancestor's intent.
+    """Discovered descendant ownership, distinct from its ancestor's record.
 
     Source requests and parent resources are unique, canonically ordered proofs.
     Conflicting scope or ancestry rejects; transfer to a typed owner is atomic.
-    Intents B maintains watermarks independently of aggregate observation.
+    Records B maintains watermarks independently of aggregate observation.
     Incomplete historical watermarks cannot authorize release or transfer;
     reconcile every source before marking the history complete.
     Retained source claims conservatively retain independent ownership: run
@@ -327,10 +327,10 @@ class RecoveryBarrier(Value):
         return self
 
 
-class IntentsState(Value):
-    """Intents state lifecycle contract."""
+class RecordsState(Value):
+    """Records state lifecycle contract."""
 
-    intents: tuple[Intent, ...] = ()
+    records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
     recovery: RecoveryBarrier = RecoveryBarrier()
 
@@ -341,16 +341,16 @@ class OperationView(Value):
     operation_id: OperationId
     scope: Scope
     schema_ref: OperationSchemaRef
-    phase: IntentPhase
+    phase: RequestPhase
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
 
 
 class RequestPrepared(Value):
-    """Canonical proposal before an executable intent acquires final payload.
+    """Canonical proposal before an executable record acquires final payload.
 
-    For registered session turns, Intents A delegates acquisition and input
+    For registered session turns, Records A delegates acquisition and input
     reservation first. Sessions A validates the accepted Operation receipt and
     normalized turn, then returns the same ExecuteRegisteredOperation identity
     with its fixed occurrence manifest. Only that final payload is registered
@@ -476,7 +476,7 @@ class RequestObserved(OutcomeValue):
     """Root request outcome with executor-owned typed setup failure.
 
     Inspection's setup classification belongs in target.setup_failure, separately
-    from the query outcome. Intents A forwards the exact corresponding value to
+    from the query outcome. Records A forwards the exact corresponding value to
     Sessions A and preserves it in the canonical ledger for equality on replay.
     """
 
@@ -530,7 +530,7 @@ class ReconciliationDeadline(Value):
 class RetryDue(Value):
     """Internal signal: core time reached the backoff of a request the executor failed retryably.
 
-    Raised on every clock tick for each intent whose ``retry_at`` has come; the ledger sends the
+    Raised on every clock tick for each record whose ``retry_at`` has come; the ledger sends the
     request out again, unchanged. Never shell input.
     """
 
@@ -552,7 +552,7 @@ class RequestUndispatchable(Value):
 
 
 class DecisionDependencyResolved(Value):
-    """Completion wakes intents to release or reject prepared dependents."""
+    """Completion wakes records to release or reject prepared dependents."""
 
     kind: Literal["decision_dependency_resolved"] = "decision_dependency_resolved"
     decision_id: DecisionId
@@ -560,7 +560,7 @@ class DecisionDependencyResolved(Value):
 
 
 class OperationRetireRequested(Value):
-    """Explicit retirement of a registered owned operation, resolved by intents."""
+    """Explicit retirement of a registered owned operation, resolved by records."""
 
     kind: Literal["operation_retire_requested"] = "operation_retire_requested"
     operation: OperationRef
@@ -589,7 +589,7 @@ class OperationResult(OutcomeValue):
         return validated
 
 
-type IntentsEvent = Annotated[
+type RecordsEvent = Annotated[
     RequestPrepared
     | DispatchAuthorized
     | RequestObserved
@@ -636,7 +636,7 @@ def request_lifecycle(request: Request) -> LifecycleClass:
             | CancelOwnedJob()
             | AdoptRevision()
             | CancelOwnedResource()
-            | BlockIntent()
+            | BlockRequest()
         ):
             lifecycle = LifecycleClass.IDEMPOTENT_WRITE
         case _:

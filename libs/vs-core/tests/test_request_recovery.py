@@ -21,7 +21,7 @@ from vs_core.api import (
     AttemptRef,
     AttemptsState,
     AttemptView,
-    BlockIntent,
+    BlockRequest,
     CancelOwnedResource,
     Capabilities,
     ChargeId,
@@ -51,10 +51,6 @@ from vs_core.api import (
     InputRecord,
     InspectRequest,
     InspectTurn,
-    Intent,
-    IntentBlocked,
-    IntentPhase,
-    IntentsState,
     Invocation,
     InvocationId,
     InvocationInputTarget,
@@ -75,13 +71,17 @@ from vs_core.api import (
     OperationWire,
     PoolId,
     ReconciliationDeadline,
+    RecordsState,
     RecoveryBarrier,
     RecoveryPhase,
     RecoveryStarted,
     RegisteredOwnedJob,
     ReissueProof,
+    RequestBlocked,
     RequestId,
     RequestObserved,
+    RequestPhase,
+    RequestRecord,
     ResourceId,
     RoleId,
     RunEnvelope,
@@ -160,9 +160,9 @@ REGISTERED_REQUESTS = {
 }
 
 
-def pending_intent(
-    identity: str = "original", phase: IntentPhase = IntentPhase.DISPATCHED
-) -> Intent:
+def pending_record(
+    identity: str = "original", phase: RequestPhase = RequestPhase.DISPATCHED
+) -> RequestRecord:
     """A persisted operation whose external acceptance has no positive proof."""
     state = initial_state()
     request_id = RequestId(root=identity)
@@ -178,7 +178,7 @@ def pending_intent(
             access=Access.WRITE_ARTIFACTS,
         ),
     )
-    return Intent(
+    return RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=fixture_digest(request),
@@ -188,12 +188,12 @@ def pending_intent(
     )
 
 
-def recovering_state(*records: Intent) -> CoreState:
+def recovering_state(*records: RequestRecord) -> CoreState:
     """Reloaded state starts behind the required barrier, retaining all ledgers."""
     state = initial_state()
     return state.model_copy(
         update={
-            "intents": IntentsState(intents=records, recovery=RecoveryBarrier()),
+            "records": RecordsState(records=records, recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
     )
@@ -222,7 +222,7 @@ def with_registered_origins(state: CoreState) -> CoreState:
         )
     )
     receipts = list(state.run.receipts)
-    for record in state.intents.intents:
+    for record in state.records.records:
         request = record.request
         if not isinstance(request, ExecuteRegisteredOperation):
             continue
@@ -279,7 +279,7 @@ def reload(state: CoreState) -> CoreState:
     envelope = RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         core=state,
-        fence=HostFence(host_id=HostId(root="recovery-host"), epoch=state.intents.recovery.epoch),
+        fence=HostFence(host_id=HostId(root="recovery-host"), epoch=state.records.recovery.epoch),
         event_cursor=EventCursor(sequence=state.revision),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
@@ -292,7 +292,7 @@ def reload(state: CoreState) -> CoreState:
     return decoded.core
 
 
-def observed(record: Intent, **facts: object) -> Observation:
+def observed(record: RequestRecord, **facts: object) -> Observation:
     """An exact persisted root observation with supplied time and identity."""
     return Observation.model_validate(
         {
@@ -308,16 +308,16 @@ def observed(record: Intent, **facts: object) -> Observation:
 
 
 @pytest.mark.parametrize(
-    "phase", [IntentPhase.DISPATCHED, IntentPhase.RECONCILING, IntentPhase.BLOCKED]
+    "phase", [RequestPhase.DISPATCHED, RequestPhase.RECONCILING, RequestPhase.BLOCKED]
 )
 def test_recovery_inspects_unfinished_authority_without_replaying_payload(
-    phase: IntentPhase,
+    phase: RequestPhase,
 ) -> None:
     # Legacy L:569 recovery and O:488 unknown provider acceptance.
-    original = pending_intent(phase=phase)
+    original = pending_record(phase=phase)
     state = recovering_state(original)
     result = step(reload(state), RecoveryStarted(epoch=3, now_at=12.0))
-    barrier = result.state.intents.recovery
+    barrier = result.state.records.recovery
     assert barrier.epoch == 3
     assert barrier.phase == RecoveryPhase.RECOVERING
     assert len(barrier.checks) == 1
@@ -329,7 +329,7 @@ def test_recovery_inspects_unfinished_authority_without_replaying_payload(
     assert isinstance(inspection, InspectRequest)
     assert inspection.target == original.request_id
     assert inspection.request_id == check.inspection
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original
     assert result.state.run.status == RunStatus.PAUSED
     assert result.state.run.now_at == 12.0
     assert project(result.state).scheduling.charged == project(state).scheduling.charged
@@ -343,7 +343,7 @@ def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(
     events: list[tuple[int, int]],
 ) -> None:
     """Duplicate, reordered and stale epochs retain one inspection per target/epoch."""
-    original = pending_intent()
+    original = pending_record()
     state = recovering_state(original)
     epoch = 0
     now_at = 0.0
@@ -356,9 +356,9 @@ def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(
         assert state.model_dump_json() == before
         epoch = max(epoch, supplied_epoch)
         now_at = max(now_at, float(supplied_time))
-        assert result.state.intents.recovery.epoch == epoch
+        assert result.state.records.recovery.epoch == epoch
         assert result.state.run.now_at == now_at
-        assert result.state.intents.intents[0] == original
+        assert result.state.records.records[0] == original
         assert result.state.run.status == RunStatus.PAUSED
         assert result.events == ()
         for request in result.requests:
@@ -368,7 +368,7 @@ def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(
             assert request.request_id not in inspections
             inspections.add(request.request_id)
         assert len(inspections) <= 6
-        checks = result.state.intents.recovery.checks
+        checks = result.state.records.recovery.checks
         assert checks[0].target == original.request_id
         assert checks[0].resolution == "pending"
         assert all(check.resolution == "safe-prepared" for check in checks[1:])
@@ -379,23 +379,23 @@ def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(
 
 
 def test_query_completion_without_target_proof_cannot_complete_recovery() -> None:
-    original = pending_intent(phase=IntentPhase.COMPLETED)
+    original = pending_record(phase=RequestPhase.COMPLETED)
     original = original.model_copy(update={"observation": observed(original)})
     result = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=20.0))
-    assert result.state.intents.recovery.phase == RecoveryPhase.RECOVERING
-    assert result.state.intents.recovery.checks[0].resolution == "pending"
+    assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
+    assert result.state.records.recovery.checks[0].resolution == "pending"
     assert isinstance(result.requests[0], InspectRequest)
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original
 
 
 def non_diagnostic(result: Transition) -> tuple[object, ...]:
-    """Strategy events other than the IntentBlocked diagnostic a deadline publishes."""
-    return tuple(event for event in result.events if not isinstance(event, IntentBlocked))
+    """Strategy events other than the RequestBlocked diagnostic a deadline publishes."""
+    return tuple(event for event in result.events if not isinstance(event, RequestBlocked))
 
 
 @given(st.integers(min_value=0, max_value=99))
 def test_reconciliation_before_deadline_never_authorizes_cleanup(now_at: int) -> None:
-    original = pending_intent()
+    original = pending_record()
     started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
     result = step(
         reload(started.state),
@@ -403,27 +403,27 @@ def test_reconciliation_before_deadline_never_authorizes_cleanup(now_at: int) ->
     )
     assert result.requests == ()
     assert result.events == ()
-    assert result.state.intents == started.state.intents
+    assert result.state.records == started.state.records
     assert result.state.run.status == RunStatus.PAUSED
 
 
 @pytest.mark.parametrize("now_at", [100.0, 101.0, 1000.0])
 def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_at: float) -> None:
-    original = pending_intent()
+    original = pending_record()
     started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
     event = ReconciliationDeadline(request_id=original.request_id, now_at=now_at)
     result = step(reload(started.state), event)
-    assert result.state.intents.recovery.phase == RecoveryPhase.BLOCKED
-    assert result.state.intents.recovery.checks[0].resolution == "blocked"
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED
+    assert result.state.records.recovery.checks[0].resolution == "blocked"
+    assert result.state.records.records[0] == original
     assert result.state.run.status == RunStatus.PAUSED
-    blocks = [request for request in result.requests if isinstance(request, BlockIntent)]
+    blocks = [request for request in result.requests if isinstance(request, BlockRequest)]
     inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
     assert len(blocks) == 1
     assert blocks[0].target == original.request_id
     assert blocks[0].request_id is not None
     assert result.events == (
-        IntentBlocked(
+        RequestBlocked(
             request_id=blocks[0].request_id,
             target=original.request_id,
             scope=blocks[0].scope,
@@ -431,18 +431,18 @@ def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_
         ),
     )
     wire = result.events[0].model_dump_json()
-    assert IntentBlocked.model_validate_json(wire) == result.events[0]
+    assert RequestBlocked.model_validate_json(wire) == result.events[0]
     assert len(inspections) == 1
     assert inspections[0].target == original.request_id
-    assert inspections[0].request_id == result.state.intents.recovery.checks[0].inspection
+    assert inspections[0].request_id == result.state.records.recovery.checks[0].inspection
     repeated = step(reload(result.state), event)
     assert repeated.requests == ()
-    assert repeated.state.intents == result.state.intents
+    assert repeated.state.records == result.state.records
     assert repeated.events == ()
 
 
 def test_unknown_deadline_target_rejects_without_mutating_input() -> None:
-    state = recovering_state(pending_intent())
+    state = recovering_state(pending_record())
     before = state.model_dump_json()
     with pytest.raises(ContractError):
         step(state, ReconciliationDeadline(request_id=RequestId(root="foreign"), now_at=100.0))
@@ -450,15 +450,15 @@ def test_unknown_deadline_target_rejects_without_mutating_input() -> None:
 
 
 def test_cas_fence_reducer_side_requires_committed_recovery_before_dispatch() -> None:
-    original = pending_intent(phase=IntentPhase.PREPARED)
+    original = pending_record(phase=RequestPhase.PREPARED)
     state = recovering_state(original)
     with pytest.raises(ContractError, match="recovery"):
         step(reload(state), DispatchAuthorized(request_id=original.request_id))
-    assert state.intents.intents == (original,)
+    assert state.records.records == (original,)
 
 
 def test_child_ownership_survives_parent_deadline_and_cleanup_requests() -> None:
-    original = pending_intent()
+    original = pending_record()
     root = ResourceId(root="parent")
     child = ResourceId(root="late-child")
     original = original.model_copy(
@@ -472,34 +472,34 @@ def test_child_ownership_survives_parent_deadline_and_cleanup_requests() -> None
         parent_resources=(root,),
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": (lease,)})}
+        update={"records": state.records.model_copy(update={"children": (lease,)})}
     )
     started = step(reload(state), RecoveryStarted(epoch=1, now_at=0.0))
     result = step(
         reload(started.state),
         ReconciliationDeadline(request_id=original.request_id, now_at=100.0),
     )
-    assert result.state.intents.children == (lease,)
+    assert result.state.records.children == (lease,)
     cancelled = {
         request.resource_id
         for request in result.requests
         if isinstance(request, CancelOwnedResource)
     }
     assert cancelled == {root, child}
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original
     assert result.state.run.status == RunStatus.PAUSED
     assert reload(result.state) == result.state
 
 
 @given(
-    phase=st.sampled_from(list(IntentPhase)),
+    phase=st.sampled_from(list(RequestPhase)),
     accepted=st.booleans(),
     terminal=st.booleans(),
     released=st.booleans(),
     complete=st.booleans(),
 )
 def test_unknown_acceptance_flags_never_replace_positive_recovery_proof(
-    phase: IntentPhase,
+    phase: RequestPhase,
     *,
     accepted: bool,
     terminal: bool,
@@ -507,7 +507,7 @@ def test_unknown_acceptance_flags_never_replace_positive_recovery_proof(
     complete: bool,
 ) -> None:
     """F3/F4/F5: ambiguous acknowledgement never authorizes reuse or release."""
-    original = pending_intent(phase=phase)
+    original = pending_record(phase=phase)
     original = original.model_copy(
         update={
             "observation": observed(
@@ -522,13 +522,13 @@ def test_unknown_acceptance_flags_never_replace_positive_recovery_proof(
     )
     state = recovering_state(original)
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
-    check = result.state.intents.recovery.checks[0]
+    check = result.state.records.recovery.checks[0]
     assert check.resolution == "pending"
-    assert result.state.intents.recovery.phase == RecoveryPhase.RECOVERING
+    assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
     assert len(result.requests) == 1
     assert isinstance(result.requests[0], InspectRequest)
-    assert result.state.intents.intents[0] == original
-    assert result.state.intents.children == state.intents.children
+    assert result.state.records.records[0] == original
+    assert result.state.records.children == state.records.children
     assert result.state.scheduling == state.scheduling
     assert result.state.attempts == state.attempts
     assert result.state.sessions == state.sessions
@@ -546,7 +546,7 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
     sequence: list[tuple[str, int, int]],
 ) -> None:
     """Crash/replay at every supplied event keeps accounting and parent facts."""
-    original = pending_intent()
+    original = pending_record()
     state = recovering_state(original)
     seen: set[RequestId] = set()
     for kind, epoch, now_at in sequence:
@@ -557,8 +557,8 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
         )
         result = step(state, event)
         assert result == step(reload(state), event)
-        assert result.state.intents.intents[0] == original
-        assert result.state.intents.recovery.phase != RecoveryPhase.READY
+        assert result.state.records.records[0] == original
+        assert result.state.records.recovery.phase != RecoveryPhase.READY
         assert result.state.run.status == RunStatus.PAUSED
         assert not non_diagnostic(result)
         assert result.state.run.receipts == state.run.receipts
@@ -566,12 +566,12 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
         assert result.state.attempts == state.attempts
         assert result.state.sessions == state.sessions
         for request in result.requests:
-            assert isinstance(request, InspectRequest | BlockIntent)
+            assert isinstance(request, InspectRequest | BlockRequest)
             assert request.target == original.request_id
             assert request.request_id is not None
             assert request.request_id not in seen
             seen.add(request.request_id)
-            if isinstance(request, BlockIntent):
+            if isinstance(request, BlockRequest):
                 assert result.state.run.now_at >= original.reconcile_deadline_at
         assert len(seen) <= 15
         state = reload(result.state)
@@ -580,10 +580,10 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
 @given(st.text(alphabet="abc123", min_size=1, max_size=20))
 def test_user_request_identity_prefix_never_hides_unresolved_authority(suffix: str) -> None:
     """Generated reconciliation IDs are not a reserved user identity namespace."""
-    original = pending_intent(identity=f"recovery:{suffix}")
-    anchor = pending_intent(identity="anchor")
+    original = pending_record(identity=f"recovery:{suffix}")
+    anchor = pending_record(identity="anchor")
     result = step(recovering_state(original, anchor), RecoveryStarted(epoch=1, now_at=0.0))
-    checks = {check.target: check for check in result.state.intents.recovery.checks}
+    checks = {check.target: check for check in result.state.records.recovery.checks}
     assert original.request_id in checks
     assert checks[original.request_id].resolution == "pending"
     assert {
@@ -592,7 +592,7 @@ def test_user_request_identity_prefix_never_hides_unresolved_authority(suffix: s
         original.request_id,
         anchor.request_id,
     }
-    assert result.state.intents.intents[:2] == (original, anchor)
+    assert result.state.records.records[:2] == (original, anchor)
 
 
 @pytest.mark.parametrize("released", [False, True])
@@ -601,17 +601,17 @@ def test_completed_but_live_session_with_incomplete_manifest_cannot_complete_rec
     released: bool,
 ) -> None:
     """A successful acquisition command is not complete lease correspondence."""
-    original = pending_intent(phase=IntentPhase.COMPLETED)
+    original = pending_record(phase=RequestPhase.COMPLETED)
     observation = observed(original, accepted=True, terminal=True, released=released)
     observation = observation.model_copy(update={"status": ObservationStatus.SUCCEEDED})
     original = original.model_copy(update={"observation": observation})
     result = step(
-        recovering_state(original, pending_intent(identity="anchor")),
+        recovering_state(original, pending_record(identity="anchor")),
         RecoveryStarted(epoch=1, now_at=10.0),
     )
     check = next(
         check
-        for check in result.state.intents.recovery.checks
+        for check in result.state.records.recovery.checks
         if check.target == original.request_id
     )
     assert check.resolution == "pending"
@@ -619,12 +619,12 @@ def test_completed_but_live_session_with_incomplete_manifest_cannot_complete_rec
         isinstance(request, InspectRequest) and request.target == original.request_id
         for request in result.requests
     )
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original
 
 
 def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
     """Child ownership is independent even after a conclusive parent release."""
-    original = pending_intent(phase=IntentPhase.COMPLETED)
+    original = pending_record(phase=RequestPhase.COMPLETED)
     root = ResourceId(root="released-parent")
     child = ResourceId(root="still-live")
     observation = observed(
@@ -643,9 +643,9 @@ def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
         source_requests=(original.request_id,),
         parent_resources=(root,),
     )
-    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = recovering_state(original, pending_record(identity="anchor"))
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": (lease,)})}
+        update={"records": state.records.model_copy(update={"children": (lease,)})}
     )
     started = step(state, RecoveryStarted(epoch=1, now_at=10.0))
     result = step(
@@ -657,14 +657,14 @@ def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
         for request in result.requests
         if isinstance(request, CancelOwnedResource)
     } == {child}
-    assert result.state.intents.children == (lease,)
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.children == (lease,)
+    assert result.state.records.records[0] == original
     assert result.state.run.status == RunStatus.PAUSED
 
 
-def turn_intent() -> Intent:
+def turn_record() -> RequestRecord:
     """An honest session-turn request with a durable invocation identity."""
-    original = pending_intent()
+    original = pending_record()
     assert isinstance(original.request, EnsureSession)
     turn = TurnSpec(
         session=original.request.spec,
@@ -697,14 +697,14 @@ def turn_intent() -> Intent:
 )
 def test_session_turn_recovery_requires_exact_typed_owner(case: str) -> None:
     """F3: known acceptance reattaches only the same invocation and physical lease."""
-    original = turn_intent()
+    original = turn_record()
     assert isinstance(original.request, DispatchTurn)
     request = original.request
     resource = ResourceId(root="session-resource")
     observation = observed(original, resource_id=resource, accepted=True, children_complete=True)
     observation = observation.model_copy(update={"status": ObservationStatus.PENDING})
     original = original.model_copy(update={"observation": observation})
-    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = recovering_state(original, pending_record(identity="anchor"))
     owner_observation = observation.model_copy(
         update={
             "resource_id": ResourceId(root="foreign-resource") if case == "resource" else resource,
@@ -736,13 +736,13 @@ def test_session_turn_recovery_requires_exact_typed_owner(case: str) -> None:
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
         check
-        for check in result.state.intents.recovery.checks
+        for check in result.state.records.recovery.checks
         if check.target == original.request_id
     )
     assert check.resolution == ("reattached" if case == "exact" else "pending")
     assert result.state.sessions == state.sessions
-    assert result.state.intents.intents[0] == original
-    assert result.state.intents.recovery.phase == RecoveryPhase.RECOVERING
+    assert result.state.records.records[0] == original
+    assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
     assert not any(isinstance(request, CancelOwnedResource) for request in result.requests)
 
 
@@ -753,7 +753,7 @@ def test_session_turn_recovery_requires_exact_typed_owner(case: str) -> None:
 )
 def test_session_lease_reattachment_preserves_conversation_identity(case: str) -> None:
     """F5 reopen: a fresh or mismatched lease cannot stand in for required_resource."""
-    original = pending_intent(phase=IntentPhase.COMPLETED)
+    original = pending_record(phase=RequestPhase.COMPLETED)
     assert isinstance(original.request, EnsureSession)
     resource = ResourceId(root="physical-session")
     request = original.request.model_copy(
@@ -774,26 +774,26 @@ def test_session_lease_reattachment_preserves_conversation_identity(case: str) -
         generation=1 if case == "generation" else 0,
         phase=SessionPhase.ACQUIRING if case == "provisional" else SessionPhase.IDLE,
         accepted=case not in ("unaccepted", "provisional"),
-        pending_intents=(original.request_id,) if case == "provisional" else (),
+        pending_records=(original.request_id,) if case == "provisional" else (),
         resource_id=None
         if case == "provisional"
         else ResourceId(root="other-resource")
         if case == "resource"
         else resource,
     )
-    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = recovering_state(original, pending_record(identity="anchor"))
     state = state.model_copy(
         update={"sessions": SessionsState(sessions=() if case == "missing" else (owner,))}
     )
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
         check
-        for check in result.state.intents.recovery.checks
+        for check in result.state.records.recovery.checks
         if check.target == original.request_id
     )
     assert check.resolution == ("reattached" if case in ("exact", "provisional") else "pending")
     assert result.state.sessions == state.sessions
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original
 
 
 @given(
@@ -805,7 +805,7 @@ def test_completed_query_resolves_itself_without_resolving_pending_target(
     status: ObservationStatus,
 ) -> None:
     """Recovery distinguishes query completion from the inspected target's facts."""
-    query = pending_intent(identity="query", phase=IntentPhase.COMPLETED)
+    query = pending_record(identity="query", phase=RequestPhase.COMPLETED)
     request = InspectRequest(
         request_id=query.request_id,
         scope=query.request.scope,
@@ -819,12 +819,12 @@ def test_completed_query_resolves_itself_without_resolving_pending_target(
             "observation": observed(query, status=status, terminal=True),
         }
     )
-    target = pending_intent(identity="pending-target")
+    target = pending_record(identity="pending-target")
     result = step(recovering_state(query, target), RecoveryStarted(epoch=1, now_at=11.0))
-    checks = {check.target: check for check in result.state.intents.recovery.checks}
+    checks = {check.target: check for check in result.state.records.recovery.checks}
     assert checks[query.request_id].resolution == "terminal"
     assert checks[target.request_id].resolution == "pending"
-    assert result.state.intents.recovery.phase == RecoveryPhase.RECOVERING
+    assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
     assert [
         request.target for request in result.requests if isinstance(request, InspectRequest)
     ] == [target.request_id]
@@ -832,7 +832,7 @@ def test_completed_query_resolves_itself_without_resolving_pending_target(
 
 def test_accepted_owned_job_without_resource_identity_cannot_fabricate_terminal_proof() -> None:
     """An owned-job acknowledgement requires an external identity or nonacceptance."""
-    original = pending_intent(phase=IntentPhase.COMPLETED)
+    original = pending_record(phase=RequestPhase.COMPLETED)
     schema = OperationSchemaRef(
         kind="cluster.owned",
         request_schema=SchemaRef(name="owned-request", version=1),
@@ -864,12 +864,12 @@ def test_accepted_owned_job_without_resource_identity_cannot_fabricate_terminal_
             ),
         }
     )
-    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = recovering_state(original, pending_record(identity="anchor"))
     state = state.model_copy(update={"registry": (descriptor,)})
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=10.0))
     check = next(
         check
-        for check in result.state.intents.recovery.checks
+        for check in result.state.records.recovery.checks
         if check.target == original.request_id
     )
     assert check.resolution == "pending"
@@ -881,7 +881,7 @@ def test_accepted_owned_job_without_resource_identity_cannot_fabricate_terminal_
 
 def test_child_release_requires_its_exact_source_request() -> None:
     """A foreign root's terminal acknowledgement cannot clear this child lease."""
-    original = pending_intent()
+    original = pending_record()
     child = ResourceId(root="child")
     observation = observed(
         original,
@@ -900,10 +900,10 @@ def test_child_release_requires_its_exact_source_request() -> None:
     )
     state = recovering_state(original)
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": (lease,)})}
+        update={"records": state.records.model_copy(update={"children": (lease,)})}
     )
     started = step(reload(state), RecoveryStarted(epoch=1, now_at=10.0))
-    assert started.state.intents.recovery.checks[0].resolution == "pending"
+    assert started.state.records.recovery.checks[0].resolution == "pending"
     result = step(
         reload(started.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
     )
@@ -912,7 +912,7 @@ def test_child_release_requires_its_exact_source_request() -> None:
         for request in result.requests
         if isinstance(request, CancelOwnedResource)
     } == {child}
-    assert result.state.intents.children == (lease,)
+    assert result.state.records.children == (lease,)
 
 
 @given(st.lists(st.lists(st.integers(0, 5), max_size=6), min_size=1, max_size=4))
@@ -922,7 +922,7 @@ def test_recovery_reconstructs_shared_descendant_proofs_canonically(
     """Persisted child manifests deduplicate discoveries without losing ancestry."""
     originals = []
     for index, manifest in enumerate(manifests):
-        record = pending_intent(identity=f"parent-request-{index}")
+        record = pending_record(identity=f"parent-request-{index}")
         record = record.model_copy(
             update={
                 "observation": observed(
@@ -938,7 +938,7 @@ def test_recovery_reconstructs_shared_descendant_proofs_canonically(
     event = RecoveryStarted(epoch=2, now_at=11.0)
     result = step(reload(state), event)
     assert result == step(state, event)
-    children = result.state.intents.children
+    children = result.state.records.children
     expected_children = sorted({number for manifest in manifests for number in manifest})
     assert [child.resource_id.root for child in children] == [
         f"child-{number}" for number in expected_children
@@ -952,14 +952,14 @@ def test_recovery_reconstructs_shared_descendant_proofs_canonically(
             ResourceId(root=f"parent-resource-{index}") for index in parents
         )
         assert child.observation is None
-    assert result.state.intents.intents[: len(originals)] == tuple(originals)
+    assert result.state.records.records[: len(originals)] == tuple(originals)
     inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
     assert len(inspections) == len(originals) + sum(len(set(manifest)) for manifest in manifests)
     assert len({request.request_id for request in inspections}) == len(inspections)
-    assert all(check.resolution == "pending" for check in result.state.intents.recovery.checks)
+    assert all(check.resolution == "pending" for check in result.state.records.recovery.checks)
     replay = step(reload(result.state), event)
     assert replay.requests == ()
-    assert replay.state.intents == result.state.intents
+    assert replay.state.records == result.state.records
     assert replay.events == ()
 
 
@@ -976,8 +976,8 @@ def test_composite_resource_ids_cannot_alias_another_targets_cleanup(
     """Colon boundaries distinguish (a:b,c) from (a,b:c) cleanup identities."""
     first, middle, last = pieces
     originals = (
-        pending_intent(identity=f"{first}:{middle}"),
-        pending_intent(identity=first),
+        pending_record(identity=f"{first}:{middle}"),
+        pending_record(identity=first),
     )
     resources = (ResourceId(root=last), ResourceId(root=f"{middle}:{last}"))
     records = tuple(
@@ -1000,7 +1000,7 @@ def test_composite_resource_ids_cannot_alias_another_targets_cleanup(
         cancels.append(requests[0])
         state = reload(result.state)
     assert cancels[0].request_id != cancels[1].request_id
-    assert state.intents.intents[:2] == records
+    assert state.records.records[:2] == records
 
 
 def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreState:
@@ -1025,7 +1025,7 @@ def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreStat
         admission_id=DecisionId(root="current-admission"),
         charges=(receipt,),
     )
-    historical = turn_intent()
+    historical = turn_record()
     assert isinstance(historical.request, DispatchTurn)
     invocation = InvocationRef(
         session_id=historical.request.turn.session.session_id,
@@ -1119,7 +1119,7 @@ def test_recovery_preserves_nonempty_sibling_accounting_and_terminal_inputs(
     amounts: tuple[int, int], sequence: list[tuple[str, int, int]]
 ) -> None:
     """Legacy composed-recovery bounds and delivery/drop finality remain authoritative."""
-    original = pending_intent()
+    original = pending_record()
     state = with_sibling_history(recovering_state(original), amounts)
     initial_attempts = state.attempts
     initial_sessions = state.sessions
@@ -1149,8 +1149,8 @@ def test_recovery_preserves_nonempty_sibling_accounting_and_terminal_inputs(
 @pytest.mark.parametrize("case", ["orphan", "foreign-scope", "different-episode"])
 def test_recovery_rejects_child_sources_without_canonical_ownership(case: str) -> None:
     """A child cannot derive authority from an absent, foreign or reused episode."""
-    first = pending_intent(identity="first")
-    second = pending_intent(identity="second")
+    first = pending_record(identity="first")
+    second = pending_record(identity="second")
     if case == "foreign-scope":
         second = second.model_copy(
             update={
@@ -1180,7 +1180,7 @@ def test_recovery_rejects_child_sources_without_canonical_ownership(case: str) -
     )
     state = recovering_state(first, second)
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": (lease,)})}
+        update={"records": state.records.model_copy(update={"children": (lease,)})}
     )
     before = state.model_dump_json()
     with pytest.raises(ContractError, match="children"):
@@ -1198,7 +1198,7 @@ def test_known_resource_deadline_requires_conclusive_release_before_skipping_can
     status: ObservationStatus, *, terminal: bool, released: bool, complete: bool
 ) -> None:
     """F5: raw released flags and cancellation acknowledgement do not prove drain."""
-    original = pending_intent(phase=IntentPhase.COMPLETED)
+    original = pending_record(phase=RequestPhase.COMPLETED)
     resource = ResourceId(root="known-resource")
     original = original.model_copy(
         update={
@@ -1213,7 +1213,7 @@ def test_known_resource_deadline_requires_conclusive_release_before_skipping_can
             ),
         }
     )
-    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = recovering_state(original, pending_record(identity="anchor"))
     started = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
     result = step(
         reload(started.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
@@ -1230,7 +1230,7 @@ def test_known_resource_deadline_requires_conclusive_release_before_skipping_can
         if isinstance(request, CancelOwnedResource)
     }
     assert resources == (set() if positive_release else {resource})
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original
     assert result.state.sessions == state.sessions
     assert result.state.attempts == state.attempts
 
@@ -1240,7 +1240,7 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
     logical_now: int,
 ) -> None:
     """Restart preserves the overdue original deadline and uses current supplied time."""
-    original = pending_intent()
+    original = pending_record()
     resource = ResourceId(root="live-resource")
     original = original.model_copy(
         update={"observation": observed(original, accepted=True, resource_id=resource)}
@@ -1259,11 +1259,11 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
         request.deadline_at == logical_now + state.run.limits.reconciliation_bound
         for request in result.requests
     )
-    assert result.state.intents.intents[0].reconcile_deadline_at == original.reconcile_deadline_at
+    assert result.state.records.records[0].reconcile_deadline_at == original.reconcile_deadline_at
     blocked = step(
         reload(result.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
     )
-    assert blocked.state.intents.recovery.phase == RecoveryPhase.BLOCKED
+    assert blocked.state.records.recovery.phase == RecoveryPhase.BLOCKED
     for request in blocked.requests:
         bound = (
             state.run.limits.cancellation_bound
@@ -1272,18 +1272,18 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
         )
         assert request.deadline_at == logical_now + bound
     assert any(isinstance(request, CancelOwnedResource) for request in blocked.requests)
-    assert blocked.state.intents.intents[0] == original
+    assert blocked.state.records.records[0] == original
 
 
-def registered_intent(
+def registered_record(
     lifecycle: LifecycleClass, identity: str = "registered"
-) -> tuple[Intent, OperationDescriptor]:
+) -> tuple[RequestRecord, OperationDescriptor]:
     """Canonical registry encoding for job and agent lifecycle payloads."""
     match lifecycle:
         case LifecycleClass.OWNED_JOB:
             payload = RegisteredJobRequest()
         case LifecycleClass.SESSION_TURN:
-            original_turn = turn_intent()
+            original_turn = turn_record()
             assert isinstance(original_turn.request, DispatchTurn)
             payload = RegisteredTurnRequest(turn=original_turn.request.turn)
         case _:
@@ -1309,7 +1309,7 @@ def registered_intent(
             ),
         )
     )
-    original = pending_intent(identity=identity)
+    original = pending_record(identity=identity)
     request = ExecuteRegisteredOperation(
         request_id=original.request_id,
         scope=original.request.scope,
@@ -1330,22 +1330,22 @@ def registered_intent(
 
 @given(
     lifecycle=st.sampled_from(list(LifecycleClass)),
-    phase=st.sampled_from(list(IntentPhase)),
+    phase=st.sampled_from(list(RequestPhase)),
     flags=st.tuples(st.booleans(), st.booleans(), st.booleans(), st.booleans()),
 )
 def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
-    lifecycle: LifecycleClass, phase: IntentPhase, flags: tuple[bool, bool, bool, bool]
+    lifecycle: LifecycleClass, phase: RequestPhase, flags: tuple[bool, bool, bool, bool]
 ) -> None:
     """F3/F4/F5 mechanism: Unknown cannot become accepted, terminated or released."""
     terminal, released, accepted, complete = flags
     if lifecycle == LifecycleClass.SESSION_TURN:
-        original = turn_intent()
+        original = turn_record()
         registry = ()
     elif lifecycle == LifecycleClass.OWNED_JOB:
-        original, descriptor = registered_intent(lifecycle)
+        original, descriptor = registered_record(lifecycle)
         registry = (descriptor,)
     elif lifecycle == LifecycleClass.QUERY:
-        original = pending_intent()
+        original = pending_record()
         request = InspectRequest(
             request_id=original.request_id,
             scope=original.request.scope,
@@ -1355,7 +1355,7 @@ def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
         original = original.model_copy(update={"request": request, "lifecycle": lifecycle})
         registry = ()
     else:
-        original = pending_intent()
+        original = pending_record()
         registry = ()
     original = original.model_copy(
         update={
@@ -1369,12 +1369,12 @@ def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
             ),
         }
     )
-    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = recovering_state(original, pending_record(identity="anchor"))
     state = with_sibling_history(state.model_copy(update={"registry": registry}), (3, 1))
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
         check
-        for check in result.state.intents.recovery.checks
+        for check in result.state.records.recovery.checks
         if check.target == original.request_id
     )
     assert check.resolution == "pending"
@@ -1383,7 +1383,7 @@ def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
         for request in result.requests
     )
     assert all(isinstance(request, InspectRequest) for request in result.requests)
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original
     assert result.state.sessions == state.sessions
     assert result.state.attempts == state.attempts
     assert result.events == ()
@@ -1392,7 +1392,7 @@ def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
 @pytest.mark.parametrize("cleanup", ["discard", "close"])
 def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cleanup: str) -> None:
     """Translate legacy test_stale_withdrawal_recovery_cannot_release_a_newer_generation."""
-    original = pending_intent(identity="old-retirement")
+    original = pending_record(identity="old-retirement")
     old_attempt = AttemptRef(attempt_id=AttemptId(root="current-owner"), generation=1)
     scope = Scope(owner=old_attempt.attempt_id, generation=old_attempt.generation)
     request_model = DiscardWorkspace if cleanup == "discard" else CloseAttemptScope
@@ -1438,11 +1438,11 @@ def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cl
         for output in blocked.requests
     )
     assert all(
-        isinstance(request, BlockIntent | InspectRequest | CancelOwnedResource)
+        isinstance(request, BlockRequest | InspectRequest | CancelOwnedResource)
         for request in blocked.requests
     )
     assert not non_diagnostic(blocked)
-    assert blocked.state.intents.intents[0] == original
+    assert blocked.state.records.records[0] == original
 
 
 @given(
@@ -1459,7 +1459,7 @@ def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cl
 )
 def test_registered_session_turn_requires_its_normalized_owner_identity(case: str) -> None:
     """Registered agent work reattaches through its declared session owner."""
-    original, descriptor = registered_intent(LifecycleClass.SESSION_TURN)
+    original, descriptor = registered_record(LifecycleClass.SESSION_TURN)
     assert isinstance(original.request, ExecuteRegisteredOperation)
     operation_id = original.request.operation_id
     decision_id = original.request.decision_id
@@ -1476,7 +1476,7 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
         children_complete=True,
     )
     original = original.model_copy(update={"observation": observation})
-    turn = turn_intent()
+    turn = turn_record()
     assert isinstance(turn.request, DispatchTurn)
     owner = Invocation(
         invocation=InvocationRef(
@@ -1498,7 +1498,7 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
         else operation_id,
         observation=observation,
     )
-    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = recovering_state(original, pending_record(identity="anchor"))
     state = state.model_copy(
         update={"registry": (descriptor,), "sessions": SessionsState(invocations=(owner,))}
     )
@@ -1541,7 +1541,7 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
         check
-        for check in result.state.intents.recovery.checks
+        for check in result.state.records.recovery.checks
         if check.target == original.request_id
     )
     assert check.resolution == ("reattached" if case == "exact" else "pending")
@@ -1565,7 +1565,7 @@ def test_registered_session_turn_requires_its_normalized_owner_identity(case: st
 )
 def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: str) -> None:
     """Recovery transfers a live descendant atomically, preserving owner facts."""
-    parent = pending_intent(identity="parent", phase=IntentPhase.COMPLETED)
+    parent = pending_record(identity="parent", phase=RequestPhase.COMPLETED)
     old_admission = DecisionId(root="old-episode")
     scope = Scope(owner=AttemptId(root="child-owner"), generation=0)
     parent = parent.model_copy(
@@ -1592,7 +1592,7 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
             ),
         }
     )
-    submission, descriptor = registered_intent(
+    submission, descriptor = registered_record(
         LifecycleClass.OWNED_JOB, identity="child-submission"
     )
     assert isinstance(submission.request, ExecuteRegisteredOperation)
@@ -1638,7 +1638,7 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
         status=ObservationStatus.PENDING,
         observation=None if case == "no-observation" else proof,
     )
-    state = recovering_state(parent, submission, pending_intent(identity="anchor"))
+    state = recovering_state(parent, submission, pending_record(identity="anchor"))
     state = state.model_copy(
         update={"registry": (descriptor,), "evaluation": EvaluationState(registered_jobs=(owner,))}
     )
@@ -1653,15 +1653,15 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
         result = step(reload(state), RecoveryStarted(epoch=epoch, now_at=11.0))
         check = next(
             check
-            for check in result.state.intents.recovery.checks
+            for check in result.state.records.recovery.checks
             if check.target == parent.request_id
         )
         assert check.resolution == ("terminal" if case == "exact" else "pending")
         if case == "exact":
-            assert result.state.intents.children == ()
+            assert result.state.records.children == ()
         else:
-            assert len(result.state.intents.children) == 1
-            lease = result.state.intents.children[0]
+            assert len(result.state.records.children) == 1
+            lease = result.state.records.children[0]
             assert lease.resource_id == child
             assert lease.source_requests == (parent.request_id,)
             assert lease.observation is None
@@ -1672,8 +1672,8 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
                 for request in result.requests
             )
         assert result.state.evaluation == state.evaluation
-        assert result.state.intents.intents[:2] == (parent, submission)
-        assert result.state.intents.recovery.phase == RecoveryPhase.RECOVERING
+        assert result.state.records.records[:2] == (parent, submission)
+        assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
         assert result.events == ()
         state = reload(result.state)
 
@@ -1699,7 +1699,7 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
             ),
         )
     )
-    state = with_sibling_history(recovering_state(pending_intent(identity="anchor")), (2, 1))
+    state = with_sibling_history(recovering_state(pending_record(identity="anchor")), (2, 1))
     owner = state.attempts.attempts[0]
     assert owner.admission_id is not None
     target = AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
@@ -1715,7 +1715,7 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
         Operation(decision_id=decision_id, scope=scope, request=payload, deadline_at=100.0)
     )
     wire = codec.encode(payload)
-    original = pending_intent(identity="reopen", phase=IntentPhase.COMPLETED)
+    original = pending_record(identity="reopen", phase=RequestPhase.COMPLETED)
     request = ExecuteRegisteredOperation(
         request_id=original.request_id,
         scope=scope,
@@ -1741,7 +1741,7 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
             "admission": admission,
         }
     )
-    original = Intent.model_validate(
+    original = RequestRecord.model_validate(
         {
             **original.model_dump(),
             "request": request,
@@ -1779,8 +1779,8 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
             ),
             "attempts": AttemptsState(attempts=(owner,)),
             "scheduling": SchedulingState(slots=(slot,)),
-            "intents": state.intents.model_copy(
-                update={"intents": (original, *state.intents.intents)}
+            "records": state.records.model_copy(
+                update={"records": (original, *state.records.records)}
             ),
         }
     )
@@ -1788,15 +1788,15 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
         result = step(reload(state), RecoveryStarted(epoch=epoch, now_at=11.0))
         check = next(
             check
-            for check in result.state.intents.recovery.checks
+            for check in result.state.records.recovery.checks
             if check.target == original.request_id
         )
         assert check.resolution == ("pending" if admission == "unknown" else "terminal")
         assert result.state.attempts == state.attempts
         assert result.state.sessions == state.sessions
         assert result.state.scheduling == state.scheduling
-        assert result.state.intents.intents[0] == original
-        assert result.state.intents.intents[0].outcome == outcome
+        assert result.state.records.records[0] == original
+        assert result.state.records.records[0].outcome == outcome
         assert all(isinstance(request, InspectRequest) for request in result.requests)
         assert result.events == ()
         assert result.state.run.status == RunStatus.PAUSED
@@ -1812,7 +1812,7 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
     case: str,
 ) -> None:
     """Positive root facts reconcile the existing owner while resource identity is pending."""
-    original, descriptor = registered_intent(LifecycleClass.OWNED_JOB)
+    original, descriptor = registered_record(LifecycleClass.OWNED_JOB)
     assert isinstance(original.request, ExecuteRegisteredOperation)
     request = original.request
     observation = observed(
@@ -1833,7 +1833,7 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
         else request.scope,
         resource_pool=PoolId(root="foreign") if case == "foreign-pool" else PoolId(root="jobs"),
     )
-    state = recovering_state(original, pending_intent(identity="anchor"))
+    state = recovering_state(original, pending_record(identity="anchor"))
     state = state.model_copy(
         update={"registry": (descriptor,), "evaluation": EvaluationState(registered_jobs=(owner,))}
     )
@@ -1841,12 +1841,12 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
         check
-        for check in result.state.intents.recovery.checks
+        for check in result.state.records.recovery.checks
         if check.target == original.request_id
     )
     assert check.resolution == ("reattached" if case == "exact" else "pending")
     assert result.state.evaluation == state.evaluation
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original
     assert result.events == ()
 
 
@@ -1855,24 +1855,24 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
     choices: list[int],
 ) -> None:
     """Fresh post-run timers reconcile the root without refreshing earlier successors."""
-    original = pending_intent()
+    original = pending_record()
     state = recovering_state(original)
     state = state.model_copy(update={"run": state.run.model_copy(update={"deadline_at": 105.0})})
     emitted: set[RequestId] = set()
     for index, choice in enumerate(choices):
-        records = state.intents.intents
+        records = state.records.records
         selected = records[choice % len(records)]
         event = ReconciliationDeadline(request_id=selected.request_id, now_at=float(110 + index))
         result = step(reload(state), event)
         assert result == step(state, event)
-        assert result.state.intents.intents[0] == original
-        assert result.state.intents.intents[: len(records)] == records
-        assert result.state.intents.recovery.phase == RecoveryPhase.BLOCKED
-        assert {check.target for check in result.state.intents.recovery.checks} == {
+        assert result.state.records.records[0] == original
+        assert result.state.records.records[: len(records)] == records
+        assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED
+        assert {check.target for check in result.state.records.recovery.checks} == {
             original.request_id
         }
         for request in result.requests:
-            assert isinstance(request, BlockIntent | InspectRequest)
+            assert isinstance(request, BlockRequest | InspectRequest)
             assert request.target == original.request_id
             assert request.request_id is not None
             assert request.request_id not in emitted
@@ -1881,10 +1881,10 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
             )
             emitted.add(request.request_id)
         assert len(emitted) <= 2
-        assert len(result.state.intents.intents) <= 3
+        assert len(result.state.records.records) <= 3
         assert all(
             record.reconcile_deadline_at == record.request.deadline_at
-            for record in result.state.intents.intents[1:]
+            for record in result.state.records.records[1:]
         )
         assert not non_diagnostic(result)
         state = reload(result.state)
@@ -1892,7 +1892,7 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
 
 def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests() -> None:
     """A reload with new child proof adds one cleanup, even when parent cleanup exists."""
-    original = pending_intent()
+    original = pending_record()
     parent = ResourceId(root="parent")
     original = original.model_copy(
         update={"observation": observed(original, accepted=True, resource_id=parent)}
@@ -1913,7 +1913,7 @@ def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests()
         parent_resources=(parent,),
     )
     # Persisted late discovery is a public state input. Full observation delivery
-    # remains blocked by the frozen intents A wrapper in this isolated slice.
+    # remains blocked by the frozen records A wrapper in this isolated slice.
     assert original.observation is not None
     latest = original.model_copy(
         update={
@@ -1924,9 +1924,9 @@ def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests()
     )
     state = initial.state.model_copy(
         update={
-            "intents": initial.state.intents.model_copy(
+            "records": initial.state.records.model_copy(
                 update={
-                    "intents": (latest, *initial.state.intents.intents[1:]),
+                    "records": (latest, *initial.state.records.records[1:]),
                     "children": (lease,),
                 }
             )
@@ -1939,11 +1939,11 @@ def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests()
     assert isinstance(cleanup, CancelOwnedResource)
     assert cleanup.resource_id == child
     assert cleanup.target == original.request_id
-    assert result.state.intents.children == (lease,)
-    assert result.state.intents.intents[0] == latest
+    assert result.state.records.children == (lease,)
+    assert result.state.records.records[0] == latest
     repeated = step(reload(result.state), event)
     assert repeated.requests == ()
-    assert repeated.state.intents == result.state.intents
+    assert repeated.state.records == result.state.records
     assert repeated.events == ()
 
 
@@ -1957,7 +1957,7 @@ def test_a_request_that_completed_before_the_restart_resolves_its_own_recovery_c
     Such a request reports the workspace another request owns, so the report says nothing
     about that workspace's release and recovery has nothing left to wait on.
     """
-    original = pending_intent(identity="finished", phase=IntentPhase.COMPLETED)
+    original = pending_record(identity="finished", phase=RequestPhase.COMPLETED)
     attempt = AttemptRef(attempt_id=AttemptId(root="owner"), generation=0)
     request = request_model(
         request_id=original.request_id,
@@ -1984,8 +1984,8 @@ def test_a_request_that_completed_before_the_restart_resolves_its_own_recovery_c
         }
     )
     result = step(reload(recovering_state(finished)), RecoveryStarted(epoch=1, now_at=11.0))
-    assert [check.resolution for check in result.state.intents.recovery.checks] != ["pending"]
-    assert result.state.intents.recovery.phase != RecoveryPhase.RECOVERING
+    assert [check.resolution for check in result.state.records.recovery.checks] != ["pending"]
+    assert result.state.records.recovery.phase != RecoveryPhase.RECOVERING
 
 
 @pytest.mark.parametrize("accepted", [False, True])
@@ -2000,7 +2000,7 @@ def test_a_refusal_that_accepted_nothing_resolves_its_recovery_check(
 
     A refusal that claims acceptance is contradictory and proves nothing.
     """
-    original = pending_intent(identity="never-began", phase=IntentPhase.COMPLETED)
+    original = pending_record(identity="never-began", phase=RequestPhase.COMPLETED)
     refused = original.model_copy(
         update={
             "lifecycle": lifecycle,
@@ -2014,20 +2014,20 @@ def test_a_refusal_that_accepted_nothing_resolves_its_recovery_check(
         }
     )
     result = step(reload(recovering_state(refused)), RecoveryStarted(epoch=1, now_at=11.0))
-    resolved = result.state.intents.recovery.checks[0].resolution != "pending"
+    resolved = result.state.records.recovery.checks[0].resolution != "pending"
     assert resolved is not accepted
 
 
-@pytest.mark.parametrize("phase", [IntentPhase.DISPATCHED, IntentPhase.RECONCILING])
+@pytest.mark.parametrize("phase", [RequestPhase.DISPATCHED, RequestPhase.RECONCILING])
 def test_a_request_proven_never_begun_is_prepared_again_and_recovery_resolves(
-    phase: IntentPhase,
+    phase: RequestPhase,
 ) -> None:
     """An inspection that proves no effect began reissues the request unchanged.
 
     The request gets no observation and its owner hears nothing, so the replay equals the
     straight run; the check resolves as safe to dispatch.
     """
-    original = pending_intent(phase=phase)
+    original = pending_record(phase=phase)
     started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
     inspection = started.requests[0]
     assert isinstance(inspection, InspectRequest)
@@ -2056,17 +2056,17 @@ def test_a_request_proven_never_begun_is_prepared_again_and_recovery_resolves(
     )
     result = step(dispatched.state, event)
     reissued = next(
-        row for row in result.state.intents.intents if row.request_id == original.request_id
+        row for row in result.state.records.records if row.request_id == original.request_id
     )
-    assert reissued == original.model_copy(update={"phase": IntentPhase.PREPARED})
-    barrier = result.state.intents.recovery
+    assert reissued == original.model_copy(update={"phase": RequestPhase.PREPARED})
+    barrier = result.state.records.recovery
     assert [check.resolution for check in barrier.checks] == ["safe-prepared"]
     assert barrier.phase == RecoveryPhase.READY
     assert result.events == ()
 
 
 def test_a_reissue_proof_must_fit_the_observation_it_accompanies() -> None:
-    original = pending_intent()
+    original = pending_record()
     accepting = observed(original, status=ObservationStatus.SUCCEEDED, accepted=True, terminal=True)
     with pytest.raises(ValueError, match="reissue"):
         TargetObservation(observation=accepting, reissue=ReissueProof.NEVER_BEGAN)
@@ -2074,7 +2074,7 @@ def test_a_reissue_proof_must_fit_the_observation_it_accompanies() -> None:
 
 def test_a_second_inspection_of_a_request_already_reissued_changes_nothing() -> None:
     """Two epochs inspected the same never-begun request: the second answer is a replay."""
-    original = pending_intent(phase=IntentPhase.DISPATCHED)
+    original = pending_record(phase=RequestPhase.DISPATCHED)
     started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=11.0))
     inspection = started.requests[0]
     assert isinstance(inspection, InspectRequest)
@@ -2103,7 +2103,7 @@ def test_a_second_inspection_of_a_request_already_reissued_changes_nothing() -> 
     )
     once = step(dispatched.state, event)
     again = step(once.state, event)
-    assert again.state.intents.intents == once.state.intents.intents
+    assert again.state.records.records == once.state.records.records
 
 
 def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
@@ -2112,7 +2112,7 @@ def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
     After a restart the recovery check asks InspectRequest, but Sessions asks InspectTurn,
     which proves the dispatch terminal under its own inspection id.
     """
-    dispatch = turn_intent()
+    dispatch = turn_record()
     assert isinstance(dispatch.request, DispatchTurn)
     inspect = InspectTurn(
         request_id=RequestId(root="turn-inspect"),
@@ -2131,7 +2131,7 @@ def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
             "request": inspect,
             "lifecycle": LifecycleClass.QUERY,
             "payload_digest": fixture_digest(inspect),
-            "phase": IntentPhase.DISPATCHED,
+            "phase": RequestPhase.DISPATCHED,
         }
     )
     base = recovering_state(dispatch, query)
@@ -2153,7 +2153,7 @@ def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:
 
     def turn_check(state: CoreState) -> str:
         return next(
-            c.resolution for c in state.intents.recovery.checks if c.target == dispatch.request_id
+            c.resolution for c in state.records.recovery.checks if c.target == dispatch.request_id
         )
 
     assert turn_check(started.state) == "pending"

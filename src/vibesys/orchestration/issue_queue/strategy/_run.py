@@ -19,10 +19,10 @@ from vibesys.orchestration.issue_queue.strategy._state import (
 from vs_core.api import (
     AdoptionFailed,
     AdoptionResult,
-    IntentBlocked,
     Measure,
     MeasurementResult,
     Rejected,
+    RequestBlocked,
     RevisionRef,
     RunResultProposal,
     Stop,
@@ -112,7 +112,7 @@ def on_measurement(
 
 
 def on_blocked(
-    state: IssueQueueStrategyState, event: IntentBlocked
+    state: IssueQueueStrategyState, event: RequestBlocked
 ) -> IssueQueueStrategyState | None:
     """The final accuracy measurement was blocked, so its proof will not come.
 

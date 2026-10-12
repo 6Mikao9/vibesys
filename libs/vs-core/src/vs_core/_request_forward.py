@@ -1,6 +1,6 @@
 """Translate a ledgered observation into the typed event its owning area consumes.
 
-The intent ledger commits an observation first. This module then names the one
+The record ledger commits an observation first. This module then names the one
 owner event that carries the same fact onward, chosen only by the canonical
 request class: nothing here reads or writes ledger state.
 """
@@ -56,15 +56,15 @@ from .types.settlement import AdoptionObserved, AdoptRevision, VerifyAdoption
 
 if TYPE_CHECKING:
     from .types.common import InvocationRef, Observation, OperationDescriptor, SchemaRef
-    from .types.intents import Intent, RequestObserved, TargetObservation
-    from .types.kernel import IntentsContext, Signal
+    from .types.kernel import RecordsContext, Signal
+    from .types.records import RequestObserved, RequestRecord, TargetObservation
     from .types.sessions import Invocation
 
 type Facts = RequestObserved | TargetObservation
 
 
 def declaration(
-    context: IntentsContext, request: ExecuteRegisteredOperation
+    context: RecordsContext, request: ExecuteRegisteredOperation
 ) -> OperationDescriptor:
     """The single registered declaration of an operation, named when absent or ambiguous."""
     rows = tuple(row for row in context.registry if row.kind == request.operation.schema_ref.kind)
@@ -82,7 +82,7 @@ def declaration(
     return proof.value
 
 
-def intents_own(descriptor: OperationDescriptor) -> bool:
+def records_own(descriptor: OperationDescriptor) -> bool:
     """Queries and plain idempotent writes are completed by the ledger itself."""
     return (
         descriptor.lifecycle in (LifecycleClass.QUERY, LifecycleClass.IDEMPOTENT_WRITE)
@@ -109,8 +109,8 @@ def reply_owed(observation: Observation, facts: Facts) -> bool:
     )
 
 
-def _invocation(context: IntentsContext, intent: Intent) -> InvocationRef:
-    request = intent.request
+def _invocation(context: RecordsContext, record: RequestRecord) -> InvocationRef:
+    request = record.request
     matches: tuple[Invocation, ...]
     if isinstance(request, ExecuteRegisteredOperation):
         matches = tuple(
@@ -132,7 +132,10 @@ def _invocation(context: IntentsContext, intent: Intent) -> InvocationRef:
 
 
 def _registered(
-    context: IntentsContext, intent: Intent, request: ExecuteRegisteredOperation, facts: Facts
+    context: RecordsContext,
+    record: RequestRecord,
+    request: ExecuteRegisteredOperation,
+    facts: Facts,
 ) -> tuple[Signal, ...]:
     observation = facts.observation
     descriptor = declaration(context, request)
@@ -148,7 +151,7 @@ def _registered(
         case LifecycleClass.SESSION_TURN:
             return (
                 TurnObserved(
-                    invocation=_invocation(context, intent),
+                    invocation=_invocation(context, record),
                     observation=observation,
                     suspension=facts.suspension,
                     output_schema=_output_schema(facts),
@@ -176,7 +179,7 @@ def _output_schema(facts: Facts) -> SchemaRef | None:
 
 
 def _reopened(
-    context: IntentsContext,
+    context: RecordsContext,
     request: ExecuteRegisteredOperation,
     observation: Observation,
     facts: Facts,
@@ -207,7 +210,7 @@ def _reopened(
 
 
 def _releases(
-    context: IntentsContext, intent: Intent, observation: Observation
+    context: RecordsContext, record: RequestRecord, observation: Observation
 ) -> tuple[Signal, ...]:
     """Terminal acknowledgement of a request that a closing attempt waits on.
 
@@ -225,22 +228,26 @@ def _releases(
         for owner in context.attempts.attempts
         if owner.closure is not None
         for edge in owner.release_dependencies
-        if edge.kind in ("request", "workspace") and edge.identity == intent.request_id
+        if edge.kind in ("request", "workspace") and edge.identity == record.request_id
     )
 
 
-def owner_signals(context: IntentsContext, intent: Intent, facts: Facts) -> tuple[Signal, ...]:
-    """The owner events for one fresh observation of this intent's canonical request."""
-    return (*_owner_signal(context, intent, facts), *_releases(context, intent, facts.observation))
+def owner_signals(
+    context: RecordsContext, record: RequestRecord, facts: Facts
+) -> tuple[Signal, ...]:
+    """The owner events for one fresh observation of this record's canonical request."""
+    return (*_owner_signal(context, record, facts), *_releases(context, record, facts.observation))
 
 
-def _owner_signal(context: IntentsContext, intent: Intent, facts: Facts) -> tuple[Signal, ...]:
-    request = intent.request
+def _owner_signal(
+    context: RecordsContext, record: RequestRecord, facts: Facts
+) -> tuple[Signal, ...]:
+    request = record.request
     observation = facts.observation
     signals: tuple[Signal, ...] = ()
     match request:
         case ExecuteRegisteredOperation():
-            signals = _registered(context, intent, request, facts)
+            signals = _registered(context, record, request, facts)
         case (
             EnsureWorkspace()
             | RestoreRevision()
@@ -269,7 +276,7 @@ def _owner_signal(context: IntentsContext, intent: Intent, facts: Facts) -> tupl
             if not reply_owed(observation, facts):
                 signals = (
                     TurnObserved(
-                        invocation=_invocation(context, intent),
+                        invocation=_invocation(context, record),
                         observation=observation,
                         suspension=facts.suspension,
                         output_schema=facts.outcome_schema,

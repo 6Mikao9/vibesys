@@ -61,7 +61,7 @@ import json, sys
 from typing import ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from vs_core.api import (
-    Capabilities, ExecuteRegisteredOperation, IntentsChange, LifecycleClass, OperationDescriptor,
+    Capabilities, ExecuteRegisteredOperation, RecordsChange, LifecycleClass, OperationDescriptor,
     OperationId, OperationRegistration, OperationRegistry, OperationRequest,
     ReducerTrace, RequestPrepared, SchemaRef, Scope, TraceFrame, Value,
     initial_state, trace_step,
@@ -91,7 +91,7 @@ for argument in sys.stdin:
         operation_id=OperationId(root="query"), operation=wire, retry_limit=0)
     event = RequestPrepared(request=request, lifecycle=LifecycleClass.QUERY)
     result = trace_step(state, event, ReducerTrace(frames=(TraceFrame(signal=event,
-        change=IntentsChange(state=state.intents, requests=(request,))),)))
+        change=RecordsChange(state=state.records, requests=(request,))),)))
     print(json.dumps([wire.payload_json, result.requests[0].request_id.root]))
     sys.stdout.flush()
 """

@@ -42,11 +42,11 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     ControlChanged,
-    IntentBlocked,
     MeasurementResult,
     OperationResult,
     Proposal,
     Rejected,
+    RequestBlocked,
     ResumeAuthorized,
     RunEnded,
     RunView,
@@ -145,7 +145,7 @@ class SingleStrategy:
             return self._attempt_feedback(state, event)
         if isinstance(event, AttemptExhausted):
             return events.on_exhausted(state, event)
-        if isinstance(event, IntentBlocked):
+        if isinstance(event, RequestBlocked):
             return self._blocked(state, event)
         return self._run_feedback(state, event)
 
@@ -182,7 +182,7 @@ class SingleStrategy:
             return state.model_copy(update={"phase": RunPhase.FINISHED})
         return state
 
-    def _blocked(self, state: SingleStrategyState, event: IntentBlocked) -> SingleStrategyState:
+    def _blocked(self, state: SingleStrategyState, event: RequestBlocked) -> SingleStrategyState:
         """Route a blocked request to the subject awaiting it: designer, baseline or round."""
         detail = f"request blocked: {event.diagnostic}"
         decision = decision_of_operation(event.target.root)
@@ -200,7 +200,7 @@ class SingleStrategy:
 
     @staticmethod
     def _designer_waits(
-        state: SingleStrategyState, event: IntentBlocked, decision: str | None
+        state: SingleStrategyState, event: RequestBlocked, decision: str | None
     ) -> bool:
         waiting = state.planner
         by_decision = decision is not None and decision in {

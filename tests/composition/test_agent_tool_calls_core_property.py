@@ -914,7 +914,7 @@ def test_a_submit_slower_than_the_agents_deadline_is_one_submission_the_agent_ca
     """The failing live run: the first call outlasts the deadline, the retry must get its handle.
 
     Before the fix the retry was refused as an exhausted budget while the lost call's
-    measurement ran unseen, and the run ended stalled with ``open intents []``.
+    measurement ran unseen, and the run ended stalled with ``open records []``.
     """
     turn = Turn(program=(("timeout_retry",), ("wait", (0,))))
     played = play((turn,), 1)

@@ -20,8 +20,6 @@ from vs_core.api import (
     EventCursor,
     HostFence,
     HostId,
-    Intent,
-    IntentPhase,
     KernelNotImplementedError,
     Observation,
     OperationRegistry,
@@ -29,6 +27,8 @@ from vs_core.api import (
     RecoveryPhase,
     RecoveryStarted,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     RunEnvelope,
     Strategy,
     StrategyState,
@@ -125,7 +125,7 @@ class RuntimeCommitUncertainError(RuntimeCommitError):
 class RuntimeExecutionError(RuntimeCommitError):
     """An authorized request ended without a usable observation; the shell halted.
 
-    The intent stays DISPATCHED. Core never receives an invented outcome: the
+    The record stays DISPATCHED. Core never receives an invented outcome: the
     executor may have performed the effect, so only a new epoch's inspection
     may classify it.
     """
@@ -138,7 +138,7 @@ class RuntimeExecutionError(RuntimeCommitError):
 class ObservationRejectedError(RuntimeExecutionError):
     """Core rejected an executor's observation after the effect ran; the shell halted.
 
-    Dropping the observation would leave the intent DISPATCHED with the result
+    Dropping the observation would leave the record DISPATCHED with the result
     lost, so a retry could never converge. Executors build observations through
     ``ObservationFactory``, so a rejection here is a defect to surface, not a
     condition to absorb.
@@ -278,7 +278,7 @@ class _Flight:
 
     order: int
     """Authorization index within the shell: the tie-break between same-tick completions."""
-    intent: Intent
+    record: RequestRecord
     now_at: float
     task: asyncio.Task[ExecutionOutcome]
 
@@ -619,7 +619,7 @@ class CoreRuntime[S: StrategyState]:
             self._held.append(item)
             return True
         if isinstance(item, _Decide):
-            if self.record.envelope.core.intents.recovery.phase != RecoveryPhase.READY:
+            if self.record.envelope.core.records.recovery.phase != RecoveryPhase.READY:
                 raise ContractError(("recovery",), "strategy proposals require ready recovery")
             proposal = self._strategy.bind(self.record.envelope.strategy).decide(
                 project(self.record.envelope.core)
@@ -805,34 +805,34 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime inactive, busy or commit unconfirmed"
             raise RuntimeCommitError(message)
 
-    def _authorized(self, *, exempt_only: bool = False) -> tuple[Intent, Transition] | None:
+    def _authorized(self, *, exempt_only: bool = False) -> tuple[RequestRecord, Transition] | None:
         """Ask core for dispatch authority; blocked prerequisites remain pending.
 
         ``exempt_only`` considers only requests that never wait for a free slot.
         """
         core = self.record.envelope.core
-        for intent in core.intents.intents:
-            if intent.phase != IntentPhase.PREPARED:
+        for record in core.records.records:
+            if record.phase != RequestPhase.PREPARED:
                 continue
-            if exempt_only and counts_toward_concurrency(intent.request):
+            if exempt_only and counts_toward_concurrency(record.request):
                 continue
             try:
                 transition = self._transitions.step(
-                    core, DispatchAuthorized(request_id=intent.request_id)
+                    core, DispatchAuthorized(request_id=record.request_id)
                 )
             except ContractError as error:
                 if error.path not in (("dependency",), ("recovery",)):
                     raise
                 continue
-            return intent, transition
+            return record, transition
         return None
 
     async def dispatch_one(self, *, now_at: float) -> ExecutorRefusal | DispatchProgress:
         """Persist authorization before I/O. Already dispatched work needs recovery.
 
         A role without a bound executor is refused before anything is committed,
-        so the intent stays PREPARED. Once authorization is durable, an executor
-        exception, refusal or unusable result halts the shell (the intent stays
+        so the record stays PREPARED. Once authorization is durable, an executor
+        exception, refusal or unusable result halts the shell (the record stays
         DISPATCHED for the next epoch's inspection) and is never reported as idle.
         """
         started = self._start(now_at=now_at)
@@ -867,12 +867,12 @@ class CoreRuntime[S: StrategyState]:
         authorized = self._authorized(exempt_only=exempt_only)
         if authorized is None:
             return None
-        intent, transition = authorized
-        unbound = self._executors.refusal(intent.request)
+        record, transition = authorized
+        unbound = self._executors.refusal(record.request)
         if unbound is not None:
             return unbound
         self._consume(
-            _Input[S](event=DispatchAuthorized(request_id=intent.request_id), now_at=now_at),
+            _Input[S](event=DispatchAuthorized(request_id=record.request_id), now_at=now_at),
             transition,
         )
         if self._fence is None or not self._store.verify(
@@ -881,19 +881,19 @@ class CoreRuntime[S: StrategyState]:
             self._halted = True
             message = "runtime fence lost before execution"
             raise RuntimeCommitError(message)
-        authorized_intent = next(
+        authorized_record = next(
             (
                 row
-                for row in self.record.envelope.core.intents.intents
-                if row.request_id == intent.request_id
+                for row in self.record.envelope.core.records.records
+                if row.request_id == record.request_id
             ),
             None,
         )
         if (
-            authorized_intent is None
-            or authorized_intent.phase != IntentPhase.DISPATCHED
-            or authorized_intent.request != intent.request
-            or authorized_intent.payload_digest != intent.payload_digest
+            authorized_record is None
+            or authorized_record.phase != RequestPhase.DISPATCHED
+            or authorized_record.request != record.request
+            or authorized_record.payload_digest != record.payload_digest
         ):
             raise ContractError(
                 ("dispatch_authorized",), "exact canonical request must be durably authorized"
@@ -901,17 +901,17 @@ class CoreRuntime[S: StrategyState]:
         context = ExecutionContext(
             fence=self.record.envelope.fence,
             now_at=now_at,
-            payload_digest=intent.payload_digest,
+            payload_digest=record.payload_digest,
             lease=_ShellLease(self),
         )
         self._authorizations += 1
         return _Flight(
             order=self._authorizations,
-            intent=intent,
+            record=record,
             now_at=now_at,
             task=asyncio.create_task(
-                self._executors.dispatch(intent.request, context),
-                name=f"dispatch:{intent.request_id.root}",
+                self._executors.dispatch(record.request, context),
+                name=f"dispatch:{record.request_id.root}",
             ),
         )
 
@@ -923,26 +923,26 @@ class CoreRuntime[S: StrategyState]:
         return self._accept(flight, flight.task.result())
 
     def _accept(self, flight: _Flight, outcome: ExecutionOutcome) -> str:
-        intent = flight.intent
+        record = flight.record
         if isinstance(outcome, ExecutorRefusal):
             raise RuntimeExecutionError(
-                intent.request_id, f"executor refused after authorization: {outcome.detail}"
+                record.request_id, f"executor refused after authorization: {outcome.detail}"
             )
-        self._validate_observation(intent.request, outcome.observation.observation)
+        self._validate_observation(record.request, outcome.observation.observation)
         observed = self._registry.validate_event(outcome.observation)
         for event in outcome.owner_events:
-            self._validate_owner_event(intent.request, event)
+            self._validate_owner_event(record.request, event)
         self._dispatched += 1
-        self._kinds[intent.request.kind] = self._kinds.get(intent.request.kind, 0) + 1
+        self._kinds[record.request.kind] = self._kinds.get(record.request.kind, 0) + 1
         self._queue.append(
             _Input[S](
                 event=observed,
                 now_at=flight.now_at,
                 owner_events=outcome.owner_events,
-                executed=intent.request_id,
+                executed=record.request_id,
             )
         )
-        return intent.request.kind
+        return record.request.kind
 
     @staticmethod
     def _validate_observation(request: Request, observation: Observation) -> None:
@@ -1017,7 +1017,7 @@ class CoreRuntime[S: StrategyState]:
     @property
     def in_flight(self) -> tuple[Request, ...]:
         """The requests whose executors are running, in authorization order."""
-        return tuple(flight.intent.request for flight in self._flights)
+        return tuple(flight.record.request for flight in self._flights)
 
     def _finish_done(self) -> bool:
         """Queue the observations of finished flights, ties in authorization order.
@@ -1025,7 +1025,7 @@ class CoreRuntime[S: StrategyState]:
         A flight that failed does not drop the observations of the flights that finished
         with it: those are committed first. The failure then halts the shell, and the
         peers still running are cancelled by the caller, because a halted shell can no
-        longer commit what they would return. Their intents stay DISPATCHED, like the
+        longer commit what they would return. Their records stay DISPATCHED, like the
         failed one, for the next epoch to inspect.
         """
         done = sorted((f for f in self._flights if f.task.done()), key=lambda f: f.order)
@@ -1072,7 +1072,7 @@ class CoreRuntime[S: StrategyState]:
             raise ValueError(message)
         while True:
             self._check_cap(cap)
-            occupied = sum(1 for f in self._flights if counts_toward_concurrency(f.intent.request))
+            occupied = sum(1 for f in self._flights if counts_toward_concurrency(f.record.request))
             began = self._start(now_at=now_at, exempt_only=occupied >= max_concurrent)
             if isinstance(began, ExecutorRefusal):
                 return began
@@ -1104,7 +1104,7 @@ class CoreRuntime[S: StrategyState]:
         """Halt and cancel the running requests the loop will not complete.
 
         For a failure, a stop that core cannot carry out, or the cancellation of the loop.
-        Their intents stay DISPATCHED, so the next epoch inspects them.
+        Their records stay DISPATCHED, so the next epoch inspects them.
         """
         self._halted = True
         flights = list(self._flights)

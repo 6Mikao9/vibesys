@@ -67,7 +67,7 @@ def test_ordered_batch_validates_revision_once_and_preserves_partial_acceptance(
         frames = tuple(
             core.operation_trace(state, decision)
             .frames[0]
-            .model_copy(update={"change": core.IntentsChange(state=state.intents)})
+            .model_copy(update={"change": core.RecordsChange(state=state.records)})
             for decision in decisions
         )
         result = core.trace_step(
@@ -91,7 +91,7 @@ def test_ordered_batch_validates_revision_once_and_preserves_partial_acceptance(
     ]
     assert result.state.revision == 1
     assert len(result.state.run.receipts) == count + 1
-    assert len(result.state.intents.intents) == 0
+    assert len(result.state.records.records) == 0
 
 
 def start_fixture(state: core.CoreState, identity: str) -> core.StartAttempt:

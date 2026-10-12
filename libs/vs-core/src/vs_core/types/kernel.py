@@ -37,13 +37,13 @@ from .evaluation import (
     ResumeAuthorized,
     TurnSuspended,
 )
-from .intents import (
-    IntentBlocked,
-    IntentsEvent,
-    IntentsState,
+from .records import (
     OperationResult,
     OperationView,
+    RecordsEvent,
+    RecordsState,
     Request,
+    RequestBlocked,
 )
 from .scheduling import (
     AdmitAttempt,
@@ -131,7 +131,7 @@ class CoreState(Value):
     sessions: SessionsState = SessionsState()
     evaluation: EvaluationState = EvaluationState()
     settlement: SettlementState = SettlementState()
-    intents: IntentsState = IntentsState()
+    records: RecordsState = RecordsState()
 
 
 class RunView(Value):
@@ -153,7 +153,7 @@ class RunView(Value):
     inputs: tuple[InputRecord, ...]
     adoption: AdoptionView | None = None
     # Earliest core time a ClockAdvanced does work: a paced job poll comes due, or an
-    # answered-but-open intent passes its reconciliation bound. None when neither is scheduled.
+    # answered-but-open record passes its reconciliation bound. None when neither is scheduled.
     next_observe_at: Seconds | None = None
 
 
@@ -229,7 +229,7 @@ type CoreEvent = Annotated[
     | SessionsEvent
     | EvaluationEvent
     | SettlementEvent
-    | IntentsEvent
+    | RecordsEvent
     | RunControlEvent,
     Field(discriminator="kind"),
 ]
@@ -248,7 +248,7 @@ type StrategyEvent = Annotated[
     | YieldPublicationFailed
     | InterruptFailed
     | OperationResult
-    | IntentBlocked
+    | RequestBlocked
     | ControlChanged
     | AdoptionResult
     | AdoptionFailed
@@ -263,7 +263,7 @@ type Signal = Annotated[
     | SessionsEvent
     | EvaluationEvent
     | SettlementEvent
-    | IntentsEvent
+    | RecordsEvent
     | AdmitAttempt
     | RegisterAttempt
     | CloseAdmission
@@ -290,7 +290,7 @@ class SchedulingContext(AreaContext):
 
     run: RunState
     attempts: AttemptsState
-    intents: IntentsState
+    records: RecordsState
     sessions: SessionsState
     settlement: SettlementState
 
@@ -303,7 +303,7 @@ class AttemptsContext(AreaContext):
     sessions: SessionsState
     evaluation: EvaluationState
     settlement: SettlementState
-    intents: IntentsState
+    records: RecordsState
 
 
 class SessionsContext(AreaContext):
@@ -312,7 +312,7 @@ class SessionsContext(AreaContext):
     run: RunState
     attempts: AttemptsState
     evaluation: EvaluationState
-    intents: IntentsState
+    records: RecordsState
 
 
 class EvaluationContext(AreaContext):
@@ -321,7 +321,7 @@ class EvaluationContext(AreaContext):
     run: RunState
     attempts: AttemptsState
     sessions: SessionsState
-    intents: IntentsState
+    records: RecordsState
 
 
 class SettlementContext(AreaContext):
@@ -336,11 +336,11 @@ class SettlementContext(AreaContext):
     attempts: AttemptsState
     sessions: SessionsState
     evaluation: EvaluationState
-    intents: IntentsState
+    records: RecordsState
 
 
-class IntentsContext(AreaContext):
-    """Required intents cross-area facts."""
+class RecordsContext(AreaContext):
+    """Required records cross-area facts."""
 
     run: RunState
     registry: tuple[OperationDescriptor, ...]

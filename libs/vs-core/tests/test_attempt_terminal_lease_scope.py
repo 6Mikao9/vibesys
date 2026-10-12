@@ -64,8 +64,8 @@ def test_terminal_writer_requires_exact_owner_or_current_reusable_run_lease(
             "resource_id": None if resource == "absent" else state.sessions.sessions[0].resource_id,
         }
     )
-    canonical = state.intents.intents[0]
-    intent = canonical.model_copy(
+    canonical = state.records.records[0]
+    record = canonical.model_copy(
         update={
             "request": canonical.request.model_copy(update={"turn": turn}),
             "observation": observed,
@@ -100,7 +100,7 @@ def test_terminal_writer_requires_exact_owner_or_current_reusable_run_lease(
             "sessions": state.sessions.model_copy(
                 update={"sessions": (session,), "invocations": (invocation,)}
             ),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
             "attempts": state.attempts.model_copy(update={"attempts": (owner,)}),
             "run": state.run.model_copy(update={"receipts": (receipt,)}),
         }

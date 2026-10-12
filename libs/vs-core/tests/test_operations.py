@@ -162,14 +162,14 @@ def test_library_owned_write_round_trips_atomic_envelope_and_stable_outbox(conte
         operation_trace(envelope.core, decision),
     )
     assert len(result.requests) == 1
-    assert result.requests[0].request_id == result.state.intents.intents[0].request_id
+    assert result.requests[0].request_id == result.state.records.records[0].request_id
     saved = envelope.model_copy(update={"core": result.state})
     loaded = codec.decode_envelope(RunEnvelope[StrategyState], codec.encode_envelope(saved))
     assert loaded == saved
     stored_decision = loaded.core.run.receipts[0].decision
     assert isinstance(stored_decision, Operation)
     assert type(stored_decision.request) is ArtifactPut
-    assert loaded.core.intents.intents[0].request_id == result.requests[0].request_id
+    assert loaded.core.records.records[0].request_id == result.requests[0].request_id
     assert (
         step(loaded.core, DecisionSubmitted(decision=decision, expected_revision=0)).requests == ()
     )
@@ -316,7 +316,7 @@ def test_copied_operation_cannot_reuse_proof_for_changed_payload(content: str) -
     assert result.requests == ()
     assert isinstance(result.events[0], Rejected)
     assert result.events[0].code == RejectionCode.UNKNOWN_SCHEMA
-    assert result.state.intents == envelope.core.intents
+    assert result.state.records == envelope.core.records
 
 
 class OpenKindRequest(ArtifactPut):

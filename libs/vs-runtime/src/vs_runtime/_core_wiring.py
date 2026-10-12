@@ -16,9 +16,9 @@ from vs_core.api import (
     Capabilities,
     CoreState,
     EvidenceRequirements,
-    IntentsState,
     Limits,
     OperationRegistry,
+    RecordsState,
     RecoveryBarrier,
     RecoveryPhase,
     RunFacts,
@@ -116,7 +116,7 @@ def new_core_state(
     )
     return CoreState(
         registry=selected.operations,
-        intents=IntentsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
+        records=RecordsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
         run=RunState(
             run_id=RunId(root=run_id),
             now_at=0.0,

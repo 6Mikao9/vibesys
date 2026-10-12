@@ -39,11 +39,11 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     ControlChanged,
-    IntentBlocked,
     MeasurementResult,
     OperationResult,
     Proposal,
     Rejected,
+    RequestBlocked,
     ResumeAuthorized,
     RunEnded,
     RunView,
@@ -129,7 +129,7 @@ class DynamicStrategy:
             | YieldPublicationFailed
             | ResumeAuthorized
             | AttemptExhausted
-            | IntentBlocked,
+            | RequestBlocked,
         ):
             return self._suspension(state, event)
         return self._run_feedback(state, event)
@@ -141,7 +141,7 @@ class DynamicStrategy:
         | YieldPublicationFailed
         | ResumeAuthorized
         | AttemptExhausted
-        | IntentBlocked,
+        | RequestBlocked,
     ) -> DynamicStrategyState:
         """Fold the feedback that suspends, resumes, exhausts or blocks a workstream."""
         if isinstance(event, TurnSuspended):
@@ -168,7 +168,7 @@ class DynamicStrategy:
             return state.model_copy(update={"phase": RunPhase.FINISHED})
         return state
 
-    def _blocked(self, state: DynamicStrategyState, event: IntentBlocked) -> DynamicStrategyState:
+    def _blocked(self, state: DynamicStrategyState, event: RequestBlocked) -> DynamicStrategyState:
         """Route a blocked request to the subject awaiting it: planner, baseline or attempt."""
         detail = f"request blocked: {event.diagnostic}"
         decision = decision_of_operation(event.target.root)

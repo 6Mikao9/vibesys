@@ -481,7 +481,7 @@ def test_fifo_head_cannot_be_bypassed_when_any_admission_gate_is_closed(gate: st
     if gate == "recovery":
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
+                "records": state.records.model_copy(
                     update={"recovery": core.RecoveryBarrier(phase=core.RecoveryPhase.BLOCKED)}
                 )
             }
@@ -524,7 +524,7 @@ def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(
     assert state.scheduling.admission_closed
     assert result.requests == ()
     assert sum(isinstance(event, core.RunEnded) for event in result.events) == 1
-    siblings = (state.attempts, state.sessions, state.evaluation, state.settlement, state.intents)
+    siblings = (state.attempts, state.sessions, state.evaluation, state.settlement, state.records)
     for _ in range(3):
         result = _step(
             state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
@@ -538,7 +538,7 @@ def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(
             state.sessions,
             state.evaluation,
             state.settlement,
-            state.intents,
+            state.records,
         ) == siblings
 
 
@@ -794,7 +794,7 @@ def test_host_stop_requires_explicit_result_and_closes_admission() -> None:
     assert result.state.sessions == state.sessions
     assert result.state.evaluation == state.evaluation
     assert result.state.settlement == state.settlement
-    assert result.state.intents == state.intents
+    assert result.state.records == state.records
 
 
 @pytest.mark.parametrize(

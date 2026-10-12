@@ -355,14 +355,14 @@ def _assert_owner_facts_reach_their_results(session: Session) -> None:
 
     Only the owner's event carries a turn's reply, so a published success without it
     means the observation pre-empted the owner event. A job that ended completes the
-    submit intent that created it.
+    submit record that created it.
     """
     for result in session.results:
         if result.observation.status == core.ObservationStatus.SUCCEEDED:
             assert result.output_json == REPLY
     for job in session.state.evaluation.jobs:
         if job.terminal and job.observation is not None:
-            intent = next(
-                row for row in session.state.intents.intents if row.request_id == job.submission_id
+            record = next(
+                row for row in session.state.records.records if row.request_id == job.submission_id
             )
-            assert intent.phase == core.IntentPhase.COMPLETED
+            assert record.phase == core.RequestPhase.COMPLETED

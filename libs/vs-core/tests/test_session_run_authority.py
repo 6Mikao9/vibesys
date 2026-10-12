@@ -45,7 +45,7 @@ def profiler_yield() -> tuple[core.CoreState, core.TurnObserved]:
         feedback=core.Accepted(decision_id=decision_id),
         request_ids=(request_id,),
     )
-    intents = tuple(
+    records = tuple(
         row.model_copy(
             update={
                 "request": request,
@@ -54,13 +54,13 @@ def profiler_yield() -> tuple[core.CoreState, core.TurnObserved]:
                         request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
                     ).encode()
                 ).hexdigest(),
-                "phase": core.IntentPhase.COMPLETED,
+                "phase": core.RequestPhase.COMPLETED,
                 "observation": observation,
             }
         )
         if row.request_id == request.request_id
         else row
-        for row in dispatched.state.intents.intents
+        for row in dispatched.state.records.records
     )
     state = dispatched.state.model_copy(
         update={
@@ -70,7 +70,7 @@ def profiler_yield() -> tuple[core.CoreState, core.TurnObserved]:
                     "limits": dispatched.state.run.limits.model_copy(update={"max_turns": 10}),
                 }
             ),
-            "intents": dispatched.state.intents.model_copy(update={"intents": intents}),
+            "records": dispatched.state.records.model_copy(update={"records": records}),
         }
     )
     jobs = fixture(run_owned=True)[0].evaluation.jobs

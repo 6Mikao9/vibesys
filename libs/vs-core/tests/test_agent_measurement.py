@@ -25,7 +25,7 @@ def call(
 def submissions(state: core.CoreState) -> list[core.SubmitMeasurement]:
     return [
         row.request
-        for row in state.intents.intents
+        for row in state.records.records
         if isinstance(row.request, core.SubmitMeasurement)
     ]
 
@@ -173,7 +173,7 @@ def test_a_run_that_is_not_running_starts_no_agent_measurement(
 def charged(state: core.CoreState) -> list[str]:
     return [
         row.request_id.root
-        for row in state.intents.intents
+        for row in state.records.records
         if isinstance(row.request, core.SubmitMeasurement) and row.request_id is not None
     ]
 

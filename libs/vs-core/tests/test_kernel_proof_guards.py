@@ -78,25 +78,25 @@ def test_dependency_dispatch_requires_exact_owner_receipt(defect: str, identity:
     canonical = json.dumps(
         request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=hashlib.sha256(canonical.encode()).hexdigest(),
         lifecycle=core.LifecycleClass.QUERY,
-        phase=core.IntentPhase.PREPARED,
+        phase=core.RequestPhase.PREPARED,
         reconcile_deadline_at=20.0,
     )
-    ready = state.intents.model_copy(
+    ready = state.records.model_copy(
         update={
-            "intents": (intent,),
-            "recovery": state.intents.recovery.model_copy(
+            "records": (record,),
+            "recovery": state.records.recovery.model_copy(
                 update={"phase": core.RecoveryPhase.READY}
             ),
         }
     )
     with pytest.raises(core.ContractError, match="dependency"):
         core.step(
-            state.model_copy(update={"intents": ready}),
+            state.model_copy(update={"records": ready}),
             core.DispatchAuthorized(request_id=request.request_id),
         )
     assert (
@@ -302,15 +302,15 @@ def test_kernel_event_cause_requires_the_recorded_observation_episode(
     )
     assert request.request_id is not None
     serialized = json.dumps(request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=hashlib.sha256(serialized.encode()).hexdigest(),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.DISPATCHED,
+        phase=core.RequestPhase.DISPATCHED,
         reconcile_deadline_at=10.0,
     )
-    state = state.model_copy(update={"intents": core.IntentsState(intents=(intent,))})
+    state = state.model_copy(update={"records": core.RecordsState(records=(record,))})
     event = core.SessionObserved(
         session_id=spec.session_id,
         observation=core.Observation(

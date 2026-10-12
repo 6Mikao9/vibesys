@@ -18,7 +18,6 @@ from vs_core.api import (
     ContinuationPhase,
     DispatchTurn,
     EventId,
-    IntentPhase,
     ItemId,
     Observation,
     ObservationStatus,
@@ -30,6 +29,7 @@ from vs_core.api import (
     RecoveryPhase,
     ReleaseDependency,
     RequestObserved,
+    RequestPhase,
     RunStatus,
     SessionPhase,
     SessionsState,
@@ -46,23 +46,23 @@ from vs_core.api import (
     waits,
 )
 
-from .test_intent_recovery import (
+from .test_measurements import submitted
+from .test_request_recovery import (
     fixture_digest,
     initial_state,
-    pending_intent,
+    pending_record,
     recovering_state,
-    turn_intent,
+    turn_record,
 )
-from .test_measurements import submitted
 from .test_write_turn_retention import write_turn_world
 
 if TYPE_CHECKING:
-    from vs_core.api import CoreState, Intent
+    from vs_core.api import CoreState, RequestRecord
 
 _WAITING = {
-    IntentPhase.PREPARED,
-    IntentPhase.DISPATCHED,
-    IntentPhase.RECONCILING,
+    RequestPhase.PREPARED,
+    RequestPhase.DISPATCHED,
+    RequestPhase.RECONCILING,
     SessionPhase.ACQUIRING,
     SessionPhase.EXECUTING,
     SessionPhase.CLOSING,
@@ -74,7 +74,7 @@ _WAITING = {
     "phase",
     [
         phase
-        for enum in (IntentPhase, SessionPhase, RecoveryPhase, ContinuationPhase)
+        for enum in (RequestPhase, SessionPhase, RecoveryPhase, ContinuationPhase)
         for phase in enum
     ],
     ids=lambda phase: f"{type(phase).__name__}.{phase.name}",
@@ -84,7 +84,7 @@ def test_every_phase_is_classified_as_waiting_or_not(phase: WaitingPhase) -> Non
     assert phase_waits(phase) is (phase in _WAITING)
 
 
-def _executing(turn: Intent, *, phase: IntentPhase) -> CoreState:
+def _executing(turn: RequestRecord, *, phase: RequestPhase) -> CoreState:
     assert isinstance(turn.request, DispatchTurn)
     session = SessionView(
         spec=turn.request.turn.session,
@@ -96,14 +96,14 @@ def _executing(turn: Intent, *, phase: IntentPhase) -> CoreState:
     return state.model_copy(
         update={
             "sessions": SessionsState(sessions=(session,)),
-            "intents": state.intents.model_copy(
-                update={"intents": (turn.model_copy(update={"phase": phase}),)}
+            "records": state.records.model_copy(
+                update={"records": (turn.model_copy(update={"phase": phase}),)}
             ),
         }
     )
 
 
-def _reply(turn: Intent) -> RequestObserved:
+def _reply(turn: RequestRecord) -> RequestObserved:
     return RequestObserved(
         observation=Observation(
             event_id=EventId(root="reply"),
@@ -119,37 +119,37 @@ def _reply(turn: Intent) -> RequestObserved:
 @pytest.mark.parametrize(
     ("phase", "producer"),
     [
-        (IntentPhase.DISPATCHED, Producer.PENDING_REQUEST),
-        (IntentPhase.RECONCILING, Producer.PENDING_REQUEST),
-        (IntentPhase.COMPLETED, None),
+        (RequestPhase.DISPATCHED, Producer.PENDING_REQUEST),
+        (RequestPhase.RECONCILING, Producer.PENDING_REQUEST),
+        (RequestPhase.COMPLETED, None),
     ],
 )
 def test_an_executing_session_needs_its_turn_in_flight(
-    phase: IntentPhase, producer: Producer | None
+    phase: RequestPhase, producer: Producer | None
 ) -> None:
-    """The P1-1 shape: the turn's intent completed and no reply is on its way."""
-    found = waits(_executing(turn_intent(), phase=phase))
+    """The P1-1 shape: the turn's record completed and no reply is on its way."""
+    found = waits(_executing(turn_record(), phase=phase))
     assert [(wait.waiter, wait.producer) for wait in found] == [(WaitKind.SESSION, producer)]
-    assert bool(orphan_waits(_executing(turn_intent(), phase=phase))) is (producer is None)
+    assert bool(orphan_waits(_executing(turn_record(), phase=phase))) is (producer is None)
 
 
 def test_a_committed_reply_awaiting_application_ends_the_wait() -> None:
-    turn = turn_intent()
-    state = _executing(turn, phase=IntentPhase.COMPLETED)
+    turn = turn_record()
+    state = _executing(turn, phase=RequestPhase.COMPLETED)
     assert orphan_waits(state)
     assert not orphan_waits(state, (_reply(turn),))
     assert [wait.producer for wait in waits(state, (_reply(turn),))] == [Producer.OUTBOX_EVENT]
 
 
 def test_a_terminal_run_waits_on_nothing() -> None:
-    state = _executing(turn_intent(), phase=IntentPhase.COMPLETED)
+    state = _executing(turn_record(), phase=RequestPhase.COMPLETED)
     done = state.model_copy(
         update={"run": state.run.model_copy(update={"status": RunStatus.TERMINAL})}
     )
     assert orphan_waits(done) == ()
 
 
-def _recovering(target: Intent) -> CoreState:
+def _recovering(target: RequestRecord) -> CoreState:
     state = recovering_state(target)
     barrier = RecoveryBarrier(
         epoch=1,
@@ -157,16 +157,16 @@ def _recovering(target: Intent) -> CoreState:
         checks=(RecoveryCheck(target=target.request_id),),
     )
     return state.model_copy(
-        update={"intents": state.intents.model_copy(update={"recovery": barrier})}
+        update={"records": state.records.model_copy(update={"recovery": barrier})}
     )
 
 
 def test_a_pending_recovery_check_needs_a_target_still_in_flight() -> None:
     """The P1-2 shape: the target completed, so inspection can never resolve its check."""
-    live = _recovering(pending_intent(phase=IntentPhase.DISPATCHED))
+    live = _recovering(pending_record(phase=RequestPhase.DISPATCHED))
     assert [wait.producer for wait in waits(live)] == [Producer.PENDING_REQUEST]
     done = _recovering(
-        pending_intent(phase=IntentPhase.COMPLETED).model_copy(update={"observation": None})
+        pending_record(phase=RequestPhase.COMPLETED).model_copy(update={"observation": None})
     )
     assert [(wait.waiter, wait.producer) for wait in orphan_waits(done)] == [
         (WaitKind.RECOVERY_CHECK, None)
@@ -174,16 +174,16 @@ def test_a_pending_recovery_check_needs_a_target_still_in_flight() -> None:
 
 
 def test_a_pending_recovery_check_with_its_inspection_in_flight_is_not_an_orphan() -> None:
-    done = _recovering(pending_intent(identity="target", phase=IntentPhase.COMPLETED))
-    inspection = pending_intent(identity="inspection", phase=IntentPhase.PREPARED)
-    check = done.intents.recovery.checks[0].model_copy(update={"inspection": inspection.request_id})
-    barrier = done.intents.recovery.model_copy(update={"checks": (check,)})
+    done = _recovering(pending_record(identity="target", phase=RequestPhase.COMPLETED))
+    inspection = pending_record(identity="inspection", phase=RequestPhase.PREPARED)
+    check = done.records.recovery.checks[0].model_copy(update={"inspection": inspection.request_id})
+    barrier = done.records.recovery.model_copy(update={"checks": (check,)})
     state = done.model_copy(
         update={
-            "intents": done.intents.model_copy(
+            "records": done.records.model_copy(
                 update={
                     "recovery": barrier,
-                    "intents": (*done.intents.intents, inspection),
+                    "records": (*done.records.records, inspection),
                 }
             )
         }
@@ -195,7 +195,7 @@ def test_a_fresh_run_has_no_waits() -> None:
     assert waits(initial_state()) == ()
 
 
-def test_an_observed_job_is_not_kept_alive_by_its_own_submission_intent() -> None:
+def test_an_observed_job_is_not_kept_alive_by_its_own_submission_record() -> None:
     state, _ = submitted()
     job = state.evaluation.jobs[0]
     assert job.observation is not None
@@ -254,7 +254,7 @@ def test_a_closing_attempt_waiting_on_a_job_that_still_runs_is_named_by_the_job(
 
 def _prepared_behind_failed_dependency() -> CoreState:
     """A request prepared after the request it depends on had already failed for good."""
-    failed = pending_intent("dependency", IntentPhase.COMPLETED)
+    failed = pending_record("dependency", RequestPhase.COMPLETED)
     answer = Observation(
         event_id=EventId(root="dependency-failed"),
         request_id=failed.request_id,
@@ -266,14 +266,14 @@ def _prepared_behind_failed_dependency() -> CoreState:
         terminal=True,
     )
     failed = failed.model_copy(update={"observation": answer, "sequence": 1})
-    dependent = pending_intent("dependent", IntentPhase.PREPARED)
+    dependent = pending_record("dependent", RequestPhase.PREPARED)
     request = dependent.request.model_copy(update={"depends_on": (failed.request_id,)})
     dependent = dependent.model_copy(
         update={"request": request, "payload_digest": fixture_digest(request)}
     )
     state = initial_state()
     return state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (failed, dependent)})}
+        update={"records": state.records.model_copy(update={"records": (failed, dependent)})}
     )
 
 
@@ -286,8 +286,8 @@ def test_a_prepared_request_behind_a_failed_dependency_has_no_dispatcher_and_is_
     state = _prepared_behind_failed_dependency()
     assert [w.waiter for w in orphan_waits(state)] == [WaitKind.DISPATCH]
     result = step(state, ClockAdvanced(now_at=2.0))
-    dependent = result.state.intents.intents[1]
-    assert dependent.phase == IntentPhase.COMPLETED
+    dependent = result.state.records.records[1]
+    assert dependent.phase == RequestPhase.COMPLETED
     assert dependent.observation is not None
     assert dependent.observation.status == ObservationStatus.CANCELLED
     assert not dependent.observation.accepted
@@ -313,7 +313,7 @@ def _acquiring_without_a_request() -> CoreState:
             "sessions": state.sessions.model_copy(
                 update={"invocations": (acquiring,), "sessions": (idle,)}
             ),
-            "intents": state.intents.model_copy(update={"intents": ()}),
+            "records": state.records.model_copy(update={"records": ()}),
         }
     )
 

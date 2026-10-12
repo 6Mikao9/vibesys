@@ -79,7 +79,7 @@ def test_disabled_capability_rejects_before_preparing_or_charging() -> None:
     result = step(state, DecisionSubmitted(decision=decision, expected_revision=0))
     assert isinstance(result.events[0], Rejected)
     assert result.events[0].code == RejectionCode.CAPABILITY
-    assert result.state.intents == state.intents
+    assert result.state.records == state.records
     assert result.state.scheduling == state.scheduling
 
 

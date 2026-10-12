@@ -326,7 +326,7 @@ def test_closed_intake_keeps_pause_recovery_and_deadline_execution_guards(
                     "status": core.RunStatus.PAUSED if paused else core.RunStatus.RUNNING,
                 }
             ),
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"recovery": core.RecoveryBarrier(phase=phase)}
             ),
         }

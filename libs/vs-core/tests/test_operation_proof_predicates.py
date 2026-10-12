@@ -20,7 +20,7 @@ from .test_recovery_proof_regressions import Cleanup, Outcome, _digest, _registe
 
 
 @st.composite
-def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.Intent]:
+def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestRecord]:
     return _registered_turn(draw(st.text(alphabet="abc123", min_size=1, max_size=12)))
 
 
@@ -52,7 +52,7 @@ def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.Intent]:
 @given(facts=operation_facts())
 def test_operation_proof_checks_every_origin_field(
     field: str,
-    facts: tuple[core.CoreState, core.Intent],
+    facts: tuple[core.CoreState, core.RequestRecord],
 ) -> None:
     state, record = facts
     request = record.request
@@ -427,7 +427,7 @@ def _wrong_invocation(row: core.Invocation, field: str) -> tuple[core.Invocation
 @given(facts=operation_facts())
 def test_proposals_and_ingress_do_not_substitute_origin_or_normalization(
     field: str,
-    facts: tuple[core.CoreState, core.Intent],
+    facts: tuple[core.CoreState, core.RequestRecord],
 ) -> None:
     state, record = facts
     receipt = state.run.receipts[0]
@@ -601,7 +601,7 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
             frames=(
                 core.TraceFrame(
                     signal=event,
-                    change=core.IntentsChange(state=state.intents, requests=(request,)),
+                    change=core.RecordsChange(state=state.records, requests=(request,)),
                 ),
             )
         ),
@@ -610,6 +610,6 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
     assert committed.request_ids == (request.request_id,)
     assert committed.feedback == feedback
     assert feedback.request_ids == ()
-    committed_request = result.state.intents.intents[0].request
+    committed_request = result.state.records.records[0].request
     assert isinstance(committed_request, core.ExecuteRegisteredOperation)
     assert operation_for(result.state.run.receipts, committed_request) == Proven(decision)

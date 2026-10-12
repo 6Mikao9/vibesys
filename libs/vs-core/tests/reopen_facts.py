@@ -7,7 +7,7 @@ from .proof_digest import value_digest
 
 def released_job(
     owner: core.AttemptView,
-) -> tuple[core.RegisteredOwnedJob, core.Intent]:
+) -> tuple[core.RegisteredOwnedJob, core.RequestRecord]:
     """A continuation job whose release is proved against its source request."""
     assert owner.closure is not None
     attempt = core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
@@ -46,16 +46,16 @@ def released_job(
         released=True,
         observation=proof,
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=source_id,
         request=source,
         payload_digest=value_digest(source),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=proof,
         reconcile_deadline_at=100.0,
     )
-    return job, intent
+    return job, record
 
 
 def with_reopening_continuation(
@@ -113,10 +113,10 @@ def with_reopening_continuation(
         ),
         phase=core.SessionPhase.SUSPENDED,
     )
-    job, intent = released_job(owner)
+    job, record = released_job(owner)
     return state.model_copy(
         update={
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
             "sessions": state.sessions.model_copy(update={"invocations": (suspended,)}),
             "evaluation": state.evaluation.model_copy(
                 update={"continuations": (continuation,), "registered_jobs": (job,)}

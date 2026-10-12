@@ -37,12 +37,12 @@ from vs_core.api import (
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
-    IntentBlocked,
     InvocationId,
     InvocationRef,
     ItemId,
     MeasurementResult,
     ObservationStatus,
+    RequestBlocked,
     RequestId,
     RunId,
     RunView,
@@ -263,9 +263,9 @@ def test_the_declaration_offers_suspension_and_profile_capture_as_optional() -> 
     assert not declaration.required
 
 
-def test_a_blocked_intent_nobody_owns_changes_nothing() -> None:
+def test_a_blocked_record_nobody_owns_changes_nothing() -> None:
     strategy = DynamicStrategy(config=config())
-    event = IntentBlocked(
+    event = RequestBlocked(
         request_id=RequestId(root="stranger"),
         target=RequestId(root="target"),
         scope=SCOPE,

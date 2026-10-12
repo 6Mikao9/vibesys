@@ -398,7 +398,7 @@ class Area(StrEnum):
     SESSIONS = "sessions"
     EVALUATION = "evaluation"
     SETTLEMENT = "settlement"
-    INTENTS = "intents"
+    RECORDS = "records"
 
 
 class KernelNotImplementedError(Exception):
@@ -627,7 +627,7 @@ class DependencyStatus(StrEnum):
 
 
 class RequestBase(Value):
-    """Canonical I/O intent correlation, including the current occupancy episode.
+    """Canonical I/O record correlation, including the current occupancy episode.
 
     Attempt mutations carry admission_id. Canonical registration derives a
     missing attempt episode from the exact owner and generation. Explicit older
@@ -869,7 +869,7 @@ class ExecuteRegisteredOperation(RequestBase):
     """Execute a canonical registered wire with separately reserved input payload.
 
     Sessions A resolves the accepted Operation origin and reserves its inputs
-    before Intents A registers this final executable payload. Dispatch uses that
+    before Records A registers this final executable payload. Dispatch uses that
     sole canonical manifest; changing it under the same request ID is a conflict.
     """
 

@@ -1,4 +1,4 @@
-"""New cleanup intents retain bounded future timers after the run expires."""
+"""New cleanup records retain bounded future timers after the run expires."""
 
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -66,12 +66,12 @@ def test_cleanup_registration_never_creates_past_timers(
     result = core.step(state, event, reducers=core.CoreReducers(evaluation=cleanup_evaluation))
     assert len(result.requests) == 1
     request = result.requests[0]
-    intent = result.state.intents.intents[0]
+    record = result.state.records.records[0]
     assert request.deadline_at == now + bound
-    assert intent.reconcile_deadline_at >= now
+    assert record.reconcile_deadline_at >= now
     if run_deadline <= now:
-        assert intent.reconcile_deadline_at == request.deadline_at
+        assert record.reconcile_deadline_at == request.deadline_at
     else:
-        assert intent.reconcile_deadline_at == min(request.deadline_at, run_deadline)
+        assert record.reconcile_deadline_at == min(request.deadline_at, run_deadline)
     assert core.CoreState.model_validate_json(result.state.model_dump_json()) == result.state
     assert state.model_dump_json() == before

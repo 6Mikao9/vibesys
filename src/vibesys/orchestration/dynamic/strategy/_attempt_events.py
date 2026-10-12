@@ -61,12 +61,12 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     EvidenceKind,
-    IntentBlocked,
     InvocationRef,
     MeasurementResult,
     ObservationStatus,
     OperationResult,
     Rejected,
+    RequestBlocked,
     ResumeAuthorized,
     RevisionRef,
     RunView,
@@ -861,7 +861,7 @@ def _record_round(
     return state.model_copy(update={"hypotheses": tuple(hypotheses)})
 
 
-def on_blocked(state: DynamicStrategyState, event: IntentBlocked) -> DynamicStrategyState:
+def on_blocked(state: DynamicStrategyState, event: RequestBlocked) -> DynamicStrategyState:
     """A blocked request leaves its effect unknown: end the workstream awaiting it.
 
     An operation names its decision in its request ID. Any other blocked request of

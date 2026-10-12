@@ -33,7 +33,7 @@ def settlement_context(state: core.CoreState) -> core.SettlementContext:
         attempts=state.attempts,
         sessions=state.sessions,
         evaluation=state.evaluation,
-        intents=state.intents,
+        records=state.records,
     )
 
 

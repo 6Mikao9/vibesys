@@ -543,7 +543,7 @@ class AgentEvaluationBridge:
                 # same answer, not a second call.
                 return self._answer(shell, scoped, charged), self._acknowledger(owed)
             now = clock.now()
-            # Intent first: if the host dies after the charge commits, the entry names it.
+            # RequestRecord first: if the host dies after the charge commits, the entry names it.
             owed = OwedSubmission(key=key, call_id=f"agent:{uuid.uuid4().hex}", submitted_at=now)
             self._owed.record(owed)
             try:

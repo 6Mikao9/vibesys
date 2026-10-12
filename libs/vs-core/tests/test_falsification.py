@@ -19,7 +19,7 @@ from vs_core.api import (
     AttemptRef,
     AttemptsState,
     AttemptView,
-    BlockIntent,
+    BlockRequest,
     Cancel,
     Capabilities,
     CloseAttemptScope,
@@ -41,8 +41,6 @@ from vs_core.api import (
     EvidenceRequirements,
     ExecuteRegisteredOperation,
     InspectRequest,
-    Intent,
-    IntentPhase,
     Invocation,
     InvocationId,
     InvocationRef,
@@ -63,7 +61,9 @@ from vs_core.api import (
     Request,
     RequestId,
     RequestObserved,
+    RequestPhase,
     RequestPrepared,
+    RequestRecord,
     ResourceId,
     RestoreRevision,
     RetainRevision,
@@ -186,7 +186,7 @@ def acknowledge_cleanup(result: Transition, retained: RevisionRef | None) -> Cor
     return state
 
 
-def measurement_ledger_row(job: OwnedJob) -> Intent:
+def measurement_ledger_row(job: OwnedJob) -> RequestRecord:
     """The ledger's record of the submission that owns this job, in its episode."""
     assert job.observation is not None
     submission = SubmitMeasurement(
@@ -196,12 +196,12 @@ def measurement_ledger_row(job: OwnedJob) -> Intent:
         admission_id=job.observation.admission_id,
         plan=job.plan,
     )
-    return Intent(
+    return RequestRecord(
         request_id=job.submission_id,
         request=submission,
         payload_digest=value_digest(submission),
         lifecycle=LifecycleClass.OWNED_JOB,
-        phase=IntentPhase.COMPLETED,
+        phase=RequestPhase.COMPLETED,
         observation=job.observation,
         reconcile_deadline_at=10.0,
     )
@@ -311,7 +311,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
                 )
             ),
             "evaluation": EvaluationState(jobs=(job,), evidence=(evidence,)),
-            "intents": state.intents.model_copy(update={"intents": (ledger_row,)}),
+            "records": state.records.model_copy(update={"records": (ledger_row,)}),
         }
     )
     cases: tuple[
@@ -469,7 +469,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             owner for owner in state.attempts.attempts if owner.attempt_id == owned.attempt_id
         )
         assert final_owner.phase == AttemptPhase.TERMINAL
-        assert not final_owner.pending_intents
+        assert not final_owner.pending_records
         assert not final_owner.release_dependencies
         if retention != "discard":
             assert any(
@@ -543,7 +543,7 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
     ).state
     assert request.request_id is not None
     dispatched = step(prepared, DispatchAuthorized(request_id=request.request_id)).state
-    assert dispatched.intents.intents[0].phase == IntentPhase.DISPATCHED
+    assert dispatched.records.records[0].phase == RequestPhase.DISPATCHED
     prepared = dispatched
     restarted = CoreState.model_validate_json(prepared.model_dump_json())
     result = step(restarted, RecoveryStarted(epoch=1, now_at=10.0))
@@ -566,7 +566,7 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
     blocked = step(
         unknown.state, ReconciliationDeadline(request_id=request.request_id, now_at=100.0)
     )
-    block = next(value for value in blocked.requests if isinstance(value, BlockIntent))
+    block = next(value for value in blocked.requests if isinstance(value, BlockRequest))
     assert all(value.kind != "execute_registered_operation" for value in blocked.requests)
     assert block.request_id is not None
     # The block command is recorded, then fences its target pending reconciliation.
@@ -588,7 +588,7 @@ def test_lost_write_acceptance_cannot_blindly_redispatch_after_restart() -> None
             )
         ),
     )
-    assert done.state.intents.intents[0].phase == IntentPhase.BLOCKED
+    assert done.state.records.records[0].phase == RequestPhase.BLOCKED
     assert all(value.kind != "execute_registered_operation" for value in done.requests)
 
 

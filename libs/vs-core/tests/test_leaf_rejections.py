@@ -52,5 +52,5 @@ def test_leaf_budget_rejection_preserves_no_charges_requests_or_acceptance() -> 
     assert result.events == (rejection,)
     assert result.requests == ()
     assert result.state.scheduling == state.scheduling
-    assert result.state.intents == state.intents
+    assert result.state.records == state.records
     assert result.state.run.receipts[0].feedback == rejection

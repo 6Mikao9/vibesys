@@ -28,7 +28,7 @@ class RequestFields(TypedDict):
 
 def episode_state(
     phase: core.AttemptPhase, kind: str, authority: str, *, matching_admission: bool
-) -> tuple[core.CoreState, core.Intent, bool]:
+) -> tuple[core.CoreState, core.RequestRecord, bool]:
     """Persist a prepared request alongside one independently unresolved anchor."""
     state = core.initial_state()
     attempt = core.AttemptRef(attempt_id=core.AttemptId(root="attempt"), generation=0)
@@ -88,12 +88,12 @@ def episode_state(
         closure=closure,
         release_dependencies=dependencies,
     )
-    prepared = core.Intent(
+    prepared = core.RequestRecord(
         request_id=identity,
         request=request,
         payload_digest="prepared",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.PREPARED,
+        phase=core.RequestPhase.PREPARED,
         reconcile_deadline_at=100.0,
     )
     anchor_request = requests["ensure"].model_copy(
@@ -103,14 +103,14 @@ def episode_state(
         update={
             "request_id": anchor_request.request_id,
             "request": anchor_request,
-            "phase": core.IntentPhase.DISPATCHED,
+            "phase": core.RequestPhase.DISPATCHED,
         }
     )
     state = state.model_copy(
         update={
             "run": state.run.model_copy(update={"status": core.RunStatus.PAUSED}),
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": core.IntentsState(intents=(prepared, anchor)),
+            "records": core.RecordsState(records=(prepared, anchor)),
         }
     )
     active = phase in (core.AttemptPhase.ACTIVE, core.AttemptPhase.ACQUIRING)
@@ -140,13 +140,13 @@ def test_prepared_cleanup_recovers_only_with_current_episode_authority(
     result = core.step(state, event)
     assert result == core.step(core.CoreState.model_validate_json(state.model_dump_json()), event)
     check = next(
-        row for row in result.state.intents.recovery.checks if row.target == prepared.request_id
+        row for row in result.state.records.recovery.checks if row.target == prepared.request_id
     )
     assert check.resolution == ("safe-prepared" if authorized else "pending")
     inspections = {row.target for row in result.requests if isinstance(row, core.InspectRequest)}
     assert (prepared.request_id in inspections) is not authorized
     assert result.state.attempts == state.attempts
-    assert result.state.intents.intents[0] == prepared
+    assert result.state.records.records[0] == prepared
     assert result.state.run.receipts == state.run.receipts
     assert result.events == ()
 
@@ -204,14 +204,14 @@ def test_prepared_registered_cleanup_uses_descriptor_and_exact_release_identity(
                 update={"capabilities": core.Capabilities(operations=(descriptor,))}
             ),
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(
-                update={"intents": (record, state.intents.intents[1])}
+            "records": state.records.model_copy(
+                update={"records": (record, state.records.records[1])}
             ),
         }
     )
     result = core.step(state, core.RecoveryStarted(epoch=1, now_at=10.0))
     check = next(
-        row for row in result.state.intents.recovery.checks if row.target == prepared.request_id
+        row for row in result.state.records.recovery.checks if row.target == prepared.request_id
     )
     cleanup = revision_authority in (
         core.RevisionAuthority.SNAPSHOT,
@@ -221,6 +221,6 @@ def test_prepared_registered_cleanup_uses_descriptor_and_exact_release_identity(
     authorized = cleanup and dependency != "foreign"
     assert check.resolution == ("safe-prepared" if authorized else "pending")
     assert result.state.attempts == state.attempts
-    assert result.state.intents.intents[0] == record
+    assert result.state.records.records[0] == record
     assert result.state.run.receipts == state.run.receipts
     assert result.events == ()

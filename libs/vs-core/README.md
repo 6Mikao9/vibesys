@@ -30,25 +30,25 @@ admissions. `DecisionReceipt.request_ids` records the cumulative causal requests
 `Accepted.request_ids` is the immutable acceptance-time snapshot. Owning reducers
 emit internal `DecisionCompleted` after their lifecycle completes. The kernel
 persists finality, rejects failed dependents and sends `DecisionDependencyResolved`
-to intents. `DispatchAuthorized` requires successful completion of all explicit
+to records. `DispatchAuthorized` requires successful completion of all explicit
 request and decision dependencies.
 
-Registered operations enter intents as `RequestPrepared`. Custom turns require
-a registered pure normalizer to `TurnSpec`; intents forwards
+Registered operations enter records as `RequestPrepared`. Custom turns require
+a registered pure normalizer to `TurnSpec`; records forwards
 `RegisteredTurnRequested` to sessions. Owned jobs declare `resource_pool` and
 use `RegisteredJobRequested` plus `RegisteredOwnedJob`, without a synthetic
 measurement plan. Revision mutations declare `RevisionAuthority` and use
 `RevisionOperationRequested` and typed `RevisionOperationObserved` acknowledgements
 under attempts. The kernel permits execution requests only from the declared
-owning area. Ordinary queries and idempotent writes remain intents-owned.
+owning area. Ordinary queries and idempotent writes remain records-owned.
 
 The shell supplies `operation_schema` on registered `RequestObserved` values and
-calls `OperationRegistry.validate_event` before `step`. Intents uses
+calls `OperationRegistry.validate_event` before `step`. Records uses
 `operation_result(operation_id, observation)` to forward the registered concrete
 outcome to `Strategy.on_event`. `OperationResult` restores the owner subtype from durable `outcome_json`. Typed payload and schema proofs
 must match before an observation or callback can enter the kernel; arbitrary
 models and copied mismatches are rejected. Envelope decoding restores typed
-intent outcomes through the same registry. Registered payload and strategy
+record outcomes through the same registry. Registered payload and strategy
 schemas reject mutable containers/defaults and open types; canonical wire values
 sort frozensets while preserving tuple order.
 
@@ -60,6 +60,6 @@ and bounded retries retain the recorded request identity.
 
 Pause and resume cannot reverse closing or blocked runs, or a committed stop
 result. `RunDrained` defers final publication while attempts, sessions, jobs,
-intents or child ownership remain unresolved. Evidence and assessment kinds are
+records or child ownership remain unresolved. Evidence and assessment kinds are
 closed, and eligibility requirements retain exact provenance, purpose, revision
 and source ownership attribution.

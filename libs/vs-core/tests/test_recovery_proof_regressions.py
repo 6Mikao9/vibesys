@@ -51,14 +51,14 @@ def _spec() -> core.SessionSpec:
     )
 
 
-def _record(request: core.Request, lifecycle: core.LifecycleClass) -> core.Intent:
+def _record(request: core.Request, lifecycle: core.LifecycleClass) -> core.RequestRecord:
     assert request.request_id is not None
-    return core.Intent(
+    return core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=_digest(request),
         lifecycle=lifecycle,
-        phase=core.IntentPhase.DISPATCHED,
+        phase=core.RequestPhase.DISPATCHED,
         reconcile_deadline_at=100.0,
         observation=core.Observation(
             event_id=core.EventId(root="fact"),
@@ -75,7 +75,7 @@ def _record(request: core.Request, lifecycle: core.LifecycleClass) -> core.Inten
     )
 
 
-def _recovering(record: core.Intent) -> core.CoreState:
+def _recovering(record: core.RequestRecord) -> core.CoreState:
     state = core.initial_state()
     anchor_request = core.EnsureSession(
         request_id=core.RequestId(root="anchor"),
@@ -90,7 +90,7 @@ def _recovering(record: core.Intent) -> core.CoreState:
     return state.model_copy(
         update={
             "run": state.run.model_copy(update={"status": core.RunStatus.PAUSED}),
-            "intents": core.IntentsState(intents=(record, anchor)),
+            "records": core.RecordsState(records=(record, anchor)),
         }
     )
 
@@ -100,11 +100,11 @@ def _resolution(state: core.CoreState, identity: core.RequestId) -> str:
     assert result.state.sessions == state.sessions
     assert result.state.evaluation == state.evaluation
     return next(
-        row.resolution for row in result.state.intents.recovery.checks if row.target == identity
+        row.resolution for row in result.state.records.recovery.checks if row.target == identity
     )
 
 
-def _registered_turn(decision_root: str = "decision") -> tuple[core.CoreState, core.Intent]:
+def _registered_turn(decision_root: str = "decision") -> tuple[core.CoreState, core.RequestRecord]:
     state = core.initial_state()
     scope = core.Scope(owner=state.run.run_id, generation=0)
     turn = core.TurnSpec(
@@ -218,8 +218,8 @@ def test_registered_reattachment_needs_accepted_exact_origin(corruption: str) ->
         record = record.model_copy(update={"lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE})
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
-                    update={"intents": (record, state.intents.intents[1])}
+                "records": state.records.model_copy(
+                    update={"records": (record, state.records.records[1])}
                 )
             }
         )
@@ -309,7 +309,7 @@ def test_budget_request_id_alone_cannot_prove_measurement_reattachment(field: st
     )
 
 
-def cleanup_fixture() -> tuple[core.CoreState, core.Intent, core.OperationDescriptor]:
+def cleanup_fixture() -> tuple[core.CoreState, core.RequestRecord, core.OperationDescriptor]:
     state = core.initial_state()
     owner_id = core.AttemptId(root="owner")
     scope = core.Scope(owner=owner_id, generation=0)
@@ -343,7 +343,7 @@ def cleanup_fixture() -> tuple[core.CoreState, core.Intent, core.OperationDescri
     )
     record = _record(request, core.LifecycleClass.IDEMPOTENT_WRITE).model_copy(
         update={
-            "phase": core.IntentPhase.PREPARED,
+            "phase": core.RequestPhase.PREPARED,
             "observation": None,
         }
     )
@@ -425,7 +425,7 @@ def _normalize_measurement(request: core.OperationRequest) -> core.MeasurementId
 
 def registered_measurement_fixture(
     suffix: str,
-) -> tuple[core.CoreState, core.Intent, core.RegisteredOwnedJob]:
+) -> tuple[core.CoreState, core.RequestRecord, core.RegisteredOwnedJob]:
     request, budget = measurement_fixture(suffix)
     descriptor = core.OperationDescriptor(
         kind="proof.measurement",

@@ -165,7 +165,7 @@ def test_resume_factory_acquires_new_epoch_and_commits_recovery(tmp_path: Path) 
     )
     shell.start("reader", now_at=1, lease_duration=10)
     assert shell.record.envelope.fence.epoch > candidate.envelope.fence.epoch
-    assert shell.record.envelope.core.intents.recovery.epoch == shell.record.envelope.fence.epoch
+    assert shell.record.envelope.core.records.recovery.epoch == shell.record.envelope.fence.epoch
     assert shell.storage_revision == 1
 
 

@@ -62,19 +62,19 @@ def request_identity(request: core.Request) -> core.RequestId:
     return request.request_id
 
 
-def proof_intent(
+def proof_record(
     request: core.Request,
     deadline: float,
     proof: core.Observation | None = None,
     *,
     lifecycle: core.LifecycleClass = core.LifecycleClass.IDEMPOTENT_WRITE,
-) -> core.Intent:
-    return core.Intent(
+) -> core.RequestRecord:
+    return core.RequestRecord(
         request_id=request_identity(request),
         request=request,
         payload_digest="durable",
         lifecycle=lifecycle,
-        phase=core.IntentPhase.PREPARED if proof is None else core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.PREPARED if proof is None else core.RequestPhase.COMPLETED,
         observation=proof,
         reconcile_deadline_at=deadline,
     )
@@ -87,11 +87,11 @@ def with_owner(state: core.CoreState, owner: core.AttemptView, **areas: object) 
 def recorded_proof(state: core.CoreState, proof: core.Observation) -> core.CoreState:
     return changed(
         state,
-        intents=changed(
-            state.intents,
-            intents=tuple(
+        records=changed(
+            state.records,
+            records=tuple(
                 changed(row, observation=proof) if row.request_id == proof.request_id else row
-                for row in state.intents.intents
+                for row in state.records.records
             ),
         ),
     )
@@ -211,7 +211,7 @@ def closing_fixture() -> tuple[core.CoreState, core.AttemptRef]:
             }
         ),
     )
-    intents = tuple(proof_intent(request, state.run.deadline_at) for request in requests)
+    records = tuple(proof_record(request, state.run.deadline_at) for request in requests)
     owner = changed(
         state.attempts.attempts[0],
         phase=core.AttemptPhase.CLOSING,
@@ -226,7 +226,7 @@ def closing_fixture() -> tuple[core.CoreState, core.AttemptRef]:
             core.ReleaseDependency(kind="workspace", identity=request_identity(requests[1])),
         ),
     )
-    return with_owner(state, owner, intents=changed(state.intents, intents=intents)), ref
+    return with_owner(state, owner, records=changed(state.records, records=records)), ref
 
 
 def undisposed_fixture() -> tuple[core.CoreState, core.AttemptRef]:
@@ -234,7 +234,7 @@ def undisposed_fixture() -> tuple[core.CoreState, core.AttemptRef]:
     owner = state.attempts.attempts[0]
     owner = changed(owner, release_dependencies=owner.release_dependencies[:1])
     return with_owner(
-        state, owner, intents=changed(state.intents, intents=state.intents.intents[:1])
+        state, owner, records=changed(state.records, records=state.records.records[:1])
     ), ref
 
 
@@ -637,11 +637,11 @@ def test_every_writer_variant_requires_exact_complete_lease_release_before_dispo
     codec = None
     if registered:
         state, invocation, request, codec = registered_writer(state, invocation, guard)
-    intent = proof_intent(
+    record = proof_record(
         request, state.run.deadline_at, writer_proof, lifecycle=core.LifecycleClass.SESSION_TURN
     )
     lease_id = core.RequestId(root="writer-lease")
-    lease = proof_intent(
+    lease = proof_record(
         core.CloseSession(
             request_id=lease_id,
             scope=invocation.scope,
@@ -669,11 +669,11 @@ def test_every_writer_variant_requires_exact_complete_lease_release_before_dispo
                 ),
             ),
         ),
-        intents=changed(
-            state.intents,
-            intents=(*state.intents.intents, intent)
+        records=changed(
+            state.records,
+            records=(*state.records.records, record)
             if reuse
-            else (*state.intents.intents, intent, lease),
+            else (*state.records.records, record, lease),
         ),
     )
     signal = core.ReleaseDependencyObserved(
@@ -737,7 +737,7 @@ def test_empty_writer_set_never_authorizes_disposal_before_positive_scope_fence(
     if canonical and status == ObservationStatus.SUCCEEDED and terminal and complete:
         assert len(result.requests) == 1
         assert isinstance(result.requests[0], core.DiscardWorkspace)
-        assert core.pending_requests(result.state.intents)[-1] == result.requests[0]
+        assert core.pending_requests(result.state.records)[-1] == result.requests[0]
     else:
         assert all(isinstance(request, core.InspectRequest) for request in result.requests)
 
@@ -865,7 +865,7 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
             ),
         ),
     )
-    job, job_intent = released_job(owner)
+    job, job_record = released_job(owner)
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
@@ -885,7 +885,7 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
         sessions=core.SessionsState(
             invocations=(changed(writer_invocation(ref), invocation=invocation),)
         ),
-        intents=changed(state.intents, intents=(job_intent,)),
+        records=changed(state.records, records=(job_record,)),
     )
     return state, core.ScopeReopenRequested(request=request, normalization=norm), codec
 
@@ -1052,12 +1052,12 @@ def test_retention_crash_ack_requires_exact_checkpoint_history(
         release_dependencies=(owner.release_dependencies[0], edge),
         checkpoints=() if checkpoint == "absent" else (retained,),
     )
-    intent = changed(state.intents.intents[1], request_id=request.request_id, request=request)
+    record = changed(state.records.records[1], request_id=request.request_id, request=request)
     state = with_owner(
         state,
         owner,
         settlement=core.SettlementState(pending=(pending_settlement(state, ref),)),
-        intents=changed(state.intents, intents=(state.intents.intents[0], intent)),
+        records=changed(state.records, records=(state.records.records[0], record)),
     )
     proof = observation(ref, request_identity(request), status=status, terminal=terminal)
     state = recorded_proof(state, proof)
@@ -1163,8 +1163,8 @@ def acquired_reopen_fixture() -> tuple[
             required_resource=resource,
         ),
     )
-    intents = tuple(
-        proof_intent(
+    records = tuple(
+        proof_record(
             request,
             state.run.deadline_at,
             observation(
@@ -1202,7 +1202,7 @@ def acquired_reopen_fixture() -> tuple[
         state,
         owner,
         sessions=sessions,
-        intents=changed(state.intents, intents=intents),
+        records=changed(state.records, records=records),
     )
     return state, event, codec
 
@@ -1222,7 +1222,7 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
 ) -> None:
     part, status, accepted, terminal, identity = proof
     state, event, codec = acquired_reopen_fixture()
-    intents = list(state.intents.intents)
+    records = list(state.records.records)
     if part == "group":
         group = changed(
             state.sessions.acquisition_groups[0],
@@ -1234,7 +1234,7 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
         state = changed(state, sessions=changed(state.sessions, acquisition_groups=(group,)))
     else:
         index = {"workspace": 0, "old-session": 1, "session": 2}[part]
-        row = intents[index]
+        row = records[index]
         assert row.observation is not None
         observation_updates: dict[str, object] = {
             "status": status,
@@ -1250,10 +1250,10 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
                 observation_updates["resource_id"] = (
                     None if identity == "absent" else core.ResourceId(root="new-conversation")
                 )
-        intents[index] = changed(
+        records[index] = changed(
             row, observation=row.observation.model_copy(update=observation_updates)
         )
-        state = changed(state, intents=changed(state.intents, intents=tuple(intents)))
+        state = changed(state, records=changed(state.records, records=tuple(records)))
     signal = core.ReacquisitionReady(
         attempt=event.normalization.attempt,
         request_id=request_identity(event.request),
@@ -1306,7 +1306,7 @@ def test_reopen_dispatch_requires_quiescent_reacquired_session(
     session = changed(
         state.sessions.sessions[0],
         phase=phase,
-        pending_intents=(core.RequestId(root="unfinished-turn"),) if pending else (),
+        pending_records=(core.RequestId(root="unfinished-turn"),) if pending else (),
     )
     state = changed(state, sessions=changed(state.sessions, sessions=(session,)))
     if not canonical:
@@ -1419,12 +1419,12 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
             ),
         ),
     )
-    intent = changed(state.intents.intents[1], request_id=request.request_id, request=request)
+    record = changed(state.records.records[1], request_id=request.request_id, request=request)
     pending = changed(pending_settlement(state, ref), retention="candidate")
     state = with_owner(
         state,
         owner,
-        intents=changed(state.intents, intents=(state.intents.intents[0], intent)),
+        records=changed(state.records, records=(state.records.records[0], record)),
         settlement=core.SettlementState(pending=(pending,))
         if disposition == "settle"
         else state.settlement,
@@ -1490,7 +1490,7 @@ def test_opaque_inspection_identities_are_injective_across_sources_and_children(
     resources = (core.ResourceId(root=f"x:inspect:child:{suffix}"), core.ResourceId(root=suffix))
     scope = core.Scope(owner=ref.attempt_id, generation=ref.generation)
     children = []
-    intents = list(state.intents.intents)
+    records = list(state.records.records)
     events = []
     for source, resource in zip(sources, resources, strict=True):
         proof = observation(
@@ -1534,18 +1534,18 @@ def test_opaque_inspection_identities_are_injective_across_sources_and_children(
             deadline_at=state.run.deadline_at,
         )
         root_proof = proof if aggregate else changed(proof, resource_id=None, children=(resource,))
-        intents.append(
+        records.append(
             changed(
-                proof_intent(request, state.run.deadline_at, root_proof),
-                phase=core.IntentPhase.RECONCILING,
+                proof_record(request, state.run.deadline_at, root_proof),
+                phase=core.RequestPhase.RECONCILING,
             )
         )
         if not aggregate:
             other_request = changed(request, request_id=other.request_id)
-            intents.append(
+            records.append(
                 changed(
-                    proof_intent(other_request, state.run.deadline_at, other),
-                    phase=core.IntentPhase.RECONCILING,
+                    proof_record(other_request, state.run.deadline_at, other),
+                    phase=core.RequestPhase.RECONCILING,
                 )
             )
         events.append(
@@ -1565,7 +1565,7 @@ def test_opaque_inspection_identities_are_injective_across_sources_and_children(
     state = with_owner(
         state,
         owner,
-        intents=changed(state.intents, intents=tuple(intents), children=tuple(children)),
+        records=changed(state.records, records=tuple(records), children=tuple(children)),
     )
     ids = []
     for event in events:
@@ -1640,7 +1640,7 @@ def test_child_release_requires_complete_positive_history_from_every_source(
         watermark_history_complete=history_complete,
     )
     sources = tuple(
-        core.Intent(
+        core.RequestRecord(
             request_id=mark.request_id,
             request=core.DiscardWorkspace(
                 request_id=mark.request_id,
@@ -1651,7 +1651,7 @@ def test_child_release_requires_complete_positive_history_from_every_source(
             ),
             payload_digest="source-proof",
             lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-            phase=core.IntentPhase.COMPLETED,
+            phase=core.RequestPhase.COMPLETED,
             observation=mark,
             reconcile_deadline_at=state.run.deadline_at,
         )
@@ -1671,12 +1671,12 @@ def test_child_release_requires_complete_positive_history_from_every_source(
         )
     state = changed(
         state,
-        intents=changed(
-            state.intents,
+        records=changed(
+            state.records,
             children=(child,),
-            intents=(*state.intents.intents, *sources)
+            records=(*state.records.records, *sources)
             if correspondence != "missing-source"
-            else state.intents.intents,
+            else state.records.records,
         ),
     )
     root = observation(ref, core.RequestId(root="withdraw"))
@@ -1731,16 +1731,16 @@ def test_unknown_scope_reopen_inspects_before_reacquisition_or_typed_outcome(
         released=False,
         children_complete=False,
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request_identity(request),
         request=request,
         payload_digest="reopen",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.RECONCILING,
+        phase=core.RequestPhase.RECONCILING,
         reconcile_deadline_at=state.run.deadline_at,
         observation=observed if canonical else None,
     )
-    state = with_owner(state, owner, intents=changed(state.intents, intents=(intent,)))
+    state = with_owner(state, owner, records=changed(state.records, records=(record,)))
     signal = core.ScopeAdmissionReopened(
         attempt=event.normalization.attempt,
         continuation_id=event.normalization.continuation_id,
@@ -1822,7 +1822,7 @@ def test_reopen_admitted_requires_exact_accepted_episode_and_park_proof(guard: s
             scope=core.Scope(owner=event.normalization.attempt.attempt_id, generation=0),
             source_requests=(core.RequestId(root="late-source"),),
         )
-        state = changed(state, intents=changed(state.intents, children=(child,)))
+        state = changed(state, records=changed(state.records, children=(child,)))
     signal = core.ScopeReopenAdmitted(
         attempt=event.normalization.attempt,
         request_id=request_id,
@@ -1926,13 +1926,13 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
         ),
         admission="closed" if outcome_identity == "admission" else "reopened",
     )
-    intent = changed(
-        core.Intent(
+    record = changed(
+        core.RequestRecord(
             request_id=request_identity(request),
             request=request,
             payload_digest="reopened",
             lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-            phase=core.IntentPhase.COMPLETED,
+            phase=core.RequestPhase.COMPLETED,
             observation=observed,
             reconcile_deadline_at=state.run.deadline_at,
         ),
@@ -1942,7 +1942,7 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
         else codec.encode_outcome(schema, outcome),
     )
     state = reload_state(
-        changed(state, intents=changed(state.intents, intents=(*state.intents.intents, intent))),
+        changed(state, records=changed(state.records, records=(*state.records.records, record))),
         codec,
     )
     signal = core.ScopeAdmissionReopened(

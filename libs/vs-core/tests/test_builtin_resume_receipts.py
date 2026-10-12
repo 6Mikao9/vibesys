@@ -14,10 +14,10 @@ def builtin_state(
 ) -> tuple[core.CoreState, core.RequestId]:
     state, identity = resume_state(attempt_owned=attempt_owned, writable=writable, registered=False)
     if dispatch:
-        intent = state.intents.intents[0]
-        assert isinstance(intent.request, core.ResumeSessionTurn)
+        record = state.records.records[0]
+        assert isinstance(record.request, core.ResumeSessionTurn)
         request = core.DispatchTurn.model_validate(
-            intent.request.model_dump(exclude={"kind", "continuation_id", "publication"})
+            record.request.model_dump(exclude={"kind", "continuation_id", "publication"})
         )
         state = replace_request(state, request)
     return state, identity
@@ -26,11 +26,11 @@ def builtin_state(
 def replace_request(
     state: core.CoreState, request: core.DispatchTurn | core.ResumeSessionTurn
 ) -> core.CoreState:
-    intent = state.intents.intents[0].model_copy(
+    record = state.records.records[0].model_copy(
         update={"request": request, "payload_digest": digest(request)}
     )
     return state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
 
 
@@ -40,7 +40,7 @@ def corrupt_origin(state: core.CoreState, fault: str) -> core.CoreState:
     receipt = state.run.receipts[0]
     assert isinstance(receipt.decision, core.RequestTurn)
     decision = receipt.decision
-    request = state.intents.intents[0].request
+    request = state.records.records[0].request
     assert isinstance(request, core.ResumeSessionTurn | core.DispatchTurn)
     match fault:
         case "feedback-id":
@@ -87,7 +87,7 @@ def assert_origin_rejected(state: core.CoreState, identity: core.RequestId) -> N
             core.ReducerTrace(
                 frames=(
                     core.TraceFrame(
-                        signal=event, change=core.IntentsChange(state=restored.intents)
+                        signal=event, change=core.RecordsChange(state=restored.records)
                     ),
                 )
             ),
@@ -126,7 +126,7 @@ def test_builtin_dispatch_cannot_reclassify_canonical_resume_to_skip_its_proofs(
     charge_class: str, *, attempt_owned: bool
 ) -> None:
     state, identity = builtin_state(attempt_owned=attempt_owned, writable=False, dispatch=True)
-    request = state.intents.intents[0].request
+    request = state.records.records[0].request
     assert isinstance(request, core.DispatchTurn)
     turn = request.turn.model_copy(update={"charge_class": charge_class})
     state = replace_request(state, request.model_copy(update={"turn": turn}))
@@ -138,7 +138,7 @@ def test_builtin_dispatch_cannot_erase_resume_origin_and_publication_together(
     *, attempt_owned: bool
 ) -> None:
     state, identity = builtin_state(attempt_owned=attempt_owned, writable=False, dispatch=True)
-    request = state.intents.intents[0].request
+    request = state.records.records[0].request
     assert isinstance(request, core.DispatchTurn)
     turn = request.turn.model_copy(update={"charge_class": "free", "continuation_id": None})
     request = request.model_copy(update={"turn": turn, "decision_id": None})
@@ -164,7 +164,7 @@ def test_exact_builtin_origin_and_publication_survive_reload_and_replay(
             event,
             core.ReducerTrace(
                 frames=(
-                    core.TraceFrame(signal=event, change=core.IntentsChange(state=state.intents)),
+                    core.TraceFrame(signal=event, change=core.RecordsChange(state=state.records)),
                 )
             ),
         )

@@ -15,8 +15,6 @@ from vs_core.api import (
     DecisionId,
     DecisionSubmitted,
     InspectRequest,
-    IntentPhase,
-    IntentsChange,
     Interrupt,
     InterruptRequested,
     InvocationId,
@@ -24,9 +22,11 @@ from vs_core.api import (
     OperationId,
     OperationRef,
     OperationRetireRequested,
+    RecordsChange,
     RecoveryStarted,
     ReducerTrace,
     RequestId,
+    RequestPhase,
     RunControlEvent,
     RunId,
     RunStatus,
@@ -66,12 +66,12 @@ def test_request_registration_is_deterministic_immutable_and_serializable(now: f
     assert state.model_dump_json() == before
     assert result.state.revision == state.revision + 1
     assert result.requests[0].request_id is not None
-    intent = result.state.intents.intents[0]
-    assert intent.phase == IntentPhase.PREPARED
-    assert intent.request == result.requests[0]
+    record = result.state.records.records[0]
+    assert record.phase == RequestPhase.PREPARED
+    assert record.request == result.requests[0]
     restarted = CoreState.model_validate_json(result.state.model_dump_json())
     assert restarted == result.state
-    assert type(restarted.intents.intents[0].request.scope.owner) is RunId
+    assert type(restarted.records.records[0].request.scope.owner) is RunId
 
 
 def test_attempt_scope_keeps_its_distinct_identity_on_wire() -> None:
@@ -93,7 +93,7 @@ def test_fixed_order_and_one_revision_for_propagated_signals() -> None:
                 change=SchedulingChange(state=state.scheduling, signals=(recovery, next_clock)),
             ),
             TraceFrame(signal=next_clock, change=SchedulingChange(state=state.scheduling)),
-            TraceFrame(signal=recovery, change=IntentsChange(state=state.intents)),
+            TraceFrame(signal=recovery, change=RecordsChange(state=state.records)),
         )
     )
     assert trace_step(state, clock, trace).state.revision == 1
@@ -156,7 +156,7 @@ def test_a_request_proposed_again_with_another_deadline_is_the_same_request(late
         )
     )
     result = trace_step(state, clock, trace)
-    prepared = [row for row in result.state.intents.intents if row.request_id == request.request_id]
+    prepared = [row for row in result.state.records.records if row.request_id == request.request_id]
     assert [row.request.deadline_at for row in prepared] == [10.0]
 
 
@@ -219,7 +219,7 @@ def test_interrupt_refund_is_preserved_through_kernel_routing(refund: int) -> No
     assert result.state.scheduling == state.scheduling
 
 
-def test_operation_retirement_routes_to_owning_intents_area() -> None:
+def test_operation_retirement_routes_to_owning_records_area() -> None:
     state = initial_state()
     scope = Scope(owner=state.run.run_id, generation=0)
     target = OperationRef(operation_id=OperationId(root="owned-operation"), generation=0)
@@ -236,7 +236,7 @@ def test_operation_retirement_routes_to_owning_intents_area() -> None:
             frames=(
                 TraceFrame(
                     signal=OperationRetireRequested(operation=target, scope=scope),
-                    change=IntentsChange(state=state.intents),
+                    change=RecordsChange(state=state.records),
                 ),
             )
         ),

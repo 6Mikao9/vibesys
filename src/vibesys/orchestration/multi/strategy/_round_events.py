@@ -39,9 +39,9 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     EvidenceKind,
-    IntentBlocked,
     OperationResult,
     Rejected,
+    RequestBlocked,
     RunView,
 )
 
@@ -105,7 +105,7 @@ def on_exhausted(state: MultiStrategyState, event: AttemptExhausted) -> MultiStr
     return fail(state, record, f"attempt budget exhausted ({event.reason})")
 
 
-def on_blocked(state: MultiStrategyState, event: IntentBlocked) -> MultiStrategyState:
+def on_blocked(state: MultiStrategyState, event: RequestBlocked) -> MultiStrategyState:
     """A blocked request leaves its effect unknown: end the round awaiting it."""
     detail = f"request blocked: {event.diagnostic}"
     record = awaiting(state, ids.decision_of_operation(event.target.root))

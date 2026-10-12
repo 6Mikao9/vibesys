@@ -119,7 +119,7 @@ class SessionView(Value):
     invocation: InvocationId | None = None
     accepted: bool = False
     resource_id: ResourceId | None = None
-    pending_intents: tuple[RequestId, ...] = ()
+    pending_records: tuple[RequestId, ...] = ()
     acceptance_sequence: int | None = Field(default=None, ge=0)
     continuation_id: ContinuationId | None = None
 
@@ -772,7 +772,7 @@ class SnapshotAndRetainRun(RequestBase):
 
     Sessions A requires terminal invocation proof before preparation. Success is
     separately observed with a retained RevisionRef; missing revision is unknown.
-    The shell persists intent before I/O and replays the same request identity.
+    The shell persists record before I/O and replays the same request identity.
     """
 
     kind: Literal["snapshot_and_retain_run"] = "snapshot_and_retain_run"

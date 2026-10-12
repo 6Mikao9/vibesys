@@ -32,8 +32,8 @@ if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.common import Scope
     from .types.evaluation import EvaluationState
-    from .types.intents import Intent, IntentsState
     from .types.kernel import RunState
+    from .types.records import RecordsState, RequestRecord
 
 __all__ = ["attempt_settled", "produce_history"]
 
@@ -73,12 +73,12 @@ type Verdict[T] = Proven[T] | Missing | Mismatch
 
 
 def _submission_rows(
-    scope: Scope, evaluation: EvaluationState, intents: IntentsState
-) -> tuple[Intent, ...]:
+    scope: Scope, evaluation: EvaluationState, records: RecordsState
+) -> tuple[RequestRecord, ...]:
     """The scope's measurement submissions in canonical outbox order."""
     return tuple(
         row
-        for row in intents.intents
+        for row in records.records
         if row.request.scope == scope
         and (
             isinstance(row.request, SubmitMeasurement)
@@ -94,7 +94,7 @@ def _submission_rows(
     )
 
 
-def attempt_settled(scope: Scope, evaluation: EvaluationState, intents: IntentsState) -> bool:
+def attempt_settled(scope: Scope, evaluation: EvaluationState, records: RecordsState) -> bool:
     """Whether every measurement submission issued in ``scope`` has a terminal observation.
 
     Invariant: core never authorizes a resume for a scope while this is False. A resume is
@@ -108,19 +108,19 @@ def attempt_settled(scope: Scope, evaluation: EvaluationState, intents: IntentsS
         row.observation is not None
         and row.observation.terminal
         and row.observation.status not in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
-        for row in _submission_rows(scope, evaluation, intents)
+        for row in _submission_rows(scope, evaluation, records)
     )
 
 
 def produce_history(
     scope: Scope,
     evaluation: EvaluationState,
-    intents: IntentsState,
+    records: RecordsState,
     owner: AttemptView,
     run: RunState,
 ) -> AttemptEvaluationHistory:
     """Certify exact submission coverage, retaining unavailable partial history."""
-    submissions = _submission_rows(scope, evaluation, intents)
+    submissions = _submission_rows(scope, evaluation, records)
     ids = tuple(row.request_id for row in submissions)
     expected = {job.submission_id for job in evaluation.jobs if job.scope == scope} | {
         job.request_id
@@ -136,7 +136,7 @@ def produce_history(
     expected.update(
         receipt.request_id for receipt in receipts if isinstance(receipt, PreparedSubmissionReceipt)
     )
-    records = []
+    produced = []
     for ordinal, row in enumerate(submissions, 1):
         observation = row.observation
         proof = _submission_identity(row, evaluation, run)
@@ -160,7 +160,7 @@ def produce_history(
         ):
             continue
         facts = row.evaluation_result.model_dump() if row.evaluation_result is not None else {}
-        records.append(
+        produced.append(
             AttemptEvaluationRecord(
                 ordinal=ordinal,
                 submission_id=row.request_id,
@@ -172,7 +172,7 @@ def produce_history(
     complete = (
         expected <= set(ids)
         and len(set(ids)) == len(ids)
-        and len(records) == len(ids)
+        and len(produced) == len(ids)
         and all(isinstance(receipt, PreparedSubmissionReceipt) for receipt in receipts)
         and (bool(ids) or _certified_empty(owner, run))
     )
@@ -183,12 +183,12 @@ def produce_history(
             else EvaluationHistoryAvailability.UNAVAILABLE
         ),
         covered_submissions=ids,
-        records=tuple(records),
+        records=tuple(produced),
     )
 
 
 def _budgeted(
-    row: Intent, identity: MeasurementIdentity, evaluation: EvaluationState
+    row: RequestRecord, identity: MeasurementIdentity, evaluation: EvaluationState
 ) -> Verdict[PreparedSubmissionReceipt]:
     budgets = tuple(
         budget
@@ -211,7 +211,7 @@ def _budgeted(
 
 
 def _submission_identity(
-    row: Intent, evaluation: EvaluationState, run: RunState
+    row: RequestRecord, evaluation: EvaluationState, run: RunState
 ) -> Verdict[MeasurementIdentity]:
     request = row.request
     if request.request_id != row.request_id:
@@ -233,7 +233,7 @@ def _submission_identity(
 
 
 def _builtin_identity(
-    row: Intent, request: SubmitMeasurement, evaluation: EvaluationState
+    row: RequestRecord, request: SubmitMeasurement, evaluation: EvaluationState
 ) -> Verdict[MeasurementIdentity]:
     jobs = tuple(job for job in evaluation.jobs if job.submission_id == row.request_id)
     if (
@@ -256,7 +256,7 @@ def _builtin_identity(
 
 
 def _registered_identity(
-    row: Intent,
+    row: RequestRecord,
     request: ExecuteRegisteredOperation,
     evaluation: EvaluationState,
     run: RunState,

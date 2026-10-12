@@ -49,7 +49,7 @@ def normalized_turn(request: core.OperationRequest) -> core.TurnSpec:
 def legacy_payload(
     request: MeasuredJob | ResumeTurn,
     scope: core.Scope,
-    phase: core.IntentPhase,
+    phase: core.RequestPhase,
     *,
     measured: bool = True,
 ) -> tuple[core.OperationRegistry, str]:
@@ -92,7 +92,7 @@ def legacy_payload(
         operation=codec.encode(request),
         retry_limit=0,
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=core.RequestId(root="registered"),
         request=executable,
         payload_digest="v2",
@@ -100,9 +100,9 @@ def legacy_payload(
         phase=phase,
         reconcile_deadline_at=100.0,
     ).model_dump(mode="json")
-    intent.pop("setup_failure")
-    intent.pop("evaluation_result")
-    intent["request"].pop("inputs")
+    record.pop("setup_failure")
+    record.pop("evaluation_result")
+    record["request"].pop("inputs")
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
@@ -112,7 +112,7 @@ def legacy_payload(
     receipt["decision"].pop("normalized_measurement")
     old["core"]["registry"] = [descriptor.model_dump(mode="json")]
     old["core"]["run"]["capabilities"]["operations"] = [descriptor.model_dump(mode="json")]
-    old["core"]["intents"]["intents"] = [intent]
+    old["core"]["records"]["records"] = [record]
     old["core"]["run"]["receipts"] = [receipt]
     return codec, json.dumps(old)
 
@@ -137,7 +137,7 @@ def test_prepared_registered_measurement_requires_reconstructable_attempt_histor
     digest: str,
 ) -> None:
     scope = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
-    codec, source = legacy_payload(measured_request(digest), scope, core.IntentPhase.PREPARED)
+    codec, source = legacy_payload(measured_request(digest), scope, core.RequestPhase.PREPARED)
     with pytest.raises(core.ContractError, match=r"history.*unavailable"):
         codec.migrate_envelope(
             core.RunEnvelope[core.StrategyState], source, core.v2_to_v3_migration(codec)
@@ -146,19 +146,19 @@ def test_prepared_registered_measurement_requires_reconstructable_attempt_histor
 
 @given(
     st.sampled_from(
-        (core.IntentPhase.DISPATCHED, core.IntentPhase.RECONCILING, core.IntentPhase.COMPLETED)
+        (core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING, core.RequestPhase.COMPLETED)
     )
 )
 def test_live_registered_measurement_keeps_ownership_and_unavailable_history(
-    phase: core.IntentPhase,
+    phase: core.RequestPhase,
 ) -> None:
     scope = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
     codec, source = legacy_payload(measured_request("evaluator"), scope, phase)
     loaded = codec.migrate_envelope(
         core.RunEnvelope[core.StrategyState], source, core.v2_to_v3_migration(codec)
     )
-    assert loaded.core.intents.intents[0].phase == phase
-    assert loaded.core.intents.recovery.phase == core.RecoveryPhase.REQUIRED
+    assert loaded.core.records.records[0].phase == phase
+    assert loaded.core.records.recovery.phase == core.RecoveryPhase.REQUIRED
     assert (
         loaded.core.attempts.attempts[0].evaluation_history.availability
         == core.EvaluationHistoryAvailability.UNAVAILABLE
@@ -169,13 +169,13 @@ def test_live_registered_measurement_keeps_ownership_and_unavailable_history(
 def test_prepared_generic_job_without_measurement_authority_stays_recoverable() -> None:
     scope = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
     codec, source = legacy_payload(
-        measured_request("evaluator"), scope, core.IntentPhase.PREPARED, measured=False
+        measured_request("evaluator"), scope, core.RequestPhase.PREPARED, measured=False
     )
     loaded = codec.migrate_envelope(
         core.RunEnvelope[core.StrategyState], source, core.v2_to_v3_migration(codec)
     )
-    assert loaded.core.intents.intents[0].phase == core.IntentPhase.PREPARED
-    assert loaded.core.intents.recovery.phase == core.RecoveryPhase.REQUIRED
+    assert loaded.core.records.records[0].phase == core.RequestPhase.PREPARED
+    assert loaded.core.records.recovery.phase == core.RecoveryPhase.REQUIRED
 
 
 @given(st.text(alphabet="abcdef0123456789", min_size=1, max_size=20))
@@ -201,7 +201,7 @@ def test_prepared_registered_resume_needs_publication_proof_before_invocation_ex
             charge_class="resume",
         )
     )
-    codec, source = legacy_payload(request, scope, core.IntentPhase.PREPARED)
+    codec, source = legacy_payload(request, scope, core.RequestPhase.PREPARED)
     with pytest.raises(core.ContractError, match=r"resume.*unavailable"):
         codec.migrate_envelope(
             core.RunEnvelope[core.StrategyState], source, core.v2_to_v3_migration(codec)

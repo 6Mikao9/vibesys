@@ -81,16 +81,16 @@ from .types.evaluation import (
     UnobservedJobFacts,
 )
 from .types.evaluation_history import EvaluationStageOutcome
-from .types.intents import IntentPhase, RequestObserved
 from .types.job_observations import MeasurementFailure, may_resubmit
 from .types.kernel import AreaChange
+from .types.records import RequestObserved, RequestPhase
 from .types.strategy import Measure
 
 if TYPE_CHECKING:
     from .types.common import DecisionId, Observation, ResourceId, Scope, Seconds
     from .types.evaluation import EvaluationEvent, EvaluationState, EvidenceRef, MeasurementPlan
-    from .types.intents import Intent, Request
     from .types.kernel import EvaluationContext, Signal
+    from .types.records import Request, RequestRecord
 
 __all__ = ["advance"]
 
@@ -154,7 +154,7 @@ def _resolved_plan(
 def _snapshot_revision(
     context: EvaluationContext, scope: Scope, candidate: SnapshotResultRef
 ) -> Verdict[RevisionRef]:
-    rows = tuple(row for row in context.intents.intents if row.request_id == candidate.request_id)
+    rows = tuple(row for row in context.records.records if row.request_id == candidate.request_id)
     if len(rows) != 1:
         return Missing(ProofReason.ABSENT_REQUEST)
     row = rows[0]
@@ -234,7 +234,7 @@ def _submission_released(
     if len(rows) != 1:
         return Missing(ProofReason.ABSENT_RESOURCE)
     job = rows[0]
-    proof = released_owner(job, context.intents.intents)
+    proof = released_owner(job, context.records.records)
     if not isinstance(proof, Proven):
         return proof
     return (
@@ -260,13 +260,13 @@ def _descendants_released(
         seen.add(resource)
         rows = tuple(
             child
-            for child in context.intents.children
+            for child in context.records.children
             if child.resource_id == resource and child.scope == job.scope
         )
         if len(rows) != 1:
             return Missing(ProofReason.INCOMPLETE_MANIFEST)
         child = rows[0]
-        if not isinstance(released_owner(child, context.intents.intents), Proven):
+        if not isinstance(released_owner(child, context.records.records), Proven):
             return Missing(ProofReason.UNRESOLVED)
         pending.extend(
             resource
@@ -308,7 +308,7 @@ def _reusable_capture(
         return Missing(ProofReason.ABSENT_RESOURCE)
     job = jobs[0]
     source = next(
-        (r for r in context.intents.intents if r.request_id == evidence.source_request), None
+        (r for r in context.records.records if r.request_id == evidence.source_request), None
     )
     if source is None:
         return Missing(ProofReason.ABSENT_REQUEST)
@@ -371,7 +371,7 @@ def _requested(
     if any(
         isinstance(row.request, SubmitMeasurement)
         and row.request.decision_id == origin.value.decision_id
-        for row in context.intents.intents
+        for row in context.records.records
     ):
         return AreaChange(state=state)
     return _admit(
@@ -497,7 +497,7 @@ def _repeated(
 def _deadline_of(
     state: EvaluationState, context: EvaluationContext, request_id: RequestId
 ) -> Seconds | None:
-    """The deadline core gave a submission, from the call that allocated it or its intent."""
+    """The deadline core gave a submission, from the call that allocated it or its record."""
     call = next(
         (
             c
@@ -508,7 +508,7 @@ def _deadline_of(
     )
     if call is not None:
         return call.deadline_at
-    row = next((r for r in context.intents.intents if r.request_id == request_id), None)
+    row = next((r for r in context.records.records if r.request_id == request_id), None)
     if row is not None and isinstance(row.request, SubmitMeasurement):
         return row.request.deadline_at
     return None
@@ -589,7 +589,7 @@ def _reported_to_strategy(context: EvaluationContext, job: OwnedJob | Registered
     """
     if isinstance(job, RegisteredOwnedJob):
         return True
-    row = next((r for r in context.intents.intents if r.request_id == job.submission_id), None)
+    row = next((r for r in context.records.records if r.request_id == job.submission_id), None)
     return not (
         row is not None
         and isinstance(row.request, SubmitMeasurement)
@@ -613,15 +613,15 @@ def _held_mismatch(
 
 def _source(
     context: EvaluationContext, observation: Observation, *, later: bool = False
-) -> Verdict[Intent]:
+) -> Verdict[RequestRecord]:
     """The committed request an observation belongs to.
 
     A job's observations carry its submission's request id, but only the submission's
-    own observation goes through the intent ledger. With ``later``, the ledger must
+    own observation goes through the record ledger. With ``later``, the ledger must
     hold the submission's observation, and the incoming one may be newer than it: an
     earlier or conflicting one is refused, and freshness against the job follows.
     """
-    rows = tuple(row for row in context.intents.intents if row.request_id == observation.request_id)
+    rows = tuple(row for row in context.records.records if row.request_id == observation.request_id)
     if len(rows) != 1:
         return Missing(ProofReason.ABSENT_REQUEST) if not rows else Mismatch(ProofField.REQUEST_ID)
     row = rows[0]
@@ -664,7 +664,7 @@ def _submission_observed(
 
 
 def _deferred_wake(
-    state: EvaluationState, event: MeasurementSubmissionObserved, source: Intent
+    state: EvaluationState, event: MeasurementSubmissionObserved, source: RequestRecord
 ) -> tuple[ContinuationJobsChanged, ...]:
     """Wake the scope's waiting continuations when one of its submissions concludes.
 
@@ -780,7 +780,7 @@ def _conclusive(observation: Observation | None) -> bool:
 
 
 def _submission_receipt(
-    budget: SubmissionBudget, event: MeasurementSubmissionObserved, source: Intent
+    budget: SubmissionBudget, event: MeasurementSubmissionObserved, source: RequestRecord
 ) -> Verdict[SubmissionBudget]:
     matches = tuple(
         r
@@ -815,7 +815,7 @@ def _submission_job(
     state: EvaluationState,
     context: EvaluationContext,
     event: MeasurementSubmissionObserved,
-    source: Intent,
+    source: RequestRecord,
     request: SubmitMeasurement,
 ) -> AreaChange[EvaluationState]:
     observation = event.observation
@@ -1034,7 +1034,7 @@ def _job_source(
     state: EvaluationState,
     context: EvaluationContext,
     job: OwnedJob | RegisteredOwnedJob,
-    source: Intent,
+    source: RequestRecord,
 ) -> Verdict[OwnedJob | RegisteredOwnedJob]:
     request_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
     if request_id != source.request_id or job.scope != source.request.scope:
@@ -1054,7 +1054,10 @@ def _job_source(
 
 
 def _measure_origin(
-    state: EvaluationState, context: EvaluationContext, source: Intent, request: SubmitMeasurement
+    state: EvaluationState,
+    context: EvaluationContext,
+    source: RequestRecord,
+    request: SubmitMeasurement,
 ) -> Verdict[None]:
     """Prove where a submission came from: an accepted Measure, or a recorded agent call.
 
@@ -1086,7 +1089,7 @@ def _measure_origin(
 
 
 def _builtin_source(
-    state: EvaluationState, context: EvaluationContext, job: OwnedJob, source: Intent
+    state: EvaluationState, context: EvaluationContext, job: OwnedJob, source: RequestRecord
 ) -> Verdict[OwnedJob]:
     request = source.request
     if not isinstance(request, SubmitMeasurement) or request.plan != job.plan:
@@ -1099,7 +1102,9 @@ def _builtin_source(
 
 
 def _incoming_job(
-    job: OwnedJob | RegisteredOwnedJob, source: Intent, event: JobObserved | RegisteredJobObserved
+    job: OwnedJob | RegisteredOwnedJob,
+    source: RequestRecord,
+    event: JobObserved | RegisteredJobObserved,
 ) -> Verdict[OwnedJob | RegisteredOwnedJob]:
     observation = event.observation
     if observation.resource_id is None or (
@@ -1274,7 +1279,7 @@ def _job_observed(
             # One collection per job. A collection that yields nothing (a job that failed
             # before producing evidence) is itself observed as a job event, and asking
             # again on that event would never end.
-            if not any(row.request_id == collect.request_id for row in context.intents.intents):
+            if not any(row.request_id == collect.request_id for row in context.records.records):
                 requests = (collect,)
     closing = _ended(context, job, event)
     return AreaChange(
@@ -1298,7 +1303,7 @@ def _ended(
     A job's observations carry its submission's request id and sequence, so the end of
     the job is a fact about the submit request, with the terminal facts the history reads.
     When the submit's own view was taken
-    while the job still ran, nothing else completes that intent, and a closing run waits
+    while the job still ran, nothing else completes that record, and a closing run waits
     for every open one. A submission the ledger already closed needs nothing, and one it
     never dispatched cannot have been observed.
     """
@@ -1308,10 +1313,10 @@ def _ended(
         or _conclusive(job.observation)
     ):
         return ()
-    intent = next(
-        (row for row in context.intents.intents if row.request_id == job.submission_id), None
+    record = next(
+        (row for row in context.records.records if row.request_id == job.submission_id), None
     )
-    if intent is None or intent.phase in (IntentPhase.PREPARED, IntentPhase.COMPLETED):
+    if record is None or record.phase in (RequestPhase.PREPARED, RequestPhase.COMPLETED):
         return ()
     return (
         RequestObserved(observation=event.observation, evaluation_result=event.evaluation_result),
@@ -1375,7 +1380,7 @@ def _job_budget(
     if job.observation is None:
         return state
     source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
-    source = next((r for r in context.intents.intents if r.request_id == source_id), None)
+    source = next((r for r in context.records.records if r.request_id == source_id), None)
     if source is None or not isinstance(
         source.request, SubmitMeasurement | ExecuteRegisteredOperation
     ):
@@ -1443,7 +1448,7 @@ def _history_signals(
     )
     if owner is None:
         return ()
-    history = produce_history(scope, state, context.intents, owner, context.run)
+    history = produce_history(scope, state, context.records, owner, context.run)
     if history == owner.evaluation_history or any(
         record not in history.records for record in owner.evaluation_history.records
     ):
@@ -1472,7 +1477,7 @@ def _job_request(
     sequence = observation.sequence if observation is not None else 0
     # Evidence is collected once per job, so its id does not name an observation.
     suffix = "" if model is CollectEvidence else f":{sequence}"
-    canonical = next((r for r in context.intents.intents if r.request_id == source), None)
+    canonical = next((r for r in context.records.records if r.request_id == source), None)
     # A poll raised by the clock has no triggering observation to inherit the
     # submission's decision from, so it names the decision itself.
     inherited = canonical.request if canonical is not None and model is ObserveOwnedJob else None
@@ -1499,10 +1504,10 @@ def _terminate(
     if len(rows) != 1:
         return AreaChange(state=state)
     job = rows[0]
-    if isinstance(released_owner(job, context.intents.intents), Proven):
+    if isinstance(released_owner(job, context.records.records), Proven):
         return AreaChange(state=state)
     source_id = job.submission_id if isinstance(job, OwnedJob) else job.request_id
-    source = next((r for r in context.intents.intents if r.request_id == source_id), None)
+    source = next((r for r in context.records.records if r.request_id == source_id), None)
     if (
         source is None
         or not isinstance(request_matches(source, source.request), Proven)
@@ -1536,7 +1541,7 @@ def _drain(
         return AreaChange(state=state)
     owner = owners[0]
     proof = current_closure(owner, owner.closure)
-    authority = next((r for r in context.intents.intents if r.request_id == event.authority), None)
+    authority = next((r for r in context.records.records if r.request_id == event.authority), None)
     if (
         not isinstance(proof, Proven)
         or proof.value.authority != event.authority

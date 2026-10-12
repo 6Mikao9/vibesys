@@ -143,9 +143,9 @@ from vs_runtime._operation_catalog import (
     RefusalReason,
 )
 from vs_runtime._operation_receipts import (
-    IntentReceipt,
     NamespaceOperationReceipts,
     OperationReceipts,
+    RecordReceipt,
     ResultReceipt,
 )
 from vs_runtime._operation_requests import RegisteredOperationRequests
@@ -286,7 +286,6 @@ __all__ = [
     "Indeterminate",
     "Inspected",
     "Inspection",
-    "IntentReceipt",
     "InterpretEvidenceOwner",
     "IssueBoardOwner",
     "JobRecord",
@@ -330,6 +329,7 @@ __all__ = [
     "ReceiptCorruptError",
     "ReceiptEvidenceLedger",
     "ReceiptStore",
+    "RecordReceipt",
     "RecordedRequestInspector",
     "RefusalReason",
     "RefusingRequestExecution",

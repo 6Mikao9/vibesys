@@ -25,8 +25,6 @@ from vs_core.api import (
     DecisionReceipt,
     DispatchTurn,
     EventId,
-    Intent,
-    IntentPhase,
     InterruptClaim,
     Invocation,
     InvocationChargeRequested,
@@ -41,6 +39,8 @@ from vs_core.api import (
     Rejected,
     RejectionCode,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     RequestTurn,
     ResourceId,
     RoleId,
@@ -139,12 +139,12 @@ def invocation_fixture(
         invocation=ref.invocation_id,
         resource_id=ResourceId(root="conversation"),
     )
-    intent = Intent(
+    record = RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest="turn",
         lifecycle=LifecycleClass.SESSION_TURN,
-        phase=IntentPhase.COMPLETED,
+        phase=RequestPhase.COMPLETED,
         observation=observed if correlation == "exact" else None,
         reconcile_deadline_at=1000,
     )
@@ -185,7 +185,7 @@ def invocation_fixture(
     )
     if receipt_kind == "foreign-request-decision":
         request = request.model_copy(update={"decision_id": DecisionId(root="foreign")})
-        intent = intent.model_copy(update={"request": request})
+        record = record.model_copy(update={"request": request})
     elif receipt_kind == "missing-request-membership":
         receipt = receipt.model_copy(update={"request_ids": ()})
     elif receipt_kind == "foreign-session-scope":
@@ -213,8 +213,8 @@ def invocation_fixture(
                     ),
                 }
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": () if correlation == "unregistered" else (intent,)}
+            "records": state.records.model_copy(
+                update={"records": () if correlation == "unregistered" else (record,)}
             ),
             "run": state.run.model_copy(
                 update={
@@ -234,7 +234,7 @@ def context(state: CoreState) -> AttemptsContext:
         sessions=state.sessions,
         evaluation=state.evaluation,
         settlement=state.settlement,
-        intents=state.intents,
+        records=state.records,
     )
 
 

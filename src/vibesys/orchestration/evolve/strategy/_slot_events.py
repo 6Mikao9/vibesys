@@ -25,9 +25,9 @@ from vs_core.api import (
     AttemptExhausted,
     AttemptReady,
     AttemptSettled,
-    IntentBlocked,
     OperationResult,
     Rejected,
+    RequestBlocked,
     RunView,
     Step,
 )
@@ -97,7 +97,7 @@ def on_exhausted(state: EvolveStrategyState, event: AttemptExhausted) -> EvolveS
     return fail(state, slot, f"attempt budget exhausted ({event.reason})")
 
 
-def on_blocked(state: EvolveStrategyState, event: IntentBlocked) -> EvolveStrategyState:
+def on_blocked(state: EvolveStrategyState, event: RequestBlocked) -> EvolveStrategyState:
     """A blocked request leaves its effect unknown: end the slot awaiting it."""
     detail = f"request blocked: {event.diagnostic}"
     slot = awaiting(state, ids.decision_of_operation(event.target.root))

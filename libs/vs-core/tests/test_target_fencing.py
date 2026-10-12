@@ -67,7 +67,7 @@ def prepare(state: core.CoreState, requests: tuple[core.Request, ...]) -> core.C
             frames=(
                 core.TraceFrame(
                     signal=recovery,
-                    change=core.IntentsChange(state=state.intents, requests=requests),
+                    change=core.RecordsChange(state=state.records, requests=requests),
                 ),
             )
         ),
@@ -293,7 +293,7 @@ def test_inspected_turn_successors_restore_original_cause_dependencies_and_episo
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
-                    signal=event, change=core.IntentsChange(state=state.intents, signals=(signal,))
+                    signal=event, change=core.RecordsChange(state=state.records, signals=(signal,))
                 ),
                 core.TraceFrame(
                     signal=signal,
@@ -313,12 +313,12 @@ def test_known_child_cannot_masquerade_as_root_target(inspection: str) -> None:
     _, state, event = registered_fixture()
     assert event.target is not None
     child = core.ResourceId(root="child")
-    original = state.intents.intents[0]
+    original = state.records.records[0]
     root_observation = observation(
         original.request.scope, "original", core.ResourceId(root="root")
     ).model_copy(update={"children": (child,)})
     original = original.model_copy(update={"observation": root_observation})
-    query = state.intents.intents[1]
+    query = state.records.records[1]
     if inspection == "job":
         query = query.model_copy(
             update={
@@ -331,7 +331,7 @@ def test_known_child_cannot_masquerade_as_root_target(inspection: str) -> None:
             }
         )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (original, query)})}
+        update={"records": state.records.model_copy(update={"records": (original, query)})}
     )
     target = event.target.model_copy(
         update={"observation": event.target.observation.model_copy(update={"resource_id": child})}
@@ -370,15 +370,15 @@ def test_observation_cannot_claim_another_owner_or_admission_episode(
         core.step(state, event)
 
 
-@pytest.mark.parametrize("manifest", ["intent", "job", "job_observation", "lease"])
+@pytest.mark.parametrize("manifest", ["record", "job", "job_observation", "lease"])
 def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manifest: str) -> None:
     _, state, event = registered_fixture()
     assert event.target is not None
     child = core.ResourceId(root="child")
-    original, query = state.intents.intents
+    original, query = state.records.records
     scope = original.request.scope
     discovered = observation(scope, "original").model_copy(update={"children": (child,)})
-    if manifest == "intent":
+    if manifest == "record":
         original = original.model_copy(update={"observation": discovered})
     elif manifest in ("job", "job_observation"):
         job = core.RegisteredOwnedJob(
@@ -395,7 +395,7 @@ def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manif
     else:
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
+                "records": state.records.model_copy(
                     update={
                         "children": (
                             core.ChildLease(
@@ -409,7 +409,7 @@ def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manif
             }
         )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (original, query)})}
+        update={"records": state.records.model_copy(update={"records": (original, query)})}
     )
     target = event.target.model_copy(
         update={"observation": event.target.observation.model_copy(update={"resource_id": child})}
@@ -421,7 +421,7 @@ def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manif
 def test_inspection_job_resource_must_match_the_recorded_owner() -> None:
     _, state, event = registered_fixture()
     assert event.target is not None
-    original, query = state.intents.intents
+    original, query = state.records.records
     resource = core.ResourceId(root="job")
     original = original.model_copy(
         update={"observation": observation(original.request.scope, "original", resource)}
@@ -437,7 +437,7 @@ def test_inspection_job_resource_must_match_the_recorded_owner() -> None:
         }
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (original, query)})}
+        update={"records": state.records.model_copy(update={"records": (original, query)})}
     )
     event = event.model_copy(
         update={
@@ -467,7 +467,7 @@ def test_query_episode_cannot_replace_an_original_targets_absent_episode() -> No
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
-                    signal=event, change=core.IntentsChange(state=state.intents, signals=(signal,))
+                    signal=event, change=core.RecordsChange(state=state.records, signals=(signal,))
                 ),
                 core.TraceFrame(
                     signal=signal,

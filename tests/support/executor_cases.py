@@ -34,7 +34,7 @@ from vs_core.api import (
     AdoptRevision,
     AttemptId,
     AttemptRef,
-    BlockIntent,
+    BlockRequest,
     CancelOwnedJob,
     CancelOwnedResource,
     CancelTurn,
@@ -252,7 +252,7 @@ class _OperationsCase:
 class _SemanticWorld(_World):
     async def prepare(self, scenario: Scenario) -> RequestBase:
         del scenario
-        return BlockIntent(
+        return BlockRequest(
             request_id=RequestId(root="block"),
             scope=SCOPE,
             deadline_at=100.0,
@@ -274,7 +274,7 @@ class _SemanticWorld(_World):
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
-            return await events.execute(cast("BlockIntent", request), context)
+            return await events.execute(cast("BlockRequest", request), context)
         finally:
             self._writes = faulting.writes
 
@@ -285,7 +285,7 @@ class _SemanticWorld(_World):
 
 class _SemanticEventsCase:
     name = "semantic_events"
-    scenarios = (Scenario("block", BlockIntent, effectful=True),)
+    scenarios = (Scenario("block", BlockRequest, effectful=True),)
 
     @asynccontextmanager
     async def world(self) -> AsyncIterator[_SemanticWorld]:

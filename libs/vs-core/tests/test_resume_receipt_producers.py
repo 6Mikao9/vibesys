@@ -58,7 +58,7 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
             run=state.run,
             attempts=state.attempts,
             evaluation=core.EvaluationState(),
-            intents=core.IntentsState(),
+            records=core.RecordsState(),
         ),
         core.TurnRequested(scope=predecessor.scope, turn=predecessor.turn),
     )
@@ -101,12 +101,12 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
             else None
         )
         sources.append(
-            core.Intent(
+            core.RequestRecord(
                 request_id=job.submission_id,
                 request=request,
                 payload_digest=digest(request),
                 lifecycle=core.LifecycleClass.OWNED_JOB,
-                phase=core.IntentPhase.COMPLETED,
+                phase=core.RequestPhase.COMPLETED,
                 observation=job.observation,
                 evaluation_result=result,
                 reconcile_deadline_at=100.0,
@@ -135,8 +135,8 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
             "evaluation": state.evaluation.model_copy(
                 update={"jobs": tuple(owned_jobs), "submission_budgets": tuple(budgets)}
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents, *sources)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, *sources)}
             ),
         }
     ), wait
@@ -174,30 +174,30 @@ def dispatch_publication(state: core.CoreState, wait: core.Continuation) -> core
         payload_digest=digest(decision),
         request_ids=(request.request_id,),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=digest(request),
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.PREPARED,
+        phase=core.RequestPhase.PREPARED,
         reconcile_deadline_at=100.0,
     )
     state = state.model_copy(
         update={
             "run": state.run.model_copy(update={"receipts": (*state.run.receipts, receipt)}),
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents, intent)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, record)}
             ),
         }
     )
     event = core.DispatchAuthorized(request_id=request.request_id)
-    # Intents A dispatch remains an explicit stub. The kernel consumes the real
+    # Records A dispatch remains an explicit stub. The kernel consumes the real
     # Evaluation/Sessions/Attempts producers before this public dispatch fence.
     return core.trace_step(
         state,
         event,
         core.ReducerTrace(
-            frames=(core.TraceFrame(signal=event, change=core.IntentsChange(state=state.intents)),)
+            frames=(core.TraceFrame(signal=event, change=core.RecordsChange(state=state.records)),)
         ),
     )
 
@@ -241,8 +241,8 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
                     "submission_budgets": state.evaluation.submission_budgets[:ordinal],
                 }
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": state.intents.intents[: ordinal + 1]}
+            "records": state.records.model_copy(
+                update={"records": state.records.records[: ordinal + 1]}
             ),
         }
     )
@@ -277,12 +277,12 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
         turn=turn,
         continuation_id=first.continuation_id,
     )
-    source = core.Intent(
+    source = core.RequestRecord(
         request_id=observation.request_id,
         request=request,
         payload_digest=digest(request),
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=observation,
         reconcile_deadline_at=100.0,
     )
@@ -340,8 +340,8 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
                     ),
                 }
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents, source)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, source)}
             ),
             "evaluation": state.evaluation.model_copy(update={"continuations": previous_rows}),
         }
@@ -379,7 +379,7 @@ def test_fresh_suspension_cannot_import_a_caller_supplied_publication_receipt(
         history_cursor=cursor,
     )
     wait = wait.model_copy(update={"authorization_receipt": receipt})
-    with pytest.raises(core.ContractError, match="only waiting intent"):
+    with pytest.raises(core.ContractError, match="only waiting record"):
         core.step(state, core.TurnSuspended(continuation=wait))
 
 
@@ -393,7 +393,7 @@ def test_fresh_suspension_cannot_import_a_caller_supplied_previous_publication(
         submission_id=core.RequestId(root="caller-submission") if ordinal else None,
     )
     wait = wait.model_copy(update={"preceding_submission": cursor})
-    with pytest.raises(core.ContractError, match="only waiting intent"):
+    with pytest.raises(core.ContractError, match="only waiting record"):
         core.step(state, core.TurnSuspended(continuation=wait))
 
 
@@ -403,12 +403,12 @@ def test_missing_scientific_or_submission_facts_never_certify_publication_histor
 ) -> None:
     state, wait = publication_state(facts=facts)
     if missing >= 0:
-        sources = state.intents.intents
+        sources = state.records.records
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
+                "records": state.records.model_copy(
                     update={
-                        "intents": tuple(
+                        "records": tuple(
                             row for index, row in enumerate(sources) if index != missing + 1
                         )
                     }
@@ -435,7 +435,7 @@ def test_history_certification_requires_exact_submission_identity_and_budget(
     fault: str, index: int
 ) -> None:
     state, wait = publication_state()
-    sources = list(state.intents.intents)
+    sources = list(state.records.records)
     source = sources[index + 1]
     request = source.request
     assert isinstance(request, core.SubmitMeasurement)
@@ -480,7 +480,7 @@ def test_history_certification_requires_exact_submission_identity_and_budget(
         budgets.append(budgets[index])
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(update={"intents": tuple(sources)}),
+            "records": state.records.model_copy(update={"records": tuple(sources)}),
             "evaluation": state.evaluation.model_copy(
                 update={"submission_budgets": tuple(budgets)}
             ),
@@ -503,7 +503,7 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
 ) -> None:
     state, wait = publication_state()
     codec = measurement_codec()
-    sources = [state.intents.intents[0]]
+    sources = [state.records.records[0]]
     receipts = list(state.run.receipts)
     jobs = []
     budgets = list(state.evaluation.submission_budgets)
@@ -527,7 +527,7 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
             operation=codec.encode(decision.request),
             retry_limit=state.run.limits.max_retries,
         )
-        source = state.intents.intents[position + 1]
+        source = state.records.records[position + 1]
         sources.append(
             source.model_copy(update={"request": request, "payload_digest": digest(request)})
         )
@@ -585,7 +585,7 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
                     ),
                 }
             ),
-            "intents": state.intents.model_copy(update={"intents": tuple(sources)}),
+            "records": state.records.model_copy(update={"records": tuple(sources)}),
             "evaluation": state.evaluation.model_copy(
                 update={
                     "jobs": (),
@@ -644,7 +644,7 @@ def test_initial_paid_cycle_prefix_requires_unique_current_run_admission(
             run=run,
             attempts=state.attempts,
             evaluation=core.EvaluationState(),
-            intents=core.IntentsState(),
+            records=core.RecordsState(),
         ),
         core.TurnRequested(scope=predecessor.scope, turn=predecessor.turn),
     )
@@ -658,7 +658,7 @@ def test_history_correlates_source_admission_with_its_canonical_submission(
     index: int, *, exact: bool, admission_present: bool
 ) -> None:
     state, wait = publication_state()
-    sources = list(state.intents.intents)
+    sources = list(state.records.records)
     source = sources[index + 1]
     assert source.observation is not None
     admission = state.attempts.attempts[0].admission_id if admission_present else None
@@ -674,7 +674,7 @@ def test_history_correlates_source_admission_with_its_canonical_submission(
     jobs[index] = jobs[index].model_copy(update={"observation": observed})
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(update={"intents": tuple(sources)}),
+            "records": state.records.model_copy(update={"records": tuple(sources)}),
             "evaluation": state.evaluation.model_copy(update={"jobs": tuple(jobs)}),
         }
     )

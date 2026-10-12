@@ -12,9 +12,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api import ClockAdvanced, IntentPhase, ObservationStatus, WaitKind, orphan_waits, step
+from vs_core.api import ClockAdvanced, ObservationStatus, RequestPhase, WaitKind, orphan_waits, step
 
-from .test_attempt_retirement import changed, closing_fixture, proof_intent, with_owner
+from .test_attempt_retirement import changed, closing_fixture, proof_record, with_owner
 
 LIVE = (core.AttemptPhase.ACQUIRING, core.AttemptPhase.ACTIVE)
 ENDED = (core.AttemptPhase.CLOSING, core.AttemptPhase.TERMINAL)
@@ -36,11 +36,11 @@ def _with_prepared_mutation(
             mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
         ),
     )
-    intent = proof_intent(request, state.run.deadline_at, lifecycle=core.LifecycleClass.OWNED_JOB)
+    record = proof_record(request, state.run.deadline_at, lifecycle=core.LifecycleClass.OWNED_JOB)
     state = with_owner(
         state,
         changed(owner, phase=phase),
-        intents=changed(state.intents, intents=(*state.intents.intents, intent)),
+        records=changed(state.records, records=(*state.records.records, record)),
     )
     assert request.request_id is not None
     return state, request.request_id
@@ -53,8 +53,8 @@ def test_a_prepared_mutation_of_an_ended_episode_is_cancelled_unsent(
     state, identity = _with_prepared_mutation(phase, current_admission=current_admission)
     assert WaitKind.DISPATCH in {w.waiter for w in orphan_waits(state)}
     result = step(state, ClockAdvanced(now_at=2.0))
-    row = next(r for r in result.state.intents.intents if r.request_id == identity)
-    assert row.phase == IntentPhase.COMPLETED
+    row = next(r for r in result.state.records.records if r.request_id == identity)
+    assert row.phase == RequestPhase.COMPLETED
     assert row.observation is not None
     assert row.observation.status == ObservationStatus.CANCELLED
     assert not row.observation.accepted
@@ -70,5 +70,5 @@ def test_a_prepared_mutation_of_a_live_episode_is_left_for_dispatch(
         w.waiter for w in orphan_waits(state) if w.subject == identity.root
     }
     result = step(state, ClockAdvanced(now_at=2.0))
-    row = next(r for r in result.state.intents.intents if r.request_id == identity)
-    assert row.phase == IntentPhase.PREPARED
+    row = next(r for r in result.state.records.records if r.request_id == identity)
+    assert row.phase == RequestPhase.PREPARED

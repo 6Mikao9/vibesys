@@ -123,7 +123,7 @@ def test_run_turn_admission_records_one_charge_and_durable_ensure(max_turns: int
     assert len(result.requests) == 1
     assert isinstance(result.requests[0], core.EnsureSession)
     assert not any(isinstance(request, core.DispatchTurn) for request in result.requests)
-    assert core.pending_requests(result.state.intents) == result.requests
+    assert core.pending_requests(result.state.records) == result.requests
     repeated = reload_step(result.state, core.TurnRequested(scope=scope(), turn=spec))
     assert repeated.requests == ()
     assert repeated.events == ()
@@ -172,7 +172,7 @@ def test_orphan_session_observation_cannot_acquire_or_release_a_lease(*, termina
     assert result.events == ()
 
 
-def carrying_request(spec: core.SessionSpec, scope: core.Scope) -> core.Intent:
+def carrying_request(spec: core.SessionSpec, scope: core.Scope) -> core.RequestRecord:
     """A live lease request for the session: the request that keeps an acquiring turn alive.
 
     A turn acquiring with no request about its session is an orphan wait that the step ends
@@ -185,12 +185,12 @@ def carrying_request(spec: core.SessionSpec, scope: core.Scope) -> core.Intent:
         deadline_at=100.0,
         spec=spec,
     )
-    return core.Intent(
+    return core.RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=value_digest(request),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.DISPATCHED,
+        phase=core.RequestPhase.DISPATCHED,
         reconcile_deadline_at=100.0,
     )
 
@@ -241,9 +241,9 @@ def waiting_for_reservation(spec: core.TurnSpec) -> core.CoreState:
     state = waiting_turn_state(spec)
     return state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
-                    "intents": (*state.intents.intents, carrying_request(spec.session, scope()))
+                    "records": (*state.records.records, carrying_request(spec.session, scope()))
                 }
             )
         }
@@ -263,14 +263,14 @@ def test_empty_manifest_dispatch_requires_charge_and_positive_session_correspond
     assert request.turn == spec
     assert request.inputs == ()
     assert request.request_id is not None
-    assert request in core.pending_requests(result.state.intents)
+    assert request in core.pending_requests(result.state.records)
     repeated = reload_step(result.state, event)
     assert repeated.requests == ()
     assert repeated.state.sessions.run_charges == state.sessions.run_charges
 
 
 @given(st.permutations((0, 1, 2)), st.lists(st.integers(min_value=0, max_value=2), max_size=10))
-def test_dispatch_reordered_duplicate_and_stale_manifests_have_one_durable_intent(
+def test_dispatch_reordered_duplicate_and_stale_manifests_have_one_durable_record(
     order: tuple[int, ...], duplicates: list[int]
 ) -> None:
     spec = turn()
@@ -290,7 +290,7 @@ def test_dispatch_reordered_duplicate_and_stale_manifests_have_one_durable_inten
         state = result.state
     assert len(dispatches) == 1
     assert isinstance(dispatches[0], core.DispatchTurn)
-    assert [row for row in state.intents.intents if isinstance(row.request, core.DispatchTurn)]
+    assert [row for row in state.records.records if isinstance(row.request, core.DispatchTurn)]
     assert len(dispatches) == 1
 
 
@@ -525,10 +525,10 @@ def test_unknown_acceptance_inspects_exact_turn_and_keeps_currency_and_payload()
     assert len(repeated.state.sessions.invocations) == 1
 
 
-def with_intent(state: core.CoreState, request: core.Request) -> core.CoreState:
+def with_record(state: core.CoreState, request: core.Request) -> core.CoreState:
     """Supply durable sibling-owned correspondence without executing that sibling."""
     assert request.request_id is not None
-    record = core.Intent(
+    record = core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=hashlib.sha256(
@@ -540,11 +540,11 @@ def with_intent(state: core.CoreState, request: core.Request) -> core.CoreState:
             ).encode()
         ).hexdigest(),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.DISPATCHED,
+        phase=core.RequestPhase.DISPATCHED,
         reconcile_deadline_at=request.deadline_at,
     )
     return state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (record,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
 
 
@@ -566,12 +566,12 @@ def closing_session_state() -> tuple[core.CoreState, core.CloseSession]:
     )
     state = waiting_turn_state(spec)
     session = state.sessions.sessions[0].model_copy(
-        update={"phase": core.SessionPhase.CLOSING, "pending_intents": (request.request_id,)}
+        update={"phase": core.SessionPhase.CLOSING, "pending_records": (request.request_id,)}
     )
     state = state.model_copy(
         update={"sessions": state.sessions.model_copy(update={"sessions": (session,)})}
     )
-    return with_intent(state, request), request
+    return with_record(state, request), request
 
 
 @given(terminal=st.booleans(), released=st.booleans(), children_complete=st.booleans())
@@ -687,7 +687,7 @@ def test_cancellation_command_acknowledgement_does_not_prove_target_terminal() -
         deadline_at=100.0,
         invocation=invocation(spec),
     )
-    state = with_intent(state, request)
+    state = with_record(state, request)
     result = reload_step(
         state,
         core.TurnObserved(
@@ -1027,7 +1027,7 @@ def test_repeated_unknown_with_new_supplied_time_reuses_exact_inspection_payload
     )
     assert len(first.requests) == 1
     assert second.requests == ()
-    assert core.pending_requests(second.state.intents) == core.pending_requests(first.state.intents)
+    assert core.pending_requests(second.state.records) == core.pending_requests(first.state.records)
     assert second.state.sessions.run_charges == first.state.sessions.run_charges
     assert len(second.state.sessions.invocations) == 1
 
@@ -1113,8 +1113,8 @@ def interrupted_attempt_state(
             "sessions": core.SessionsState(
                 sessions=(session,), invocations=(predecessor,), interrupts=(claim,)
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": (carrying_request(spec.session, owner_scope),)}
+            "records": state.records.model_copy(
+                update={"records": (carrying_request(spec.session, owner_scope),)}
             ),
         }
     )
@@ -1222,7 +1222,7 @@ def test_terminal_history_ignores_duplicate_reordered_and_stale_results(
         deadline_at=100.0,
         turn=turn_spec,
     )
-    state = with_intent(state, request)
+    state = with_record(state, request)
     expected = state.sessions
     for sequence, status, generation in observations:
         event = core.TurnObserved(
@@ -1520,7 +1520,7 @@ def registered_turn_state(
         deadline_at=spec.deadline_at,
     )
     assert request.request_id is not None
-    state = with_intent(initial or core.initial_state(), request)
+    state = with_record(initial or core.initial_state(), request)
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
@@ -1528,8 +1528,8 @@ def registered_turn_state(
         feedback=core.Accepted(decision_id=decision.decision_id, request_ids=(request.request_id,)),
         request_ids=(request.request_id,),
     )
-    canonical = state.intents.intents[0].model_copy(
-        update={"phase": core.IntentPhase.PREPARED, "lifecycle": core.LifecycleClass.SESSION_TURN}
+    canonical = state.records.records[0].model_copy(
+        update={"phase": core.RequestPhase.PREPARED, "lifecycle": core.LifecycleClass.SESSION_TURN}
     )
     state = state.model_copy(
         update={
@@ -1540,7 +1540,7 @@ def registered_turn_state(
                     "receipts": (receipt,),
                 }
             ),
-            "intents": state.intents.model_copy(update={"intents": (canonical,)}),
+            "records": state.records.model_copy(update={"records": (canonical,)}),
         }
     )
     return state, request, spec, codec
@@ -1553,7 +1553,7 @@ def test_registered_turn_keeps_canonical_operation_and_acquires_before_dispatch(
     assert len(result.requests) == 1
     assert isinstance(result.requests[0], core.EnsureSession)
     assert result.state.sessions.invocations[0].registered_operation == request.operation_id
-    assert result.state.intents.intents[0] == state.intents.intents[0]
+    assert result.state.records.records[0] == state.records.records[0]
     assert len(result.state.sessions.run_charges) == 1
     replay = reload_step(result.state, event, codec=codec)
     assert replay.requests == ()
@@ -1574,9 +1574,9 @@ def test_registered_turn_manifest_uses_original_canonical_request() -> None:
         state, core.TurnInputsReserved(invocation=invocation(spec), input_ids=()), codec=codec
     )
     assert result.requests == ()
-    assert result.state.intents.intents == state.intents.intents
+    assert result.state.records.records == state.records.records
     assert result.state.sessions.invocations[0].phase == core.SessionPhase.EXECUTING
-    assert core.pending_requests(result.state.intents) == (request,)
+    assert core.pending_requests(result.state.records) == (request,)
     note = core.SessionInput(
         input_id=core.InputId(root="registered-note"),
         target=core.ScopeInputTarget(scope=scope()),
@@ -1617,7 +1617,7 @@ def test_registered_turn_cannot_admit_without_exact_canonical_operation(forgery:
     state, request, spec, codec = registered_turn_state()
     if forgery == "missing":
         state = state.model_copy(
-            update={"intents": state.intents.model_copy(update={"intents": ()})}
+            update={"records": state.records.model_copy(update={"records": ()})}
         )
     elif forgery == "request-id":
         request = request.model_copy(
@@ -1666,7 +1666,7 @@ def test_declared_cancellation_is_durable_idempotent_and_preserves_refund_author
     assert isinstance(request, core.CancelTurn)
     assert request.invocation == ref
     assert request.request_id is not None
-    assert request in core.pending_requests(result.state.intents)
+    assert request in core.pending_requests(result.state.records)
     assert result.state.sessions.interrupts == (claim,)
     assert result.state.sessions.run_charges == state.sessions.run_charges
     assert result.state.sessions.invocations[0].phase == core.SessionPhase.EXECUTING
@@ -1676,7 +1676,7 @@ def test_declared_cancellation_is_durable_idempotent_and_preserves_refund_author
     assert replay.state.sessions == result.state.sessions
 
 
-def test_arbitrary_recorded_intent_does_not_authorize_turn_cancellation() -> None:
+def test_arbitrary_recorded_record_does_not_authorize_turn_cancellation() -> None:
     spec = turn()
     dispatched = reload_step(
         waiting_turn_state(spec), core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
@@ -1687,7 +1687,7 @@ def test_arbitrary_recorded_intent_does_not_authorize_turn_cancellation() -> Non
         session_id=core.SessionId(root="another-session"),
         deadline_at=100.0,
     )
-    state = with_intent(dispatched.state, unrelated)
+    state = with_record(dispatched.state, unrelated)
     assert unrelated.request_id is not None
     with pytest.raises(core.ContractValidationError, match="authority"):
         core.step(
@@ -1871,7 +1871,7 @@ def test_generated_authority_ids_encode_components_without_delimiter_collisions(
         assert isinstance(result.requests[0], core.EnsureSession)
         state = result.state
     assert len({receipt.charge_id for receipt in state.sessions.run_charges}) == 2
-    assert len({intent.request_id for intent in state.intents.intents}) == 2
+    assert len({record.request_id for record in state.records.records}) == 2
     sessions = tuple(
         session.model_copy(
             update={
@@ -2092,7 +2092,7 @@ def test_acquisition_requires_conclusive_readiness_or_nonacceptance(
     else:
         result = reload_step(prepared.state, event)
         assert result.state.sessions.sessions[0].phase == core.SessionPhase.UNKNOWN
-        assert prepared.requests[0].request_id in result.state.sessions.sessions[0].pending_intents
+        assert prepared.requests[0].request_id in result.state.sessions.sessions[0].pending_records
         assert result.state.sessions.invocations[0].phase == core.SessionPhase.ACQUIRING
         assert len(result.requests) == 1
         assert isinstance(result.requests[0], core.InspectRequest)
@@ -2120,12 +2120,12 @@ def test_late_acquisition_closes_lease_and_cancels_waiting_decision(*, registere
         decision_id=core.DecisionId(root="pending-turn"), scope=owner_scope, turn=spec
     )
     codec = None
-    registered_intents = ()
+    registered_records = ()
     if registered:
         state, operation, _, codec = registered_turn_state(
             spec=spec, owner_scope=owner_scope, initial=state
         )
-        registered_intents = state.intents.intents
+        registered_records = state.records.records
         decision = state.run.receipts[0].decision
         current = state.sessions.invocations[0].model_copy(
             update={"registered_operation": operation.operation_id}
@@ -2143,11 +2143,11 @@ def test_late_acquisition_closes_lease_and_cancels_waiting_decision(*, registere
         deadline_at=100.0,
     )
     assert ensure.request_id is not None
-    state = with_intent(state, ensure)
+    state = with_record(state, ensure)
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
-                update={"intents": registered_intents + state.intents.intents}
+            "records": state.records.model_copy(
+                update={"records": registered_records + state.records.records}
             )
         }
     )
@@ -2169,7 +2169,7 @@ def test_late_acquisition_closes_lease_and_cancels_waiting_decision(*, registere
         update={
             "phase": core.SessionPhase.ACQUIRING,
             "resource_id": None,
-            "pending_intents": (ensure.request_id,),
+            "pending_records": (ensure.request_id,),
         }
     )
     state = state.model_copy(
@@ -2226,15 +2226,15 @@ def test_turn_completion_cannot_revive_a_closed_or_closing_physical_session(
         waiting_turn_state(spec), core.TurnInputsReserved(invocation=ref, input_ids=())
     )
     _, close = closing_session_state()
-    close_state = with_intent(dispatched.state, close)
+    close_state = with_record(dispatched.state, close)
     session = dispatched.state.sessions.sessions[0].model_copy(
-        update={"phase": core.SessionPhase.CLOSING, "pending_intents": (close.request_id,)}
+        update={"phase": core.SessionPhase.CLOSING, "pending_records": (close.request_id,)}
     )
     state = dispatched.state.model_copy(
         update={
-            "intents": dispatched.state.intents.model_copy(
+            "records": dispatched.state.records.model_copy(
                 update={
-                    "intents": dispatched.state.intents.intents + close_state.intents.intents,
+                    "records": dispatched.state.records.records + close_state.records.records,
                 }
             ),
             "sessions": dispatched.state.sessions.model_copy(update={"sessions": (session,)}),
@@ -2382,7 +2382,7 @@ def test_a_session_close_releases_its_closing_attempt_exactly_once() -> None:
     state = state.model_copy(
         update={"sessions": state.sessions.model_copy(update={"sessions": (session,)})}
     )
-    state = with_intent(state, request)
+    state = with_record(state, request)
     dependency = core.ReleaseDependency(kind="session", identity=request.session_id)
     owner = core.AttemptView(
         attempt_id=attempt_id,
@@ -2410,8 +2410,8 @@ def test_a_session_close_releases_its_closing_attempt_exactly_once() -> None:
         attempt=core.AttemptRef(attempt_id=attempt_id, generation=0),
     )
     fenced = (
-        with_intent(state, fence)
-        .intents.intents[0]
+        with_record(state, fence)
+        .records.records[0]
         .model_copy(
             update={
                 "observation": turn_observation(
@@ -2423,8 +2423,8 @@ def test_a_session_close_releases_its_closing_attempt_exactly_once() -> None:
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents, fenced)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, fenced)}
             ),
         }
     )

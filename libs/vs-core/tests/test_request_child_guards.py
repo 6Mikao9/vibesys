@@ -30,9 +30,6 @@ from vs_core.api import (
     HostFence,
     HostId,
     InspectRequest,
-    Intent,
-    IntentPhase,
-    IntentsState,
     LifecycleClass,
     MeasurementPlan,
     MeasurementStage,
@@ -47,10 +44,13 @@ from vs_core.api import (
     OwnedJob,
     PoolId,
     ReconciliationDeadline,
+    RecordsState,
     RecoveryBarrier,
     RecoveryStarted,
     RegisteredOwnedJob,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     ResourceId,
     RoleId,
     RunEnvelope,
@@ -81,7 +81,7 @@ class JobRequest(OperationRequest):
     outcome_model: ClassVar[type[BaseModel]] = JobOutcome
 
 
-def pending_intent(identity: str, phase: IntentPhase = IntentPhase.DISPATCHED) -> Intent:
+def pending_record(identity: str, phase: RequestPhase = RequestPhase.DISPATCHED) -> RequestRecord:
     """A canonical persisted setup request with unknown external acceptance."""
     state = initial_state()
     request_id = RequestId(root=identity)
@@ -97,7 +97,7 @@ def pending_intent(identity: str, phase: IntentPhase = IntentPhase.DISPATCHED) -
             access=Access.WRITE_ARTIFACTS,
         ),
     )
-    return Intent(
+    return RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=fixture_digest(request),
@@ -107,7 +107,7 @@ def pending_intent(identity: str, phase: IntentPhase = IntentPhase.DISPATCHED) -
     )
 
 
-def observed(record: Intent, **facts: object) -> Observation:
+def observed(record: RequestRecord, **facts: object) -> Observation:
     """Persist supplied observation facts through the public contract."""
     return Observation.model_validate(
         {
@@ -122,20 +122,20 @@ def observed(record: Intent, **facts: object) -> Observation:
     )
 
 
-def recovering_state(*records: Intent) -> CoreState:
+def recovering_state(*records: RequestRecord) -> CoreState:
     """A paused persisted kernel state awaiting recovery."""
     state = initial_state()
     return state.model_copy(
         update={
-            "intents": IntentsState(intents=records, recovery=RecoveryBarrier()),
+            "records": RecordsState(records=records, recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
     )
 
 
-def registered_intent(
+def registered_record(
     lifecycle: LifecycleClass, identity: str
-) -> tuple[Intent, OperationDescriptor]:
+) -> tuple[RequestRecord, OperationDescriptor]:
     """Encode an actual typed operation rather than synthesizing its wire data."""
     assert lifecycle == LifecycleClass.OWNED_JOB
     descriptor = OperationDescriptor(
@@ -154,7 +154,7 @@ def registered_intent(
             ),
         )
     )
-    original = pending_intent(identity)
+    original = pending_record(identity)
     request = ExecuteRegisteredOperation(
         request_id=original.request_id,
         scope=original.request.scope,
@@ -193,7 +193,7 @@ def with_registered_origins(state: CoreState) -> CoreState:
         )
     )
     receipts = list(state.run.receipts)
-    for record in state.intents.intents:
+    for record in state.records.records:
         request = record.request
         if not isinstance(request, ExecuteRegisteredOperation):
             continue
@@ -242,7 +242,7 @@ def reload(state: CoreState) -> CoreState:
     envelope = RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         core=state,
-        fence=HostFence(host_id=HostId(root="child-host"), epoch=state.intents.recovery.epoch),
+        fence=HostFence(host_id=HostId(root="child-host"), epoch=state.records.recovery.epoch),
         event_cursor=EventCursor(sequence=state.revision),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
@@ -253,9 +253,9 @@ def reload(state: CoreState) -> CoreState:
     return decoded.core
 
 
-def released_parent(resource: ResourceId) -> Intent:
+def released_parent(resource: ResourceId) -> RequestRecord:
     """A completed parent retains responsibility for a discovered child."""
-    parent = pending_intent(identity="parent", phase=IntentPhase.COMPLETED)
+    parent = pending_record(identity="parent", phase=RequestPhase.COMPLETED)
     return parent.model_copy(
         update={
             "observation": observed(
@@ -320,11 +320,11 @@ def test_child_transfer_requires_the_same_typed_correspondence_as_reattachment(
             "observation": parent.observation.model_copy(update={"scope": scope}),
         }
     )
-    submission, descriptor = registered_intent(LifecycleClass.OWNED_JOB, identity="submission")
+    submission, descriptor = registered_record(LifecycleClass.OWNED_JOB, identity="submission")
     request = submission.request
     assert isinstance(request, ExecuteRegisteredOperation)
     if mismatch == "registered-kind":
-        request = pending_intent(identity="submission").request
+        request = pending_record(identity="submission").request
     elif mismatch in ("builtin-plan", "builtin-kind"):
         request = SubmitMeasurement(
             request_id=submission.request_id,
@@ -368,19 +368,19 @@ def test_child_transfer_requires_the_same_typed_correspondence_as_reattachment(
             observation=proof,
         )
         evaluation = EvaluationState(registered_jobs=(owner,))
-    state = recovering_state(parent, submission, pending_intent(identity="anchor"))
+    state = recovering_state(parent, submission, pending_record(identity="anchor"))
     state = state.model_copy(update={"registry": (descriptor,), "evaluation": evaluation})
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
-    assert tuple(child.resource_id for child in result.state.intents.children) == (resource,)
+    assert tuple(child.resource_id for child in result.state.records.children) == (resource,)
     parent_check = next(
-        check for check in result.state.intents.recovery.checks if check.target == parent.request_id
+        check for check in result.state.records.recovery.checks if check.target == parent.request_id
     )
     assert parent_check.resolution == "pending"
     if not released:
         assert (
             next(
                 check
-                for check in result.state.intents.recovery.checks
+                for check in result.state.records.recovery.checks
                 if check.target == submission.request_id
             ).resolution
             == "pending"
@@ -410,7 +410,7 @@ def test_foreign_source_fact_cannot_transfer_a_retained_child_lease(
     """Foreign source proof, newer or stale, cannot replace retained authority."""
     resource = ResourceId(root="child")
     parent = released_parent(resource)
-    submission, descriptor = registered_intent(LifecycleClass.OWNED_JOB, identity="submission")
+    submission, descriptor = registered_record(LifecycleClass.OWNED_JOB, identity="submission")
     request = submission.request
     assert isinstance(request, ExecuteRegisteredOperation)
     retained = observed(
@@ -451,16 +451,16 @@ def test_foreign_source_fact_cannot_transfer_a_retained_child_lease(
         scope=parent.request.scope,
         observation=proof,
     )
-    state = recovering_state(parent, submission, pending_intent(identity="anchor"))
+    state = recovering_state(parent, submission, pending_record(identity="anchor"))
     state = state.model_copy(
         update={
             "registry": (descriptor,),
             "evaluation": EvaluationState(registered_jobs=(owner,)),
-            "intents": state.intents.model_copy(update={"children": (lease,)}),
+            "records": state.records.model_copy(update={"children": (lease,)}),
         }
     )
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
-    assert result.state.intents.children == (lease,)
+    assert result.state.records.children == (lease,)
     assert any(
         isinstance(request, InspectRequest) and request.resource_id == resource
         for request in result.requests
@@ -468,7 +468,7 @@ def test_foreign_source_fact_cannot_transfer_a_retained_child_lease(
     assert (
         next(
             check
-            for check in result.state.intents.recovery.checks
+            for check in result.state.records.recovery.checks
             if check.target == parent.request_id
         ).resolution
         == "pending"
@@ -477,7 +477,7 @@ def test_foreign_source_fact_cannot_transfer_a_retained_child_lease(
     deadline = step(
         reload(result.state), ReconciliationDeadline(request_id=parent.request_id, now_at=100.0)
     )
-    assert deadline.state.intents.children == (lease,)
+    assert deadline.state.records.children == (lease,)
     # A legacy aggregate lacks complete independent source history, including
     # when its selected source claims release. Keep cancellation debt.
     assert any(
@@ -492,7 +492,7 @@ def test_incomplete_independent_source_history_cannot_transfer_to_a_typed_owner(
 ) -> None:
     resource = ResourceId(root="child")
     parent = released_parent(resource)
-    submission, descriptor = registered_intent(LifecycleClass.OWNED_JOB, identity="submission")
+    submission, descriptor = registered_record(LifecycleClass.OWNED_JOB, identity="submission")
     assert isinstance(submission.request, ExecuteRegisteredOperation)
     operation_id = submission.request.operation_id
     proof = observed(
@@ -508,7 +508,7 @@ def test_incomplete_independent_source_history_cannot_transfer_to_a_typed_owner(
     sources = (
         parent,
         submission,
-        *(pending_intent(f"source:{index}") for index in range(count - 2)),
+        *(pending_record(f"source:{index}") for index in range(count - 2)),
     )
     lease = ChildLease(
         resource_id=resource,
@@ -531,11 +531,11 @@ def test_incomplete_independent_source_history_cannot_transfer_to_a_typed_owner(
         update={
             "registry": (descriptor,),
             "evaluation": EvaluationState(registered_jobs=(owner,)),
-            "intents": state.intents.model_copy(update={"children": (lease,)}),
+            "records": state.records.model_copy(update={"children": (lease,)}),
         }
     )
     result = step(reload(state), RecoveryStarted(epoch=1, now_at=11.0))
-    assert result.state.intents.children == (lease,)
+    assert result.state.records.children == (lease,)
     assert any(
         isinstance(request, InspectRequest) and request.resource_id == resource
         for request in result.requests
@@ -558,7 +558,7 @@ def test_complete_source_history_transfers_only_after_every_independent_release(
     terminal, released, complete, status = flags
     resource = ResourceId(root="child")
     parent = released_parent(resource)
-    submission, descriptor = registered_intent(
+    submission, descriptor = registered_record(
         LifecycleClass.OWNED_JOB, identity="a-typed" if typed_first else "z-typed"
     )
     assert isinstance(submission.request, ExecuteRegisteredOperation)
@@ -605,12 +605,12 @@ def test_complete_source_history_transfers_only_after_every_independent_release(
         scope=parent.request.scope,
         observation=typed_fact,
     )
-    state = recovering_state(parent, submission, pending_intent("anchor"))
+    state = recovering_state(parent, submission, pending_record("anchor"))
     state = state.model_copy(
         update={
             "registry": (descriptor,),
             "evaluation": EvaluationState(registered_jobs=(owner,)),
-            "intents": state.intents.model_copy(update={"children": (lease,)}),
+            "records": state.records.model_copy(update={"children": (lease,)}),
         }
     )
     state = with_registered_origins(state)
@@ -621,7 +621,7 @@ def test_complete_source_history_transfers_only_after_every_independent_release(
         and complete
         and status not in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
     )
-    assert result.state.intents.children == (() if conclusive else (lease,))
+    assert result.state.records.children == (() if conclusive else (lease,))
     assert result.state.evaluation == state.evaluation
     if not conclusive:
         deadline = step(

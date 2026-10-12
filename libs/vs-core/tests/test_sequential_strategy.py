@@ -259,7 +259,7 @@ def exercise_item(
     strategy = deliver(strategy, result)
     state = type(state).model_validate_json(result.state.model_dump_json())
     workspace_request = result.requests[0]
-    assert state.intents.intents[-1].request_id == workspace_request.request_id
+    assert state.records.records[-1].request_id == workspace_request.request_id
     ready = AttemptReady(attempt=attempt, admission_id=slot.admission_id)
     observation = Observation(
         event_id=EventId(root=f"workspace:{index}"),
@@ -439,18 +439,18 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
                 ),
                 invocations=result.state.sessions.invocations,
             ),
-            "intents": core.IntentsState(
-                intents=tuple(
-                    intent.model_copy(
+            "records": core.RecordsState(
+                records=tuple(
+                    record.model_copy(
                         update={
-                            "phase": core.IntentPhase.COMPLETED,
+                            "phase": core.RequestPhase.COMPLETED,
                             "observation": core.Observation(
-                                event_id=core.EventId(root=f"released:{intent.request_id.root}"),
-                                request_id=intent.request_id,
-                                scope=intent.request.scope,
-                                admission_id=intent.request.admission_id,
+                                event_id=core.EventId(root=f"released:{record.request_id.root}"),
+                                request_id=record.request_id,
+                                scope=record.request.scope,
+                                admission_id=record.request.admission_id,
                                 resource_id=core.ResourceId(
-                                    root=f"resource:{intent.request_id.root}"
+                                    root=f"resource:{record.request_id.root}"
                                 ),
                                 sequence=1,
                                 observed_at=10.0,
@@ -461,7 +461,7 @@ def test_sequential_strategy_has_no_optional_capabilities_or_product_state() -> 
                             ),
                         }
                     )
-                    for intent in result.state.intents.intents
+                    for record in result.state.records.records
                 )
             ),
         }

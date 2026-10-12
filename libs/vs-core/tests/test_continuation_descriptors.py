@@ -36,7 +36,7 @@ type Declaration = Literal[
 def registered_yield() -> tuple[core.CoreState, core.Continuation]:
     state, continuation = fixture(settled=True)
     invocation = state.sessions.invocations[0]
-    intent = state.intents.intents[0]
+    record = state.records.records[0]
     codec = operation_codec()
     payload = RegisteredTurn(turn=invocation.turn)
     decision = codec.validate_decision(
@@ -48,12 +48,12 @@ def registered_yield() -> tuple[core.CoreState, core.Continuation]:
         )
     )
     request = core.ExecuteRegisteredOperation(
-        request_id=intent.request_id,
+        request_id=record.request_id,
         operation_id=core.OperationId(root="operation:registered-turn"),
         decision_id=decision.decision_id,
         scope=invocation.scope,
         deadline_at=100.0,
-        admission_id=intent.request.admission_id,
+        admission_id=record.request.admission_id,
         operation=codec.encode(payload),
         retry_limit=state.run.limits.max_retries,
     )
@@ -62,7 +62,7 @@ def registered_yield() -> tuple[core.CoreState, core.Continuation]:
         decision=decision,
         payload_digest="registered-yield",
         feedback=core.Accepted(decision_id=decision.decision_id),
-        request_ids=(intent.request_id,),
+        request_ids=(record.request_id,),
     )
     return state.model_copy(
         update={
@@ -73,8 +73,8 @@ def registered_yield() -> tuple[core.CoreState, core.Continuation]:
                     "capabilities": core.Capabilities(operations=codec.descriptors),
                 }
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": (intent.model_copy(update={"request": request}),)}
+            "records": state.records.model_copy(
+                update={"records": (record.model_copy(update={"request": request}),)}
             ),
             "sessions": state.sessions.model_copy(
                 update={

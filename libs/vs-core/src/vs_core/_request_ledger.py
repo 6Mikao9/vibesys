@@ -1,4 +1,4 @@
-"""Intent ledger: the core's durable record of every request it has authorized.
+"""RequestRecord ledger: the core's durable record of every request it has authorized.
 
 A request is issued (registered PREPARED by the kernel), dispatched (committed
 before any I/O), observed, and finally terminal. The ledger decides which
@@ -7,9 +7,9 @@ completes decisions it owns. Observations are never accepted with a
 non-increasing sequence: duplicates and older sequences are inert, a different
 fact at an accepted sequence is a typed rejection.
 
-Unknown acceptance and retryable failures keep the intent open for a later,
+Unknown acceptance and retryable failures keep the record open for a later,
 higher-sequence observation; only a conclusive terminal observation closes it,
-exactly once. Recovery (``_intent_recovery``) reads this ledger and never writes
+exactly once. Recovery (``_request_recovery``) reads this ledger and never writes
 its request fields.
 """
 
@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ._dispatch_episode import episode_ended
-from ._intent_forward import declaration, intents_own, owner_signals, success_without_reply
 from ._outcomes import prove_outcome
 from ._proofs import (
     Mismatch,
@@ -33,6 +32,7 @@ from ._proofs import (
     released_owner,
 )
 from ._registry import ContractError
+from ._request_forward import declaration, owner_signals, records_own, success_without_reply
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
 from .types.common import (
@@ -49,27 +49,27 @@ from .types.common import (
     SetupFailureKind,
 )
 from .types.evaluation import RegisteredJobRequested
-from .types.intents import (
-    BlockIntent,
+from .types.kernel import AreaChange, DecisionCompleted
+from .types.records import (
+    BlockRequest,
     CancelOwnedResource,
     DecisionDependencyResolved,
     DispatchAuthorized,
     InspectRequest,
-    Intent,
-    IntentPhase,
-    IntentsState,
     OperationResult,
     OperationRetireRequested,
+    RecordsState,
     RecoveryPhase,
     ReissueProof,
     RequestObserved,
+    RequestPhase,
     RequestPrepared,
+    RequestRecord,
     RequestUndispatchable,
     RetryDue,
     TargetObservation,
     request_lifecycle,
 )
-from .types.kernel import AreaChange, DecisionCompleted
 from .types.sessions import (
     CancelTurn,
     DispatchTurn,
@@ -82,8 +82,8 @@ from .types.strategy import Cancel, Withdraw
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState
     from .types.common import DecisionId
-    from .types.intents import IntentsEvent, IntentsState, Request
-    from .types.kernel import IntentsContext, RunState, Signal, StrategyEvent
+    from .types.kernel import RecordsContext, RunState, Signal, StrategyEvent
+    from .types.records import RecordsEvent, RecordsState, Request
     from .types.sessions import SessionsState
 
     type Facts = RequestObserved | TargetObservation
@@ -104,9 +104,9 @@ _COMPLETION = {
 
 
 def advance(
-    state: IntentsState, context: IntentsContext, event: IntentsEvent
-) -> AreaChange[IntentsState]:
-    """Consume the five ledger events; recovery events belong to Intents B."""
+    state: RecordsState, context: RecordsContext, event: RecordsEvent
+) -> AreaChange[RecordsState]:
+    """Consume the five ledger events; recovery events belong to Records B."""
     match event:
         case RequestPrepared():
             change = _prepared(state, context, event)
@@ -123,22 +123,22 @@ def advance(
         case RequestUndispatchable():
             change = _undispatchable(state, context, event)
         case _:
-            raise ContractValidationError("event.kind", "event is owned by intent recovery")
+            raise ContractValidationError("event.kind", "event is owned by record recovery")
     return change
 
 
-def _unique(state: IntentsState, identity: RequestId) -> Intent | None:
-    rows = tuple(row for row in state.intents if row.request_id == identity)
+def _unique(state: RecordsState, identity: RequestId) -> RequestRecord | None:
+    rows = tuple(row for row in state.records if row.request_id == identity)
     if len(rows) > 1:
         raise ContractError(("request_id", identity.root), "ambiguous canonical request identity")
     return rows[0] if rows else None
 
 
-def _replace(state: IntentsState, intent: Intent) -> IntentsState:
+def _replace(state: RecordsState, record: RequestRecord) -> RecordsState:
     return state.model_copy(
         update={
-            "intents": tuple(
-                intent if row.request_id == intent.request_id else row for row in state.intents
+            "records": tuple(
+                record if row.request_id == record.request_id else row for row in state.records
             )
         }
     )
@@ -148,7 +148,7 @@ def _conclusive(observation: Observation | None) -> bool:
     return observation is not None and observation.terminal and observation.status in _CONCLUSIVE
 
 
-def _finish(change: AreaChange[IntentsState], *more: AreaChange[IntentsState]) -> AreaChange:
+def _finish(change: AreaChange[RecordsState], *more: AreaChange[RecordsState]) -> AreaChange:
     """Merge sequential changes; signals and requests keep order without duplicates."""
     merged = change
     for item in more:
@@ -165,8 +165,8 @@ def _finish(change: AreaChange[IntentsState], *more: AreaChange[IntentsState]) -
 
 
 def _prepared(
-    state: IntentsState, context: IntentsContext, event: RequestPrepared
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, event: RequestPrepared
+) -> AreaChange[RecordsState]:
     """Route an accepted proposal to the one area that owns its lifecycle."""
     request = event.request
     if request_lifecycle(request) != event.lifecycle:
@@ -183,11 +183,11 @@ def _prepared(
 
 
 def _route_operation(
-    state: IntentsState,
-    context: IntentsContext,
+    state: RecordsState,
+    context: RecordsContext,
     event: RequestPrepared,
     request: ExecuteRegisteredOperation,
-) -> AreaChange[IntentsState]:
+) -> AreaChange[RecordsState]:
     descriptor = declaration(context, request)
     if descriptor.normalization == OperationNormalizationKind.SCOPE_REOPEN:
         raise ContractError(("operation",), "scope reopen enters through its own guarded event")
@@ -211,21 +211,21 @@ def _route_operation(
     return AreaChange(state=state, requests=(request,))
 
 
-def _dispatched(state: IntentsState, event: DispatchAuthorized) -> AreaChange[IntentsState]:
+def _dispatched(state: RecordsState, event: DispatchAuthorized) -> AreaChange[RecordsState]:
     """Record that I/O may start; the kernel already proved dependencies and recovery."""
-    intent = _unique(state, event.request_id)
-    if intent is None:
+    record = _unique(state, event.request_id)
+    if record is None:
         raise ContractError(("request_id",), "dispatch names no canonical request")
-    match intent.phase:
-        case IntentPhase.PREPARED:
+    match record.phase:
+        case RequestPhase.PREPARED:
             pass
-        case IntentPhase.DISPATCHED:
+        case RequestPhase.DISPATCHED:
             return AreaChange(state=state)
-        case IntentPhase.RECONCILING if intent.lifecycle in _REPLAYABLE:
+        case RequestPhase.RECONCILING if record.lifecycle in _REPLAYABLE:
             pass
         case _:
-            raise ContractError(("phase",), f"{intent.phase.value} request cannot be dispatched")
-    updated = intent.model_copy(update={"phase": IntentPhase.DISPATCHED})
+            raise ContractError(("phase",), f"{record.phase.value} request cannot be dispatched")
+    updated = record.model_copy(update={"phase": RequestPhase.DISPATCHED})
     return AreaChange(state=_replace(state, updated))
 
 
@@ -238,8 +238,8 @@ def _reject_proof(proof: Mismatch | Missing, path: str) -> ContractError:
 
 
 def _observed(
-    state: IntentsState, context: IntentsContext, event: RequestObserved
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, event: RequestObserved
+) -> AreaChange[RecordsState]:
     """Commit the root fact, then independent root facts about an inspected target."""
     root = _unique(state, event.observation.request_id)
     if root is None:
@@ -253,7 +253,7 @@ def _observed(
     original = _unique(change.state, target.observation.request_id)
     if original is None:
         raise ContractError(("target", "request_id"), "target names no canonical request")
-    if target.reissue is not None and original.phase == IntentPhase.PREPARED:
+    if target.reissue is not None and original.phase == RequestPhase.PREPARED:
         # Another inspection already returned it to PREPARED (two epochs inspected it).
         return change
     if target.reissue is not None and _reissuable(original, target.reissue):
@@ -270,8 +270,8 @@ def _observed(
 
 
 def _end_released_turn_pair(
-    state: IntentsState, context: IntentsContext, root: Intent, event: RequestObserved
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, root: RequestRecord, event: RequestObserved
+) -> AreaChange[RecordsState]:
     """A release of a turn closes the other half of its dispatch and cancellation pair."""
     if isinstance(root.request, CancelTurn):
         return _end_released_dispatch(state, context, root, event)
@@ -279,8 +279,8 @@ def _end_released_turn_pair(
 
 
 def _end_released_dispatch(
-    state: IntentsState, context: IntentsContext, root: Intent, event: RequestObserved
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, root: RequestRecord, event: RequestObserved
+) -> AreaChange[RecordsState]:
     """A cancellation that released an unresolved turn ends that turn's open dispatch.
 
     The dispatch never learned its own outcome (the transport died after sending), so the
@@ -299,12 +299,12 @@ def _end_released_dispatch(
     )
     dispatch = next(
         (
-            intent
-            for intent in state.intents
-            if isinstance(intent.request, DispatchTurn)
-            and intent.phase in (IntentPhase.RECONCILING, IntentPhase.BLOCKED)
+            record
+            for record in state.records
+            if isinstance(record.request, DispatchTurn)
+            and record.phase in (RequestPhase.RECONCILING, RequestPhase.BLOCKED)
             and any(
-                intent.request.turn == row.turn and intent.request.scope == row.scope
+                record.request.turn == row.turn and record.request.scope == row.scope
                 for row in rows
             )
         ),
@@ -323,8 +323,8 @@ def _end_released_dispatch(
 
 
 def _end_cancels_of_released_turn(
-    state: IntentsState, context: IntentsContext, root: Intent, event: RequestObserved
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, root: RequestRecord, event: RequestObserved
+) -> AreaChange[RecordsState]:
     """A turn that ended released ends the cancellations still waiting on its dispatch.
 
     A cancellation sent while the turn's dispatch was in flight could not prove the turn
@@ -343,13 +343,14 @@ def _end_cancels_of_released_turn(
         if row.turn == request.turn and row.scope == request.scope
     }
     waiting = [
-        (intent, intent.observation)
-        for intent in state.intents
-        if isinstance(intent.request, CancelTurn)
-        and intent.request.invocation in invocations
-        and intent.phase in (IntentPhase.DISPATCHED, IntentPhase.RECONCILING, IntentPhase.BLOCKED)
-        and intent.observation is not None
-        and not intent.observation.terminal
+        (record, record.observation)
+        for record in state.records
+        if isinstance(record.request, CancelTurn)
+        and record.request.invocation in invocations
+        and record.phase
+        in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING, RequestPhase.BLOCKED)
+        and record.observation is not None
+        and not record.observation.terminal
     ]
     change = AreaChange(state=state)
     for cancel, waiting_on in waiting:
@@ -369,18 +370,18 @@ def _end_cancels_of_released_turn(
     return change
 
 
-def _reissuable(intent: Intent, proof: ReissueProof) -> bool:
-    """Whether an inspection's proof lets core send this open intent out again.
+def _reissuable(record: RequestRecord, proof: ReissueProof) -> bool:
+    """Whether an inspection's proof lets core send this open record out again.
 
     A session turn is not reissued for a begun record: what its owner does with an
     interrupted turn is turn policy, not recovery, so its inspection is recorded as usual.
     """
-    return intent.phase in (IntentPhase.DISPATCHED, IntentPhase.RECONCILING) and not (
-        proof == ReissueProof.BEGUN_UNSEALED and intent.lifecycle == LifecycleClass.SESSION_TURN
+    return record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING) and not (
+        proof == ReissueProof.BEGUN_UNSEALED and record.lifecycle == LifecycleClass.SESSION_TURN
     )
 
 
-def _reissue(state: IntentsState, intent: Intent) -> AreaChange[IntentsState]:
+def _reissue(state: RecordsState, record: RequestRecord) -> AreaChange[RecordsState]:
     """An open request the executor can account for goes out again, unchanged, from PREPARED.
 
     Never begun: no effect started, so the request is simply sent again. Begun without a
@@ -389,9 +390,9 @@ def _reissue(state: IntentsState, intent: Intent) -> AreaChange[IntentsState]:
     neither observed nor reported to its owner: the owner never learns it was interrupted,
     and the replay equals the straight run.
     """
-    reissued = intent.model_copy(
+    reissued = record.model_copy(
         update={
-            "phase": IntentPhase.PREPARED,
+            "phase": RequestPhase.PREPARED,
             "observation": None,
             "sequence": None,
             "retry_at": None,
@@ -401,22 +402,22 @@ def _reissue(state: IntentsState, intent: Intent) -> AreaChange[IntentsState]:
 
 
 def _apply(
-    state: IntentsState,
-    context: IntentsContext,
-    intent: Intent,
+    state: RecordsState,
+    context: RecordsContext,
+    record: RequestRecord,
     facts: Facts,
     *,
     unsent: bool = False,
-) -> AreaChange[IntentsState]:
+) -> AreaChange[RecordsState]:
     observation = facts.observation
-    proof = observation_for(intent, observation)
+    proof = observation_for(record, observation)
     if not isinstance(proof, Proven):
         raise _reject_proof(proof, "scope")
-    if intent.phase == IntentPhase.PREPARED and not unsent:
+    if record.phase == RequestPhase.PREPARED and not unsent:
         raise ContractError(
             ("observation", "request_id"), "observation requires committed dispatch authorization"
         )
-    previous = intent.observation
+    previous = record.observation
     fresh = fresh_observation(() if previous is None else (previous,), observation, complete=True)
     if isinstance(fresh, Mismatch) and fresh.field == ProofField.SEQUENCE:
         if previous is not None and observation.sequence < previous.sequence:
@@ -426,16 +427,16 @@ def _apply(
         raise _reject_proof(fresh, "sequence")
     if observation == previous:
         return AreaChange(state=state)
-    if intent.phase == IntentPhase.COMPLETED:
-        return _refine(state, intent, observation)
-    return _advance_phase(state, context, intent, facts)
+    if record.phase == RequestPhase.COMPLETED:
+        return _refine(state, record, observation)
+    return _advance_phase(state, context, record, facts)
 
 
 def _refine(
-    state: IntentsState, intent: Intent, observation: Observation
-) -> AreaChange[IntentsState]:
-    """A closed intent only gains release facts; it never changes disposition."""
-    previous = intent.observation
+    state: RecordsState, record: RequestRecord, observation: Observation
+) -> AreaChange[RecordsState]:
+    """A closed record only gains release facts; it never changes disposition."""
+    previous = record.observation
     if (
         previous is None
         or not observation.terminal
@@ -447,7 +448,7 @@ def _refine(
         or not set(previous.children) <= set(observation.children)
     ):
         raise ContractError(("observation",), "terminal request cannot change its disposition")
-    updated = intent.model_copy(
+    updated = record.model_copy(
         update={"observation": observation, "sequence": observation.sequence}
     )
     return AreaChange(state=_replace(state, updated))
@@ -465,31 +466,31 @@ def retry_delay(retries: int) -> float:
     return min(RETRY_BACKOFF * 2 ** max(retries - 1, 0), RETRY_BACKOFF_CAP)
 
 
-def _retry_limit(context: IntentsContext, intent: Intent) -> int:
-    request = intent.request
+def _retry_limit(context: RecordsContext, record: RequestRecord) -> int:
+    request = record.request
     if isinstance(request, ExecuteRegisteredOperation):
         return request.retry_limit
     return context.run.limits.max_retries
 
 
-def _next_phase(intent: Intent, observation: Observation) -> tuple[IntentPhase, int]:
-    """Only a conclusive observation closes; everything else keeps the intent open."""
+def _next_phase(record: RequestRecord, observation: Observation) -> tuple[RequestPhase, int]:
+    """Only a conclusive observation closes; everything else keeps the record open."""
     if _conclusive(observation) and not (
         observation.status == ObservationStatus.SUCCEEDED and not observation.accepted
     ):
-        return IntentPhase.COMPLETED, intent.retry_count
+        return RequestPhase.COMPLETED, record.retry_count
     if observation.status == ObservationStatus.UNKNOWN or observation.terminal:
         # Unknown, or success whose acceptance is unproven: inspect before any retry.
-        return IntentPhase.RECONCILING, intent.retry_count
+        return RequestPhase.RECONCILING, record.retry_count
     if observation.retryable:
-        return IntentPhase.DISPATCHED, intent.retry_count + 1
-    return IntentPhase.DISPATCHED, intent.retry_count
+        return RequestPhase.DISPATCHED, record.retry_count + 1
+    return RequestPhase.DISPATCHED, record.retry_count
 
 
 _EXHAUSTED = "retries-exhausted:"
 
 
-def is_late(state: IntentsState, event: RequestObserved) -> bool:
+def is_late(state: RecordsState, event: RequestObserved) -> bool:
     """Whether *event* answers a request core already ended because its retries ran out.
 
     Core wrote that failure itself and told the owner. Whatever the executor says next is too
@@ -503,7 +504,7 @@ def is_late(state: IntentsState, event: RequestObserved) -> bool:
     )
 
 
-def _exhausted(context: IntentsContext, intent: Intent, facts: Facts) -> Facts:
+def _exhausted(context: RecordsContext, record: RequestRecord, facts: Facts) -> Facts:
     """The conclusive failure a request ends with once its retries are used up.
 
     The executor said, ``retry_limit + 1`` times, that it did not run the request. That is a
@@ -512,12 +513,12 @@ def _exhausted(context: IntentsContext, intent: Intent, facts: Facts) -> Facts:
     up by one so a redelivery of the retryable answer stays inert.
     """
     observation = facts.observation
-    if not observation.retryable or intent.retry_count + 1 <= _retry_limit(context, intent):
+    if not observation.retryable or record.retry_count + 1 <= _retry_limit(context, record):
         return facts
     return TargetObservation(
         observation=observation.model_copy(
             update={
-                "event_id": EventId(root=f"{_EXHAUSTED}{intent.request_id.root}"),
+                "event_id": EventId(root=f"{_EXHAUSTED}{record.request_id.root}"),
                 "sequence": observation.sequence + 1,
                 "accepted": False,
                 "terminal": True,
@@ -529,75 +530,75 @@ def _exhausted(context: IntentsContext, intent: Intent, facts: Facts) -> Facts:
     )
 
 
-def due_retries(state: IntentsState, now_at: float) -> tuple[RetryDue, ...]:
+def due_retries(state: RecordsState, now_at: float) -> tuple[RetryDue, ...]:
     """One retry per request whose backoff has passed at core time ``now_at``."""
     return tuple(
-        RetryDue(request_id=intent.request_id, now_at=now_at)
-        for intent in state.intents
-        if (due := intent.retry_wait_until) is not None and due <= now_at
+        RetryDue(request_id=record.request_id, now_at=now_at)
+        for record in state.records
+        if (due := record.retry_wait_until) is not None and due <= now_at
     )
 
 
-def next_retry_at(state: IntentsState) -> float | None:
+def next_retry_at(state: RecordsState) -> float | None:
     """The earliest core time at which a ``ClockAdvanced`` sends a request out again."""
     return min(
-        (due for row in state.intents if (due := row.retry_wait_until) is not None), default=None
+        (due for row in state.records if (due := row.retry_wait_until) is not None), default=None
     )
 
 
 def _retry(
-    state: IntentsState, context: IntentsContext, event: RetryDue
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, event: RetryDue
+) -> AreaChange[RecordsState]:
     """Send a retryably failed request out again, unchanged, once its backoff has passed.
 
     Recovery owns every open request while it gates the run, so a retry waits for it.
     """
-    intent = _unique(state, event.request_id)
-    due = None if intent is None else intent.retry_wait_until
+    record = _unique(state, event.request_id)
+    due = None if record is None else record.retry_wait_until
     if (
-        intent is None
+        record is None
         or due is None
         or max(context.run.now_at, event.now_at) < due
         or state.recovery.phase != RecoveryPhase.READY
     ):
         return AreaChange(state=state)
-    return _reissue(state, intent)
+    return _reissue(state, record)
 
 
 @dataclass(frozen=True)
 class _EpisodeFacts:
-    """The state slices an episode check reads, joined from the context and the intents."""
+    """The state slices an episode check reads, joined from the context and the records."""
 
     run: RunState
     attempts: AttemptsState
     sessions: SessionsState
-    intents: IntentsState
+    records: RecordsState
 
 
 def _undispatchable(
-    state: IntentsState, context: IntentsContext, event: RequestUndispatchable
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, event: RequestUndispatchable
+) -> AreaChange[RecordsState]:
     """Close a prepared request that can never be dispatched, as an unsent cancellation.
 
     Its dependencies failed for good, or the episode that prepared it ended.
     """
-    intent = _unique(state, event.request_id)
-    if intent is None or intent.phase != IntentPhase.PREPARED:
+    record = _unique(state, event.request_id)
+    if record is None or record.phase != RequestPhase.PREPARED:
         return AreaChange(state=state)
     facts = _EpisodeFacts(
-        run=context.run, attempts=context.attempts, sessions=context.sessions, intents=state
+        run=context.run, attempts=context.attempts, sessions=context.sessions, records=state
     )
     if not (
-        dependency_failed(intent.request, context.run.receipts, state)
-        or episode_ended(facts, intent.request)
+        dependency_failed(record.request, context.run.receipts, state)
+        or episode_ended(facts, record.request)
     ):
         return AreaChange(state=state)
-    return _cancel_prepared(state, context, (intent,))
+    return _cancel_prepared(state, context, (record,))
 
 
 def _record(
-    intent: Intent, facts: Facts, phase: IntentPhase, retries: int, retry_at: float | None
-) -> Intent:
+    record: RequestRecord, facts: Facts, phase: RequestPhase, retries: int, retry_at: float | None
+) -> RequestRecord:
     observation = facts.observation
     update: dict[str, object] = {
         "phase": phase,
@@ -615,24 +616,24 @@ def _record(
             outcome_json=facts.outcome_json,
             outcome=facts.outcome,
         )
-    return intent.model_copy(update=update)
+    return record.model_copy(update=update)
 
 
 def _advance_phase(
-    state: IntentsState, context: IntentsContext, intent: Intent, facts: Facts
-) -> AreaChange[IntentsState]:
-    facts = _exhausted(context, intent, facts)
-    phase, retries = _next_phase(intent, facts.observation)
+    state: RecordsState, context: RecordsContext, record: RequestRecord, facts: Facts
+) -> AreaChange[RecordsState]:
+    facts = _exhausted(context, record, facts)
+    phase, retries = _next_phase(record, facts.observation)
     retry_at = (
         context.run.now_at + retry_delay(retries)
-        if phase == IntentPhase.DISPATCHED and facts.observation.retryable
+        if phase == RequestPhase.DISPATCHED and facts.observation.retryable
         else None
     )
-    updated = _record(intent, facts, phase, retries, retry_at)
+    updated = _record(record, facts, phase, retries, retry_at)
     state = _replace(state, updated)
     signals = owner_signals(context, updated, facts)
     events: tuple[StrategyEvent, ...] = ()
-    if phase == IntentPhase.COMPLETED:
+    if phase == RequestPhase.COMPLETED:
         state = _block_target(state, updated)
         completion, events = _complete(context, updated, facts)
         change = AreaChange(
@@ -645,36 +646,36 @@ def _advance_phase(
     return AreaChange(state=state, signals=signals)
 
 
-def _block_target(state: IntentsState, intent: Intent) -> IntentsState:
+def _block_target(state: RecordsState, record: RequestRecord) -> RecordsState:
     """A recorded block command leaves its target fenced awaiting reconciliation."""
-    request = intent.request
-    observation = intent.observation
+    request = record.request
+    observation = record.observation
     if (
-        not isinstance(request, BlockIntent)
+        not isinstance(request, BlockRequest)
         or observation is None
         or observation.status != ObservationStatus.SUCCEEDED
     ):
         return state
     target = _unique(state, request.target)
-    if target is None or target.phase == IntentPhase.COMPLETED:
+    if target is None or target.phase == RequestPhase.COMPLETED:
         return state
-    return _replace(state, target.model_copy(update={"phase": IntentPhase.BLOCKED}))
+    return _replace(state, target.model_copy(update={"phase": RequestPhase.BLOCKED}))
 
 
 # --- Decision completion -----------------------------------------------------------
 
 
-def _completable(context: IntentsContext, intent: Intent) -> bool:
-    request = intent.request
+def _completable(context: RecordsContext, record: RequestRecord) -> bool:
+    request = record.request
     if isinstance(request, CancelOwnedResource):
         return True
-    return isinstance(request, ExecuteRegisteredOperation) and intents_own(
+    return isinstance(request, ExecuteRegisteredOperation) and records_own(
         declaration(context, request)
     )
 
 
 def _completion_signal(
-    context: IntentsContext, decision_id: DecisionId, status: CompletionStatus
+    context: RecordsContext, decision_id: DecisionId, status: CompletionStatus
 ) -> tuple[Signal, ...]:
     """One completion per accepted, unfinished decision."""
     proof = accepted_receipt_for(context.run.receipts, decision_id, None)
@@ -684,12 +685,12 @@ def _completion_signal(
 
 
 def _operation_result(
-    intent: Intent, facts: Facts, context: IntentsContext
+    record: RequestRecord, facts: Facts, context: RecordsContext
 ) -> tuple[StrategyEvent, ...]:
-    request = intent.request
+    request = record.request
     if (
         not isinstance(request, ExecuteRegisteredOperation)
-        or not intents_own(declaration(context, request))
+        or not records_own(declaration(context, request))
         or facts.operation_schema is None
         or facts.outcome is None
         or not facts.outcome_is_registered
@@ -707,29 +708,29 @@ def _operation_result(
 
 
 def _complete(
-    context: IntentsContext, intent: Intent, facts: Facts
+    context: RecordsContext, record: RequestRecord, facts: Facts
 ) -> tuple[tuple[Signal, ...], tuple[StrategyEvent, ...]]:
-    if not _completable(context, intent) or intent.request.decision_id is None:
+    if not _completable(context, record) or record.request.decision_id is None:
         return (), ()
     status = _COMPLETION[facts.observation.status]
     return (
-        _completion_signal(context, intent.request.decision_id, status),
-        _operation_result(intent, facts, context),
+        _completion_signal(context, record.request.decision_id, status),
+        _operation_result(record, facts, context),
     )
 
 
 # --- Dependencies and retirement ----------------------------------------------------
 
 
-def _unsent_cancellation(context: IntentsContext, intent: Intent) -> TargetObservation:
+def _unsent_cancellation(context: RecordsContext, record: RequestRecord) -> TargetObservation:
     """Never-dispatched work is provably unaccepted, so core can close it itself."""
-    request = intent.request
+    request = record.request
     return TargetObservation(
         observation=Observation(
-            event_id=EventId(root=f"cancelled-unsent:{intent.request_id.root}"),
-            request_id=intent.request_id,
+            event_id=EventId(root=f"cancelled-unsent:{record.request_id.root}"),
+            request_id=record.request_id,
             scope=request.scope,
-            sequence=0 if intent.observation is None else intent.observation.sequence + 1,
+            sequence=0 if record.observation is None else record.observation.sequence + 1,
             observed_at=context.run.now_at,
             status=ObservationStatus.CANCELLED,
             accepted=False,
@@ -743,12 +744,12 @@ def _unsent_cancellation(context: IntentsContext, intent: Intent) -> TargetObser
 
 
 def _cancel_prepared(
-    state: IntentsState, context: IntentsContext, doomed: tuple[Intent, ...]
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, doomed: tuple[RequestRecord, ...]
+) -> AreaChange[RecordsState]:
     change = AreaChange(state=state)
-    for intent in doomed:
-        current = _unique(change.state, intent.request_id)
-        if current is None or current.phase != IntentPhase.PREPARED:
+    for record in doomed:
+        current = _unique(change.state, record.request_id)
+        if current is None or current.phase != RequestPhase.PREPARED:
             continue
         facts = _unsent_cancellation(context, current)
         change = _finish(change, _apply(change.state, context, current, facts, unsent=True))
@@ -756,34 +757,34 @@ def _cancel_prepared(
 
 
 def _cancel_dependents(
-    state: IntentsState, context: IntentsContext, failed: Intent
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, failed: RequestRecord
+) -> AreaChange[RecordsState]:
     """Prepared requests that required this request can never be dispatched."""
     doomed = tuple(
         row
-        for row in state.intents
-        if row.phase == IntentPhase.PREPARED and failed.request_id in row.request.depends_on
+        for row in state.records
+        if row.phase == RequestPhase.PREPARED and failed.request_id in row.request.depends_on
     )
     return _cancel_prepared(state, context, doomed)
 
 
 def _dependency_resolved(
-    state: IntentsState, context: IntentsContext, event: DecisionDependencyResolved
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, event: DecisionDependencyResolved
+) -> AreaChange[RecordsState]:
     """A failed or cancelled decision releases no dependent: its prepared work is cancelled."""
     if event.status == CompletionStatus.SUCCEEDED:
         return AreaChange(state=state)
     doomed = tuple(
         row
-        for row in state.intents
-        if row.phase == IntentPhase.PREPARED
+        for row in state.records
+        if row.phase == RequestPhase.PREPARED
         and event.decision_id in row.request.decision_dependencies
     )
     return _cancel_prepared(state, context, doomed)
 
 
 def _retirement_decision(
-    context: IntentsContext, event: OperationRetireRequested
+    context: RecordsContext, event: OperationRetireRequested
 ) -> DecisionId | None:
     rows = tuple(
         row.decision_id
@@ -798,50 +799,50 @@ def _retirement_decision(
 
 
 def _retire(
-    state: IntentsState, context: IntentsContext, event: OperationRetireRequested
-) -> AreaChange[IntentsState]:
+    state: RecordsState, context: RecordsContext, event: OperationRetireRequested
+) -> AreaChange[RecordsState]:
     """Cancel an owned operation: unsent work is closed, live work gets a bounded command."""
     matches = tuple(
         row
-        for row in state.intents
+        for row in state.records
         if isinstance(row.request, ExecuteRegisteredOperation)
         and row.request.operation_id == event.operation.operation_id
         and row.request.scope == event.scope
     )
     if len(matches) != 1:
         raise ContractError(("operation",), "retirement needs one canonical operation")
-    intent = matches[0]
+    record = matches[0]
     withdraw = _retirement_decision(context, event)
     done = (
         ()
         if withdraw is None
         else _completion_signal(context, withdraw, CompletionStatus.SUCCEEDED)
     )
-    if intent.phase == IntentPhase.PREPARED:
-        change = _cancel_prepared(state, context, (intent,))
+    if record.phase == RequestPhase.PREPARED:
+        change = _cancel_prepared(state, context, (record,))
         return _finish(change, AreaChange(state=change.state, signals=done))
-    observation = intent.observation
-    if intent.phase == IntentPhase.COMPLETED and isinstance(
-        released_owner(intent, (intent,)), Proven
+    observation = record.observation
+    if record.phase == RequestPhase.COMPLETED and isinstance(
+        released_owner(record, (record,)), Proven
     ):
         return AreaChange(state=state, signals=done)
     resource = None if observation is None else observation.resource_id
     request: Request
     if resource is not None:
         request = CancelOwnedResource(
-            request_id=RequestId(root=f"retire:{intent.request_id.root}"),
-            scope=intent.request.scope,
-            admission_id=intent.request.admission_id,
+            request_id=RequestId(root=f"retire:{record.request_id.root}"),
+            scope=record.request.scope,
+            admission_id=record.request.admission_id,
             deadline_at=context.run.now_at + context.run.limits.cancellation_bound,
             resource_id=resource,
-            target=intent.request_id,
+            target=record.request_id,
         )
     else:
         request = InspectRequest(
-            request_id=RequestId(root=f"retire-inspect:{intent.request_id.root}"),
-            scope=intent.request.scope,
-            admission_id=intent.request.admission_id,
+            request_id=RequestId(root=f"retire-inspect:{record.request_id.root}"),
+            scope=record.request.scope,
+            admission_id=record.request.admission_id,
             deadline_at=context.run.now_at + context.run.limits.reconciliation_bound,
-            target=intent.request_id,
+            target=record.request_id,
         )
     return AreaChange(state=state, requests=(request,))

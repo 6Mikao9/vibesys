@@ -29,9 +29,6 @@ from vs_core.api import (
     HostFence,
     HostId,
     InspectRequest,
-    Intent,
-    IntentPhase,
-    IntentsState,
     InvocationId,
     LifecycleClass,
     Observation,
@@ -43,8 +40,11 @@ from vs_core.api import (
     OperationRegistration,
     OperationRegistry,
     OperationRequest,
+    RecordsState,
     RecoveryStarted,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     ResourceId,
     ResumeSessionTurn,
     RevisionId,
@@ -78,7 +78,7 @@ def fixture_digest(request: Value) -> str:
     ).hexdigest()
 
 
-def _state(record: Intent) -> CoreState:
+def _state(record: RequestRecord) -> CoreState:
     state = initial_state()
     anchor_request = EnsureSession(
         request_id=RequestId(root="anchor"),
@@ -93,18 +93,18 @@ def _state(record: Intent) -> CoreState:
         ),
     )
     assert anchor_request.request_id is not None
-    anchor = Intent(
+    anchor = RequestRecord(
         request_id=anchor_request.request_id,
         request=anchor_request,
         payload_digest="anchor",
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-        phase=IntentPhase.DISPATCHED,
+        phase=RequestPhase.DISPATCHED,
         reconcile_deadline_at=100.0,
     )
     return state.model_copy(
         update={
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
-            "intents": IntentsState(intents=(record, anchor)),
+            "records": RecordsState(records=(record, anchor)),
         }
     )
 
@@ -215,21 +215,21 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         if identity == "missing"
         else ResourceId(root="different-lease"),
     )
-    record = Intent(
+    record = RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE
         if kind in ("setup", "workspace", "close")
         else LifecycleClass.SESSION_TURN,
-        phase=IntentPhase.COMPLETED,
+        phase=RequestPhase.COMPLETED,
         reconcile_deadline_at=100.0,
         observation=observation,
     )
     state = _state(record)
     result = step(state, RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
-        check for check in result.state.intents.recovery.checks if check.target == request_id
+        check for check in result.state.records.recovery.checks if check.target == request_id
     )
     identified = identity != "missing" and (kind != "setup" or identity == "exact")
     assert check.resolution == ("terminal" if identified and released and complete else "pending")
@@ -237,7 +237,7 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         isinstance(request, InspectRequest) and request.target == request_id
         for request in result.requests
     ) == (check.resolution == "pending")
-    assert result.state.intents.intents[0] == record
+    assert result.state.records.records[0] == record
     assert result.state.sessions == state.sessions
 
 
@@ -279,12 +279,12 @@ def test_resource_free_query_and_proven_nonacceptance_remain_terminal(
             ),
         )
     )
-    record = Intent(
+    record = RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=fixture_digest(request),
         lifecycle=LifecycleClass.QUERY if query else LifecycleClass.IDEMPOTENT_WRITE,
-        phase=IntentPhase.COMPLETED,
+        phase=RequestPhase.COMPLETED,
         reconcile_deadline_at=100.0,
         observation=Observation(
             event_id=EventId(root="negative-proof"),
@@ -301,7 +301,7 @@ def test_resource_free_query_and_proven_nonacceptance_remain_terminal(
     )
     result = step(_state(record), RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
-        check for check in result.state.intents.recovery.checks if check.target == request_id
+        check for check in result.state.records.recovery.checks if check.target == request_id
     )
     assert check.resolution == "terminal"
 
@@ -376,13 +376,13 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
             "admission": admission,
         }
     )
-    record = Intent.model_validate(
+    record = RequestRecord.model_validate(
         {
             "request_id": request_id,
             "request": request,
             "payload_digest": "reopen",
             "lifecycle": LifecycleClass.IDEMPOTENT_WRITE,
-            "phase": IntentPhase.COMPLETED,
+            "phase": RequestPhase.COMPLETED,
             "reconcile_deadline_at": 100.0,
             "outcome_schema": descriptor.outcome_schema,
             "outcome_json": codec.encode_outcome(wire.schema_ref, outcome),
@@ -459,7 +459,7 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
         assert reloaded == state
     result = step(reloaded, RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
-        check for check in result.state.intents.recovery.checks if check.target == request_id
+        check for check in result.state.records.recovery.checks if check.target == request_id
     )
     assert check.resolution == (
         "terminal" if metadata == "exact" and admission != "unknown" else "pending"
@@ -468,7 +468,7 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
         isinstance(request, InspectRequest) and request.target == request_id
         for request in result.requests
     ) == (check.resolution == "pending")
-    assert result.state.intents.intents[0] == record
+    assert result.state.records.records[0] == record
 
 
 @given(
@@ -514,14 +514,14 @@ def test_terminal_session_resource_matches_request_correlated_lease(
             continuation_id=ContinuationId(root="continuation"),
         ),
     }
-    record = Intent(
+    record = RequestRecord(
         request_id=request_id,
         request=requests[kind],
         payload_digest=fixture_digest(requests[kind]),
         lifecycle=LifecycleClass.SESSION_TURN
         if kind in ("turn", "resume")
         else LifecycleClass.IDEMPOTENT_WRITE,
-        phase=IntentPhase.COMPLETED,
+        phase=RequestPhase.COMPLETED,
         reconcile_deadline_at=100.0,
         observation=Observation(
             event_id=EventId(root="release"),
@@ -548,7 +548,7 @@ def test_terminal_session_resource_matches_request_correlated_lease(
                         phase=SessionPhase.IDLE,
                         accepted=True,
                         resource_id=resource,
-                        pending_intents=(request_id,) if correlated else (),
+                        pending_records=(request_id,) if correlated else (),
                     ),
                 )
             )
@@ -556,7 +556,7 @@ def test_terminal_session_resource_matches_request_correlated_lease(
     )
     result = step(state, RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
-        check for check in result.state.intents.recovery.checks if check.target == request_id
+        check for check in result.state.records.recovery.checks if check.target == request_id
     )
     assert check.resolution == ("pending" if correlated and identity == "wrong" else "terminal")
     assert result.state.sessions == state.sessions

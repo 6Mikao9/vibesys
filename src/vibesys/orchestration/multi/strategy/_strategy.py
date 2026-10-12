@@ -45,11 +45,11 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     ControlChanged,
-    IntentBlocked,
     MeasurementResult,
     OperationResult,
     Proposal,
     Rejected,
+    RequestBlocked,
     ResumeAuthorized,
     RunEnded,
     RunView,
@@ -150,7 +150,7 @@ class MultiStrategy:
             return self._attempt_feedback(state, event)
         if isinstance(event, AttemptExhausted):
             return round_events.on_exhausted(state, event)
-        if isinstance(event, IntentBlocked):
+        if isinstance(event, RequestBlocked):
             return self._blocked(state, event)
         return self._run_feedback(state, event)
 
@@ -185,7 +185,7 @@ class MultiStrategy:
             return state.model_copy(update={"phase": RunPhase.FINISHED})
         return state
 
-    def _blocked(self, state: MultiStrategyState, event: IntentBlocked) -> MultiStrategyState:
+    def _blocked(self, state: MultiStrategyState, event: RequestBlocked) -> MultiStrategyState:
         """Route a blocked request to the subject awaiting it: design, baseline or round."""
         detail = f"request blocked: {event.diagnostic}"
         decision = decision_of_operation(event.target.root)

@@ -171,7 +171,7 @@ def test_unacknowledged_success_requests_exact_inspection_and_fences_session_reu
     replay = reload_step(result.state, event)
     assert replay.requests == ()
     assert replay.events == ()
-    assert inspection in core.pending_requests(replay.state.intents)
+    assert inspection in core.pending_requests(replay.state.records)
 
 
 @given(
@@ -202,7 +202,7 @@ def test_unacknowledged_terminal_proof_keeps_one_inspection_and_reserved_payload
         state = result.state
     assert len(inspections) == 1
     assert len(outputs) == 1
-    pending = core.pending_requests(state.intents)
+    pending = core.pending_requests(state.records)
     assert len([row for row in pending if isinstance(row, core.InspectTurn)]) == 1
 
 

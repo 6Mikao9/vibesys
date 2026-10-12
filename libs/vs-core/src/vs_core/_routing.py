@@ -49,7 +49,15 @@ from .types.evaluation import (
     RegisteredJobRequested,
     TurnSuspended,
 )
-from .types.intents import (
+from .types.kernel import (
+    CoreEvent,
+    DecisionCompleted,
+    DecisionSubmitted,
+    ProposalSubmitted,
+    RunControlEvent,
+    Signal,
+)
+from .types.records import (
     DecisionDependencyResolved,
     DispatchAuthorized,
     OperationRetireRequested,
@@ -60,14 +68,6 @@ from .types.intents import (
     RequestPrepared,
     RequestUndispatchable,
     RetryDue,
-)
-from .types.kernel import (
-    CoreEvent,
-    DecisionCompleted,
-    DecisionSubmitted,
-    ProposalSubmitted,
-    RunControlEvent,
-    Signal,
 )
 from .types.scheduling import (
     AdmissionControl,
@@ -123,7 +123,7 @@ SIGNAL_ORDER = (
     Area.SESSIONS,
     Area.EVALUATION,
     Area.SETTLEMENT,
-    Area.INTENTS,
+    Area.RECORDS,
 )
 
 
@@ -238,7 +238,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | OperationRetireRequested()
             | DecisionCompleted()
         ):
-            return Area.INTENTS
+            return Area.RECORDS
         case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent():
             raise ContractError(("event",), "kernel event requires translation")
         case _:

@@ -36,9 +36,9 @@ from .proof_facts import dependency_facts, fact_digest, stop_facts
 def test_decision_dependencies_require_exact_completion(
     variant: str,
     denial: Missing | Mismatch | None,
-    facts: tuple[core.RequestBase, core.DecisionReceipt, core.Intent],
+    facts: tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord],
 ) -> None:
-    request, receipt, intent = facts
+    request, receipt, record = facts
     receipts = (receipt,)
     match variant:
         case "optional_empty":
@@ -51,7 +51,7 @@ def test_decision_dependencies_require_exact_completion(
             receipt = _dependency_receipt(variant, receipt)
     if variant not in ("receipt", "duplicate_receipt"):
         receipts = (receipt,)
-    assert dependencies_for(request, receipts, core.IntentsState(intents=(intent,))) == (
+    assert dependencies_for(request, receipts, core.RecordsState(records=(record,))) == (
         Proven(request) if denial is None else denial
     )
 
@@ -102,29 +102,29 @@ def _dependency_receipt(variant: str, receipt: core.DecisionReceipt) -> core.Dec
 def test_request_dependencies_require_exact_success(
     variant: str,
     denial: Missing | Mismatch | None,
-    facts: tuple[core.RequestBase, core.DecisionReceipt, core.Intent],
+    facts: tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord],
 ) -> None:
-    request, receipt, intent = facts
-    intents = (intent,)
+    request, receipt, record = facts
+    records = (record,)
     match variant:
         case "request":
-            intents = ()
+            records = ()
         case "duplicate":
-            intents = (intent, intent)
+            records = (record, record)
         case "observation":
-            intent = intent.model_copy(update={"observation": None})
+            record = record.model_copy(update={"observation": None})
         case "pending":
-            intent = intent.model_copy(update={"phase": core.IntentPhase.DISPATCHED})
+            record = record.model_copy(update={"phase": core.RequestPhase.DISPATCHED})
         case _:
-            intent = _dependency_observation(variant, intent)
+            record = _dependency_observation(variant, record)
     if variant not in ("request", "duplicate"):
-        intents = (intent,)
-    assert dependencies_for(request, (receipt,), core.IntentsState(intents=intents)) == (
+        records = (record,)
+    assert dependencies_for(request, (receipt,), core.RecordsState(records=records)) == (
         Proven(request) if denial is None else denial
     )
 
 
-def _dependency_observation(variant: str, intent: core.Intent) -> core.Intent:
+def _dependency_observation(variant: str, record: core.RequestRecord) -> core.RequestRecord:
     updates = {
         "episode": {"admission_id": None},
         "failed": {"status": core.ObservationStatus.FAILED},
@@ -132,9 +132,9 @@ def _dependency_observation(variant: str, intent: core.Intent) -> core.Intent:
         "not_accepted": {"accepted": False},
     }.get(variant)
     if updates is None:
-        return intent
-    assert intent.observation is not None
-    return intent.model_copy(update={"observation": intent.observation.model_copy(update=updates)})
+        return record
+    assert record.observation is not None
+    return record.model_copy(update={"observation": record.observation.model_copy(update=updates)})
 
 
 @pytest.mark.parametrize(
@@ -224,26 +224,26 @@ def _stop_receipt_variant(variant: str, run: core.RunState, expected: core.Stop)
 
 
 @pytest.mark.parametrize(
-    "phase", [core.IntentPhase.PREPARED, core.IntentPhase.DISPATCHED, core.IntentPhase.COMPLETED]
+    "phase", [core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED, core.RequestPhase.COMPLETED]
 )
 @given(dependency_facts())
 def test_inflight_dependencies_wait_without_an_observation(
-    phase: core.IntentPhase,
-    facts: tuple[core.RequestBase, core.DecisionReceipt, core.Intent],
+    phase: core.RequestPhase,
+    facts: tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord],
 ) -> None:
-    request, receipt, intent = facts
-    intent = intent.model_copy(update={"phase": phase, "observation": None})
-    verdict = dependencies_for(request, (receipt,), core.IntentsState(intents=(intent,)))
+    request, receipt, record = facts
+    record = record.model_copy(update={"phase": phase, "observation": None})
+    verdict = dependencies_for(request, (receipt,), core.RecordsState(records=(record,)))
     reason = (
         ProofReason.ABSENT_OBSERVATION
-        if phase == core.IntentPhase.COMPLETED
+        if phase == core.RequestPhase.COMPLETED
         else ProofReason.UNRESOLVED
     )
     assert verdict == Missing(reason)
     dependent = core.InspectRequest(
         scope=request.scope,
         deadline_at=request.deadline_at,
-        target=intent.request_id,
+        target=record.request_id,
         depends_on=request.depends_on,
         decision_dependencies=request.decision_dependencies,
     )
@@ -251,12 +251,12 @@ def test_inflight_dependencies_wait_without_an_observation(
     state = state.model_copy(
         update={
             "run": state.run.model_copy(update={"receipts": (receipt,)}),
-            "intents": core.IntentsState(intents=(intent,)),
+            "records": core.RecordsState(records=(record,)),
         }
     )
     status = (
         core.DependencyStatus.FAILED
-        if phase == core.IntentPhase.COMPLETED
+        if phase == core.RequestPhase.COMPLETED
         else core.DependencyStatus.PENDING
     )
     assert core.dependency_status(state, dependent) == status
@@ -266,9 +266,9 @@ def test_inflight_dependencies_wait_without_an_observation(
 @given(dependency_facts())
 def test_a_pending_dependency_cannot_hide_a_rejected_dependency(
     order: str,
-    facts: tuple[core.RequestBase, core.DecisionReceipt, core.Intent],
+    facts: tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord],
 ) -> None:
-    request, receipt, intent = facts
+    request, receipt, record = facts
     assert receipt.decision is not None
     rejected_decision = receipt.decision.model_copy(
         update={"decision_id": core.DecisionId(root="rejected")}
@@ -292,12 +292,12 @@ def test_a_pending_dependency_cannot_hide_a_rejected_dependency(
     )
     request = request.model_copy(update={"decision_dependencies": ids})
     assert dependencies_for(
-        request, (pending, rejected), core.IntentsState(intents=(intent,))
+        request, (pending, rejected), core.RecordsState(records=(record,))
     ) == Missing(ProofReason.NOT_ACCEPTED)
     dependent = core.InspectRequest(
         scope=request.scope,
         deadline_at=request.deadline_at,
-        target=intent.request_id,
+        target=record.request_id,
         decision_dependencies=ids,
     )
     state = core.initial_state()

@@ -75,8 +75,8 @@ from .types.common import (
 )
 from .types.evaluation import ContinuationPhase, ResumeAuthorizationReceipt
 from .types.evaluation_history import EvaluationHistoryAvailability
-from .types.intents import ExecuteRegisteredOperation, InspectRequest, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
+from .types.records import ExecuteRegisteredOperation, InspectRequest, RequestPhase
 from .types.sessions import (
     Access,
     CancelTurn,
@@ -112,8 +112,8 @@ from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 if TYPE_CHECKING:
     from .types.common import Observation, SessionId
     from .types.evaluation_history import EvaluationHistoryCursor
-    from .types.intents import Intent, Request
     from .types.kernel import SessionsContext, Signal
+    from .types.records import Request, RequestRecord
     from .types.sessions import SessionsEvent, SessionSpec, TurnSpec
 
 
@@ -155,8 +155,8 @@ def _session_id(session: SessionView, action: str) -> RequestId:
     return RequestId(root=encode_identity("session", *parts))
 
 
-def _intent(context: SessionsContext, identity: RequestId | None) -> Intent | None:
-    return next((row for row in context.intents.intents if row.request_id == identity), None)
+def _record(context: SessionsContext, identity: RequestId | None) -> RequestRecord | None:
+    return next((row for row in context.records.records if row.request_id == identity), None)
 
 
 def _episode(context: SessionsContext, scope: Scope) -> DecisionId | None:
@@ -423,11 +423,11 @@ def _registered_request(
     context: SessionsContext, request: ExecuteRegisteredOperation, turn: TurnSpec
 ) -> ExecuteRegisteredOperation:
     """Require canonical wire, accepted origin and exact registered turn normalization."""
-    canonical = _intent(context, request.request_id)
+    canonical = _record(context, request.request_id)
     proof = accepted_receipt_for(context.run.receipts, request.decision_id, None)
     if not isinstance(request_matches(canonical, request), Proven) or not isinstance(proof, Proven):
         raise ContractValidationError(
-            "registered_operation", "turn lacks exact canonical session-turn intent"
+            "registered_operation", "turn lacks exact canonical session-turn record"
         )
     decision = proof.value.decision
     if (
@@ -501,7 +501,7 @@ def _evaluation_prefix(
     owner = attempt_for(context, scope)
     if owner is None or not isinstance(current_admission(owner, scope, owner.admission_id), Proven):
         return None
-    history = produce_history(scope, context.evaluation, context.intents, owner, context.run)
+    history = produce_history(scope, context.evaluation, context.records, owner, context.run)
     return (
         history.cursor if history.availability == EvaluationHistoryAvailability.COMPLETE else None
     )
@@ -533,13 +533,13 @@ def _turn_requested(
             )
         return AreaChange(state=state)
     if isinstance(event, RegisteredTurnRequested):
-        canonical = _intent(context, event.request.request_id)
+        canonical = _record(context, event.request.request_id)
         if canonical is not None and canonical.phase in (
-            IntentPhase.COMPLETED,
-            IntentPhase.BLOCKED,
+            RequestPhase.COMPLETED,
+            RequestPhase.BLOCKED,
         ):
             raise ContractValidationError(
-                "registered_operation", "canonical turn intent is already final"
+                "registered_operation", "canonical turn record is already final"
             )
     if any(row.invocation.invocation_id == ref.invocation_id for row in state.invocations):
         raise ContractValidationError(
@@ -579,7 +579,7 @@ def _turn_requested(
             invocation=turn.invocation_id,
         )
         ensure = _ensure(session, context, bound_to_run(context.run, turn.deadline_at))
-        session = session.model_copy(update={"pending_intents": (ensure.request_id,)})
+        session = session.model_copy(update={"pending_records": (ensure.request_id,)})
         requests = (ensure,)
     else:
         session = session.model_copy(
@@ -631,23 +631,23 @@ def _charges_authorized(
 
 
 def _registered_dispatch(context: SessionsContext, invocation: Invocation) -> Request:
-    intent = next(
+    record = next(
         (
             row
-            for row in context.intents.intents
+            for row in context.records.records
             if getattr(row.request, "operation_id", None) == invocation.registered_operation
         ),
         None,
     )
     if (
-        intent is None
-        or not isinstance(intent.request, ExecuteRegisteredOperation)
-        or intent.phase in (IntentPhase.COMPLETED, IntentPhase.BLOCKED)
+        record is None
+        or not isinstance(record.request, ExecuteRegisteredOperation)
+        or record.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED)
     ):
         raise ContractValidationError(
             "registered_operation", "missing unfinished canonical registered request"
         )
-    return _registered_request(context, intent.request, invocation.turn)
+    return _registered_request(context, record.request, invocation.turn)
 
 
 def _dispatch_reserved(
@@ -734,7 +734,7 @@ def _dispatch_reserved(
     session = session.model_copy(
         update={
             "phase": SessionPhase.EXECUTING,
-            "pending_intents": (*session.pending_intents, request.request_id),
+            "pending_records": (*session.pending_records, request.request_id),
             "continuation_id": invocation.turn.continuation_id,
         }
     )
@@ -835,7 +835,7 @@ def _acquire(
                 "admission_id": event.admission_id,
             }
         )
-        session = session.model_copy(update={"pending_intents": (request.request_id,)})
+        session = session.model_copy(update={"pending_records": (request.request_id,)})
         state = _replace_session(state, session)
         requests.append(request)
     state = state.model_copy(update={"acquisition_groups": (*state.acquisition_groups, group)})
@@ -853,13 +853,13 @@ def _acquire(
 
 def _valid_observation(
     context: SessionsContext, session: SessionView, observation: Observation
-) -> Intent | None:
-    intent = _intent(context, observation.request_id)
+) -> RequestRecord | None:
+    record = _record(context, observation.request_id)
     if (
-        intent is None
-        or intent.request.scope != session.scope
-        or not isinstance(request_matches(intent, intent.request), Proven)
-        or not isinstance(observation_for(intent, observation), Proven)
+        record is None
+        or record.request.scope != session.scope
+        or not isinstance(request_matches(record, record.request), Proven)
+        or not isinstance(observation_for(record, observation), Proven)
     ):
         return None
     if isinstance(session.scope.owner, AttemptId) and not isinstance(
@@ -869,17 +869,17 @@ def _valid_observation(
         Proven,
     ):
         return None
-    return intent
+    return record
 
 
 def _inspect_session(
     session: SessionView, context: SessionsContext, target: RequestId
 ) -> InspectRequest:
     identity = RequestId(root=encode_identity("inspect-root", target.root))
-    previous = _intent(context, identity)
+    previous = _record(context, identity)
     if previous is not None and isinstance(previous.request, InspectRequest):
         return previous.request
-    original = _intent(context, target)
+    original = _record(context, target)
     return InspectRequest(
         request_id=identity,
         scope=session.scope,
@@ -916,8 +916,8 @@ def _group_admitted(context: SessionsContext, group: SessionAcquisitionGroup) ->
 def _group_observed(
     state: SessionsState, context: SessionsContext, session: SessionView, event: SessionObserved
 ) -> AreaChange[SessionsState]:
-    intent = _intent(context, event.observation.request_id)
-    admission = intent.request.admission_id if intent is not None else None
+    record = _record(context, event.observation.request_id)
+    admission = record.request.admission_id if record is not None else None
     group = next(
         (
             row
@@ -945,7 +945,7 @@ def _group_observed(
         session = session.model_copy(
             update={
                 "phase": SessionPhase.CLOSING,
-                "pending_intents": (*session.pending_intents, close.request_id),
+                "pending_records": (*session.pending_records, close.request_id),
             }
         )
         return AreaChange(state=_replace_session(state, session), requests=(close,))
@@ -978,7 +978,7 @@ def _group_observed(
                 member = member.model_copy(
                     update={
                         "phase": SessionPhase.CLOSING,
-                        "pending_intents": (*member.pending_intents, request.request_id),
+                        "pending_records": (*member.pending_records, request.request_id),
                     }
                 )
                 state = _replace_session(state, member)
@@ -1041,7 +1041,7 @@ def _close_observed(
     session = session.model_copy(
         update={
             "phase": SessionPhase.TERMINAL,
-            "pending_intents": (),
+            "pending_records": (),
             "acceptance_sequence": observation.sequence,
         }
     )
@@ -1088,14 +1088,14 @@ def _abandon_turn_acquisition(
                 failure=SetupFailureKind.UNKNOWN,
             )
         )
-    intent = _intent(context, observation.request_id)
-    if intent is not None and intent.request.decision_id is not None:
+    record = _record(context, observation.request_id)
+    if record is not None and record.request.decision_id is not None:
         status = (
             CompletionStatus.CANCELLED
             if observation.status == ObservationStatus.CANCELLED
             else CompletionStatus.FAILED
         )
-        signals.append(DecisionCompleted(decision_id=intent.request.decision_id, status=status))
+        signals.append(DecisionCompleted(decision_id=record.request.decision_id, status=status))
     return AreaChange(
         state=state,
         signals=tuple(signals),
@@ -1106,19 +1106,19 @@ def _abandon_turn_acquisition(
 def _prepared_registered_completion(
     context: SessionsContext, invocation: Invocation
 ) -> tuple[Signal, ...]:
-    intent = next(
+    record = next(
         (
             row
-            for row in context.intents.intents
+            for row in context.records.records
             if isinstance(row.request, ExecuteRegisteredOperation)
             and row.request.operation_id == invocation.registered_operation
             and row.request.scope == invocation.scope
         ),
         None,
     )
-    if intent is None or not isinstance(intent.request, ExecuteRegisteredOperation):
+    if record is None or not isinstance(record.request, ExecuteRegisteredOperation):
         return ()
-    request = _registered_request(context, intent.request, invocation.turn)
+    request = _registered_request(context, record.request, invocation.turn)
     receipt = next(
         (row for row in context.run.receipts if row.decision_id == request.decision_id), None
     )
@@ -1180,7 +1180,7 @@ def _after_ensure(
         closing = session.model_copy(
             update={
                 "phase": SessionPhase.CLOSING,
-                "pending_intents": (*session.pending_intents, request.request_id),
+                "pending_records": (*session.pending_records, request.request_id),
             }
         )
         signals = () if invocation is None else _prepared_completion(context, invocation)
@@ -1253,9 +1253,9 @@ def _ensure_observed(
             "phase": phase,
             "resource_id": observation.resource_id or session.resource_id,
             "acceptance_sequence": observation.sequence,
-            "pending_intents": tuple(
+            "pending_records": tuple(
                 identity
-                for identity in session.pending_intents
+                for identity in session.pending_records
                 if phase == SessionPhase.UNKNOWN or identity != observation.request_id
             ),
         }
@@ -1299,17 +1299,17 @@ def _session_observed(
     state: SessionsState, context: SessionsContext, event: SessionObserved
 ) -> AreaChange[SessionsState]:
     session = _session(state, event.session_id)
-    if session is None or event.observation.request_id not in session.pending_intents:
+    if session is None or event.observation.request_id not in session.pending_records:
         return AreaChange(state=state)
-    intent = _valid_observation(context, session, event.observation)
-    if intent is None:
+    record = _valid_observation(context, session, event.observation)
+    if record is None:
         return AreaChange(state=state)
     observation = event.observation
     # Sequences belong to a request, not to the physical conversation globally.
-    previous = intent.observation
+    previous = record.observation
     if previous is not None and previous.sequence > observation.sequence:
         return AreaChange(state=state)
-    request = intent.request
+    request = record.request
     if isinstance(request, CloseSession) and request.session_id == event.session_id:
         return _close_observed(state, context, session, event)
     if isinstance(request, EnsureSession) and request.spec == session.spec:
@@ -1361,14 +1361,14 @@ def _terminal_signals(
         ObservationStatus.SUCCEEDED: CompletionStatus.SUCCEEDED,
         ObservationStatus.CANCELLED: CompletionStatus.CANCELLED,
     }.get(observation.status, CompletionStatus.FAILED)
-    intent = _intent(context, observation.request_id)
+    record = _record(context, observation.request_id)
     if (
-        intent is not None
-        and intent.request.decision_id is not None
+        record is not None
+        and record.request.decision_id is not None
         and not (event.suspension is not None and status == CompletionStatus.SUCCEEDED)
     ):
         # Checkpoint failure preserves the yielded decision dependency fence.
-        signals.append(DecisionCompleted(decision_id=intent.request.decision_id, status=status))
+        signals.append(DecisionCompleted(decision_id=record.request.decision_id, status=status))
     return tuple(signals)
 
 
@@ -1413,12 +1413,12 @@ def _after_turn_cleanup(
         )
         return AreaChange(state=state, signals=signals)
     request = _close(session, context, owner.closure.authority)
-    if request.request_id in session.pending_intents:
+    if request.request_id in session.pending_records:
         return AreaChange(state=state)
     closing = session.model_copy(
         update={
             "phase": SessionPhase.CLOSING,
-            "pending_intents": (*session.pending_intents, request.request_id),
+            "pending_records": (*session.pending_records, request.request_id),
         }
     )
     return AreaChange(state=_replace_session(state, closing), requests=(request,))
@@ -1505,8 +1505,8 @@ def _physical_turn_phase(
     if session.phase == SessionPhase.TERMINAL or (
         session.phase == SessionPhase.CLOSING
         and any(
-            row.request_id in session.pending_intents and isinstance(row.request, CloseSession)
-            for row in context.intents.intents
+            row.request_id in session.pending_records and isinstance(row.request, CloseSession)
+            for row in context.records.records
         )
     ):
         physical_phase = session.phase
@@ -1517,7 +1517,7 @@ def _correlated_turn_observation(
     context: SessionsContext, invocation: Invocation, event: TurnObserved
 ) -> tuple[TurnObserved, bool]:
     previous = invocation.observation
-    inspection = _intent(context, event.observation.request_id)
+    inspection = _record(context, event.observation.request_id)
     inspected = inspection is not None and isinstance(inspection.request, InspectTurn)
     if inspected and previous is not None:
         # Inspection strengthens the original dispatch delivery facts.
@@ -1568,12 +1568,12 @@ def _unresolved_after_inspection(
     context: SessionsContext, invocation: Invocation, event: TurnObserved
 ) -> bool:
     """Whether the turn's inspection completed and acceptance is still unknown."""
-    inspection = _intent(context, inspect_turn(context, invocation).request_id)
+    inspection = _record(context, inspect_turn(context, invocation).request_id)
     return (
         invocation.phase == SessionPhase.UNKNOWN
         and event.observation.status == ObservationStatus.UNKNOWN
         and inspection is not None
-        and inspection.phase == IntentPhase.COMPLETED
+        and inspection.phase == RequestPhase.COMPLETED
     )
 
 
@@ -1696,7 +1696,7 @@ def _cancel(
     )
     if claim is None and not cleanup and not run_cleanup and not lost:
         raise ContractValidationError(
-            "authority", "cancellation requires recorded interruption or cleanup intent"
+            "authority", "cancellation requires recorded interruption or cleanup record"
         )
     request = CancelTurn(
         request_id=turn_request_id(event.invocation, f"cancel:{event.authority.root}"),
@@ -1707,12 +1707,12 @@ def _cancel(
         admission_id=_episode(context, invocation.scope),
         invocation=event.invocation,
     )
-    if request.request_id in session.pending_intents:
+    if request.request_id in session.pending_records:
         return AreaChange(state=state)
     session = session.model_copy(
         update={
             "phase": SessionPhase.CLOSING,
-            "pending_intents": (*session.pending_intents, request.request_id),
+            "pending_records": (*session.pending_records, request.request_id),
         }
     )
     return AreaChange(state=_replace_session(state, session), requests=(request,))
@@ -1739,8 +1739,8 @@ def _drain_acquiring(
 ) -> AreaChange[SessionsState]:
     ensures = tuple(
         row
-        for row in context.intents.intents
-        if row.request_id in session.pending_intents and isinstance(row.request, EnsureSession)
+        for row in context.records.records
+        if row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
     )
     if ensures:
         return AreaChange(
@@ -1777,20 +1777,20 @@ def _drain_lease(
     if session.resource_id is None:
         ensures = tuple(
             row
-            for row in context.intents.intents
-            if row.request_id in session.pending_intents and isinstance(row.request, EnsureSession)
+            for row in context.records.records
+            if row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
         )
         return AreaChange(
             state=state,
             requests=tuple(_inspect_session(session, context, row.request_id) for row in ensures),
         )
     request = _close(session, context, authority)
-    if request.request_id in session.pending_intents:
+    if request.request_id in session.pending_records:
         return AreaChange(state=state)
     closing = session.model_copy(
         update={
             "phase": SessionPhase.CLOSING,
-            "pending_intents": (*session.pending_intents, request.request_id),
+            "pending_records": (*session.pending_records, request.request_id),
         }
     )
     return AreaChange(state=_replace_session(state, closing), requests=(request,))

@@ -3,7 +3,7 @@
 The production shell runs the dynamic search with the requests of one kind answered in
 one of four ways, at a concurrency cap of one or two (two implementer workstreams in
 flight, the cap alternating across the cases). Whatever the answer, `vs_core.testing.liveness`
-must hold: the run ends terminal, no intent is left open, requests stay bounded and none repeats without new information.
+must hold: the run ends terminal, no record is left open, requests stay bounded and none repeats without new information.
 No request identity is executed twice. The kinds come from core's closed registry
 (`REQUEST_DISPATCH`), so a kind that is added must be classified here, either as issued
 by the dynamic search (and so exercised by every case) or as issued only by recovery.
@@ -42,7 +42,7 @@ RECOVERY_ONLY = frozenset(
         "cancel_turn",
         "cancel_owned_job",
         "cancel_owned_resource",
-        "block_intent",
+        "block_request",
         "resume_session_turn",
         "collect_evidence",
         "snapshot_and_retain_run",
@@ -133,14 +133,14 @@ def test_a_run_with_every_answer_conclusive_ends_live(cap: int) -> None:
     assert max(script.executed.values()) == 1
 
 
-# Kind and answer pairs whose run does not end: core blocks the intent at its bound, but the
-# blocked intent is routed to the strategy only. The owning area (an attempt that is still
+# Kind and answer pairs whose run does not end: core blocks the record at its bound, but the
+# blocked record is routed to the strategy only. The owning area (an attempt that is still
 # acquiring, a session that is still ensuring, a settlement or job that is still closing)
 # never hears of it, so cleanup stays pending and the run stays open. Turns, measurements and
 # a few operations conclude. Each pair fails at both caps; fix the routing in core, then
 # delete the pair.
 OPEN_AFTER_BLOCK_GAP = (
-    "gap (owner: vs-core): reconciliation blocks the intent but only the strategy hears of it; "
+    "gap (owner: vs-core): reconciliation blocks the record but only the strategy hears of it; "
     "the attempt, session or settlement waiting on this kind never concludes, so the run does "
     "not end"
 )
@@ -180,7 +180,7 @@ SHOWN_OPEN: frozenset[tuple[str, Reply]] = frozenset(
 def _cases() -> list[object]:
     """Every (kind, answer) pair that can tell something new, at an alternating cap.
 
-    A known-open pair fails because core blocks the intent and only the strategy hears of
+    A known-open pair fails because core blocks the record and only the strategy hears of
     it; which answer led to the block does not change that, so only the pairs in
     `SHOWN_OPEN` are run. Fixing the gap means deleting the pairs from `KNOWN_OPEN`, which
     runs the kind's other answers again.

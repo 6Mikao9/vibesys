@@ -55,7 +55,7 @@ def test_current_main_persisted_state_requires_selected_migration_and_roundtrips
     continuation = loaded.core.evaluation.continuations[0]
     assert continuation.authorization_receipt is None
     assert continuation.deadline_at == old["core"]["evaluation"]["continuations"][0]["deadline_at"]
-    child = loaded.core.intents.children[0]
+    child = loaded.core.records.children[0]
     assert not child.watermark_history_complete
     assert child.observation_watermarks == ()
     result = step(loaded.core, ProposalSubmitted(decisions=(), expected_revision=loaded.revision))
@@ -73,12 +73,12 @@ def test_migration_preserves_original_source_sequences_and_deadlines(
     sequence: int, deadline: float
 ) -> None:
     old = json.loads(_FIXTURE.read_text())
-    observation = old["core"]["intents"]["children"][0]["observation"]
+    observation = old["core"]["records"]["children"][0]["observation"]
     observation["sequence"] = sequence
     old["core"]["run"]["deadline_at"] = deadline
     old["core"]["evaluation"]["continuations"][0]["deadline_at"] = deadline
     loaded = _load(json.dumps(old))
-    child = loaded.core.intents.children[0]
+    child = loaded.core.records.children[0]
     assert child.observation is not None
     assert child.observation.sequence == sequence
     assert child.observation_watermarks == ()
@@ -92,7 +92,7 @@ def test_migration_preserves_original_source_sequences_and_deadlines(
 
 
 @pytest.mark.parametrize(
-    "area", ["run", "attempts", "sessions", "evaluation", "intents", "settlement"]
+    "area", ["run", "attempts", "sessions", "evaluation", "records", "settlement"]
 )
 def test_migration_rejects_unknown_keys_in_every_area(area: str) -> None:
     old = json.loads(_FIXTURE.read_text())
@@ -103,10 +103,10 @@ def test_migration_rejects_unknown_keys_in_every_area(area: str) -> None:
 
 def test_migration_does_not_infer_other_source_watermarks_from_latest_observation() -> None:
     old = json.loads(_FIXTURE.read_text())
-    child = old["core"]["intents"]["children"][0]
+    child = old["core"]["records"]["children"][0]
     child["source_requests"].append({"kind": "request", "root": "second-source"})
     loaded = _load(json.dumps(old))
-    migrated = loaded.core.intents.children[0]
+    migrated = loaded.core.records.children[0]
     assert not migrated.watermark_history_complete
     assert migrated.observation_watermarks == ()
     assert len(migrated.source_requests) > len(migrated.observation_watermarks)
@@ -118,8 +118,8 @@ def test_migration_does_not_infer_other_source_watermarks_from_latest_observatio
         ("core", "attempts", "attempts", 0, "budget", "repeated_failure_limit"),
         ("core", "attempts", "attempts", 0, "evaluation_history"),
         ("core", "attempts", "attempts", 0, "terminal_reason"),
-        ("core", "intents", "children", 0, "observation_watermarks"),
-        ("core", "intents", "children", 0, "watermark_history_complete"),
+        ("core", "records", "children", 0, "observation_watermarks"),
+        ("core", "records", "children", 0, "watermark_history_complete"),
         ("core", "sessions", "run_checkpoints"),
         ("core", "run", "limits", "pool_capacities"),
         ("core", "evaluation", "continuations", 0, "preceding_submission"),
@@ -136,7 +136,7 @@ def test_version2_rejects_every_introduced_contract_field(path: tuple[str | int,
         _load(json.dumps(old))
 
 
-def _version2_ensure_intent() -> dict[str, object]:
+def _version2_ensure_record() -> dict[str, object]:
     scope = core.Scope(owner=core.RunId(root="run"), generation=0)
     request = core.EnsureSession(
         request_id=core.RequestId(root="ensure"),
@@ -150,25 +150,25 @@ def _version2_ensure_intent() -> dict[str, object]:
             access=core.Access.READ_ONLY,
         ),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=core.RequestId(root="ensure"),
         request=request,
         payload_digest="payload",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.PREPARED,
+        phase=core.RequestPhase.PREPARED,
         reconcile_deadline_at=100.0,
     ).model_dump(mode="json")
-    intent.pop("setup_failure")
-    intent.pop("evaluation_result", None)
-    return intent
+    record.pop("setup_failure")
+    record.pop("evaluation_result", None)
+    return record
 
 
 @pytest.mark.parametrize("field", ["setup_failure", "evaluation_result"])
-def test_version2_rejects_new_authority_fields_in_legacy_intent(field: str) -> None:
+def test_version2_rejects_new_authority_fields_in_legacy_record(field: str) -> None:
     old = json.loads(_FIXTURE.read_text())
-    intent = _version2_ensure_intent()
-    old["core"]["intents"]["intents"] = [intent]
-    intent[field] = None
+    record = _version2_ensure_record()
+    old["core"]["records"]["records"] = [record]
+    record[field] = None
     with pytest.raises(ContractError, match=field):
         _load(json.dumps(old))
 
@@ -198,10 +198,10 @@ def test_version2_rejects_new_bound_in_accepted_start_receipt() -> None:
         _load(json.dumps(old))
 
 
-def _version2_intent(request: core.Request, phase: core.IntentPhase) -> dict[str, object]:
+def _version2_record(request: core.Request, phase: core.RequestPhase) -> dict[str, object]:
     identity = request.request_id
     assert identity is not None
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=identity,
         request=request,
         payload_digest="legacy-payload",
@@ -209,9 +209,9 @@ def _version2_intent(request: core.Request, phase: core.IntentPhase) -> dict[str
         phase=phase,
         reconcile_deadline_at=request.deadline_at,
     ).model_dump(mode="json")
-    intent.pop("setup_failure")
-    intent.pop("evaluation_result", None)
-    return intent
+    record.pop("setup_failure")
+    record.pop("evaluation_result", None)
+    return record
 
 
 def _legacy_resume(deadline: float) -> core.ResumeSessionTurn:
@@ -249,27 +249,27 @@ def test_prepared_legacy_resume_cannot_gain_authorization_from_absent_v3_receipt
 ) -> None:
     old = json.loads(_FIXTURE.read_text())
     old["core"]["evaluation"]["continuations"][0]["phase"] = "authorized"
-    old["core"]["intents"]["intents"] = [
-        _version2_intent(_legacy_resume(float(deadline)), core.IntentPhase.PREPARED)
+    old["core"]["records"]["records"] = [
+        _version2_record(_legacy_resume(float(deadline)), core.RequestPhase.PREPARED)
     ]
     with pytest.raises(ContractError, match="resume publication/history"):
         _load(json.dumps(old))
 
 
 @given(
-    phase=st.sampled_from([core.IntentPhase.DISPATCHED, core.IntentPhase.RECONCILING]),
+    phase=st.sampled_from([core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING]),
     deadline=st.integers(min_value=20, max_value=10000),
 )
 def test_started_legacy_resume_keeps_inspection_identity_behind_fresh_recovery(
-    phase: core.IntentPhase, deadline: int
+    phase: core.RequestPhase, deadline: int
 ) -> None:
     old = json.loads(_FIXTURE.read_text())
     request = _legacy_resume(float(deadline))
-    old["core"]["intents"]["intents"] = [_version2_intent(request, phase)]
+    old["core"]["records"]["records"] = [_version2_record(request, phase)]
     loaded = _load(json.dumps(old))
-    assert loaded.core.intents.recovery.phase == core.RecoveryPhase.REQUIRED
-    assert loaded.core.intents.intents[0].request == request
-    assert loaded.core.intents.intents[0].phase == phase
+    assert loaded.core.records.recovery.phase == core.RecoveryPhase.REQUIRED
+    assert loaded.core.records.records[0].request == request
+    assert loaded.core.records.records[0].phase == phase
     assert loaded.core.evaluation.continuations[0].authorization_receipt is None
     assert loaded.core.run.status == core.RunStatus.RUNNING
     with pytest.raises(ContractError, match="recovery"):
@@ -302,20 +302,20 @@ def test_prepared_attempt_measurement_cannot_gain_complete_history_from_migratio
         deadline_at=float(deadline),
         plan=plan,
     )
-    intent = _version2_intent(request, core.IntentPhase.PREPARED)
-    intent["lifecycle"] = core.LifecycleClass.OWNED_JOB
-    old["core"]["intents"]["intents"] = [intent]
+    record = _version2_record(request, core.RequestPhase.PREPARED)
+    record["lifecycle"] = core.LifecycleClass.OWNED_JOB
+    old["core"]["records"]["records"] = [record]
     with pytest.raises(ContractError, match="attempt evaluation history"):
         _load(json.dumps(old))
 
 
-def test_migration_requires_fresh_recovery_even_for_legacy_ready_generic_intent() -> None:
+def test_migration_requires_fresh_recovery_even_for_legacy_ready_generic_record() -> None:
     old = json.loads(_FIXTURE.read_text())
-    old["core"]["intents"]["intents"] = [_version2_ensure_intent()]
-    assert old["core"]["intents"]["recovery"]["phase"] == "ready"
+    old["core"]["records"]["records"] = [_version2_ensure_record()]
+    assert old["core"]["records"]["recovery"]["phase"] == "ready"
     loaded = _load(json.dumps(old))
-    assert loaded.core.intents.recovery.phase == core.RecoveryPhase.REQUIRED
-    assert loaded.core.intents.recovery.epoch == old["core"]["intents"]["recovery"]["epoch"]
+    assert loaded.core.records.recovery.phase == core.RecoveryPhase.REQUIRED
+    assert loaded.core.records.recovery.epoch == old["core"]["records"]["recovery"]["epoch"]
     assert loaded.core.run.status == core.RunStatus.RUNNING
     with pytest.raises(ContractError, match="recovery"):
         step(loaded.core, core.DispatchAuthorized(request_id=core.RequestId(root="ensure")))
@@ -340,7 +340,7 @@ def test_legacy_invocation_cannot_claim_new_paid_cycle_history_prefix(deadline: 
     old["core"]["sessions"]["invocations"] = [invocation]
     loaded = _load(json.dumps(old))
     assert loaded.core.sessions.invocations[0].evaluation_prefix is None
-    assert loaded.core.intents.recovery.phase == core.RecoveryPhase.REQUIRED
+    assert loaded.core.records.recovery.phase == core.RecoveryPhase.REQUIRED
     invocation["evaluation_prefix"] = {"ordinal": 0, "submission_id": None}
     with pytest.raises(ContractError, match="evaluation_prefix"):
         _load(json.dumps(old))
@@ -408,11 +408,11 @@ def test_legacy_historical_measurement_does_not_fabricate_continuation_cursor(
         deadline_at=float(deadline),
         plan=plan,
     )
-    intent = _version2_intent(request, core.IntentPhase.COMPLETED)
-    intent["lifecycle"] = core.LifecycleClass.OWNED_JOB
-    old["core"]["intents"]["intents"] = [intent]
+    record = _version2_record(request, core.RequestPhase.COMPLETED)
+    record["lifecycle"] = core.LifecycleClass.OWNED_JOB
+    old["core"]["records"]["records"] = [record]
     loaded = _load(json.dumps(old))
-    assert loaded.core.intents.intents[0].request == request
+    assert loaded.core.records.records[0].request == request
     assert loaded.core.evaluation.continuations[0].preceding_submission is None
     assert loaded.core.attempts.attempts[0].evaluation_history.availability == (
         core.EvaluationHistoryAvailability.UNAVAILABLE

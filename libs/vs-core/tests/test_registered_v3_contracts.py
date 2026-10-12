@@ -68,15 +68,15 @@ def test_main_encoder_registered_turn_migrates_exact_inputs_and_preserves_payloa
     loaded = codec.migrate_envelope(
         core.RunEnvelope[core.StrategyState], source, core.v2_to_v3_migration(codec)
     )
-    intent = loaded.core.intents.intents[0]
-    assert isinstance(intent.request, core.ExecuteRegisteredOperation)
-    old_intent = old["core"]["intents"]["intents"][0]
-    old_wire = old_intent["request"]["operation"]
-    assert intent.request.operation.model_dump(mode="json") == old_wire
-    assert tuple(row.input_id.root for row in intent.request.inputs) == ("input-0", "input-1")
-    assert intent.request.inputs[0].artifact == intent.request.inputs[1].artifact
-    assert intent.payload_digest == value_digest(intent.request)
-    assert intent.payload_digest != old_intent["payload_digest"]
+    record = loaded.core.records.records[0]
+    assert isinstance(record.request, core.ExecuteRegisteredOperation)
+    old_record = old["core"]["records"]["records"][0]
+    old_wire = old_record["request"]["operation"]
+    assert record.request.operation.model_dump(mode="json") == old_wire
+    assert tuple(row.input_id.root for row in record.request.inputs) == ("input-0", "input-1")
+    assert record.request.inputs[0].artifact == record.request.inputs[1].artifact
+    assert record.payload_digest == value_digest(record.request)
+    assert record.payload_digest != old_record["payload_digest"]
     receipt = loaded.core.run.receipts[0]
     assert isinstance(receipt.decision, core.Operation)
     assert isinstance(receipt.decision.request, PersistedTurn)
@@ -89,7 +89,7 @@ def test_main_encoder_registered_turn_migrates_exact_inputs_and_preserves_payloa
         loaded.core, core.ProposalSubmitted(decisions=(), expected_revision=loaded.revision)
     )
     assert result.requests == ()
-    assert result.state.intents == loaded.core.intents
+    assert result.state.records == loaded.core.records
     assert (
         codec.decode_envelope(core.RunEnvelope[core.StrategyState], codec.encode_envelope(loaded))
         == loaded
@@ -243,10 +243,10 @@ def test_registered_turn_migration_requires_exact_request_receipt(fault: str) ->
     old = json.loads(
         (Path(__file__).parent / "fixtures" / "envelope-v2-registered-turn.json").read_text()
     )
-    intent = old["core"]["intents"]["intents"][0]
+    record = old["core"]["records"]["records"][0]
     receipt = old["core"]["run"]["receipts"][0]
     if fault == "decision":
-        intent["request"]["decision_id"] = {"root": "foreign"}
+        record["request"]["decision_id"] = {"root": "foreign"}
     else:
         receipt["request_ids"] = []
     codec = persisted_turn_codec()

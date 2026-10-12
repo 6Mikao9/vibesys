@@ -42,13 +42,13 @@ from .types.evaluation import (
     SubmissionBudget,
     SubmitMeasurement,
 )
-from .types.intents import (
+from .types.records import (
     ChildLease,
-    Intent,
-    IntentPhase,
-    IntentsState,
+    RecordsState,
     Request,
+    RequestPhase,
     RequestPrepared,
+    RequestRecord,
     request_lifecycle,
 )
 from .types.scheduling import AdmissionRequest, AttemptReopenRequest, Slot
@@ -281,11 +281,13 @@ def current_closure(
     return fields if fields is not None else Proven(closure)
 
 
-def request_matches(intent: Intent | None, expected: Request | None) -> Verdict[Intent]:
+def request_matches(
+    record: RequestRecord | None, expected: Request | None
+) -> Verdict[RequestRecord]:
     """Prove complete canonical outbox payload, including its recorded episode."""
-    if intent is None or expected is None or expected.request_id is None:
+    if record is None or expected is None or expected.request_id is None:
         return Missing(ProofReason.ABSENT_REQUEST)
-    request = intent.request
+    request = record.request
     if request.request_id is None:
         return Missing(ProofReason.ABSENT_REQUEST)
     if isinstance(request.scope.owner, AttemptId) and (
@@ -294,44 +296,46 @@ def request_matches(intent: Intent | None, expected: Request | None) -> Verdict[
         return Missing(ProofReason.ABSENT_EPISODE)
     fields = _identity_mismatch(
         (
-            (ProofField.REQUEST_ID, intent.request_id, expected.request_id),
+            (ProofField.REQUEST_ID, record.request_id, expected.request_id),
             (ProofField.REQUEST_ID, request.request_id, expected.request_id),
             (ProofField.SCOPE, request.scope.owner, expected.scope.owner),
             (ProofField.GENERATION, request.scope.generation, expected.scope.generation),
             (ProofField.ADMISSION_ID, request.admission_id, expected.admission_id),
         )
     )
-    return fields if fields is not None else _request_payload(intent, expected)
+    return fields if fields is not None else _request_payload(record, expected)
 
 
-def _request_payload(intent: Intent, expected: Request) -> Verdict[Intent]:
+def _request_payload(record: RequestRecord, expected: Request) -> Verdict[RequestRecord]:
     try:
-        if canonical_json(intent.request) != canonical_json(expected):
+        if canonical_json(record.request) != canonical_json(expected):
             return Mismatch(ProofField.PAYLOAD)
-        if intent.payload_digest != digest(expected):
+        if record.payload_digest != digest(expected):
             return Mismatch(ProofField.DIGEST)
     except (TypeError, ValueError):
         return Mismatch(ProofField.PAYLOAD)
-    if intent.lifecycle != request_lifecycle(expected):
+    if record.lifecycle != request_lifecycle(expected):
         return Mismatch(ProofField.LIFECYCLE)
-    return Proven(intent)
+    return Proven(record)
 
 
-def observation_for(intent: Intent | None, observation: Observation | None) -> Verdict[Observation]:
+def observation_for(
+    record: RequestRecord | None, observation: Observation | None
+) -> Verdict[Observation]:
     """Correlate target facts in their own source sequence and recorded episode."""
-    if intent is None or intent.request.request_id is None:
+    if record is None or record.request.request_id is None:
         return Missing(ProofReason.ABSENT_REQUEST)
     if observation is None:
         return Missing(ProofReason.ABSENT_OBSERVATION)
-    request = intent.request
+    request = record.request
     if isinstance(request.scope.owner, AttemptId) and (
         request.admission_id is None or observation.admission_id is None
     ):
         return Missing(ProofReason.ABSENT_EPISODE)
     fields = _identity_mismatch(
         (
-            (ProofField.REQUEST_ID, observation.request_id, intent.request_id),
-            (ProofField.REQUEST_ID, request.request_id, intent.request_id),
+            (ProofField.REQUEST_ID, observation.request_id, record.request_id),
+            (ProofField.REQUEST_ID, request.request_id, record.request_id),
             (ProofField.SCOPE, observation.scope.owner, request.scope.owner),
             (ProofField.GENERATION, observation.scope.generation, request.scope.generation),
             (ProofField.ADMISSION_ID, observation.admission_id, request.admission_id),
@@ -596,7 +600,7 @@ def _operation_request(
 
 
 def dependencies_for(
-    request: RequestBase, receipts: tuple[DecisionReceipt, ...], intents: IntentsState
+    request: RequestBase, receipts: tuple[DecisionReceipt, ...], records: RecordsState
 ) -> Verdict[RequestBase]:
     """Prove optional dependencies; known denials outrank unfinished obligations.
 
@@ -607,7 +611,7 @@ def dependencies_for(
         _decision_dependency(receipts, identity) for identity in request.decision_dependencies
     )
     proofs += tuple(
-        _request_dependency(tuple(row for row in intents.intents if row.request_id == identity))
+        _request_dependency(tuple(row for row in records.records if row.request_id == identity))
         for identity in request.depends_on
     )
     failures = tuple(proof for proof in proofs if not isinstance(proof, Proven))
@@ -625,7 +629,7 @@ def dependencies_for(
 
 
 def request_dependency_status(
-    request: Request, receipts: tuple[DecisionReceipt, ...], intents: IntentsState
+    request: Request, receipts: tuple[DecisionReceipt, ...], records: RecordsState
 ) -> DependencyStatus:
     """Whether a prepared request may be dispatched: now, later, or never.
 
@@ -636,7 +640,7 @@ def request_dependency_status(
         accepted_receipt_for(receipts, request.decision_id, None), Proven
     ):
         return DependencyStatus.FAILED
-    proof = dependencies_for(request, receipts, intents)
+    proof = dependencies_for(request, receipts, records)
     if isinstance(proof, Proven):
         return DependencyStatus.SUCCEEDED
     if isinstance(proof, Missing) and proof.reason in (
@@ -651,7 +655,7 @@ _NOT_YET_KNOWN = (ProofReason.UNRESOLVED, ProofReason.ABSENT_REQUEST, ProofReaso
 
 
 def dependency_failed(
-    request: Request, receipts: tuple[DecisionReceipt, ...], intents: IntentsState
+    request: Request, receipts: tuple[DecisionReceipt, ...], records: RecordsState
 ) -> bool:
     """Whether a decision or request this one depends on has ended without succeeding.
 
@@ -661,7 +665,7 @@ def dependency_failed(
     proofs = tuple(
         _decision_dependency(receipts, identity) for identity in request.decision_dependencies
     ) + tuple(
-        _request_dependency(tuple(row for row in intents.intents if row.request_id == identity))
+        _request_dependency(tuple(row for row in records.records if row.request_id == identity))
         for identity in request.depends_on
     )
     return any(
@@ -684,7 +688,7 @@ def _decision_dependency(
     return proof
 
 
-def _request_dependency(rows: tuple[Intent, ...]) -> Verdict[Intent]:
+def _request_dependency(rows: tuple[RequestRecord, ...]) -> Verdict[RequestRecord]:
     if not rows:
         return Missing(ProofReason.ABSENT_REQUEST)
     if len(rows) != 1:
@@ -695,7 +699,7 @@ def _request_dependency(rows: tuple[Intent, ...]) -> Verdict[Intent]:
         return proof
     # An observation is required only for the completed lifecycle stage.
     # Prepared and dispatched requests remain unresolved while outcomes arrive.
-    if row.phase != IntentPhase.COMPLETED:
+    if row.phase != RequestPhase.COMPLETED:
         return Missing(ProofReason.UNRESOLVED)
     observation = observation_for(row, row.observation)
     if not isinstance(observation, Proven):
@@ -797,12 +801,12 @@ def resolved_observation(observation: Observation | None) -> Verdict[Observation
     return Proven(observation)
 
 
-def _release_source(observation: Observation, source: Intent | None) -> Verdict[Observation]:
+def _release_source(observation: Observation, source: RequestRecord | None) -> Verdict[Observation]:
     """Recorded requests, rather than current owners, identify cleanup episodes.
 
-    Permanent rule: the Intents ledger is the only release authority, so an owner
+    Permanent rule: the Records ledger is the only release authority, so an owner
     whose canonical request is absent is denied. There is no separate certified
-    release source; a migrated owner must be given a canonical intent instead.
+    release source; a migrated owner must be given a canonical record instead.
     """
     if source is None:
         # A copied request id in a lease or watermark cannot certify the absent
@@ -837,7 +841,7 @@ def _release_nonownership(observation: Observation) -> bool:
     )
 
 
-def _released_intent(owner: Intent) -> Verdict[Observation]:
+def _released_record(owner: RequestRecord) -> Verdict[Observation]:
     observation = owner.observation
     if observation is None:
         return Missing(ProofReason.ABSENT_OBSERVATION)
@@ -854,7 +858,7 @@ def _released_intent(owner: Intent) -> Verdict[Observation]:
 
 
 def _released_job(
-    owner: OwnedJob | RegisteredOwnedJob, sources: tuple[Intent, ...]
+    owner: OwnedJob | RegisteredOwnedJob, sources: tuple[RequestRecord, ...]
 ) -> Verdict[Observation]:
     observation = owner.observation
     if observation is None:
@@ -873,7 +877,7 @@ def _released_job(
 
 
 def _job_release_binding(
-    owner: OwnedJob | RegisteredOwnedJob, observation: Observation, source: Intent | None
+    owner: OwnedJob | RegisteredOwnedJob, observation: Observation, source: RequestRecord | None
 ) -> Verdict[Observation]:
     request_id = owner.request_id if isinstance(owner, RegisteredOwnedJob) else owner.submission_id
     mismatch = _identity_mismatch(
@@ -904,7 +908,7 @@ def _job_release_binding(
     return Proven(observation)
 
 
-def _released_child(owner: ChildLease, sources: tuple[Intent, ...]) -> Verdict[Observation]:
+def _released_child(owner: ChildLease, sources: tuple[RequestRecord, ...]) -> Verdict[Observation]:
     observation = owner.observation
     if observation is None:
         return Missing(ProofReason.ABSENT_OBSERVATION)
@@ -922,7 +926,7 @@ def _released_child(owner: ChildLease, sources: tuple[Intent, ...]) -> Verdict[O
 
 
 def _released_child_source(
-    owner: ChildLease, observation: Observation, sources: tuple[Intent, ...]
+    owner: ChildLease, observation: Observation, sources: tuple[RequestRecord, ...]
 ) -> Verdict[Observation]:
     matches = tuple(source for source in sources if source.request_id == observation.request_id)
     if len(matches) > 1:
@@ -940,7 +944,9 @@ def _released_child_source(
     return mismatch if mismatch is not None else resolved_observation(observation)
 
 
-def _released_session(owner: SessionView, sources: tuple[Intent, ...]) -> Verdict[Observation]:
+def _released_session(
+    owner: SessionView, sources: tuple[RequestRecord, ...]
+) -> Verdict[Observation]:
     matches = tuple(
         source
         for source in sources
@@ -952,7 +958,7 @@ def _released_session(owner: SessionView, sources: tuple[Intent, ...]) -> Verdic
         return Missing(ProofReason.ABSENT_REQUEST)
     if len(matches) != 1:
         return Mismatch(ProofField.REQUEST_ID)
-    proof = _released_intent(matches[0])
+    proof = _released_record(matches[0])
     if not isinstance(proof, Proven):
         return proof
     return _session_release_binding(owner, proof.value)
@@ -977,14 +983,14 @@ def _session_release_binding(owner: SessionView, observation: Observation) -> Ve
 
 
 def released_owner(
-    owner: Intent | OwnedJob | RegisteredOwnedJob | SessionView | ChildLease | None,
-    sources: tuple[Intent, ...],
+    owner: RequestRecord | OwnedJob | RegisteredOwnedJob | SessionView | ChildLease | None,
+    sources: tuple[RequestRecord, ...],
 ) -> Verdict[Observation]:
     """Prove physical release in the source's recorded episode, preserving child debt."""
     if owner is None:
         return Missing(ProofReason.ABSENT_REQUEST)
-    if isinstance(owner, Intent):
-        return _released_intent(owner)
+    if isinstance(owner, RequestRecord):
+        return _released_record(owner)
     if isinstance(owner, (OwnedJob, RegisteredOwnedJob)):
         return _released_job(owner, sources)
     if isinstance(owner, ChildLease):

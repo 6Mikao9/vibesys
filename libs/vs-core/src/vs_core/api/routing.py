@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Protocol, TypeAliasType, cast, get_args
 
-from vs_core import attempts, evaluation, intents, sessions, settlement
+from vs_core import attempts, evaluation, records, sessions, settlement
 from vs_core.scheduling import schedule
 from vs_core.types.common import Area
 from vs_core.types.kernel import Signal
@@ -42,7 +42,7 @@ EVENT_ROUTES: Mapping[Area, EventRoutes] = cast(
             Area.SESSIONS: sessions.EVENT_TO_SUBAREA,
             Area.EVALUATION: evaluation.EVENT_TO_SUBAREA,
             Area.SETTLEMENT: settlement.EVENT_TO_SUBAREA,
-            Area.INTENTS: intents.EVENT_TO_SUBAREA,
+            Area.RECORDS: records.EVENT_TO_SUBAREA,
             Area.SCHEDULING: _scheduling_routes(SchedulingEvent),
         }
     ),

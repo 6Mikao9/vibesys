@@ -55,7 +55,7 @@ class Cluster:
         # The submission stays open until its job ends; the job's own events close it.
         return tuple(
             request
-            for request in core.pending_requests(self.state.intents)
+            for request in core.pending_requests(self.state.records)
             if not isinstance(request, core.SubmitMeasurement)
         )
 

@@ -120,7 +120,7 @@ def test_retention_and_outcome_survive_one_terminal_publication(
     assert transition.state.attempts == state.attempts
     assert transition.state.sessions == state.sessions
     assert transition.state.evaluation == state.evaluation
-    assert transition.state.intents == state.intents
+    assert transition.state.records == state.records
     replay = core.step(reload(transition.state), released(value))
     assert replay.events == replay.requests == ()
     assert replay.state.settlement == transition.state.settlement
@@ -235,7 +235,7 @@ def test_cleanup_dependency_fences_settlement_and_slot_ordering(
         assert result.events == result.requests == ()
 
 
-@pytest.mark.parametrize("missing", ["closure", "episode", "checkpoint", "phase", "intent"])
+@pytest.mark.parametrize("missing", ["closure", "episode", "checkpoint", "phase", "record"])
 def test_missing_owner_proof_cannot_publish_retained_candidate(missing: str) -> None:
     value = settlement("succeeded", "candidate")
     state = pending_state(value)
@@ -245,7 +245,7 @@ def test_missing_owner_proof_cannot_publish_retained_candidate(missing: str) -> 
         "episode": {"admission_id": core.DecisionId(root="new-episode")},
         "checkpoint": {"checkpoints": ()},
         "phase": {"phase": core.AttemptPhase.ACTIVE},
-        "intent": {"pending_intents": (core.RequestId(root="unfinished"),)},
+        "record": {"pending_records": (core.RequestId(root="unfinished"),)},
     }
     owner = owner.model_copy(update=replacements[missing])
     state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
@@ -560,17 +560,17 @@ def judge_state() -> tuple[core.CoreState, core.Settlement]:
     request = core.DispatchTurn(
         request_id=core.RequestId(root="judge"), scope=scope, deadline_at=10.0, turn=turn
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=core.RequestId(root="judge"),
         request=request,
         payload_digest="judge",
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         reconcile_deadline_at=10.0,
     )
     return state.model_copy(
         update={
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
             "run": state.run.model_copy(update={"requirements": requirements}),
             "sessions": core.SessionsState(invocations=(invocation,)),
             "evaluation": core.EvaluationState(),
@@ -630,15 +630,15 @@ def test_unmeasured_judge_requires_declared_exact_final_authority(corrupt: str) 
         "missing_output": {"output_json": None},
     }
     invocation = invocation.model_copy(update=replacements.get(corrupt, {}))
-    intent = state.intents.intents[0]
-    assert isinstance(intent.request, core.DispatchTurn)
-    intent = intent.model_copy(
-        update={"request": intent.request.model_copy(update={"turn": invocation.turn})}
+    record = state.records.records[0]
+    assert isinstance(record.request, core.DispatchTurn)
+    record = record.model_copy(
+        update={"request": record.request.model_copy(update={"turn": invocation.turn})}
     )
     state = state.model_copy(
         update={
             "sessions": core.SessionsState(invocations=(invocation,)),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     result = core.step(reload(state), released(value))
@@ -813,12 +813,12 @@ def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.Oper
         request_ids=(request_id,),
         completion=core.CompletionStatus.SUCCEEDED,
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest="registered-judge",
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         reconcile_deadline_at=10.0,
     )
     return (
@@ -831,7 +831,7 @@ def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.Oper
                         invocation.model_copy(update={"registered_operation": operation_id}),
                     )
                 ),
-                "intents": state.intents.model_copy(update={"intents": (intent,)}),
+                "records": state.records.model_copy(update={"records": (record,)}),
             }
         ),
         value,
@@ -860,8 +860,8 @@ def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.Oper
 def test_registered_judge_authority_requires_exact_canonical_correspondence(corrupt: str) -> None:
     state, value, codec = registered_judge_state()
     invocation = state.sessions.invocations[0]
-    intent = state.intents.intents[0]
-    request = intent.request
+    record = state.records.records[0]
+    request = record.request
     assert isinstance(request, core.ExecuteRegisteredOperation)
     receipt = state.run.receipts[0]
     if corrupt == "operation":
@@ -932,8 +932,8 @@ def test_registered_judge_authority_requires_exact_canonical_correspondence(corr
         update={
             "run": state.run.model_copy(update={"receipts": (receipt,)}),
             "sessions": core.SessionsState(invocations=(invocation,)),
-            "intents": state.intents.model_copy(
-                update={"intents": (intent.model_copy(update={"request": request}),)}
+            "records": state.records.model_copy(
+                update={"records": (record.model_copy(update={"request": request}),)}
             ),
             "settlement": state.settlement.model_copy(update={"pending": (value,)}),
         }
@@ -1114,7 +1114,7 @@ def test_multiple_attempt_replays_keep_terminal_callbacks_and_accounting_separat
         state.attempts,
         state.sessions,
         state.evaluation,
-        state.intents,
+        state.records,
         state.scheduling,
     )
     callbacks: dict[core.AttemptRef, int] = {}
@@ -1150,7 +1150,7 @@ def test_multiple_attempt_replays_keep_terminal_callbacks_and_accounting_separat
             result.state.attempts,
             result.state.sessions,
             result.state.evaluation,
-            result.state.intents,
+            result.state.records,
             result.state.scheduling,
         ) == immutable_siblings
         assert result.state.settlement.adoption == state.settlement.adoption
@@ -1546,10 +1546,10 @@ def test_judge_checkpoint_authority_requires_exact_invocation_and_revision(corru
     invocation = invocation.model_copy(
         update={"turn": invocation.turn.model_copy(update={"workspace": invocation.scope})}
     )
-    intent = state.intents.intents[0]
-    assert isinstance(intent.request, core.DispatchTurn)
-    intent = intent.model_copy(
-        update={"request": intent.request.model_copy(update={"turn": invocation.turn})}
+    record = state.records.records[0]
+    assert isinstance(record.request, core.DispatchTurn)
+    record = record.model_copy(
+        update={"request": record.request.model_copy(update={"turn": invocation.turn})}
     )
     assert value.candidate is not None
     source = invocation.invocation
@@ -1573,7 +1573,7 @@ def test_judge_checkpoint_authority_requires_exact_invocation_and_revision(corru
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
             "sessions": core.SessionsState(invocations=(invocation,)),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     result = core.step(state, released(value))

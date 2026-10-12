@@ -1,4 +1,4 @@
-"""Blocked-intent diagnostics: one row per request identity, command-only acknowledgement."""
+"""Blocked-record diagnostics: one row per request identity, command-only acknowledgement."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_core.api import BlockIntent, ObservationStatus, RequestId
+from vs_core.api import BlockRequest, ObservationStatus, RequestId
 from vs_project.api import Project
 from vs_runtime.api.core import JournalSemanticEvents, ReceiptStore, RequestExecutors
 from vs_runtime.api.executor_contexts import context_for
@@ -19,8 +19,8 @@ from vs_runtime.api.operation_fixtures import SCOPE
 pytestmark = pytest.mark.asyncio
 
 
-def block(request: str, target: str, text: str) -> BlockIntent:
-    return BlockIntent(
+def block(request: str, target: str, text: str) -> BlockRequest:
+    return BlockRequest(
         request_id=RequestId(root=request),
         scope=SCOPE,
         deadline_at=100.0,
@@ -88,7 +88,7 @@ async def test_a_new_host_sees_the_journal_a_crashed_host_wrote() -> None:
         assert again.observation.observation.status is ObservationStatus.SUCCEEDED
 
 
-async def test_request_executors_route_block_intent_to_the_semantic_role() -> None:
+async def test_request_executors_route_block_record_to_the_semantic_role() -> None:
     with tempfile.TemporaryDirectory() as raw:
         events = journal(Path(raw))
         executors = RequestExecutors(semantic_events=events)

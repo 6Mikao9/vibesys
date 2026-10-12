@@ -16,8 +16,8 @@ from vs_core.api import (
     HostFence,
     HostId,
     InspectRequest,
-    IntentPhase,
     OperationRegistry,
+    RequestPhase,
     Transition,
     initial_state,
 )
@@ -143,7 +143,7 @@ async def test_generated_crash_points_preserve_exact_committed_envelopes_and_no_
         # The new epoch inspects the interrupted request instead of replaying it.
         ensured = next(
             row.request.request_id
-            for row in restarted.record.envelope.core.intents.intents
+            for row in restarted.record.envelope.core.records.records
             if row.request.kind == "ensure_session"
         )
         inspected = [
@@ -168,7 +168,7 @@ async def test_unknown_dispatch_authorization_never_calls_executor() -> None:
         await shell.dispatch_one(now_at=1)
     assert error.value.candidate_visible
     assert executor.executions == ()
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
 
 
 @pytest.mark.asyncio

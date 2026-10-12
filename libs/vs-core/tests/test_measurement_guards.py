@@ -129,13 +129,13 @@ def test_snapshot_result_requires_exact_committed_checkpoint(
         terminal=terminal,
         status=status,
     )
-    source = core.Intent(
+    source = core.RequestRecord(
         request_id=request_id,
         request=request,
         observation=observed,
         payload_digest=value_digest(request),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         reconcile_deadline_at=100.0,
     )
     owner = owner.model_copy(
@@ -152,7 +152,7 @@ def test_snapshot_result_requires_exact_committed_checkpoint(
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(update={"intents": (source,)}),
+            "records": state.records.model_copy(update={"records": (source,)}),
         }
     )
     measurement = plan(candidate=core.SnapshotResultRef(request_id=request_id))
@@ -381,11 +381,11 @@ def test_ingress_requires_independent_canonical_submission_proof(fault: str) -> 
             update={"run": state.run.model_copy(update={"receipts": (receipt,)})}
         )
     elif fault == "payload":
-        row = state.intents.intents[0].model_copy(update={"payload_digest": "wrong"})
+        row = state.records.records[0].model_copy(update={"payload_digest": "wrong"})
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
-                    update={"intents": (row, *state.intents.intents[1:])}
+                "records": state.records.model_copy(
+                    update={"records": (row, *state.records.records[1:])}
                 )
             }
         )
@@ -549,7 +549,7 @@ def test_registered_jobs_cannot_infer_expected_identity_from_evidence(
         terminal=True,
         released=True,
     )
-    source = next(r for r in result.state.intents.intents if r.request_id == request.request_id)
+    source = next(r for r in result.state.records.records if r.request_id == request.request_id)
     facts = (
         core.EvaluationTerminalFacts(
             stages=(
@@ -564,9 +564,9 @@ def test_registered_jobs_cannot_infer_expected_identity_from_evidence(
     )
     state = result.state.model_copy(
         update={
-            "intents": result.state.intents.model_copy(
+            "records": result.state.records.model_copy(
                 update={
-                    "intents": (
+                    "records": (
                         source.model_copy(
                             update={"observation": observed, "evaluation_result": facts}
                         ),
@@ -808,7 +808,7 @@ def test_retry_waits_for_root_and_every_discovered_child_release(
     )
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"children": (child,) if child_present else ()}
             )
         }

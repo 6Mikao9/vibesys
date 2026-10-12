@@ -114,7 +114,7 @@ RECOVERY_ONLY = frozenset(
         "cancel_turn",
         "cancel_owned_job",
         "cancel_owned_resource",
-        "block_intent",
+        "block_request",
         "resume_session_turn",
         "collect_evidence",
         "snapshot_and_retain_run",
@@ -469,7 +469,7 @@ def _decisions(run: Run) -> Sequence[Decision]:
 
 def request_kinds(recorded: Recorded) -> Counter[str]:
     """How many requests of each kind the run issued, as core's ledger recorded them."""
-    return Counter(row.request.kind for row in recorded.run.core.intents.intents)
+    return Counter(row.request.kind for row in recorded.run.core.records.records)
 
 
 def run_pure(
@@ -508,7 +508,7 @@ CONCLUSIVE_AFTER_FAULT = frozenset(
 )
 """Kind and answer pairs after which a run ends live, whatever strategy issues the kind.
 
-For the other pairs core blocks the intent at its bound but routes the block to the strategy
+For the other pairs core blocks the record at its bound but routes the block to the strategy
 only, so the attempt, session or settlement waiting on it never concludes and the run stays
 open. That gap belongs to vs-core (see the dynamic recovery matrix); when it is fixed these
 pairs join the set and every strategy is asked to survive them.

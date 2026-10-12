@@ -263,7 +263,7 @@ def test_run_paid_turn_is_rejected_without_spending_any_currency(max_turns: int)
 
 
 @given(st.integers(min_value=0, max_value=1000))
-def test_run_checkpoint_pending_request_preserves_intent_in_public_codec(generation: int) -> None:
+def test_run_checkpoint_pending_request_preserves_record_in_public_codec(generation: int) -> None:
     state = core.initial_state()
     request = core.SnapshotAndRetainRun(
         request_id=core.RequestId(root="checkpoint"),
@@ -272,21 +272,21 @@ def test_run_checkpoint_pending_request_preserves_intent_in_public_codec(generat
         retention="wip",
         deadline_at=30.0,
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=core.RequestId(root="checkpoint"),
         request=request,
         payload_digest="checkpoint-payload",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.PREPARED,
+        phase=core.RequestPhase.PREPARED,
         reconcile_deadline_at=30.0,
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
     codec = core.OperationRegistry()
     envelope = _envelope(state)
     restored = codec.decode_envelope(type(envelope), codec.encode_envelope(envelope))
-    assert restored.core.intents.intents == (intent,)
+    assert restored.core.records.records == (record,)
     assert restored.core.sessions.run_checkpoints == ()
     event = core.RunInvocationCheckpointRequested(
         scope=_scope(generation),
@@ -301,7 +301,7 @@ def test_run_checkpoint_pending_request_preserves_intent_in_public_codec(generat
         now_at=2.0,
     )
     unchanged = core.step(restored.core, steer)
-    assert unchanged.state.intents.intents == (intent,)
+    assert unchanged.state.records.records == (record,)
     assert unchanged.state.sessions.run_checkpoints == ()
 
 
@@ -327,7 +327,7 @@ def test_run_drain_requires_run_ownership_and_typed_stop_authority(generation: i
     failure=st.sampled_from(tuple(core.SetupFailureKind)),
     accepted=st.booleans(),
 )
-def test_setup_classification_survives_root_target_and_canonical_intent_codecs(
+def test_setup_classification_survives_root_target_and_canonical_record_codecs(
     *, failure: core.SetupFailureKind, accepted: bool
 ) -> None:
     observation = _observation(accepted=accepted)
@@ -364,12 +364,12 @@ def test_setup_classification_survives_root_target_and_canonical_intent_codecs(
             access=core.Access.READ_ONLY,
         ),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=observation.request_id,
         request=request,
         payload_digest="ensure-payload",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=observation,
         setup_failure=failure,
         sequence=observation.sequence,
@@ -377,20 +377,20 @@ def test_setup_classification_survives_root_target_and_canonical_intent_codecs(
     )
     state = core.initial_state()
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
     codec = core.OperationRegistry()
     envelope = _envelope(state)
     restored = codec.decode_envelope(type(envelope), codec.encode_envelope(envelope))
-    assert restored.core.intents.intents[0].setup_failure == failure
-    restored_observation = restored.core.intents.intents[0].observation
+    assert restored.core.records.records[0].setup_failure == failure
+    restored_observation = restored.core.records.records[0].observation
     assert restored_observation is not None
     assert restored_observation.accepted == accepted
     steer = core.RunControlEvent(
         control=core.ControlInput(control_id=core.ControlId(root="steer"), action="steer"),
         now_at=3.0,
     )
-    assert core.step(restored.core, steer).state.intents == state.intents
+    assert core.step(restored.core, steer).state.records == state.records
     if accepted:
         # Even FAILED does not turn accepted external ownership into release.
         assert not restored_observation.released

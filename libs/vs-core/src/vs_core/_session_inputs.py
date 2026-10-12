@@ -34,8 +34,8 @@ from .types.common import (
     RunStatus,
     Scope,
 )
-from .types.intents import ExecuteRegisteredOperation
 from .types.kernel import AreaChange, DecisionCompleted
+from .types.records import ExecuteRegisteredOperation
 from .types.session_inputs import (
     InputDelivered,
     InputDropped,
@@ -70,8 +70,8 @@ from .types.strategy import Accepted, Interrupt, Operation, Withdraw
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
     from .types.common import InvocationRef, RevisionRef
-    from .types.intents import Request
     from .types.kernel import SessionsContext, Signal
+    from .types.records import Request
     from .types.session_inputs import SessionInput
     from .types.sessions import Invocation, SessionsEvent, SessionsState
 
@@ -173,7 +173,7 @@ def _inspection(
         root=f"input-inspect:{len(ref.session_id.root)}:{ref.session_id.root}:"
         f"{ref.generation}:{len(ref.invocation_id.root)}:{ref.invocation_id.root}"
     )
-    previous = next((row for row in context.intents.intents if row.request_id == identity), None)
+    previous = next((row for row in context.records.records if row.request_id == identity), None)
     owner = attempt_for(context, invocation.scope)
     request = (
         previous.request
@@ -182,7 +182,7 @@ def _inspection(
             request_id=identity,
             scope=invocation.scope,
             invocation=ref,
-            dispatch=dispatching_request(context.intents, invocation),
+            dispatch=dispatching_request(context.records, invocation),
             admission_id=owner.admission_id if owner is not None else None,
             deadline_at=min(
                 context.run.deadline_at,
@@ -200,25 +200,25 @@ def _input_proof(
 ) -> Invocation | None:
     invocation = proven_invocation(state, event.invocation)
     obs = event.observation
-    intent = next(
-        (row for row in context.intents.intents if row.request_id == obs.request_id), None
+    record = next(
+        (row for row in context.records.records if row.request_id == obs.request_id), None
     )
     if (
         invocation is None
         or invocation.observation is None
-        or intent is None
+        or record is None
         or invocation.scope != obs.scope
-        or intent.request.scope != invocation.scope
+        or record.request.scope != invocation.scope
         or invocation.observation.request_id != obs.request_id
         or invocation.observation.sequence != obs.sequence
         or invocation.observation.accepted != obs.accepted
         or invocation.observation.terminal != obs.terminal
         or invocation.observation.status != obs.status
-        or not isinstance(request_matches(intent, intent.request), Proven)
-        or not isinstance(observation_for(intent, obs), Proven)
+        or not isinstance(request_matches(record, record.request), Proven)
+        or not isinstance(observation_for(record, obs), Proven)
         or not isinstance(
             fresh_observation(
-                () if intent.observation is None else (intent.observation,), obs, complete=True
+                () if record.observation is None else (record.observation,), obs, complete=True
             ),
             Proven,
         )
@@ -229,7 +229,7 @@ def _input_proof(
         not isinstance(current_admission(owner, invocation.scope, obs.admission_id), Proven)
     ):
         return None
-    return invocation if _manifest_matches(state, context, invocation, intent.request) else None
+    return invocation if _manifest_matches(state, context, invocation, record.request) else None
 
 
 def _manifest_matches(

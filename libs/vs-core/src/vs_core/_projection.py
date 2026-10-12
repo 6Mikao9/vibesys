@@ -5,17 +5,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._adoption import view as adoption_view
-from ._intent_ledger import next_retry_at
-from ._intent_recovery import next_reconciliation_at
+from ._request_ledger import next_retry_at
+from ._request_recovery import next_reconciliation_at
 from .types.common import ChargeKind
-from .types.intents import (
-    ExecuteRegisteredOperation,
-    IntentPhase,
-    IntentsState,
-    OperationView,
-    Request,
-)
 from .types.kernel import CoreState, RunSummary, RunView
+from .types.records import (
+    ExecuteRegisteredOperation,
+    OperationView,
+    RecordsState,
+    Request,
+    RequestPhase,
+)
 from .types.scheduling import SchedulingState, SchedulingView
 from .types.sessions import SessionProjection
 
@@ -113,10 +113,10 @@ def settlement_view(state: SettlementState) -> tuple[Settlement, ...]:
     return state.settlements
 
 
-def pending_requests(state: IntentsState) -> tuple[Request, ...]:
+def pending_requests(state: RecordsState) -> tuple[Request, ...]:
     """The durable outbox; this does not authorize external dispatch."""
     return tuple(
-        intent.request for intent in state.intents if intent.phase != IntentPhase.COMPLETED
+        record.request for record in state.records if record.phase != RequestPhase.COMPLETED
     )
 
 
@@ -125,16 +125,16 @@ def project(state: CoreState) -> RunView:
     run = state.run
     operations = tuple(
         OperationView(
-            operation_id=intent.request.operation_id,
-            scope=intent.request.scope,
-            schema_ref=intent.request.operation.schema_ref,
-            phase=intent.phase,
-            outcome_schema=intent.outcome_schema,
-            outcome_json=intent.outcome_json,
-            outcome=intent.outcome,
+            operation_id=record.request.operation_id,
+            scope=record.request.scope,
+            schema_ref=record.request.operation.schema_ref,
+            phase=record.phase,
+            outcome_schema=record.outcome_schema,
+            outcome_json=record.outcome_json,
+            outcome=record.outcome,
         )
-        for intent in state.intents.intents
-        if isinstance(intent.request, ExecuteRegisteredOperation)
+        for record in state.records.records
+        if isinstance(record.request, ExecuteRegisteredOperation)
     )
     return RunView(
         revision=state.revision,
@@ -158,10 +158,10 @@ def project(state: CoreState) -> RunView:
         settlements=settlement_view(state.settlement),
         artifacts=run.artifacts,
         controls=run.controls,
-        adoption=adoption_view(state.settlement, state.intents),
+        adoption=adoption_view(state.settlement, state.records),
         next_observe_at=_earliest(
             next_observe_at(state.evaluation),
-            next_reconciliation_at(state.intents),
-            next_retry_at(state.intents),
+            next_reconciliation_at(state.records),
+            next_retry_at(state.records),
         ),
     )

@@ -26,7 +26,7 @@ from .types.common import (
     ScopeReopenNormalization,
 )
 from .types.evaluation import MeasurementIdentity
-from .types.intents import OperationResult, RequestObserved
+from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Decision, Operation, StrategyState
 
@@ -84,7 +84,7 @@ class OperationRegistry:
     """Closed registered codec; changed schemas require explicit migration."""
 
     def __init__(self, registrations: tuple[OperationRegistration, ...] = ()) -> None:
-        self._checked_intents: InstanceMemo[bool] = InstanceMemo()
+        self._checked_records: InstanceMemo[bool] = InstanceMemo()
         self._registrations = registrations
         seen: set[str] = set()
         for index, registration in enumerate(registrations):
@@ -332,21 +332,21 @@ class OperationRegistry:
             )
             if self._find(schema).descriptor != descriptor:
                 raise ContractError(("registry", descriptor.kind), "descriptor migration required")
-        for intent in state.intents.intents:
-            if self._checked_intents.get(intent):
+        for record in state.records.records:
+            if self._checked_records.get(record):
                 continue
-            if isinstance(intent.request, ExecuteRegisteredOperation):
-                self.decode(intent.request.operation)
-                if intent.outcome_json is not None:
-                    self.decode_outcome(intent.request.operation.schema_ref, intent.outcome_json)
-            if intent.model_config.get("frozen"):
-                # An intent is checked against this registry's codecs, and a frozen one never
-                # changes, so each durable write re-proves only the intents it adds.
-                self._checked_intents.put(intent, fact=True)
+            if isinstance(record.request, ExecuteRegisteredOperation):
+                self.decode(record.request.operation)
+                if record.outcome_json is not None:
+                    self.decode_outcome(record.request.operation.schema_ref, record.outcome_json)
+            if record.model_config.get("frozen"):
+                # A record is checked against this registry's codecs, and a frozen one never
+                # changes, so each durable write re-proves only the records it adds.
+                self._checked_records.put(record, fact=True)
 
 
 def operation_result(operation_id: OperationId, event: RequestObserved) -> OperationResult:
-    """Let intents forward a codec-validated owner payload to Strategy.on_event."""
+    """Let records forward a codec-validated owner payload to Strategy.on_event."""
     if not event.outcome_is_registered or event.operation_schema is None or event.outcome is None:
         raise ContractError(("outcome",), "registered observation outcome required")
     result = OperationResult(

@@ -138,7 +138,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     measured = step(
         state.model_copy(
             update={
-                "intents": core.IntentsState(
+                "records": core.RecordsState(
                     recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
                 )
             }
@@ -239,25 +239,25 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                     ),
                 ),
             ),
-            "intents": core.IntentsState(
+            "records": core.RecordsState(
                 recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
-                intents=(
-                    core.Intent(
+                records=(
+                    core.RequestRecord(
                         request_id=yielded.request_id,
                         request=dispatch,
                         payload_digest=_digest(dispatch),
                         lifecycle=core.LifecycleClass.SESSION_TURN,
-                        phase=core.IntentPhase.COMPLETED,
+                        phase=core.RequestPhase.COMPLETED,
                         sequence=yielded.sequence,
                         observation=yielded,
                         reconcile_deadline_at=100.0,
                     ),
-                    core.Intent(
+                    core.RequestRecord(
                         request_id=job_request,
                         request=submission,
                         payload_digest=_digest(submission),
                         lifecycle=core.LifecycleClass.OWNED_JOB,
-                        phase=core.IntentPhase.DISPATCHED,
+                        phase=core.RequestPhase.DISPATCHED,
                         reconcile_deadline_at=10.0,
                     ),
                 ),
@@ -381,10 +381,10 @@ def execute(
         replay = step(current.core, submitted)
         assert replay.requests == replay.events == ()
     # Replay the durable outbox; stable invocation identity makes acceptance idempotent.
-    for intent in current.core.intents.intents:
-        request = intent.request
+    for record in current.core.records.records:
+        request = record.request
         # Completed work was acknowledged before the crash window and is never replayed.
-        if intent.phase != core.IntentPhase.COMPLETED and isinstance(
+        if record.phase != core.RequestPhase.COMPLETED and isinstance(
             request, DispatchTurn | ResumeSessionTurn
         ):
             payload = request.turn.model_dump_json()
@@ -392,9 +392,9 @@ def execute(
             assert prior == payload
     assert tuple(accepted) == (turn.invocation_id,)
     dispatch = next(
-        intent.request
-        for intent in current.core.intents.intents
-        if intent.request.kind in ("dispatch_turn", "resume_session_turn")
+        record.request
+        for record in current.core.records.records
+        if record.request.kind in ("dispatch_turn", "resume_session_turn")
     )
     assert dispatch.request_id is not None
     completed = TurnObserved(
@@ -435,10 +435,10 @@ def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
         ),
     )
     (submitted,) = (
-        row for row in ingress.state.intents.intents if row.request_id == job.observation.request_id
+        row for row in ingress.state.records.records if row.request_id == job.observation.request_id
     )
     assert submitted.observation == job.observation
-    assert submitted.phase == core.IntentPhase.COMPLETED
+    assert submitted.phase == core.RequestPhase.COMPLETED
     initial = RunEnvelope[CallbackState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),

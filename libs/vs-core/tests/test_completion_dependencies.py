@@ -149,7 +149,7 @@ def test_queued_start_dependency_survives_without_initial_requests() -> None:
                     ),
                 ),
                 TraceFrame(
-                    signal=resolved, change=core.IntentsChange(state=dependent.state.intents)
+                    signal=resolved, change=core.RecordsChange(state=dependent.state.records)
                 ),
             )
         ),
@@ -232,11 +232,11 @@ def test_new_dependent_rejects_failed_or_cancelled_completion(status: str) -> No
     assert isinstance(result.events[0], core.Rejected)
     assert result.events[0].code == core.RejectionCode.DEPENDENCY
     assert result.requests == ()
-    assert result.state.intents == state.intents
+    assert result.state.records == state.records
 
 
 @pytest.mark.parametrize("status", ["failed", "cancelled"])
-def test_failed_completion_rejects_already_prepared_dependent_and_notifies_intents(
+def test_failed_completion_rejects_already_prepared_dependent_and_notifies_records(
     status: str,
 ) -> None:
     codec, state = operation_state()
@@ -276,11 +276,11 @@ def test_failed_completion_rejects_already_prepared_dependent_and_notifies_inten
                     ),
                 ),
                 TraceFrame(
-                    signal=notification, change=core.IntentsChange(state=dependent.state.intents)
+                    signal=notification, change=core.RecordsChange(state=dependent.state.records)
                 ),
                 TraceFrame(
                     signal=core.RequestUndispatchable(request_id=dependent_id),
-                    change=core.IntentsChange(state=dependent.state.intents),
+                    change=core.RecordsChange(state=dependent.state.records),
                 ),
             )
         ),

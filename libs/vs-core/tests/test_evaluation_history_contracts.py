@@ -33,8 +33,6 @@ from vs_core.api import (
     EventId,
     HostFence,
     HostId,
-    Intent,
-    IntentPhase,
     InvocationId,
     InvocationRef,
     ItemId,
@@ -53,6 +51,8 @@ from vs_core.api import (
     RepeatedFailureGuidance,
     RequestId,
     RequestObserved,
+    RequestPhase,
+    RequestRecord,
     ResourceId,
     ResumeAuthorizationReceipt,
     ResumeAuthorized,
@@ -426,14 +426,15 @@ def test_publication_receipt_cannot_rewrite_frozen_timeout(reached: float) -> No
 
 
 @pytest.mark.parametrize(
-    "carrier", [JobObserved, RegisteredJobObserved, RequestObserved, TargetObservation, Intent]
+    "carrier",
+    [JobObserved, RegisteredJobObserved, RequestObserved, TargetObservation, RequestRecord],
 )
 @given(
     accepted=st.booleans(), terminal=st.booleans(), status=st.sampled_from(tuple(ObservationStatus))
 )
 def test_scientific_terminal_ingress_requires_positive_execution_source(
     carrier: type[
-        JobObserved | RegisteredJobObserved | RequestObserved | TargetObservation | Intent
+        JobObserved | RegisteredJobObserved | RequestObserved | TargetObservation | RequestRecord
     ],
     *,
     accepted: bool,
@@ -456,7 +457,7 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
         payload["resource_id"] = ResourceId(root="job")
     elif carrier is RegisteredJobObserved:
         payload["operation_id"] = OperationId(root="operation")
-    elif carrier is Intent:
+    elif carrier is RequestRecord:
         payload.update(
             request_id=observation.request_id,
             request=SubmitMeasurement(
@@ -479,11 +480,11 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
             ),
             payload_digest="payload",
             lifecycle=LifecycleClass.OWNED_JOB,
-            phase=IntentPhase.COMPLETED,
+            phase=RequestPhase.COMPLETED,
             reconcile_deadline_at=100.0,
         )
         with pytest.raises(ValidationError, match="evaluation_result"):
-            Intent.model_validate({**payload, "observation": None})
+            RequestRecord.model_validate({**payload, "observation": None})
     if (
         accepted
         and terminal

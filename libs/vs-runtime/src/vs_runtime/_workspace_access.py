@@ -72,9 +72,9 @@ class WorkspaceAccessTarget(Protocol):
 
 
 class WorkspaceAccessRecovery:
-    """Keep failed isolation intent with its workspace until restoration succeeds.
+    """Keep failed isolation record with its workspace until restoration succeeds.
 
-    Every snapshot reconciles this intent first, including snapshots requested
+    Every snapshot reconciles this record first, including snapshots requested
     by another session. A retry cannot turn unauthorized edits into its baseline.
     """
 
@@ -98,15 +98,15 @@ class WorkspaceAccessRecovery:
         allowed: tuple[str, ...],
         directories: tuple[str, ...],
     ) -> None:
-        """Record isolation intent once dispatch settles, before restoration I/O.
+        """Record isolation record once dispatch settles, before restoration I/O.
 
-        Beginning the same intent again is a retry and changes nothing.
+        Beginning the same record again is a retry and changes nothing.
         """
-        intent = revision, role_id, allowed, directories
-        if self._checkpoint is not None and self._checkpoint != intent:
+        record = revision, role_id, allowed, directories
+        if self._checkpoint is not None and self._checkpoint != record:
             message = "workspace access restoration is still pending"
             raise RuntimeContractError(message)
-        self._checkpoint = intent
+        self._checkpoint = record
 
     async def reconcile(
         self,
@@ -114,7 +114,7 @@ class WorkspaceAccessRecovery:
         *,
         observer: Callable[[list[str]], None] | None = None,
     ) -> WorkspaceAccessResult:
-        """Restore the original baseline or retain its intent on any failure.
+        """Restore the original baseline or retain its record on any failure.
 
         *observer* receives the unauthorized paths before anything is restored, so a
         caller can record the violation durably ahead of the revert. A snapshot goes
@@ -184,7 +184,7 @@ async def enforce_workspace_access(
 
     The single place that applies the access policy after a turn, shared by the
     legacy session and the session executors. A role with write access is only
-    reconciled against intents other sessions left pending. Calling it again after a
+    reconciled against records other sessions left pending. Calling it again after a
     crash or a failed revert resumes the same restoration.
     """
     if grant.access is not WorkspaceAccess.READ_WRITE:

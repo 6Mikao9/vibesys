@@ -1,7 +1,7 @@
 """An executor that answered Unknown or a retryable failure and went silent is blocked on time.
 
 Core learns time only from ``ClockAdvanced``. Any tick at or after an answered-but-open
-intent's reconciliation bound blocks it (a ``BlockIntent`` request), earlier ticks do not,
+record's reconciliation bound blocks it (a ``BlockRequest`` request), earlier ticks do not,
 the run's recovery barrier stays open for scheduling, and the projected next wake names
 the bound so a shell sleeps toward it instead of stalling.
 """
@@ -11,20 +11,20 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
-    BlockIntent,
+    BlockRequest,
     ClockAdvanced,
     CoreState,
     EnsureSession,
     EventId,
-    Intent,
-    IntentPhase,
-    IntentsState,
     LifecycleClass,
     Observation,
     ObservationStatus,
+    RecordsState,
     RecoveryBarrier,
     RecoveryPhase,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     RoleId,
     Scope,
     SessionId,
@@ -37,7 +37,7 @@ from vs_core.api import (
 BOUND = 100.0
 
 
-def _silent(phase: IntentPhase, status: ObservationStatus, *, terminal: bool) -> CoreState:
+def _silent(phase: RequestPhase, status: ObservationStatus, *, terminal: bool) -> CoreState:
     state = initial_state()
     request_id = RequestId(root="setup")
     request = EnsureSession(
@@ -61,7 +61,7 @@ def _silent(phase: IntentPhase, status: ObservationStatus, *, terminal: bool) ->
         status=status,
         terminal=terminal,
     )
-    intent = Intent(
+    record = RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest="setup",
@@ -73,8 +73,8 @@ def _silent(phase: IntentPhase, status: ObservationStatus, *, terminal: bool) ->
     )
     return state.model_copy(
         update={
-            "intents": IntentsState(
-                intents=(intent,), recovery=RecoveryBarrier(epoch=1, phase=RecoveryPhase.READY)
+            "records": RecordsState(
+                records=(record,), recovery=RecoveryBarrier(epoch=1, phase=RecoveryPhase.READY)
             )
         }
     )
@@ -82,15 +82,15 @@ def _silent(phase: IntentPhase, status: ObservationStatus, *, terminal: bool) ->
 
 ANSWERS = st.sampled_from(
     [
-        (IntentPhase.RECONCILING, ObservationStatus.UNKNOWN, False),
-        (IntentPhase.DISPATCHED, ObservationStatus.FAILED, False),
+        (RequestPhase.RECONCILING, ObservationStatus.UNKNOWN, False),
+        (RequestPhase.DISPATCHED, ObservationStatus.FAILED, False),
     ]
 )
 
 
 @given(answer=ANSWERS, now=st.floats(min_value=1.0, max_value=1000.0))
-def test_a_tick_blocks_a_silent_intent_exactly_when_its_bound_has_passed(
-    answer: tuple[IntentPhase, ObservationStatus, bool], now: float
+def test_a_tick_blocks_a_silent_record_exactly_when_its_bound_has_passed(
+    answer: tuple[RequestPhase, ObservationStatus, bool], now: float
 ) -> None:
     phase, status, terminal = answer
     state = _silent(phase, status, terminal=terminal)
@@ -98,18 +98,18 @@ def test_a_tick_blocks_a_silent_intent_exactly_when_its_bound_has_passed(
 
     after = step(state, ClockAdvanced(now_at=now))
 
-    blocks = [r for r in after.requests if isinstance(r, BlockIntent)]
+    blocks = [r for r in after.requests if isinstance(r, BlockRequest)]
     assert (len(blocks) == 1) == (now >= BOUND)
-    assert after.state.intents.recovery.phase == RecoveryPhase.READY
+    assert after.state.records.recovery.phase == RecoveryPhase.READY
 
 
-def test_an_intent_still_executing_has_no_bound_to_wait_for() -> None:
-    state = _silent(IntentPhase.DISPATCHED, ObservationStatus.PENDING, terminal=False)
+def test_an_record_still_executing_has_no_bound_to_wait_for() -> None:
+    state = _silent(RequestPhase.DISPATCHED, ObservationStatus.PENDING, terminal=False)
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
-                    "intents": (state.intents.intents[0].model_copy(update={"observation": None}),)
+                    "records": (state.records.records[0].model_copy(update={"observation": None}),)
                 }
             )
         }
@@ -121,13 +121,13 @@ def test_an_intent_still_executing_has_no_bound_to_wait_for() -> None:
 @given(
     status=st.sampled_from(list(ObservationStatus)), now=st.floats(min_value=1.0, max_value=1000.0)
 )
-def test_only_an_answered_open_intent_is_blocked_and_progress_never_is(
+def test_only_an_answered_open_record_is_blocked_and_progress_never_is(
     status: ObservationStatus, now: float
 ) -> None:
-    """A DISPATCHED intent still reporting progress is never blocked at its bound."""
-    state = _silent(IntentPhase.DISPATCHED, status, terminal=False)
+    """A DISPATCHED record still reporting progress is never blocked at its bound."""
+    state = _silent(RequestPhase.DISPATCHED, status, terminal=False)
     blocks = [
-        r for r in step(state, ClockAdvanced(now_at=now)).requests if isinstance(r, BlockIntent)
+        r for r in step(state, ClockAdvanced(now_at=now)).requests if isinstance(r, BlockRequest)
     ]
     retryable = status in (
         ObservationStatus.FAILED,

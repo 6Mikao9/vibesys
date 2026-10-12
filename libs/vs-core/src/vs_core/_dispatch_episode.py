@@ -29,8 +29,8 @@ from .types.common import (
     SessionId,
 )
 from .types.evaluation import CancelOwnedJob, InspectOwnedJob, ObserveOwnedJob
-from .types.intents import (
-    BlockIntent,
+from .types.records import (
+    BlockRequest,
     CancelOwnedResource,
     ExecuteRegisteredOperation,
     InspectRequest,
@@ -43,8 +43,8 @@ from .types.strategy import Operation, StartAttempt, Stop, Withdraw
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState
     from .types.common import DecisionId
-    from .types.intents import IntentsState, Request
     from .types.kernel import RunState
+    from .types.records import RecordsState, Request
     from .types.sessions import SessionsState
 
 
@@ -52,7 +52,7 @@ class EpisodeFacts(Protocol):
     """The slices of core state that decide an episode.
 
     A ``CoreState`` is one, and so is an
-    area reducer's context joined with the intents it is changing.
+    area reducer's context joined with the records it is changing.
     """
 
     @property
@@ -71,7 +71,7 @@ class EpisodeFacts(Protocol):
         ...
 
     @property
-    def intents(self) -> IntentsState:
+    def records(self) -> RecordsState:
         """The recorded requests a retirement may target."""
         ...
 
@@ -102,7 +102,7 @@ def retirement_dispatch(request: Request) -> bool:
         | CancelOwnedResource
         | CancelTurn
         | CancelOwnedJob
-        | BlockIntent,
+        | BlockRequest,
     )
 
 
@@ -150,10 +150,10 @@ def _retirement_target_matches(
             for invocation in state.sessions.invocations
         )
     return any(
-        isinstance(intent.request, ExecuteRegisteredOperation)
-        and intent.request.operation_id == target.operation_id
-        and intent.request.scope == request.scope
-        for intent in state.intents.intents
+        isinstance(record.request, ExecuteRegisteredOperation)
+        and record.request.operation_id == target.operation_id
+        and record.request.scope == request.scope
+        for record in state.records.records
     )
 
 
@@ -293,7 +293,7 @@ def episode_ended(state: EpisodeFacts, request: Request) -> bool:
     prepared request and decides what becomes of it, and core does not pre-empt that check.
     """
     return (
-        state.intents.recovery.phase == RecoveryPhase.READY
+        state.records.recovery.phase == RecoveryPhase.READY
         and not isinstance(request, _CLEANUP_KINDS)
         and not dispatch_episode_current(state, request)
     )

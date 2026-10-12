@@ -115,19 +115,19 @@ def registered_state(
         ),
         request_ids=(request_id,),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest="registered-turn",
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.DISPATCHED,
+        phase=core.RequestPhase.DISPATCHED,
         reconcile_deadline_at=1000,
     )
     if receipt_kind == "no-membership":
         receipt = receipt.model_copy(update={"request_ids": ()})
     elif receipt_kind == "foreign-decision":
         request = request.model_copy(update={"decision_id": core.DecisionId(root="foreign")})
-        intent = intent.model_copy(update={"request": request})
+        record = record.model_copy(update={"request": request})
     invocation = invocation.model_copy(update={"registered_operation": operation_id})
     state = state.model_copy(
         update={
@@ -138,7 +138,7 @@ def registered_state(
                     "capabilities": core.Capabilities(operations=codec.descriptors),
                 }
             ),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
             "sessions": state.sessions.model_copy(update={"invocations": (invocation,)}),
         }
     )

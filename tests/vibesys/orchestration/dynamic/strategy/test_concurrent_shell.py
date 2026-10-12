@@ -40,12 +40,12 @@ from vs_core.api import (
     DispatchTurn,
     EventId,
     InspectRequest,
-    IntentPhase,
     InvocationId,
     Observation,
     ObservationStatus,
     ReissueProof,
     RequestObserved,
+    RequestPhase,
     ResourceId,
     ResumeSessionTurn,
     RunEnvelope,
@@ -450,9 +450,9 @@ def test_a_failing_turn_keeps_what_the_turns_that_finished_with_it_returned(
     built = _build(2, delays, failing=frozenset({failing}))
     with pytest.raises(_TurnFailedError):
         run_virtual(built.clock, drive_core(built.host, built.config))
-    intents = {i.request_id.root: i for i in built.shell.record.envelope.core.intents.intents}
+    records = {i.request_id.root: i for i in built.shell.record.envelope.core.records.records}
     for request_id in built.ledger.returned:
-        assert intents[request_id].phase == IntentPhase.COMPLETED, request_id
+        assert records[request_id].phase == RequestPhase.COMPLETED, request_id
 
 
 class _AdmittingDelivery(FakePublicationDelivery):
@@ -532,10 +532,10 @@ class _Crash(BaseException):
     """The process died: raised by the observer right after a durable commit."""
 
 
-def _implementer_turns(record: RuntimeRecord[DynamicStrategyState]) -> list[IntentPhase]:
+def _implementer_turns(record: RuntimeRecord[DynamicStrategyState]) -> list[RequestPhase]:
     return [
         row.phase
-        for row in record.envelope.core.intents.intents
+        for row in record.envelope.core.records.records
         if _is_implementer_turn(row.request)
     ]
 
@@ -544,7 +544,7 @@ def _implementer_turns(record: RuntimeRecord[DynamicStrategyState]) -> list[Inte
 class _DiesWhen:
     """Dies right after the first commit at which ``when`` holds of the implementer turns."""
 
-    when: Callable[[list[IntentPhase]], bool]
+    when: Callable[[list[RequestPhase]], bool]
     fired: bool = False
 
     def committed(
@@ -558,15 +558,15 @@ class _DiesWhen:
             raise _Crash
 
 
-def _both_authorized(phases: list[IntentPhase]) -> bool:
+def _both_authorized(phases: list[RequestPhase]) -> bool:
     """The second DispatchAuthorized just committed: two turns authorized, none complete."""
-    started = [p for p in phases if p is not IntentPhase.PREPARED]
-    return len(started) == IMPLEMENTERS and IntentPhase.COMPLETED not in phases
+    started = [p for p in phases if p is not RequestPhase.PREPARED]
+    return len(started) == IMPLEMENTERS and RequestPhase.COMPLETED not in phases
 
 
-def _one_completed(phases: list[IntentPhase]) -> bool:
+def _one_completed(phases: list[RequestPhase]) -> bool:
     """Between the two completions: one turn's observation committed, the other's did not."""
-    return phases.count(IntentPhase.COMPLETED) == 1 and len(phases) == IMPLEMENTERS
+    return phases.count(RequestPhase.COMPLETED) == 1 and len(phases) == IMPLEMENTERS
 
 
 @pytest.mark.parametrize(
@@ -579,7 +579,7 @@ def _one_completed(phases: list[IntentPhase]) -> bool:
     ],
 )
 def test_a_crash_with_two_turns_in_flight_at_the_cap_resumes_with_one_effect_per_request(
-    dies: Callable[[list[IntentPhase]], bool], delays: list[int]
+    dies: Callable[[list[RequestPhase]], bool], delays: list[int]
 ) -> None:
     """Two turns are authorized and neither is done when the process dies; a restart over
     the same store finishes the run, and no request's effect happens twice."""

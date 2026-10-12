@@ -38,11 +38,11 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     ControlChanged,
-    IntentBlocked,
     MeasurementResult,
     OperationResult,
     Proposal,
     Rejected,
+    RequestBlocked,
     ResumeAuthorized,
     RunEnded,
     RunView,
@@ -132,7 +132,7 @@ class EvolveStrategy:
             return self._attempt_feedback(state, event)
         if isinstance(event, AttemptExhausted):
             return slot_events.on_exhausted(state, event)
-        if isinstance(event, IntentBlocked):
+        if isinstance(event, RequestBlocked):
             return slot_events.on_blocked(state, event)
         return self._run_feedback(state, event)
 

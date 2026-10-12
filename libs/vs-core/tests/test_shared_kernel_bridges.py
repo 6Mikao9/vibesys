@@ -178,7 +178,7 @@ def test_recovery_barrier_rejects_ordinary_decisions(phase: core.RecoveryPhase) 
     state = core.initial_state()
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"recovery": core.RecoveryBarrier(phase=phase)}
             )
         }
@@ -273,7 +273,7 @@ def test_acquisition_episode_reaches_prepared_requests() -> None:
         ),
     )
     assert result.requests[0].admission_id == decision.decision_id
-    assert result.state.intents.recovery == state.intents.recovery
+    assert result.state.records.recovery == state.records.recovery
 
 
 @pytest.mark.parametrize("inspection", [False, True])
@@ -312,7 +312,7 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
     ).state
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"recovery": core.RecoveryBarrier(phase=core.RecoveryPhase.BLOCKED)}
             )
         }
@@ -320,10 +320,10 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
     event = core.DispatchAuthorized(request_id=request_id)
     if inspection:
         dispatched = core.step(state, event)
-        (intent,) = (
-            row for row in dispatched.state.intents.intents if row.request_id == request_id
+        (record,) = (
+            row for row in dispatched.state.records.records if row.request_id == request_id
         )
-        assert intent.phase == core.IntentPhase.DISPATCHED
+        assert record.phase == core.RequestPhase.DISPATCHED
     else:
         with pytest.raises(core.ContractError, match="recovery"):
             core.step(state, event)
@@ -335,7 +335,7 @@ def test_recovery_ready_wakes_scheduling_without_unpausing() -> None:
         update={"run": state.run.model_copy(update={"status": core.RunStatus.PAUSED})}
     )
     started = core.RecoveryStarted(now_at=5.0, epoch=2)
-    ready = state.intents.model_copy(
+    ready = state.records.model_copy(
         update={"recovery": core.RecoveryBarrier(epoch=2, phase=core.RecoveryPhase.READY)}
     )
     wake = core.ClockAdvanced(now_at=5.0)
@@ -346,14 +346,14 @@ def test_recovery_ready_wakes_scheduling_without_unpausing() -> None:
             frames=(
                 core.TraceFrame(
                     signal=started,
-                    change=core.IntentsChange(state=ready, signals=(core.RecoveryReady(epoch=2),)),
+                    change=core.RecordsChange(state=ready, signals=(core.RecoveryReady(epoch=2),)),
                 ),
                 core.TraceFrame(signal=wake, change=core.SchedulingChange(state=state.scheduling)),
             )
         ),
     )
     assert result.state.run.status == core.RunStatus.PAUSED
-    assert result.state.intents.recovery == ready.recovery
+    assert result.state.records.recovery == ready.recovery
 
 
 @given(terminal=st.booleans(), released=st.booleans(), complete=st.booleans())
@@ -393,10 +393,10 @@ def test_child_leases_fence_run_closure_until_exact_release_manifest(
                     "result": core.RunResultProposal(outcome="cancelled", reason="cleanup"),
                 }
             ),
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
                     "children": (child,),
-                    "intents": (inspect_source(observed.request_id, scope),),
+                    "records": (inspect_source(observed.request_id, scope),),
                 }
             ),
         }

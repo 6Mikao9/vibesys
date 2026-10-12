@@ -47,7 +47,7 @@ class SnapshotResultRef(Value):
 class StageRequirements(Value):
     """A stage value that may name the outputs its evidence must contain.
 
-    ``required_outputs`` joined stages after runs had already stored digests of plans, intents
+    ``required_outputs`` joined stages after runs had already stored digests of plans, records
     and receipts. A stage that requires nothing serializes exactly as it did before the field
     existed, so every stored digest, submission budget key and recipe digest still matches and
     a run started earlier resumes. Only a stage that requires something carries the field.
@@ -465,7 +465,7 @@ class SubmissionBudget(Value):
 
     The first limit cannot exceed the run ceiling. Workload rejection is durable;
     conclusive infrastructure failure may retry within this bound. Transport
-    reconciliation accounting remains Intent.retry_count, not this receipt list.
+    reconciliation accounting remains RequestRecord.retry_count, not this receipt list.
     """
 
     scope: Scope

@@ -75,7 +75,7 @@ def yield_state(
         feedback=core.Accepted(decision_id=request.decision_id),
         request_ids=(request.request_id,),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=hashlib.sha256(
@@ -84,7 +84,7 @@ def yield_state(
             ).encode()
         ).hexdigest(),
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.DISPATCHED,
+        phase=core.RequestPhase.DISPATCHED,
         reconcile_deadline_at=100.0,
     )
     owner = core.AttemptView(
@@ -127,7 +127,7 @@ def yield_state(
                 "run": state.run.model_copy(update={"receipts": (receipt,)}),
                 "attempts": core.AttemptsState(attempts=(owner,)),
                 "sessions": core.SessionsState(sessions=(session,), invocations=(invocation,)),
-                "intents": core.IntentsState(intents=(intent,)),
+                "records": core.RecordsState(records=(record,)),
             }
         ),
         request,
@@ -384,12 +384,12 @@ def test_yield_checkpoint_completes_original_turn_not_checkpoint_request_origin(
         )
         if row.request_id == event.request_id
         else row
-        for row in state.intents.intents
+        for row in state.records.records
     )
     state = state.model_copy(
         update={
             "run": state.run.model_copy(update={"receipts": (*state.run.receipts, other)}),
-            "intents": state.intents.model_copy(update={"intents": records}),
+            "records": state.records.model_copy(update={"records": records}),
         }
     )
     state = commit_checkpoint(state, event)

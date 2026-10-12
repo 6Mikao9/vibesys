@@ -60,7 +60,7 @@ def test_every_input_measurement_outcome_ends_the_run_with_its_status(
 
     assert run.finished
     assert not run.liveness_violations
-    requests = [intent.request for intent in run.core.intents.intents]
+    requests = [record.request for record in run.core.records.records]
     assert len(requests) <= MAX_REQUESTS
     assert sum(isinstance(request, CollectEvidence) for request in requests) <= 3
     result = _stop(run.decisions)

@@ -5,15 +5,15 @@ from vs_core._step import _operation_prepared, operation_owner
 from vs_core.types.attempts import RevisionOperationRequested
 from vs_core.types.common import Area, ExecuteRegisteredOperation
 from vs_core.types.evaluation import RegisteredJobRequested
-from vs_core.types.intents import RequestPrepared
 from vs_core.types.kernel import CoreState
+from vs_core.types.records import RequestPrepared
 from vs_core.types.sessions import RegisteredTurnRequested
 from vs_core.types.strategy import Operation
 
 from .traces import (
     AttemptsChange,
     EvaluationChange,
-    IntentsChange,
+    RecordsChange,
     ReducerTrace,
     SessionsChange,
     TraceFrame,
@@ -30,11 +30,11 @@ def operation_trace(state: CoreState, decision: Operation) -> ReducerTrace:
         raise ContractError(("request",), "expected registered operation request")
     descriptor = next(item for item in state.registry if item.kind == decision.request.kind)
     owner = operation_owner(state, request)
-    if owner == Area.INTENTS:
+    if owner == Area.RECORDS:
         return ReducerTrace(
             frames=(
                 TraceFrame(
-                    signal=prepared, change=IntentsChange(state=state.intents, requests=(request,))
+                    signal=prepared, change=RecordsChange(state=state.records, requests=(request,))
                 ),
             )
         )
@@ -56,7 +56,7 @@ def operation_trace(state: CoreState, decision: Operation) -> ReducerTrace:
     return ReducerTrace(
         frames=(
             TraceFrame(
-                signal=prepared, change=IntentsChange(state=state.intents, signals=(signal,))
+                signal=prepared, change=RecordsChange(state=state.records, signals=(signal,))
             ),
             TraceFrame(signal=signal, change=change),
         )

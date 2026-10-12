@@ -40,12 +40,12 @@ from vs_core.api import (
     AttemptReady,
     AttemptSettled,
     ControlChanged,
-    IntentBlocked,
-    IntentPhase,
     MeasurementResult,
     OperationResult,
     Proposal,
     Rejected,
+    RequestBlocked,
+    RequestPhase,
     ResumeAuthorized,
     RunEnded,
     RunView,
@@ -111,7 +111,7 @@ class IssueQueueStrategy:
         blocked = frozenset(
             decision_of_operation(item.operation_id.root)
             for item in view.operations
-            if item.phase is IntentPhase.BLOCKED
+            if item.phase is RequestPhase.BLOCKED
         )
         if not blocked:
             return state
@@ -145,7 +145,7 @@ class IssueQueueStrategy:
             | YieldPublicationFailed
             | ResumeAuthorized
             | AttemptExhausted
-            | IntentBlocked,
+            | RequestBlocked,
         ):
             return self._suspension(state, event)
         return self._run_feedback(state, event)
@@ -157,7 +157,7 @@ class IssueQueueStrategy:
         | YieldPublicationFailed
         | ResumeAuthorized
         | AttemptExhausted
-        | IntentBlocked,
+        | RequestBlocked,
     ) -> IssueQueueStrategyState:
         """Fold the feedback that suspends, resumes, exhausts or blocks the open job."""
         if isinstance(event, TurnSuspended):

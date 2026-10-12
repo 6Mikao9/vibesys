@@ -1,4 +1,4 @@
-"""Property tests of the intent ledger through the public `step` only."""
+"""Property tests of the record ledger through the public `step` only."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from vs_core.api import (
     DispatchAuthorized,
     EventId,
     ExecuteRegisteredOperation,
-    IntentPhase,
     LifecycleClass,
     Observation,
     ObservationStatus,
@@ -26,6 +25,7 @@ from vs_core.api import (
     OperationWire,
     RequestId,
     RequestObserved,
+    RequestPhase,
     RequestPrepared,
     SchemaRef,
     Scope,
@@ -140,14 +140,14 @@ def test_ledger_interleavings_are_safe_and_reload_transparent(trace: list[Action
         completions += sum(
             isinstance(row, core.OperationResult | core.DecisionCompleted) for row in left.events
         )
-        (intent,) = plain.intents.intents
-        if intent.observation is not None:
+        (record,) = plain.records.records
+        if record.observation is not None:
             # An accepted observation never moves the sequence backward or repeats it.
-            assert intent.observation.sequence >= best
-            best = intent.observation.sequence
-        if intent.phase == IntentPhase.COMPLETED:
-            assert intent.observation is not None
-            assert intent.observation.terminal
+            assert record.observation.sequence >= best
+            best = record.observation.sequence
+        if record.phase == RequestPhase.COMPLETED:
+            assert record.observation is not None
+            assert record.observation.terminal
     assert completions <= 1
     assert plain == reloaded
 
@@ -158,14 +158,14 @@ def test_duplicate_and_stale_observations_are_inert(sequence: int) -> None:
     state = step(_ready(), DispatchAuthorized(request_id=REQUEST)).state
     first = step(state, RequestObserved(observation=_observation(state, sequence, "unknown")))
     again = step(first.state, RequestObserved(observation=_observation(state, sequence, "unknown")))
-    assert again.state.intents == first.state.intents
+    assert again.state.records == first.state.records
     assert again.events == again.requests == ()
     if sequence > 1:
         stale = step(
             first.state,
             RequestObserved(observation=_observation(state, sequence - 1, "unknown")),
         )
-        assert stale.state.intents == first.state.intents
+        assert stale.state.records == first.state.records
 
 
 def _obs(
@@ -207,10 +207,10 @@ def _dispatched() -> CoreState:
 
 def test_retiring_unsent_work_closes_it_without_a_command() -> None:
     result = _retire(_ready())
-    (intent,) = result.state.intents.intents
-    assert intent.phase == IntentPhase.COMPLETED
-    assert intent.observation is not None
-    assert intent.observation.status == ObservationStatus.CANCELLED
+    (record,) = result.state.records.records
+    assert record.phase == RequestPhase.COMPLETED
+    assert record.observation is not None
+    assert record.observation.status == ObservationStatus.CANCELLED
     assert result.requests == ()
 
 
@@ -238,12 +238,12 @@ def test_retiring_released_terminal_work_is_quiet() -> None:
 def test_unknown_work_can_be_dispatched_again_and_terminal_work_cannot() -> None:
     state = _dispatched()
     unknown = step(state, RequestObserved(observation=_obs(1, ObservationStatus.UNKNOWN))).state
-    assert unknown.intents.intents[0].phase == IntentPhase.RECONCILING
+    assert unknown.records.records[0].phase == RequestPhase.RECONCILING
     again = step(unknown, DispatchAuthorized(request_id=REQUEST)).state
-    assert again.intents.intents[0].phase == IntentPhase.DISPATCHED
+    assert again.records.records[0].phase == RequestPhase.DISPATCHED
     done = _obs(2, ObservationStatus.SUCCEEDED, terminal=True)
     closed = step(again, RequestObserved(observation=done)).state
-    assert closed.intents.intents[0].phase == IntentPhase.COMPLETED
+    assert closed.records.records[0].phase == RequestPhase.COMPLETED
     assert _try(closed, DispatchAuthorized(request_id=REQUEST)) is None
 
 
@@ -266,27 +266,27 @@ def test_retries_exhaust_into_a_conclusive_failure() -> None:
     for sequence in (1, 2, 3):
         failed = _obs(sequence, ObservationStatus.FAILED)
         state = step(state, RequestObserved(observation=failed)).state
-    (intent,) = state.intents.intents
-    assert intent.phase == IntentPhase.COMPLETED
-    assert intent.observation is not None
-    assert intent.observation.terminal
-    assert intent.observation.status == ObservationStatus.FAILED
-    assert not intent.observation.accepted
+    (record,) = state.records.records
+    assert record.phase == RequestPhase.COMPLETED
+    assert record.observation is not None
+    assert record.observation.terminal
+    assert record.observation.status == ObservationStatus.FAILED
+    assert not record.observation.accepted
 
 
 def test_a_prepared_request_replays_inertly_and_conflicts_loudly() -> None:
     state = _ready()
-    (intent,) = state.intents.intents
-    assert isinstance(intent.request, ExecuteRegisteredOperation)
+    (record,) = state.records.records
+    assert isinstance(record.request, ExecuteRegisteredOperation)
     replay = step(
         state,
-        RequestPrepared(request=intent.request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE),
+        RequestPrepared(request=record.request, lifecycle=LifecycleClass.IDEMPOTENT_WRITE),
     )
-    assert replay.state.intents == state.intents
+    assert replay.state.records == state.records
     assert replay.requests == ()
-    changed = intent.request.model_copy(
+    changed = record.request.model_copy(
         update={
-            "operation": intent.request.operation.model_copy(
+            "operation": record.request.operation.model_copy(
                 update={"payload_json": '{"content":"y"}'}
             )
         }
@@ -366,15 +366,15 @@ def test_every_request_class_round_trips_through_the_ledger(index: int) -> None:
     sent = step(prepared.state, DispatchAuthorized(request_id=REQUEST)).state
     done = _obs(1, ObservationStatus.SUCCEEDED, terminal=True, resource="job")
     closed = step(sent, RequestObserved(observation=done)).state
-    (intent,) = closed.intents.intents
-    assert intent.phase == IntentPhase.COMPLETED
-    assert intent.observation == done
+    (record,) = closed.records.records
+    assert record.phase == RequestPhase.COMPLETED
+    assert record.observation == done
 
 
 def _dependent() -> CoreState:
     state = _ready()
-    (intent,) = state.intents.intents
-    request = intent.request.model_copy(
+    (record,) = state.records.records
+    request = record.request.model_copy(
         update={
             "request_id": RequestId(root="dependent"),
             "decision_dependencies": (core.DecisionId(root="upstream"),),
@@ -397,18 +397,20 @@ def test_only_an_unsuccessful_upstream_decision_cancels_prepared_dependents(
         ),
     ).state
     dependent = next(
-        row for row in resolved.intents.intents if row.request_id == RequestId(root="dependent")
+        row for row in resolved.records.records if row.request_id == RequestId(root="dependent")
     )
     expected = (
-        IntentPhase.PREPARED if status == core.CompletionStatus.SUCCEEDED else IntentPhase.COMPLETED
+        RequestPhase.PREPARED
+        if status == core.CompletionStatus.SUCCEEDED
+        else RequestPhase.COMPLETED
     )
     assert dependent.phase == expected
 
 
 def test_events_naming_unknown_requests_or_wrong_classes_are_rejected() -> None:
     state = _ready()
-    (intent,) = state.intents.intents
-    wrong = RequestPrepared(request=intent.request, lifecycle=LifecycleClass.QUERY)
+    (record,) = state.records.records
+    wrong = RequestPrepared(request=record.request, lifecycle=LifecycleClass.QUERY)
     assert _try(state, wrong) is None
     assert _try(initial_state(), DispatchAuthorized(request_id=REQUEST)) is None
     ghost = _obs(1, ObservationStatus.PENDING)
@@ -468,14 +470,14 @@ def test_a_registered_write_completes_its_decision_and_reports_once() -> None:
 
 
 @given(st.lists(st.integers(min_value=1, max_value=6), min_size=1, max_size=6, unique=True))
-def test_the_intent_always_records_the_latest_accepted_observation(sequences: list[int]) -> None:
-    """Owners compare against the intent's current observation, so it must follow progress."""
+def test_the_record_always_records_the_latest_accepted_observation(sequences: list[int]) -> None:
+    """Owners compare against the record's current observation, so it must follow progress."""
     state = _dispatched()
     latest = 0
     for sequence in sequences:
         observation = _obs(sequence, ObservationStatus.PENDING, resource="job")
         state = step(state, RequestObserved(observation=observation)).state
-        (intent,) = state.intents.intents
+        (record,) = state.records.records
         latest = max(latest, sequence)
-        assert intent.observation is not None
-        assert intent.observation.sequence == latest
+        assert record.observation is not None
+        assert record.observation.sequence == latest

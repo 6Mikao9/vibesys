@@ -330,11 +330,11 @@ def test_applied_but_unverified_is_recovered_by_verify_not_by_adopting_again() -
     # A ledger that lost the verify record gets exactly that request back, never AdoptRevision.
     lost = run.state.model_copy(
         update={
-            "intents": run.state.intents.model_copy(
+            "records": run.state.records.model_copy(
                 update={
-                    "intents": tuple(
+                    "records": tuple(
                         row
-                        for row in run.state.intents.intents
+                        for row in run.state.records.records
                         if row.request_id != verify.request_id
                     )
                 }
@@ -715,7 +715,7 @@ def _executor_answer(
     status: core.ObservationStatus,
     revision: core.RevisionRef | None = None,
 ) -> core.Transition:
-    """Answer through the intent ledger, the way an executor's result enters the core."""
+    """Answer through the record ledger, the way an executor's result enters the core."""
     assert request.request_id is not None
     key = request.request_id.root
     run.sequences[key] = run.sequences.get(key, 0) + 1
@@ -736,7 +736,7 @@ def _executor_answer(
 
 
 def test_the_winner_decision_completes_only_after_its_adoption_is_verified() -> None:
-    """INTENTS-A gap: completing on the restore alone would precede the verification."""
+    """RECORDS-A gap: completing on the restore alone would precede the verification."""
     run = start()
     selection = GOOD[0]
     (adopt,) = new_requests(run.propose(selection))

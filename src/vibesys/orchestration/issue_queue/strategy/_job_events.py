@@ -49,12 +49,12 @@ from vs_core.api import (
     AttemptExhausted,
     AttemptReady,
     AttemptSettled,
-    IntentBlocked,
     InvocationRef,
     ObservationStatus,
     OperationResult,
     Rejected,
     RenderedArtifacts,
+    RequestBlocked,
     ResumeAuthorized,
     RevisionRef,
     RunView,
@@ -185,7 +185,7 @@ def retry_blocked(
     )
 
 
-def on_blocked(state: IssueQueueStrategyState, event: IntentBlocked) -> IssueQueueStrategyState:
+def on_blocked(state: IssueQueueStrategyState, event: RequestBlocked) -> IssueQueueStrategyState:
     """A blocked request of the job's attempt leaves its effect unknown: end the job.
 
     A board write is run-scoped and is retried from the view instead (`retry_blocked`).

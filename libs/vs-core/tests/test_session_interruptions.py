@@ -49,7 +49,7 @@ def test_run_interruption_waits_for_terminal_turn_then_checkpoint_and_completes_
     assert isinstance(interrupted.requests[0], core.CancelTurn)
     assert interrupted.state.sessions.interrupts[0].phase == "draining"
     assert reload_step(interrupted.state, event).requests == ()
-    request = state.intents.intents[0].request
+    request = state.records.records[0].request
     assert isinstance(request, core.DispatchTurn)
     observed = core.TurnObserved(
         invocation=event.invocation,
@@ -127,15 +127,15 @@ def test_a_turn_that_ends_released_closes_the_cancellation_that_could_not_prove_
     cancel = interrupted.requests[0]
     assert isinstance(cancel, core.CancelTurn)
     dispatch = next(
-        r.request for r in state.intents.intents if isinstance(r.request, core.DispatchTurn)
+        r.request for r in state.records.records if isinstance(r.request, core.DispatchTurn)
     )
     sent = interrupted.state.model_copy(
         update={
-            "intents": interrupted.state.intents.model_copy(
+            "records": interrupted.state.records.model_copy(
                 update={
-                    "intents": tuple(
-                        row.model_copy(update={"phase": core.IntentPhase.DISPATCHED})
-                        for row in interrupted.state.intents.intents
+                    "records": tuple(
+                        row.model_copy(update={"phase": core.RequestPhase.DISPATCHED})
+                        for row in interrupted.state.records.records
                     )
                 }
             )
@@ -143,11 +143,11 @@ def test_a_turn_that_ends_released_closes_the_cancellation_that_could_not_prove_
     )
     unproven = turn_observation(cancel, sequence=1).model_copy(update={"observed_at": 1.0})
     waiting = reload_step(sent, core.RequestObserved(observation=unproven))
-    row = next(r for r in waiting.state.intents.intents if r.request_id == cancel.request_id)
-    assert row.phase != core.IntentPhase.COMPLETED
+    row = next(r for r in waiting.state.records.records if r.request_id == cancel.request_id)
+    assert row.phase != core.RequestPhase.COMPLETED
     ended = turn_observation(
         dispatch, sequence=2, accepted=True, terminal=True, status=core.ObservationStatus.FAILED
     ).model_copy(update={"released": True, "children_complete": True})
     result = reload_step(waiting.state, core.RequestObserved(observation=ended))
-    row = next(r for r in result.state.intents.intents if r.request_id == cancel.request_id)
-    assert row.phase == core.IntentPhase.COMPLETED
+    row = next(r for r in result.state.records.records if r.request_id == cancel.request_id)
+    assert row.phase == core.RequestPhase.COMPLETED

@@ -54,13 +54,13 @@ Readers who know the product but not `vs-core` need these terms.
   If the turn's workspace checkpoint is declined or fails, core instead ends the turn with
   `YieldPublicationFailed` (a named reason) and the strategy treats it as a failed turn.
 - **Shell**: the async host in `vs-runtime` that executes core's requests and feeds outcomes
-  back as events. **Durable boundary**: one atomic commit of state plus the intents it implies.
+  back as events. **Durable boundary**: one atomic commit of state plus the records it implies.
 
 Core events the strategies fold, with the consequence of each: `AttemptReady` (slot and
 workspace held, begin turns), `TurnResult` (reply or typed failure), `TurnSuspended`, `YieldPublicationFailed` and
 `ResumeAuthorized` (wait, failed wait, and resume), `MeasurementResult` (trusted evidence ids),
 `OperationResult`, `AttemptExhausted` (budget spent), `AttemptSettled`, `AdoptionResult`,
-`IntentBlocked` (effect unknown), `Rejected` (decision refused), `ControlChanged` (operator
+`RequestBlocked` (effect unknown), `Rejected` (decision refused), `ControlChanged` (operator
 stop), `RunEnded`.
 
 ### 1.3 Status
@@ -395,9 +395,9 @@ defaults the legacy `structured_turn` and runtime gave. `--max-rounds` growth on
 
 ### 4.7 Crash and replay
 
-Every transition is one event folded into state that commits atomically with its intents, so
+Every transition is one event folded into state that commits atomically with its records, so
 the legacy commit points (initialize, start hypothesis, checkpoint, close round) disappear.
-After a crash the shell replays unfinished intents under their recorded ids, the strategy is
+After a crash the shell replays unfinished records under their recorded ids, the strategy is
 rebound to the committed state, and `decide` re-proposes identical decisions, which core
 deduplicates. Two cases need care and have properties (section 9): a reply delivered before
 its checkpoint is visible is held (`RETAINING`) and must be acted on once; a designer plan
@@ -700,7 +700,7 @@ build differs from it, and why.
   than the last write (property Q3). `ApplyIssueChanges` therefore returns only where each
   change landed, not a snapshot. A blocked board request is sent again under a new decision
   identity and the same keys, read from the view (`OperationView.phase`), because a blocked
-  intent names its request, not its decision.
+  record names its request, not its decision.
 - **Progress is fire and forget.** `LogProgress` is proposed beside the write it records and its
   result is not awaited; replay is safe because the owner appends once per key.
 - **Idempotence lives in the tracker records.** `IssueTracker.create`, `update_status` and
@@ -880,7 +880,7 @@ and before dispatch, and after dispatch and before the observation is committed.
 | C1 | `decide` is deterministic and idempotent; a replayed proposal is deduplicated and changes nothing | reachable (state, view) pairs |
 | C2 | Crash and replay: for every durable boundary k and every crash point, restart from the stored envelope with a new strategy instance and executors that keep their world; the run reaches the same terminal result, the same set of decision ids, equal final strategy state, and no request identity executes twice | executor answers (`Succeeded`, `Running`, `Unknown`, `Retryable`, `Failed`), agent replies, k, crash point |
 | C3 | Every reachable state round-trips the envelope codec and passes `validate_immutable_schema` | states reached by C1/C2 runs |
-| C4 | Liveness (`vs_core.testing.liveness`): terminal, no open intent, no orphan wait, bounded requests, no spin | answers with duplicate and reordered delivery (`Faults`) |
+| C4 | Liveness (`vs_core.testing.liveness`): terminal, no open record, no orphan wait, bounded requests, no spin | answers with duplicate and reordered delivery (`Faults`) |
 | C5 | An operator stop injected at any step ends `cancelled` with every attempt settled and nothing leaked | stop position |
 | C6 | The derived `Limits` are never exceeded: attempts, turns, retries, measurement submissions | whole scenarios |
 | C7 | An event for an unknown decision, attempt or invocation, or a duplicate, changes nothing | event streams with injected strays |

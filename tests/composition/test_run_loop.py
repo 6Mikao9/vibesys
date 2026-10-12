@@ -332,16 +332,16 @@ async def test_a_run_nothing_can_wake_is_reported_stalled(tmp_path: Path) -> Non
             await drive_core(host, _config())
 
 
-async def test_a_stalled_run_with_no_open_intent_still_names_what_is_unfinished(
+async def test_a_stalled_run_with_no_open_record_still_names_what_is_unfinished(
     tmp_path: Path,
 ) -> None:
-    """``open intents []`` is never the whole report: core says it waits on nothing."""
+    """``open records []`` is never the whole report: core says it waits on nothing."""
     with open_skeleton_world(tmp_path, INERT) as world:
         _, host = _host(world, ProbedRunClock(clock_from(1.0)))
         start_core(host, _config())
         with pytest.raises(
             RunStalledError,
-            match=r"open intents \[\]; core waits on nothing, so the strategy is the one that has "
+            match=r"open records \[\]; core waits on nothing, so the strategy is the one that has "
             r"stopped proposing; unfinished attempts \[.*\], sessions \[.*\], continuations \[",
         ):
             await drive_core(host, _config())
@@ -351,7 +351,7 @@ async def test_a_stalled_run_reports_what_the_host_knows_about_the_cause(tmp_pat
     with open_skeleton_world(tmp_path, INERT) as world:
         _, host = _host(world, ProbedRunClock(clock_from(1.0)))
         start_core(host, _config())
-        with pytest.raises(RunStalledError, match=r"open intents \[\].*; a submission nobody told"):
+        with pytest.raises(RunStalledError, match=r"open records \[\].*; a submission nobody told"):
             await drive_core(host, _config(), stall_notes=lambda: ["a submission nobody told"])
 
 
@@ -379,7 +379,7 @@ class StuckClosingWorld(World):
 
 
 async def test_a_stalled_run_names_the_release_a_closing_attempt_waits_for(tmp_path: Path) -> None:
-    """The cause is the attempt stuck closing, not only that no intent is open."""
+    """The cause is the attempt stuck closing, not only that no record is open."""
     with open_skeleton_world(tmp_path, INERT) as opened:
         world = StuckClosingWorld(
             **{f.name: getattr(opened, f.name) for f in dataclasses.fields(opened)}

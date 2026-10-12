@@ -70,7 +70,7 @@ class Executor:
         self.issued.extend(transition.requests)
 
     def pending(self) -> tuple[core.Request, ...]:
-        return core.pending_requests(self.state.intents)
+        return core.pending_requests(self.state.records)
 
     def request_turn(self, *, reuse: bool) -> None:
         self.turns += 1

@@ -61,7 +61,7 @@ def _text(prompt: PlannerPrompt) -> str:
         ((False, "profile capture process failed"), "failed", "profile capture process failed"),
     ],
 )
-def test_the_next_plan_receives_a_completed_profiles_intent_and_trusted_outcome(
+def test_the_next_plan_receives_a_completed_profiles_record_and_trusted_outcome(
     reading: tuple[bool, str], status: str, detail: str
 ) -> None:
     world = DynamicWorld(

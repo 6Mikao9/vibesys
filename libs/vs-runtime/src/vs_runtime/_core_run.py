@@ -415,7 +415,7 @@ class _Loop:
             self._shell.submit(ClockAdvanced(now_at=now), now_at=now)
             before = self._signature()
             refusal = await self._settle(now)
-            if refusal is None and self._core().intents.recovery.phase == RecoveryPhase.READY:
+            if refusal is None and self._core().records.recovery.phase == RecoveryPhase.READY:
                 self._shell.decide(now_at=now)
                 refusal = await self._settle(now)
             if refusal is not None:
@@ -505,7 +505,7 @@ class _Loop:
             await self._wait_while_running(due)
             return
         paused = core.run.status == RunStatus.PAUSED
-        recovering = core.intents.recovery.phase != RecoveryPhase.READY
+        recovering = core.records.recovery.phase != RecoveryPhase.READY
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):
             raise RunStalledError(_describe(core, self._stall_notes()))
@@ -567,20 +567,20 @@ def _noop() -> None:
 
 
 def _describe(core: CoreState, notes: Sequence[str]) -> str:
-    """Why nothing can proceed: the open intents, then every wait nothing will end.
+    """Why nothing can proceed: the open records, then every wait nothing will end.
 
-    A stalled run always names a cause. When core holds no open intent and no orphaned wait,
+    A stalled run always names a cause. When core holds no open record and no orphaned wait,
     the strategy still has unfinished work core is not waiting on, so the report lists the
     attempts, sessions and continuations that have not ended.
     """
-    open_intents = [
-        f"{intent.request.kind}:{intent.phase.value}"
-        for intent in core.intents.intents
-        if intent.phase.value != "completed"
+    open_records = [
+        f"{record.request.kind}:{record.phase.value}"
+        for record in core.records.records
+        if record.phase.value != "completed"
     ]
     text = (
         f"run {core.run.run_id.root} stalled at core revision {core.revision} "
-        f"with status {core.run.status.value}; open intents {open_intents}"
+        f"with status {core.run.status.value}; open records {open_records}"
     )
     # An attempt that cannot finish closing is the usual reason nothing else is left to do.
     waiting = [
@@ -594,7 +594,7 @@ def _describe(core: CoreState, notes: Sequence[str]) -> str:
     orphans = [f"{wait.waiter.value} {wait.subject}" for wait in orphan_waits(core)]
     if orphans:
         text += f"; waits nothing will end {orphans}"
-    if not open_intents and not waiting and not orphans:
+    if not open_records and not waiting and not orphans:
         text += f"; {_unfinished(core)}"
     if notes:
         text += f"; {'; '.join(notes)}"

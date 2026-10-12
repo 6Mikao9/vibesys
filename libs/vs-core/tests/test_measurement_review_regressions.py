@@ -68,10 +68,10 @@ def test_inert_job_observations_emit_no_events(sequence: int, fault: str) -> Non
         # The ledger holds no observation of the submission, so nothing vouches for the job.
         rows = tuple(
             row.model_copy(update={"observation": None, "sequence": 0})
-            for row in state.intents.intents
+            for row in state.records.records
         )
         state = state.model_copy(
-            update={"intents": state.intents.model_copy(update={"intents": rows})}
+            update={"records": state.records.model_copy(update={"records": rows})}
         )
     else:
         state = committed(state, observed)

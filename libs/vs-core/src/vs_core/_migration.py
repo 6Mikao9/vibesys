@@ -11,8 +11,8 @@ from ._values import canonical_json
 from .types.attempts import AttemptBudget
 from .types.common import AttemptId, ExecuteRegisteredOperation, LifecycleClass
 from .types.evaluation import SubmitMeasurement
-from .types.intents import IntentPhase, RecoveryBarrier, RecoveryPhase
 from .types.kernel import CoreState, DecisionReceipt
+from .types.records import RecoveryBarrier, RecoveryPhase, RequestPhase
 from .types.sessions import ResumeSessionTurn
 from .types.strategy import Accepted, Operation
 
@@ -60,10 +60,10 @@ def _new_evaluation_contracts(core: dict[str, object]) -> None:
                 job.get("evidence"), ("core", "evaluation", group, index, "evidence")
             )
     continuations = _rows(evaluation.get("continuations"), ("core", "evaluation", "continuations"))
-    intents = _object(core.get("intents"), ("core", "intents"))
+    records = _object(core.get("records"), ("core", "records"))
     continuations.extend(
         _object(row["suspension"], ("suspension",))
-        for row in _rows(intents.get("intents"), ("core", "intents", "intents"))
+        for row in _rows(records.get("records"), ("core", "records", "records"))
         if row.get("suspension") is not None
     )
     for continuation in continuations:
@@ -100,12 +100,12 @@ def _new_attempt_contracts(core: dict[str, object]) -> None:
 
 
 def _new_child_contracts(core: dict[str, object]) -> None:
-    intents = _object(core.get("intents"), ("core", "intents"))
-    for child in _rows(intents.get("children"), ("core", "intents", "children")):
+    records = _object(core.get("records"), ("core", "records"))
+    for child in _rows(records.get("children"), ("core", "records", "children")):
         _absent_fields(
             child,
             ("observation_watermarks", "watermark_history_complete"),
-            ("core", "intents", "children"),
+            ("core", "records", "children"),
         )
         # Keep the aggregate observation as its source's sequence lower bound.
         # Only a fresh correlated inspection creates a certified watermark.
@@ -127,17 +127,17 @@ def _registered_input_manifests(core: dict[str, object]) -> None:
             ("core", "sessions", "invocations", index),
         )
         # Version 2 retained no invocation-owned pending yield. Neither an
-        # evaluation continuation nor a sibling intent can reconstruct it.
+        # evaluation continuation nor a sibling record can reconstruct it.
         invocation["pending_suspension"] = None
-    intents = _object(core.get("intents"), ("core", "intents"))
-    for index, intent in enumerate(_rows(intents.get("intents"), ("core", "intents", "intents"))):
+    records = _object(core.get("records"), ("core", "records"))
+    for index, record in enumerate(_rows(records.get("records"), ("core", "records", "records"))):
         _absent_fields(
-            intent, ("setup_failure", "evaluation_result"), ("core", "intents", "intents", index)
+            record, ("setup_failure", "evaluation_result"), ("core", "records", "records", index)
         )
-        request = _object(intent.get("request"), ("core", "intents", "intents", index, "request"))
+        request = _object(record.get("request"), ("core", "records", "records", index, "request"))
         if request.get("kind") != "execute_registered_operation":
             continue
-        _absent_fields(request, ("inputs",), ("core", "intents", "intents", index, "request"))
+        _absent_fields(request, ("inputs",), ("core", "records", "records", index, "request"))
         request["inputs"] = []
         matching = [
             row
@@ -146,7 +146,7 @@ def _registered_input_manifests(core: dict[str, object]) -> None:
         ]
         if len(matching) > 1:
             raise ContractError(
-                ("core", "intents", "intents", index, "inputs"), "ambiguous invocation manifest"
+                ("core", "records", "records", index, "inputs"), "ambiguous invocation manifest"
             )
         if not matching:
             operation = _object(request.get("operation"), ("operation",))
@@ -155,18 +155,18 @@ def _registered_input_manifests(core: dict[str, object]) -> None:
                 row.get("reserved_to") is not None for row in inputs
             ):
                 raise ContractError(
-                    ("core", "intents", "intents", index, "inputs"),
+                    ("core", "records", "records", index, "inputs"),
                     "missing invocation correspondence",
                 )
             continue
         invocation = matching[0]
         if invocation.get("scope") != request.get("scope"):
             raise ContractError(
-                ("core", "intents", "intents", index, "inputs"),
+                ("core", "records", "records", index, "inputs"),
                 "invocation scope correspondence mismatch",
             )
         request["inputs"] = _input_occurrences(
-            invocation, inputs, ("core", "intents", "intents", index, "inputs")
+            invocation, inputs, ("core", "records", "records", index, "inputs")
         )
 
 
@@ -221,18 +221,18 @@ def _validate_old_decisions(core: dict[str, object]) -> None:
 
 def _validate_prepared_authority(state: CoreState, registry: OperationRegistry) -> None:
     """New bounds cannot bless already-prepared work from an unknown prefix."""
-    for index, intent in enumerate(state.intents.intents):
-        if intent.phase != IntentPhase.PREPARED:
+    for index, record in enumerate(state.records.records):
+        if record.phase != RequestPhase.PREPARED:
             continue
-        request = intent.request
+        request = record.request
         if isinstance(request, ResumeSessionTurn):
             raise ContractError(
-                ("core", "intents", "intents", index, "request"),
+                ("core", "records", "records", index, "request"),
                 "resume publication/history proof unavailable in version 2",
             )
         if isinstance(request, SubmitMeasurement) and isinstance(request.scope.owner, AttemptId):
             raise ContractError(
-                ("core", "intents", "intents", index, "request"),
+                ("core", "records", "records", index, "request"),
                 "attempt evaluation history unavailable in version 2",
             )
         if not isinstance(request, ExecuteRegisteredOperation):
@@ -243,21 +243,21 @@ def _validate_prepared_authority(state: CoreState, registry: OperationRegistry) 
             and registry.normalize_measurement(decoded) is not None
         ):
             raise ContractError(
-                ("core", "intents", "intents", index, "request"),
+                ("core", "records", "records", index, "request"),
                 "registered evaluation history unavailable in version 2",
             )
         turn = registry.normalize_turn(decoded)
         if turn is not None and turn.continuation_id is not None:
             raise ContractError(
-                ("core", "intents", "intents", index, "request"),
+                ("core", "records", "records", index, "request"),
                 "registered resume publication/history proof unavailable in version 2",
             )
 
 
 def _validate_registered_turn_correspondence(state: CoreState) -> None:
     """An operation ID alone cannot prove which wire or invocation was reserved."""
-    for index, intent in enumerate(state.intents.intents):
-        request = intent.request
+    for index, record in enumerate(state.records.records):
+        request = record.request
         if (
             not isinstance(request, ExecuteRegisteredOperation)
             or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
@@ -271,14 +271,14 @@ def _validate_registered_turn_correspondence(state: CoreState) -> None:
         ]
         if len(origins) != 1:
             raise ContractError(
-                ("core", "intents", "intents", index, "request"),
+                ("core", "records", "records", index, "request"),
                 "missing canonical registered turn receipt",
             )
         receipt = origins[0]
         decision = receipt.decision
         if not isinstance(decision, Operation):
             raise ContractError(
-                ("core", "intents", "intents", index, "request"),
+                ("core", "records", "records", index, "request"),
                 "missing registered operation decision",
             )
         _validate_registered_turn_origin(state, request, receipt, decision, index)
@@ -304,7 +304,7 @@ def _validate_registered_turn_origin(
         or descriptor.lifecycle != schema.lifecycle
     ):
         raise ContractError(
-            ("core", "intents", "intents", index, "request"),
+            ("core", "records", "records", index, "request"),
             "registered turn lacks exact offered descriptor authority",
         )
     if (
@@ -315,7 +315,7 @@ def _validate_registered_turn_origin(
         or request.request_id not in receipt.request_ids
     ):
         raise ContractError(
-            ("core", "intents", "intents", index, "request"), "unaccepted registered turn receipt"
+            ("core", "records", "records", index, "request"), "unaccepted registered turn receipt"
         )
     if (
         decision.scope != request.scope
@@ -323,7 +323,7 @@ def _validate_registered_turn_origin(
         or decision.registered_wire != request.operation
     ):
         raise ContractError(
-            ("core", "intents", "intents", index, "request"),
+            ("core", "records", "records", index, "request"),
             "registered turn payload/scope/deadline correspondence mismatch",
         )
     invocations = [
@@ -333,7 +333,7 @@ def _validate_registered_turn_origin(
     ]
     if len(invocations) != 1:
         raise ContractError(
-            ("core", "intents", "intents", index, "request"), "missing exact registered invocation"
+            ("core", "records", "records", index, "request"), "missing exact registered invocation"
         )
     invocation = invocations[0]
     turn = decision.registered_turn
@@ -346,7 +346,7 @@ def _validate_registered_turn_origin(
         or invocation.invocation.generation != request.scope.generation
     ):
         raise ContractError(
-            ("core", "intents", "intents", index, "request"),
+            ("core", "records", "records", index, "request"),
             "registered invocation correspondence mismatch",
         )
 
@@ -396,14 +396,14 @@ def v2_to_v3_migration(registry: OperationRegistry) -> EnvelopeMigration:
         _validate_registered_turn_correspondence(state)
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
+                "records": state.records.model_copy(
                     update={
                         "recovery": RecoveryBarrier(
-                            epoch=state.intents.recovery.epoch, phase=RecoveryPhase.REQUIRED
+                            epoch=state.records.recovery.epoch, phase=RecoveryPhase.REQUIRED
                         ),
-                        "intents": tuple(
-                            intent.model_copy(update={"payload_digest": _digest(intent.request)})
-                            for intent in state.intents.intents
+                        "records": tuple(
+                            record.model_copy(update={"payload_digest": _digest(record.request)})
+                            for record in state.records.records
                         ),
                     }
                 ),

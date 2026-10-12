@@ -9,8 +9,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, assert_never
 
 from ._adoption import fences_root_mutation
-from ._intent_ledger import due_retries
-from ._intent_recovery import overdue_reconciliations
 from ._proofs import (
     Proven,
     accepted_receipt_for,
@@ -18,6 +16,8 @@ from ._proofs import (
     committed_stop,
     draining,
 )
+from ._request_ledger import due_retries
+from ._request_recovery import overdue_reconciliations
 from .types.attempts import AttemptPhase, RetireRequested
 from .types.common import (
     AttemptRef,
@@ -31,8 +31,8 @@ from .types.common import (
     WorkspaceMode,
 )
 from .types.evaluation import ObservationsDue
-from .types.intents import RecoveryPhase
 from .types.kernel import AreaChange
+from .types.records import RecoveryPhase
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
@@ -159,7 +159,7 @@ def _accepting(context: SchedulingContext) -> bool:
     return (
         (open_run or draining(context.run))
         and context.run.now_at < context.run.deadline_at
-        and context.intents.recovery.phase == RecoveryPhase.READY
+        and context.records.recovery.phase == RecoveryPhase.READY
     )
 
 
@@ -198,7 +198,7 @@ def _fits(state: SchedulingState, context: SchedulingContext, request: Admission
         return False
     if _mode(context, _target(request), request.decision_id) != WorkspaceMode.EXCLUSIVE_ROOT:
         return True
-    if fences_root_mutation(context.settlement, context.intents):
+    if fences_root_mutation(context.settlement, context.records):
         return False
     return not any(
         _mode(context, slot.attempt, slot.admission_id) == WorkspaceMode.EXCLUSIVE_ROOT
@@ -655,8 +655,8 @@ def schedule(
                     "signals": (
                         *filled.signals,
                         ObservationsDue(now_at=context.run.now_at),
-                        *due_retries(context.intents, context.run.now_at),
-                        *overdue_reconciliations(context.intents, context.run.now_at),
+                        *due_retries(context.records, context.run.now_at),
+                        *overdue_reconciliations(context.records, context.run.now_at),
                     )
                 }
             )

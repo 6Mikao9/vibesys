@@ -9,13 +9,13 @@ from vs_core.api import (
     Access,
     EnsureSession,
     InspectRequest,
-    Intent,
-    IntentPhase,
-    IntentsState,
     LifecycleClass,
+    RecordsState,
     RecoveryBarrier,
     RecoveryStarted,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     RoleId,
     RunStatus,
     Scope,
@@ -33,7 +33,7 @@ def _digest(value: Value) -> str:
     ).hexdigest()
 
 
-def _session_intent() -> Intent:
+def _session_record() -> RequestRecord:
     state = initial_state()
     request_id = RequestId(root="target")
     request = EnsureSession(
@@ -48,17 +48,17 @@ def _session_intent() -> Intent:
             access=Access.WRITE_ARTIFACTS,
         ),
     )
-    return Intent(
+    return RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=_digest(request),
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-        phase=IntentPhase.DISPATCHED,
+        phase=RequestPhase.DISPATCHED,
         reconcile_deadline_at=100.0,
     )
 
 
-def _lost_inspection(target: Intent, phase: IntentPhase) -> Intent:
+def _lost_inspection(target: RequestRecord, phase: RequestPhase) -> RequestRecord:
     request_id = RequestId(root="inspection")
     request = InspectRequest(
         request_id=request_id,
@@ -66,7 +66,7 @@ def _lost_inspection(target: Intent, phase: IntentPhase) -> Intent:
         deadline_at=100.0,
         target=target.request_id,
     )
-    return Intent(
+    return RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=_digest(request),
@@ -76,18 +76,18 @@ def _lost_inspection(target: Intent, phase: IntentPhase) -> Intent:
     )
 
 
-@pytest.mark.parametrize("phase", [IntentPhase.DISPATCHED, IntentPhase.RECONCILING])
-def test_an_inspection_that_never_reported_is_prepared_again(phase: IntentPhase) -> None:
-    target = _session_intent()
+@pytest.mark.parametrize("phase", [RequestPhase.DISPATCHED, RequestPhase.RECONCILING])
+def test_an_inspection_that_never_reported_is_prepared_again(phase: RequestPhase) -> None:
+    target = _session_record()
     lost = _lost_inspection(target, phase)
     state = initial_state()
     state = state.model_copy(
         update={
-            "intents": IntentsState(intents=(target, lost), recovery=RecoveryBarrier()),
+            "records": RecordsState(records=(target, lost), recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
     )
     result = step(state, RecoveryStarted(epoch=1, now_at=11.0))
-    phases = {row.request_id: row.phase for row in result.state.intents.intents}
-    assert phases[lost.request_id] == IntentPhase.PREPARED
+    phases = {row.request_id: row.phase for row in result.state.records.records}
+    assert phases[lost.request_id] == RequestPhase.PREPARED
     assert phases[target.request_id] == target.phase

@@ -20,7 +20,7 @@ from .test_session_turns import reload_step, turn_observation
 def _interrupted_until_checkpoint() -> tuple[core.CoreState, core.SnapshotAndRetainRun]:
     state, event = interrupt_state()
     interrupted = reload_step(state, event)
-    request = state.intents.intents[0].request
+    request = state.records.records[0].request
     assert isinstance(request, core.DispatchTurn)
     ended = reload_step(
         interrupted.state,
@@ -95,9 +95,9 @@ def test_an_interruption_whose_checkpoint_keeps_answering_retryably_is_retried_t
         if asks > limit + 1:
             break
         phase = next(
-            row.phase for row in state.intents.intents if row.request_id == snapshot.request_id
+            row.phase for row in state.records.records if row.request_id == snapshot.request_id
         )
-        if phase == core.IntentPhase.PREPARED:
+        if phase == core.RequestPhase.PREPARED:
             state = core.step(state, core.DispatchAuthorized(request_id=snapshot.request_id)).state
             asks += 1
             answer = turn_observation(
@@ -108,7 +108,7 @@ def test_an_interruption_whose_checkpoint_keeps_answering_retryably_is_retried_t
                 status=core.ObservationStatus.FAILED,
             )
             result = reload_step(state, core.RequestObserved(observation=answer))
-        elif phase == core.IntentPhase.COMPLETED:
+        elif phase == core.RequestPhase.COMPLETED:
             break
         else:
             clock += 31.0
