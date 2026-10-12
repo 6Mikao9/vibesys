@@ -1,7 +1,7 @@
 """Static policy knobs of one dynamic run, built from the validated `DynamicOptions`.
 
-Configuration is an input of the strategy, never persisted state: restarting the
-strategy with the same options reproduces every scientific decision.
+Configuration is an input of the search, never persisted state: restarting the
+search with the same options reproduces every scientific decision.
 """
 
 from typing import TYPE_CHECKING, Annotated
@@ -10,7 +10,7 @@ from pydantic import Field
 
 from vibesys.candidates.api import CandidateConfig
 from vibesys.orchestration.dynamic.models import ProfileField, ProfileOffer
-from vs_core.api import ArtifactRef
+from vs_core.api import ArtifactRef, Backoff
 
 if TYPE_CHECKING:
     from vibesys.orchestration.dynamic.models import DynamicOptions
@@ -57,9 +57,10 @@ class DynamicConfig(CandidateConfig):
     profile_seconds: Duration = 1800.0
     operation_seconds: Duration = 300.0
 
-    def drop_backoff(self, drops: int) -> float:
-        """Seconds to wait before re-asking a turn that was already lost ``drops`` times."""
-        return min(self.turn_drop_backoff_cap_seconds, self.turn_drop_backoff_seconds * 2**drops)
+    @property
+    def backoff(self) -> Backoff:
+        """How long a lost turn waits before it is asked again, doubling per drop up to the cap."""
+        return Backoff(first=self.turn_drop_backoff_seconds, cap=self.turn_drop_backoff_cap_seconds)
 
     @property
     def profile_offer(self) -> ProfileOffer | None:

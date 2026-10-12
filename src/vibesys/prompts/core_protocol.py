@@ -13,7 +13,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from vs_core.api import EvidenceRef, RevisionRef, Value
+from vs_core.api import EvidenceRef, RepeatedFailureGuidance, ReplyError, RevisionRef, Value
 
 
 class CoreProtocolTemplate(StrEnum):
@@ -32,7 +32,7 @@ class ResumePrompt(Value):
     retained_revision: RevisionRef | None
     timed_out: bool
     cited_evidence: tuple[EvidenceRef, ...] = ()
-    repeated_failure: str | None = None
+    repeated_failure: RepeatedFailureGuidance | None = None
 
 
 class ReplyCorrectionPrompt(Value):
@@ -40,7 +40,7 @@ class ReplyCorrectionPrompt(Value):
 
     template: Literal[CoreProtocolTemplate.REPLY_CORRECTION] = CoreProtocolTemplate.REPLY_CORRECTION
     role: Literal["planner", "implementer", "judge", "profiler"]
-    error: str
+    errors: tuple[ReplyError, ...]
 
 
 class WaitUnrecordedPrompt(Value):

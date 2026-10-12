@@ -9,8 +9,8 @@ only.
 
 from typing import Literal, Protocol
 
-from vibesys.candidates._baseline import BaselineStage, BaselineState
-from vibesys.candidates._config import CandidateConfig
+from vibesys.candidates.baseline import Baseline, Measured
+from vibesys.candidates.config import CandidateConfig
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.metrics import AcceptedReading, Measurement, MetricComparison, MetricRow, reading_of
 from vs_core.api import (
@@ -22,12 +22,11 @@ from vs_core.api import (
     Settle,
 )
 
-STOPPED = "stopped by the operator"
 _UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 
 
 class FinishedAttempt(Protocol):
-    """What settlement reads of an attempt, which a strategy's own record provides."""
+    """What settlement reads of an attempt, which a search's own record provides."""
 
     @property
     def readings(self) -> tuple[AcceptedReading, ...]:
@@ -55,8 +54,13 @@ class FinishedAttempt(Protocol):
         ...
 
     @property
-    def failure(self) -> str | None:
-        """The recorded failure, or None."""
+    def stopped(self) -> bool:
+        """Whether the operator stopped the attempt (which counts as ``failed`` as well)."""
+        ...
+
+    @property
+    def failed(self) -> bool:
+        """Whether the attempt recorded a failure, an operator stop included."""
         ...
 
 
@@ -66,18 +70,18 @@ def measurement(row: MetricRow | None) -> Measurement | None:
 
 
 def beats_baseline(
-    baseline: BaselineState, config: CandidateConfig, reading: AcceptedReading | None
+    baseline: Baseline, config: CandidateConfig, reading: AcceptedReading | None
 ) -> bool:
     """Whether the candidate's headline improves on the baseline beyond noise.
 
     An input that was not measured leaves nothing to beat, so candidates compete
     on their own readings.
     """
-    if baseline.stage is not BaselineStage.MEASURED or not baseline.metrics:
+    if not isinstance(baseline, Measured) or not baseline.reading.metrics:
         return True
     comparison = config.metric_space.compare(
         measurement(None if reading is None else reading.headline()),
-        measurement(baseline.metrics[0]),
+        measurement(baseline.reading.metrics[0]),
     )
     return comparison is MetricComparison.BETTER
 
@@ -120,14 +124,14 @@ def _review(record: FinishedAttempt) -> tuple[AssessmentProposal, ...]:
 
 def outcome_of(record: FinishedAttempt) -> Literal["succeeded", "failed", "cancelled", "blocked"]:
     """The settlement outcome the record's scientific result maps to."""
-    if record.failure == STOPPED:
+    if record.stopped:
         return "cancelled"
     if record.outcome is HypothesisOutcome.BLOCKED:
         return "blocked"
-    return "succeeded" if record.failure is None else "failed"
+    return "failed" if record.failed else "succeeded"
 
 
-def settle_for(record: FinishedAttempt, baseline: BaselineState, config: CandidateConfig) -> Settle:
+def settle_for(record: FinishedAttempt, baseline: Baseline, config: CandidateConfig) -> Settle:
     """The assessments, eligibility and retention to propose for a finished attempt."""
     accuracy = reading_of(record.readings, EvidenceKind.CORRECTNESS)
     benchmark = reading_of(record.readings, EvidenceKind.BENCHMARK)
@@ -138,7 +142,7 @@ def settle_for(record: FinishedAttempt, baseline: BaselineState, config: Candida
         and _gate(benchmark, configured=config.benchmark_configured)
         and record.review_passed is not False
         and record.outcome not in _UNSETTLED
-        and record.failure is None
+        and not record.failed
         and beats_baseline(baseline, config, benchmark)
     )
     return Settle(

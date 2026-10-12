@@ -1,4 +1,4 @@
-"""The knobs candidate policy reads, which a strategy's own config extends."""
+"""The knobs candidate policy reads, which a search's own config extends."""
 
 from typing import Annotated
 

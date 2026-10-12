@@ -1,12 +1,13 @@
-"""Pure validation of a planner portfolio against the strategy's scientific state.
+"""Pure validation of a planner portfolio against what the search has recorded.
 
-Every rejection is a typed `PlanViolation` naming the offending plan field, so the
-planner correction can quote it. Messages keep the wording of the legacy loop's
-`DynamicPlanError` so one correction template serves both. Validation never
-raises: it splits a portfolio into the entries that may be scheduled and the
-violations that explain the rest.
+Every rejection is a typed `PlanViolation` naming the offending plan field, so the planner
+correction can quote it from a template. Validation never raises: it splits a portfolio into the
+entries that may be scheduled and the violations that explain the rest.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Literal
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
@@ -17,12 +18,13 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPlan,
     planned_id,
 )
-from vibesys.orchestration.dynamic.strategy._parents import ParentOption
-from vibesys.orchestration.dynamic.strategy._state import (
-    DynamicStrategyState,
+from vibesys.orchestration.dynamic.search._parents import ParentOption
+from vibesys.orchestration.dynamic.search._values import (
+    Alternative,
     HypothesisRecord,
+    PlanViolation,
+    ViolationCode,
     WorkKind,
-    WorkPhase,
     WorkPlan,
 )
 from vs_core.api import Value
@@ -31,23 +33,11 @@ _TERMINAL_OUTCOMES = frozenset(
     {HypothesisOutcome.SUPPORTED, HypothesisOutcome.NOMINATED, HypothesisOutcome.DISPROVEN}
 )
 
-
-class PlanViolation(Value):
-    """One reason a planned entry or update cannot be applied."""
-
-    path: str
-    detail: str
-
-    def render(self) -> str:
-        """The correction line shown to the planner."""
-        return f"{self.path}: {self.detail}"
-
-
 _RETIREMENTS: dict[str, Literal[HypothesisStrategy.PARKED, HypothesisStrategy.ABANDONED]] = {
     "parked": HypothesisStrategy.PARKED,
     "abandoned": HypothesisStrategy.ABANDONED,
 }
-"""The planner's wording of a retirement, as the strategy value the record stores."""
+"""The planner's wording of a retirement, as the strategic value the record stores."""
 
 
 class PlanUpdate(Value):
@@ -72,31 +62,31 @@ class PlanCheck(Value):
         return not self.violations
 
 
-def in_flight(state: DynamicStrategyState) -> frozenset[str]:
-    """Work IDs of workstreams that have not finished."""
-    return frozenset(
-        item.plan.work_id for item in state.attempts if item.phase is not WorkPhase.DONE
-    )
+@dataclass(frozen=True)
+class PlanLedger:
+    """What validation reads of the search: hypotheses, what is running and which IDs are profiles."""
+
+    hypotheses: tuple[HypothesisRecord, ...]
+    running: frozenset[str]
+    profile_ids: frozenset[str]
+
+    def hypothesis(self, identifier: str) -> HypothesisRecord | None:
+        """The record of a hypothesis ID, if one exists."""
+        return next((item for item in self.hypotheses if item.hypothesis_id == identifier), None)
 
 
-def _hypothesis(state: DynamicStrategyState, identifier: str) -> HypothesisRecord | None:
-    return next((item for item in state.hypotheses if item.hypothesis_id == identifier), None)
-
-
-def _profile_ids(state: DynamicStrategyState) -> frozenset[str]:
-    return frozenset(
-        item.plan.work_id for item in state.attempts if item.plan.kind is WorkKind.PROFILE
-    )
-
-
-def _alternatives(offered: tuple[ParentOption, ...]) -> tuple[tuple[str, str], ...]:
+def _alternatives(offered: tuple[ParentOption, ...]) -> tuple[Alternative, ...]:
     return tuple(
-        (item.snapshot.hypothesis_id, item.snapshot.revision.revision_id.root) for item in offered
+        Alternative(
+            hypothesis_id=item.snapshot.hypothesis_id,
+            revision=item.snapshot.revision.revision_id.root,
+        )
+        for item in offered
     )
 
 
 def _exact_revision(
-    path: str,
+    path: tuple[str | int, ...],
     plan: WorkstreamPlan,
     mine: tuple[ParentOption, ...],
     offered: tuple[ParentOption, ...],
@@ -104,75 +94,63 @@ def _exact_revision(
     if any(item.snapshot.revision.revision_id.root == plan.parent_revision for item in mine):
         return None
     return PlanViolation(
-        path=f"{path}.parent_revision",
-        detail=(
-            f"{plan.parent_revision!r} is not an offered revision of "
-            f"{plan.parent_hypothesis_id!r}; usable options: {_alternatives(offered)}"
-        ),
+        path=(*path, "parent_revision"),
+        code=ViolationCode.REVISION_NOT_OFFERED,
+        subject=str(plan.parent_hypothesis_id),
+        revision=str(plan.parent_revision),
+        usable=_alternatives(offered),
     )
 
 
 def _implement_parent(
     position: int, plan: WorkstreamPlan, offered: tuple[ParentOption, ...]
 ) -> PlanViolation | None:
-    path = f"workstreams[{position}]"
+    path: tuple[str | int, ...] = ("workstreams", position)
     chosen = plan.parent_hypothesis_id
-    field = f"{path}.parent_hypothesis_id"
     if chosen is None and plan.parent_revision is not None:
         return PlanViolation(
-            path=f"{path}.parent_revision",
-            detail=(
-                "an exact candidate revision requires parent_hypothesis_id; usable options: "
-                f"{_alternatives(offered)}"
-            ),
+            path=(*path, "parent_revision"),
+            code=ViolationCode.REVISION_WITHOUT_PARENT,
+            usable=_alternatives(offered),
         )
     if chosen is None:
         return None
+    field = (*path, "parent_hypothesis_id")
     if plan.continue_hypothesis:
-        return PlanViolation(
-            path=field, detail="a continued hypothesis builds on its own candidate; use null"
-        )
+        return PlanViolation(path=field, code=ViolationCode.CONTINUATION_HAS_PARENT)
     mine = tuple(item for item in offered if item.snapshot.hypothesis_id == chosen)
     if plan.parent_revision is not None:
         return _exact_revision(path, plan, mine, offered)
     if any(item.latest_verified for item in mine):
         return None
-    return PlanViolation(
-        path=field,
-        detail=(
-            f"{chosen!r} is not a buildable candidate; name one listed under buildable "
-            "candidates, or use null for the base revision"
-        ),
-    )
+    return PlanViolation(path=field, code=ViolationCode.PARENT_NOT_BUILDABLE, subject=chosen)
 
 
 def _implement_identity(
     position: int,
     plan: WorkstreamPlan,
-    state: DynamicStrategyState,
+    ledger: PlanLedger,
     *,
     abandoned: frozenset[str],
-    running: frozenset[str],
 ) -> PlanViolation | None:
     identifier = plan.hypothesis_id
-    path = f"workstreams[{position}].hypothesis_id"
-    prior = _hypothesis(state, identifier)
-    if identifier in _profile_ids(state):
-        return PlanViolation(path=path, detail=f"hypothesis ID {identifier!r} was already used")
-    if identifier in abandoned or (
+    path: tuple[str | int, ...] = ("workstreams", position, "hypothesis_id")
+    prior = ledger.hypothesis(identifier)
+    code: ViolationCode | None = None
+    if identifier in ledger.profile_ids:
+        code = ViolationCode.HYPOTHESIS_ID_USED
+    elif identifier in abandoned or (
         prior is not None and prior.strategy is HypothesisStrategy.ABANDONED
     ):
-        return PlanViolation(
-            path=path, detail=f"{identifier!r} is abandoned and cannot be continued"
-        )
-    if identifier in running:
-        return PlanViolation(path=path, detail=f"hypothesis {identifier!r} is still in flight")
-    if prior is None and plan.continue_hypothesis:
-        return PlanViolation(
-            path=path, detail=f"unknown hypothesis {identifier!r} cannot be continued"
-        )
-    if prior is not None and not plan.continue_hypothesis:
-        return PlanViolation(path=path, detail=f"hypothesis ID {identifier!r} was already used")
+        code = ViolationCode.HYPOTHESIS_ABANDONED
+    elif identifier in ledger.running:
+        code = ViolationCode.HYPOTHESIS_IN_FLIGHT
+    elif prior is None and plan.continue_hypothesis:
+        code = ViolationCode.HYPOTHESIS_UNKNOWN
+    elif prior is not None and not plan.continue_hypothesis:
+        code = ViolationCode.HYPOTHESIS_ID_USED
+    if code is not None:
+        return PlanViolation(path=path, code=code, subject=identifier)
     return None if prior is None else _continuation(position, plan, prior)
 
 
@@ -184,16 +162,15 @@ def _continuation(
         return None
     if last.outcome in _TERMINAL_OUTCOMES:
         return PlanViolation(
-            path=f"workstreams[{position}].hypothesis_id",
-            detail=f"evaluated hypothesis {plan.hypothesis_id!r} is already terminal",
+            path=("workstreams", position, "hypothesis_id"),
+            code=ViolationCode.HYPOTHESIS_TERMINAL,
+            subject=plan.hypothesis_id,
         )
     if last.outcome is HypothesisOutcome.BLOCKED and plan.task.strip() == prior.last_task.strip():
         return PlanViolation(
-            path=f"workstreams[{position}].task",
-            detail=(
-                f"hypothesis {plan.hypothesis_id!r} was blocked; continue it only with a task "
-                "that removes the recorded blocker, or park or abandon it"
-            ),
+            path=("workstreams", position, "task"),
+            code=ViolationCode.HYPOTHESIS_BLOCKED,
+            subject=plan.hypothesis_id,
         )
     return None
 
@@ -201,69 +178,55 @@ def _continuation(
 def _profile_violation(
     position: int,
     plan: ProfilePlan,
-    state: DynamicStrategyState,
+    ledger: PlanLedger,
     offered: tuple[ParentOption, ...],
     offer: ProfileOffer | None,
 ) -> PlanViolation | None:
-    path = f"workstreams[{position}]"
+    path: tuple[str | int, ...] = ("workstreams", position)
     if offer is None:
-        return PlanViolation(
-            path=f"{path}.kind",
-            detail=(
-                "this run cannot produce trusted profile evidence; schedule only implement "
-                "workstreams"
-            ),
-        )
+        return PlanViolation(path=(*path, "kind"), code=ViolationCode.PROFILE_NOT_OFFERED)
     unsupported = sorted(set(plan.required_fields) - set(offer.fields))
     if unsupported:
-        supplied = ", ".join(offer.fields) or "none"
         return PlanViolation(
-            path=f"{path}.required_fields",
-            detail=(
-                f"this run's capture cannot supply {', '.join(unsupported)}; "
-                f"require only fields it supplies (supplied: {supplied})"
-            ),
+            path=(*path, "required_fields"),
+            code=ViolationCode.PROFILE_FIELDS_UNSUPPORTED,
+            fields=tuple(str(item) for item in unsupported),
+            supplied=tuple(str(item) for item in offer.fields),
         )
-    used = {item.hypothesis_id for item in state.hypotheses} | _profile_ids(state)
+    used = {item.hypothesis_id for item in ledger.hypotheses} | ledger.profile_ids
     if plan.profile_id in used:
         return PlanViolation(
-            path=f"{path}.profile_id",
-            detail=f"{plan.profile_id!r} was already used; choose a new ID",
+            path=(*path, "profile_id"), code=ViolationCode.PROFILE_ID_USED, subject=plan.profile_id
         )
     target = plan.target_hypothesis_id
     if target is not None and not any(
         item.snapshot.hypothesis_id == target and item.latest_verified for item in offered
     ):
         return PlanViolation(
-            path=f"{path}.target_hypothesis_id",
-            detail=(
-                f"{target!r} is not a buildable candidate; name one listed under buildable "
-                "candidates, or use null for the base revision"
-            ),
+            path=(*path, "target_hypothesis_id"),
+            code=ViolationCode.PARENT_NOT_BUILDABLE,
+            subject=target,
         )
     return None
 
 
 def _updates(
-    plan: PortfolioPlan, state: DynamicStrategyState, running: frozenset[str]
+    plan: PortfolioPlan, ledger: PlanLedger
 ) -> tuple[tuple[PlanUpdate, ...], tuple[PlanViolation, ...]]:
     kept: list[PlanUpdate] = []
     bad: list[PlanViolation] = []
     seen: set[str] = set()
     for position, update in enumerate(plan.hypothesis_updates):
-        path = f"hypothesis_updates[{position}].hypothesis_id"
-        record = _hypothesis(state, update.hypothesis_id)
-        if update.hypothesis_id in running:
-            detail = (
-                f"{update.hypothesis_id!r} is still running; park or abandon it only after "
-                "its workstream finishes"
-            )
+        path = ("hypothesis_updates", position, "hypothesis_id")
+        record = ledger.hypothesis(update.hypothesis_id)
+        if update.hypothesis_id in ledger.running:
+            code = ViolationCode.UPDATE_RUNNING
         elif update.hypothesis_id in seen:
-            detail = f"duplicate strategy update for hypothesis {update.hypothesis_id!r}"
+            code = ViolationCode.UPDATE_DUPLICATE
         elif record is None:
-            detail = f"strategy update names unknown hypothesis {update.hypothesis_id!r}"
+            code = ViolationCode.UPDATE_UNKNOWN
         elif not record.rounds:
-            detail = f"cannot update incomplete hypothesis {update.hypothesis_id!r}"
+            code = ViolationCode.UPDATE_INCOMPLETE
         else:
             seen.add(update.hypothesis_id)
             kept.append(
@@ -275,7 +238,7 @@ def _updates(
                 )
             )
             continue
-        bad.append(PlanViolation(path=path, detail=detail))
+        bad.append(PlanViolation(path=path, code=code, subject=update.hypothesis_id))
     return tuple(kept), tuple(bad)
 
 
@@ -305,25 +268,23 @@ def _work_plan(entry: WorkstreamPlan | ProfilePlan) -> WorkPlan:
 
 def validate(
     plan: PortfolioPlan,
-    state: DynamicStrategyState,
+    ledger: PlanLedger,
     offered: tuple[ParentOption, ...],
     *,
     capacity: int,
     offer: ProfileOffer | None,
 ) -> PlanCheck:
     """Split ``plan`` into schedulable entries and typed violations, never raising."""
-    running = in_flight(state)
-    updates, bad = _updates(plan, state, running)
+    updates, bad = _updates(plan, ledger)
     abandoned = frozenset(item.hypothesis_id for item in updates if item.disposition == "abandoned")
     violations = list(bad)
     if len(plan.workstreams) > capacity:
         violations.append(
             PlanViolation(
-                path="workstreams",
-                detail=(
-                    f"portfolio requested {len(plan.workstreams)} workstreams, "
-                    f"but capacity is {capacity}"
-                ),
+                path=("workstreams",),
+                code=ViolationCode.OVER_CAPACITY,
+                requested=len(plan.workstreams),
+                capacity=capacity,
             )
         )
     accepted: list[WorkPlan] = []
@@ -333,17 +294,15 @@ def validate(
         violation: PlanViolation | None
         if identifier in seen:
             violation = PlanViolation(
-                path=f"workstreams[{position}]",
-                detail=(
-                    f"{identifier!r} repeats an earlier entry's ID; merge the entries or give "
-                    "each its own ID"
-                ),
+                path=("workstreams", position),
+                code=ViolationCode.DUPLICATE_ID,
+                subject=identifier,
             )
         elif isinstance(entry, ProfilePlan):
-            violation = _profile_violation(position, entry, state, offered, offer)
+            violation = _profile_violation(position, entry, ledger, offered, offer)
         else:
             violation = _implement_identity(
-                position, entry, state, abandoned=abandoned, running=running
+                position, entry, ledger, abandoned=abandoned
             ) or _implement_parent(position, entry, offered)
         seen.add(identifier)
         if violation is not None:

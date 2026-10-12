@@ -39,9 +39,6 @@ class DynamicOptions(AgentOrchestrationOptions):
     """
 
     max_in_flight: Annotated[int, Field(gt=0, le=32)] = 2
-    # An attempt ends once this many of its evaluations in a row fail with
-    # one failure signature (exception type and innermost source line).
-    max_repeated_failures: Annotated[int, Field(ge=2, le=32)] = 3
     # Turns of one workstream that may end without a candidate reaching measurement before
     # it settles as failed and its slot returns to the planner.
     max_unmeasured_turns: Annotated[int, Field(gt=0, le=32)] = 2

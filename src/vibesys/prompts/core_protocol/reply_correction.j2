@@ -1,4 +1,13 @@
+{% set meaning = {
+  'missing': 'a required field is missing',
+  'unexpected': 'this field is not allowed',
+  'wrong-type': 'the value has the wrong type',
+  'invalid-value': 'the value is not acceptable',
+  'not-json': 'the reply is not valid JSON',
+} -%}
 Your previous {{ role }} reply violated its output schema:
-{{ error }}
+{% for item in errors %}
+- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ meaning[item.code.value] }}
+{% endfor %}
 
 Reply again with only schema-valid JSON.

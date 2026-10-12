@@ -22,7 +22,7 @@ workspace edits. These are the trusted results; report them as measured:
 {% endif %}
 {% if repeated_failure %}
 
-Repeated failure: {{ repeated_failure }}
+Repeated failure: your last {{ repeated_failure.consecutive_failures }} evaluations in a row failed{% if repeated_failure.traceback_signature %} with the same traceback (`{{ repeated_failure.traceback_signature }}`){% elif repeated_failure.failed_benchmark %} the benchmark, ending at {{ repeated_failure.failed_benchmark.partial_rate }} (comparison interval {{ repeated_failure.failed_benchmark.rate_lower }} to {{ repeated_failure.failed_benchmark.rate_upper }}){% endif %}; the limit is {{ repeated_failure.limit }}.
 {% endif %}
 
 A failed or cancelled evaluation is an ordinary terminal outcome. Do not duplicate a
