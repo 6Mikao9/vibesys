@@ -729,7 +729,9 @@ def update(ws: Workstream, event: Event, env: Env) -> tuple[Workstream, list[Dec
             raise UnexpectedEvent(ws.phase, event)
 
 
-def _verified(ws: Workstream, env: Env, outcome: BaseModel | None) -> tuple[Workstream, list[Decision]]:
+def _verified(
+    ws: Workstream, env: Env, outcome: BaseModel | None
+) -> tuple[Workstream, list[Decision]]:
     if (
         isinstance(outcome, ParentVerification)
         and outcome.status == "succeeded"
@@ -805,7 +807,9 @@ def _begin_review(
     return _moved(ws, phase), [_decode(env, name, refs, ws)]
 
 
-def _readings(outcome: BaseModel | None, refs: tuple[EvidenceRef, ...]) -> tuple[AcceptedReading, ...]:
+def _readings(
+    outcome: BaseModel | None, refs: tuple[EvidenceRef, ...]
+) -> tuple[AcceptedReading, ...]:
     """What the owner decoded of ``refs``; a refusal leaves the evidence listed without numbers."""
     if not isinstance(outcome, EvidenceReadings) or outcome.status != "succeeded":
         return ()
