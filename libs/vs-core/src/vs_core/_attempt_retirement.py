@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._acquisition_stall import is_stalled_acquisition
-from ._deadlines import limit_to
+from ._deadlines import cleanup
 from .types.attempts import (
     AttemptCheckpoint,
     AttemptClosure,
@@ -52,7 +52,7 @@ from .types.evaluation import (
     RegisteredOwnedJob,
 )
 from .types.kernel import AreaChange, DecisionCompleted
-from .types.records import InspectRequest, Outbound, inherit, within
+from .types.records import InspectRequest, Outbound, inherit
 from .types.scheduling import (
     AttemptReopenRequest,
     AttemptReopenRequested,
@@ -1812,10 +1812,10 @@ def _closure_event(
 
 
 def _outbound(context: AttemptsContext, request: Request) -> Outbound:
-    """A reopened operation ends with its decision; every other retirement request, with the run."""
+    """A reopened operation ends with its decision; every other retirement request is cleanup."""
     if isinstance(request, ExecuteRegisteredOperation):
         return inherit(request)
-    return within(request, limit_to(context.run, context.run.deadline_at))
+    return cleanup(context.run, request)
 
 
 def advance(

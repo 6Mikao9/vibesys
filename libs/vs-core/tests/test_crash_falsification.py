@@ -131,7 +131,6 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
-        deadline_at=10.0,
     )
     # The paid measurement was authorized by a real accepted Measure decision.
     measured = step(

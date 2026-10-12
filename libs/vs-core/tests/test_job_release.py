@@ -122,6 +122,10 @@ class Cluster:
             if record.request in self.pending()
         ]
         self.now = max(self.state.run.now_at, min([target, *(at - 1.0 for at in limits)]))
+        if limits and self.now >= min(limits) - 1.0:
+            # Core's own cleanup limits are short; answers carry times that may already have
+            # brought the clock to the edge of one. Waiting on the far side then changes nothing.
+            return
         self.feed(core.ClockAdvanced(now_at=self.now))
 
 

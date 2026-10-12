@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ._deadlines import limit_to, resolve_until
+from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -386,6 +386,8 @@ class _Origin:
 
     scope: Scope
     decision_id: DecisionId | None
+    within: Within | None = None
+    """The agent's limit; None for a Measure decision, whose limit is its wait's."""
 
 
 def _admit(
@@ -451,7 +453,9 @@ def _agent_requested(
         request_id, deadline_at = repeated
         call = AgentCall.answered(event, request_id, deadline_at, repeat=True)
         return _recorded(AreaChange(state=state), call)
-    change = _admit(state, context, _Origin(event.scope, None), event.plan, identity.value)
+    change = _admit(
+        state, context, _Origin(event.scope, None, _capped(event)), event.plan, identity.value
+    )
     outbound = next((r for r in change.requests if isinstance(r.request, SubmitMeasurement)), None)
     if outbound is None or outbound.request.request_id is None:
         refused = AgentCall.refused(event, AgentRejection.NOT_ALLOWED)
@@ -460,6 +464,12 @@ def _agent_requested(
         event, outbound.request.request_id, _deadline_at(context, outbound), repeat=False
     )
     return _recorded(change, call)
+
+
+def _capped(event: AgentMeasurementRequested) -> Within:
+    """The agent's limit, no longer than the plan's declared stages and queue allowance."""
+    within = event.within
+    return within.model_copy(update={"limit": min(within.limit, event.plan.time_bound)})
 
 
 def _deadline_at(context: EvaluationContext, outbound: Outbound) -> Seconds:
@@ -546,7 +556,10 @@ def _allocate(
         if plan.submission_limit > context.run.limits.max_measurement_submissions:
             return _rejected(state, scope)
         budget = SubmissionBudget(scope=scope, identity=identity.value, limit=plan.submission_limit)
-    if not min(plan.deadline_at, context.run.deadline_at) > context.run.now_at:
+    # New work is refused once the run's time is over, and a submission needs a positive limit.
+    if not context.run.deadline_at > context.run.now_at or (
+        origin.within is not None and origin.within.limit <= 0
+    ):
         return _rejected(state, scope)
     ordinal = len(budget.receipts) + 1
     key = digest(budget.identity)[:24]
@@ -574,11 +587,11 @@ def _allocate(
         else (*state.submission_budgets, updated)
     )
     # A measurement decision waits as long as its wait says; an agent's own submission, as
-    # long as the plan it wrote says.
+    # long as the limit parsed from its call says. Neither is a field of the plan.
     outbound = (
         inherit(request)
-        if decision_id is not None
-        else within(request, limit_to(context.run, plan.deadline_at))
+        if decision_id is not None or origin.within is None
+        else Outbound(request=request, until=origin.within)
     )
     return AreaChange(
         state=state.model_copy(update={"submission_budgets": budgets}), requests=(outbound,)

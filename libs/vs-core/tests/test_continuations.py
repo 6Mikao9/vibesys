@@ -261,7 +261,6 @@ def fixture(
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
-        deadline_at=20.0,
     )
     jobs = tuple(
         core.OwnedJob(

@@ -126,7 +126,7 @@ def _label(request: Request) -> str:
 
 def _key(request: Request) -> str:
     """The request's kind and target: everything it asks for except who asked and when."""
-    data = request.model_dump(mode="json", exclude=_IDENTITY | {"deadline_at"})
+    data = request.model_dump(mode="json", exclude=_IDENTITY)
     return _dump(data)
 
 

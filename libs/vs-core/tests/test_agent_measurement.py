@@ -17,7 +17,10 @@ def call(
 ) -> core.Transition:
     scope = core.Scope(owner=state.run.run_id, generation=state.run.generation + generation_offset)
     event = core.AgentMeasurementRequested(
-        scope=scope, plan=plan(evaluator_digest=f"evaluator-{variant}"), call_id=call_id
+        scope=scope,
+        plan=plan(evaluator_digest=f"evaluator-{variant}"),
+        within=core.Within(limit=100.0),
+        call_id=call_id,
     )
     return transition(state, event)
 
@@ -148,7 +151,8 @@ def test_each_refusal_names_its_reason_and_charges_nothing() -> None:
     state = core.initial_state()
     event = core.AgentMeasurementRequested(
         scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
-        plan=plan(deadline_at=0.0),
+        plan=plan(),
+        within=core.Within(limit=0.0),
         call_id="c1",
     )
     refused = transition(state, event)

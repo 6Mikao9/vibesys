@@ -26,6 +26,7 @@ from vs_core.api import (
     DispatchTurn,
     RevisionRef,
     TurnObserved,
+    Within,
 )
 from vs_evaluation.api import SubmitCall, WaitCall
 from vs_runtime.api.core import (
@@ -141,6 +142,7 @@ class WaitingTurns:
                 AgentMeasurementRequested(
                     scope=request.scope,
                     plan=self._policy.plan(measure.candidate, now_at=measure.now_at),
+                    within=Within(limit=self._policy.measurement.budget()),
                     call_id=f"agent-call-{measure.call}",
                 ),
                 now_at=measure.now_at,

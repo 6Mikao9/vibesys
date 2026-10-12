@@ -245,7 +245,6 @@ def test_r23_late_profile_reuses_only_exact_capture_identity(
     }
     updates = {
         "submitted_at": 3.0,
-        "deadline_at": 103.0,
         "reusable_evidence": (capture.evidence_id,) if hints else (),
     }
     if field is not None:
@@ -306,7 +305,7 @@ def test_capture_without_final_trusted_source_never_grants_reuse(
     result = requested(
         state,
         identity="reuse",
-        measurement=source.plan.model_copy(update={"submitted_at": 3.0, "deadline_at": 103.0}),
+        measurement=source.plan.model_copy(update={"submitted_at": 3.0}),
     )
     reused = (
         receipt
@@ -818,7 +817,7 @@ def test_retry_waits_for_root_and_every_discovered_child_release(
     result = requested(
         state,
         identity="after-release",
-        measurement=request.plan.model_copy(update={"submitted_at": 3.0, "deadline_at": 103.0}),
+        measurement=request.plan.model_copy(update={"submitted_at": 3.0}),
     )
     assert bool(result.requests) == (
         root_released

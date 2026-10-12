@@ -98,6 +98,7 @@ from vs_core.api import (
     StageBudget,
     SuspensionRefusal,
     Transition,
+    Within,
     suspension_refusal,
 )
 from vs_evaluation.api import (
@@ -550,6 +551,7 @@ class AgentEvaluationBridge:
                 event = AgentMeasurementRequested(
                     scope=scope,
                     plan=self._policy.plan(revision_ref(revision), now_at=now),
+                    within=Within(limit=self._policy.measurement.budget()),
                     call_id=owed.call_id,
                 )
                 transition = self._admit(shell, event, now)

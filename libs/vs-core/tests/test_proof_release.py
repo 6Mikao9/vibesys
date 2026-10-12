@@ -95,7 +95,6 @@ def release_facts(
                 ),
                 submitted_at=0.0,
                 queue_allowance=0.0,
-                deadline_at=1.0,
             ),
         )
     elif kind == "session":

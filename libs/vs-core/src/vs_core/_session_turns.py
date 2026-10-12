@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from . import _session_checkpoints
 from ._acquisition_stall import stalled_acquisition
 from ._continuations import bounded_wait, wait_refused_at_turn_end
-from ._deadlines import limit_to
+from ._deadlines import cleanup, limit_to
 from ._evaluation_history import produce_history
 from ._proofs import (
     Proven,
@@ -161,9 +161,14 @@ def _session_id(session: SessionView, action: str) -> RequestId:
     return RequestId(root=encode_identity("session", *parts))
 
 
-def _by_run_end(context: SessionsContext, request: Request) -> Outbound:
-    """Session setup and cleanup run until the run ends (bounded cleanup after it)."""
+def _setup(context: SessionsContext, request: Request) -> Outbound:
+    """Session setup may take the time the run has left."""
     return within(request, limit_to(context.run, context.run.deadline_at))
+
+
+def _cleanup(context: SessionsContext, request: Request) -> Outbound:
+    """Session close and inspection get core's bounded cleanup time, even after the run ends."""
+    return cleanup(context.run, request)
 
 
 def _reconciling(context: SessionsContext, request: Request) -> Outbound:
@@ -850,7 +855,7 @@ def _acquire(
         )
         session = session.model_copy(update={"pending_records": (request.request_id,)})
         state = _replace_session(state, session)
-        requests.append(_by_run_end(context, request))
+        requests.append(_setup(context, request))
     state = state.model_copy(update={"acquisition_groups": (*state.acquisition_groups, group)})
     signals = (
         ()
@@ -960,7 +965,7 @@ def _group_observed(
             }
         )
         return AreaChange(
-            state=_replace_session(state, session), requests=(_by_run_end(context, close),)
+            state=_replace_session(state, session), requests=(_cleanup(context, close),)
         )
     if (
         observation.terminal
@@ -995,7 +1000,7 @@ def _group_observed(
                     }
                 )
                 state = _replace_session(state, member)
-                requests.append(_by_run_end(context, request))
+                requests.append(_cleanup(context, request))
         return AreaChange(
             state=state,
             requests=tuple(requests),
@@ -1051,7 +1056,7 @@ def _close_observed(
         return AreaChange(
             state=state,
             requests=(
-                _by_run_end(context, _inspect_session(session, context, observation.request_id)),
+                _cleanup(context, _inspect_session(session, context, observation.request_id)),
             ),
         )
     session = session.model_copy(
@@ -1202,7 +1207,7 @@ def _after_ensure(
         signals = () if invocation is None else _prepared_completion(context, invocation)
         return AreaChange(
             state=_replace_session(grouped.state, closing),
-            requests=(_by_run_end(context, request),),
+            requests=(_cleanup(context, request),),
             signals=signals,
         )
     if session.invocation is not None:
@@ -1248,7 +1253,7 @@ def _ensure_observed(
         return AreaChange(
             state=_replace_session(state, session),
             requests=(
-                _by_run_end(context, _inspect_session(session, context, observation.request_id)),
+                _cleanup(context, _inspect_session(session, context, observation.request_id)),
             ),
         )
     if observation.accepted:
@@ -1444,7 +1449,7 @@ def _after_turn_cleanup(
         }
     )
     return AreaChange(
-        state=_replace_session(state, closing), requests=(_by_run_end(context, request),)
+        state=_replace_session(state, closing), requests=(_cleanup(context, request),)
     )
 
 
@@ -1774,7 +1779,7 @@ def _drain_acquiring(
         return AreaChange(
             state=state,
             requests=tuple(
-                _by_run_end(context, _inspect_session(session, context, row.request_id))
+                _cleanup(context, _inspect_session(session, context, row.request_id))
                 for row in ensures
             ),
         )
@@ -1814,7 +1819,7 @@ def _drain_lease(
         return AreaChange(
             state=state,
             requests=tuple(
-                _by_run_end(context, _inspect_session(session, context, row.request_id))
+                _cleanup(context, _inspect_session(session, context, row.request_id))
                 for row in ensures
             ),
         )
@@ -1828,7 +1833,7 @@ def _drain_lease(
         }
     )
     return AreaChange(
-        state=_replace_session(state, closing), requests=(_by_run_end(context, request),)
+        state=_replace_session(state, closing), requests=(_cleanup(context, request),)
     )
 
 

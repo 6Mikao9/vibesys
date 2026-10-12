@@ -99,7 +99,6 @@ def test_separately_proposed_measurement_keeps_current_admission_episode() -> No
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
-        deadline_at=10.0,
     )
     decision = core.Measure(decision_id=core.DecisionId(root="measure"), scope=scope, plan=plan)
     signal = core.MeasurementRequested(scope=scope, plan=plan)

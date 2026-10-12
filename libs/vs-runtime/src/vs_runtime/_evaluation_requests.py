@@ -419,7 +419,9 @@ class MeasurementRequests:
         request_id = _identity(request)
         handle = handle_for(request_id)
         try:
-            eval_request = measurement_request(request.plan, request.scope, handle)
+            eval_request = measurement_request(
+                request.plan, request.scope, handle, deadline_at=context.until.at
+            )
         except RejectedPlanError as error:
             return self._rejected(request, context, str(error), failure=MeasurementFailure.WORKLOAD)
         closed = self._register(request.scope, request.admission_id, handle)

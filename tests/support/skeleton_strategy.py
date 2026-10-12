@@ -98,7 +98,6 @@ def measurement(
         submitted_at=now_at,
         queue_allowance=880.0,
         # Absolute run-clock time, past any restart the scenarios make (the run ends at 1000 s).
-        deadline_at=now_at + 900.0,
         accuracy_stage="accuracy",
     )
 

@@ -90,7 +90,6 @@ def released_job(identity: int) -> tuple[core.CoreState, core.OwnedJob, core.Req
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
-        deadline_at=1.0,
     )
     request = core.SubmitMeasurement(
         request_id=core.RequestId(root=f"submission:{identity}"),

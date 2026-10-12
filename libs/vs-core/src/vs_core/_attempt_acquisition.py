@@ -348,8 +348,8 @@ def _replace(state: AttemptsState, attempt: AttemptView) -> AttemptsState:
     )
 
 
-def _by_run_end(context: AttemptsContext, request: Request) -> Outbound:
-    """Workspace setup and cleanup run until the run ends (bounded cleanup after it)."""
+def _within_run(context: AttemptsContext, request: Request) -> Outbound:
+    """Workspace setup and restore may take the time the run has left."""
     return within(request, limit_to(context.run, context.run.deadline_at))
 
 
@@ -563,7 +563,7 @@ def _admit(
     return AreaChange(
         state=_replace(registered, attempt),
         requests=(
-            _by_run_end(
+            _within_run(
                 context,
                 EnsureWorkspace(
                     request_id=identity,
@@ -1316,7 +1316,7 @@ def _checkpoint_request(
         invocation=event.invocation,
     )
     updated = attempt.model_copy(update={"pending_records": (*attempt.pending_records, identity)})
-    return AreaChange(state=_replace(state, updated), requests=(_by_run_end(context, request),))
+    return AreaChange(state=_replace(state, updated), requests=(_within_run(context, request),))
 
 
 def _checkpoint_acknowledged(
@@ -1643,7 +1643,7 @@ def _reacquire(
     return AreaChange(
         state=_replace(state, updated),
         requests=(
-            _by_run_end(
+            _within_run(
                 context,
                 RestoreRevision(
                     request_id=identity,

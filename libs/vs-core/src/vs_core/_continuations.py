@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from ._deadlines import bound_to_run, limit_to, time_remains
+from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
 from ._registry import ContractError
 from ._session_scope import dispatching_request
@@ -233,8 +233,9 @@ def commit_refusal_in(
     return None
 
 
-def _until_run_end(context: EvaluationContext, request: Request) -> Outbound:
-    return within(request, limit_to(context.run, context.run.deadline_at))
+def _inspection(context: EvaluationContext, request: Request) -> Outbound:
+    """A reconciling inspection gets core's own bounded cleanup time."""
+    return cleanup(context.run, request)
 
 
 def _until_wait_ends(
@@ -975,7 +976,7 @@ def _suspend(
         return AreaChange(
             state=state,
             requests=(
-                _until_run_end(
+                _inspection(
                     context,
                     InspectTurn(
                         request_id=RequestId(
@@ -1371,7 +1372,7 @@ def _reopened(
         return AreaChange(
             state=state,
             requests=(
-                _until_run_end(
+                _inspection(
                     context,
                     InspectRequest(
                         request_id=RequestId(root=f"{observation.request_id.root}/inspect-reopen"),

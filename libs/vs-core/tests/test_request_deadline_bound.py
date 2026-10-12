@@ -63,7 +63,7 @@ def _submit(state: core.CoreState, decision: core.Work, limit: float) -> core.Tr
 def test_a_measurement_is_issued_within_the_run_deadline(requested: float) -> None:
     state, scope = attempt_state()
     state = _bounded_run(state)
-    measurement = plan(deadline_at=min(requested, 100.0))
+    measurement = plan()
     decision = core.Measure(decision_id=core.DecisionId(root="m"), scope=scope, plan=measurement)
     result = _submit(state, decision, requested)
     submitted = [r for r in result.requests if isinstance(r, core.SubmitMeasurement)]

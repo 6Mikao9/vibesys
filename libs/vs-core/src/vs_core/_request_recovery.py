@@ -1259,13 +1259,17 @@ def _deadline(
         for child in state.children
     )
     resolution = _resolution(record, context)
-    # A passed limit ends a record that is still going on elsewhere only if nothing proves
-    # it terminal or reattached; a fired watch ends the wait even for a live executor,
-    # because the work is pointless whatever it is doing.
+    # A passed limit always ends a record that still owes a result, whatever the executor is
+    # doing (a reattached live one included): the shell cancels its flight at the same
+    # instant. A record already proven terminal, or one that already concluded and has no
+    # children to release, keeps its result. Ending moves the record to BLOCKED, which is
+    # not open, so the deadline cannot be raised for it again.
     timed = event.reason == FailureReason.TIMED_OUT
-    if (timed and now_at < record.until.at) or (
-        (resolution == "terminal" or (timed and resolution == "reattached"))
-        and not unresolved_children
+    concluded = not is_open(record) and not unresolved_children
+    if (
+        (timed and now_at < record.until.at)
+        or (resolution == "terminal" and not unresolved_children)
+        or (timed and concluded and resolution == "reattached")
     ):
         return AreaChange(state=state)
     block_id = RequestId(root=f"recovery:block:{state.recovery.epoch}:{record.request_id.root}")

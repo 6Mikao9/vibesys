@@ -283,7 +283,6 @@ def measurement_plan() -> MeasurementPlan:
         recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
-        deadline_at=10.0,
     )
 
 

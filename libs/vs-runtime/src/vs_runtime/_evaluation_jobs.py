@@ -156,8 +156,13 @@ def _required_profile_fields(stage_id: str, plan: MeasurementPlan) -> tuple[Prof
         raise RejectedPlanError(path, PlanRejection.UNKNOWN_OUTPUT) from error
 
 
-def measurement_request(plan: MeasurementPlan, scope: Scope, handle_id: str) -> EvaluationRequest:
-    """The ordered semantic request for an accepted plan, or a typed rejection."""
+def measurement_request(
+    plan: MeasurementPlan, scope: Scope, handle_id: str, *, deadline_at: float
+) -> EvaluationRequest:
+    """The ordered semantic request for an accepted plan, or a typed rejection.
+
+    ``deadline_at`` is when core ends the submission (its record's ``until``), not a plan field.
+    """
     if not isinstance(plan.candidate, RevisionRef):
         raise RejectedPlanError("plan.candidate", PlanRejection.UNRESOLVED_CANDIDATE)
     fingerprints = EvidenceFingerprints(
@@ -177,7 +182,7 @@ def measurement_request(plan: MeasurementPlan, scope: Scope, handle_id: str) -> 
             required_profile_fields=_required_profile_fields(stage_id, plan),
             fingerprints=fingerprints,
             submitted_at_s=plan.submitted_at,
-            deadline_at_s=plan.deadline_at,
+            deadline_at_s=deadline_at,
         )
         steps.append(EvaluationStep(name=stage_id, payload=stage.model_dump(mode="json")))
     return EvaluationRequest(

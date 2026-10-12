@@ -26,7 +26,6 @@ def plan(**updates: object) -> core.MeasurementPlan:
         "recipe": core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         "submitted_at": 0.0,
         "queue_allowance": 10.0,
-        "deadline_at": 100.0,
         "submission_limit": 3,
         "accuracy_stage": "accuracy",
     }
@@ -286,7 +285,7 @@ def test_submission_retry_requires_conclusive_infrastructure_failure(
     retried = requested(
         result.state,
         identity="retry",
-        measurement=plan(submitted_at=2.0, deadline_at=102.0, submission_limit=99),
+        measurement=plan(submitted_at=2.0, submission_limit=99),
     )
     allowed = (
         terminal
@@ -325,7 +324,7 @@ def test_a_failure_after_the_run_stopped_is_never_resubmitted(
     retried = requested(
         stopped_state,
         identity="retry",
-        measurement=plan(submitted_at=2.0, deadline_at=102.0, submission_limit=99),
+        measurement=plan(submitted_at=2.0, submission_limit=99),
     )
     assert retried.requests == ()
     assert len(retried.state.evaluation.submission_budgets[0].receipts) == 1
@@ -338,7 +337,7 @@ def test_preacceptance_failures_are_bounded_and_timing_never_resets_identity(cou
         result = requested(
             state,
             identity=f"measure-{index}",
-            measurement=plan(submitted_at=float(index), deadline_at=100.0 + index),
+            measurement=plan(submitted_at=float(index)),
         )
         if index >= 3:
             assert result.requests == ()

@@ -5,6 +5,7 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
+    BlockRequest,
     CancelOwnedResource,
     ChildLease,
     CoreState,
@@ -116,7 +117,7 @@ def reload(state: CoreState) -> CoreState:
     child_pending=st.booleans(),
     elapsed=st.integers(min_value=0, max_value=10_000),
 )
-def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
+def test_a_passed_limit_ends_an_owed_root_even_when_reattached_and_cleans_its_children(
     phase: RequestPhase,
     *,
     ready: bool,
@@ -124,7 +125,7 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
     child_pending: bool,
     elapsed: int,
 ) -> None:
-    """Across barriers and live successors, setup expiry has no root authority."""
+    """Across barriers and live successors, a passed limit ends the record that owes a result."""
     original = pending_record(phase=phase)
     assert isinstance(original.request, EnsureSession)
     resource = ResourceId(root="conversation")
@@ -241,8 +242,8 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
     retained = {record.request_id: record for record in result.state.records.records}
     for record in state.records.records:
         after = retained[record.request_id]
-        if child_pending and record.request_id == original.request_id and record.phase in OWED:
-            # The limit ends a record whose result is still owed.
+        if record.request_id == original.request_id and record.phase in OWED:
+            # The limit ends a record whose result is still owed, reattached or not.
             assert after.failure is not None
             assert after.failure.reason == FailureReason.TIMED_OUT
             record_after = record.model_copy(
@@ -254,7 +255,8 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
         assert after == record_after
     assert result.state.records.children == state.records.children
     if not child_pending:
-        assert result.requests == ()
+        assert all(isinstance(value, BlockRequest) for value in result.requests)
+        assert bool(result.requests) == (phase in OWED)
         assert result.state.records.recovery == state.records.recovery
 
 

@@ -100,9 +100,7 @@ def test_failure_claim_cannot_grant_retry_after_accepted_execution(
         committed(state, classified),
         core.MeasurementSubmissionObserved(observation=classified, failure=claim),
     ).state
-    retried = requested(
-        state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
-    )
+    retried = requested(state, identity="again", measurement=plan(submitted_at=5.0))
     conclusive = terminal and status in CONCLUSIVE
     assert bool(retried.requests) == (
         conclusive and status != S.SUCCEEDED and claim in _RETRYABLE_CLAIMS
@@ -431,9 +429,7 @@ def test_a_job_observation_without_facts_charges_a_retry_only_for_a_retryable_cl
     claim: core.MeasurementFailure | None,
 ) -> None:
     state = _failed_job(claim, None)
-    retried = requested(
-        state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
-    )
+    retried = requested(state, identity="again", measurement=plan(submitted_at=5.0))
     assert bool(retried.requests) == (claim in _RETRYABLE_CLAIMS)
 
 
@@ -450,9 +446,7 @@ def test_a_retryable_claim_never_overrides_scientific_facts(
         accuracy_passed=False,
     )
     state = _failed_job(claim, facts)
-    retried = requested(
-        state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
-    )
+    retried = requested(state, identity="again", measurement=plan(submitted_at=5.0))
     assert retried.requests == ()
 
 
