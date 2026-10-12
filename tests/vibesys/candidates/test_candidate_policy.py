@@ -8,10 +8,11 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.candidates.api import (
-    BaselineStage,
-    BaselineState,
     CandidateConfig,
     EligibleRound,
+    InputReading,
+    Measured,
+    NotConfigured,
     choose_winner,
     settle_for,
 )
@@ -38,7 +39,8 @@ class FinishedFake:
     review_passed: bool | None = None
     judge_invocation: InvocationRef | None = None
     outcome: HypothesisOutcome | None = HypothesisOutcome.NOMINATED
-    failure: str | None = None
+    stopped: bool = False
+    failed: bool = False
 
 
 def _reading(kind: EvidenceKind, *, passed: bool, value: float = 1.0) -> AcceptedReading:
@@ -69,9 +71,9 @@ def test_a_candidate_is_winner_eligible_only_when_every_configured_gate_passed(
     attempt = FinishedFake(
         readings=_readings(accuracy=accuracy, benchmark=benchmark),
         review_passed=review,
-        failure="boom" if failed else None,
+        failed=failed,
     )
-    settle = settle_for(attempt, BaselineState(), CandidateConfig())
+    settle = settle_for(attempt, NotConfigured(), CandidateConfig())
     expected = accuracy is True and benchmark is True and review is not False and not failed
     assert settle.eligible is expected
     # A candidate whose accuracy passed stays a buildable parent even if the benchmark failed.
@@ -85,13 +87,13 @@ def test_a_gate_the_run_does_not_configure_is_not_required(
 ) -> None:
     config = CandidateConfig(accuracy_configured=False, benchmark_configured=False)
     attempt = FinishedFake(readings=_readings(accuracy=accuracy, benchmark=benchmark))
-    assert settle_for(attempt, BaselineState(), config).eligible is bool(
+    assert settle_for(attempt, NotConfigured(), config).eligible is bool(
         attempt.readings and attempt.candidate
     )
 
 
 def test_an_unmeasured_candidate_is_discarded() -> None:
-    settle = settle_for(FinishedFake(), BaselineState(), CandidateConfig())
+    settle = settle_for(FinishedFake(), NotConfigured(), CandidateConfig())
     assert (settle.retention, settle.eligible, settle.candidate) == ("discard", False, None)
 
 
@@ -99,9 +101,11 @@ def test_an_unmeasured_candidate_is_discarded() -> None:
 def test_a_candidate_must_beat_a_measured_baseline_but_not_an_unmeasured_one(
     baseline: int, candidate: int
 ) -> None:
-    measured = BaselineState(
-        stage=BaselineStage.MEASURED,
-        metrics=(MetricRow(name="tps", value=float(baseline), direction="max"),),
+    measured = Measured(
+        attempts=1,
+        reading=InputReading(
+            metrics=(MetricRow(name="tps", value=float(baseline), direction="max"),)
+        ),
     )
     attempt = FinishedFake(
         readings=(
@@ -110,7 +114,7 @@ def test_a_candidate_must_beat_a_measured_baseline_but_not_an_unmeasured_one(
         )
     )
     assert settle_for(attempt, measured, CandidateConfig()).eligible is (candidate > baseline)
-    assert settle_for(attempt, BaselineState(), CandidateConfig()).eligible
+    assert settle_for(attempt, NotConfigured(), CandidateConfig()).eligible
 
 
 def _round(index: int, value: float | None) -> EligibleRound:
