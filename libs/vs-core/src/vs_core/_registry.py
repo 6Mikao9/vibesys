@@ -51,6 +51,19 @@ class ContractError(ValueError):
         super().__init__(f"{'.'.join(map(str, path))}: {detail}")
 
 
+class UnexpectedEvent(ContractError):
+    """A search machine received an event its phase has no transition for.
+
+    Every machine ends its ``match`` with this, so a pair nobody planned for stops the run
+    with the phase and the event named instead of being ignored.
+    """
+
+    def __init__(self, phase: object, event: object) -> None:
+        self.phase = type(phase).__name__
+        self.event = str(getattr(event, "kind", type(event).__name__))
+        super().__init__(("update", self.phase), f"no transition for the event {self.event}")
+
+
 @dataclass(frozen=True)
 class OperationRegistration:
     """Owning-library model classes, kept outside persisted core state."""
