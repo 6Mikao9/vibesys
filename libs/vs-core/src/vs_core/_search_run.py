@@ -154,10 +154,14 @@ def advance[S: StrategyState, C](
 
 
 def begin[S: StrategyState, C](
-    search: Search[S, C], config: C, core: CoreState, host: SearchHost
+    search: Search[S, C],
+    config: C,
+    core: CoreState,
+    host: SearchHost,
+    incoming: tuple[Event, ...] = (),
 ) -> Advanced[S]:
-    """Start a new run: ``init`` on the run's facts, then submit its decisions."""
+    """Start a new run: ``init`` on the run's facts, submit its decisions, then ``incoming``."""
     state, decisions = search.init(config, core.run.facts)
-    run = _Pass(host, [])
+    run = _Pass(host, list(incoming))
     core = run.submit(check_decisions(search.declaration, decisions), core)
     return run.drain(search, state, core)
