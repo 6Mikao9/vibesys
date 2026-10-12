@@ -22,6 +22,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any, Literal
 
 from tests.support.checkpoint_faults import FaultyCheckpoints
+from tests.vibesys.orchestration.dynamic.search._refusals import Refuses, Refusing, as_search
 from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
@@ -43,6 +44,7 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     requirements_for,
 )
 from vibesys.orchestration.dynamic.search.api import (
+    DynamicConfig,
     EvidenceReading,
     EvidenceReadings,
     InterpretEvidence,
@@ -76,6 +78,7 @@ from vs_core.api import (
     RetainRevision,
     RevisionRef,
     RunEnvelope,
+    Search,
     SessionId,
     SnapshotAndRetain,
     SubmitMeasurement,
@@ -117,6 +120,12 @@ _KINDS = {
 _PLAIN_PROFILE = (True, "profile captured")
 
 
+def _search(selected: DynamicConfig, refuses: Refuses | None) -> Search[Any, Any]:
+    """The dynamic search, with the decisions ``refuses`` names refused."""
+    search = build_search(selected)
+    return search if refuses is None else as_search(Refusing(search, refuses))
+
+
 def _lease(session_id: SessionId) -> ResourceId:
     """The lease an executor holds for a session: the same name from ensure through close."""
     return ResourceId(root=f"lease:{session_id.root}")
@@ -155,6 +164,7 @@ class DynamicWorld:
         deadline_at: float = Harness.deadline_at,
         max_concurrent: int | None = None,
         lifecycle: Collection[LifecycleCapability] = (),
+        refuses: Refuses | None = None,
         **settings: object,
     ) -> None:
         """Script a run.
@@ -186,8 +196,9 @@ class DynamicWorld:
 
         ``limits`` and ``deadline_at`` are the run's; ``max_concurrent`` the loop's concurrency
         (default one, or the run's parallelism and two more where turns use the evaluation
-        tool); ``lifecycle`` the capabilities the run offers beyond waiting. Any other option
-        is a `DynamicConfig` field.
+        tool); ``lifecycle`` the capabilities the run offers beyond waiting. ``refuses`` names
+        the decisions core refuses, by identity, with the code it answers (see `Refusing`). Any
+        other option is a `DynamicConfig` field.
         """
         selected = config(**settings)
         hosted = bool(waits) or bool(submit_only)
@@ -196,7 +207,7 @@ class DynamicWorld:
             suspend: LifecycleCapability = "suspend"
             capabilities |= {suspend}
         self.setup = RunSetup(
-            new_launch=lambda: Launch(search=build_search(selected), config=selected),
+            new_launch=lambda: Launch(search=_search(selected, refuses), config=selected),
             harness=Harness(
                 registry=dynamic_operation_registry(),
                 facts=FACTS,

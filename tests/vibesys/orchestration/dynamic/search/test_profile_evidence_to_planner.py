@@ -58,9 +58,7 @@ _CONFIG = DynamicConfig(
     max_rounds=3,
     profiling=True,
 )
-_RENDERER = TemplateRenderer(
-    Path(templates.__file__).parent, fallback_roots=(CORE_PROTOCOL_DIR,)
-)
+_RENDERER = TemplateRenderer(Path(templates.__file__).parent, fallback_roots=(CORE_PROTOCOL_DIR,))
 
 
 def _text(prompt: PlannerPrompt) -> str:
