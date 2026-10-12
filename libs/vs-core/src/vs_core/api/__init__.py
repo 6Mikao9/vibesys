@@ -582,6 +582,7 @@ from vs_core.types.strategy import (
     Work,
 )
 from vs_core.types.until import (
+    REPLY_ERROR_MESSAGE_LIMIT,
     Failed,
     FailureReason,
     ReplyError,
@@ -603,6 +604,7 @@ __all__ = [
     "INTERPRET_SUFFIX",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "RENDER_SUFFIX",
+    "REPLY_ERROR_MESSAGE_LIMIT",
     "RESOLUTIONS",
     "RETAIN_SUFFIX",
     "THIS_RUN",

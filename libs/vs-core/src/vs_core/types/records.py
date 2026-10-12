@@ -65,7 +65,7 @@ from .sessions import (
     TurnSpec,
 )
 from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
-from .until import Failed, FailureReason, Inherited, Until, Watch, Within
+from .until import Failed, FailureReason, Inherited, ReplyError, Until, Watch, Within
 
 
 class InspectRequest(RequestBase):
@@ -423,6 +423,8 @@ class TargetObservation(OutcomeValue):
     suspension: Continuation | None = None
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
+    reply_errors: tuple[ReplyError, ...] = ()
+    """What a rejected turn reply got wrong, field by field, for the correction that follows."""
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     operation_schema: OperationSchemaRef | None = None
     reissue: ReissueProof | None = None
@@ -507,6 +509,7 @@ class RequestObserved(OutcomeValue):
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
+    reply_errors: tuple[ReplyError, ...] = ()
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     evidence: tuple[EvidenceRef, ...] = ()
     revision: RevisionRef | None = None

@@ -43,7 +43,7 @@ from .common import (
 from .evaluation import Continuation, ResumeAuthorizationReceipt
 from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
-from .until import Until
+from .until import ReplyError, Until
 
 
 class Access(StrEnum):
@@ -326,6 +326,8 @@ class TurnObserved(Value):
     observation: Observation
     output_schema: SchemaRef | None = None
     output_json: str | None = None
+    reply_errors: tuple[ReplyError, ...] = ()
+    """The executor's schema check of a reply it rejected, by field."""
 
 
 class SessionObserved(Value):
@@ -401,6 +403,8 @@ class TurnResult(Value):
     output_json: str | None = None
     failure: TurnFailureKind | None = None
     detail: str = Field(default="", max_length=TURN_FAILURE_DETAIL_LIMIT)
+    reply_errors: tuple[ReplyError, ...] = ()
+    """The executor's schema check of a reply it rejected, by field; empty for any other end."""
     suspending: bool = False
     """Core recorded the turn's wait, so a ``TurnSuspended`` follows when it checkpoints.
 
@@ -415,7 +419,7 @@ class TurnResult(Value):
     def failure_matches_status(self) -> TurnResult:
         """A failure kind and its text belong to a turn that did not succeed."""
         if self.observation.status == ObservationStatus.SUCCEEDED and (
-            self.failure is not None or self.detail
+            self.failure is not None or self.detail or self.reply_errors
         ):
             raise ContractValidationError("failure", "a succeeded turn carries no failure")
         return self

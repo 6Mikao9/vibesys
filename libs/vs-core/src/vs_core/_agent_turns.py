@@ -591,6 +591,22 @@ class AgentTurns[S: StrategyState, C]:
         if result.observation.status is not ObservationStatus.SUCCEEDED or output is None:
             if result.failure is TurnFailureKind.TRANSPORT_LOST:
                 return self._lost(state, flow, turn, view)
+            if result.reply_errors:
+                # The executor's own schema check rejected the reply: the same typed failure as
+                # a reply that breaks the model here, with the errors it reported by field.
+                invalid = Failed(
+                    reason=FailureReason.INVALID_REPLY,
+                    decision=flow.ask,
+                    errors=result.reply_errors,
+                    turn=turn,
+                )
+                flow = flow.model_copy(update={"invocation": turn})
+                return self._corrected(
+                    state,
+                    flow,
+                    lambda: self.protocol.correction(agent.role, result.reply_errors),
+                    invalid,
+                )
             failed = Failed(
                 reason=FailureReason.TURN_FAILED,
                 decision=flow.ask,
@@ -618,8 +634,9 @@ class AgentTurns[S: StrategyState, C]:
             invalid = Failed(
                 reason=FailureReason.INVALID_REPLY, decision=flow.ask, errors=errors, turn=turn
             )
-            context = self.protocol.correction(agent.role, errors)
-            return self._corrected(state, flow, context, invalid)
+            return self._corrected(
+                state, flow, lambda: self.protocol.correction(agent.role, errors), invalid
+            )
         reply = parsed.reply if isinstance(parsed, WaitableReply) else parsed
         if isinstance(reply, WaitingForDependency):
             refused = Failed(
@@ -628,7 +645,9 @@ class AgentTurns[S: StrategyState, C]:
                 turn=turn,
                 refusal=WaitRefusal.NOT_RECORDED,
             )
-            return self._corrected(state, flow, self.protocol.wait_unrecorded(agent.role), refused)
+            return self._corrected(
+                state, flow, lambda: self.protocol.wait_unrecorded(agent.role), refused
+            )
         if agent.checkpoint is None or not agent.checkpoint(reply):
             return self._finish(state, flow, output, None)
         known = _checkpoint_of(state, turn)
@@ -640,17 +659,21 @@ class AgentTurns[S: StrategyState, C]:
         self,
         state: Piped[S, Value],
         flow: Flow[Value],
-        context: Value,
+        context: Callable[[], Value],
         exhausted: Failed,
     ) -> tuple[Piped[S, Value], list[Decision], list[Event]]:
-        """Ask the agent to fix its reply, or report ``exhausted`` once its corrections are spent."""
+        """Ask the agent to fix its reply, or report ``exhausted`` once its corrections are spent.
+
+        The correction prompt is built only when a correction is asked for: a role that is
+        never corrected here owns no correction template.
+        """
         agent = self.agents[flow.agent]
         if flow.corrections >= agent.retry.corrections:
             return self._end(state, flow, exhausted)
         state, serial = self._serial(state, agent.role, flow.ask)
         again = flow.model_copy(
             update={
-                "input": context,
+                "input": context(),
                 "attempt": flow.attempt + 1,
                 "serial": serial,
                 "charge": "correction",

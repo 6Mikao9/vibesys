@@ -141,11 +141,20 @@ class ReplyErrorCode(StrEnum):
     NOT_JSON = "not-json"
 
 
+REPLY_ERROR_MESSAGE_LIMIT = 500
+"""Characters kept of one validator message, so an unbounded reply cannot grow the state."""
+
+
 class ReplyError(Value):
-    """One typed problem in a reply: where it is and what is wrong."""
+    """One typed problem in a reply: where it is and what is wrong.
+
+    ``message`` is the validator's own wording when it reported one (a provider's schema
+    check does); the reply model's check leaves it empty and ``code`` says what is wrong.
+    """
 
     path: tuple[str | int, ...]
     code: ReplyErrorCode
+    message: str = Field(default="", max_length=REPLY_ERROR_MESSAGE_LIMIT)
 
 
 _TURN_REASONS = frozenset(

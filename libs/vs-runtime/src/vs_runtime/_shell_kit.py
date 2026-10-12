@@ -34,6 +34,7 @@ from vs_core.api import (
     ObservationStatus,
     ObserveOwnedJob,
     OwnedJob,
+    ReplyError,
     RequestObserved,
     RestoreRevision,
     ResumeSessionTurn,
@@ -121,6 +122,7 @@ class InvalidReply:
     """The turn ran and its reply does not parse as the schema it was asked to answer."""
 
     resource_id: ResourceId | None
+    errors: tuple[ReplyError, ...] = ()
 
 
 def _status(answer: Answer | InvalidReply) -> tuple[ObservationStatus, bool, bool]:
@@ -313,6 +315,7 @@ class ScriptedExecutors:
             observation=observed.observation,
             output_schema=None if reply is None else request.turn.output_schema,
             output_json=reply,
+            reply_errors=answer.errors if isinstance(answer, InvalidReply) else (),
         )
 
     @staticmethod

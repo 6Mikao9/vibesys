@@ -1194,6 +1194,21 @@ def _prepared_completion(context: SessionsContext, invocation: Invocation) -> tu
     return (DecisionCompleted(decision_id=decision.decision_id, status=CompletionStatus.CANCELLED),)
 
 
+def _after_terminal_ensure(
+    grouped: AreaChange[SessionsState],
+    context: SessionsContext,
+    session: SessionView,
+    event: SessionObserved,
+    closing_authority: RequestId | None,
+) -> AreaChange[SessionsState]:
+    """The session ended without a conversation: abandon its turn, and close it if its attempt is."""
+    abandoned = _abandon_turn_acquisition(grouped.state, context, session, event.observation)
+    if closing_authority is not None and session.resource_id is None:
+        # A closing attempt waits on the session's release, which only a close can report.
+        return _closing(abandoned, context, session, closing_authority)
+    return abandoned
+
+
 def _after_ensure(
     state: SessionsState, context: SessionsContext, session: SessionView, event: SessionObserved
 ) -> AreaChange[SessionsState]:
@@ -1203,23 +1218,8 @@ def _after_ensure(
     owner = attempt_for(context, session.scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
     if session.phase == SessionPhase.TERMINAL:
-        abandoned = _abandon_turn_acquisition(grouped.state, context, session, event.observation)
-        if not isinstance(closure, Proven) or session.resource_id is not None:
-            return abandoned
-        # A closing attempt waits on the session's release, which only a close can report.
-        request = _close(session, context, closure.value.authority)
-        closing = session.model_copy(
-            update={
-                "phase": SessionPhase.CLOSING,
-                "pending_records": (*session.pending_records, request.request_id),
-            }
-        )
-        return abandoned.model_copy(
-            update={
-                "state": _replace_session(abandoned.state, closing),
-                "requests": (*abandoned.requests, _cleanup(context, request)),
-            }
-        )
+        authority = closure.value.authority if isinstance(closure, Proven) else None
+        return _after_terminal_ensure(grouped, context, session, event, authority)
     if session.phase == SessionPhase.UNKNOWN:
         return grouped
     if isinstance(closure, Proven):
@@ -1251,6 +1251,28 @@ def _after_ensure(
     if session.invocation is not None:
         return _reservation_after_acquisition(grouped, context, session)
     return grouped
+
+
+def _closing(
+    change: AreaChange[SessionsState],
+    context: SessionsContext,
+    session: SessionView,
+    authority: RequestId,
+) -> AreaChange[SessionsState]:
+    """*change* plus the close of *session*, which then waits for it."""
+    request = _close(session, context, authority)
+    closing = session.model_copy(
+        update={
+            "phase": SessionPhase.CLOSING,
+            "pending_records": (*session.pending_records, request.request_id),
+        }
+    )
+    return change.model_copy(
+        update={
+            "state": _replace_session(change.state, closing),
+            "requests": (*change.requests, _cleanup(context, request)),
+        }
+    )
 
 
 def _acquired_phase(state: SessionsState, session: SessionView) -> SessionPhase:
@@ -1811,8 +1833,7 @@ def _drain_acquiring(
     ensures = tuple(
         row
         for row in context.records.records
-        if row.request_id in session.pending_records
-        and isinstance(row.request, EnsureSession)
+        if row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
     )
     if ensures:
         return AreaChange(
@@ -1853,9 +1874,8 @@ def _drain_lease(
         ensures = tuple(
             row
             for row in context.records.records
-            if row.request_id in session.pending_records
-            and isinstance(row.request, EnsureSession)
-            )
+            if row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
+        )
         return AreaChange(
             state=state,
             requests=tuple(

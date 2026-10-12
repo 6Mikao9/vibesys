@@ -156,6 +156,7 @@ def _registered(
                     suspension=facts.suspension,
                     output_schema=_output_schema(facts),
                     output_json=facts.outcome_json,
+                    reply_errors=facts.reply_errors,
                 ),
             )
         case LifecycleClass.OWNED_JOB:
@@ -281,6 +282,7 @@ def _owner_signal(
                         suspension=facts.suspension,
                         output_schema=facts.outcome_schema,
                         output_json=facts.outcome_json,
+                        reply_errors=facts.reply_errors,
                     ),
                 )
         case SnapshotAndRetainRun():
