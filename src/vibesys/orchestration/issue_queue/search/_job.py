@@ -901,20 +901,26 @@ def _implemented(
         summary=reply.summary, files_touched=reply.files_touched, self_check=reply.self_check
     )
     phase = Recording(spent=spent, work=work, candidate=changed)
-    write = _send(job, env, "record", 1, _record_write(job, env, spent, work))
+    write = _send(job, env, f"record.{spent}", 1, _record_write(job, env, spent, work))
     log = _log(job, env, "implement", _implementation_json(work), f"log.implement.{spent}")
     return _moved(job, phase), [write, log]
 
 
 def _after_record(job: Job, env: Env, event: Event, phase: Recording) -> Moved:
     def resend(number: int) -> Moved:
-        write = _send(job, env, "record", number, _record_write(job, env, phase.spent, phase.work))
+        write = _send(
+            job,
+            env,
+            f"record.{phase.spent}",
+            number,
+            _record_write(job, env, phase.spent, phase.work),
+        )
         return _moved(job, phase.model_copy(update={"sent": number})), [write]
 
     def landed(_: AppliedChanges) -> Moved:
         return _begin_review(job, env, phase)
 
-    name = decision(job.key, "record", phase.sent - 1)
+    name = decision(job.key, f"record.{phase.spent}", phase.sent - 1)
     return _answer(job, env, event, Sent(name, phase.sent, resend, landed))
 
 
@@ -936,7 +942,7 @@ def _reviewed(
     )
     spent = phase.spent
     filing = Filing(spent=spent, candidate=phase.candidate, verdict=verdict, judge=invocation)
-    write = _send(job, env, "verdict", 1, _verdict_write(job, env, spent, verdict))
+    write = _send(job, env, f"verdict.{spent}", 1, _verdict_write(job, env, spent, verdict))
     log = _log(job, env, "review", _verdict_json(verdict), f"log.review.{spent}")
     return _moved(job, filing), [write, log]
 
@@ -944,14 +950,18 @@ def _reviewed(
 def _after_verdict(job: Job, env: Env, event: Event, phase: Filing) -> Moved:
     def resend(number: int) -> Moved:
         write = _send(
-            job, env, "verdict", number, _verdict_write(job, env, phase.spent, phase.verdict)
+            job,
+            env,
+            f"verdict.{phase.spent}",
+            number,
+            _verdict_write(job, env, phase.spent, phase.verdict),
         )
         return _moved(job, phase.model_copy(update={"sent": number})), [write]
 
     def landed(_: AppliedChanges) -> Moved:
         return _after_filed(job, env, phase)
 
-    name = decision(job.key, "verdict", phase.sent - 1)
+    name = decision(job.key, f"verdict.{phase.spent}", phase.sent - 1)
     return _answer(job, env, event, Sent(name, phase.sent, resend, landed))
 
 
@@ -1005,8 +1015,12 @@ def _evaluated(
         metrics_json=_metrics_json(reply),
         filed=_files(reply.new_issues),
     )
-    write = _send(job, env, "filing", 1, _report_write(job, env, evaluation))
     log = _log(job, env, "performance", reply.model_dump_json(), "log.performance")
+    changes = _report_write(job, env, evaluation)
+    if not changes:  # nothing to file: the evaluation is over
+        moved, decisions = settle(job, env, Closing(evaluation=evaluation))
+        return moved, [log, *decisions]
+    write = _send(job, env, "filing", 1, changes)
     return _moved(job, Reporting(evaluation=evaluation)), [write, log]
 
 

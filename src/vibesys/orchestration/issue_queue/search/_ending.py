@@ -30,7 +30,8 @@ def describe_failure(failure: JobFailure) -> str:
             return "stopped by the operator"
         case FailureKind.ENDED:
             reason = "without a reason" if failure.reason is None else failure.reason.value
-            return f"{role} turn did not complete ({reason})"
+            cause = "" if failure.cause is None else f": {failure.cause.value}"
+            return f"{role} turn did not complete ({reason}{cause})"
         case FailureKind.CHECKPOINT_DECLINED:
             declined = "unknown" if failure.declined is None else failure.declined.value
             return f"{role} checkpoint declined ({declined})"

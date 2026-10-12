@@ -85,7 +85,7 @@ def agents(config: IssueQueueConfig) -> tuple[Agent, ...]:
             schema=PERF_REPLY,
             access=Access.WRITE_CANDIDATE,
             workspace=WorkspaceMode.ISOLATED_CHILD,
-            charge="paid",
+            charge="free",
             retry=retry,
             checkpoint=lambda _reply: True,
         ),
@@ -131,4 +131,5 @@ def build_search(config: IssueQueueConfig) -> AgentTurns[IssueQueueState, IssueQ
         operations=OPERATIONS,
         ids=IDS,
         inputs=PromptContext,
+        render_limit=config.operation_seconds,
     )

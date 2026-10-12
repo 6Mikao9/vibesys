@@ -21,10 +21,11 @@ from vibesys.orchestration.issue_queue.search._measure import (
 )
 from vibesys.orchestration.issue_queue.search._operations import (
     APPLY_KIND,
+    INTERPRET_KIND,
     LOG_KIND,
     OPERATIONS,
     READ_KIND,
-    RENDER_KIND,
+    VERIFY_KIND,
     ReadBoard,
     board_schema_ref,
 )
@@ -115,11 +116,14 @@ class IssueQueueSearch:
             strategy_id=STRATEGY_ID,
             state_schema=STATE_SCHEMA,
             required_operations=(
-                OPERATIONS.schema_ref(RENDER_KIND),
                 board_schema_ref(READ_KIND),
                 board_schema_ref(APPLY_KIND),
                 board_schema_ref(LOG_KIND),
+                OPERATIONS.schema_ref(INTERPRET_KIND),
             ),
+            # The kit registers it beside the others; this search builds only on revisions it
+            # retained itself, so it never asks.
+            optional_operations=(OPERATIONS.schema_ref(VERIFY_KIND),),
             optional=frozenset({"suspend"}),
             uses=frozenset(
                 {

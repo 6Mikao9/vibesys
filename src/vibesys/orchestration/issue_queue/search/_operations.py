@@ -6,8 +6,8 @@ the operations `vs_issue_tracker` owns. Core registers only a codec for each; a 
 performs them and reports an outcome the search reads back as `OperationFinished`.
 
 The verify and interpret operations are declared because the shared namespace registers them
-beside render; this search requires only the render and board operations, since it builds on
-revisions it retained itself and reads no evidence.
+beside render. The search requires verify to measure the final tip and interpret to read what
+the final measurement reported; it builds on revisions it retained itself, so it needs no other.
 """
 
 from typing import ClassVar, Literal
