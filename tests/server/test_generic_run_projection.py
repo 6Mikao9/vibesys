@@ -5,7 +5,7 @@ from __future__ import annotations
 from server.api.design import DesignLog
 from server.api.experiments import build_experiment_log
 from server.api.performance import build_performance_context
-from vibesys.api import RunStatus, CoreView
+from vibesys.api import CoreView, RunStatus
 
 
 def test_agent_readers_ignore_a_custom_projection() -> None:

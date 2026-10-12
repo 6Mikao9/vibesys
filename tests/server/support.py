@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from server.chat.factory import ChatAgentBuilder
     from server.run_attachment import AgentSelection
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunRecord, CoreView
+    from vibesys.api import CoreView, RunRecord
     from vs_project.api import Project
     from vs_sim.api import Condition, Threads, Worker
 

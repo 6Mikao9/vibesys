@@ -15,7 +15,7 @@ from tests.vibesys.orchestration.issue_queue.strategy.world import (
     judged,
 )
 
-from vs_core.api import ProposeWinner, RequestTurn, Finish
+from vs_core.api import Finish, ProposeWinner, RequestTurn
 from vs_dst.api import SimulatedRun, simulate
 from vs_issue_tracker.api import IssueStatus
 

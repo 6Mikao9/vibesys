@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
-from vs_core.api import CollectEvidence, ProposeWinner, Finish
+from vs_core.api import CollectEvidence, Finish, ProposeWinner
 from vs_dst.api import simulate
 
 if TYPE_CHECKING:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld
 
-from vs_core.api import ProposeWinner, StartAttempt, Finish
+from vs_core.api import Finish, ProposeWinner, StartAttempt
 from vs_dst.api import simulate
 
 

@@ -21,7 +21,7 @@ from vibesys.orchestration.dynamic.strategy.api import (
     RoundRecord,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, project_run
-from vibesys.run.contracts import RunStatus, CoreView
+from vibesys.run.contracts import CoreView, RunStatus
 from vs_core.api import AttemptId, EventCursor, HostFence, HostId, RunEnvelope
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record

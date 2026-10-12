@@ -716,9 +716,14 @@ def propagate(
             for outbound in change.requests
         )
         events.extend(change.events)
-    transition = _registered_transition(state, requests, events)
-    # A watch can already have fired for work requested in this step, which only now has a
-    # record to end.
+    return _end_fired_watches(_registered_transition(state, requests, events), dispatch)
+
+
+def _end_fired_watches(transition: Transition, dispatch: Dispatch) -> Transition:
+    """Also end the waits whose watch had already fired for work requested in this step.
+
+    Such work only now has a record to end.
+    """
     fired = watch_deadlines(transition.state)
     if not fired:
         return transition

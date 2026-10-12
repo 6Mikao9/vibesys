@@ -20,11 +20,11 @@ from tests.vibesys.orchestration.dynamic.strategy.world import DynamicWorld
 
 from vs_core.api import (
     AdoptRevision,
+    Finish,
     Operation,
     ProposeWinner,
     RequestTurn,
     StartAttempt,
-    Finish,
     VerifyAdoption,
 )
 from vs_core.testing.drive import Failed

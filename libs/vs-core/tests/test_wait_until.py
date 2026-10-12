@@ -182,7 +182,7 @@ def test_a_fired_watch_ends_exactly_the_waits_that_declared_it(
 
 
 def test_a_watch_alone_is_not_an_until() -> None:
-    state, codec = _fresh()
+    _, codec = _fresh()
     work = _wait(codec, "w", core.Within(limit=10.0)).request
     bad = core.Wait.model_construct(request=work, until=_closed_workspace())
     with pytest.raises(core.ContractError, match="until"):

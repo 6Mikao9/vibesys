@@ -47,6 +47,7 @@ from vs_core.api import (
     EnsureSession,
     EnsureWorkspace,
     ExecuteRegisteredOperation,
+    FailureReason,
     InspectOwnedJob,
     InspectRequest,
     InspectTurn,
@@ -155,7 +156,6 @@ async def inspect_request_of(world: CaseWorld, target: RequestBase) -> Execution
         request_id=RequestId(root=f"inspect-of-{target_id.root}"),
         scope=target.scope,
         admission_id=target.admission_id,
-        deadline_at=100.0,
         target=target_id,
         resource_id=None,
     )
@@ -195,14 +195,12 @@ class _OperationsWorld(_World):
             return InspectRequest(
                 request_id=RequestId(root="req-inspect"),
                 scope=SCOPE,
-                deadline_at=100.0,
                 target=RequestId(root="req-seed"),
                 resource_id=None,
             )
         return CancelOwnedResource(
             request_id=RequestId(root="req-cancel"),
             scope=SCOPE,
-            deadline_at=100.0,
             resource_id=ResourceId(root="resource"),
             target=RequestId(root="req-seed"),
         )
@@ -255,9 +253,8 @@ class _SemanticWorld(_World):
         return BlockRequest(
             request_id=RequestId(root="block"),
             scope=SCOPE,
-            deadline_at=100.0,
             target=RequestId(root="target"),
-            diagnostic="stuck",
+            reason=FailureReason.LOST,
         )
 
     async def execute(
@@ -318,7 +315,6 @@ class _EvaluationWorld(_World):
                 request_id=RequestId(root="close"),
                 scope=EVALUATION_SCOPE,
                 admission_id=ADMISSION,
-                deadline_at=100.0,
                 attempt=AttemptRef(attempt_id=AttemptId(root="attempt"), generation=0),
             )
         kind = scenario.kind
@@ -330,7 +326,6 @@ class _EvaluationWorld(_World):
             request_id=RequestId(root=scenario.name),
             scope=EVALUATION_SCOPE,
             admission_id=ADMISSION,
-            deadline_at=100.0,
             resource_id=resource,
         )
 
@@ -432,7 +427,6 @@ class _WorkspacesWorld:
             return SnapshotAndRetainRun(
                 request_id=RequestId(root="run-snap"),
                 scope=Scope(owner=RunId(root="run-1"), generation=3),
-                deadline_at=100.0,
                 invocation=InvocationRef(
                     session_id=SessionId(root="s1"),
                     invocation_id=InvocationId(root="i1"),

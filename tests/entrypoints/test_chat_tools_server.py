@@ -19,7 +19,7 @@ from tests.support.multi_search import SearchRecord
 
 from entrypoints.chat_tools_server import build_parser, build_tools
 from launch import open_run_store
-from vibesys.api import RunStatus, CoreView
+from vibesys.api import CoreView, RunStatus
 from vibesys.api.hypothesis import RoundRecord
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState

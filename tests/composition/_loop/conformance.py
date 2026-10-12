@@ -55,11 +55,11 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import (
-        CoreState,
         Command,
+        CoreState,
+        CoreView,
         Request,
         RevisionRef,
-        CoreView,
         SchemaRef,
         Strategy,
         StrategyEvent,

@@ -148,7 +148,6 @@ def cancel_request(request_id: str = "req-cancel", invocation: str = "inv-1") ->
     return CancelTurn(
         request_id=RequestId(root=request_id),
         scope=SCOPE,
-        deadline_at=100.0,
         invocation=InvocationRef(
             session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
         ),
@@ -160,7 +159,6 @@ def close_request(request_id: str = "req-close") -> CloseSession:
     return CloseSession(
         request_id=RequestId(root=request_id),
         scope=SCOPE,
-        deadline_at=100.0,
         session_id=SESSION,
     )
 
@@ -177,7 +175,6 @@ def resume_request(
     return ResumeSessionTurn(
         request_id=RequestId(root=request_id),
         scope=SCOPE,
-        deadline_at=100.0,
         turn=turn,
         continuation_id=continuation,
     )
@@ -188,7 +185,6 @@ def run_snapshot_request(invocation: str = "inv-1") -> SnapshotAndRetainRun:
     return SnapshotAndRetainRun(
         request_id=RequestId(root="req-snap"),
         scope=SCOPE,
-        deadline_at=100.0,
         invocation=InvocationRef(
             session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
         ),

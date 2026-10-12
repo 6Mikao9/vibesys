@@ -19,13 +19,13 @@ from tests.vibesys.orchestration.evolve.strategy.world import (
 from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState
 from vs_core.api import (
     DispatchTurn,
+    Finish,
     Measure,
     ProposeWinner,
     RequestTurn,
     RevisionRef,
     Settle,
     StartAttempt,
-    Finish,
     Withdraw,
 )
 

@@ -43,8 +43,8 @@ from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     AttemptId,
-    EvidenceKind,
     CoreView,
+    EvidenceKind,
 )
 from vs_prompts.api import TemplateRenderer
 

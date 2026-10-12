@@ -34,20 +34,20 @@ from vs_core.api import (
     ControlId,
     ControlInput,
     EventCursor,
+    Finish,
     HostFence,
     HostId,
     Measure,
     ProposeWinner,
     RunEnvelope,
     Settle,
-    Finish,
     Withdraw,
 )
 from vs_core.testing.drive import new_run
 from vs_dst.api import simulate
 
 if TYPE_CHECKING:
-    from vs_core.api import Proposal, CoreView, StrategyEvent
+    from vs_core.api import CoreView, Proposal, StrategyEvent
 
 
 @dataclass

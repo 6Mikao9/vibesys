@@ -17,6 +17,7 @@ from vs_core.api import (
     DecisionId,
     EnsureWorkspace,
     EventKind,
+    Failed,
     Finish,
     ItemId,
     Limits,
@@ -29,6 +30,7 @@ from vs_core.api import (
     Scope,
     Settle,
     StartAttempt,
+    StopRequested,
     StrategyState,
     Wait,
     WakeAt,
@@ -105,6 +107,10 @@ class TinySearch:
                 return state.model_copy(update={"done": done}), self._next(
                     done, view.facts.baseline
                 )
+            case StopRequested() | Failed():
+                # The run's own deadline stop, or a request the world never answered: the
+                # search has no other plan, and what the run reports then is under test.
+                return state, []
             case _:
                 message = f"unexpected event {event.kind}"
                 raise ValueError(message)

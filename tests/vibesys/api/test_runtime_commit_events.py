@@ -13,7 +13,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 
 from vibesys.events import CoreEvent, CoreEventType
-from vibesys.run.contracts import RoundSummary, RunStatus, CoreView
+from vibesys.run.contracts import CoreView, RoundSummary, RunStatus
 from vibesys.run.integration import LocalRunIntegration
 
 
@@ -29,7 +29,9 @@ class _FakeAgentState(BaseModel):
 class _FakeProjector:
     """Project `_FakeAgentState` into a view whose payload is what a frontend would show."""
 
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> CoreView | None:
+    def project_committed(
+        self, namespace: str, state: BaseModel, *, run_id: str
+    ) -> CoreView | None:
         if namespace != "commit-probe" or not isinstance(state, _FakeAgentState):
             return None
         return _agent_view(state, run_id=run_id)

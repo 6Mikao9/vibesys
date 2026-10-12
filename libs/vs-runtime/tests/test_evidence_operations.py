@@ -14,6 +14,7 @@ from vs_core.api import (
     Capabilities,
     ContractError,
     EventId,
+    EventKind,
     EvidenceAcceptanceReceipt,
     EvidenceId,
     EvidenceKey,
@@ -530,6 +531,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         state_schema=SchemaRef(name="state", version=1),
         required_operations=(_schema(interpret),),
         optional_operations=(_schema(retain),),
+        handles=frozenset({EventKind.FAILED, EventKind.STOP_REQUESTED}),
     )
     ownerless = build_operation_catalog(registrations, {})
     with pytest.raises(ContractError, match=r"test\.interpret"):

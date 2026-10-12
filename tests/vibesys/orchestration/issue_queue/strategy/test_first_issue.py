@@ -18,7 +18,7 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     IssueQueueStrategy,
     IssueQueueStrategyState,
 )
-from vs_core.api import Operation, Finish, project
+from vs_core.api import Finish, Operation, project
 from vs_core.testing.drive import new_run
 from vs_issue_tracker.api import ApplyIssueChanges, CreateIssue
 

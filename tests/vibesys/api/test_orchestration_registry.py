@@ -15,12 +15,12 @@ from launch import LaunchSettings, built_in_orchestrations, create_session
 from vibesys.api import (
     ComputeBackend,
     Config,
+    CoreView,
     OrchestrationRegistry,
     PluginProjection,
     ProfilerKind,
     RunRequest,
     RunStatus,
-    CoreView,
 )
 from vibesys.api.request import load_task
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
@@ -524,7 +524,9 @@ class _OwnProjector:
         del project
         return CoreView(run_id=run_id, loop=loop, status=status, experiment_revision=7)
 
-    def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> CoreView | None:
+    def project_committed(
+        self, namespace: str, state: BaseModel, *, run_id: str
+    ) -> CoreView | None:
         del namespace, state, run_id
         return None
 

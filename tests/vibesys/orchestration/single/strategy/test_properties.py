@@ -21,7 +21,7 @@ from tests.vibesys.orchestration.single.strategy.world import (
 
 from vibesys.hypothesis import rounds
 from vibesys.orchestration.single.strategy.api import SingleStrategyState
-from vs_core.api import ProposeWinner, RequestTurn, Settle, StartAttempt, Finish, Withdraw
+from vs_core.api import Finish, ProposeWinner, RequestTurn, Settle, StartAttempt, Withdraw
 from vs_dst.api import simulate
 
 if TYPE_CHECKING:

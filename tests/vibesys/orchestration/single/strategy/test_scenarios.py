@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from tests.vibesys.orchestration.single.strategy.world import SingleWorld
 
-from vs_core.api import ProposeWinner, RequestTurn, StartAttempt, Finish
+from vs_core.api import Finish, ProposeWinner, RequestTurn, StartAttempt
 from vs_dst.api import simulate
 
 

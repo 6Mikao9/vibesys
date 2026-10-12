@@ -1,7 +1,5 @@
 """Property tests of the record ledger through the public `step` only."""
 
-from __future__ import annotations
-
 from typing import ClassVar, Literal
 
 from hypothesis import given, settings

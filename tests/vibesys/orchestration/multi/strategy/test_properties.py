@@ -30,12 +30,12 @@ from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.multi.strategy.api import MultiStrategyState, ValidateLocal
 from vs_core.api import (
     AssessmentKind,
+    Finish,
     LocalValidationReport,
     Operation,
     RequestTurn,
     Settle,
     StartAttempt,
-    Finish,
     Withdraw,
 )
 from vs_dst.api import simulate

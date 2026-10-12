@@ -40,13 +40,13 @@ from vibesys.orchestration.dynamic.strategy.api import (
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import (
     AttemptId,
+    CoreView,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
     ObservationStatus,
     Operation,
     RevisionRef,
-    CoreView,
     Scope,
 )
 from vs_dst.api import SimulatedRun, simulate

@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from vibesys.api import ResumeRef, RunRequest, RunResult, RunStatus, CoreView
+from vibesys.api import CoreView, ResumeRef, RunRequest, RunResult, RunStatus
 from vibesys.api import contracts as api_contracts
 
 
