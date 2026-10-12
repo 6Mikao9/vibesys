@@ -33,7 +33,6 @@ from .common import (
     RunId,
     SchemaRef,
     Scope,
-    Seconds,
     SessionId,
     SetupFailureKind,
     Value,

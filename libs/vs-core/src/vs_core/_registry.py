@@ -26,9 +26,10 @@ from .types.common import (
     ScopeReopenNormalization,
 )
 from .types.evaluation import MeasurementIdentity
+from .types.kinds import ALWAYS, OPT_IN, PRODUCES
 from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
-from .types.strategy import Command, Operation, StrategyState
+from .types.strategy import Command, Operation, StrategyState, Wait
 
 ENVELOPE_SCHEMA_VERSION = 4
 
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from .types.kernel import CoreState, RunEnvelope
-    from .types.strategy import OperationRequest, SearchDeclaration
+    from .types.strategy import OperationRequest, SearchDeclaration, Submission
 
 
 class ContractError(ValueError):
@@ -283,6 +284,13 @@ class OperationRegistry:
             decision.model_dump_json(), context={"operation_registry": self}
         )
 
+    def validate_submission(self, decision: Submission) -> Submission:
+        """Validate the operation a ``Wait`` carries; any other decision passes through."""
+        if not isinstance(decision, Wait):
+            return decision
+        validated = self.validate_decision(decision.request)
+        return decision.model_copy(update={"request": validated})
+
     def validate_envelope(self, envelope: RunEnvelope) -> None:
         """Check what writing the envelope requires, without serializing it.
 
@@ -449,8 +457,30 @@ def _validate_operation(descriptor: OperationDescriptor, path: tuple[str | int, 
         raise ContractError((*path, "cancel/watch"), "owned lifecycle requires cancel and watch")
 
 
+def validate_search_declaration(declaration: SearchDeclaration) -> None:
+    """Refuse a declaration whose event kinds do not match the work it uses.
+
+    Every result event of the work the search uses must be declared (otherwise a result
+    would arrive that the search never agreed to handle), and every declared kind must be
+    one that work, or the always-delivered and opt-in kinds, can produce (otherwise the
+    declaration is dead and hides a typo).
+    """
+    needed = ALWAYS.union(*(PRODUCES[kind] for kind in declaration.uses))
+    for kind in sorted(needed - declaration.handles):
+        raise ContractError(
+            ("declaration", "handles", kind.value),
+            "event kind is produced by the declared work but the search does not declare it",
+        )
+    for kind in sorted(declaration.handles - needed - OPT_IN):
+        raise ContractError(
+            ("declaration", "handles", kind.value),
+            "event kind is declared but no declared work can produce it",
+        )
+
+
 def validate_startup(declaration: SearchDeclaration, available: Capabilities) -> Capabilities:
     """Reject required absence; expose only the declared validated intersection."""
+    validate_search_declaration(declaration)
     if declaration.required & declaration.optional:
         raise ContractError(("declaration", "optional"), "capability also required")
     missing = declaration.required - available.lifecycle

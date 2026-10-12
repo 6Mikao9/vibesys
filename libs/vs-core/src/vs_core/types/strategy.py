@@ -40,6 +40,7 @@ from .common import (
     Value,
 )
 from .evaluation import MeasurementIdentity, MeasurementPlan
+from .kinds import EventKind, WorkKind
 from .sessions import SessionSpec, TurnSpec
 from .settlement import AssessmentProposal, RunResultProposal, Selection
 from .until import Within
@@ -288,9 +289,13 @@ class SearchDeclaration(Value):
     optional_operations: tuple[OperationSchemaRef, ...] = ()
     required: frozenset[LifecycleCapability] = frozenset()
     optional: frozenset[LifecycleCapability] = frozenset()
+    uses: frozenset[WorkKind] = frozenset()
+    """The kinds of work the search starts (a ``WakeAt`` counts as ``WAKE_AT``)."""
+    handles: frozenset[EventKind] = frozenset()
+    """The event kinds ``Search.update`` handles. Core checks them against ``uses``."""
 
-    @field_serializer("required", "optional", when_used="json")
-    def _sorted_abilities(self, value: frozenset[LifecycleCapability]) -> list[str]:
+    @field_serializer("required", "optional", "uses", "handles", when_used="json")
+    def _sorted_sets(self, value: frozenset[str]) -> list[str]:
         """Write the sets in sorted order, as `Capabilities.lifecycle` does."""
         return sorted(value)
 

@@ -6,12 +6,11 @@ from math import isfinite
 from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
-from ._proofs import Proven, accepted_receipt_for, descriptor_matches
+from ._proofs import Proven, descriptor_matches
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
 from .types.common import (
     AttemptRef,
-    CompletionStatus,
     InvocationRef,
     LifecycleCapability,
     OperationDescriptor,

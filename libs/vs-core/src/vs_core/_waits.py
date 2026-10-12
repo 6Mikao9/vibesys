@@ -106,7 +106,7 @@ class Resolution(Value):
     """The named reason the strategy or operator sees, or what the gap is for a halt."""
 
 
-class Wait(Value):
+class OpenWait(Value):
     """One waiting entity and the producer that will end its wait, or None for an orphan."""
 
     waiter: WaitKind
@@ -301,14 +301,14 @@ def _job_producer(
     return None
 
 
-def _session_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
+def _session_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:
     found = []
     for session in core.sessions.sessions:
         if not session_waits(session.phase):
             continue
         related = [row for row in core.records.records if _about_session(row, session)]
         found.append(
-            Wait(
+            OpenWait(
                 waiter=WaitKind.SESSION,
                 subject=session.spec.session_id.root,
                 producer=_producer(related, outbox),
@@ -367,7 +367,7 @@ def stalled_acquisitions(
     )
 
 
-def _acquisition_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
+def _acquisition_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:
     """A turn acquiring waits for the session request that carries it forward."""
     found = []
     for row in _acquiring(core.sessions):
@@ -378,7 +378,7 @@ def _acquisition_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wa
         ]
         carried = _carried(core.sessions, core.records.records, (), row.invocation)
         found.append(
-            Wait(
+            OpenWait(
                 waiter=WaitKind.TURN_ACQUISITION,
                 subject=row.invocation.invocation_id.root,
                 producer=Producer.PENDING_REQUEST if carried else _producer(related, outbox),
@@ -387,13 +387,13 @@ def _acquisition_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wa
     return found
 
 
-def _recovery_waits(core: CoreState) -> list[Wait]:
+def _recovery_waits(core: CoreState) -> list[OpenWait]:
     barrier = core.records.recovery
     if not recovery_waits(barrier.phase):
         return []
     live = {row.request_id for row in _live(core)}
     return [
-        Wait(
+        OpenWait(
             waiter=WaitKind.RECOVERY_CHECK,
             subject=check.target.root,
             producer=Producer.PENDING_REQUEST
@@ -405,7 +405,7 @@ def _recovery_waits(core: CoreState) -> list[Wait]:
     ]
 
 
-def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
+def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:
     found = []
     for job in core.evaluation.jobs:
         if job.terminal:
@@ -417,7 +417,7 @@ def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
         ]
         producer = Producer.TIMER if job.pacing.next_at is not None else None
         found.append(
-            Wait(
+            OpenWait(
                 waiter=WaitKind.OWNED_JOB,
                 subject=job.resource_id.root,
                 producer=producer
@@ -440,7 +440,7 @@ def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
         ]
         producer = Producer.TIMER if registered.pacing.next_at is not None else None
         found.append(
-            Wait(
+            OpenWait(
                 waiter=WaitKind.OWNED_JOB,
                 subject=registered.request_id.root,
                 producer=producer
@@ -455,7 +455,7 @@ def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
     return found
 
 
-def _release_waits(core: CoreState) -> list[Wait]:
+def _release_waits(core: CoreState) -> list[OpenWait]:
     """A closing attempt's dependency on a job that is already released.
 
     A job that is still live is named by its own wait above. A closing attempt that still lists
@@ -468,7 +468,7 @@ def _release_waits(core: CoreState) -> list[Wait]:
         if job.resource_id is not None and job.terminal and job.released
     }
     return [
-        Wait(waiter=WaitKind.RELEASE_DEPENDENCY, subject=edge.identity.root, producer=None)
+        OpenWait(waiter=WaitKind.RELEASE_DEPENDENCY, subject=edge.identity.root, producer=None)
         for attempt in core.attempts.attempts
         if attempt.phase in (AttemptPhase.CLOSING, AttemptPhase.BLOCKED)
         for edge in attempt.release_dependencies
@@ -578,7 +578,7 @@ def undispatchable_requests(state: CoreState) -> tuple[RequestId, ...]:
     )
 
 
-def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
+def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:
     """The waits that hang on a turn's checkpoint: its suspension and its interruption.
 
     Core publishes a suspension, and completes an interruption, when the checkpoint of the
@@ -595,7 +595,7 @@ def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
             kinds.append(WaitKind.INTERRUPT)
         related = _checkpoint_records(core.records.records, invocation.invocation)
         found.extend(
-            Wait(
+            OpenWait(
                 waiter=kind,
                 subject=invocation.invocation.invocation_id.root,
                 producer=_producer(related, outbox),
@@ -606,7 +606,7 @@ def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
             # The refund is a signal of the step that retained the checkpoint: no request,
             # event or timer outlives that step, so a claim still waiting has no producer.
             found.append(
-                Wait(
+                OpenWait(
                     waiter=WaitKind.REFUND,
                     subject=invocation.invocation.invocation_id.root,
                     producer=None,
@@ -615,11 +615,11 @@ def _yield_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Wait]:
     return found
 
 
-def _dispatch_waits(core: CoreState) -> list[Wait]:
+def _dispatch_waits(core: CoreState) -> list[OpenWait]:
     """A prepared request waits for the shell to dispatch it, which core must be able to allow."""
     undispatchable = set(undispatchable_requests(core))
     return [
-        Wait(
+        OpenWait(
             waiter=WaitKind.DISPATCH,
             subject=row.request_id.root,
             producer=None if row.request_id in undispatchable else Producer.PENDING_REQUEST,
@@ -629,10 +629,10 @@ def _dispatch_waits(core: CoreState) -> list[Wait]:
     ]
 
 
-def _retry_waits(core: CoreState) -> list[Wait]:
+def _retry_waits(core: CoreState) -> list[OpenWait]:
     """A retryably failed request waits for its backoff timer, which core's clock tick fires."""
     return [
-        Wait(waiter=WaitKind.RETRY, subject=row.request_id.root, producer=Producer.TIMER)
+        OpenWait(waiter=WaitKind.RETRY, subject=row.request_id.root, producer=Producer.TIMER)
         for row in core.records.records
         if row.retry_wait_until is not None
     ]
@@ -645,7 +645,7 @@ def _observes(record: RequestRecord, resource: object) -> bool:
     )
 
 
-def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wait, ...]:
+def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[OpenWait, ...]:
     """Every wait in *core*, each with the producer that will end it.
 
     *outbox* holds the events committed but not yet applied (the shell's pending inputs).
@@ -663,7 +663,7 @@ def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wait, ...]
     )
 
 
-def orphan_waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wait, ...]:
+def orphan_waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[OpenWait, ...]:
     """The waits nothing will end. A terminal run waits on nothing."""
     if core.run.status == RunStatus.TERMINAL:
         return ()
@@ -672,10 +672,10 @@ def orphan_waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[Wai
 
 __all__ = [
     "RESOLUTIONS",
+    "OpenWait",
     "Outcome",
     "Producer",
     "Resolution",
-    "Wait",
     "WaitKind",
     "WaitingPhase",
     "awaiting_refund",

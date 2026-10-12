@@ -79,7 +79,6 @@ from .settlement import (
 from .strategy import (
     Command,
     DecisionFeedback,
-    Finish,
     SearchDeclaration,
     StrategyState,
     Submission,

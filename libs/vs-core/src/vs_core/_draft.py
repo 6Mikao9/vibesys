@@ -73,7 +73,6 @@ def attempt_scope(view: CoreView, attempt: AttemptId, generation: int) -> Scope:
 
 
 def declared_operation(
-    view: CoreView,
     identifier: DecisionId,
     scope: Scope,
     request: OperationRequest,
@@ -126,11 +125,10 @@ class TurnShape:
     workspace: WorkspaceRef | Scope
     access: Access
     output_schema: SchemaRef
-    seconds: float
 
 
 def request_turn[C: Value](
-    view: CoreView, scheme: IdScheme, shape: TurnShape, turn: TurnChain[C], scope: Scope
+    scheme: IdScheme, shape: TurnShape, turn: TurnChain[C], scope: Scope
 ) -> RequestTurn:
     """Build the paid, free, correction or resume turn the chain describes."""
     role, subject = shape.role, shape.subject

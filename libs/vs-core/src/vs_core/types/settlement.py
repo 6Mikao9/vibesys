@@ -10,8 +10,6 @@ from pydantic import Field
 from .common import (
     AssessmentKind,
     AttemptRef,
-    CompletionStatus,
-    DecisionId,
     EvidenceId,
     EvidenceKey,
     EvidenceKind,

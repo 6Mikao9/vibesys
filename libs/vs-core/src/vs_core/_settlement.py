@@ -10,7 +10,6 @@ from .types.common import (
     AssessmentKind,
     CompletionStatus,
     ContractValidationError,
-    DependencyRef,
     EvidenceId,
     EvidenceKey,
     ObservationStatus,
@@ -33,7 +32,7 @@ from .types.strategy import Accepted, Rejected, Settle, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import AttemptRef, DecisionId, InvocationRef, RevisionRef
+    from .types.common import AttemptRef, InvocationRef, RevisionRef
     from .types.evaluation import EvidenceRef
     from .types.kernel import DecisionReceipt, SettlementContext
     from .types.records import RequestRecord

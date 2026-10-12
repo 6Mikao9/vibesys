@@ -1165,7 +1165,7 @@ def _observe(
 
 
 def _deadline_barrier(
-    state: RecordsState, context: RecordsContext, record: RequestRecord, now_at: float
+    state: RecordsState, context: RecordsContext, record: RequestRecord
 ) -> tuple[RecoveryBarrier, InspectRequest | None]:
     if _aggregate_resolution(record, context, state) == "reattached":
         return state.recovery, None
@@ -1335,7 +1335,7 @@ def _deadline(
         # Recovery is gating the run: record the blocked check and inspect once more. A
         # bound passing while the run is live (an executor answered and went silent) blocks
         # the record for the strategy to handle and leaves scheduling open.
-        barrier, inspection = _deadline_barrier(state, context, record, now_at)
+        barrier, inspection = _deadline_barrier(state, context, record)
         if inspection is not None:
             requests.append(_probe(inspection, context))
 
