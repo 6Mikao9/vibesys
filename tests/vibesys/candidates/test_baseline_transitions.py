@@ -52,8 +52,10 @@ def _step(baseline: Baseline, event: Event) -> tuple[Baseline, list[Decision]]:
 
 
 @pytest.mark.parametrize("baseline", SETTLED, ids=lambda item: item.kind)
-def test_a_settled_input_ignores_a_second_ending_of_its_wait(baseline: Baseline) -> None:
-    assert _step(baseline, _ENDED) == (baseline, [])
+def test_a_settled_input_is_never_told_of_a_second_ending_of_its_wait(baseline: Baseline) -> None:
+    """Core tells a decision once that it ended, so a settled input has no arm for it."""
+    with pytest.raises(UnexpectedEvent):
+        _step(baseline, _ENDED)
 
 
 @pytest.mark.parametrize("baseline", OPEN, ids=lambda item: item.kind)
