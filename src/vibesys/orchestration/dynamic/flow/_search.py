@@ -15,7 +15,6 @@ from vibesys.orchestration.dynamic.flow._workstream import workstream
 from vibesys.orchestration.dynamic.search.api import (
     INTERPRET_KIND,
     OPERATIONS,
-    STATE_SCHEMA,
     STRATEGY_ID,
     VERIFY_KIND,
     DynamicConfig,
@@ -36,7 +35,7 @@ from vs_core.api.search import (
     WorkKind,
 )
 
-FLOW_STATE_SCHEMA = SchemaRef(name=STATE_SCHEMA.name, version=3)
+FLOW_STATE_SCHEMA = SchemaRef(name="dynamic.flow-state", version=1)
 """The persisted state is the journal of the flow, not the record the state machine kept."""
 
 DECLARATION = SearchDeclaration(
@@ -73,7 +72,7 @@ DECLARATION = SearchDeclaration(
 
 def dynamic_search(config: DynamicConfig) -> FlowSearch[DynamicConfig]:
     """The dynamic search of one run, as a search core can run and persist."""
-    return FlowSearch(DECLARATION, dynamic, config)
+    return FlowSearch(DECLARATION, dynamic, config, OPERATIONS.registry())
 
 
 async def dynamic(ctx: Flow, config: DynamicConfig) -> None:
