@@ -1298,7 +1298,7 @@ def _deadline(
         # Only a record whose result is still owed ends with a failure. One that already
         # concluded (it is here for its unreleased children) has told its owner already.
         failed = record.failure or _failure(record, event.reason)
-        if previous_block is None:
+        if previous_block is None and not _decision_ended(state, record):
             events = (failed,)
         state = _replace_record(
             state, record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
@@ -1351,6 +1351,21 @@ def _deadline(
         state=state.model_copy(update={"recovery": barrier}),
         requests=tuple(requests),
         events=events,
+    )
+
+
+def _decision_ended(state: RecordsState, record: RequestRecord) -> bool:
+    """Whether another request of the record's decision already ended with a failure.
+
+    A decision hears of its ending once. Its later requests (the submission a measurement
+    still holds open after its observation timed out) end quietly: the owner has moved on.
+    """
+    decision = record.request.decision_id
+    return decision is not None and any(
+        row.failure is not None
+        and row.request.decision_id == decision
+        and row.request_id != record.request_id
+        for row in state.records
     )
 
 

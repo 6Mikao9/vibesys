@@ -340,3 +340,47 @@ def test_a_turn_that_never_started_reaches_the_decision_that_asked_for_it(identi
 
     unasked = core.translate(waiting_turn_state(spec), (ended,))
     assert unasked.events == ()
+
+
+def _with_later_requests(state: core.CoreState, extra: int, gap: float) -> core.CoreState:
+    """The decision's one record plus *extra* more of the same decision that outlast it by *gap*."""
+    (record,) = operations(state)
+    clones = tuple(
+        record.model_copy(
+            update={
+                "request_id": core.RequestId(root=f"w/more/{n}"),
+                "request": record.request.model_copy(
+                    update={"request_id": core.RequestId(root=f"w/more/{n}")}
+                ),
+                "until": core.Until(at=record.until.at + gap),
+            }
+        )
+        for n in range(extra)
+    )
+    records = state.records.model_copy(update={"records": (*state.records.records, *clones)})
+    return state.model_copy(update={"records": records})
+
+
+@given(
+    limit=LIMITS,
+    extra=st.integers(min_value=1, max_value=3),
+    gap=st.floats(min_value=1.0, max_value=100.0, allow_nan=False),
+)
+def test_a_decision_hears_of_its_ending_once_however_many_requests_it_held(
+    limit: float, extra: int, gap: float
+) -> None:
+    """A later request of a decision that already ended with a failure ends quietly."""
+    state, codec = fresh()
+    state = dispatch_all(submit(state, wait(codec, "w", core.Within(limit=limit))).state)
+    state = _with_later_requests(state, extra, gap)
+    first_limit = min(row.until.at for row in operations(state))
+    last_limit = max(row.until.at for row in operations(state))
+
+    first = core.step(state, core.ClockAdvanced(now_at=first_limit))
+    last = core.step(first.state, core.ClockAdvanced(now_at=last_limit))
+
+    (failure,) = failures(first)
+    assert failure.reason is core.FailureReason.TIMED_OUT
+    assert failure.decision == core.DecisionId(root="w")
+    assert [f for f in failures(last) if f.decision is not None] == []
+    assert all(row.failure is not None for row in operations(last.state)), "every request ended"
