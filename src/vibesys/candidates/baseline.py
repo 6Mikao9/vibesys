@@ -274,7 +274,7 @@ def update(  # LW-220406 [PLR0911]; one exhaustive match over (phase, event) is 
             if not isinstance(outcome, EvidenceReadingsBase):
                 undecoded = InputFailure(kind=InputFailureKind.READINGS_UNDECODABLE)
                 return Unmeasurable(attempts=submitted, failure=undecoded), []
-            return _read(submitted, refs, outcome.status, tuple(outcome.readings)), []
+            return input_from_readings(submitted, refs, outcome.status, tuple(outcome.readings)), []
         case Measuring(attempts=submitted) | Interpreting(attempts=submitted), Failed():
             ended = InputFailure(
                 kind=InputFailureKind.WAIT_ENDED, ended=event.reason, cause=event.cause
@@ -297,7 +297,7 @@ def _interpret(refs: tuple[EvidenceRef, ...], measuring: InputMeasurement) -> De
     return Wait(request=request, until=Within(limit=measuring.operation_seconds))
 
 
-def _read(
+def input_from_readings(
     submitted: int,
     refs: tuple[EvidenceRef, ...],
     status: str,

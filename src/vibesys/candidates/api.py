@@ -20,6 +20,7 @@ from vibesys.candidates.baseline import (
     update,
 )
 from vibesys.candidates.config import CandidateConfig
+from vibesys.candidates.flows import adopt, measure_input
 from vibesys.candidates.selection import (
     FINISH,
     PROPOSE,
@@ -61,6 +62,7 @@ __all__ = [
     "NotConfigured",
     "Unmeasurable",
     "Winner",
+    "adopt",
     "assessment",
     "beats_baseline",
     "begin",
@@ -69,6 +71,7 @@ __all__ = [
     "ending_reason",
     "failure",
     "finish",
+    "measure_input",
     "measurement",
     "outcome_of",
     "reading",

@@ -1225,9 +1225,18 @@ from = ["vibesys.orchestration.dynamic.search"]
 expose = ["api", "api\\..*"]
 
 [[modules]]
+path = "vibesys.orchestration.dynamic.flow"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.search", "vibesys.hypothesis", "vibesys.metrics"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.dynamic.flow"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
 path = "vibesys.orchestration.dynamic.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.search", "vibesys.prompts", "vibesys.run.contracts"]
+depends_on = ["vs_core", "vibesys.candidates", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.flow", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.search", "vibesys.prompts", "vibesys.run.contracts"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]

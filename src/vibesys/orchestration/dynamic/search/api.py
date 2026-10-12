@@ -2,7 +2,19 @@
 
 from vibesys.candidates.api import Winner
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
+from vibesys.orchestration.dynamic.search._briefs import (
+    implement_prompt,
+    profile_prompt,
+    review_prompt,
+)
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._context import (
+    PlanWorld,
+    RunningWork,
+    free_slots,
+    offered_parents,
+    remaining,
+)
 from vibesys.orchestration.dynamic.search._ids import (
     BASELINE_KEY,
     IDS,
@@ -30,6 +42,7 @@ from vibesys.orchestration.dynamic.search._parents import (
     resolve,
 )
 from vibesys.orchestration.dynamic.search._plan import PlanCheck, PlanLedger, validate
+from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     HistoryRow,
@@ -55,6 +68,7 @@ from vibesys.orchestration.dynamic.search._schemas import (
     JUDGE_REPLY,
     PLANNER_REPLY,
     PROFILER_REPLY,
+    STRATEGY_ID,
 )
 from vibesys.orchestration.dynamic.search._search import DynamicSearch
 from vibesys.orchestration.dynamic.search._state import (
@@ -68,13 +82,19 @@ from vibesys.orchestration.dynamic.search._values import (
     BlockerKind,
     Failure,
     FailureKind,
+    FinishedWork,
     HypothesisRecord,
     PlanProblem,
     PlanViolation,
     ProblemKind,
+    Proof,
     Role,
     RoundRecord,
+    Unreachable,
+    UnreachableReason,
     ViolationCode,
+    WorkKind,
+    WorkPlan,
 )
 from vibesys.orchestration.dynamic.search._workstream import Workstream
 from vs_core.api.search import ledger_refs, trusted_keys
@@ -90,6 +110,7 @@ __all__ = [
     "PROFILER_REPLY",
     "RENDER_KIND",
     "STATE_SCHEMA",
+    "STRATEGY_ID",
     "VERIFY_KIND",
     "AcceptedReading",
     "Blocker",
@@ -103,6 +124,7 @@ __all__ = [
     "Failure",
     "FailureKind",
     "Finished",
+    "FinishedWork",
     "HistoryRow",
     "HypothesisRecord",
     "ImplementPrompt",
@@ -117,6 +139,7 @@ __all__ = [
     "PlanLedger",
     "PlanProblem",
     "PlanViolation",
+    "PlanWorld",
     "PlannerCorrection",
     "PlannerPrompt",
     "PlannerReask",
@@ -126,24 +149,37 @@ __all__ = [
     "ProfilePrompt",
     "PromptContext",
     "PromptTemplate",
+    "Proof",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
     "ReviewEvaluation",
     "ReviewPrompt",
     "Role",
     "RoundRecord",
+    "RunningWork",
     "Selecting",
+    "Unreachable",
+    "UnreachableReason",
     "VerifyParentRevision",
     "ViolationCode",
     "Winner",
+    "WorkKind",
+    "WorkPlan",
     "Workstream",
+    "free_slots",
+    "implement_prompt",
     "ingest",
     "ledger_refs",
     "measurement_recipe",
+    "offered_parents",
     "options",
     "planning_key",
+    "profile_prompt",
+    "refusal",
+    "remaining",
     "resolve",
     "review_evaluations",
+    "review_prompt",
     "review_refs",
     "trusted_keys",
     "validate",

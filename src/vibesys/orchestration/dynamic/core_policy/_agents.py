@@ -17,6 +17,7 @@ from vibesys.orchestration.dynamic.models import (
     ReviewResult,
     planner_reply_type,
 )
+from vibesys.orchestration.dynamic.flow.api import dynamic_search
 from vibesys.orchestration.dynamic.search.api import (
     IDS,
     IMPLEMENTER_REPLY,
@@ -24,7 +25,6 @@ from vibesys.orchestration.dynamic.search.api import (
     OPERATIONS,
     PLANNER_REPLY,
     PROFILER_REPLY,
-    DynamicSearch,
     PromptContext,
     Role,
 )
@@ -46,8 +46,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vibesys.orchestration.dynamic.search.api import DynamicConfig, DynamicState
-    from vs_core.api import SchemaRef, Value
+    from vibesys.orchestration.dynamic.search.api import DynamicConfig
+    from vs_core.api import FlowState, SchemaRef, Value
 
 
 class ImplementerReplyModel(WaitableReply[ImplementerResult]):
@@ -136,10 +136,10 @@ def reply_schemas(config: DynamicConfig) -> Mapping[SchemaRef, type[BaseModel]]:
     return {item.schema: item.reply for item in agents(config)}
 
 
-def build_search(config: DynamicConfig) -> AgentTurns[DynamicState, DynamicConfig]:
+def build_search(config: DynamicConfig) -> AgentTurns[FlowState, DynamicConfig]:
     """The dynamic search of one run, wrapped in the agent pipeline."""
     return AgentTurns(
-        DynamicSearch(config),
+        dynamic_search(config),
         agents=agents(config),
         protocol=PROTOCOL,
         operations=OPERATIONS,

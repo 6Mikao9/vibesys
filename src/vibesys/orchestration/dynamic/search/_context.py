@@ -8,6 +8,7 @@ text.
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Protocol
 
 from vibesys.candidates.api import Baseline, failure, reading
 from vibesys.metrics import reading_of
@@ -27,9 +28,29 @@ from vibesys.orchestration.dynamic.search._values import (
     FinishedWork,
     HypothesisRecord,
     WorkKind,
+    WorkPlan,
 )
-from vibesys.orchestration.dynamic.search._workstream import Workstream
 from vs_core.api.search import EvidenceKind, RevisionRef, RunView
+
+
+class RunningWork(Protocol):
+    """What the planner is told of a workstream that has not finished."""
+
+    @property
+    def plan(self) -> WorkPlan:
+        """What the workstream was scheduled to do."""
+        ...
+
+    @property
+    def sequence(self) -> int:
+        """Its position in the order workstreams were scheduled."""
+        ...
+
+    @property
+    def parent(self) -> RevisionRef:
+        """The revision it builds on."""
+        ...
+
 
 _HISTORY_ROWS = 20
 _HISTORY_TITLE_CHARS = 200
@@ -96,7 +117,7 @@ def _profile_row(
     sequence: int,
     plan_fields: tuple[str, ...],
     work: FinishedWork | None,
-    running: Workstream | None,
+    running: RunningWork | None,
 ) -> ProfileHistoryRow:
     """A profile workstream as the planner sees it: running, or what its capture established."""
     source = work if work is not None else running
@@ -172,7 +193,7 @@ class PlanWorld:
     base: RevisionRef
     baseline: Baseline
     hypotheses: tuple[HypothesisRecord, ...]
-    running: tuple[Workstream, ...]
+    running: tuple[RunningWork, ...]
     finished: tuple[FinishedWork, ...]
     refunded: int
     offered: tuple[ParentOption, ...]
