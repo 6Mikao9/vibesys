@@ -201,8 +201,9 @@ class SimulatedRun:
             self._take_snapshots(self._pristine, offered | {point})
         snapshot = self._snapshots[point]
         outside = snapshot.outside.copy()
-        # The next host starts after the dead one's lease has expired.
-        clock_at = self._started.clock_at + LEASE + 1
+        # The next host starts after the dead one's lease has expired, however far the dead
+        # host's clock had run by the crash (a run that waits out a limit runs it far ahead).
+        clock_at = max(self._started.clock_at + LEASE, snapshot.outside.store.lease_ends_at) + 1
         run = _run_host(outside, self._options, clock_at, None)
         started = Start(
             clock_at=clock_at,

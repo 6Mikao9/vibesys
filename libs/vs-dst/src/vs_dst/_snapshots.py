@@ -83,6 +83,8 @@ class RecordingStore(FakeStateStore):
         """Start empty, watched by nobody."""
         super().__init__()
         self.commits = 0
+        self.lease_ends_at = 0.0
+        """The latest moment the committing hosts held the lease until, as the commits showed it."""
         self.watcher: Snapshots | None = None
 
     def __deepcopy__(self, memo: dict[int, object]) -> RecordingStore:
@@ -100,6 +102,7 @@ class RecordingStore(FakeStateStore):
         """Commit, with the watcher told just before the store changes and just after."""
         index = self.commits
         self.commits += 1
+        self.lease_ends_at = max(self.lease_ends_at, fence.expires_at, now)
         if self.watcher is not None:
             self.watcher.take(CrashPoint(CrashKind.BEFORE_COMMIT, index))
         outcome = super().commit(expected_revision, envelope, fence, now)

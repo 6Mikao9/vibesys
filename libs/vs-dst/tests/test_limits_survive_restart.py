@@ -27,8 +27,6 @@ if TYPE_CHECKING:
 
 RUN_DEADLINE = 1_500.0
 """Short, so that the virtual clock has little to wait through for an unanswered request."""
-EARLY = 15
-"""Crash points after the first commits are not probed: the run is long once it waits."""
 
 
 class SilentDiscard(TinyWorld):
@@ -63,9 +61,7 @@ def test_a_committed_request_keeps_its_limit_through_a_crash_and_restart() -> No
     assert reference.failure.limit_at == reference.until.at
 
     with using_crash_point_policy(EVERY_POINT):
-        points = sorted(
-            (point for point in normal.crash_points() if point.commit < EARLY), key=_in_time_order
-        )
+        points = sorted(normal.crash_points(), key=_in_time_order)
     kept = []
     for crash in points:
         recovered = normal.rerun_with_crash(crash)
