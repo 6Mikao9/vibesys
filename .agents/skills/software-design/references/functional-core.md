@@ -165,16 +165,18 @@ The core imports no I/O library or interface. Shared pure value contracts may
 live in pure libraries; do not import mixed I/O APIs for their types. Preserve
 one-way dependencies and the [placement rule](../../../../docs/contributing/architecture.md).
 
-## Worked example: DynamicStrategy
+## Worked example: DynamicSearch
 
-Read [DynamicStrategy](../../../../src/vibesys/orchestration/dynamic/strategy/_strategy.py)
-and its [scenario tests](../../../../tests/vibesys/orchestration/dynamic/strategy/test_scenarios.py).
-`decide` is a pure function of the strategy state, the `RunView` and the static
-config. It returns requests (start an attempt, plan, judge, stop) and never
-starts anything. `on_event` folds one typed feedback into the next state. The
-shell executes each request through its interface and feeds the observation
-back. Slot and budget decisions need no async execution, and restart replays
-the committed intent against the same identities.
+Read [DynamicSearch](../../../../src/vibesys/orchestration/dynamic/search/_search.py)
+and its [scenario tests](../../../../tests/vibesys/orchestration/dynamic/search/test_scenarios.py).
+`update(state, event, view)` is a pure function of the search state, one event
+and the read-only `RunView`. It returns the next state and decisions (wait for a
+request, wake at a time, finish) and never starts anything. Each part of the
+run is a machine with a phase per kind of wait, and `Children` routes an event
+to the machine whose decision it answers. The shell executes each request
+through its interface and feeds the result back as the next event. Slot and
+budget decisions need no async execution, and restart replays the committed
+decisions against the same identities.
 
 ## When not to use it
 
