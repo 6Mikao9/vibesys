@@ -280,6 +280,10 @@ def update(  # noqa: PLR0911  # LW-220406 [PLR0911]; one exhaustive match over (
                 kind=InputFailureKind.WAIT_ENDED, ended=event.reason, cause=event.cause
             )
             return Unmeasurable(attempts=submitted, failure=ended), []
+        case Measured() | Unmeasurable() | NotConfigured(), Failed():
+            # Core ends a record that stays open (an unanswered observation) again at the run
+            # deadline; the baseline already took its answer from the first ending.
+            return baseline, []
         case _:
             raise UnexpectedEvent(baseline, event)
 
