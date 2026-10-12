@@ -11,8 +11,10 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .proof_digest import value_digest
 from .test_attempt_retirement import fixture, retirement
 from .test_measurements import plan as measurement_plan
+from .test_session_turns import invocation, scope, turn, waiting_turn_state
 from .wait_support import (
     dispatch_all,
     failures,
@@ -297,3 +299,44 @@ def test_unanswered_cleanup_ends_at_its_budget_and_only_core_hears_of_it(budget:
     heard = core.translate(ended.state, ended.events)
     assert [e for e in heard.events if isinstance(e, core.Failed)] == []
     assert {d.reason for d in heard.discarded} == {core.DiscardReason.INTERNAL_FAILURE}
+
+
+@given(identity=st.text("abcdefgh", min_size=1, max_size=6))
+def test_a_turn_that_never_started_reaches_the_decision_that_asked_for_it(identity: str) -> None:
+    """A stalled acquisition ends the turn with an observation that names no request.
+
+    The search still asked for that turn, so it hears `TurnEnded` for its decision, found by
+    the receipt of the `RequestTurn`; a turn nobody asked for is core's own and stays quiet.
+    """
+    spec = turn(identity)
+    asked = core.RequestTurn(decision_id=core.DecisionId(root="ask"), scope=scope(), turn=spec)
+    receipt = core.DecisionReceipt(
+        decision_id=asked.decision_id,
+        decision=asked,
+        payload_digest=value_digest(asked),
+        feedback=core.Accepted(decision_id=asked.decision_id),
+    )
+    state = waiting_turn_state(spec)
+    run = state.run.model_copy(update={"receipts": (receipt,)})
+    seeded = state.model_copy(update={"run": run})
+    ended = core.TurnResult(
+        invocation=invocation(spec),
+        observation=core.Observation(
+            event_id=core.EventId(root=f"acquisition-stalled:{identity}"),
+            request_id=core.RequestId(root=f"acquisition-stalled:{identity}"),
+            scope=scope(),
+            sequence=0,
+            observed_at=1.0,
+            status=core.ObservationStatus.CANCELLED,
+            terminal=True,
+            released=True,
+            children_complete=True,
+        ),
+    )
+
+    heard = core.translate(seeded, (ended,))
+    assert heard.events == (core.TurnEnded(decision=asked.decision_id, result=ended),)
+    assert heard.discarded == ()
+
+    unasked = core.translate(waiting_turn_state(spec), (ended,))
+    assert unasked.events == ()

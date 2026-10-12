@@ -46,7 +46,7 @@ from .types.search import (
 from .types.session_inputs import InputDelivered, InputDropped
 from .types.sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
 from .types.settlement import AdoptionFailed, AdoptionResult, AttemptSettled
-from .types.strategy import Rejected
+from .types.strategy import Rejected, RequestTurn
 from .types.until import Failed, FailureReason
 
 if TYPE_CHECKING:
@@ -166,8 +166,29 @@ def _rejected(core: CoreState, event: Rejected) -> Event:
     return Failed(reason=FailureReason.REFUSED, decision=event.decision_id, cause=event.code)
 
 
+def _never_started(core: CoreState, event: TurnResult) -> DecisionId | None:
+    """The decision of a turn that ended with no request of its own, else None.
+
+    A turn whose acquisition stalled never reached an executor, so core ended it with an
+    observation that names no request. The receipt of the ``RequestTurn`` that asked for it
+    is the only place that still names the decision.
+    """
+    return next(
+        (
+            receipt.decision_id
+            for receipt in core.run.receipts
+            if isinstance(receipt.decision, RequestTurn)
+            and receipt.decision.turn.invocation_id == event.invocation.invocation_id
+        ),
+        None,
+    )
+
+
 def _turn(core: CoreState, event: TurnResult) -> Event | Discarded | None:
     request = event.observation.request_id
+    if not any(record.request_id == request for record in core.records.records):
+        decision = _never_started(core, event)
+        return None if decision is None else TurnEnded(decision=decision, result=event)
     decision = _decision_of(core, request)
     if decision is None:
         return None
