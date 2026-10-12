@@ -15,12 +15,16 @@ from vs_core.testing.drive import (
     Unknown,
     new_run,
 )
+from vs_core.testing.flows import Asked, FakeView, FlowRun
 from vs_core.testing.liveness import Budget, Journal, Violation, liveness
 
 __all__ = [
     "Answer",
+    "Asked",
     "Budget",
     "Failed",
+    "FakeView",
+    "FlowRun",
     "Harness",
     "Journal",
     "Retryable",
