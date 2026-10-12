@@ -18,6 +18,7 @@ from tests.vibesys.orchestration.dynamic.search._replies import (
     implemented,
     plan_reply,
 )
+from tests.vibesys.orchestration.dynamic.search._run import dynamic_state
 from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vibesys.hypothesis import HypothesisStrategy
@@ -83,11 +84,10 @@ def test_every_retirement_the_planner_schema_allows_leaves_a_persistable_state(
     )
 
     run = simulate(world)
-    state = run.state.inner
+    state = dynamic_state(run)
 
     assert run.finished
     assert not run.liveness_violations
-    assert isinstance(state, DynamicState)
 
     retired = next(item for item in state.hypotheses if item.hypothesis_id == "h1")
     assert retired.strategy is HypothesisStrategy(disposition)

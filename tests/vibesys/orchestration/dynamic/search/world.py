@@ -206,13 +206,14 @@ class DynamicWorld:
         if hosted:
             suspend: LifecycleCapability = "suspend"
             capabilities |= {suspend}
+        state_model = build_search(selected).state_model
         self.setup = RunSetup(
             new_launch=lambda: Launch(search=_search(selected, refuses), config=selected),
             harness=Harness(
                 registry=dynamic_operation_registry(),
                 facts=FACTS,
                 limits=limits,
-                envelope_type=RunEnvelope[build_search(selected).state_model],
+                envelope_type=RunEnvelope[state_model],
                 requirements=requirements_for(selected),
                 deadline_at=deadline_at,
                 lifecycle=capabilities,

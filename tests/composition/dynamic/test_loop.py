@@ -64,7 +64,6 @@ def _assert_long_text_kept_whole_yet_history_bounded(
     for field in ("hypothesis", "task", "pass_criteria"):
         assert attempt["plan"][field] == long
     assert attempt["summary"] == long
-    assert attempt["next_step"] == long
     second_prompt = agents.prompts(ORCHESTRATOR.id)[1]
     assert len(second_prompt) < 20_000
     assert long not in second_prompt
@@ -198,12 +197,16 @@ def test_every_kind_of_planner_mistake_is_corrected_in_one_run(tmp_path: Path) -
     assert len(planner) == 2 + 1 + 1 + 1 + 1
     # A lost turn is asked again as it was; each mistake is corrected by naming it.
     assert all("Correction required" not in prompt for prompt in planner[:3])
-    assert _SCHEMA_ERRORS in planner[3]
-    assert "Correction required" in planner[4]
-    assert "workstreams.0.implement.hypothesis_id" in planner[4]
-    assert "'0 ' is not a valid identifier" in planner[4]
+    # A provider schema failure is a typed turn failure: the planner is told the turn ended
+    # without a reply and why (the executor's schema message is not carried into the prompt).
+    assert "Correction required" in planner[3]
+    assert "provider_failed" in planner[3]
+    # A second schema failure in a row is reported as an unusable plan; the executor's
+    # schema message (which field, which pattern) is not carried into the prompt.
+    assert "did not produce a usable plan" in planner[4]
+    assert "provider_failed" in planner[4]
     assert "Correction required" in planner[5]
-    assert "'Q9' cannot be continued" in planner[5]
+    assert "`workstreams.0.hypothesis_id`: `Q9` is not in the history" in planner[5]
     records = CoreRecords(loop_input, run.run_id)
     assert records.outcome == ("terminal", "success")
     assert {item["hypothesis_id"] for item in records.strategy["hypotheses"]} == set(odd)
@@ -263,7 +266,7 @@ def test_implementer_and_judge_faults_in_parallel_workstreams_leave_the_others_u
     rounds = {item["hypothesis_id"]: item["rounds"] for item in records.strategy["hypotheses"]}
     (lost_round,) = rounds["A"]
     assert not lost_round["eligible"]
-    assert "lost" in lost_round["failure"]
+    assert lost_round["failure"]["ended"] == "lost"
     assert rounds["B"][-1]["metrics"][0]["value"] == 4.0
     assert rounds["C"][0]["eligible"]
     selection = records.selection
@@ -405,10 +408,11 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
     assert re.search(r"progress 38(\.0)? of 72(\.0)? rounds", buildable)
     # No input and no candidate is trusted: the run fails, with a typed reason and counts.
     assert (run.succeeded, run.status) == (False, RunStatus.FAILED)
-    assert records.strategy["baseline"]["stage"] == "unmeasurable"
+    assert records.baseline["kind"] == "unmeasurable"
     assert records.outcome == ("terminal", "failure")
     assert records.run["result"]["reason"].startswith("no trusted result")
-    assert "warmup stopped: 1/72 rounds" in records.run["result"]["reason"]
+    assert records.run["result"]["reason"] == "no trusted result: benchmark-failed"
+    assert records.baseline["failure"]["output"] == "warmup stopped: 1/72 rounds"
     assert records.selection is None
     assert run.result is not None
     failure = run.result.failure

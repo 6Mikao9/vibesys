@@ -17,6 +17,7 @@ from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 from tests.vibesys.orchestration.dynamic.search._views import evidence_ref, revision
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
+from vibesys.candidates.api import NotConfigured
 from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
 
 # test-isolation: PlanWorld is the search's internal projection of its state into the planner's
@@ -41,7 +42,6 @@ from vibesys.orchestration.dynamic.search.api import (
     ProfileHistoryStatus,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vibesys.candidates.api import NotConfigured
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,

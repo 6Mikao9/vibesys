@@ -23,7 +23,7 @@ from vs_dst.api import simulate
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_core.api import Command, RunResultProposal
+    from vs_core.api import RunResultProposal
 
 # A run asks core for a few dozen requests (workspaces, sessions, turns, measurements).
 # Generous, but far below a request loop that never ends.
@@ -46,7 +46,7 @@ def _world(measurement: Input, *, candidate_found: bool) -> DynamicWorld:
     )
 
 
-def _stop(decisions: Sequence[Command]) -> RunResultProposal:
+def _stop(decisions: Sequence[object]) -> RunResultProposal:
     final = decisions[-1]
     assert isinstance(final, Finish), "the run never reached a terminal decision"
     return final.result

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
         RunView,
         Search,
         SearchDeclaration,
+        StrategyState,
     )
 
 type Refuses = Callable[[DecisionId], RejectionCode | None]
@@ -40,7 +41,7 @@ def decision_id(decision: Decision) -> DecisionId | None:
     return getattr(work, "decision_id", None)
 
 
-class Refusing[S, C]:
+class Refusing[S: StrategyState, C]:
     """``inner`` with the decisions ``refuses`` names turned into refusals."""
 
     def __init__(self, inner: Search[S, C], refuses: Refuses) -> None:
@@ -90,4 +91,4 @@ class Refusing[S, C]:
 
 def as_search(search: Refusing[Any, Any]) -> Search[Any, Any]:
     """``search`` as the protocol a launch takes (it has every member of it)."""
-    return search  # ty: ignore[invalid-return-type]
+    return search

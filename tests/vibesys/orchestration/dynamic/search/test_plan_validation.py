@@ -11,7 +11,6 @@ from tests.vibesys.orchestration.dynamic.search._replies import implement, plan_
 from vibesys.orchestration.dynamic.models import PortfolioPlan
 from vibesys.orchestration.dynamic.search.api import PlanCheck, PlanLedger, validate
 
-
 _LEDGER = PlanLedger(hypotheses=(), running=frozenset(), profile_ids=frozenset())
 
 

@@ -128,7 +128,11 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     """
     services = host.services
     shell = CoreRuntime(
-        services.store, services.strategy, services.state, bindings=services.bindings
+        services.store,
+        services.search,
+        services.state,
+        config=services.config,
+        bindings=services.bindings,
     )
     delivery = JournalPublicationDelivery(
         services.publications, services.bindings.registry, services.store

@@ -427,6 +427,7 @@ def _run(
         store,
         search,
         new_run(search, harness),
+        config=selected,
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
             commits=_PauseClock(clock, paused),

@@ -57,7 +57,7 @@ def test_no_better_candidate_keeps_a_trusted_input_and_still_succeeds(tmp_path: 
     assert (run.succeeded, run.status) == (True, RunStatus.COMPLETED)
     assert agents.unscripted == []
     records = CoreRecords(loop_input, run.run_id)
-    assert records.strategy["baseline"]["stage"] == "measured"
+    assert records.baseline["kind"] == "measured"
     assert records.outcome == ("terminal", "success")
     assert records.run["result"]["reason"].startswith("no improvement")
     assert records.selection is not None

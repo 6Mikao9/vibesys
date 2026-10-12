@@ -12,6 +12,7 @@ from vibesys.orchestration.dynamic.core_policy.api import (
 )
 from vibesys.orchestration.dynamic.search.api import (
     DynamicConfig,
+    DynamicState,
 )
 from vs_core.api import (
     ArtifactId,
@@ -26,6 +27,8 @@ from vs_core.testing.liveness import Budget, End, Journal, assert_live
 
 if TYPE_CHECKING:
     from tests.vibesys.orchestration.dynamic.search._executors import Executors
+
+    from vs_dst.api import SimulatedRun
 
 
 def config(**overrides: object) -> DynamicConfig:
@@ -89,3 +92,10 @@ def run(
 
 def kinds(trace: Trace[Any]) -> list[str]:
     return [type(item).__name__ for item in works(trace.decisions)]
+
+
+def dynamic_state(finished: SimulatedRun) -> DynamicState:
+    """The dynamic search's own state inside the agent pipeline's wrapper."""
+    inner = getattr(finished.state, "inner", None)
+    assert isinstance(inner, DynamicState), type(finished.state)
+    return inner

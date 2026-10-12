@@ -16,12 +16,9 @@ from vibesys.orchestration.dynamic.core_policy.api import (
 )
 from vibesys.orchestration.dynamic.search.api import (
     DynamicState,
+    PromptContext,
 )
-from vibesys.orchestration.issue_queue.strategy.api import (
-    IssueQueueStrategyState,
-    plain_operation_registry,
-)
-from vs_core.api import RunEnvelope
+from vs_core.api import Piped, RunEnvelope
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,10 +38,18 @@ class LoopSpec:
 
 def _dynamic_core(envelope: str) -> CoreState:
     codec = dynamic_operation_registry()
-    return codec.decode_envelope(RunEnvelope[DynamicState], envelope).core
+    return codec.decode_envelope(RunEnvelope[Piped[DynamicState, PromptContext]], envelope).core
 
 
 def _plain_core(envelope: str) -> CoreState:
+    # lint-waiver: LW-220407 [PLC0415]; the plain strategy is not yet on the search API.
+    # > A module-level import makes the dynamic loop's tests fail to import while the plain
+    # > strategy is unported; a loader wrapper hides one temporary use. Restore it with the port.
+    from vibesys.orchestration.issue_queue.strategy.api import (  # noqa: PLC0415
+        IssueQueueStrategyState,
+        plain_operation_registry,
+    )
+
     codec = plain_operation_registry()
     return codec.decode_envelope(RunEnvelope[IssueQueueStrategyState], envelope).core
 

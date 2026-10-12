@@ -714,8 +714,9 @@ class CoreRecords:
 
     @property
     def strategy(self) -> dict[str, Any]:
-        """Return the strategy's committed state."""
-        return self.envelope["strategy"]
+        """Return the search's committed dynamic state (inside the strategy wrapper)."""
+        wrapper = self.envelope["strategy"]
+        return wrapper.get("inner", wrapper)
 
     @property
     def run(self) -> dict[str, Any]:
@@ -733,21 +734,35 @@ class CoreRecords:
         """Return the run's selected result, if any."""
         return (self.run.get("result") or {}).get("selection")
 
+    @property
+    def baseline(self) -> dict[str, Any]:
+        """Return the input baseline's machine (kind, attempts, reading, failure)."""
+        (member,) = (
+            item for item in self.strategy["parts"]["members"] if item["key"] == "baseline"
+        )
+        return member["machine"]
+
     def baseline_metric(self) -> float | None:
         """Return the trusted baseline's first metric value, if it was measured."""
-        baseline = self.strategy["baseline"]
-        return baseline["metrics"][0]["value"] if baseline["metrics"] else None
+        reading = self.baseline.get("reading") or {}
+        metrics = reading.get("metrics") or []
+        return metrics[0]["value"] if metrics else None
 
     def attempt(self, hypothesis_id: str, sequence: int | None = None) -> dict[str, Any]:
-        """Return the strategy's record of one attempt (the last of the hypothesis by default)."""
+        """Return one finished workstream joined with its round (the last by default)."""
         rows = [
             row
-            for row in self.strategy["attempts"]
+            for row in self.strategy["finished"]
             if row["plan"]["work_id"] == hypothesis_id
             and (sequence is None or row["sequence"] == sequence)
         ]
         assert rows, f"no attempt of {hypothesis_id!r}"
-        return rows[-1]
+        row = dict(rows[-1])
+        for hypothesis in self.strategy["hypotheses"]:
+            for round_ in hypothesis["rounds"]:
+                if round_["sequence"] == row["sequence"]:
+                    row = {**round_, **row}
+        return row
 
     def publications(self) -> bytes:
         """Return the run's journaled publications."""

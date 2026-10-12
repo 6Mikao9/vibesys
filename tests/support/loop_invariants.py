@@ -230,6 +230,10 @@ def terminal_status(records: RunRecords) -> list[Violation]:
             return [Violation(Invariant.EMPTY_COMPLETION, "completed with zero workstreams")]
     if status == "completed" and records.envelope is not None:
         strategy = records.envelope.get("strategy")
+        # The dynamic search wraps its state: the hypotheses live in the wrapper's inner state.
+        if isinstance(strategy, dict):
+            inner = strategy.get("inner")
+            strategy = inner if isinstance(inner, dict) else strategy
         if isinstance(strategy, dict) and not _list(strategy, "hypotheses"):
             return [Violation(Invariant.EMPTY_COMPLETION, "completed with zero hypotheses")]
     return record_agreement(records, str(status))

@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
-    from vs_core.api import CoreState, LifecycleCapability, Strategy
+    from vs_core.api import CoreState, LifecycleCapability, Search
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
@@ -168,7 +168,8 @@ class CoreServices:
     """
 
     run_id: str
-    strategy: Strategy[Any]
+    search: Search[Any, Any]
+    config: object
     state: CoreState
     bindings: CoreRuntimeBindings
     catalog: OperationCatalog
@@ -206,7 +207,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         evidence = ReceiptEvidenceLedger(receipt_store)
         bridge = _agent_bridge(plan, resources, receipt_store, evidence)
         catalog = _catalog(policy, plan, resources, artifacts, evidence)
-        catalog.require_owned(plan.strategy.declaration)
+        catalog.require_owned(plan.search.declaration)
         resolver = ProductionSessionResolver(
             ResolverInputs(
                 roles=resources.roles,
@@ -232,7 +233,8 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     )
     return CoreServices(
         run_id=run_id,
-        strategy=plan.strategy,
+        search=plan.search,
+        config=plan.config,
         state=state,
         bindings=replace(bindings, commits=resources.commit_observer),
         catalog=catalog,
@@ -298,7 +300,7 @@ def _initial_state(
     return new_core_state(
         resources.run_id,
         plan.facts,
-        plan.strategy.declaration,
+        plan.search.declaration,
         offered=catalog,
         startup=CoreStartup(
             deadline_at=resources.clock.now() + plan.deadline_seconds,

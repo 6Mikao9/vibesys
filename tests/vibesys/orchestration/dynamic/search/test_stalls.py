@@ -140,7 +140,7 @@ def test_a_start_core_refuses_leaves_the_other_workstreams_to_finish(
 class StopAfter(DynamicWorld):
     """A world whose operator stops the run once ``requests`` requests have been executed."""
 
-    def __init__(self, requests: int, **options: Any) -> None:  # noqa: ANN401  # the world's options are the base world's own, which this subclass only passes on.
+    def __init__(self, requests: int, options: dict[str, Any]) -> None:
         """Stop after the ``requests``-th executed request (0: before any)."""
         super().__init__(**options)
         self._requests = requests
@@ -213,7 +213,7 @@ HALTS = (ContractError, ObservationRejectedError)
     ],
 )
 def test_a_stop_at_any_position_ends_the_run_with_every_attempt_closed(position: int) -> None:
-    run = simulate(StopAfter(position, **_options()))
+    run = simulate(StopAfter(position, _options()))
     assert_ended_closed(run)
     result = run.core.run.result
     assert result is not None

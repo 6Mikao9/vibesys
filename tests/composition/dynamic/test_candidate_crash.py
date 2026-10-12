@@ -111,8 +111,10 @@ def test_a_crashing_candidate_is_measured_by_its_class_and_the_planner_reads_the
     assert run.error is None
     assert agents.unscripted == []
     records = CoreRecords(loop_input, run.run_id)
-    assert records.attempt("A")["measurements"] == 2
-    assert records.attempt("B")["measurements"] == 1
+    # The search keeps no per-attempt submission count; the cluster's jobs prove it: the input
+    # (1), A measured twice (2) and B once (1).
+    assert killed in records.attempt("A")["failure_tail"]
+    assert reported in records.attempt("B")["failure_tail"]
     assert loop_input.sbatch_count() == 1 + 2 + 1
     # The last plan is the first that sees both finished candidates.
     prompt = agents.prompts(ORCHESTRATOR.id)[-1]
