@@ -7,7 +7,7 @@ measure, which lets the search design and open rounds without a baseline to buil
 
 from __future__ import annotations
 
-from tests.vibesys.orchestration.single.search._refusals import decision_id
+from tests.support.refusing_search import decision_id
 from tests.vibesys.orchestration.single.search._views import empty_view
 from tests.vibesys.orchestration.single.search.world import (
     FACTS,

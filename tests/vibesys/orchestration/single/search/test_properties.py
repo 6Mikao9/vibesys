@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.single.search._decisions import works
+from tests.support.search_decisions import works
 from tests.vibesys.orchestration.single.search.world import (
     FACTS,
     SingleWorld,

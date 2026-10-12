@@ -11,7 +11,7 @@ from __future__ import annotations
 from hypothesis import HealthCheck, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
-from tests.vibesys.orchestration.single.search._refusals import decision_id
+from tests.support.refusing_search import decision_id
 from tests.vibesys.orchestration.single.search._views import empty_view
 from tests.vibesys.orchestration.single.search.world import FACTS, SingleWorld, single_config
 

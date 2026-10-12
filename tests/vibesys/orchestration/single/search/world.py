@@ -19,8 +19,8 @@ import json
 from typing import TYPE_CHECKING, Any, Literal
 
 from tests.support.checkpoint_faults import FaultyCheckpoints
-from tests.vibesys.orchestration.single.search._refusals import Refuses, Refusing, as_search
-from tests.vibesys.orchestration.single.search._waiting import WAITING, WaitingTurns
+from tests.support.refusing_search import Refuses, Refusing, as_search
+from tests.support.waiting_turns import WAITING, WaitingTurns
 
 from vibesys.orchestration.single.core_policy.api import (
     build_search,

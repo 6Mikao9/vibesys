@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.vibesys.orchestration.single.search._decisions import works
+from tests.support.search_decisions import works
 from tests.vibesys.orchestration.single.search.world import SingleWorld
 
 from vs_core.api import Finish, ProposeWinner, RequestTurn, StartAttempt

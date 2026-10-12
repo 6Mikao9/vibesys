@@ -39,7 +39,7 @@ _ROLE = AgentRole(
     id="agent", system_prompt="agent", extra_tools=(AgentTool(id=EVALUATION_TOOL_ID),)
 )
 # The bridge keeps its owed-submission records in files; a world has no directory of its own.
-_SCRATCH = tempfile.TemporaryDirectory(prefix="multi-world-")
+_SCRATCH = tempfile.TemporaryDirectory(prefix="search-world-")
 
 
 class _Workspace:

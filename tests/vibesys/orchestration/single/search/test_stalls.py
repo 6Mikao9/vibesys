@@ -28,7 +28,7 @@ from vs_core.api import (
 from vs_dst.api import SimulatedRun, simulate
 
 if TYPE_CHECKING:
-    from tests.vibesys.orchestration.single.search._refusals import Refuses
+    from tests.support.refusing_search import Refuses
 
     from vs_core.api import DecisionId, Request
     from vs_runtime.api.core import CoreRuntime, ExecutionResult

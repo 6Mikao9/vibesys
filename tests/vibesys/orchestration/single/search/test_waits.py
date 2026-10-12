@@ -10,7 +10,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.checkpoint_faults import CHECKPOINTS
-from tests.vibesys.orchestration.single.search._decisions import works
+from tests.support.search_decisions import works
 from tests.vibesys.orchestration.single.search.world import ENDINGS, Ending, SingleWorld
 
 from vs_core.api import AttemptPhase, Settle, Withdraw
