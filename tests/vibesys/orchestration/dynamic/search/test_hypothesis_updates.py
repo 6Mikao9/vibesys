@@ -83,7 +83,7 @@ def test_every_retirement_the_planner_schema_allows_leaves_a_persistable_state(
     )
 
     run = simulate(world)
-    state = run.state
+    state = run.state.inner
 
     assert run.finished
     assert not run.liveness_violations

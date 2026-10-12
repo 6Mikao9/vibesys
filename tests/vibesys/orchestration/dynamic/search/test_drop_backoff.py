@@ -19,7 +19,7 @@ def test_the_backoff_never_shrinks_never_passes_the_cap_and_starts_at_the_base(
 ) -> None:
     policy = config(turn_drop_backoff_seconds=base, turn_drop_backoff_cap_seconds=cap)
 
-    waits = [policy.drop_backoff(n) for n in range(drops + 1)]
+    waits = [policy.backoff.delay(n) for n in range(drops + 1)]
 
     assert waits[0] == min(base, cap)
     assert all(0 < wait <= cap for wait in waits)

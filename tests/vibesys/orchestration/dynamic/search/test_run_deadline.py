@@ -1,7 +1,7 @@
 """A run whose remaining time is shorter than a role's turn budget still asks its turns.
 
-`[run] max_run_seconds` becomes core's run deadline, and core rejects a turn whose own
-deadline lies past it. The per-role turn budgets (`planner_turn_seconds` 30 min,
+`[run] max_run_seconds` becomes core's run deadline, and core caps the wait of a turn at it.
+The per-role turn budgets (`planner_turn_seconds` 30 min,
 `implementer_turn_seconds` 2 h by default) are upper bounds on one turn, not a
 requirement that the run have that much time left: a turn asked near the end of a run
 is bounded by the run's deadline. These tests drive whole runs on the real core with
@@ -16,7 +16,7 @@ from tests.vibesys.orchestration.dynamic.search._decisions import works
 from tests.vibesys.orchestration.dynamic.search._run import config
 from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
-from vs_core.api import DispatchTurn, RequestTurn, ResumeSessionTurn
+from vs_core.api import RequestTurn
 from vs_dst.api import SimulatedRun, simulate
 
 
@@ -42,11 +42,3 @@ def test_a_run_shorter_than_a_turn_budget_asks_its_turns_within_the_run(
         "dynamic-orchestrator",
         "dynamic-implementer",
     }
-    # Core bounds what it dispatches; the strategy's own turn budget stays an upper bound.
-    dispatched = [
-        record.request
-        for record in trace.core.records.records
-        if isinstance(record.request, DispatchTurn | ResumeSessionTurn)
-    ]
-    assert dispatched
-    assert all(request.deadline_at <= deadline_at for request in dispatched)

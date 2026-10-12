@@ -14,22 +14,24 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.dynamic.search._views import empty_view, evidence_ref, revision
+from tests.vibesys.orchestration.dynamic.search._views import evidence_ref, revision
 
 import vibesys.orchestration.dynamic.core_policy.prompts as templates
 from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
 
-# test-isolation: planner_prompt is the strategy's internal projection of its ledger into the
-# planner's typed context; no public entry accepts a hand-built ledger, and the production
+# test-isolation: PlanWorld is the search's internal projection of its state into the planner's
+# typed context; no public entry accepts a hand-built finished workstream, and the production
 # shell cannot script a profile that finished with no reading or one with arbitrary statistics.
-from vibesys.orchestration.dynamic.search._context import planner_prompt
-from vibesys.orchestration.dynamic.search._state import (
-    AttemptRecord,
-    DynamicState,
+from vibesys.orchestration.dynamic.search._context import PlanWorld
+from vibesys.orchestration.dynamic.search._values import (
+    Failure,
+    FailureKind,
+    FinishedWork,
+    Proof,
     WorkKind,
-    WorkPhase,
     WorkPlan,
 )
+from vibesys.orchestration.dynamic.search._workstream import Profiling, Workstream
 from vibesys.orchestration.dynamic.search.api import (
     AcceptedReading,
     DynamicConfig,
@@ -39,29 +41,32 @@ from vibesys.orchestration.dynamic.search.api import (
     ProfileHistoryStatus,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
+from vibesys.candidates.api import NotConfigured
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     AttemptId,
-    CoreView,
     EvidenceKind,
+    ObservationStatus,
 )
 from vs_prompts.api import TemplateRenderer
 
-FAILURE_TEXT = "profile produced no trusted evidence"
+FAILURE_TEXT = "the trusted check produced no usable evidence"
 _WORDS = string.ascii_letters + string.digits + " "
 _CONFIG = DynamicConfig(
     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
     max_rounds=3,
     profiling=True,
 )
+_RENDERER = TemplateRenderer(
+    Path(templates.__file__).parent, fallback_roots=(CORE_PROTOCOL_DIR,)
+)
 
 
 def _text(prompt: PlannerPrompt) -> str:
     variables = {name: getattr(prompt, name) for name in type(prompt).model_fields}
     variables.pop("template")
-    root = Path(templates.__file__).parent
-    return TemplateRenderer(root, fallback_roots=(CORE_PROTOCOL_DIR,)).render_template(
+    return _RENDERER.render_template(
         "portfolio.j2",
         **variables,
         **run_prompt_variables(
@@ -84,38 +89,59 @@ def _metrics() -> st.SearchStrategy[tuple[MetricRow, ...]]:
     return st.lists(row, max_size=6, unique_by=lambda item: item.name).map(tuple)
 
 
-def _prompt(
-    *,
-    phase: WorkPhase,
-    reading: AcceptedReading | None,
-    failure: str | None = None,
-    required_fields: tuple[str, ...] = (),
-    artifacts: tuple[ArtifactRef, ...] = (),
-) -> PlannerPrompt:
-    plan = WorkPlan(
+def _plan(required_fields: tuple[str, ...]) -> WorkPlan:
+    return WorkPlan(
         kind=WorkKind.PROFILE,
         work_id="prof-1",
         question="Where does the time go?",
         decision_impact="Pick the next kernel to optimize.",
         required_fields=required_fields,
     )
+
+
+def _world(*, finished: tuple[FinishedWork, ...], running: tuple[Workstream, ...]) -> PlanWorld:
+    return PlanWorld(
+        config=_CONFIG,
+        base=revision("parent"),
+        baseline=NotConfigured(),
+        hypotheses=(),
+        running=running,
+        finished=finished,
+        refunded=0,
+        offered=(),
+    )
+
+
+def _finished(
+    *,
+    reading: AcceptedReading | None,
+    failure: Failure | None = None,
+    required_fields: tuple[str, ...] = (),
+    artifacts: tuple[ArtifactRef, ...] = (),
+) -> PlannerPrompt:
     ref = evidence_ref("profile-evidence", EvidenceKind.PROFILING, revision("parent")).model_copy(
         update={"purpose": "profile", "artifacts": artifacts}
     )
-    record = AttemptRecord(
-        plan=plan,
+    work = FinishedWork(
         sequence=1,
+        plan=_plan(required_fields),
+        parent=revision("parent"),
+        failure=failure,
+        readings=() if reading is None else (reading,),
+        proof=None if reading is None else Proof(refs=(ref,)),
+    )
+    return _world(finished=(work,), running=()).prompt()
+
+
+def _running() -> PlannerPrompt:
+    work = Workstream(
+        sequence=1,
+        plan=_plan(()),
         attempt=AttemptId(root="attempt-1"),
         parent=revision("parent"),
-        phase=phase,
-        generation=1,
-        failure=failure,
-        evidence=() if reading is None else (ref.key,),
-        readings=() if reading is None else (reading,),
+        phase=Profiling(),
     )
-    view: CoreView = empty_view().model_copy(update={"measurements": (ref,)})
-    state = DynamicState(attempts=(record,))
-    return planner_prompt(state, _CONFIG, view)
+    return _world(finished=(), running=(work,)).prompt()
 
 
 def _reading(*, passed: bool, metrics: tuple[MetricRow, ...], feedback: str) -> AcceptedReading:
@@ -153,8 +179,7 @@ def test_a_passed_profile_is_observed_evidence_whatever_its_output_length(
         ArtifactRef(artifact_id=ArtifactId(root=f"art-{name}"), digest="d")
         for name in artifact_names
     )
-    prompt = _prompt(
-        phase=WorkPhase.DONE,
+    prompt = _finished(
         reading=_reading(passed=True, metrics=metrics, feedback=output),
         required_fields=fields,
         artifacts=artifacts,
@@ -163,7 +188,7 @@ def test_a_passed_profile_is_observed_evidence_whatever_its_output_length(
     rendered = _text(prompt)
 
     assert row.status is ProfileHistoryStatus.OBSERVED
-    assert row.failure == ""
+    assert row.failure is None
     assert FAILURE_TEXT not in rendered
     assert "Why it failed" not in rendered
     # The verdict, the typed statistics, the fields and the artifacts are never cut.
@@ -187,8 +212,9 @@ def test_a_passed_profile_is_observed_evidence_whatever_its_output_length(
 def test_a_failed_profile_states_its_failure_and_no_success_evidence(
     feedback: str, metrics: tuple[MetricRow, ...]
 ) -> None:
-    prompt = _prompt(
-        phase=WorkPhase.DONE, reading=_reading(passed=False, metrics=metrics, feedback=feedback)
+    failure = Failure(kind=FailureKind.NO_TRUSTED_EVIDENCE, status=ObservationStatus.FAILED)
+    prompt = _finished(
+        reading=_reading(passed=False, metrics=metrics, feedback=feedback), failure=failure
     )
     row = _row(prompt)
     rendered = _text(prompt)
@@ -200,20 +226,24 @@ def test_a_failed_profile_states_its_failure_and_no_success_evidence(
     assert row.metrics == ()
 
 
-def test_a_finished_profile_with_no_reading_is_a_failure_with_the_fallback_text() -> None:
-    prompt = _prompt(phase=WorkPhase.DONE, reading=None)
+def test_a_finished_profile_with_no_reading_states_the_typed_failure() -> None:
+    failure = Failure(kind=FailureKind.NO_TRUSTED_EVIDENCE, status=ObservationStatus.SUCCEEDED)
+    prompt = _finished(reading=None, failure=failure)
     assert _row(prompt).status is ProfileHistoryStatus.FAILED
     assert FAILURE_TEXT in _text(prompt)
 
 
-@given(failure=st.text(_WORDS, min_size=1, max_size=200))
-def test_a_profile_that_ended_in_failure_reports_the_attempts_own_reason(failure: str) -> None:
-    prompt = _prompt(phase=WorkPhase.DONE, reading=None, failure=failure)
-    assert failure.strip()[-40:] in _text(prompt)
+@given(output=st.text(_WORDS, min_size=1, max_size=200))
+def test_a_profile_that_ended_in_failure_reports_what_its_evidence_printed(output: str) -> None:
+    failure = Failure(
+        kind=FailureKind.NO_TRUSTED_EVIDENCE, status=ObservationStatus.FAILED, output=output
+    )
+    prompt = _finished(reading=None, failure=failure)
+    assert output.strip()[-40:] in _text(prompt)
 
 
 def test_a_running_profile_carries_neither_failure_nor_success_evidence() -> None:
-    prompt = _prompt(phase=WorkPhase.PROFILE, reading=None)
+    prompt = _running()
     rendered = _text(prompt)
     assert _row(prompt).status is ProfileHistoryStatus.RUNNING
     assert FAILURE_TEXT not in rendered

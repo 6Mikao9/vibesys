@@ -9,19 +9,22 @@ from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.search._replies import implement, plan_reply
 
 from vibesys.orchestration.dynamic.models import PortfolioPlan
-from vibesys.orchestration.dynamic.search.api import DynamicState, PlanCheck, validate
+from vibesys.orchestration.dynamic.search.api import PlanCheck, PlanLedger, validate
+
+
+_LEDGER = PlanLedger(hypotheses=(), running=frozenset(), profile_ids=frozenset())
 
 
 def _check(*entries: dict[str, object], capacity: int = 8) -> PlanCheck:
     plan = PortfolioPlan.model_validate_json(plan_reply(*entries))
-    return validate(plan, DynamicState(), (), capacity=capacity, offer=None)
+    return validate(plan, _LEDGER, (), capacity=capacity, offer=None)
 
 
 def test_repeated_id_is_a_violation() -> None:
     """Ports test_plan_ids: a plan that repeats a hypothesis ID is rejected by path."""
     check = _check(implement("a"), implement("a"))
     assert not check.valid
-    assert any("workstreams[1]" in item.path for item in check.violations)
+    assert any(item.path[:2] == ("workstreams", 1) for item in check.violations)
 
 
 def test_distinct_ids_are_accepted() -> None:
@@ -35,7 +38,7 @@ def test_unknown_continuation_is_a_violation() -> None:
     """Ports test_plan_ids::test_semantically_rejected_ids_name_the_exact_plan_field (unknown_continuation): continuing an unseen hypothesis is rejected."""
     check = _check(implement("a", continue_hypothesis=True))
     assert not check.valid
-    assert check.violations[0].path == "workstreams[0].hypothesis_id"
+    assert check.violations[0].path == ("workstreams", 0, "hypothesis_id")
 
 
 @given(st.lists(st.sampled_from("abcdef"), min_size=1, max_size=6))
