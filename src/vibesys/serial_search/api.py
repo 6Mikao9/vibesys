@@ -22,7 +22,14 @@ from vibesys.serial_search._plan_view import (
     RoundRow,
     plan_evidence,
 )
-from vibesys.serial_search._plans import accept_plan, base_commit
+from vibesys.serial_search._plans import (
+    PlanCorrection,
+    PlanProblem,
+    ProblemKind,
+    SerialTemplate,
+    accept_plan,
+    base_commit,
+)
 
 PROMPTS_DIR = Path(_prompts.__file__).parent
 """Where the shared `plan.j2` lives; a strategy lists it as a fallback root of its core policy."""
@@ -35,8 +42,12 @@ __all__ = [
     "FrontierRow",
     "LastProfile",
     "PendingClaim",
+    "PlanCorrection",
     "PlanEvidence",
+    "PlanProblem",
+    "ProblemKind",
     "RoundRow",
+    "SerialTemplate",
     "accept_plan",
     "base_commit",
     "bottlenecks_of",

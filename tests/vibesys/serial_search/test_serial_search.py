@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.hypothesis import HypothesisConfig, OrchestratorPlan, rounds
+from vibesys.hypothesis import HypothesisConfig, OrchestratorPlan, PlanFault, rounds
 from vibesys.profile_focus import ProfileAttributionError
 from vibesys.serial_search.api import (
     AttributionConfig,
+    PlanProblem,
+    ProblemKind,
     accept_plan,
     bottlenecks_of,
     focus_of,
@@ -24,8 +24,8 @@ _CONFIG = HypothesisConfig(max_rounds=4)
 _TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
 
 
-def _reply(identifier: str, **extra: object) -> str:
-    return json.dumps(
+def _plan(identifier: str, **extra: object) -> OrchestratorPlan:
+    return OrchestratorPlan.model_validate(
         {
             "hypothesis_id": identifier,
             "title": "a title",
@@ -45,7 +45,7 @@ def test_a_valid_plan_gets_a_stripped_nonempty_id_whatever_the_designer_wrote(
     plan = accept_plan(
         _CONFIG,
         rounds.Ledger(rounds.decode(rounds.EncodedLedger()).search),
-        _reply(identifier),
+        _plan(identifier),
         round_number=3,
     )
     assert isinstance(plan, OrchestratorPlan)
@@ -53,27 +53,37 @@ def test_a_valid_plan_gets_a_stripped_nonempty_id_whatever_the_designer_wrote(
     assert plan.recommended_skills == []
 
 
-@given(text=_TEXT)
-def test_a_reply_that_is_not_a_plan_is_refused_with_a_reason(text: str) -> None:
-    refused = accept_plan(_CONFIG, rounds.decode(rounds.EncodedLedger()), text, round_number=1)
-    assert isinstance(refused, str)
-    assert refused
-
-
-def test_a_plan_that_updates_itself_twice_or_reuses_an_id_is_refused() -> None:
+def test_a_plan_that_updates_itself_twice_or_reuses_an_id_is_refused_with_its_fault() -> None:
     ledger = rounds.decode(rounds.EncodedLedger())
     update = {"hypothesis_id": "old", "disposition": "parked", "reason": "defective"}
     duplicate = accept_plan(
-        _CONFIG, ledger, _reply("h1", hypothesis_updates=[update, update]), round_number=1
+        _CONFIG, ledger, _plan("h1", hypothesis_updates=[update, update]), round_number=1
     )
     selfish = accept_plan(
         _CONFIG,
         ledger,
-        _reply("h1", hypothesis_updates=[{**update, "hypothesis_id": "h1"}]),
+        _plan("h1", hypothesis_updates=[{**update, "hypothesis_id": "h1"}]),
         round_number=1,
     )
-    assert "more than once" in str(duplicate)
-    assert "new hypothesis" in str(selfish)
+    assert duplicate == PlanProblem(
+        kind=ProblemKind.REJECTED, fault=PlanFault.DUPLICATE_UPDATES, hypothesis_id="old"
+    )
+    assert selfish == PlanProblem(
+        kind=ProblemKind.REJECTED, fault=PlanFault.SELF_REFERENCE, hypothesis_id="h1"
+    )
+
+
+def test_a_plan_that_updates_an_unknown_hypothesis_is_refused_with_its_fault() -> None:
+    update = {"hypothesis_id": "old", "disposition": "parked", "reason": "defective"}
+    refused = accept_plan(
+        _CONFIG,
+        rounds.decode(rounds.EncodedLedger()),
+        _plan("h1", hypothesis_updates=[update]),
+        round_number=1,
+    )
+    assert isinstance(refused, PlanProblem)
+    assert refused.fault is PlanFault.UNKNOWN_HYPOTHESIS
+    assert refused.hypothesis_id == "old"
 
 
 def test_attribution_output_that_is_not_the_protocol_is_refused() -> None:

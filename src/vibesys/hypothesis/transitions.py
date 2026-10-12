@@ -34,6 +34,7 @@ from vibesys.hypothesis.notices import (
     TerminalWorkspaceEdits,
     WorkspaceCheckpoint,
 )
+from vibesys.hypothesis.plan import InvalidPlanError
 from vibesys.hypothesis.state import (
     Hypothesis,
     HypothesisMeasurement,
@@ -335,8 +336,7 @@ def apply_strategy_updates(
     seen: set[str] = set()
     for change in updates:
         if change.hypothesis_id in seen:
-            message = f"duplicate strategy update for hypothesis {change.hypothesis_id!r}"
-            raise ValueError(message)
+            raise InvalidPlanError.duplicate_updates(change.hypothesis_id)
         seen.add(change.hypothesis_id)
         index = next(
             (
@@ -347,15 +347,12 @@ def apply_strategy_updates(
             None,
         )
         if index is None:
-            message = f"strategy update names unknown hypothesis {change.hypothesis_id!r}"
-            raise ValueError(message)
+            raise InvalidPlanError.unknown_hypothesis(change.hypothesis_id)
         item = updated.hypotheses[index]
         if updated.active_hypothesis_id == change.hypothesis_id:
-            message = f"cannot {change.disposition} active hypothesis {change.hypothesis_id!r}"
-            raise ValueError(message)
+            raise InvalidPlanError.active_hypothesis(change.hypothesis_id, change.disposition)
         if not item.rounds:
-            message = f"cannot update incomplete hypothesis {change.hypothesis_id!r}"
-            raise ValueError(message)
+            raise InvalidPlanError.incomplete_hypothesis(change.hypothesis_id)
         item.strategy = HypothesisStrategy(change.disposition)
         item.strategy_reason = change.reason.strip()
     return _validated_state(updated)

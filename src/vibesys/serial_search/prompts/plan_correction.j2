@@ -1,0 +1,35 @@
+{% set meaning = {
+  'missing': 'a required field is missing',
+  'unexpected': 'this field is not allowed',
+  'wrong-type': 'the value has the wrong type',
+  'invalid-value': 'the value is not acceptable',
+  'not-json': 'the reply is not valid JSON',
+} -%}
+{% if problem.kind.value == 'unparseable' %}
+Your previous plan violated its output schema:
+{% for item in problem.errors %}
+- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ meaning[item.code.value] }}
+{% endfor %}
+{% elif problem.kind.value == 'rejected' %}
+Your previous plan was rejected:
+{% if problem.fault.value == 'duplicate-updates' %}
+`hypothesis_updates` names `{{ problem.hypothesis_id }}` more than once.
+{% elif problem.fault.value == 'self-reference' %}
+`hypothesis_updates` names the new hypothesis `{{ problem.hypothesis_id }}` itself.
+{% elif problem.fault.value == 'reused-id' %}
+`hypothesis_id` `{{ problem.hypothesis_id }}` was already used in this run.
+{% elif problem.fault.value == 'unknown-hypothesis' %}
+`hypothesis_updates` names `{{ problem.hypothesis_id }}`, which is not a hypothesis of this run.
+{% elif problem.fault.value == 'active-hypothesis' %}
+`hypothesis_updates` parks or abandons `{{ problem.hypothesis_id }}`, which is still being worked on.
+{% else %}
+`hypothesis_updates` names `{{ problem.hypothesis_id }}`, which has no completed round yet.
+{% endif %}
+
+A `hypothesis_id` names one investigation permanently: never reuse an identifier used earlier in
+this run. `hypothesis_updates` may name each prior hypothesis at most once, and never the new one.
+{% else %}
+Your previous turn ended without a plan.
+{% endif %}
+
+Produce a corrected plan for this round. Return only the JSON object.

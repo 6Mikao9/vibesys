@@ -6,7 +6,6 @@ from vibesys.prompts.core_protocol import (
     ResumePrompt,
     WaitUnrecordedPrompt,
 )
-from vibesys.prompts.plan_correction import render_plan_correction
 from vibesys.prompts.renderer import (
     CORE_PROTOCOL_DIR,
     PROMPTS_DIR,
@@ -37,7 +36,6 @@ __all__ = [
     "TrainiumComputeBackendFragment",
     "WaitUnrecordedPrompt",
     "get_backend_fragment",
-    "render_plan_correction",
     "render_string",
     "render_template",
 ]

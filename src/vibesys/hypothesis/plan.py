@@ -9,6 +9,7 @@ here because they are parts of this plan's agent-facing contract.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -20,27 +21,85 @@ HypothesisStrategyDisposition = Literal["parked", "abandoned"]
 HYPOTHESIS_TITLE_MAX_LEN = 60
 
 
-class InvalidPlanError(ValueError):
-    """The designer returned an invalid hypothesis state transition."""
+class PlanFault(StrEnum):
+    """What a designer's plan asked of the hypothesis ledger that it cannot accept. Closed."""
 
-    def __init__(self, detail: str) -> None:
+    DUPLICATE_UPDATES = "duplicate-updates"
+    """``hypothesis_updates`` names one hypothesis more than once."""
+    SELF_REFERENCE = "self-reference"
+    """``hypothesis_updates`` names the plan's own new hypothesis."""
+    REUSED_ID = "reused-id"
+    """The new hypothesis ID was already used in this run."""
+    UNKNOWN_HYPOTHESIS = "unknown-hypothesis"
+    """An update names a hypothesis the ledger has never seen."""
+    ACTIVE_HYPOTHESIS = "active-hypothesis"
+    """An update parks or abandons the hypothesis that is still being worked on."""
+    INCOMPLETE_HYPOTHESIS = "incomplete-hypothesis"
+    """An update names a hypothesis that has no completed round yet."""
+
+
+class InvalidPlanError(ValueError):
+    """The designer returned an invalid hypothesis state transition.
+
+    ``fault`` says which rule the plan broke and ``hypothesis_id`` the hypothesis it names
+    (empty when the rule names none), so a caller can report the problem as data.
+    """
+
+    def __init__(self, fault: PlanFault, detail: str, hypothesis_id: str = "") -> None:
         """Name the violated plan invariant."""
         super().__init__(detail)
+        self.fault = fault
+        self.hypothesis_id = hypothesis_id
 
     @classmethod
-    def duplicate_updates(cls) -> InvalidPlanError:
+    def duplicate_updates(cls, hypothesis_id: str = "") -> InvalidPlanError:
         """Report repeated prior hypothesis IDs."""
-        return cls("hypothesis_updates names one hypothesis more than once")
+        if hypothesis_id:
+            detail = f"duplicate strategy update for hypothesis {hypothesis_id!r}"
+        else:
+            detail = "hypothesis_updates names one hypothesis more than once"
+        return cls(PlanFault.DUPLICATE_UPDATES, detail, hypothesis_id)
 
     @classmethod
-    def self_reference(cls) -> InvalidPlanError:
+    def self_reference(cls, hypothesis_id: str = "") -> InvalidPlanError:
         """Report a plan that updates its own new hypothesis."""
-        return cls("hypothesis_updates includes the new hypothesis")
+        return cls(
+            PlanFault.SELF_REFERENCE, "hypothesis_updates includes the new hypothesis", hypothesis_id
+        )
 
     @classmethod
     def reused_id(cls, hypothesis_id: str) -> InvalidPlanError:
         """Report a new hypothesis ID already used in this run."""
-        return cls(f"hypothesis ID {hypothesis_id!r} was already used")
+        return cls(
+            PlanFault.REUSED_ID, f"hypothesis ID {hypothesis_id!r} was already used", hypothesis_id
+        )
+
+    @classmethod
+    def unknown_hypothesis(cls, hypothesis_id: str) -> InvalidPlanError:
+        """Report an update of a hypothesis the ledger does not have."""
+        return cls(
+            PlanFault.UNKNOWN_HYPOTHESIS,
+            f"strategy update names unknown hypothesis {hypothesis_id!r}",
+            hypothesis_id,
+        )
+
+    @classmethod
+    def active_hypothesis(cls, hypothesis_id: str, disposition: str) -> InvalidPlanError:
+        """Report an update that parks or abandons the active hypothesis."""
+        return cls(
+            PlanFault.ACTIVE_HYPOTHESIS,
+            f"cannot {disposition} active hypothesis {hypothesis_id!r}",
+            hypothesis_id,
+        )
+
+    @classmethod
+    def incomplete_hypothesis(cls, hypothesis_id: str) -> InvalidPlanError:
+        """Report an update of a hypothesis with no completed round."""
+        return cls(
+            PlanFault.INCOMPLETE_HYPOTHESIS,
+            f"cannot update incomplete hypothesis {hypothesis_id!r}",
+            hypothesis_id,
+        )
 
 
 class SkillResourceSelection(BaseModel):
