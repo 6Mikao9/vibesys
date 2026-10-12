@@ -59,6 +59,7 @@ from vs_agent.contracts import (
     QuotaResumeReason,
     ReadinessProbe,
     ReadinessProblem,
+    SchemaViolation,
     SteerableAgentClient,
     SteerOutcome,
 )
@@ -227,6 +228,7 @@ __all__ = [
     "ReplyBreach",
     "ReplyGuard",
     "RoundProgress",
+    "SchemaViolation",
     "SessionConfigurationError",
     "SessionPersistenceError",
     "SessionResumeError",
