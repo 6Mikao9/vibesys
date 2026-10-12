@@ -12,7 +12,7 @@ When the workstream is over its phase is `Done`; the search records it and drops
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from vibesys.candidates.api import (
     Baseline,
@@ -665,7 +665,7 @@ def update(ws: Workstream, event: Event, env: Env) -> tuple[Workstream, list[Dec
                 kind=BlockerKind.NO_REPLY,
                 ended=event.reason if event.reason is FailureReason.TIMED_OUT else None,
                 turn_failure=event.turn_failure,
-                digest=event.digest or "",
+                digest=event.digest,
             )
             return _retry_unmeasured(ws, env, spent, prior, blocker)
         case Implementing(prior=prior), Failed():
@@ -729,7 +729,7 @@ def update(ws: Workstream, event: Event, env: Env) -> tuple[Workstream, list[Dec
             raise UnexpectedEvent(ws.phase, event)
 
 
-def _verified(ws: Workstream, env: Env, outcome: object) -> tuple[Workstream, list[Decision]]:
+def _verified(ws: Workstream, env: Env, outcome: BaseModel | None) -> tuple[Workstream, list[Decision]]:
     if (
         isinstance(outcome, ParentVerification)
         and outcome.status == "succeeded"
@@ -805,7 +805,7 @@ def _begin_review(
     return _moved(ws, phase), [_decode(env, name, refs, ws)]
 
 
-def _readings(outcome: object, refs: tuple[EvidenceRef, ...]) -> tuple[AcceptedReading, ...]:
+def _readings(outcome: BaseModel | None, refs: tuple[EvidenceRef, ...]) -> tuple[AcceptedReading, ...]:
     """What the owner decoded of ``refs``; a refusal leaves the evidence listed without numbers."""
     if not isinstance(outcome, EvidenceReadings) or outcome.status != "succeeded":
         return ()
@@ -890,7 +890,7 @@ def _measured(
 
 
 def _interpreted(
-    ws: Workstream, env: Env, result: Result | None, proof: Proof, outcome: object
+    ws: Workstream, env: Env, result: Result | None, proof: Proof, outcome: BaseModel | None
 ) -> tuple[Workstream, list[Decision]]:
     if not isinstance(outcome, EvidenceReadings):
         return fail(ws, env, Failure(kind=FailureKind.EVIDENCE_UNDECODABLE), result, proof=proof)

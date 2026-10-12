@@ -102,7 +102,7 @@ class Blocker(Value):
     summary: str = ""
     next_step: str = ""
     revision: RevisionRef | None = None
-    digest: str = ""
+    digest: str | None = None
     ended: FailureReason | None = None
     turn_failure: TurnFailureKind | None = None
 
