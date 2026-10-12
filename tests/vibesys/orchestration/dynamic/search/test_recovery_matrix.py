@@ -156,7 +156,6 @@ KNOWN_OPEN: frozenset[tuple[str, Reply]] = frozenset(
         ("ensure_session", Reply.UNKNOWN_ONCE),
         ("ensure_workspace", Reply.SILENT),
         ("ensure_workspace", Reply.UNKNOWN_ONCE),
-        ("execute_registered_operation", Reply.SILENT),
         ("observe_owned_job", Reply.SILENT),
         ("observe_owned_job", Reply.UNKNOWN_ONCE),
         ("retain_revision", Reply.SILENT),

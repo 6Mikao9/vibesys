@@ -215,7 +215,7 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         # replies are compared.
         assert finished.core.evaluation.continuations != ()
         assert [type(item).__name__ for item in works(finished.decisions)] == [
-            type(item).__name__ for item in run(("wait",)).decisions
+            type(item).__name__ for item in works(run(("wait",)).decisions)
         ]
 
 
