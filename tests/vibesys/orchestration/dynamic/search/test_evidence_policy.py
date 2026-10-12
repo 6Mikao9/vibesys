@@ -1,4 +1,4 @@
-"""Which evidence, readings and checkpoints the strategy trusts (review findings #7 and #9)."""
+"""Which evidence and readings the search trusts (review finding #9)."""
 
 from __future__ import annotations
 
@@ -15,45 +15,24 @@ from tests.vibesys.orchestration.dynamic.search._views import (
     revision,
 )
 
+from vibesys.metrics import accept_readings
 from vibesys.orchestration.dynamic.search.api import (
     AcceptedReading,
-    DynamicStrategy,
+    DynamicSearch,
     EvidenceReading,
-    EvidenceReadings,
     InterpretEvidence,
-    RetainVerifiedRevision,
-    accept_readings,
     ledger_refs,
     trusted_keys,
-    turn_candidate,
 )
 from vs_core.api import (
-    AttemptBudget,
-    AttemptCheckpoint,
-    AttemptId,
-    AttemptPhase,
-    AttemptView,
-    ContinuationId,
-    CoreView,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
-    InvocationId,
-    InvocationRef,
-    ItemId,
     MeasurementResult,
     ObservationStatus,
-    RequestBlocked,
     RequestId,
     RunId,
     Scope,
-    SessionId,
-    TurnCandidatePending,
-    TurnCandidateRetained,
-    TurnChain,
-    Value,
-    WorkspaceMode,
-    WorkspacePlan,
 )
 
 if TYPE_CHECKING:
@@ -124,7 +103,7 @@ def test_the_ledger_must_hold_every_requested_record() -> None:
 
 
 def _accept(requested: tuple[EvidenceRef, ...], *readings: EvidenceReading) -> object:
-    return accept_readings(EvidenceReadings(status="succeeded", readings=readings), requested)
+    return accept_readings(readings, requested)
 
 
 def test_a_reading_for_an_unrequested_id_is_refused() -> None:
@@ -172,73 +151,6 @@ def test_accepted_readings_bind_to_exactly_the_requested_records(
     }
 
 
-# -- #7: a retry turn that retained nothing retained no changed candidate ---------------
-
-
-def _invocation(name: str) -> InvocationRef:
-    return InvocationRef(
-        session_id=SessionId(root="session"),
-        invocation_id=InvocationId(root=name),
-        generation=0,
-    )
-
-
-def _checkpoint(invocation: str, name: str) -> AttemptCheckpoint:
-    return AttemptCheckpoint(
-        invocation=_invocation(invocation),
-        request_id=RequestId(root=f"retain-{name}"),
-        revision=revision(name),
-        retention="candidate",
-    )
-
-
-def _view(*checkpoints: AttemptCheckpoint) -> CoreView:
-    attempt = AttemptView(
-        attempt_id=AttemptId(root="attempt"),
-        item_id=ItemId(root="item"),
-        generation=0,
-        phase=AttemptPhase.ACTIVE,
-        workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=CANDIDATE),
-        budget=AttemptBudget(),
-        checkpoints=checkpoints,
-    )
-    return empty_view().model_copy(update={"attempts": (attempt,)})
-
-
-def test_a_retry_turn_that_retained_nothing_is_not_credited_with_an_older_checkpoint() -> None:
-    view = _view(_checkpoint("first", "r1"))
-    assert (
-        turn_candidate(view, AttemptId(root="attempt"), _invocation("retry"), predecessors=())
-        is None
-    )
-    assert turn_candidate(
-        view, AttemptId(root="attempt"), _invocation("first"), predecessors=()
-    ) == revision("r1")
-
-
-@given(
-    st.lists(st.tuples(st.sampled_from("abc"), st.integers(0, 9)), max_size=8),
-    st.sampled_from("abcd"),
-)
-def test_a_turn_owns_only_its_own_last_checkpoint(
-    retained: list[tuple[str, int]], asked: str
-) -> None:
-    view = _view(*(_checkpoint(inv, f"r{n}-{i}") for i, (inv, n) in enumerate(retained)))
-    mine = [f"r{n}-{i}" for i, (inv, n) in enumerate(retained) if inv == asked]
-    expected = revision(mine[-1]) if mine else None
-    assert (
-        turn_candidate(view, AttemptId(root="attempt"), _invocation(asked), predecessors=())
-        == expected
-    )
-
-
-def test_a_turn_of_an_unknown_attempt_has_no_candidate() -> None:
-    assert (
-        turn_candidate(empty_view(), AttemptId(root="none"), _invocation("x"), predecessors=())
-        is None
-    )
-
-
 # -- the contract shapes the strategy relies on -----------------------------------------
 
 
@@ -249,29 +161,10 @@ def test_interpret_evidence_carries_the_evidence_it_decodes() -> None:
     assert InterpretEvidence(evidence=(ref,)).evidence == (ref,)
 
 
-def test_retain_verified_revision_names_the_revision_and_its_accuracy_proof() -> None:
-    with pytest.raises(ValidationError):
-        RetainVerifiedRevision.model_validate({})
-    proof = _ref("proof", EvidenceKind.CORRECTNESS)
-    request = RetainVerifiedRevision(revision=CANDIDATE, accuracy_proof=proof)
-    assert request.accuracy_proof == proof
-
-
 def test_the_declaration_offers_suspension_and_profile_capture_as_optional() -> None:
-    declaration = DynamicStrategy(config=config()).declaration
+    declaration = DynamicSearch(config()).declaration
     assert {"suspend", "profile-capture"} <= declaration.optional
     assert not declaration.required
-
-
-def test_a_blocked_record_nobody_owns_changes_nothing() -> None:
-    strategy = DynamicStrategy(config=config())
-    event = RequestBlocked(
-        request_id=RequestId(root="stranger"),
-        target=RequestId(root="target"),
-        scope=SCOPE,
-        diagnostic="blocked",
-    )
-    assert strategy.on_event(empty_view(), event) == strategy.state
 
 
 def test_evidence_ids_are_unique_only_within_a_source_request() -> None:
@@ -279,50 +172,3 @@ def test_evidence_ids_are_unique_only_within_a_source_request() -> None:
     two = _ref("same", source_request=RequestId(root="two"))
     assert one.evidence_id == EvidenceId(root="same") == two.evidence_id
     assert one.key != two.key
-
-
-@given(
-    steps=st.lists(
-        st.tuples(st.sampled_from(("suspend", "correct", "lose", "retry")), st.booleans()),
-        max_size=10,
-    ),
-    first_retains=st.booleans(),
-)
-def test_a_turn_chains_candidate_is_only_the_current_invocations_outcome(
-    steps: list[tuple[str, bool]], *, first_retains: bool
-) -> None:
-    """Older turns never decide the current turn, whatever transitions produced them."""
-    chain: TurnChain[Value] = TurnChain()
-    current = 0
-    retained = {0: first_retains}
-    for kind, retains in steps:
-        ref = _invocation(f"t{current}")
-        nxt = current + 1
-        if kind == "suspend":
-            chain = chain.suspended(ref, ContinuationId(root=f"c{current}")).resumed(
-                authorized=InvocationId(root=f"t{nxt}"),
-                continuation=ContinuationId(root=f"c{current}"),
-                context=None,
-            )
-        elif kind == "correct":
-            corrected = chain.corrected(ref, None, limit=100)
-            assert corrected is not None
-            chain = corrected
-        elif kind == "lose":
-            again = chain.asked_again(ref, now=0.0, limit=100, backoff=0.0)
-            if again is None:
-                continue
-            chain = again
-        else:
-            chain = chain.followed_by(charge="paid")
-        current = nxt
-        retained[current] = retains
-    view = _view(
-        *(_checkpoint(f"t{turn}", f"r{turn}") for turn in sorted(retained) if retained[turn])
-    )
-    candidate = chain.candidate_outcome(view, AttemptId(root="attempt"), _invocation(f"t{current}"))
-    if retained[current]:
-        assert isinstance(candidate, TurnCandidateRetained)
-        assert candidate.revision == revision(f"r{current}")
-    else:
-        assert isinstance(candidate, TurnCandidatePending)
