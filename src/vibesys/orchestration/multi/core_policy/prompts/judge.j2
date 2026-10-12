@@ -1,3 +1,4 @@
+{% set pareto_archive_conflict = conflict %}
 {% from '_evaluations.j2' import trusted_evaluations %}
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
@@ -107,9 +108,9 @@ because fresh canonical fields are null. If behavior changed, reject stale
 metrics for that arm while preserving independently unchanged retained rows.
 {% endif %}
 
-{% if official_due %}
+{% if official_reason %}
 Official evaluation is scheduled after PASS because
-`{{ official_reason or 'framework policy' }}`. Do not duplicate
+`{{ official_reason.value }}`. Do not duplicate
 framework-owned commands.
 {% else %}
 Official evaluation is deferred. Do not fail a valid scoped result solely for

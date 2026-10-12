@@ -1,7 +1,7 @@
 """Static policy knobs of one multi run, built from the validated options.
 
-Configuration is an input of the strategy, never persisted state: restarting the strategy with
-the same options reproduces every decision.
+Configuration is an input of the search, never persisted state: restarting the search with the
+same options reproduces every decision.
 """
 
 from typing import Annotated
@@ -11,7 +11,7 @@ from pydantic import Field
 from vibesys.candidates.api import CandidateConfig
 from vibesys.hypothesis import HypothesisConfig
 from vibesys.serial_search.api import AttributionConfig
-from vs_core.api import ArtifactRef, WorkspaceMode
+from vs_core.api.search import ArtifactRef, Backoff, WorkspaceMode
 
 type Positive = Annotated[int, Field(gt=0)]
 type Duration = Annotated[float, Field(gt=0, allow_inf_nan=False)]
@@ -59,9 +59,10 @@ class MultiConfig(CandidateConfig):
     benchmark_seconds: Duration = 3600.0
     operation_seconds: Duration = 300.0
 
-    def drop_backoff(self, drops: int) -> float:
-        """Seconds to wait before re-asking a turn that was already lost ``drops`` times."""
-        return min(self.turn_drop_backoff_cap_seconds, self.turn_drop_backoff_seconds * 2**drops)
+    @property
+    def backoff(self) -> Backoff:
+        """How long a lost turn waits before it is asked again, doubling per drop up to the cap."""
+        return Backoff(first=self.turn_drop_backoff_seconds, cap=self.turn_drop_backoff_cap_seconds)
 
     @property
     def profiling(self) -> bool:

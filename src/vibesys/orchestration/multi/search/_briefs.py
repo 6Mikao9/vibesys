@@ -1,25 +1,15 @@
-"""Prompt data and bookkeeping derived from state, the run view and config.
+"""The prompt data of each multi request, from the ledger, the plan and the round's facts.
 
-Everything here is a pure function of `MultiStrategyState`, `RunView` and `MultiConfig`.
-Prompt contexts are typed values; the strategy never writes prompt text.
+Everything here is a pure function of its arguments. Prompt contexts are typed values; the search
+never writes prompt text.
 """
 
-from vibesys.candidates.api import BaselineStage
-from vibesys.hypothesis import (
-    ArchiveConflict,
-    Hypothesis,
-    OrchestratorPlan,
-    PlanningContext,
-    rounds,
-)
+from vibesys.hypothesis import ArchiveConflict, Hypothesis, OrchestratorPlan, PlanningContext
 from vibesys.orchestration.multi.models import ImplementerResponse
-from vibesys.orchestration.multi.strategy._config import MultiConfig
-from vibesys.orchestration.multi.strategy._prompts import (
-    ArchiveConflictView,
+from vibesys.orchestration.multi.search._config import MultiConfig
+from vibesys.orchestration.multi.search._prompts import (
     Claim,
-    ConflictMetric,
     ContinuePrompt,
-    Dominator,
     GateFacts,
     HypothesisPlan,
     ImplementerClaims,
@@ -29,60 +19,17 @@ from vibesys.orchestration.multi.strategy._prompts import (
     PreRoundPrompt,
     ProfilerPrompt,
 )
-from vibesys.orchestration.multi.strategy._state import MultiStrategyState, RoundState
+from vibesys.orchestration.multi.search._values import (
+    ArchiveConflictView,
+    ConflictMetric,
+    Dominator,
+    Repair,
+)
 from vibesys.profile_focus import FocusView
-from vibesys.serial_search import api as serial
-from vibesys.serial_search.api import PlanEvidence
-from vs_core.api import EvidenceRef, RevisionRef, RunView
+from vibesys.serial_search.api import LastProfile, NoReply, OfficialReason, PlanEvidence
+from vs_core.api.search import EvidenceRef, RevisionRef
 
 PROFILE_DIRECTORY = "profile"
-
-
-def ledger_of(state: MultiStrategyState, config: MultiConfig) -> rounds.Ledger:
-    """The decoded hypothesis ledger, projected onto the run's metric space."""
-    return rounds.decode(
-        rounds.EncodedLedger(search_json=state.search_json, carry_json=state.carry_json),
-        config.metric_space,
-    )
-
-
-def baseline_resolved(state: MultiStrategyState) -> bool:
-    """Whether the input measurement has reached a terminal stage."""
-    return state.baseline.stage in {
-        BaselineStage.MEASURED,
-        BaselineStage.UNMEASURABLE,
-        BaselineStage.NOT_CONFIGURED,
-    }
-
-
-def input_trusted(state: MultiStrategyState) -> bool:
-    """Whether the input revision has a trusted reading, or no gate is configured to give one."""
-    return (
-        state.baseline.stage in {BaselineStage.MEASURED, BaselineStage.NOT_CONFIGURED}
-        and state.baseline.accuracy_passed is not False
-    )
-
-
-def build_base(state: MultiStrategyState, view: RunView) -> RevisionRef:
-    """The newest revision a later round may build on: a retained checkpoint, else the input."""
-    return state.checkpoint or view.facts.baseline
-
-
-def commit_ref(commit: str | None, fallback: RevisionRef) -> RevisionRef:
-    """The revision a recorded commit names, else ``fallback``."""
-    return fallback if not commit else RevisionRef.of_git_commit(commit)
-
-
-def plan_of(round_state: RoundState) -> OrchestratorPlan:
-    """The designer's validated plan of the open round."""
-    return OrchestratorPlan.model_validate_json(round_state.plan_json)
-
-
-def response_of(round_state: RoundState) -> ImplementerResponse | None:
-    """The last valid implementer reply of the open round, if any."""
-    if round_state.response_json is None:
-        return None
-    return ImplementerResponse.model_validate_json(round_state.response_json)
 
 
 def hypothesis_plan(plan: OrchestratorPlan) -> HypothesisPlan:
@@ -156,49 +103,25 @@ def conflict_view(conflict: ArchiveConflict) -> ArchiveConflictView:
     )
 
 
-def active_hypothesis(state: MultiStrategyState, config: MultiConfig) -> Hypothesis | None:
-    """The hypothesis the open round works on."""
-    return ledger_of(state, config).search.active_hypothesis
-
-
-def _evidence(
-    state: MultiStrategyState,
-    config: MultiConfig,
-    planning: PlanningContext,
-    focus: FocusView | None,
-) -> PlanEvidence:
-    evidence = serial.plan_evidence(config.hypotheses, ledger_of(state, config), planning, focus)
-    return evidence.model_copy(
-        update={
-            "benchmark_enabled": config.benchmark_configured,
-            "last_profile": state.design.profile,
-        }
-    )
-
-
 def plan_prompt(
-    state: MultiStrategyState,
+    evidence: PlanEvidence,
     config: MultiConfig,
-    view: RunView,
-    planning: PlanningContext,
-    focus: FocusView | None = None,
+    profile: LastProfile | None,
+    base: RevisionRef,
 ) -> PlanPrompt:
     """The new-hypothesis request: history, the frontier, carried notices and the fresh profile."""
-    evidence = _evidence(state, config, planning, focus)
+    full = evidence.model_copy(
+        update={"benchmark_enabled": config.benchmark_configured, "last_profile": profile}
+    )
     return PlanPrompt(
-        **{name: getattr(evidence, name) for name in PlanEvidence.model_fields},
-        base_revision=build_base(state, view),
+        **{name: getattr(full, name) for name in PlanEvidence.model_fields}, base_revision=base
     )
 
 
 def pre_round_prompt(
-    state: MultiStrategyState,
-    config: MultiConfig,
-    planning: PlanningContext,
-    focus: FocusView | None = None,
+    evidence: PlanEvidence, config: MultiConfig, planning: PlanningContext
 ) -> PreRoundPrompt:
     """The routing request: is fresh profile evidence wanted before this plan?"""
-    evidence = _evidence(state, config, planning, focus)
     return PreRoundPrompt(
         round_number=planning.round_number,
         has_history=bool(evidence.history),
@@ -211,13 +134,12 @@ def pre_round_prompt(
     )
 
 
-def profiler_prompt(state: MultiStrategyState, config: MultiConfig) -> ProfilerPrompt:
+def profiler_prompt(number: int, config: MultiConfig, focus: str | None) -> ProfilerPrompt:
     """The advisory profiling request for the focus the routing turn chose."""
-    number = state.closed + 1
     return ProfilerPrompt(
         round_number=number,
         profiler_kind=config.profiler_id,
-        profile_focus=state.design.profile_focus or "general steady-state benchmark hotspots",
+        profile_focus=focus or "general steady-state benchmark hotspots",
         benchmark_command=config.benchmark_command,
         profile_execution=config.profile_execution,
         profiler_support_name=config.profiler_support_name,
@@ -226,42 +148,42 @@ def profiler_prompt(state: MultiStrategyState, config: MultiConfig) -> ProfilerP
     )
 
 
-def implement_prompt(
-    record: RoundState,
+def implement_prompt(  # noqa: PLR0913  # LW-220510 [PLR0913]; the request reads independent plain facts of the round, the ledger and the attempt.
+    *,
+    number: int,
+    retry: int,
+    plan: OrchestratorPlan,
+    base: RevisionRef,
     config: MultiConfig,
     hypothesis: Hypothesis | None,
     focus: FocusView | None,
+    repair: Repair | None,
+    no_reply: NoReply | None,
+    official_reason: OfficialReason | None,
 ) -> ImplementPrompt | ContinuePrompt:
     """The implementation request of the open round: first brief, or a bounded continuation."""
-    plan = hypothesis_plan(plan_of(record))
     gates = gate_facts(hypothesis)
-    retry = record.turns_spent + 1
     step = None if hypothesis is None else hypothesis.next_step
     if step:
         return ContinuePrompt(
-            round_number=record.number,
+            round_number=number,
             retry=retry,
-            plan=plan,
-            base_revision=record.base,
+            plan=hypothesis_plan(plan),
+            base_revision=base,
             continuation_step=step,
             framework=gates,
-            feedback=record.feedback,
-            validation_failure=record.validation_failure,
-            no_valid_reply=record.no_valid_reply,
-            pareto_archive_conflict=record.conflict,
+            repair=repair,
+            no_reply=no_reply,
         )
     return ImplementPrompt(
-        round_number=record.number,
+        round_number=number,
         retry=retry,
-        plan=plan,
-        base_revision=record.base,
+        plan=hypothesis_plan(plan),
+        base_revision=base,
         framework=gates,
-        feedback=record.feedback,
-        validation_failure=record.validation_failure,
-        no_valid_reply=record.no_valid_reply,
-        pareto_archive_conflict=record.conflict,
-        official_due=record.planned_official_reason is not None,
-        official_reason=record.planned_official_reason,
+        repair=repair,
+        no_reply=no_reply,
+        official_reason=official_reason,
         benchmark_enabled=config.benchmark_configured,
         active_component=None if focus is None else (focus.active_component or None),
         reference_path=config.reference_path,
@@ -269,23 +191,27 @@ def implement_prompt(
     )
 
 
-def judge_prompt(
-    record: RoundState,
+def judge_prompt(  # noqa: PLR0913  # LW-220511 [PLR0913]; the request reads independent plain facts of the round, the ledger and the attempt.
+    *,
+    number: int,
+    retry: int,
+    plan: OrchestratorPlan,
     config: MultiConfig,
     hypothesis: Hypothesis | None,
     reply: ImplementerResponse,
+    conflict: ArchiveConflictView | None,
+    official_reason: OfficialReason | None,
     cited_evidence: tuple[EvidenceRef, ...],
 ) -> JudgePrompt:
     """The independent review request for the implementer's latest reply."""
     return JudgePrompt(
-        round_number=record.number,
-        retry=record.turns_spent,
-        plan=hypothesis_plan(plan_of(record)),
+        round_number=number,
+        retry=retry,
+        plan=hypothesis_plan(plan),
         claims=claims_of(reply),
         framework=gate_facts(hypothesis),
-        pareto_archive_conflict=record.conflict,
-        official_due=record.planned_official_reason is not None,
-        official_reason=record.planned_official_reason,
+        conflict=conflict,
+        official_reason=official_reason,
         benchmark_enabled=config.benchmark_configured,
         interface=config.interface,
         cited_evidence=cited_evidence,

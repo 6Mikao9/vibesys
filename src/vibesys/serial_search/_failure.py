@@ -30,6 +30,7 @@ class Role(StrEnum):
     IMPLEMENTER = "implementer"
     JUDGE = "judge"
     PROFILER = "profiler"
+    PREROUND = "preround"
 
 
 class FailureKind(StrEnum):

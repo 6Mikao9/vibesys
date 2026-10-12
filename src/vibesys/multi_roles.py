@@ -21,7 +21,7 @@ from vibesys.core_roles import (
     core_role,
 )
 from vibesys.orchestration.multi.core_policy.api import prompts
-from vibesys.orchestration.multi.strategy.api import Role, role_id
+from vibesys.orchestration.multi.search.api import IDS, Role
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentCapability, AgentTool, WorkspaceAccess
 
@@ -41,18 +41,21 @@ PROFILER_KIND = RoleKind(
 )
 
 
-def _role(role: Role, kind: RoleKind) -> AgentRole:
+def _role(role: Role, kind: RoleKind, system: Role | None = None) -> AgentRole:
+    """The role ``role``, whose system prompt is ``system``'s when it shares another role's."""
     return core_role(
         _RENDERER,
-        role_id=role_id(role.value).root,
-        system_template=f"{role.value}_system.j2",
+        role_id=IDS.role_id(role.value).root,
+        system_template=f"{(system or role).value}_system.j2",
         kind=kind,
     )
 
 
 DESIGNER = _role(Role.PLANNER, DESIGNER_KIND)
+# The routing turn is the designer's question asked in a conversation of its own, with its prompt.
+ROUTER = _role(Role.PREROUND, DESIGNER_KIND, system=Role.PLANNER)
 PROFILER = _role(Role.PROFILER, PROFILER_KIND)
 IMPLEMENTER = _role(Role.IMPLEMENTER, MEASURING_WRITER)
 JUDGE = _role(Role.JUDGE, MEASURING_READER)
 
-CORE_ROLES = (DESIGNER, PROFILER, IMPLEMENTER, JUDGE)
+CORE_ROLES = (DESIGNER, ROUTER, PROFILER, IMPLEMENTER, JUDGE)

@@ -8,16 +8,15 @@ from vibesys.hypothesis import rounds
 from vibesys.hypothesis.readmodel import project_hypothesis_state
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.multi.strategy.api import MultiStrategyState
+    from vibesys.orchestration.multi.search.api import MultiState
     from vibesys.run.contracts import PluginProjection
 
 
-def project_strategy_state(
-    state: MultiStrategyState, *, experiment_revision: int
-) -> PluginProjection:
+def project_strategy_state(state: MultiState, *, experiment_revision: int) -> PluginProjection:
     """Project one strategy state; `experiment_revision` is the core revision it was read at."""
     del experiment_revision
+    live = state.in_force
     ledger = rounds.decode(
-        rounds.EncodedLedger(search_json=state.search_json, carry_json=state.carry_json)
+        rounds.EncodedLedger(search_json=live.search_json, carry_json=live.carry_json)
     )
     return project_hypothesis_state(ledger.search)

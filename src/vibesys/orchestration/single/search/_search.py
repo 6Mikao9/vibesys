@@ -43,9 +43,10 @@ from vibesys.orchestration.single.search._state import (
 from vibesys.orchestration.single.search._state import (
     Finished as RunFinished,
 )
-from vibesys.orchestration.single.search._values import Repair, RepairKind, RoundOutcome
+from vibesys.orchestration.single.search._values import Repair, RepairKind
 from vibesys.serial_search.api import (
     LastProfile,
+    RoundOutcome,
     decode_ledger,
     describe,
     describe_unmeasured,

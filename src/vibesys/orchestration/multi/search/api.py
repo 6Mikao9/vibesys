@@ -1,20 +1,13 @@
-"""Public surface of the multi strategy package."""
+"""Public surface of the multi search package."""
 
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
-from vibesys.orchestration.multi.strategy._config import MultiConfig
-from vibesys.orchestration.multi.strategy._draft import measurement_recipe
-from vibesys.orchestration.multi.strategy._ids import (
-    decision_id,
-    invocation_id,
-    role_id,
-    session_id,
-)
-from vibesys.orchestration.multi.strategy._operations import (
+from vibesys.orchestration.multi.search._config import MultiConfig
+from vibesys.orchestration.multi.search._ids import BASELINE_KEY, DESIGN_KEY, IDS, round_key
+from vibesys.orchestration.multi.search._operations import (
     CAPTURE_KIND,
     INTERPRET_KIND,
     OPERATIONS,
     RENDER_KIND,
-    RETAIN_KIND,
     VALIDATE_LOCAL_KIND,
     VERIFY_KIND,
     CaptureCommand,
@@ -25,18 +18,12 @@ from vibesys.orchestration.multi.strategy._operations import (
     ParentVerification,
     RenderedArtifacts,
     RenderRoleArtifacts,
-    RetainVerifiedRevision,
-    RetentionReceipt,
     ValidateLocal,
     VerifyParentRevision,
-    multi_operation_registrations,
-    multi_operation_registry,
 )
-from vibesys.orchestration.multi.strategy._prompts import (
-    ArchiveConflictView,
-    ConflictMetric,
+from vibesys.orchestration.multi.search._prompts import (
+    Claim,
     ContinuePrompt,
-    Dominator,
     GateFacts,
     HypothesisPlan,
     ImplementerClaims,
@@ -47,9 +34,10 @@ from vibesys.orchestration.multi.strategy._prompts import (
     ProfilerPrompt,
     PromptContext,
     PromptTemplate,
-    ValidationFailure,
 )
-from vibesys.orchestration.multi.strategy._schemas import (
+from vibesys.orchestration.multi.search._recipe import measurement_recipe
+from vibesys.orchestration.multi.search._round import Round
+from vibesys.orchestration.multi.search._schemas import (
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
     PLANNER_REPLY,
@@ -57,18 +45,40 @@ from vibesys.orchestration.multi.strategy._schemas import (
     PROFILER_REPLY,
     STRATEGY_ID,
 )
-from vibesys.orchestration.multi.strategy._state import (
+from vibesys.orchestration.multi.search._search import MultiSearch
+from vibesys.orchestration.multi.search._state import (
     STATE_SCHEMA,
-    MultiStrategyState,
+    Finished,
+    MultiState,
+    Searching,
+    Selecting,
+)
+from vibesys.orchestration.multi.search._values import (
+    ArchiveConflictView,
+    ConflictMetric,
+    Dominator,
+    Note,
+    NoteKind,
+    Repair,
+    RepairKind,
+    Unreachable,
+    UnreachableReason,
+    ValidationFailure,
+)
+from vibesys.serial_search.api import (
+    AttributionConfig,
+    NoReply,
+    NoReplyKind,
+    OfficialReason,
     Role,
     RoundOutcome,
-    RoundState,
 )
-from vibesys.orchestration.multi.strategy._strategy import MultiStrategy
-from vibesys.serial_search.api import AttributionConfig
 
 __all__ = [
+    "BASELINE_KEY",
     "CAPTURE_KIND",
+    "DESIGN_KEY",
+    "IDS",
     "IMPLEMENTER_REPLY",
     "INTERPRET_KIND",
     "JUDGE_REPLY",
@@ -77,7 +87,6 @@ __all__ = [
     "PRE_ROUND_REPLY",
     "PROFILER_REPLY",
     "RENDER_KIND",
-    "RETAIN_KIND",
     "STATE_SCHEMA",
     "STRATEGY_ID",
     "VALIDATE_LOCAL_KIND",
@@ -86,12 +95,14 @@ __all__ = [
     "ArchiveConflictView",
     "AttributionConfig",
     "CaptureCommand",
+    "Claim",
     "CommandCapture",
     "ConflictMetric",
     "ContinuePrompt",
     "Dominator",
     "EvidenceReading",
     "EvidenceReadings",
+    "Finished",
     "GateFacts",
     "HypothesisPlan",
     "ImplementPrompt",
@@ -101,8 +112,13 @@ __all__ = [
     "LocalValidationReport",
     "MetricRow",
     "MultiConfig",
-    "MultiStrategy",
-    "MultiStrategyState",
+    "MultiSearch",
+    "MultiState",
+    "NoReply",
+    "NoReplyKind",
+    "Note",
+    "NoteKind",
+    "OfficialReason",
     "ParentVerification",
     "PartialRow",
     "PlanPrompt",
@@ -112,19 +128,18 @@ __all__ = [
     "PromptTemplate",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
-    "RetainVerifiedRevision",
-    "RetentionReceipt",
+    "Repair",
+    "RepairKind",
     "Role",
+    "Round",
     "RoundOutcome",
-    "RoundState",
+    "Searching",
+    "Selecting",
+    "Unreachable",
+    "UnreachableReason",
     "ValidateLocal",
     "ValidationFailure",
     "VerifyParentRevision",
-    "decision_id",
-    "invocation_id",
     "measurement_recipe",
-    "multi_operation_registrations",
-    "multi_operation_registry",
-    "role_id",
-    "session_id",
+    "round_key",
 ]

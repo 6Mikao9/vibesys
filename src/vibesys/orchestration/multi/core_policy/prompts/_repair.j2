@@ -1,0 +1,20 @@
+{# What the last attempt left to repair, worded from typed data. #}
+{% set meaning = {
+  'missing': 'a required field is missing',
+  'unexpected': 'this field is not allowed',
+  'wrong-type': 'the value has the wrong type',
+  'invalid-value': 'the value is not acceptable',
+  'not-json': 'the reply is not valid JSON',
+} -%}
+{# `repair` (Repair): the feedback to show, the author's text else what failed; empty when none. #}
+{% macro feedback(repair) -%}
+{% if repair.text %}{{ repair.text }}{% elif repair.kind.value == 'review' %}review failed{% elif repair.kind.value == 'gate' %}{{ repair.gate.value }} gate failed{% endif %}
+{%- endmacro %}
+{# `no_reply` (NoReply): how the previous attempt ended without a usable response. #}
+{% macro unanswered(no_reply) -%}
+Your previous attempt returned no valid response ({% if no_reply.kind.value == 'invalid-reply' %}the reply broke its output schema{% elif no_reply.ended %}the turn ended: {{ no_reply.ended.value }}{% elif no_reply.turn_failure %}the turn did not complete: {{ no_reply.turn_failure.value }}{% else %}the turn ended without a reply{% endif %}). Answer with the
+schema-valid JSON object this time.
+{% for item in no_reply.errors %}
+- {% if item.path %}`{{ item.path | join('.') }}`{% else %}the reply{% endif %}: {{ meaning[item.code.value] }}
+{% endfor %}
+{%- endmacro %}

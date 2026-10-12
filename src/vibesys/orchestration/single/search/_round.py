@@ -27,8 +27,6 @@ from vibesys.orchestration.single.search._config import SingleConfig
 from vibesys.orchestration.single.search._operations import EvidenceReadings, InterpretEvidence
 from vibesys.orchestration.single.search._prompts import RoundPrompt
 from vibesys.orchestration.single.search._values import (
-    NoReply,
-    NoReplyKind,
     Repair,
     RepairKind,
     Unreachable,
@@ -37,6 +35,8 @@ from vibesys.orchestration.single.search._values import (
 from vibesys.serial_search.api import (
     Failure,
     FailureKind,
+    NoReply,
+    NoReplyKind,
     OfficialReason,
     Role,
     StoredLedger,

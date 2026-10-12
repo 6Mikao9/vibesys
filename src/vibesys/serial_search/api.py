@@ -29,6 +29,7 @@ from vibesys.serial_search._giveup import GiveUp, giveup_reason
 from vibesys.serial_search._ledger import OfficialReason, StoredLedger, official_reason
 from vibesys.serial_search._ledger import decode as decode_ledger
 from vibesys.serial_search._ledger import encode as encode_ledger
+from vibesys.serial_search._outcomes import NoReply, NoReplyKind, RoundOutcome
 from vibesys.serial_search._plan_view import (
     Bottleneck,
     FrontierRow,
@@ -75,6 +76,8 @@ __all__ = [
     "GaveUp",
     "GiveUp",
     "LastProfile",
+    "NoReply",
+    "NoReplyKind",
     "OfficialReason",
     "PendingClaim",
     "PlanCorrection",
@@ -85,6 +88,7 @@ __all__ = [
     "Planning",
     "ProblemKind",
     "Role",
+    "RoundOutcome",
     "RoundRow",
     "SerialTemplate",
     "StoredLedger",

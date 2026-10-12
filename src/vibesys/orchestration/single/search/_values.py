@@ -8,18 +8,9 @@ never written by the search.
 
 from enum import StrEnum
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
 
-from vibesys.metrics import MetricRow
-from vs_core.api.search import (
-    EvidenceKind,
-    FailureReason,
-    ReplyError,
-    RevisionRef,
-    SettlementId,
-    TurnFailureKind,
-    Value,
-)
+from vs_core.api.search import EvidenceKind, Value
 
 
 class UnreachableReason(StrEnum):
@@ -72,32 +63,3 @@ class Repair(Value):
         if self.kind is RepairKind.GATE and self.gate is not None:
             return f"{self.gate.value} gate failed"
         return "self-review failed"
-
-
-class NoReplyKind(StrEnum):
-    """How the implementer's last turn ended without a usable reply. Closed."""
-
-    INVALID_REPLY = "invalid-reply"
-    """The reply broke its schema and no correction was left; ``errors`` say where."""
-    NO_REPLY = "no-reply"
-    """The turn ended without a reply; ``ended`` or ``turn_failure`` say how."""
-
-
-class NoReply(Value):
-    """An attempt that produced no valid response, which the next attempt is told about."""
-
-    kind: NoReplyKind
-    errors: tuple[ReplyError, ...] = ()
-    ended: FailureReason | None = None
-    turn_failure: TurnFailureKind | None = None
-
-
-class RoundOutcome(Value):
-    """What core settled for one closed round, kept for winner choice."""
-
-    round_number: int = Field(gt=0)
-    hypothesis_id: str
-    settlement: SettlementId
-    candidate: RevisionRef | None = None
-    eligible: bool = False
-    metrics: tuple[MetricRow, ...] = ()

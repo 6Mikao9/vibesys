@@ -1,9 +1,11 @@
-"""Operations the multi strategy declares; execution belongs to the owning libraries.
+"""Operations the multi search declares; execution belongs to the owning libraries.
 
-The request and outcome shapes are the shared bases of `vs_core.api`; this module pins multi's
-namespace (the persisted kind names) and its prompt-context and decoded-reading types. Capture
-is declared for the profile-guided preset and validation for the reviewed round; each is
-optional, because a run without isolated candidate workspaces cannot offer them.
+The request and outcome shapes are the shared bases of `vs_core.api.search`; this module pins
+multi's namespace (the persisted kind names) and its prompt-context and decoded-reading types. A
+runtime executor performs each one and reports an outcome the search reads back as
+`OperationFinished`. Capture is declared for the profile-guided preset and validation for the
+reviewed round; each is optional, because a run without isolated candidate workspaces cannot
+offer them. Rendering a prompt is core's: the agent pipeline asks for it, so the search never does.
 """
 
 from typing import ClassVar, Literal
@@ -11,20 +13,16 @@ from typing import ClassVar, Literal
 from pydantic import BaseModel
 
 from vibesys.metrics import EvidenceReading
-from vibesys.orchestration.multi.strategy._prompts import PromptContext
-from vs_core.api import (
+from vibesys.orchestration.multi.search._prompts import PromptContext
+from vs_core.api.search import (
     CaptureCommandBase,
     CommandCapture,
     EvidenceReadingsBase,
     InterpretEvidenceBase,
     LocalValidationReport,
-    OperationRegistration,
-    OperationRegistry,
     ParentVerification,
     RenderedArtifacts,
     RenderRoleArtifactsBase,
-    RetainVerifiedRevisionBase,
-    RetentionReceipt,
     StrategyOperations,
     ValidateLocalBase,
     VerifyParentRevisionBase,
@@ -33,7 +31,6 @@ from vs_core.api import (
 RENDER_KIND = "multi.render_role_artifacts"
 VERIFY_KIND = "multi.verify_parent_revision"
 INTERPRET_KIND = "multi.interpret_evidence"
-RETAIN_KIND = "multi.retain_verified_revision"
 CAPTURE_KIND = "multi.capture_command"
 VALIDATE_LOCAL_KIND = "multi.validate_local"
 
@@ -42,7 +39,6 @@ __all__ = [
     "INTERPRET_KIND",
     "OPERATIONS",
     "RENDER_KIND",
-    "RETAIN_KIND",
     "VALIDATE_LOCAL_KIND",
     "VERIFY_KIND",
     "CaptureCommand",
@@ -53,12 +49,8 @@ __all__ = [
     "ParentVerification",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
-    "RetainVerifiedRevision",
-    "RetentionReceipt",
     "ValidateLocal",
     "VerifyParentRevision",
-    "multi_operation_registrations",
-    "multi_operation_registry",
 ]
 
 
@@ -79,16 +71,10 @@ class EvidenceReadings(EvidenceReadingsBase[EvidenceReading]):
 
 
 class InterpretEvidence(InterpretEvidenceBase):
-    """Decode accepted evidence into typed metrics; the strategy never parses artifacts."""
+    """Decode accepted evidence into typed metrics; the search never parses artifacts."""
 
     kind: Literal["multi.interpret_evidence"] = "multi.interpret_evidence"
     outcome_model: ClassVar[type[BaseModel]] = EvidenceReadings
-
-
-class RetainVerifiedRevision(RetainVerifiedRevisionBase):
-    """Retain an accuracy-verified exact revision while its producer may still edit."""
-
-    kind: Literal["multi.retain_verified_revision"] = "multi.retain_verified_revision"
 
 
 class CaptureCommand(CaptureCommandBase):
@@ -108,17 +94,6 @@ OPERATIONS = StrategyOperations(
     render=RenderRoleArtifacts,
     verify=VerifyParentRevision,
     interpret=InterpretEvidence,
-    retain=RetainVerifiedRevision,
     capture=CaptureCommand,
     validate_local=ValidateLocal,
 )
-
-
-def multi_operation_registrations() -> tuple[OperationRegistration, ...]:
-    """Codec registrations the launch assembles beside other libraries' operations."""
-    return OPERATIONS.registrations()
-
-
-def multi_operation_registry() -> OperationRegistry:
-    """A closed codec holding only the multi strategy's operations."""
-    return OPERATIONS.registry()

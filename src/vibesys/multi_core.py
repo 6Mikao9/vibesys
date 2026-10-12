@@ -26,20 +26,22 @@ from vibesys.orchestration.multi.core_policy.api import (
     PolicyInputs,
     RunBounds,
     build_core_policy,
+    multi_operation_registry,
     project_strategy_state,
     prompts,
     run_prompt_variables,
 )
 from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
-from vibesys.orchestration.multi.strategy.api import (
+from vibesys.orchestration.multi.search.api import (
     OPERATIONS,
-    MultiStrategyState,
+    MultiState,
+    PromptContext,
     measurement_recipe,
-    multi_operation_registry,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
+from vs_core.api import Piped
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
@@ -103,14 +105,16 @@ def multi_operation_catalog(ports: OperationPorts) -> OperationCatalog:
     return operation_catalog(OPERATIONS, ports)
 
 
-def multi_projector(plugin_id: str) -> RuntimeRecordProjector[MultiStrategyState]:
-    """Read a multi run's strategy state from its committed runtime record."""
+def multi_projector(plugin_id: str) -> RuntimeRecordProjector[Piped[MultiState, PromptContext]]:
+    """Read a multi run's search state from its committed runtime record."""
     return RuntimeRecordProjector(
         plugin_id=plugin_id,
-        state_type=MultiStrategyState,
-        record_type=RuntimeRecord[MultiStrategyState],
+        state_type=Piped[MultiState, PromptContext],
+        record_type=RuntimeRecord[Piped[MultiState, PromptContext]],
         operations=multi_operation_registry(),
-        project=lambda state, revision: project_strategy_state(state, experiment_revision=revision),
+        project=lambda state, revision: project_strategy_state(
+            state.inner, experiment_revision=revision
+        ),
     )
 
 
@@ -139,9 +143,10 @@ def _plan_for(options_type: type[MultiRunOptions]) -> Callable[[CoreRunContext],
             ),
             isolated_candidates=context.environment.parallel_candidate_obstacle is None,
         )
-        config = policy.strategy.config
+        config = policy.config
         return CorePlan(
-            strategy=policy.strategy,
+            search=policy.search,
+            config=config,
             reply_schemas=policy.reply_schemas,
             facts=policy.facts,
             limits=policy.limits,

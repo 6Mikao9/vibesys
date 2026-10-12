@@ -1,3 +1,7 @@
+{% from '_repair.j2' import feedback as repair_feedback, unanswered %}
+{% set shown = repair_feedback(repair) | trim if repair else '' %}
+{% set validation_failure = repair.validation if repair else none %}
+{% set pareto_archive_conflict = repair.conflict if repair else none %}
 {% from '_revision.j2' import rev %}
 You are the Implementer continuing hypothesis `{{ plan.hypothesis_id }}`{% if plan.title %} ({{ plan.title }}){% endif %}.
 Execute the required delta; do not rediscover completed work.
@@ -24,10 +28,9 @@ prior attempt remains consumed against the typed plan's hard maximum over all br
 repeat exhausted target work; make the smallest local/report-only correction or return the
 truthful incomplete outcome.
 {% endif %}
-{% if no_valid_reply %}
+{% if no_reply %}
 
-Your previous attempt returned no valid response ({{ no_valid_reply }}). Answer with the
-schema-valid JSON object this time.
+{{ unanswered(no_reply) }}
 {% endif %}
 
 ## Required continuation delta
@@ -41,10 +44,10 @@ Tally cumulative paid work from your own records; rounds/reviews/retries do not
 replenish it. If spent or new authority is needed, make no paid call and return
 a terminal outcome with empty `next_step`.
 
-{% if feedback %}
+{% if shown %}
 ## New review/framework feedback
 
-{{ feedback }}
+{{ shown }}
 {% endif %}
 {% if validation_failure %}
 ## Framework validation failure

@@ -14,9 +14,9 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from vibesys.orchestration.single.search._values import NoReply, Repair
+from vibesys.orchestration.single.search._values import Repair
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
-from vibesys.serial_search.api import OfficialReason, PlanCorrection, PlanEvidence
+from vibesys.serial_search.api import NoReply, OfficialReason, PlanCorrection, PlanEvidence
 from vs_core.api.search import RevisionRef, Value
 
 

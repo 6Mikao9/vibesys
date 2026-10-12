@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from vs_core.api import Limits
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.multi.strategy.api import MultiConfig
+    from vibesys.orchestration.multi.search.api import MultiConfig
 
 # Core requires a finite deadline. An unset `[run] max_run_seconds` means unbounded, which is the
 # largest finite double: no run clock reaches it and nothing adds to it.
@@ -26,12 +26,12 @@ def limits_for(
 
     One round is one admitted attempt, run serially, so attempts are `max_rounds` and a refund
     (an attempt core never admitted) can return at most that many. A chain of turns counts its
-    first reply, `max_corrections` corrections and `max_turn_drops` asks after a lost turn. Per
-    round: the three run-scoped chains (routing, profile, plan), and for each paid
+    first reply and `max_corrections` corrections, and any of them is asked again up to
+    `max_turn_drops` times after a lost turn. Per round: the three run-scoped chains (routing, profile, plan), and for each paid
     implementer chain (at most `max_retries_per_round`) one review chain, with one resume per
     measurement submission for each of the two roles.
     """
-    chain = 1 + config.max_corrections + config.max_turn_drops
+    chain = (1 + config.max_corrections) * (1 + config.max_turn_drops)
     submissions = config.max_input_measurement_attempts
     per_round = 3 + 2 * config.max_retries_per_round + 2 * submissions
     return Limits(

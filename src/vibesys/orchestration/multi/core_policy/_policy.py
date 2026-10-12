@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.orchestration.multi.core_policy._agents import build_search, reply_schemas
 from vibesys.orchestration.multi.core_policy._limits import limits_for, run_deadline_at
-from vibesys.orchestration.multi.core_policy._replies import reply_schemas
-from vibesys.orchestration.multi.strategy.api import (
+from vibesys.orchestration.multi.search.api import (
+    IDS,
     JUDGE_REPLY,
     AttributionConfig,
     MultiConfig,
-    MultiStrategy,
     Role,
-    role_id,
 )
 from vibesys.orchestration.profilers import ProfilerKind, profiler_definition
 from vs_core.api import (
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from vibesys.orchestration.multi.models import MultiOptions, ProfileGuidedMultiOptions
-    from vs_core.api import Limits, SchemaRef
+    from vs_core.api import Limits, SchemaRef, Search
 
 type Seconds = Annotated[int, Field(gt=0)]
 
@@ -76,7 +75,8 @@ class PolicyInputs(_Value):
 class MultiCorePolicy:
     """What the shell needs to start, run and resume a multi search on the core."""
 
-    strategy: MultiStrategy
+    search: Search[Any, Any]
+    config: MultiConfig
     facts: CoreRunFacts
     limits: Limits
     deadline_at: float
@@ -94,7 +94,7 @@ def requirements_for(config: MultiConfig) -> EvidenceRequirements:
         assessment_authorities=(
             AssessmentAuthority(
                 kind=AssessmentKind.LOCAL_VALIDATION,
-                role_id=role_id(Role.JUDGE.value),
+                role_id=IDS.role_id(Role.JUDGE.value),
                 output_schema=JUDGE_REPLY,
             ),
         ),
@@ -173,7 +173,8 @@ def build_core_policy(
     """The policy of one multi run from its validated options and resolved inputs."""
     config = config_for(options, bounds, inputs)
     return MultiCorePolicy(
-        strategy=MultiStrategy(config=config),
+        search=build_search(config),
+        config=config,
         facts=CoreRunFacts(
             objective=inputs.objective,
             baseline=RevisionRef.of_git_commit(inputs.baseline_commit),
@@ -187,6 +188,6 @@ def build_core_policy(
             observe_backoff_cap=float(bounds.observe_backoff_cap_seconds),
         ),
         deadline_at=run_deadline_at(bounds.max_run_seconds),
-        reply_schemas=reply_schemas(),
+        reply_schemas=reply_schemas(config),
         requirements=requirements_for(config),
     )

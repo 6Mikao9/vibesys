@@ -1,10 +1,12 @@
-"""Typed data the strategy hands to the declared prompt-rendering operation.
+"""Typed data the search hands to the prompt renderer.
 
-The strategy never builds prompt text. It sends a `PromptContext`; the operation's executor
-renders the named template with `vs_prompts` and stores the artifacts. The evidence the legacy
-loop kept in progress files (round history, the Pareto frontier, carried notices, the profile,
-the implementer's claims for the judge) is rendered from the typed rows below, because a
-round's workspace is an isolated child of a revision and holds no progress files.
+The search never builds prompt text. It sends a `PromptContext`; the render operation renders the
+named template with `vs_prompts` and stores the artifacts. The evidence the legacy loop kept in
+progress files (round history, the Pareto frontier, carried notices, the profile, the
+implementer's claims for the judge) is rendered from the typed rows below, because a round's
+workspace is an isolated child of a revision and holds no progress files. The contexts of the core
+protocol (a reply that broke its schema, a resumed turn, a wait nobody recorded) come from
+`vibesys.prompts`, and the correction of a plan the ledger refused from `vibesys.serial_search`.
 """
 
 from enum import StrEnum
@@ -12,13 +14,14 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
+from vibesys.orchestration.multi.search._values import ArchiveConflictView, Repair
 from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
-from vibesys.serial_search.api import PlanEvidence
-from vs_core.api import EvidenceRef, RevisionRef, Value
+from vibesys.serial_search.api import NoReply, OfficialReason, PlanCorrection, PlanEvidence
+from vs_core.api.search import EvidenceRef, RevisionRef, Value
 
 
 class PromptTemplate(StrEnum):
-    """Closed set of multi's own templates (the shared protocol ones are `CoreProtocolTemplate`)."""
+    """Closed set of multi's own templates (the shared ones are `CoreProtocolTemplate`)."""
 
     PRE_ROUND = "pre_round"
     PROFILER = "profiler"
@@ -90,36 +93,6 @@ class ImplementerClaims(Value):
     validation_recipe_artifact: str | None = None
 
 
-class ConflictMetric(Value):
-    """One objective value of a point on the live archive."""
-
-    name: str
-    value: float
-    direction: Literal["max", "min"]
-
-
-class Dominator(Value):
-    """A trusted archive point that dominates a claimed frontier row."""
-
-    round_number: int = Field(gt=0)
-    metrics: tuple[ConflictMetric, ...] = ()
-
-
-class ArchiveConflictView(Value):
-    """A `pareto_frontier` claim that the live archive dominates."""
-
-    dominators: tuple[Dominator, ...] = Field(min_length=1)
-
-
-class ValidationFailure(Value):
-    """How the trusted run of the implementer's validation recipes ended, when it did not pass."""
-
-    recipe: str = ""
-    error: str = ""
-    output: str = ""
-    recipe_unusable: bool = False
-
-
 class HypothesisPlan(Value):
     """The designer's typed plan of the hypothesis a round works on."""
 
@@ -155,12 +128,9 @@ class ImplementPrompt(Value):
     plan: HypothesisPlan
     base_revision: RevisionRef
     framework: GateFacts
-    feedback: str | None = None
-    validation_failure: ValidationFailure | None = None
-    no_valid_reply: str | None = None
-    pareto_archive_conflict: ArchiveConflictView | None = None
-    official_due: bool = False
-    official_reason: str | None = None
+    repair: Repair | None = None
+    no_reply: NoReply | None = None
+    official_reason: OfficialReason | None = None
     benchmark_enabled: bool = True
     active_component: str | None = None
     reference_path: str = "."
@@ -177,10 +147,8 @@ class ContinuePrompt(Value):
     base_revision: RevisionRef
     continuation_step: str
     framework: GateFacts
-    feedback: str | None = None
-    validation_failure: ValidationFailure | None = None
-    no_valid_reply: str | None = None
-    pareto_archive_conflict: ArchiveConflictView | None = None
+    repair: Repair | None = None
+    no_reply: NoReply | None = None
 
 
 class JudgePrompt(Value):
@@ -192,9 +160,8 @@ class JudgePrompt(Value):
     plan: HypothesisPlan
     claims: ImplementerClaims
     framework: GateFacts
-    pareto_archive_conflict: ArchiveConflictView | None = None
-    official_due: bool = False
-    official_reason: str | None = None
+    conflict: ArchiveConflictView | None = None
+    official_reason: OfficialReason | None = None
     benchmark_enabled: bool = True
     interface: str = "inprocess"
     # The trusted evaluations the candidate was measured by, stated at render time.
@@ -205,6 +172,7 @@ type PromptContext = Annotated[
     PreRoundPrompt
     | ProfilerPrompt
     | PlanPrompt
+    | PlanCorrection
     | ImplementPrompt
     | ContinuePrompt
     | JudgePrompt
