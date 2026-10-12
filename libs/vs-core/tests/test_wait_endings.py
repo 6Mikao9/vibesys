@@ -164,7 +164,7 @@ def test_a_result_that_arrives_after_its_request_ended_is_discarded_not_delivere
     for result in _late_results(live):
         heard = _hearing(state, result)
         (event,) = heard.events
-        assert isinstance(event, core.TurnFinished | core.MeasurementFinished), "while it lasts"
+        assert isinstance(event, core.TurnEnded | core.MeasurementFinished), "while it lasts"
         assert event.decision == core.DecisionId(root="w")
         assert heard.discarded == ()
 
