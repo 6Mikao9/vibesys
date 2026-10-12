@@ -10,7 +10,8 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.checkpoint_faults import CHECKPOINTS
-from tests.vibesys.orchestration.single.strategy.world import ENDINGS, Ending, SingleWorld
+from tests.vibesys.orchestration.single.search._decisions import works
+from tests.vibesys.orchestration.single.search.world import ENDINGS, Ending, SingleWorld
 
 from vs_core.api import AttemptPhase, Settle, Withdraw
 from vs_dst.api import SimulatedRun, simulate
@@ -33,7 +34,7 @@ def test_a_round_whose_turn_waited_adopts_the_candidate_it_checkpointed() -> Non
     assert run.core.evaluation.continuations != ()
     (settle,) = [
         item.disposition
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
     assert settle.candidate is not None
@@ -82,8 +83,8 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         # replies are compared.
         assert run.core.evaluation.continuations != ()
         waiting = simulate(SingleWorld(waits=(True,), polls=(polls,), max_rounds=rounds))
-        assert [type(item).__name__ for item in run.decisions] == [
-            type(item).__name__ for item in waiting.decisions
+        assert [type(item).__name__ for item in works(run.decisions)] == [
+            type(item).__name__ for item in works(waiting.decisions)
         ]
 
 

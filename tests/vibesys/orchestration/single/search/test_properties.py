@@ -11,16 +11,17 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.single.strategy.world import (
+from tests.vibesys.orchestration.single.search._decisions import works
+from tests.vibesys.orchestration.single.search.world import (
     FACTS,
     SingleWorld,
     implemented,
     plan_reply,
     profile_attribution,
+    single_state,
 )
 
 from vibesys.hypothesis import rounds
-from vibesys.orchestration.single.strategy.api import SingleStrategyState
 from vs_core.api import Finish, ProposeWinner, RequestTurn, Settle, StartAttempt, Withdraw
 from vs_dst.api import simulate
 
@@ -31,13 +32,13 @@ PURE = settings(max_examples=12, deadline=None, derandomize=True, database=None)
 
 
 def _starts(run: SimulatedRun) -> list[StartAttempt]:
-    return [item for item in run.decisions if isinstance(item, StartAttempt)]
+    return [item for item in works(run.decisions) if isinstance(item, StartAttempt)]
 
 
 def _settles(run: SimulatedRun) -> list[Settle]:
     return [
         item.disposition
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, Withdraw) and isinstance(item.disposition, Settle)
     ]
 
@@ -57,11 +58,11 @@ def test_s5_paid_turns_of_a_round_never_exceed_the_retry_budget(
     assert not run.liveness_violations
     paid = [
         item
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, RequestTurn) and item.turn.charge_class == "paid"
     ]
     assert len(paid) <= retries
-    assert isinstance(run.decisions[-1], Finish)
+    assert isinstance(works(run.decisions)[-1], Finish)
 
 
 def test_s1_a_round_the_cadence_skipped_is_never_a_winner_and_is_the_next_base() -> None:
@@ -86,8 +87,8 @@ def test_s1_a_round_the_cadence_skipped_is_never_a_winner_and_is_the_next_base()
     assert run.finished
     assert not run.liveness_violations
     first = _settles(run)[0]
-    state = SingleStrategyState.model_validate(run.state)
-    ledger = rounds.decode(rounds.EncodedLedger(state.search_json, state.carry_json))
+    state = single_state(run)
+    ledger = rounds.decode(rounds.EncodedLedger(state.ledger.search_json, state.ledger.carry_json))
     first_record = ledger.records[0]
 
     assert (first.eligible, first.retention) == (False, "candidate")
@@ -96,7 +97,7 @@ def test_s1_a_round_the_cadence_skipped_is_never_a_winner_and_is_the_next_base()
     assert first_record.candidate_disposition == "pareto_frontier"
     assert first_record.candidate_retention_reason == "agent reports a tradeoff"
     assert first_record.candidate_retained is False
-    winner = next(item for item in run.decisions if isinstance(item, ProposeWinner))
+    winner = next(item for item in works(run.decisions) if isinstance(item, ProposeWinner))
     if winner.selection.kind == "retained_candidate":
         assert winner.selection.revision != first.candidate
 
@@ -119,7 +120,7 @@ def test_an_invalid_designer_plan_is_corrected_once_with_its_predecessor() -> No
     assert not run.liveness_violations
     designer = [
         item
-        for item in run.decisions
+        for item in works(run.decisions)
         if isinstance(item, RequestTurn) and item.turn.session.role_id.root.endswith("orchestrator")
     ]
     assert [item.turn.charge_class for item in designer] == ["free", "correction"]
@@ -133,7 +134,7 @@ def test_a_designer_that_never_gives_a_valid_plan_ends_the_run_without_a_round()
     assert run.finished
     assert not run.liveness_violations
     assert not _starts(run)
-    final = run.decisions[-1]
+    final = works(run.decisions)[-1]
     assert isinstance(final, Finish)
     assert final.result.outcome in {"failure", "success"}
 
@@ -153,7 +154,7 @@ def test_s6_profile_guidance_is_captured_once_per_new_hypothesis_and_reaches_the
     assert not run.liveness_violations
     captures = [
         item
-        for item in run.decisions
+        for item in works(run.decisions)
         if type(getattr(item, "request", None)).__name__ == "CaptureCommand"
     ]
     assert len(captures) == 2
@@ -168,7 +169,7 @@ def test_the_search_survives_an_implementer_whose_every_reply_is_unparsable() ->
 
     assert run.finished
     assert not run.liveness_violations
-    assert isinstance(run.decisions[-1], Finish)
+    assert isinstance(works(run.decisions)[-1], Finish)
     assert all(not item.eligible for item in _settles(run))
 
 
@@ -207,9 +208,9 @@ def test_a_failed_attribution_command_names_the_command_and_where_it_runs(
 
     assert run.finished
     assert not run.liveness_violations
-    assert isinstance(run.state, SingleStrategyState)
-    error = run.state.planner.last_error
-    assert error is not None
+    result = run.core.run.result
+    assert result is not None
+    error = result.reason
     assert "`bash attribute.sh`" in error
     assert f"exited with code {exit_code}" in error
     assert "command environment" in error

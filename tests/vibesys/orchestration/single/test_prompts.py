@@ -14,10 +14,10 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from vibesys.orchestration.single.strategy.api import PlanPrompt, PromptTemplate, RoundPrompt
 
 import vibesys.orchestration.single.core_policy.prompts as templates
 from vibesys.orchestration.single.core_policy.api import run_prompt_variables
-from vibesys.orchestration.single.strategy.api import PlanPrompt, PromptTemplate, RoundPrompt
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vibesys.serial_search.api import (
     PROMPTS_DIR,

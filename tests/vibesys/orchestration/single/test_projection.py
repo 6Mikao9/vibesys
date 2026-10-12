@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from tests.vibesys.orchestration.test_projection import _search_state
+from vibesys.orchestration.single.strategy.api import SingleStrategyState
 
 from vibesys.hypothesis import rounds
 from vibesys.hypothesis.readmodel import project_hypothesis_state
 from vibesys.orchestration.single.core_policy.api import project_strategy_state
-from vibesys.orchestration.single.strategy.api import SingleStrategyState
 
 
 def test_the_projection_of_the_strategy_state_is_the_projection_of_its_ledger() -> None:

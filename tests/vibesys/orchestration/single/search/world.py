@@ -1,4 +1,4 @@
-"""The single strategy's world: what its agents reply and what its benchmarks measure.
+"""The single search's world: what its agents reply and what its benchmarks measure.
 
 `SingleWorld` is a vs-dst `World`. A test builds one from plain data, simulates it and asserts
 on the run::
@@ -19,10 +19,16 @@ import json
 from typing import TYPE_CHECKING, Any, Literal
 
 from tests.support.checkpoint_faults import FaultyCheckpoints
-from tests.vibesys.orchestration.single.strategy._waiting import WAITING, WaitingTurns
+from tests.vibesys.orchestration.single.search._refusals import Refuses, Refusing, as_search
+from tests.vibesys.orchestration.single.search._waiting import WAITING, WaitingTurns
 
-from vibesys.orchestration.single.core_policy.api import reply_schemas, requirements_for
-from vibesys.orchestration.single.strategy.api import (
+from vibesys.orchestration.single.core_policy.api import (
+    build_search,
+    reply_schemas,
+    requirements_for,
+    single_operation_registry,
+)
+from vibesys.orchestration.single.search.api import (
     CaptureCommand,
     CommandCapture,
     EvidenceReading,
@@ -34,10 +40,8 @@ from vibesys.orchestration.single.strategy.api import (
     RenderedArtifacts,
     RenderRoleArtifacts,
     SingleConfig,
-    SingleStrategy,
-    SingleStrategyState,
+    SingleState,
     VerifyParentRevision,
-    single_operation_registry,
 )
 from vs_core.api import (
     AdoptRevision,
@@ -72,12 +76,13 @@ from vs_core.api import (
 from vs_core.testing.drive import Answer, Harness, Running, Succeeded, Unknown
 from vs_dst.api import RunSetup
 from vs_runtime.api.core import handle_for
+from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_core.api import CoreState, MeasurementPlan, Request, RequestId, Scope
-    from vs_dst.api import Enact
+    from vs_core.api import CoreState, MeasurementPlan, Request, RequestId, Scope, Search
+    from vs_dst.api import Enact, SimulatedRun
     from vs_runtime.api.core import CoreRuntime
     from vs_sim.api.testing import VirtualClock
 
@@ -160,6 +165,19 @@ def single_config(**settings: object) -> SingleConfig:
     )
 
 
+def single_state(finished: SimulatedRun) -> SingleState:
+    """The single search's own state inside the agent pipeline's wrapper."""
+    inner = getattr(finished.state, "inner", None)
+    assert isinstance(inner, SingleState), type(finished.state)
+    return inner
+
+
+def _search(selected: SingleConfig, refuses: Refuses | None) -> Search[Any, Any]:
+    """The single search, with the decisions ``refuses`` names refused."""
+    search = build_search(selected)
+    return search if refuses is None else as_search(Refusing(search, refuses))
+
+
 def _lease(session_id: SessionId) -> ResourceId:
     """The lease an executor holds for a session: the same name from ensure through close."""
     return ResourceId(root=f"lease:{session_id.root}")
@@ -191,6 +209,7 @@ class SingleWorld:
         ends: Sequence[Ending] = ("wait",),
         polls: Sequence[int] = (0,),
         checkpoints: Sequence[str] = (),
+        refuses: Refuses | None = None,
         **settings: object,
     ) -> None:
         """Script a run.
@@ -206,20 +225,22 @@ class SingleWorld:
         it validated its wait (with the waiting reply, the role's final result, or a reply that is
         not JSON); ``polls`` is how many polls the n-th evaluation job reports running (the last
         entry repeats). ``checkpoints`` answers the n-th checkpoint request ``succeeded``,
-        ``failed`` or ``retryable`` (cycling). Any other option is a `SingleConfig` field.
+        ``failed`` or ``retryable`` (cycling). ``refuses`` names the decisions core refuses, by identity,
+        with the code it answers (see `Refusing`). Any other option is a `SingleConfig` field.
         """
         config = single_config(**settings)
+        state_model = build_search(config).state_model
         self.setup = RunSetup(
-            new_strategy=lambda: SingleStrategy(config=config),
+            new_launch=lambda: Launch(search=_search(config, refuses), config=config),
             harness=Harness(
                 registry=single_operation_registry(),
                 facts=FACTS,
                 limits=LIMITS,
-                envelope_type=RunEnvelope[SingleStrategyState],
+                envelope_type=RunEnvelope[state_model],
                 requirements=requirements_for(config),
                 lifecycle=frozenset({"suspend"}) if waits else frozenset(),
             ),
-            schemas=reply_schemas(),
+            schemas=reply_schemas(config),
             # A turn that waits is resumed while another request runs, and the evaluation it
             # waits for is admitted to the shell by the loop's control poll.
             max_concurrent=2 if waits else 1,
