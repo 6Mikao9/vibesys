@@ -30,6 +30,17 @@ class CheckpointDecline(StrEnum):
     still retains the workspace, so the attempt can release."""
 
 
+class TurnFailureKind(StrEnum):
+    """Why a turn ended without a usable reply, as a closed set strategies match on."""
+
+    PROVIDER_FAILED = "provider_failed"
+    """The executor ended the turn: the provider refused it, or its reply broke the schema."""
+    TRANSPORT_LOST = "transport_lost"
+    """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
+    CANCELLED = "cancelled"
+    """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
+
+
 class Value(BaseModel):
     """Persistable data, never live interfaces or mutable containers."""
 
@@ -286,6 +297,10 @@ class Scope(Value):
 
     owner: Annotated[RunId | AttemptId, Field(discriminator="kind")]
     generation: Generation
+
+
+THIS_RUN = Scope(owner=RunId(root="this-run"), generation=0)
+"""The scope a search names for work the run itself owns. Core replaces it with the run's own."""
 
 
 class AttemptRef(Value):

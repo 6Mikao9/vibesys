@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from ._registry import ContractError
 from ._search_events import run_view, translate
-from .types.common import RunStatus
+from .types.common import THIS_RUN, RunStatus, Scope
 from .types.kernel import ProposalSubmitted
 from .types.kinds import OPT_IN, EventKind, WorkKind
 from .types.records import RecoveryPhase
@@ -67,6 +67,16 @@ def check_decisions(declaration: SearchDeclaration, decisions: object) -> tuple[
             raise ContractError((*path, "request"), "work kind is not in the declaration's uses")
         checked.append(decision)
     return tuple(checked)
+
+
+def _in_scope[D: Wait | Finish](decision: D, own: Scope) -> D:
+    """``decision`` with the run's own scope where the search wrote ``THIS_RUN``."""
+    if isinstance(decision, Wait):
+        if decision.request.scope != THIS_RUN:
+            return decision
+        request = decision.request.model_copy(update={"scope": own})
+        return decision.model_copy(update={"request": request})  # type: ignore[return-value]
+    return decision.model_copy(update={"scope": own}) if decision.scope == THIS_RUN else decision
 
 
 def _deliverable(declaration: SearchDeclaration, event: Event) -> bool:
@@ -140,7 +150,10 @@ class _Pass:
         if core.records.recovery.phase != RecoveryPhase.READY:
             self.held.extend(work)
             return core
-        submissions = tuple(self.host.registry.validate_submission(d) for d in work)
+        own = Scope(owner=core.run.run_id, generation=core.run.generation)
+        submissions = tuple(
+            self.host.registry.validate_submission(_in_scope(d, own)) for d in work
+        )
         self.sent.extend(submissions)
         transition = self.host.step(
             core, ProposalSubmitted(decisions=submissions, expected_revision=core.revision)

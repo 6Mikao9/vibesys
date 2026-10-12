@@ -51,6 +51,24 @@ class DecisionBase(Value):
 
     decision_id: DecisionId
     scope: Scope
+    """Who owns the work. ``THIS_RUN`` means the run itself; core fills in its own scope."""
+
+
+class AskAgent(DecisionBase):
+    """Ask a declared agent for a reply (a search's request; core's pipeline does the rest).
+
+    ``input`` is the typed context the agent's prompt template renders. The pipeline renders
+    it, runs the turn, validates the reply against the agent's model, asks again for
+    corrections and for turns the transport lost, resumes a turn that waited for its
+    evaluations, and delivers ONE ``TurnFinished`` (or one ``Failed``). An input that is a
+    ``Correction`` names the earlier turn it corrects, so the new turn is that turn's
+    correction. ``revision`` is the revision of the agent's workspace, when it has one.
+    """
+
+    kind: Literal["ask_agent"] = "ask_agent"
+    agent: str = Field(min_length=1)
+    input: SerializeAsAny[Value]
+    revision: RevisionRef | None = None
 
 
 class RequestTurn(DecisionBase):
@@ -236,7 +254,7 @@ class Operation(DecisionBase):
 
 
 type Work = Annotated[
-    RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation,
+    AskAgent | RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation,
     Field(discriminator="kind"),
 ]
 """What a search can ask for. It only starts inside a ``Wait``."""

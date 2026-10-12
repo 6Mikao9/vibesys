@@ -6,7 +6,13 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from .attempts import AttemptExhausted, AttemptsEvent, AttemptsState, AttemptView
+from .attempts import (
+    AttemptExhausted,
+    AttemptsEvent,
+    AttemptsState,
+    AttemptView,
+    CheckpointResolved,
+)
 from .common import (
     ArtifactRef,
     Capabilities,
@@ -256,6 +262,7 @@ type StrategyEvent = Annotated[
     | InputDelivered
     | InputDropped
     | AttemptExhausted
+    | CheckpointResolved
     | InterruptCompleted
     | MeasurementResult
     | ResumeAuthorized

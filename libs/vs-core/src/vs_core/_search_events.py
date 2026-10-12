@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ._registry import ContractError
-from .types.attempts import AttemptExhausted
-from .types.evaluation import MeasurementResult
+from .types.attempts import AttemptExhausted, CheckpointResolved
+from .types.common import Scope
+from .types.evaluation import MeasurementResult, ResumeAuthorized, TurnSuspended
 from .types.kernel import ControlChanged
 from .types.kinds import EventKind
 from .types.records import OperationResult
@@ -25,6 +26,7 @@ from .types.scheduling import AttemptReady
 from .types.search import (
     AdoptionFinished,
     AttemptSummary,
+    CheckpointKnown,
     Discarded,
     DiscardReason,
     Interrupted,
@@ -32,14 +34,17 @@ from .types.search import (
     MessageDelivered,
     MessageDropped,
     OperationFinished,
+    ResumeReady,
     RunView,
     StopRequested,
-    TurnFinished,
+    TurnEnded,
+    TurnYielded,
     WorkspaceClosed,
     WorkspaceOpened,
+    YieldFailed,
 )
 from .types.session_inputs import InputDelivered, InputDropped
-from .types.sessions import InterruptCompleted, InterruptFailed, TurnResult
+from .types.sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
 from .types.settlement import AdoptionFailed, AdoptionResult, AttemptSettled
 from .types.strategy import Rejected
 from .types.until import Failed, FailureReason
@@ -57,6 +62,7 @@ def run_view(core: CoreState) -> RunView:
     """The narrow read-only view of a run that ``Search.update`` receives."""
     run = core.run
     return RunView(
+        run=Scope(owner=run.run_id, generation=run.generation),
         now_at=run.now_at,
         deadline_at=run.deadline_at,
         facts=run.facts,
@@ -163,11 +169,31 @@ def _rejected(core: CoreState, event: Rejected) -> Event:
 def _turn(core: CoreState, event: TurnResult) -> Event | Discarded | None:
     request = event.observation.request_id
     decision = _decision_of(core, request)
-    if event.suspending or decision is None:
+    if decision is None:
         return None
-    return _late(core, request, EventKind.TURN_FINISHED) or TurnFinished(
+    return _late(core, request, EventKind.TURN_FINISHED) or TurnEnded(
         decision=decision, result=event
     )
+
+
+def _yielded(core: CoreState, event: TurnSuspended) -> Event:
+    del core
+    return TurnYielded(continuation=event.continuation)
+
+
+def _yield_failed(core: CoreState, event: YieldPublicationFailed) -> Event:
+    del core
+    return YieldFailed(failure=event)
+
+
+def _resume(core: CoreState, event: ResumeAuthorized) -> Event:
+    del core
+    return ResumeReady(authorization=event)
+
+
+def _checkpoint(core: CoreState, event: CheckpointResolved) -> Event:
+    del core
+    return CheckpointKnown(invocation=event.invocation, checkpoint=event.checkpoint)
 
 
 def _measurement(core: CoreState, event: MeasurementResult) -> Event | Discarded:
@@ -230,6 +256,10 @@ _TRANSLATE: dict[type, Callable[[CoreState, Any], Event | Discarded | None]] = {
     Rejected: _rejected,
     AttemptExhausted: _exhausted,
     TurnResult: _turn,
+    TurnSuspended: _yielded,
+    YieldPublicationFailed: _yield_failed,
+    ResumeAuthorized: _resume,
+    CheckpointResolved: _checkpoint,
     MeasurementResult: _measurement,
     OperationResult: _operation,
     AdoptionResult: _adoption,

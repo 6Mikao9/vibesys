@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from .agents import Checkpoint
 from .common import (
     AttemptId,
     AttemptRef,
@@ -103,6 +104,14 @@ class CheckpointDeclined(Value):
     invocation: InvocationRef
     authority: RequestId
     reason: CheckpointDecline
+
+
+class CheckpointResolved(Value):
+    """Core recorded or declined the checkpoint of one invocation (a published fact)."""
+
+    kind: Literal["checkpoint_resolved"] = "checkpoint_resolved"
+    invocation: InvocationRef
+    checkpoint: Checkpoint
 
 
 class AttemptView(Value):

@@ -30,6 +30,7 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._session_scope import retains_write_turn, write_turn_authority, yield_authority, yields_turn
+from .types.agents import Declined, Retained
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
@@ -44,6 +45,7 @@ from .types.attempts import (
     AttemptView,
     CheckpointDecline,
     CheckpointDeclined,
+    CheckpointResolved,
     EnsureWorkspace,
     InitialSessionsFailed,
     InitialSessionsReady,
@@ -1281,7 +1283,14 @@ def _decline_checkpoint(
     updated = attempt.model_copy(
         update={"checkpoint_declines": (*attempt.checkpoint_declines, row)}
     )
-    return AreaChange(state=_replace(state, updated))
+    return AreaChange(
+        state=_replace(state, updated),
+        events=(
+            CheckpointResolved(
+                invocation=event.invocation, checkpoint=Declined(reason=reason)
+            ),
+        ),
+    )
 
 
 def _checkpoint_request(
@@ -1442,6 +1451,11 @@ def _checkpointed(
     )
     return AreaChange(
         state=_replace(state, updated),
+        events=(
+            CheckpointResolved(
+                invocation=event.invocation, checkpoint=Retained(revision=checkpoint.revision)
+            ),
+        ),
         signals=(
             InvocationCheckpointAvailable(
                 invocation=event.invocation,

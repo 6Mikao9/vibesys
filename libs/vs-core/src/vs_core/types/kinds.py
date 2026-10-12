@@ -14,6 +14,8 @@ from enum import StrEnum
 class WorkKind(StrEnum):
     """What a ``Wait`` can ask for, plus the clock wake-up."""
 
+    ASK_AGENT = "ask_agent"
+    """Ask an agent for a reply; core runs render, turn, validation, corrections and resumes."""
     REQUEST_TURN = "request_turn"
     START_ATTEMPT = "start_attempt"
     WITHDRAW = "withdraw"
@@ -38,18 +40,41 @@ class EventKind(StrEnum):
     MESSAGE_DELIVERED = "message_delivered"
     MESSAGE_DROPPED = "message_dropped"
     INTERRUPTED = "interrupted"
+    TURN_ENDED = "turn_ended"
+    """Plumbing of the agent pipeline: one provider turn ended (reply or typed failure)."""
+    TURN_YIELDED = "turn_yielded"
+    """Plumbing of the agent pipeline: core recorded the wait a turn ended with."""
+    YIELD_FAILED = "yield_failed"
+    """Plumbing of the agent pipeline: core could not publish the wait a turn ended with."""
+    RESUME_READY = "resume_ready"
+    """Plumbing of the agent pipeline: core authorized the resume of a suspended turn."""
+    CHECKPOINT_KNOWN = "checkpoint_known"
+    """Plumbing of the agent pipeline: core recorded or declined a turn's checkpoint."""
 
 
 ALWAYS: frozenset[EventKind] = frozenset({EventKind.FAILED, EventKind.STOP_REQUESTED})
 """Delivered to every search: any wait can fail, and an operator can ask to stop."""
 
-OPT_IN: frozenset[EventKind] = frozenset(
-    {EventKind.MESSAGE_DELIVERED, EventKind.MESSAGE_DROPPED, EventKind.INTERRUPTED}
+PIPELINE: frozenset[EventKind] = frozenset(
+    {
+        EventKind.TURN_ENDED,
+        EventKind.TURN_YIELDED,
+        EventKind.YIELD_FAILED,
+        EventKind.RESUME_READY,
+        EventKind.CHECKPOINT_KNOWN,
+    }
+)
+"""The events of one provider turn. Only core's agent pipeline declares and handles them."""
+
+OPT_IN: frozenset[EventKind] = (
+    frozenset({EventKind.MESSAGE_DELIVERED, EventKind.MESSAGE_DROPPED, EventKind.INTERRUPTED})
+    | PIPELINE
 )
 """Delivered only to a search that declares it; core handles them itself otherwise."""
 
 PRODUCES: dict[WorkKind, frozenset[EventKind]] = {
-    WorkKind.REQUEST_TURN: frozenset({EventKind.TURN_FINISHED}),
+    WorkKind.ASK_AGENT: frozenset({EventKind.TURN_FINISHED}),
+    WorkKind.REQUEST_TURN: PIPELINE,
     WorkKind.START_ATTEMPT: frozenset({EventKind.WORKSPACE_OPENED}),
     WorkKind.WITHDRAW: frozenset({EventKind.WORKSPACE_CLOSED}),
     WorkKind.MEASURE: frozenset({EventKind.MEASUREMENT_FINISHED}),

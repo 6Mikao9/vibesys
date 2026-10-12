@@ -35,6 +35,7 @@ from .common import (
     Scope,
     SessionId,
     SetupFailureKind,
+    TurnFailureKind,
     Value,
     WorkspaceRef,
     validate_setup_failure,
@@ -383,17 +384,6 @@ class InterruptRequested(Value):
 
 TURN_FAILURE_DETAIL_LIMIT = 4000
 """Longest failure text a TurnResult carries, in characters."""
-
-
-class TurnFailureKind(StrEnum):
-    """Why a turn ended without a usable reply, as a closed set strategies match on."""
-
-    PROVIDER_FAILED = "provider_failed"
-    """The executor ended the turn: the provider refused it, or its reply broke the schema."""
-    TRANSPORT_LOST = "transport_lost"
-    """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
-    CANCELLED = "cancelled"
-    """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
 
 
 class TurnResult(Value):

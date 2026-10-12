@@ -16,28 +16,36 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
-from pydantic import Field
+from pydantic import BaseModel, Field, SerializeAsAny
 
+from .agents import Checkpoint
 from .attempts import AttemptBudget, AttemptPhase, AttemptView, WorkspacePlan
 from .common import (
     AttemptRef,
     Capabilities,
     ControlInput,
     DecisionId,
+    InvocationRef,
     ItemId,
     Limits,
     RequestId,
     RevisionRef,
     RunFacts,
+    Scope,
     Seconds,
     Value,
 )
-from .evaluation import EvidenceRef, MeasurementResult
+from .evaluation import (
+    Continuation,
+    EvidenceRef,
+    MeasurementResult,
+    ResumeAuthorized,
+)
 from .evaluation_history import AttemptEvaluationHistory, AttemptTerminalReason
 from .kinds import EventKind
 from .records import OperationResult
 from .session_inputs import InputDelivered, InputDropped
-from .sessions import InterruptCompleted, InterruptFailed, TurnResult
+from .sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPublicationFailed
 from .settlement import AdoptionFailed, AdoptionResult, Settlement
 from .until import Failed
 
@@ -62,11 +70,56 @@ class WorkspaceClosed(Value):
 
 
 class TurnFinished(Value):
-    """A turn ended with a reply or a typed turn failure."""
+    """An asked agent answered: its reply, valid against its model, once.
+
+    ``decision`` is the ``AskAgent`` it answers. ``checkpoint`` is core's outcome for the
+    revision the turn produced, present exactly when the agent's reply asks for one (the
+    pipeline holds the reply until the outcome is known). A turn that ended any other way
+    arrives as ``Failed``.
+    """
 
     kind: Literal["turn_finished"] = "turn_finished"
     decision: DecisionId
+    invocation: InvocationRef
+    reply: SerializeAsAny[BaseModel]
+    checkpoint: Checkpoint | None = None
+
+
+class TurnEnded(Value):
+    """Plumbing of the agent pipeline: one provider turn ended. A search never sees it."""
+
+    kind: Literal["turn_ended"] = "turn_ended"
+    decision: DecisionId
     result: TurnResult
+
+
+class TurnYielded(Value):
+    """Plumbing of the agent pipeline: core recorded the wait a turn ended with."""
+
+    kind: Literal["turn_yielded"] = "turn_yielded"
+    continuation: Continuation
+
+
+class YieldFailed(Value):
+    """Plumbing of the agent pipeline: core could not publish the wait it recorded."""
+
+    kind: Literal["yield_failed"] = "yield_failed"
+    failure: YieldPublicationFailed
+
+
+class ResumeReady(Value):
+    """Plumbing of the agent pipeline: a suspended turn may be resumed."""
+
+    kind: Literal["resume_ready"] = "resume_ready"
+    authorization: ResumeAuthorized
+
+
+class CheckpointKnown(Value):
+    """Plumbing of the agent pipeline: core recorded or declined a turn's checkpoint."""
+
+    kind: Literal["checkpoint_known"] = "checkpoint_known"
+    invocation: InvocationRef
+    checkpoint: Checkpoint
 
 
 class MeasurementFinished(Value):
@@ -140,6 +193,11 @@ type Event = Annotated[
     | MessageDelivered
     | MessageDropped
     | Interrupted
+    | TurnEnded
+    | TurnYielded
+    | YieldFailed
+    | ResumeReady
+    | CheckpointKnown
     | Failed,
     Field(discriminator="kind"),
 ]
@@ -186,6 +244,8 @@ class RunView(Value):
     keeps none of them in its own state.
     """
 
+    run: Scope
+    """The run's own scope (what ``THIS_RUN`` stands for in a decision)."""
     now_at: Seconds
     deadline_at: Seconds
     facts: RunFacts

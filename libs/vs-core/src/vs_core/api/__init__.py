@@ -1,5 +1,6 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
+from vs_core._agent_turns import Agent, AgentProtocol, AgentTurns, reply_errors
 from vs_core._attempt_track import (
     AttemptTrack,
     Step,
@@ -147,6 +148,15 @@ from vs_core.testing.traces import (
     TraceFrame,
     trace_step,
 )
+from vs_core.types.agents import (
+    Backoff,
+    Checkpoint,
+    Correction,
+    Declined,
+    ResumeFacts,
+    Retained,
+    Retry,
+)
 from vs_core.types.attempts import (
     AttemptAdmitted,
     AttemptBudget,
@@ -165,6 +175,7 @@ from vs_core.types.attempts import (
     AttemptView,
     CheckpointDecline,
     CheckpointDeclined,
+    CheckpointResolved,
     CloseAttemptScope,
     DiscardWorkspace,
     EnsureWorkspace,
@@ -193,6 +204,7 @@ from vs_core.types.attempts import (
 )
 from vs_core.types.common import (
     DEFAULT_MAX_MEASUREMENT_SUBMISSIONS,
+    THIS_RUN,
     Area,
     ArtifactId,
     ArtifactRef,
@@ -428,6 +440,7 @@ from vs_core.types.scope_reopen import ScopedAdmissionReopen, ScopedAdmissionReo
 from vs_core.types.search import (
     AdoptionFinished,
     AttemptSummary,
+    CheckpointKnown,
     Discarded,
     DiscardReason,
     Event,
@@ -436,13 +449,17 @@ from vs_core.types.search import (
     MessageDelivered,
     MessageDropped,
     OperationFinished,
+    ResumeReady,
     RunView,
     Search,
     StopRequested,
     TimeReached,
+    TurnEnded,
     TurnFinished,
+    TurnYielded,
     WorkspaceClosed,
     WorkspaceOpened,
+    YieldFailed,
 )
 from vs_core.types.session_inputs import (
     InputDelivered,
@@ -536,6 +553,7 @@ from vs_core.types.settlement import (
 )
 from vs_core.types.strategy import (
     Accepted,
+    AskAgent,
     Cancel,
     Command,
     Decision,
@@ -568,12 +586,33 @@ from vs_core.types.until import (
     ReplyError,
     ReplyErrorCode,
     Until,
+    WaitRefusal,
     WhileAlive,
     WhileOpen,
     Within,
 )
 
 __all__ = [
+    "THIS_RUN",
+    "Agent",
+    "AgentProtocol",
+    "AgentTurns",
+    "AskAgent",
+    "Backoff",
+    "Checkpoint",
+    "CheckpointKnown",
+    "CheckpointResolved",
+    "Correction",
+    "Declined",
+    "ResumeFacts",
+    "ResumeReady",
+    "Retained",
+    "Retry",
+    "TurnEnded",
+    "TurnYielded",
+    "WaitRefusal",
+    "YieldFailed",
+    "reply_errors",
     "AMBIGUOUS_SUBMISSION_LIMIT",
     "CAPTURE_SUFFIX",
     "DEFAULT_MAX_MEASUREMENT_SUBMISSIONS",

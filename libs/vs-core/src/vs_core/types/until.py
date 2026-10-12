@@ -21,9 +21,11 @@ from pydantic import Field, model_validator
 from .common import (
     AttemptRef,
     DecisionId,
+    InvocationRef,
     RejectionCode,
     ResourceId,
     Seconds,
+    TurnFailureKind,
     Value,
 )
 
@@ -47,8 +49,34 @@ class FailureReason(StrEnum):
     """Reconciliation could not prove what happened to the request."""
 
     INVALID_REPLY = "invalid-reply"
+    """The agent's reply broke its model and no correction is left; ``errors`` say how."""
+
+    RENDER_FAILED = "render-failed"
+    """The prompt of an agent's turn could not be rendered."""
+
+    TURN_FAILED = "turn-failed"
+    """A turn ended without a reply; ``turn_failure`` says how and ``digest`` fingerprints
+    the diagnostic the executor printed."""
+
+    WAIT_REFUSED = "wait-refused"
+    """The agent's turn asked to wait for evaluations and the run could not honor it;
+    ``refusal`` says why."""
+
     OUT_OF_BUDGET = "out-of-budget"
     MEASUREMENT_UNTRUSTED = "measurement-untrusted"
+
+
+class WaitRefusal(StrEnum):
+    """Why a turn that asked to wait for its evaluations was not suspended. Closed."""
+
+    NOT_OFFERED = "not-offered"
+    """The run offers no suspend capability."""
+
+    NOT_RECORDED = "not-recorded"
+    """Core recorded no wait (it refused it, or the host lost it), so no resume will come."""
+
+    NOT_PUBLISHED = "not-published"
+    """Core recorded the wait but could not publish it."""
 
 
 class WhileOpen(Value):
@@ -120,6 +148,17 @@ class ReplyError(Value):
     code: ReplyErrorCode
 
 
+_TURN_REASONS = frozenset(
+    {
+        FailureReason.INVALID_REPLY,
+        FailureReason.LOST,
+        FailureReason.TURN_FAILED,
+        FailureReason.TIMED_OUT,
+        FailureReason.WAIT_REFUSED,
+    }
+)
+
+
 class Failed(Value):
     """A request ended without a result. Every field is typed; nothing is free text.
 
@@ -140,6 +179,11 @@ class Failed(Value):
     limit_at: Seconds | None = None
     cause: RejectionCode | None = None
     errors: tuple[ReplyError, ...] = ()
+    turn: InvocationRef | None = None
+    """The turn that failed, for the reasons that end one (and for a lost turn)."""
+    turn_failure: TurnFailureKind | None = None
+    digest: str | None = None
+    refusal: WaitRefusal | None = None
 
     @model_validator(mode="after")
     def fields_match_reason(self) -> Failed:
@@ -149,7 +193,15 @@ class Failed(Value):
             "limit_at": self.reason == FailureReason.TIMED_OUT,
             "cause": self.reason == FailureReason.REFUSED,
             "errors": self.reason == FailureReason.INVALID_REPLY,
+            "turn_failure": self.reason == FailureReason.TURN_FAILED,
+            "refusal": self.reason == FailureReason.WAIT_REFUSED,
         }
+        if self.turn is not None and self.reason not in _TURN_REASONS:
+            message = f"turn does not belong to reason {self.reason.value}"
+            raise ValueError(message)
+        if self.digest is not None and self.reason != FailureReason.TURN_FAILED:
+            message = f"digest does not belong to reason {self.reason.value}"
+            raise ValueError(message)
         for name, allowed in expected.items():
             present = (
                 bool(getattr(self, name)) if name == "errors" else getattr(self, name) is not None
