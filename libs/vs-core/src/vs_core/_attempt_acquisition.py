@@ -1392,7 +1392,15 @@ def _checkpoint_acknowledged(
             ),
         }
     )
-    return AreaChange(state=_replace(state, updated))
+    return AreaChange(
+        state=_replace(state, updated),
+        events=(
+            CheckpointResolved(
+                invocation=request.invocation,
+                checkpoint=Declined(reason=CheckpointDecline.SNAPSHOT_FAILED),
+            ),
+        ),
+    )
 
 
 def _checkpointed(

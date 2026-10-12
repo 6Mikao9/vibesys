@@ -145,6 +145,12 @@ def test_a_failed_snapshot_releases_the_attempt_and_records_why(
     assert [row.reason for row in owner.checkpoint_declines] == [
         core.CheckpointDecline.SNAPSHOT_FAILED
     ]
+    # The decline is also published, so a search waiting for the checkpoint hears of it.
+    assert [
+        event.checkpoint
+        for event in failed.events
+        if isinstance(event, core.CheckpointResolved)
+    ] == [core.Declined(reason=core.CheckpointDecline.SNAPSHOT_FAILED)]
 
 
 @settings(max_examples=60, deadline=None)
