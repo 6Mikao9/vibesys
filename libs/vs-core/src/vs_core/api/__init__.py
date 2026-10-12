@@ -1,6 +1,14 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
-from vs_core._agent_turns import Agent, AgentProtocol, AgentTurns, Piped, reply_errors
+from vs_core._agent_turns import (
+    Agent,
+    AgentProtocol,
+    AgentTurns,
+    Piped,
+    PipeStep,
+    PipeStepKind,
+    reply_errors,
+)
 from vs_core._attempt_track import (
     AttemptTrack,
     Step,
@@ -878,6 +886,8 @@ __all__ = [
     "ParentVerification",
     "Park",
     "PatchExport",
+    "PipeStep",
+    "PipeStepKind",
     "Piped",
     "PoolCapacity",
     "PoolId",

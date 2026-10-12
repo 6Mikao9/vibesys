@@ -19,6 +19,7 @@ gets ``Failed(INVALID_REPLY)`` (or ``Failed(LOST)``) at once and asks again itse
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from hashlib import sha256
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -90,7 +91,6 @@ if TYPE_CHECKING:
     from .types.evaluation import ResumeAuthorized
     from .types.search import Search
 
-_MIN_ASK_SUFFIX = 2
 _SEPARATOR = "~"
 _RENDER_LIMIT = 300.0
 
@@ -207,6 +207,37 @@ class KnownCheckpoint(Value):
     checkpoint: Checkpoint
 
 
+class PipeStepKind(StrEnum):
+    """The two kernel requests one attempt of an ask makes, in order."""
+
+    RENDER = "r"
+    TURN = "t"
+
+
+class PipeStep(Value):
+    """One kernel request of an ask: which ask, which of its two requests, which attempt.
+
+    The kernel only knows the request's decision id, a string. `decision_id` writes the step
+    into one, once, at the point the request is made; `Piped.issued` remembers what it wrote, so
+    an answer is matched to its step by lookup and no id is ever taken apart.
+    """
+
+    ask: DecisionId
+    kind: PipeStepKind
+    attempt: int = Field(ge=0)
+
+    def decision_id(self) -> DecisionId:
+        """The kernel's name for this step, distinct for every (ask, kind, attempt)."""
+        return DecisionId(root=f"{self.ask.root}{_SEPARATOR}{self.kind.value}{self.attempt}")
+
+
+class IssuedPipeStep(Value):
+    """A step and the decision id it was made under."""
+
+    decision: DecisionId
+    step: PipeStep
+
+
 class Piped[S: StrategyState, I: Value](StrategyState):
     """The wrapped search's state and the asks in flight."""
 
@@ -214,6 +245,8 @@ class Piped[S: StrategyState, I: Value](StrategyState):
     flows: tuple[Flow[I], ...] = ()
     serials: tuple[Serial, ...] = ()
     checkpoints: tuple[KnownCheckpoint, ...] = ()
+    issued: tuple[IssuedPipeStep, ...] = ()
+    """Every step made so far, so an answer for a finished ask is recognised and dropped."""
 
 
 def _digest(text: str) -> str:
@@ -327,10 +360,10 @@ class AgentTurns[S: StrategyState, C]:
     ) -> tuple[Piped[S, Value], list[Decision], list[Event]]:
         """Handle what belongs to a flow; whatever is not a flow's is the wrapped search's."""
         if isinstance(event, OperationFinished | TurnEnded | Failed):
-            named = _named(event.decision)
-            if named is None:
+            step = _step_of(state, event.decision)
+            if step is None:
                 return state, [], [event]
-            flow = self._flow_of(state, named)
+            flow = self._flow_of(state, step)
             if flow is None:
                 return state, [], []  # a result for an ask that is over
             return self._answered(state, flow, event, view)
@@ -387,20 +420,20 @@ class AgentTurns[S: StrategyState, C]:
         for flow in state.flows:
             if isinstance(flow.phase, BackingOff) and flow.phase.until <= view.now_at:
                 state = self._swap(state, flow.model_copy(update={"phase": Rendering()}))
-                decisions.append(self._render(flow))
+                state, wait = self._render(state, flow)
+                decisions.append(wait)
         return state, decisions, [event]
 
     # -- flows ------------------------------------------------------------------------------
 
     @staticmethod
-    def _flow_of(state: Piped[S, Value], named: tuple[DecisionId, str, int]) -> Flow[Value] | None:
-        ask, step, attempt = named
-        flow = next((f for f in state.flows if f.ask == ask), None)
-        if flow is None or flow.attempt != attempt:
+    def _flow_of(state: Piped[S, Value], step: PipeStep) -> Flow[Value] | None:
+        flow = next((f for f in state.flows if f.ask == step.ask), None)
+        if flow is None or flow.attempt != step.attempt:
             return None
-        if step == "r" and not isinstance(flow.phase, Rendering):
+        if step.kind is PipeStepKind.RENDER and not isinstance(flow.phase, Rendering):
             return None
-        if step == "t" and not isinstance(flow.phase, Asked):
+        if step.kind is PipeStepKind.TURN and not isinstance(flow.phase, Asked):
             return None
         return flow
 
@@ -492,24 +525,24 @@ class AgentTurns[S: StrategyState, C]:
             predecessor=follows,
         )
         state = state.model_copy(update={"flows": (*state.flows, new)})
-        return state, self._render(new)
+        return self._render(state, new)
 
-    def _render(self, flow: Flow[Value]) -> Wait:
+    def _render(self, state: Piped[S, Value], flow: Flow[Value]) -> tuple[Piped[S, Value], Wait]:
         """Ask the renderer for the prompt of the flow's next turn."""
+        state, decision_id = _issue(
+            state, PipeStep(ask=flow.ask, kind=PipeStepKind.RENDER, attempt=flow.attempt)
+        )
         subject = f"{self._subject(flow.ask)}.{flow.agent}"
         request = self.operations.render(subject=subject, ordinal=flow.serial, context=flow.input)  # ty: ignore[missing-argument]
-        return Wait(
-            request=Operation(
-                decision_id=_decision(flow.ask, "r", flow.attempt),
-                scope=flow.scope,
-                request=request,
-            ),
+        wait = Wait(
+            request=Operation(decision_id=decision_id, scope=flow.scope, request=request),
             until=Within(limit=self.render_limit, watches=flow.until.watches),
         )
+        return state, wait
 
     def _build(
-        self, flow: Flow[Value], rendered: RenderedArtifacts, view: RunView
-    ) -> tuple[Flow[Value], Wait]:
+        self, state: Piped[S, Value], flow: Flow[Value], rendered: RenderedArtifacts, view: RunView
+    ) -> tuple[Piped[S, Value], Flow[Value], Wait]:
         """The kernel turn for a rendered prompt."""
         agent = self.agents[flow.agent]
         scope = view.run if flow.scope == THIS_RUN else flow.scope
@@ -550,11 +583,12 @@ class AgentTurns[S: StrategyState, C]:
             predecessor=None if flow.charge == "resume" else flow.predecessor,
         )
         asked = flow.model_copy(update={"invocation": invocation, "phase": Asked()})
-        request = RequestTurn(
-            decision_id=_decision(flow.ask, "t", flow.attempt), scope=scope, turn=spec
+        state, decision_id = _issue(
+            state, PipeStep(ask=flow.ask, kind=PipeStepKind.TURN, attempt=flow.attempt)
         )
+        request = RequestTurn(decision_id=decision_id, scope=scope, turn=spec)
         within = Within(limit=flow.until.limit, watches=flow.until.watches)
-        return asked, Wait(request=request, until=within)
+        return state, asked, Wait(request=request, until=within)
 
     # -- answers ----------------------------------------------------------------------------
 
@@ -577,7 +611,7 @@ class AgentTurns[S: StrategyState, C]:
                 ):
                     failed = Failed(reason=FailureReason.RENDER_FAILED, decision=flow.ask)
                     return self._end(state, flow, failed)
-                asked, wait = self._build(flow, outcome, view)
+                state, asked, wait = self._build(state, flow, outcome, view)
                 return self._swap(state, asked), [wait], []
             case TurnEnded(result=result):
                 return self._ended(state, flow, result, view)
@@ -686,7 +720,8 @@ class AgentTurns[S: StrategyState, C]:
                 "phase": Rendering(),
             }
         )
-        return self._swap(state, again), [self._render(again)], []
+        state, wait = self._render(self._swap(state, again), again)
+        return state, [wait], []
 
     def _lost(
         self, state: Piped[S, Value], flow: Flow[Value], lost: InvocationRef, view: RunView
@@ -741,26 +776,22 @@ class AgentTurns[S: StrategyState, C]:
                 "phase": Rendering(),
             }
         )
-        return self._swap(state, resumed), [self._render(resumed)], []
+        state, wait = self._render(self._swap(state, resumed), resumed)
+        return state, [wait], []
 
 
-def _decision(ask: DecisionId, step: Literal["r", "t"], attempt: int) -> DecisionId:
-    return DecisionId(root=f"{ask.root}{_SEPARATOR}{step}{attempt}")
+def _issue[S: StrategyState, I: Value](
+    state: Piped[S, I], step: PipeStep
+) -> tuple[Piped[S, I], DecisionId]:
+    """Name the step for the kernel and remember the name."""
+    decision = step.decision_id()
+    issued = IssuedPipeStep(decision=decision, step=step)
+    return state.model_copy(update={"issued": (*state.issued, issued)}), decision
 
 
-def _named(decision: DecisionId | None) -> tuple[DecisionId, str, int] | None:
-    """The ask, step and attempt a pipeline decision names; None for the search's own."""
-    if decision is None:
-        return None
-    head, separator, tail = decision.root.rpartition(_SEPARATOR)
-    if (
-        not separator
-        or len(tail) < _MIN_ASK_SUFFIX
-        or tail[0] not in "rt"
-        or not tail[1:].isdigit()
-    ):
-        return None
-    return DecisionId(root=head), tail[0], int(tail[1:])
+def _step_of(state: Piped[Any, Value], decision: DecisionId | None) -> PipeStep | None:
+    """The step a decision answers; None for the search's own decisions."""
+    return next((i.step for i in state.issued if i.decision == decision), None)
 
 
 def _revision_of(state: Piped[Any, Value], invocation: InvocationRef) -> RevisionRef | None:
