@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     )
     from vs_core.types.evaluation import EvidenceRef, MeasurementResult
     from vs_core.types.kernel import CoreView
+    from vs_core.types.search import RunView
 
 
 def trusted_keys(
@@ -47,7 +48,9 @@ def trusted_keys(
     )
 
 
-def ledger_refs(view: CoreView, keys: tuple[EvidenceKey, ...]) -> tuple[EvidenceRef, ...] | None:
+def ledger_refs(
+    view: CoreView | RunView, keys: tuple[EvidenceKey, ...]
+) -> tuple[EvidenceRef, ...] | None:
     """The ledger records for ``keys`` in order, or None when core holds any of them not."""
     ledger = {item.key: item for item in view.measurements}
     refs = tuple(ledger.get(key) for key in keys)

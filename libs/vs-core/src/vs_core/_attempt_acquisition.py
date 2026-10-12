@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
+from ._checkpoint_events import declined, retained
 from ._deadlines import limit_to
 from ._evaluation_history import produce_history
 from ._proofs import (
@@ -30,7 +31,6 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._session_scope import retains_write_turn, write_turn_authority, yield_authority, yields_turn
-from .types.agents import Declined, Retained
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
@@ -45,7 +45,6 @@ from .types.attempts import (
     AttemptView,
     CheckpointDecline,
     CheckpointDeclined,
-    CheckpointResolved,
     EnsureWorkspace,
     InitialSessionsFailed,
     InitialSessionsReady,
@@ -1283,12 +1282,7 @@ def _decline_checkpoint(
     updated = attempt.model_copy(
         update={"checkpoint_declines": (*attempt.checkpoint_declines, row)}
     )
-    return AreaChange(
-        state=_replace(state, updated),
-        events=(
-            CheckpointResolved(invocation=event.invocation, checkpoint=Declined(reason=reason)),
-        ),
-    )
+    return AreaChange(state=_replace(state, updated), events=declined(event.invocation, reason))
 
 
 def _checkpoint_request(
@@ -1375,32 +1369,21 @@ def _checkpoint_acknowledged(
             ),
         )
     # A conclusive failure retains nothing here; release must not wait on it forever.
+    failed = CheckpointDecline.SNAPSHOT_FAILED
     updated = attempt.model_copy(
         update={
             "pending_records": tuple(
-                identity
-                for identity in attempt.pending_records
-                if identity != observation.request_id
+                rid for rid in attempt.pending_records if rid != observation.request_id
             ),
             "checkpoint_declines": (
                 *attempt.checkpoint_declines,
                 CheckpointDeclined(
-                    invocation=request.invocation,
-                    authority=observation.request_id,
-                    reason=CheckpointDecline.SNAPSHOT_FAILED,
+                    invocation=request.invocation, authority=observation.request_id, reason=failed
                 ),
             ),
         }
     )
-    return AreaChange(
-        state=_replace(state, updated),
-        events=(
-            CheckpointResolved(
-                invocation=request.invocation,
-                checkpoint=Declined(reason=CheckpointDecline.SNAPSHOT_FAILED),
-            ),
-        ),
-    )
+    return AreaChange(state=_replace(state, updated), events=declined(request.invocation, failed))
 
 
 def _checkpointed(
@@ -1457,11 +1440,7 @@ def _checkpointed(
     )
     return AreaChange(
         state=_replace(state, updated),
-        events=(
-            CheckpointResolved(
-                invocation=event.invocation, checkpoint=Retained(revision=checkpoint.revision)
-            ),
-        ),
+        events=retained(event.invocation, checkpoint.revision),
         signals=(
             InvocationCheckpointAvailable(
                 invocation=event.invocation,
