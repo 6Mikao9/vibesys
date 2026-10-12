@@ -9,6 +9,7 @@ It is rebuilt by replay after a restart, so it is never persisted.
 
 from dataclasses import dataclass, field
 from functools import partial
+from typing import Literal
 
 from pydantic import TypeAdapter
 
@@ -42,7 +43,7 @@ from vibesys.orchestration.dynamic.search.api import (
     resolve,
     workstream_key,
 )
-from vs_core.api.search import Flow, RevisionRef, RunView
+from vs_core.api.search import Flow, RevisionRef, RunView, Value
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,29 @@ class PlannerGate:
 _OFFERS = TypeAdapter(tuple[ParentOption, ...])
 _RESOLVED = TypeAdapter(ParentSnapshot | None)
 _CATALOG = TypeAdapter(tuple[ParentSnapshot, ...] | None)
+
+
+class Running(Value):
+    """A workstream in flight, as the published record shows it."""
+
+    sequence: int
+    plan: WorkPlan
+
+
+class RunSnapshot(Value):
+    """What the search publishes of its record, for whoever reads the persisted state.
+
+    The state of a flow search is its journal; this is the one place the record can be read
+    from it (`published`), by the projector and by tests.
+    """
+
+    kind: Literal["dynamic-run-snapshot"] = "dynamic-run-snapshot"
+    baseline: candidates.Baseline
+    hypotheses: tuple[HypothesisRecord, ...] = ()
+    finished: tuple[FinishedWork, ...] = ()
+    running: tuple[Running, ...] = ()
+    parents: tuple[ParentSnapshot, ...] = ()
+    winner: candidates.Winner | None = None
 
 
 @dataclass
@@ -319,6 +343,24 @@ class RunRecord:
                 self.parents = catalog
 
     # -- what the search ends with ------------------------------------------------------------------
+
+    def snapshot(self, winner: candidates.Winner | None = None) -> RunSnapshot:
+        """The record as it is published."""
+        return RunSnapshot(
+            baseline=self.baseline,
+            hypotheses=tuple(self.hypotheses.values()),
+            finished=tuple(self.finished_work),
+            running=tuple(Running(sequence=r.sequence, plan=r.plan) for r in self.running.values()),
+            parents=self.parents,
+            winner=winner,
+        )
+
+    def publish(self, ctx: Flow, winner: candidates.Winner | None = None) -> None:
+        """Record the snapshot in the journal.
+
+        A read the flow ignores: the only way to put a value in the persisted state today.
+        """
+        ctx.read(lambda _view: self.snapshot(winner), RunSnapshot)
 
     def eligible_rounds(self) -> tuple[candidates.EligibleRound, ...]:
         """Every winner-eligible round of the run."""

@@ -26,21 +26,21 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     RunBounds,
     build_core_policy,
     dynamic_operation_registry,
-    project_strategy_state,
+    project_published,
     prompts,
     run_prompt_variables,
 )
+from vibesys.orchestration.dynamic.flow.api import published
 from vibesys.orchestration.dynamic.models import DynamicOptions
 from vibesys.orchestration.dynamic.search.api import (
     OPERATIONS,
     STATE_SCHEMA,
-    DynamicState,
     PromptContext,
     measurement_recipe,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vs_core.api import Piped
+from vs_core.api import FlowState, Piped
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
@@ -85,15 +85,15 @@ def dynamic_operation_catalog(ports: OperationPorts) -> OperationCatalog:
     return operation_catalog(OPERATIONS, ports)
 
 
-def dynamic_projector() -> RuntimeRecordProjector[Piped[DynamicState, PromptContext]]:
+def dynamic_projector() -> RuntimeRecordProjector[Piped[FlowState, PromptContext]]:
     """Read a dynamic run's search state from its committed runtime record."""
     return RuntimeRecordProjector(
         plugin_id=_PLUGIN_ID,
-        state_type=Piped[DynamicState, PromptContext],
-        record_type=RuntimeRecord[Piped[DynamicState, PromptContext]],
+        state_type=Piped[FlowState, PromptContext],
+        record_type=RuntimeRecord[Piped[FlowState, PromptContext]],
         operations=dynamic_operation_registry(),
-        project=lambda state, revision: project_strategy_state(
-            state.inner, experiment_revision=revision
+        project=lambda state, revision: project_published(
+            published(state.inner), experiment_revision=revision
         ),
     )
 

@@ -10,13 +10,14 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     build_search,
     dynamic_operation_registry,
 )
+from vibesys.orchestration.dynamic.flow.api import RunSnapshot, published
 from vibesys.orchestration.dynamic.search.api import (
     DynamicConfig,
-    DynamicState,
 )
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    FlowState,
     Limits,
     RevisionRef,
     RunEnvelope,
@@ -94,8 +95,10 @@ def kinds(trace: Trace[Any]) -> list[str]:
     return [type(item).__name__ for item in works(trace.decisions)]
 
 
-def dynamic_state(finished: SimulatedRun) -> DynamicState:
-    """The dynamic search's own state inside the agent pipeline's wrapper."""
+def dynamic_state(finished: SimulatedRun) -> RunSnapshot:
+    """The record the dynamic search published, read from its persisted state."""
     inner = getattr(finished.state, "inner", None)
-    assert isinstance(inner, DynamicState), type(finished.state)
-    return inner
+    assert isinstance(inner, FlowState), type(finished.state)
+    record = published(inner)
+    assert record is not None, "the search published no record"
+    return record

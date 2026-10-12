@@ -9,9 +9,10 @@ and no provisional number can reach the frontier.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast
 
-from vibesys.candidates.api import reading
+from vibesys.candidates.api import NotConfigured, reading
 from vibesys.hypothesis import derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -19,6 +20,7 @@ from vibesys.hypothesis.readmodel import (
     HypothesisView,
     RoundView,
 )
+from vibesys.orchestration.dynamic.flow.api import RunSnapshot
 from vibesys.orchestration.dynamic.search.api import BASELINE_KEY, Finished, Selecting, Workstream
 from vibesys.run.contracts import PluginProjection, RoundSummary
 
@@ -35,20 +37,51 @@ if TYPE_CHECKING:
 type Verdict = Literal["pass", "fail", "skipped"]
 
 
+@dataclass(frozen=True)
+class _Facts:
+    """What the read model shows of a search, whichever form its state takes."""
+
+    hypotheses: tuple[HypothesisRecord, ...]
+    running: tuple[tuple[int, str], ...]
+    """The (sequence, hypothesis id) of every workstream in flight."""
+    baseline: tuple[MetricRow, ...]
+    winner: Winner | None
+
+
 def project_strategy_state(state: DynamicState, *, experiment_revision: int) -> PluginProjection:
     """Project one strategy state; `experiment_revision` is the core revision it was read at."""
+    facts = _Facts(
+        hypotheses=state.hypotheses,
+        running=tuple((item.sequence, item.plan.work_id) for item in _running(state)),
+        baseline=_baseline_metrics(state),
+        winner=_winner(state),
+    )
+    return _project(facts, experiment_revision)
+
+
+def project_published(record: RunSnapshot | None, *, experiment_revision: int) -> PluginProjection:
+    """Project the record a flow search published (none yet: an empty run)."""
+    record = record or RunSnapshot(baseline=NotConfigured())
+    seen = reading(record.baseline)
+    facts = _Facts(
+        hypotheses=record.hypotheses,
+        running=tuple((item.sequence, item.plan.work_id) for item in record.running),
+        baseline=() if seen is None else seen.metrics,
+        winner=record.winner,
+    )
+    return _project(facts, experiment_revision)
+
+
+def _project(state: _Facts, experiment_revision: int) -> PluginProjection:
     rounds = sorted(
         (record for item in state.hypotheses for record in item.rounds),
         key=lambda record: record.sequence,
     )
-    in_flight = tuple(
-        record.plan.work_id
-        for record in sorted(_running(state), key=lambda record: record.sequence)
-    )
+    in_flight = tuple(work_id for _, work_id in sorted(state.running))
     active = in_flight[-1] if in_flight else None
     projection = AgentRunProjection(
         current_round=len(rounds),
-        objectives=tuple(f"{row.name}:{row.direction}" for row in _baseline_metrics(state)),
+        objectives=tuple(f"{row.name}:{row.direction}" for row in state.baseline),
         active_hypothesis_id=active,
         experiment_revision=experiment_revision,
         hypotheses=[
@@ -146,13 +179,11 @@ def _winner_hypothesis(winner: Winner | None) -> str | None:
     return winner.hypothesis_id if winner is not None else None
 
 
-def _hypothesis_view(
-    item: HypothesisRecord, *, active: bool, state: DynamicState
-) -> HypothesisView:
+def _hypothesis_view(item: HypothesisRecord, *, active: bool, state: _Facts) -> HypothesisView:
     rounds = item.rounds
     measured = next((record for record in reversed(rounds) if record.metrics), None)
     headline = _headline(measured.metrics) if measured is not None else None
-    base = _headline(_baseline_metrics(state))
+    base = _headline(state.baseline)
     comparable = (
         base if base is not None and headline is not None and base.name == headline.name else None
     )
@@ -182,7 +213,7 @@ def _hypothesis_view(
         perf_metric_name=headline.name if headline is not None else None,
         perf_direction=headline.direction if headline is not None else None,
         perf_baseline_value=comparable.value if comparable is not None else None,
-        kept=True if _winner_hypothesis(_winner(state)) == item.hypothesis_id else None,
+        kept=True if _winner_hypothesis(state.winner) == item.hypothesis_id else None,
         strategy_disposition=item.strategy.value,
         strategy_reason=item.reason or None,
         active=active,

@@ -25,7 +25,10 @@ from vibesys.orchestration.dynamic.core_policy._policy import (
     build_core_policy,
     requirements_for,
 )
-from vibesys.orchestration.dynamic.core_policy._projection import project_strategy_state
+from vibesys.orchestration.dynamic.core_policy._projection import (
+    project_published,
+    project_strategy_state,
+)
 from vibesys.orchestration.dynamic.core_policy._replies import (
     planner_reply_example,
     run_prompt_variables,
@@ -46,6 +49,7 @@ __all__ = [
     "dynamic_operation_registry",
     "limits_for",
     "planner_reply_example",
+    "project_published",
     "project_strategy_state",
     "prompts",
     "reply_schemas",

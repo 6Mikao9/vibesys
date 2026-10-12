@@ -12,12 +12,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vibesys.hypothesis import HypothesisOutcome
+from vibesys.orchestration.dynamic.flow.api import dynamic_search
 from vibesys.orchestration.dynamic.models import (
     ImplementerResult,
     ReviewResult,
     planner_reply_type,
 )
-from vibesys.orchestration.dynamic.flow.api import dynamic_search
 from vibesys.orchestration.dynamic.search.api import (
     IDS,
     IMPLEMENTER_REPLY,

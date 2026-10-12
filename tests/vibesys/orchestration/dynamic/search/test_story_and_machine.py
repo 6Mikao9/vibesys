@@ -16,7 +16,8 @@ from tests.vibesys.orchestration.dynamic.search._run import FACTS, config
 from tests.vibesys.orchestration.dynamic.search._views import empty_view
 from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
-from vibesys.orchestration.dynamic.search.api import DynamicSearch, DynamicState
+from vibesys.orchestration.dynamic.flow.api import dynamic_search
+from vibesys.orchestration.dynamic.search.api import OPERATIONS
 from vs_core.api import (
     ControlId,
     ControlInput,
@@ -25,6 +26,7 @@ from vs_core.api import (
     Failed,
     FailureReason,
     Finish,
+    FlowState,
     RejectionCode,
     StopRequested,
     Wait,
@@ -41,20 +43,20 @@ def test_story_one_hypothesis_from_baseline_to_adoption() -> None:
     run = simulate(DynamicWorld())
 
     assert _names(list(run.decisions)) == [
-        "baseline/measure.0",
-        "baseline/interpret",
-        "plan.1/planner.0~r0",
-        "plan.1/planner.0~t0",
-        "000001.h1/start",
-        "000001.h1/implementer.0~r0",
-        "000001.h1/implementer.0~t0",
-        "000001.h1/judge.0~r0",
-        "000001.h1/judge.0~t0",
-        "000001.h1/measure.0",
-        "000001.h1/interpret",
-        "000001.h1/settle",
-        "propose",
-        "finish",
+        "measure.1",
+        "interpret.1",
+        "plan.1/planner.1~r0",
+        "plan.1/planner.1~t0",
+        "000001.h1/open/start.1",
+        "000001.h1/implementer.1~r0",
+        "000001.h1/implementer.1~t0",
+        "000001.h1/judge.1~r0",
+        "000001.h1/judge.1~t0",
+        "000001.h1/measure.1",
+        "000001.h1/interpret.1",
+        "000001.h1/settle/settle.1",
+        "propose.1",
+        "finish.1",
     ]
 
 
@@ -72,7 +74,7 @@ class SearchUnderArbitraryEndings(RuleBasedStateMachine):
     def __init__(self) -> None:
         super().__init__()
         settings_ = config(max_rounds=2, max_in_flight=2)
-        self.search = DynamicSearch(settings_)
+        self.search = dynamic_search(settings_)
         self.state, decisions = self.search.init(settings_, FACTS)
         self.view = empty_view()
         self.open: dict[DecisionId, Decision] = {}
@@ -109,7 +111,11 @@ class SearchUnderArbitraryEndings(RuleBasedStateMachine):
 
     @invariant()
     def state_round_trips(self) -> None:
-        assert DynamicState.model_validate_json(self.state.model_dump_json()) == self.state
+        context = {"operation_registry": OPERATIONS.registry(), "persisted_operation": True}
+        assert (
+            FlowState.model_validate_json(self.state.model_dump_json(), context=context)
+            == self.state
+        )
 
     @invariant()
     def never_quiet_without_finishing(self) -> None:

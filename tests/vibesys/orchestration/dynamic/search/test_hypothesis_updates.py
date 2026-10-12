@@ -12,7 +12,6 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.search._decisions import works
-from tests.vibesys.orchestration.dynamic.search._harness import envelope, round_trip
 from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
@@ -22,8 +21,8 @@ from tests.vibesys.orchestration.dynamic.search._run import dynamic_state
 from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vibesys.hypothesis import HypothesisStrategy
+from vibesys.orchestration.dynamic.flow.api import RunSnapshot
 from vibesys.orchestration.dynamic.models import StrategyReason
-from vibesys.orchestration.dynamic.search.api import DynamicState
 from vs_core.api import Finish
 from vs_dst.api import simulate
 
@@ -92,6 +91,5 @@ def test_every_retirement_the_planner_schema_allows_leaves_a_persistable_state(
     retired = next(item for item in state.hypotheses if item.hypothesis_id == "h1")
     assert retired.strategy is HypothesisStrategy(disposition)
     assert retired.reason_kind == reason_kind
-    assert DynamicState.model_validate(state.model_dump(mode="python")) == state
-    codec, saved = envelope(state)
-    assert round_trip(codec, saved).strategy == state
+    assert RunSnapshot.model_validate(state.model_dump(mode="python")) == state
+    assert RunSnapshot.model_validate_json(state.model_dump_json()) == state

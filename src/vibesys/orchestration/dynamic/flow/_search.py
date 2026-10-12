@@ -93,12 +93,14 @@ async def dynamic(ctx: Flow, config: DynamicConfig) -> None:
             ctx.spawn(run.begin_planning(), plan, run, then=run.planned)
         # A stop wakes nothing here: it ends the workstreams, and their ending does.
         await ctx.until(lambda: run.changed)
+        run.publish(ctx)
     await finish(ctx, run)
 
 
 async def finish(ctx: Flow, run: RunRecord) -> None:
     """Choose the winner, have it adopted, and end the run with the result."""
     winner = await select_and_adopt(ctx, run)
+    run.publish(ctx, winner)
     ending = candidates.finish(
         winner, stopping=ctx.stop_requested, no_winner_reason=run.no_winner_reason()
     )

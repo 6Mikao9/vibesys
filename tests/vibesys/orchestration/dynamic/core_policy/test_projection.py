@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.search._harness import envelope
+from tests.vibesys.orchestration.dynamic.search._run import FACTS
 
+from vibesys.candidates.api import NotConfigured
 from vibesys.dynamic_core import dynamic_core_registration, dynamic_projector
 from vibesys.hypothesis.readmodel import agent_projection
-from vibesys.orchestration.dynamic.core_policy.api import project_strategy_state
+from vibesys.orchestration.dynamic.core_policy.api import project_published
+from vibesys.orchestration.dynamic.flow.api import DECLARATION, RunSnapshot
 from vibesys.orchestration.dynamic.search.api import (
-    DynamicState,
     Failure,
     FailureKind,
     HypothesisRecord,
@@ -24,7 +26,18 @@ from vibesys.orchestration.dynamic.search.api import (
 from vibesys.plugin_registration import OrchestrationRegistration, project_run
 from vibesys.run.contracts import RunStatus
 from vibesys.run.contracts import RunView as ProjectedRunView
-from vs_core.api import AttemptId, EventCursor, HostFence, HostId, Piped, RunEnvelope
+from vs_core.api import (
+    AttemptId,
+    EventCursor,
+    Flow,
+    FlowSearch,
+    FlowState,
+    HostFence,
+    HostId,
+    Piped,
+    RunEnvelope,
+)
+from vs_core.api.testing import FlowRun
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import RuntimeRecord
@@ -46,7 +59,7 @@ _metrics = st.lists(_row, max_size=2).map(tuple)
 
 
 @st.composite
-def _states(draw: st.DrawFn) -> DynamicState:
+def _states(draw: st.DrawFn) -> RunSnapshot:
     counts = draw(st.lists(st.integers(0, 3), max_size=4))
     sequence = 0
     hypotheses = []
@@ -73,15 +86,15 @@ def _states(draw: st.DrawFn) -> DynamicState:
                 rounds=tuple(rounds),
             )
         )
-    return DynamicState(hypotheses=tuple(hypotheses))
+    return RunSnapshot(baseline=NotConfigured(), hypotheses=tuple(hypotheses))
 
 
 @settings(max_examples=60, deadline=None)
 @given(_states(), st.integers(0, 50))
 def test_projection_copies_recorded_rounds_and_only_measured_numbers(
-    state: DynamicState, revision: int
+    state: RunSnapshot, revision: int
 ) -> None:
-    projection = project_strategy_state(state, experiment_revision=revision)
+    projection = project_published(state, experiment_revision=revision)
     view = agent_projection(_run_view(projection.payload))
     recorded = [record for item in state.hypotheses for record in item.rounds]
 
@@ -127,11 +140,26 @@ def _project_with_run(root: Path) -> tuple[Project, str]:
     return project, manifest.run_id
 
 
-type _Stored = Piped[DynamicState, PromptContext]
+type _Stored = Piped[FlowState, PromptContext]
 
 
-def _commit(project: Project, run_id: str, state: DynamicState) -> RuntimeRecord[_Stored]:
-    _, saved = envelope(state)
+async def _publish_then_end(ctx: Flow, record: RunSnapshot) -> None:
+    await ctx.wake_at(1.0)
+    ctx.read(lambda _view: record, RunSnapshot)
+    await ctx.wake_at(2.0)
+
+
+def _flow_state(record: RunSnapshot) -> FlowState:
+    """The persisted state of a flow search that published ``record``."""
+    search = FlowSearch(DECLARATION, _publish_then_end, record)
+    run = FlowRun.start(search, record, FACTS)
+    run.advance_to(1.0)
+    return run.state
+
+
+def _commit(project: Project, run_id: str, state: RunSnapshot) -> RuntimeRecord[_Stored]:
+    flow = _flow_state(state)
+    _, saved = envelope(flow)
     record = RuntimeRecord[_Stored].fresh(
         RunEnvelope[_Stored](
             schema_version=saved.schema_version,
@@ -139,8 +167,8 @@ def _commit(project: Project, run_id: str, state: DynamicState) -> RuntimeRecord
             strategy_id=saved.strategy_id,
             state_schema=saved.state_schema,
             core=saved.core,
-            strategy=Piped[DynamicState, PromptContext](
-                schema_version=state.schema_version, inner=state
+            strategy=Piped[FlowState, PromptContext](
+                schema_version=flow.schema_version, inner=flow
             ),
             event_cursor=EventCursor(sequence=0),
         )
@@ -157,14 +185,15 @@ def _commit(project: Project, run_id: str, state: DynamicState) -> RuntimeRecord
     return record
 
 
-def _state() -> DynamicState:
+def _state() -> RunSnapshot:
     round_ = RoundRecord(
         sequence=1,
         attempt=AttemptId(root="attempt-1"),
         review_passed=True,
         metrics=(MetricRow(name="throughput", value=81.5, direction="max", unit="tok/s"),),
     )
-    return DynamicState(
+    return RunSnapshot(
+        baseline=NotConfigured(),
         hypotheses=(
             HypothesisRecord(
                 hypothesis_id="fuse",
@@ -173,7 +202,7 @@ def _state() -> DynamicState:
                 first_sequence=1,
                 rounds=(round_,),
             ),
-        )
+        ),
     )
 
 
@@ -199,7 +228,7 @@ def test_the_stored_record_projects_at_its_core_revision(tmp_path: Path) -> None
 
     view = dynamic_projector().view(project, run_id, status=RunStatus.COMPLETED, loop="dynamic")
 
-    expected = project_strategy_state(_state(), experiment_revision=record.envelope.revision)
+    expected = project_published(_state(), experiment_revision=record.envelope.revision)
     assert view.projection == expected.payload
     assert view.rounds == expected.rounds
     assert view.experiment_revision == record.envelope.revision
