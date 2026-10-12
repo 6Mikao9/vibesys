@@ -217,6 +217,8 @@ class _AgentGpuMode:
         )
 
     def locate_tool(self, executable: str, site: ToolSite) -> ToolLocation:
+        if site is ToolSite.COMMAND_ENVIRONMENT:
+            return assumed_tool(executable)
         if site is ToolSite.AGENT_SHELL:
             return ToolLocation.missing(
                 f"`{executable}` would run in the editor container, which ships no "
