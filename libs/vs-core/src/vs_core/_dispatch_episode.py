@@ -23,6 +23,7 @@ from .types.common import (
     AttemptRef,
     InvocationRef,
     LifecycleClass,
+    ObservationStatus,
     OperationId,
     RequestId,
     Scope,
@@ -35,6 +36,7 @@ from .types.records import (
     ExecuteRegisteredOperation,
     InspectRequest,
     RecoveryPhase,
+    RequestPhase,
     request_lifecycle,
 )
 from .types.sessions import CancelTurn, CloseSession, InspectTurn
@@ -291,8 +293,27 @@ def episode_ended(state: EpisodeFacts, request: Request) -> bool:
     While recovery runs the answer is always no: the recovery barrier inspects every
     prepared request and decides what becomes of it, and core does not pre-empt that check.
     """
+    if state.records.recovery.phase != RecoveryPhase.READY:
+        return False
+    if isinstance(request, InspectRequest):
+        return _inspection_moot(state, request)
+    return not isinstance(request, _CLEANUP_KINDS) and not dispatch_episode_current(state, request)
+
+
+def _inspection_moot(state: EpisodeFacts, request: InspectRequest) -> bool:
+    """Whether the request inspected was closed unsent, so there is nothing to find out.
+
+    Core ends a prepared request of an ended episode itself (provably unaccepted). An
+    inspection prepared meanwhile would report a second, conflicting first observation.
+    """
+    target = next((row for row in state.records.records if row.request_id == request.target), None)
+    observation = None if target is None else target.observation
     return (
-        state.records.recovery.phase == RecoveryPhase.READY
-        and not isinstance(request, _CLEANUP_KINDS)
-        and not dispatch_episode_current(state, request)
+        target is not None
+        and target.phase == RequestPhase.COMPLETED
+        and observation is not None
+        and observation.status == ObservationStatus.CANCELLED
+        and not observation.accepted
+        and observation.terminal
+        and observation.released
     )

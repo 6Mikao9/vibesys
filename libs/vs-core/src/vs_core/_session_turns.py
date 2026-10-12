@@ -1112,7 +1112,14 @@ def _abandon_turn_acquisition(
         return AreaChange(state=state)
     owner = attempt_for(context, invocation.scope)
     invocation = invocation.model_copy(
-        update={"phase": SessionPhase.TERMINAL, "observation": observation}
+        update={
+            "phase": SessionPhase.TERMINAL,
+            # A closing attempt counts a turn drained only on an observation of its own
+            # dispatch; a cancelled acquisition never had one, so it ends as never started.
+            "observation": stalled_acquisition(invocation, context.run.now_at)
+            if observation.status == ObservationStatus.CANCELLED
+            else observation,
+        }
     )
     state = _replace_invocation(state, invocation)
     signals: list[Signal] = [InputReservationReleased(invocation=ref, observation=observation)]
@@ -1193,12 +1200,28 @@ def _after_ensure(
     grouped = _group_observed(state, context, session, event)
     if grouped.signals or grouped.requests:
         return grouped
-    if session.phase == SessionPhase.TERMINAL:
-        return _abandon_turn_acquisition(grouped.state, context, session, event.observation)
-    if session.phase == SessionPhase.UNKNOWN:
-        return grouped
     owner = attempt_for(context, session.scope)
     closure = current_closure(owner, owner.closure if owner is not None else None)
+    if session.phase == SessionPhase.TERMINAL:
+        abandoned = _abandon_turn_acquisition(grouped.state, context, session, event.observation)
+        if not isinstance(closure, Proven) or session.resource_id is not None:
+            return abandoned
+        # A closing attempt waits on the session's release, which only a close can report.
+        request = _close(session, context, closure.value.authority)
+        closing = session.model_copy(
+            update={
+                "phase": SessionPhase.CLOSING,
+                "pending_records": (*session.pending_records, request.request_id),
+            }
+        )
+        return abandoned.model_copy(
+            update={
+                "state": _replace_session(abandoned.state, closing),
+                "requests": (*abandoned.requests, _cleanup(context, request)),
+            }
+        )
+    if session.phase == SessionPhase.UNKNOWN:
+        return grouped
     if isinstance(closure, Proven):
         invocation = _current_invocation(grouped.state, session)
         if invocation is not None and invocation.phase == SessionPhase.ACQUIRING:
@@ -1790,7 +1813,6 @@ def _drain_acquiring(
         for row in context.records.records
         if row.request_id in session.pending_records
         and isinstance(row.request, EnsureSession)
-        and row.phase != RequestPhase.PREPARED
     )
     if ensures:
         return AreaChange(
@@ -1802,14 +1824,7 @@ def _drain_acquiring(
         )
     if invocation is None:
         return AreaChange(state=state)
-    # Nothing was dispatched, and a closing attempt counts a turn drained only on an
-    # observation: the turn ends as one that never started, as in `_after_ensure`.
-    abandoned = invocation.model_copy(
-        update={
-            "phase": SessionPhase.TERMINAL,
-            "observation": stalled_acquisition(invocation, context.run.now_at),
-        }
-    )
+    abandoned = invocation.model_copy(update={"phase": SessionPhase.TERMINAL})
     state = _replace_invocation(state, abandoned)
     if _run_reusable(session, context):
         detached = session.model_copy(
@@ -1840,8 +1855,7 @@ def _drain_lease(
             for row in context.records.records
             if row.request_id in session.pending_records
             and isinstance(row.request, EnsureSession)
-            and row.phase != RequestPhase.PREPARED
-        )
+            )
         return AreaChange(
             state=state,
             requests=tuple(
