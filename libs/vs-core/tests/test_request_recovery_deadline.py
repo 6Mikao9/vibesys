@@ -110,6 +110,13 @@ def reload(state: CoreState) -> CoreState:
     child_pending=False,
     elapsed=0,
 )
+@example(
+    phase=RequestPhase.DISPATCHED,
+    ready=True,
+    successor=True,
+    child_pending=False,
+    elapsed=0,
+)
 @given(
     phase=st.sampled_from([RequestPhase.DISPATCHED, RequestPhase.COMPLETED]),
     ready=st.booleans(),
@@ -258,6 +265,13 @@ def test_a_passed_limit_ends_an_owed_root_even_when_reattached_and_cleans_its_ch
         assert all(isinstance(value, BlockRequest) for value in result.requests)
         assert bool(result.requests) == (phase in OWED)
         assert result.state.records.recovery == state.records.recovery
+    # No spin: a second deadline for the same record changes nothing and publishes nothing.
+    again = step(
+        reload(result.state),
+        ReconciliationDeadline(request_id=original.request_id, now_at=100.0 + elapsed + 1.0),
+    )
+    assert again.state.records.records == result.state.records.records
+    assert again.events == ()
 
 
 @example(missing=False, elapsed=0)

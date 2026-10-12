@@ -560,7 +560,8 @@ class Limits(Value):
     max_measurement_submissions: Count = DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
     queue_allowance: Seconds = 900.0
     cancellation_bound: Seconds = 60.0
-    # Time core gives its own cleanup and inspection requests, however late the run is.
+    # The least time core gives its own cleanup and inspection requests, even once the run
+    # deadline has passed (see `cleanup` in `_deadlines`).
     cleanup_bound: Seconds = Field(default=60.0, gt=0)
     reconciliation_bound: Seconds = 60.0
     # Poll cadence for a submitted measurement job, and the cap of the doubling

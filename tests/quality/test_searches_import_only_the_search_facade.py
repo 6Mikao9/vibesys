@@ -43,9 +43,9 @@ def foreign_vs_core_imports(source: str) -> list[int]:
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if node.level == 0 and (module == "vs_core" or module.startswith("vs_core.")):
-                if module != FACADE:
-                    lines.append(node.lineno)
+            is_core = module == "vs_core" or module.startswith("vs_core.")
+            if node.level == 0 and is_core and module != FACADE:
+                lines.append(node.lineno)
         elif isinstance(node, ast.Import):
             lines += [
                 node.lineno
