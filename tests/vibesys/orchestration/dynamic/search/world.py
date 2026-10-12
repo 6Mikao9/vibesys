@@ -36,7 +36,12 @@ from tests.vibesys.orchestration.dynamic.search._waiting import (
     WaitingTurns,
 )
 
-from vibesys.orchestration.dynamic.core_policy.api import reply_schemas, requirements_for
+from vibesys.orchestration.dynamic.core_policy.api import (
+    build_search,
+    dynamic_operation_registry,
+    reply_schemas,
+    requirements_for,
+)
 from vibesys.orchestration.dynamic.search.api import (
     EvidenceReading,
     EvidenceReadings,
@@ -47,8 +52,6 @@ from vibesys.orchestration.dynamic.search.api import (
     RenderedArtifacts,
     RenderRoleArtifacts,
     VerifyParentRevision,
-    build_search,
-    dynamic_operation_registry,
 )
 from vs_core.api import (
     AdoptRevision,

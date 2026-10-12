@@ -7,11 +7,9 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel, JsonValue
-from tests.support.core_plugins import failing_plugin
 from tests.vibesys.orchestration.dynamic.search._harness import envelope
 
-from vibesys.dynamic_core import dynamic_projector
+from vibesys.dynamic_core import dynamic_core_registration, dynamic_projector
 from vibesys.hypothesis.readmodel import agent_projection
 from vibesys.orchestration.dynamic.core_policy.api import project_strategy_state
 from vibesys.orchestration.dynamic.search.api import (
@@ -24,7 +22,8 @@ from vibesys.orchestration.dynamic.search.api import (
     RoundRecord,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, project_run
-from vibesys.run.contracts import CoreView, RunStatus
+from vibesys.run.contracts import RunStatus
+from vibesys.run.contracts import RunView as ProjectedRunView
 from vs_core.api import AttemptId, EventCursor, HostFence, HostId, Piped, RunEnvelope
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
@@ -33,9 +32,7 @@ from vs_runtime.api.core import RuntimeRecord
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-class _Options(BaseModel):
-    pass
+    from pydantic import JsonValue
 
 
 _row = st.builds(
@@ -109,8 +106,8 @@ def test_projection_copies_recorded_rounds_and_only_measured_numbers(
     ]
 
 
-def _run_view(payload: dict[str, JsonValue] | None) -> CoreView:
-    return CoreView(run_id="r", loop="dynamic", status=RunStatus.ACTIVE, projection=payload)
+def _run_view(payload: dict[str, JsonValue] | None) -> ProjectedRunView:
+    return ProjectedRunView(run_id="r", loop="dynamic", status=RunStatus.ACTIVE, projection=payload)
 
 
 def _project_with_run(root: Path) -> tuple[Project, str]:
@@ -142,7 +139,9 @@ def _commit(project: Project, run_id: str, state: DynamicState) -> RuntimeRecord
             strategy_id=saved.strategy_id,
             state_schema=saved.state_schema,
             core=saved.core,
-            strategy=Piped[DynamicState, PromptContext](inner=state),
+            strategy=Piped[DynamicState, PromptContext](
+                schema_version=state.schema_version, inner=state
+            ),
             event_cursor=EventCursor(sequence=0),
         )
     )
@@ -222,7 +221,7 @@ def test_a_just_committed_record_projects_without_reading_disk(tmp_path: Path) -
 def test_a_plugin_registers_the_projector(tmp_path: Path) -> None:
     project, run_id = _project_with_run(tmp_path)
     _commit(project, run_id, _state())
-    plugin = failing_plugin("dynamic", options=_Options)
+    plugin = dynamic_core_registration().plugin
 
     registration = OrchestrationRegistration(plugin=plugin, projector=dynamic_projector())
     view = project_run(

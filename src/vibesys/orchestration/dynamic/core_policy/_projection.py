@@ -195,6 +195,9 @@ def _running(state: DynamicState) -> tuple[Workstream, ...]:
 
 
 def _baseline_metrics(state: DynamicState) -> tuple[MetricRow, ...]:
+    keys = state.parts.keys()
+    if BASELINE_KEY not in keys:
+        return ()
     seen = reading(cast("Baseline", state.parts.get(BASELINE_KEY)))
     return () if seen is None else seen.metrics
 

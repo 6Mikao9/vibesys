@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from tests.vibesys.orchestration.dynamic.search._run import config
 
-from vibesys.orchestration.dynamic.search.api import (
+from vibesys.orchestration.dynamic.core_policy.api import (
     build_search,
     dynamic_operation_registrations,
 )

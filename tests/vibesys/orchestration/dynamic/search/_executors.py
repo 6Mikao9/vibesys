@@ -14,6 +14,9 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.dynamic.core_policy.api import (
+    dynamic_operation_registry,
+)
 from vibesys.orchestration.dynamic.search.api import (
     EvidenceReading,
     EvidenceReadings,
@@ -23,7 +26,6 @@ from vibesys.orchestration.dynamic.search.api import (
     RenderedArtifacts,
     RenderRoleArtifacts,
     VerifyParentRevision,
-    dynamic_operation_registry,
 )
 from vs_core.api import (
     AdoptRevision,

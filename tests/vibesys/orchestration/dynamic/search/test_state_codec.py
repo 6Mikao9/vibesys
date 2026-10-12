@@ -7,10 +7,12 @@ from pydantic import ValidationError
 from tests.vibesys.orchestration.dynamic.search._harness import envelope, round_trip
 from tests.vibesys.orchestration.dynamic.search._views import snapshot
 
+from vibesys.orchestration.dynamic.core_policy.api import (
+    dynamic_operation_registry,
+)
 from vibesys.orchestration.dynamic.search.api import (
     STATE_SCHEMA,
     DynamicState,
-    dynamic_operation_registry,
 )
 
 

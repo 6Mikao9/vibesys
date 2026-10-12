@@ -11,9 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.dynamic.core_policy.api import (
+    dynamic_operation_registry,
+)
 from vibesys.orchestration.dynamic.search.api import (
     DynamicState,
-    dynamic_operation_registry,
 )
 from vibesys.orchestration.issue_queue.strategy.api import (
     IssueQueueStrategyState,

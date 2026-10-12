@@ -25,13 +25,17 @@ from vibesys.orchestration.dynamic.core_policy.api import (
 from vibesys.orchestration.dynamic.models import PortfolioPlan, ProfileOffer, planner_response_type
 from vibesys.orchestration.dynamic.search.api import (
     PLANNER_REPLY,
-    DynamicState,
-    PlannerCorrectionPrompt,
+    PlanLedger,
+    PlannerCorrection,
     PlannerPrompt,
+    PlannerReask,
+    PlanProblem,
+    ProblemKind,
+    ViolationCode,
     validate,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vs_core.api import RevisionId, RevisionRef
+from vs_core.api import InvocationId, InvocationRef, RevisionId, RevisionRef, SessionId
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ProfileField
 
@@ -82,7 +86,7 @@ def _prompt(fields: tuple[ProfileField, ...]) -> PlannerPrompt:
     )
 
 
-def _variables(context: PlannerPrompt | PlannerCorrectionPrompt) -> dict[str, object]:
+def _variables(context: PlannerPrompt | PlannerCorrection | PlannerReask) -> dict[str, object]:
     variables = {name: getattr(context, name) for name in type(context).model_fields}
     variables.pop("template")
     return {
@@ -101,10 +105,15 @@ def test_the_planner_prompt_names_exactly_the_supported_fields(
     fields: tuple[ProfileField, ...],
 ) -> None:
     prompt = _prompt(fields)
-    correction = PlannerCorrectionPrompt(planner=prompt, error=None, scheduled=0)
+    turn = InvocationRef(
+        session_id=SessionId(root="s"), invocation_id=InvocationId(root="i"), generation=0
+    )
+    correction = PlannerCorrection(of=turn, planner=prompt, problem=None)
+    reask = PlannerReask(planner=prompt, problem=PlanProblem(kind=ProblemKind.NO_REPLY))
     texts = [
         _RENDERER.render_template("portfolio.j2", **_variables(prompt)),
         _RENDERER.render_template("portfolio_correction.j2", **_variables(correction)),
+        _RENDERER.render_template("portfolio_reask.j2", **_variables(reask)),
     ]
     for text in texts:
         for field in ProfileField:
@@ -124,11 +133,13 @@ def test_a_plan_requiring_an_unsupported_field_is_a_violation_naming_it(
         plan_reply(profile("p1", required_fields=[field.value for field in requested]))
     )
 
-    check = validate(plan, DynamicState(), (), capacity=1, offer=ProfileOffer(supported))
+    ledger = PlanLedger(hypotheses=(), running=frozenset(), profile_ids=frozenset())
+    check = validate(plan, ledger, (), capacity=1, offer=ProfileOffer(supported))
 
     unsupported = set(requested) - set(supported)
     assert check.valid is not bool(unsupported)
-    for field in unsupported:
-        assert any(field.value in item.detail for item in check.violations)
     if unsupported:
-        assert [item.path for item in check.violations] == ["workstreams[0].required_fields"]
+        (violation,) = check.violations
+        assert violation.code is ViolationCode.PROFILE_FIELDS_UNSUPPORTED
+        assert set(violation.fields) == {field.value for field in unsupported}
+        assert violation.path == ("workstreams", 0, "required_fields")

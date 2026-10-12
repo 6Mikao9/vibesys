@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from tests.vibesys.orchestration.dynamic.search._decisions import works
 
-from vibesys.orchestration.dynamic.search.api import (
-    DynamicConfig,
+from vibesys.orchestration.dynamic.core_policy.api import (
     build_search,
     dynamic_operation_registry,
+)
+from vibesys.orchestration.dynamic.search.api import (
+    DynamicConfig,
 )
 from vs_core.api import (
     ArtifactId,

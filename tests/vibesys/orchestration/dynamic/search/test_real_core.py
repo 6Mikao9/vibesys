@@ -12,10 +12,12 @@ from tests.vibesys.orchestration.dynamic.search._decisions import works
 from tests.vibesys.orchestration.dynamic.search._executors import Executors
 from tests.vibesys.orchestration.dynamic.search._run import FACTS, config, kinds, run
 
-from vibesys.orchestration.dynamic.search.api import (
-    RenderRoleArtifacts,
+from vibesys.orchestration.dynamic.core_policy.api import (
     build_search,
     dynamic_operation_registry,
+)
+from vibesys.orchestration.dynamic.search.api import (
+    RenderRoleArtifacts,
 )
 from vs_core.api import (
     ControlId,

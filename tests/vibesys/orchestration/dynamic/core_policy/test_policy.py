@@ -31,11 +31,11 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     run_deadline_at,
 )
 from vibesys.orchestration.dynamic.search.api import (
-    DynamicSearch,
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
     PLANNER_REPLY,
     PROFILER_REPLY,
+    DynamicSearch,
 )
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_core.api import (
@@ -105,16 +105,16 @@ def _core_run_state(policy: DynamicCorePolicy, offered: Capabilities) -> RunStat
         now_at=0.0,
         deadline_at=policy.deadline_at,
         facts=policy.facts,
-        capabilities=validate_startup(policy.strategy.declaration, offered),
+        capabilities=validate_startup(policy.search.declaration, offered),
         limits=policy.limits,
-        declaration=policy.strategy.declaration,
+        declaration=policy.search.declaration,
     )
 
 
 def test_policy_from_a_real_request_starts_on_the_production_catalog(tmp_path: Path) -> None:
     policy, run = _policy(tmp_path, {"max_rounds": 3, "max_in_flight": 2})
     catalog = dynamic_operation_catalog(ports(tmp_path, run))
-    declaration = policy.strategy.declaration
+    declaration = policy.search.declaration
 
     catalog.require_owned(declaration)
     state = _core_run_state(policy, Capabilities(operations=catalog.offered_operations))
@@ -167,7 +167,7 @@ def test_limits_follow_the_requested_budgets(
     }
     policy, _ = _policy(root, options)
 
-    assert policy.limits.max_attempts == rounds * in_flight == policy.strategy.config.start_budget
+    assert policy.limits.max_attempts == rounds * in_flight == policy.config.start_budget
     assert policy.limits.max_parallel == in_flight
     assert policy.limits.max_turns >= policy.limits.max_attempts
     _core_run_state(policy, Capabilities(operations=_offered(root)))
@@ -190,7 +190,7 @@ def test_run_facts_use_the_evaluation_identity_the_backend_uses(tmp_path: Path) 
 
 def test_the_recipe_is_the_stored_evaluation_plan(tmp_path: Path) -> None:
     policy, run = _policy(tmp_path)
-    recipe = policy.strategy.config.recipe
+    recipe = policy.config.recipe
 
     assert run.artifacts.contains(run.evaluation_plan.model_dump_json().encode())
     assert recipe.digest in {path.name for path in tmp_path.rglob("*") if path.is_file()}
@@ -213,7 +213,7 @@ def test_capabilities_of_the_run_override_the_config_defaults(tmp_path: Path) ->
         ),
         config={"evaluation": {"queue_allowance_seconds": 77}},
     )
-    config = policy.strategy.config
+    config = policy.config
 
     assert config.profiling
     assert config.profile_measurement
@@ -225,14 +225,14 @@ def test_capabilities_of_the_run_override_the_config_defaults(tmp_path: Path) ->
 
 
 def test_no_profiler_means_no_profiling(tmp_path: Path) -> None:
-    config = _policy(tmp_path)[0].strategy.config
+    config = _policy(tmp_path)[0].config
 
     assert not config.profiling
     assert not config.profile_measurement
 
 
 def test_a_profiler_without_trusted_capture_does_not_offer_profile_work(tmp_path: Path) -> None:
-    config = _policy(tmp_path, profiler_id="nsys")[0].strategy.config
+    config = _policy(tmp_path, profiler_id="nsys")[0].config
 
     assert not config.profiling
     assert not config.profile_measurement
@@ -304,7 +304,7 @@ def test_profile_work_is_offered_exactly_when_the_run_can_capture(
     )
     run = resolved(tmp_path, profiler_id=profiler_id, plan=plan, environment=view)
     policy = _policy_of(tmp_path, run)[0]
-    config = policy.strategy.config
+    config = policy.config
 
     can_capture = view.captures_profile and manifest_command is not None
     wants_profile = profiler_id != "none" and manifest_command is not None

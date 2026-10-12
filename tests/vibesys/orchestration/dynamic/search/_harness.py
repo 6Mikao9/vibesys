@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from tests.vibesys.orchestration.dynamic.search._run import FACTS, config
 
+from vibesys.orchestration.dynamic.core_policy.api import (
+    dynamic_operation_registry,
+)
 from vibesys.orchestration.dynamic.search.api import (
     STATE_SCHEMA,
     DynamicSearch,
     DynamicState,
-    dynamic_operation_registry,
 )
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
