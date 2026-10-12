@@ -30,6 +30,7 @@ from vs_core.api import (
     CoreState,
     CoreView,
     Decision,
+    Discarded,
     DispatchAuthorized,
     Event,
     EventCursor,
@@ -60,8 +61,8 @@ from vs_core.api import (
     advance,
     begin,
     project,
-    search_events,
     step,
+    translate,
     validate_startup,
 )
 from vs_core.testing.builders import initial_state
@@ -168,6 +169,8 @@ class Trace[S: StrategyState]:
     decisions: list[Submission] = field(default_factory=list)
     events: list[StrategyEvent] = field(default_factory=list)
     requests: list[Request] = field(default_factory=list)
+    # What core kept from the search: failures of its own requests and late results.
+    discarded: list[Discarded] = field(default_factory=list)
     # Requests as dispatched and executor observations as delivered, interleaved in order.
     log: list[Request | RequestObserved] = field(default_factory=list)
     finished: bool = False
@@ -215,14 +218,19 @@ class _Driver[S: StrategyState]:
         """Deliver the clock and the harness events, then begin the search's run."""
         published: list[StrategyEvent] = []
         incoming: list[Event] = []
+        discarded: list[Discarded] = []
         core = self.core
         for event in (ClockAdvanced(now_at=1.0), *events):
             transition = step(core, event)
             core = transition.state
             published.extend(transition.events)
-            incoming.extend(search_events(core, transition.events))
-        advanced = begin(self.search, config, core, self.host, tuple(incoming))
+            translated = translate(core, transition.events)
+            incoming.extend(translated.events)
+            discarded.extend(translated.discarded)
+        arrived = Inbox(tuple(incoming), (), tuple(discarded))
+        advanced = begin(self.search, config, core, self.host, arrived)
         self.trace = Trace(core=core, search=self.search, state=advanced.state)
+        self.trace.discarded.extend(advanced.discarded)
         self.trace.steps = 1 + len(events)
         self.take(
             advanced.state,
@@ -377,10 +385,16 @@ class _Driver[S: StrategyState]:
         if isinstance(event, RequestObserved):
             trace.log.append(event)
         transition = step(trace.core, event)
-        incoming = (*search_events(transition.state, transition.events), *extra)
+        translated = translate(transition.state, transition.events)
+        incoming = (*translated.events, *extra)
         advanced = advance(
-            trace.search, trace.state, transition.state, self.host, Inbox(incoming, self.held)
+            trace.search,
+            trace.state,
+            transition.state,
+            self.host,
+            Inbox(incoming, self.held, translated.discarded),
         )
+        trace.discarded.extend(advanced.discarded)
         self.take(
             advanced.state,
             advanced.core,

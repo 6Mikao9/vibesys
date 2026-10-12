@@ -46,7 +46,7 @@ def _failed(identity: str) -> core.Failed:
     return core.Failed(
         reason=core.FailureReason.TIMED_OUT,
         decision=core.DecisionId(root=identity),
-        limit=5.0,
+        limit_at=5.0,
     )
 
 

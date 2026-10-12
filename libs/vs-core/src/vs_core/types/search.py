@@ -13,22 +13,28 @@ arrives as ``Failed`` with a closed reason; nothing here is free text.
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import Field
 
-from .attempts import AttemptView
+from .attempts import AttemptBudget, AttemptPhase, AttemptView, WorkspacePlan
 from .common import (
     AttemptRef,
     Capabilities,
     ControlInput,
     DecisionId,
+    ItemId,
     Limits,
+    RequestId,
+    RevisionRef,
     RunFacts,
     Seconds,
     Value,
 )
 from .evaluation import EvidenceRef, MeasurementResult
+from .evaluation_history import AttemptEvaluationHistory, AttemptTerminalReason
+from .kinds import EventKind
 from .records import OperationResult
 from .session_inputs import InputDelivered, InputDropped
 from .sessions import InterruptCompleted, InterruptFailed, TurnResult
@@ -140,6 +146,39 @@ type Event = Annotated[
 """Everything ``Search.update`` can receive. A search declares which kinds it handles."""
 
 
+class AttemptSummary(Value):
+    """What a search may read of one workspace (attempt): its identity, phase and results.
+
+    Request ids, receipts, the release graph and checkpoint bookkeeping are core's and are
+    not here; a search reaches work only through its own decisions.
+    """
+
+    attempt: AttemptRef
+    item_id: ItemId
+    phase: AttemptPhase
+    workspace: WorkspacePlan
+    budget: AttemptBudget
+    parent: AttemptRef | None
+    checkpoint: RevisionRef | None
+    evaluation_history: AttemptEvaluationHistory
+    terminal_reason: AttemptTerminalReason | None
+
+    @classmethod
+    def of(cls, view: AttemptView) -> AttemptSummary:
+        """The summary of core's view of an attempt."""
+        return cls(
+            attempt=AttemptRef(attempt_id=view.attempt_id, generation=view.generation),
+            item_id=view.item_id,
+            phase=view.phase,
+            workspace=view.workspace,
+            budget=view.budget,
+            parent=view.parent,
+            checkpoint=view.checkpoint,
+            evaluation_history=view.evaluation_history,
+            terminal_reason=view.terminal_reason,
+        )
+
+
 class RunView(Value):
     """What a search may read about the run, and nothing it could write.
 
@@ -152,9 +191,32 @@ class RunView(Value):
     facts: RunFacts
     capabilities: Capabilities
     limits: Limits
-    attempts: tuple[AttemptView, ...]
+    attempts: tuple[AttemptSummary, ...]
     measurements: tuple[EvidenceRef, ...]
     settlements: tuple[Settlement, ...]
+
+
+class DiscardReason(StrEnum):
+    """Why core kept an event from the search. Closed."""
+
+    INTERNAL_FAILURE = "internal-failure"
+    """A request core made for itself ended without a result; the search never asked for it."""
+
+    LATE_RESULT = "late-result"
+    """A result arrived for a request that had already ended with a failure."""
+
+
+class Discarded(Value):
+    """An event core handled instead of delivering, kept so the shell can log it.
+
+    ``failure`` is set for an internal failure; ``request`` and ``event`` for a late result.
+    Typed fields only: nothing here is free text.
+    """
+
+    reason: DiscardReason
+    failure: Failed | None = None
+    request: RequestId | None = None
+    event: EventKind | None = None
 
 
 class Search[S: StrategyState, C](Protocol):

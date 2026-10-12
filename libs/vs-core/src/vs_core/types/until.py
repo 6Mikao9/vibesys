@@ -22,7 +22,6 @@ from .common import (
     AttemptRef,
     DecisionId,
     RejectionCode,
-    RequestId,
     ResourceId,
     Seconds,
     Value,
@@ -33,7 +32,7 @@ class FailureReason(StrEnum):
     """Why a requested piece of work ended without a result. Closed: no free-text reasons."""
 
     TIMED_OUT = "timed-out"
-    """The limit of its ``Within`` passed."""
+    """The limit of its ``Within`` passed (``Failed.limit_at`` is when)."""
 
     WORKSPACE_CLOSED = "workspace-closed"
     """A ``WhileOpen`` watch fired: the workspace it names is no longer open."""
@@ -124,17 +123,21 @@ class ReplyError(Value):
 class Failed(Value):
     """A request ended without a result. Every field is typed; nothing is free text.
 
-    Each reason carries its own fields, and only those: ``TIMED_OUT`` the ``limit`` that
-    passed, ``WORKSPACE_CLOSED`` / ``OWNER_GONE`` the ``watch`` that fired, ``REFUSED`` the
-    ``cause`` core gave, ``INVALID_REPLY`` the reply ``errors``.
+    Each reason carries its own fields, and only those: ``TIMED_OUT`` the ``limit_at`` (the
+    run-clock time of the limit that passed), ``WORKSPACE_CLOSED`` / ``OWNER_GONE`` the
+    ``watch`` that fired, ``REFUSED`` the ``cause`` core gave, ``INVALID_REPLY`` the reply
+    ``errors``.
+
+    ``decision`` names the search's own decision that ended; it is None for a request core
+    made for itself, and core keeps such a failure to itself. A failure never names a request
+    id: requests are core's, and a search knows only its decisions.
     """
 
     kind: Literal["failed"] = "failed"
     reason: FailureReason
     decision: DecisionId | None = None
-    request: RequestId | None = None
     watch: Watch | None = None
-    limit: Limit | None = None
+    limit_at: Seconds | None = None
     cause: RejectionCode | None = None
     errors: tuple[ReplyError, ...] = ()
 
@@ -143,7 +146,7 @@ class Failed(Value):
         """Refuse a field that does not belong to the reason, or a reason missing its field."""
         expected = {
             "watch": self.reason in (FailureReason.WORKSPACE_CLOSED, FailureReason.OWNER_GONE),
-            "limit": self.reason == FailureReason.TIMED_OUT,
+            "limit_at": self.reason == FailureReason.TIMED_OUT,
             "cause": self.reason == FailureReason.REFUSED,
             "errors": self.reason == FailureReason.INVALID_REPLY,
         }

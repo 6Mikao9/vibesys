@@ -18,6 +18,7 @@ from vs_core.api import (
     CoreEvent,
     CoreState,
     Decision,
+    Discarded,
     DispatchAuthorized,
     EventCursor,
     HostFence,
@@ -42,8 +43,8 @@ from vs_core.api import (
     advance,
     check_decisions,
     orphan_waits,
-    search_events,
     step,
+    translate,
     validate_startup,
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
@@ -349,6 +350,7 @@ class CoreRuntime[S: StrategyState]:
         )
         self._host = SearchHost(step=self._transitions.step, registry=self._registry)
         self._record: RuntimeRecord[S] | None = None
+        self._discarded: list[Discarded] = []
         self._storage_revision: int | None = None
         self._fence: StoreFence | None = None
         self._halted = False
@@ -395,6 +397,14 @@ class CoreRuntime[S: StrategyState]:
         return cls(
             resolved.store, search, resolved.record.envelope.core, config=config, bindings=selected
         )
+
+    @property
+    def discarded(self) -> tuple[Discarded, ...]:
+        """What core kept from the search since start (internal failures, late results).
+
+        The shell logs these; they are typed and never reach the search.
+        """
+        return tuple(self._discarded)
 
     @property
     def record(self) -> RuntimeRecord[S]:
@@ -748,17 +758,16 @@ class CoreRuntime[S: StrategyState]:
         """
         record = self.record
         envelope = record.envelope
-        arrived = (
-            *search_events(transition.state, transition.events),
-            *(TimeReached(time=wake) for wake in due),
-        )
+        translated = translate(transition.state, transition.events)
+        arrived = (*translated.events, *(TimeReached(time=wake) for wake in due))
         advanced = advance(
             self._search,
             envelope.strategy,
             transition.state,
             self._host,
-            Inbox(arrived, record.pending_decisions),
+            Inbox(arrived, record.pending_decisions, translated.discarded),
         )
+        self._discarded.extend(advanced.discarded)
         events = (*transition.events, *advanced.published)
         publications = tuple(
             Publication(

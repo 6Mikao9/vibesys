@@ -1,10 +1,10 @@
 """Type-level contract of the search API: what a search cannot write.
 
 ``ty`` is the test. Each line marked ``ty: ignore`` must be a type error; if the API
-loosens so that the line type-checks, the ignore becomes unused and ``ty`` reports it
-(``unused-ignore-comment``; check with
-``ty check --error unused-ignore-comment libs/vs-core/tests/test_search_types.py``). The ``raises`` tests also assert that a caller bypassing the type
-checker is refused at runtime.
+loosens so that the line type-checks, the ignore becomes unused and ``ty`` reports it.
+CI enforces that with ``[tool.ty.rules] unused-ignore-comment = "error"`` in
+``pyproject.toml``. Each test also checks that code which skips the type checker is still
+refused at runtime.
 """
 
 import pytest
@@ -32,6 +32,12 @@ def test_a_bare_request_is_not_a_decision() -> None:
     # A bare request is work, not a decision: it only starts inside a Wait.
     decisions.append(_work())  # ty: ignore[invalid-argument-type]
     assert [type(d) for d in decisions[:2]] == [core.Wait, core.WakeAt]
+    # Without the type checker, core still refuses the bare request, naming where it is.
+    uses = frozenset({core.WorkKind.WITHDRAW, core.WorkKind.WAKE_AT})
+    declaration = core.initial_state().run.declaration.model_copy(update={"uses": uses})
+    with pytest.raises(core.ContractError, match="start work inside a Wait") as refused:
+        core.check_decisions(declaration, decisions)
+    assert refused.value.path == ("decisions", 2)
 
 
 def test_a_watch_alone_is_not_an_until() -> None:

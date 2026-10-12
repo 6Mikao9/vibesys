@@ -59,7 +59,7 @@ from vs_core._registry import (
     validate_search_declaration,
     validate_startup,
 )
-from vs_core._search_events import run_view, search_events
+from vs_core._search_events import Translated, run_view, search_events, translate
 from vs_core._search_run import (
     Advanced,
     CoreStep,
@@ -427,6 +427,9 @@ from vs_core.types.scheduling import (
 from vs_core.types.scope_reopen import ScopedAdmissionReopen, ScopedAdmissionReopenOutcome
 from vs_core.types.search import (
     AdoptionFinished,
+    AttemptSummary,
+    Discarded,
+    DiscardReason,
     Event,
     Interrupted,
     MeasurementFinished,
@@ -636,6 +639,7 @@ __all__ = [
     "AttemptRequested",
     "AttemptSettled",
     "AttemptSetupFailed",
+    "AttemptSummary",
     "AttemptTerminalReason",
     "AttemptTrack",
     "AttemptView",
@@ -701,7 +705,9 @@ __all__ = [
     "DependencyRef",
     "DependencyStatus",
     "DigestScheme",
+    "DiscardReason",
     "DiscardWorkspace",
+    "Discarded",
     "DispatchAuthorized",
     "DispatchTurn",
     "Disposition",
@@ -994,6 +1000,7 @@ __all__ = [
     "TraceChange",
     "TraceFrame",
     "Transition",
+    "Translated",
     "TrustedBaseline",
     "TurnCandidate",
     "TurnCandidateFailed",
@@ -1080,6 +1087,7 @@ __all__ = [
     "step",
     "suspension_refusal",
     "trace_step",
+    "translate",
     "trusted_keys",
     "turn_candidate",
     "turn_decision_id",

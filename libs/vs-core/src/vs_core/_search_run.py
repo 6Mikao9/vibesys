@@ -12,11 +12,11 @@ that backs up the type checker for what a search returns.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from ._registry import ContractError
-from ._search_events import run_view, search_events
+from ._search_events import run_view, translate
 from .types.common import RunStatus
 from .types.kernel import ProposalSubmitted
 from .types.kinds import OPT_IN, EventKind, WorkKind
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from ._registry import OperationRegistry
     from .types.common import Seconds
     from .types.kernel import CoreEvent, CoreState, StrategyEvent, Transition
-    from .types.search import Event, Search
+    from .types.search import Discarded, Event, Search
     from .types.strategy import Decision, SearchDeclaration, StrategyState, Submission
 
 type CoreStep = Callable[[CoreState, CoreEvent], Transition]
@@ -83,10 +83,15 @@ def _deliverable(declaration: SearchDeclaration, event: Event) -> bool:
 
 @dataclass(frozen=True)
 class Inbox:
-    """What waits for the search: events to deliver, and decisions core could not take yet."""
+    """What waits for the search: events to deliver, and decisions core could not take yet.
+
+    ``discarded`` are events core already kept from the search (see ``translate``); they
+    are passed on in ``Advanced.discarded`` so the shell logs everything in one place.
+    """
 
     events: tuple[Event, ...] = ()
     held: tuple[Decision, ...] = ()
+    discarded: tuple[Discarded, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -99,6 +104,7 @@ class Advanced[S: StrategyState]:
 
     state: S
     core: CoreState
+    discarded: tuple[Discarded, ...] = field(default=())
     published: tuple[StrategyEvent, ...] = field(default=())
     wakes: tuple[Seconds, ...] = field(default=())
     submitted: tuple[Submission, ...] = field(default=())
@@ -123,6 +129,7 @@ class _Pass:
     wakes: list[Seconds] = field(default_factory=list)
     sent: list[Submission] = field(default_factory=list)
     held: list[Decision] = field(default_factory=list)
+    discarded: list[Discarded] = field(default_factory=list)
 
     def submit(self, decisions: tuple[Decision, ...], core: CoreState) -> CoreState:
         """Send the decisions to core, or hold them until recovery is ready."""
@@ -139,7 +146,9 @@ class _Pass:
             core, ProposalSubmitted(decisions=submissions, expected_revision=core.revision)
         )
         self.published.extend(transition.events)
-        self.queue.extend(search_events(transition.state, transition.events))
+        translated = translate(transition.state, transition.events)
+        self.queue.extend(translated.events)
+        self.discarded.extend(translated.discarded)
         return transition.state
 
     def drain[S: StrategyState, C](
@@ -156,6 +165,7 @@ class _Pass:
         return Advanced(
             state=state,
             core=core,
+            discarded=tuple(self.discarded),
             published=tuple(self.published),
             wakes=tuple(self.wakes),
             submitted=tuple(self.sent),
@@ -167,7 +177,7 @@ def advance[S: StrategyState, C](
     search: Search[S, C], state: S, core: CoreState, host: SearchHost, inbox: Inbox
 ) -> Advanced[S]:
     """Submit what was held, deliver the events one by one, and feed back what that causes."""
-    run = _Pass(host, list(inbox.events))
+    run = _Pass(host, list(inbox.events), discarded=list(inbox.discarded))
     core = run.submit(inbox.held, core)
     return run.drain(search, state, core)
 
@@ -177,10 +187,9 @@ def begin[S: StrategyState, C](
     config: C,
     core: CoreState,
     host: SearchHost,
-    events: tuple[Event, ...] = (),
+    arrived: Inbox | None = None,
 ) -> Advanced[S]:
-    """Start a new run: ``init`` on the run's facts, submit its decisions, then ``events``."""
+    """Start a new run: ``init`` on the run's facts, submit its decisions, then ``arrived``."""
     state, decisions = search.init(config, core.run.facts)
-    return advance(
-        search, state, core, host, Inbox(events, check_decisions(search.declaration, decisions))
-    )
+    held = check_decisions(search.declaration, decisions)
+    return advance(search, state, core, host, replace(arrived or Inbox(), held=held))

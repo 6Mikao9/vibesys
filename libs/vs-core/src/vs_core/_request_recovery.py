@@ -1368,9 +1368,8 @@ def _failure(record: RequestRecord, reason: FailureReason) -> Failed:
     return Failed(
         reason=reason,
         decision=record.request.decision_id,
-        request=record.request_id,
         watch=watch,
-        limit=record.until.at if reason == FailureReason.TIMED_OUT else None,
+        limit_at=record.until.at if reason == FailureReason.TIMED_OUT else None,
     )
 
 

@@ -396,8 +396,7 @@ def timed_out(record: RequestRecord) -> RequestRecord:
             "failure": Failed(
                 reason=FailureReason.TIMED_OUT,
                 decision=record.request.decision_id,
-                request=record.request_id,
-                limit=record.until.at,
+                limit_at=record.until.at,
             ),
         }
     )

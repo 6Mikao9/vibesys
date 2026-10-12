@@ -145,8 +145,7 @@ def test_every_open_record_ends_exactly_at_its_limit_whatever_the_executor_last_
     failed = Failed(
         reason=FailureReason.TIMED_OUT,
         decision=None,
-        request=record.request_id,
-        limit=BOUND,
+        limit_at=BOUND,
     )
     assert len(blocks) == 1
     assert record.phase == RequestPhase.BLOCKED
