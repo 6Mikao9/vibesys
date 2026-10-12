@@ -23,7 +23,7 @@ from vibesys.orchestration.issue_queue.core_policy.api import (
     prompts,
 )
 from vibesys.orchestration.issue_queue.models import IssueQueueOptions
-from vibesys.orchestration.issue_queue.strategy.api import (
+from vibesys.orchestration.issue_queue.search.api import (
     BOOTSTRAP_TEMPLATE,
     PERF_REPLY,
     ImplementPrompt,
@@ -32,10 +32,7 @@ from vibesys.orchestration.issue_queue.strategy.api import (
     PerformancePrompt,
     PriorPerformance,
     PromptContext,
-    ReplyCorrectionPrompt,
-    ResumePrompt,
     ReviewPrompt,
-    WaitUnrecordedPrompt,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import ArtifactId, ArtifactRef, RevisionId, RevisionRef
@@ -73,8 +70,8 @@ _REVISION = RevisionRef(revision_id=RevisionId(root="a1b2c3"), digest="git-commi
 _PRIOR = (
     PriorPerformance(
         iteration=1,
-        throughput_trend="improved",
-        latency_trend="mixed",
+        primary_trend="improved",
+        secondary_trend="mixed",
         metrics_json='{"load_levels": []}',
         new_issues=2,
     ),
@@ -118,24 +115,6 @@ _CASES: dict[str, tuple[PromptContext | str, RunFacts]] = {
         ),
         _CONFIGURED,
     ),
-    "resume": (
-        ResumePrompt(
-            role="implementer",
-            retained_revision=_REVISION,
-            timed_out=False,
-            repeated_failure="same error three times",
-        ),
-        _CONFIGURED,
-    ),
-    "resume_timed_out": (
-        ResumePrompt(role="judge", retained_revision=None, timed_out=True),
-        _CONFIGURED,
-    ),
-    "reply_correction": (
-        ReplyCorrectionPrompt(role="judge", error="verdict: Input should be 'pass' or 'fail'"),
-        _CONFIGURED,
-    ),
-    "wait_unrecorded": (WaitUnrecordedPrompt(), _CONFIGURED),
     "bootstrap_configured": (BOOTSTRAP_TEMPLATE, _CONFIGURED),
     "bootstrap_bare": (BOOTSTRAP_TEMPLATE, _BARE),
 }

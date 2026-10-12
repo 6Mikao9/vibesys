@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search._refusals import decision_id
+from tests.vibesys.orchestration.issue_queue.search.world import (
     IssueQueueWorld,
     evaluated,
     implemented,
@@ -19,15 +20,26 @@ from tests.vibesys.orchestration.issue_queue.strategy.world import (
 )
 
 from vs_dst.api import SimulatedRun, simulate
+from vs_runtime.api.testing import LEASE
 
 
 def _world() -> IssueQueueWorld:
-    """Two issues: the bootstrap one fails its first review, and its judge finds a bug."""
+    """Two issues: the bootstrap one fails its first review, and its judge finds a bug.
+
+    The operation limit outlasts a dead host's lease: a limit core persisted passes while no
+    host runs, and a request still waiting then ends as timed out (see the PR's finding).
+    """
     return IssueQueueWorld(
+        operation_seconds=2 * LEASE,
         implementer=[implemented(f"turn {n}") for n in range(6)],
         judge=[judged(passed=False), judged(bugs=("a bug",)), judged(), judged()],
         perf=[evaluated(), evaluated()],
     )
+
+
+def _identities(run: SimulatedRun) -> set[str]:
+    """The identity of every decision the run asked."""
+    return {item.root for item in map(decision_id, run.decisions) if item is not None}
 
 
 def _board(run: SimulatedRun) -> list[tuple[object, ...]]:
@@ -46,9 +58,7 @@ def _recovers_the_run(recovered: SimulatedRun, label: object) -> None:
     assert recovered.result == NORMAL.result, label
     assert _board(recovered) == _board(NORMAL), label
     assert recovered.no_effect_ran_twice(), label
-    assert {d.decision_id.root for d in recovered.decisions} == {
-        d.decision_id.root for d in NORMAL.decisions
-    }, label
+    assert _identities(recovered) == _identities(NORMAL), label
 
 
 def test_a_restart_after_any_crash_finishes_the_same_run() -> None:

@@ -621,19 +621,18 @@ operations (8.3 recommends the design; the operations are named here).
 
 ### 7.3 State
 
-`IssueQueueStrategyState` (schema `plain.strategy-state`, version 1):
+`IssueQueueState` (schema `plain.search-state`, version 2; a version 1 state is refused):
 
 | Field | Meaning |
 |---|---|
-| `phase`, `stopping` | `RunPhase`, plus the cursor below |
-| `cursor` | `round_idx`, and `DRAIN`, `PERF`, `NEXT_ROUND` (replaces `phase` and `current_issue_id` and the `_resume_point` heuristic) |
-| `bootstrap_done` | whether the bootstrap issue was created |
-| `board` | the last `BoardSnapshot` read: per issue id, status, attempt count, last judge review. A cache of the tracker, refreshed by `ReadBoard` after every batch of writes; never the source of truth |
-| `work` | the open issue attempt: issue id, `AttemptTrack`, `work` phase (CLAIM, START, IMPLEMENT, REVIEW, RECORD, SETTLE, DONE), pending change keys |
-| `perf` | the open performance attempt, same shape |
-| `performance` | the existing `PerformanceRecord` history |
+| `run` | one phase of a closed union: `Reading` (a board read is out, and what to decide once it arrives), `Bootstrapping`, `Working` (a job is open), `Verifying` (the final tip is being measured), `Selecting` (the winner is proposed) or `Finished` |
+| `board` | the last `BoardSnapshot` read: a cache of the tracker, refreshed by a `ReadBoard` before every decision that depends on it; never the source of truth |
+| `reads`, `bootstrapped`, `stopping` | how many reads were sent (each read has its own identity), whether the bootstrap issue exists, whether the operator asked to stop |
+| `round_idx`, `processed`, `jobs_started` | the round, the issues worked in it, and the jobs numbered so far |
+| `performance` | the `PerformanceRecord` history |
 | `tip` | the revision and settlement of the last closed issue; the base of the next attempt and the adoption candidate |
-| `notes`, `unreachable` | as in 4.3 |
+
+A job is its own machine (`Starting`, `Claiming`, `Implementing`, `Recording`, `Reviewing`, `Filing`, `Blocking`, `Evaluating`, `Reporting`, `Settling`, `Done`); the state holds only the phase it is in. The agent pipeline (render, turn, validate, correct, ask again, resume) belongs to core (`AgentTurns`), so the state carries none of it.
 
 ### 7.4 Candidates, attempts and adoption
 

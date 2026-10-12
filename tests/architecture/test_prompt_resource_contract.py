@@ -35,7 +35,7 @@ from vibesys.hypothesis import (
 from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.search.api import PlannerPrompt, ReviewEvaluation
 from vibesys.orchestration.evolve.population import Individual
-from vibesys.orchestration.issue_queue.strategy.api import IssueBrief, PriorPerformance
+from vibesys.orchestration.issue_queue.search.api import IssueBrief, PriorPerformance
 from vibesys.orchestration.multi.models import (
     ImplementerResponse,
     JudgeResponse,

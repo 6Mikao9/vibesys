@@ -6,21 +6,23 @@ import re
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search._decisions import works
+from tests.vibesys.orchestration.issue_queue.search.world import (
     FACTS,
+    IssueQueueWorld,
+    evaluated,
+    implemented,
     issue_queue_config,
-    issue_queue_harness,
+    judged,
 )
 
-from vibesys.orchestration.issue_queue.strategy.api import (
-    BoardState,
-    Cursor,
-    IssueQueueStrategy,
-    IssueQueueStrategyState,
+from vibesys.orchestration.issue_queue.search.api import (
+    Finished,
+    IssueQueueSearch,
+    bootstrap_title,
 )
-from vs_core.api import Finish, Operation, project
-from vs_core.testing.drive import new_run
-from vs_issue_tracker.api import ApplyIssueChanges, CreateIssue
+from vs_core.api import Finish
+from vs_dst.api import simulate
 
 _WORDS = st.text(
     alphabet=st.characters(whitelist_categories=("Ll", "Lu", "Nd"), max_codepoint=0x24F),
@@ -63,29 +65,7 @@ OBJECTIVES = (
 )
 
 
-def _first_decisions(objective: str) -> list[object]:
-    settings_ = issue_queue_config()
-    strategy = IssueQueueStrategy(config=settings_)
-    facts = FACTS.model_copy(update={"objective": objective})
-    view = project(new_run(strategy, issue_queue_harness(settings_, facts=facts)))
-    state = IssueQueueStrategyState(cursor=Cursor.START, board=BoardState(fresh=True))
-    return list(strategy.bind(state).decide(view).decisions)
-
-
-def _created(decisions: list[object]) -> CreateIssue:
-    assert len(decisions) == 1
-    operation = decisions[0]
-    assert isinstance(operation, Operation)
-    assert isinstance(operation.request, ApplyIssueChanges)
-    (create,) = operation.request.changes
-    assert isinstance(create, CreateIssue)
-    return create
-
-
-@settings(max_examples=80, deadline=None, derandomize=True, database=None)
-@given(objective=OBJECTIVES)
-def test_the_first_issue_is_titled_from_the_objective_of_any_task(objective: str) -> None:
-    title = _created(_first_decisions(objective)).title
+def _check(title: str, objective: str) -> None:
     assert title
     assert "\n" not in title
     assert len(title) <= 80
@@ -96,25 +76,52 @@ def test_the_first_issue_is_titled_from_the_objective_of_any_task(objective: str
     assert "inference server" not in title
 
 
+@settings(max_examples=200, deadline=None, derandomize=True, database=None)
+@given(objective=OBJECTIVES)
+def test_the_title_is_plain_text_taken_from_the_objective_of_any_task(objective: str) -> None:
+    _check(bootstrap_title(objective), objective)
+
+
+def _first_title(objective: str) -> str:
+    world = IssueQueueWorld(
+        implementer=[implemented()],
+        judge=[judged()],
+        perf=[evaluated()],
+        objective=objective,
+        max_rounds=1,
+    )
+    assert simulate(world).finished
+    return world.titles()[0]
+
+
+@settings(max_examples=6, deadline=None, derandomize=True, database=None)
+@given(objective=OBJECTIVES)
+def test_the_first_issue_of_a_run_is_titled_from_its_objective(objective: str) -> None:
+    title = _first_title(objective)
+    assert title == bootstrap_title(objective)
+    _check(title, objective)
+
+
 def test_a_markdown_objective_is_titled_as_plain_text() -> None:
     objective = "# Objective: fast rowwise projection + softmax on one GPU\n\nWrite the kernel."
-    assert _created(_first_decisions(objective)).title == (
-        "fast rowwise projection + softmax on one GPU"
-    )
+    assert _first_title(objective) == "fast rowwise projection + softmax on one GPU"
 
 
 def test_a_rowwise_kernel_task_is_not_seeded_with_a_serving_issue() -> None:
     objective = "Write a PyTorch rowwise matmul and softmax kernel. Make it fast."
-    assert _created(_first_decisions(objective)).title == (
-        "Write a PyTorch rowwise matmul and softmax kernel."
-    )
+    assert _first_title(objective) == "Write a PyTorch rowwise matmul and softmax kernel."
 
 
 @given(blank=st.text(alphabet=" \t\n\r", max_size=8))
 def test_a_task_without_an_objective_fails_the_run_instead_of_seeding_an_unrelated_issue(
     blank: str,
 ) -> None:
-    (decision,) = _first_decisions(blank)
+    config = issue_queue_config()
+    state, decisions = IssueQueueSearch(config).init(
+        config, FACTS.model_copy(update={"objective": blank})
+    )
+    (decision,) = works(decisions)
     assert isinstance(decision, Finish)
     assert decision.result.outcome == "failure"
     assert "objective" in decision.result.reason
+    assert isinstance(state.run, Finished)

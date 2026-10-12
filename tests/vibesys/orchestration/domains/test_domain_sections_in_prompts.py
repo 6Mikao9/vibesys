@@ -27,7 +27,7 @@ from vibesys.domains.rendering import render_domain_sections
 from vibesys.orchestration import dynamic, evolve, issue_queue, multi, single
 from vibesys.orchestration.dynamic.search import api as dynamic_api
 from vibesys.orchestration.evolve.strategy import api as evolve_api
-from vibesys.orchestration.issue_queue.strategy import api as plain_api
+from vibesys.orchestration.issue_queue.search import api as plain_api
 from vibesys.orchestration.multi.strategy import api as multi_api
 from vibesys.orchestration.single.strategy import api as single_api
 from vs_core.api import RevisionId, RevisionRef

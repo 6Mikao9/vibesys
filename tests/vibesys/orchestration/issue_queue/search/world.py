@@ -21,19 +21,22 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from tests.support.checkpoint_faults import FaultyCheckpoints
-from tests.vibesys.orchestration.issue_queue.strategy._waiting import WAITING, WaitingTurns
+from tests.vibesys.orchestration.issue_queue.search._refusals import Refuses, Refusing, as_search
+from tests.vibesys.orchestration.issue_queue.search._waiting import WAITING, WaitingTurns
 
+from vibesys.metrics import EvidenceReading
 from vibesys.orchestration.issue_queue.core_policy.api import (
+    build_search,
     limits_for,
+    plain_operation_registry,
     reply_schemas,
     requirements_for,
 )
-from vibesys.orchestration.issue_queue.strategy.api import (
+from vibesys.orchestration.issue_queue.search.api import (
+    EvidenceReadings,
+    InterpretEvidence,
     IssueQueueConfig,
-    IssueQueueStrategy,
-    IssueQueueStrategyState,
     RenderRoleArtifacts,
-    plain_operation_registry,
 )
 from vs_core.api import (
     AdoptRevision,
@@ -62,6 +65,7 @@ from vs_core.api import (
     RevisionRef,
     RunEnvelope,
     RunFacts,
+    Search,
     SessionId,
     SnapshotAndRetain,
     SubmitMeasurement,
@@ -71,6 +75,7 @@ from vs_core.testing.drive import Answer, Harness, Running, Succeeded, Unknown
 from vs_dst.api import RunSetup
 from vs_issue_tracker.api import FakeIssueTracker, LogProgress, MemoryProgressLog
 from vs_runtime.api.core import IssueBoardOwner, handle_for
+from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -206,6 +211,12 @@ def issue_queue_limits(settings: IssueQueueConfig) -> Limits:
     )
 
 
+def _search(selected: IssueQueueConfig, refuses: Refuses | None) -> Search[Any, Any]:
+    """The issue-queue search, with the decisions ``refuses`` names refused."""
+    search = build_search(selected)
+    return search if refuses is None else as_search(Refusing(search, refuses))
+
+
 def issue_queue_harness(
     settings: IssueQueueConfig,
     *,
@@ -213,11 +224,12 @@ def issue_queue_harness(
     lifecycle: frozenset[LifecycleCapability] = frozenset(),
 ) -> Harness:
     """What hosts the strategy: its codec, the run's facts, limits and evidence requirements."""
+    state_model = build_search(settings).state_model
     return Harness(
         registry=plain_operation_registry(),
         facts=facts,
         limits=issue_queue_limits(settings),
-        envelope_type=RunEnvelope[IssueQueueStrategyState],
+        envelope_type=RunEnvelope[state_model],
         requirements=requirements_for(),
         lifecycle=lifecycle,
     )
@@ -298,6 +310,8 @@ class IssueQueueWorld:
         delays: Sequence[int] = (0,),
         polls: int = 0,
         checkpoints: Sequence[str] = (),
+        refuses: Refuses | None = None,
+        objective: str | None = None,
         **settings: object,
     ) -> None:
         """Script a run.
@@ -317,14 +331,20 @@ class IssueQueueWorld:
         the role's final result, ``"invalid"``: a reply that is not JSON); ``delays`` is how many
         event-loop yields the n-th turn takes; ``polls`` is how many polls each evaluation job
         reports running; ``checkpoints`` answers the n-th checkpoint request ``succeeded``,
-        ``failed`` or ``retryable`` (cycling). Any other option is an `IssueQueueConfig` field.
+        ``failed`` or ``retryable`` (cycling). ``refuses`` names the decisions core refuses, by
+        identity, with the code it answers (see `Refusing`). ``objective`` replaces the task's
+        objective. Any other option is an `IssueQueueConfig` field.
         """
         self.config = issue_queue_config(**settings)
         config = self.config
         self.setup = RunSetup(
-            new_strategy=lambda: IssueQueueStrategy(config=config),
+            new_launch=lambda: Launch(search=_search(config, refuses), config=config),
             harness=issue_queue_harness(
-                config, lifecycle=frozenset({"suspend"}) if waits else frozenset()
+                config,
+                facts=FACTS
+                if objective is None
+                else FACTS.model_copy(update={"objective": objective}),
+                lifecycle=frozenset({"suspend"}) if waits else frozenset(),
             ),
             schemas=reply_schemas(config),
             # A turn that waits is resumed while another request runs, and the evaluation it
@@ -426,6 +446,21 @@ class IssueQueueWorld:
                             artifact_id=ArtifactId(root=f"prompt:{request.operation_id.root}"),
                             digest="prompt",
                         ),
+                    ),
+                )
+            )
+        if isinstance(typed, InterpretEvidence):
+            return Succeeded(
+                outcome=EvidenceReadings(
+                    status="succeeded",
+                    readings=tuple(
+                        EvidenceReading(
+                            evidence_id=item.evidence_id,
+                            kind=item.kind,
+                            passed=item.status is ObservationStatus.SUCCEEDED,
+                            stage="accuracy",
+                        )
+                        for item in typed.evidence
                     ),
                 )
             )

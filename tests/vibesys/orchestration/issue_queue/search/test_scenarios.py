@@ -7,7 +7,8 @@ fake tracker, so a test reads the outcome off the board as well as off the decis
 
 from __future__ import annotations
 
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search._decisions import works
+from tests.vibesys.orchestration.issue_queue.search.world import (
     IssueQueueWorld,
     evaluated,
     generic_evaluated,
@@ -43,11 +44,11 @@ def _ran(world: IssueQueueWorld) -> SimulatedRun:
 
 
 def _kinds(run: SimulatedRun) -> list[str]:
-    return [type(item).__name__ for item in run.decisions]
+    return [type(item).__name__ for item in works(run.decisions)]
 
 
 def _stop(run: SimulatedRun) -> Finish:
-    final = run.decisions[-1]
+    final = works(run.decisions)[-1]
     assert isinstance(final, Finish)
     return final
 
@@ -56,7 +57,7 @@ def test_a_quiet_board_ends_in_success_with_the_work_adopted() -> None:
     world = _one_issue()
     run = _ran(world)
     assert _stop(run).result.outcome == "success"
-    assert any(isinstance(item, ProposeWinner) for item in run.decisions)
+    assert any(isinstance(item, ProposeWinner) for item in works(run.decisions))
     assert _kinds(run).count("StartAttempt") == 2  # the issue, then the evaluation
     assert world.board() == {1: ("closed", 1)}
 
@@ -89,7 +90,9 @@ def test_a_failed_review_is_the_next_paid_turn_of_the_same_attempt() -> None:
     assert _stop(run).result.outcome == "success"
     assert _kinds(run).count("StartAttempt") == 2
     assert world.board() == {1: ("closed", 2)}
-    charges = [item.turn.charge_class for item in run.decisions if isinstance(item, RequestTurn)]
+    charges = [
+        item.turn.charge_class for item in works(run.decisions) if isinstance(item, RequestTurn)
+    ]
     assert charges.count("paid") == 2
 
 
@@ -105,7 +108,7 @@ def test_an_issue_whose_attempts_are_spent_is_blocked_and_a_blocked_queue_fails_
     assert "blocked" in result.reason
     assert world.board() == {1: ("blocked", 2)}
     # Nothing closed, so nothing is adopted.
-    assert not any(isinstance(item, ProposeWinner) for item in run.decisions)
+    assert not any(isinstance(item, ProposeWinner) for item in works(run.decisions))
     assert _kinds(run).count("StartAttempt") == 1
 
 
@@ -145,7 +148,7 @@ def test_the_round_budget_ends_a_run_that_keeps_finding_work() -> None:
     assert result.outcome == "failure"
     assert "round budget" in result.reason
     # The work done before the budget stop is still adopted.
-    assert any(isinstance(item, ProposeWinner) for item in run.decisions)
+    assert any(isinstance(item, ProposeWinner) for item in works(run.decisions))
     assert [status for status, _ in world.board().values()].count("open") == 1
 
 
@@ -181,24 +184,7 @@ def test_a_final_accuracy_measurement_core_blocks_ends_the_run_without_an_adopti
     assert "not adopted" in result.reason
 
 
-def test_an_invalid_reply_is_corrected_once_and_then_accepted() -> None:
-    world = IssueQueueWorld(
-        implementer=["not json", implemented()], judge=[judged()], perf=[evaluated()]
-    )
-    run = _ran(world)
-    assert _stop(run).result.outcome == "success"
-    turns = [item.turn for item in run.decisions if isinstance(item, RequestTurn)]
-    corrections = [turn for turn in turns if turn.charge_class == "correction"]
-    assert len(corrections) == 1
-    assert corrections[0].predecessor is not None
-    # A correction speaks in its predecessor's session.
-    assert (
-        len({turn.session for turn in turns if turn.session.role_id.root.endswith("implementer")})
-        == 1
-    )
-
-
-def test_a_reply_that_stays_invalid_ends_the_run_in_failure_with_nothing_adopted() -> None:
+def test_a_reply_the_executor_rejects_ends_the_run_in_failure_with_nothing_adopted() -> None:
     world = IssueQueueWorld(
         implementer=["not json", "still not json", implemented()],
         judge=[judged()],
@@ -208,7 +194,7 @@ def test_a_reply_that_stays_invalid_ends_the_run_in_failure_with_nothing_adopted
     result = _stop(run).result
     assert result.outcome == "failure"
     assert "implementer turn did not complete" in result.reason
-    assert not any(isinstance(item, ProposeWinner) for item in run.decisions)
+    assert not any(isinstance(item, ProposeWinner) for item in works(run.decisions))
 
 
 def test_a_run_that_spends_every_budget_stays_within_the_derived_limits() -> None:
@@ -240,5 +226,5 @@ def test_an_issue_closed_by_a_turn_that_changed_nothing_keeps_the_tip_and_adopts
     run = _ran(world)
     result = _stop(run).result
     assert result.outcome == "success"
-    assert not any(isinstance(item, ProposeWinner) for item in run.decisions)
+    assert not any(isinstance(item, ProposeWinner) for item in works(run.decisions))
     assert world.board() == {1: ("closed", 1)}

@@ -1,6 +1,6 @@
-"""Properties of how the strategy reads and writes the board (design properties Q2 to Q5).
+"""Properties of how the search reads and writes the board (design properties Q2 to Q5).
 
-The strategy decides from the last board snapshot it read, files only what its reply schemas
+The search decides from the last board snapshot it read, files only what its reply schemas
 allow, stops by the legacy decision table, and works at most the round cap of issues between two
 performance evaluations.
 """
@@ -14,13 +14,12 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search._decisions import works
+from tests.vibesys.orchestration.issue_queue.search.world import (
     FACTS,
     IssueQueueWorld,
     evaluated,
     implemented,
-    issue_queue_config,
-    issue_queue_harness,
     judged,
 )
 
@@ -28,19 +27,10 @@ from vibesys.orchestration.issue_queue.models import (
     JudgeReplyModel,
     perf_result_model,
 )
-from vibesys.orchestration.issue_queue.strategy.api import (
-    BoardState,
-    Cursor,
-    IssueQueueStrategy,
-    IssueQueueStrategyState,
-    JobKind,
-    bootstrap_title,
-)
-from vibesys.orchestration.issue_queue.strategy.api import PerformanceRecord as Record
-from vs_core.api import Operation, Proposal, StartAttempt, project
-from vs_core.testing.drive import new_run
-from vs_dst.api import simulate
-from vs_issue_tracker.api import IssueRow, IssueStatus, IssueType, ReadBoard
+from vibesys.orchestration.issue_queue.search.api import bootstrap_title
+from vs_core.api import Finish, Operation, StartAttempt
+from vs_dst.api import SimulatedRun, simulate
+from vs_issue_tracker.api import IssueStatus, IssueType, ReadBoard
 
 _KINDS = ["bug", "feature", "perf"]
 
@@ -79,112 +69,92 @@ def test_an_evaluator_reply_files_at_most_its_cap_of_issues_of_known_types(
             perf_result_model(cap).model_validate_json(json.dumps(reply))
 
 
-# Q3: after a restart the first decision that depends on the board is to read it.
+# Q3: a decision that depends on the board follows a read of it.
 
 
-def _decide(state: IssueQueueStrategyState) -> list[object]:
-    settings_ = issue_queue_config()
-    strategy = IssueQueueStrategy(config=settings_)
-    view = project(new_run(strategy, issue_queue_harness(settings_)))
-    return list(strategy.bind(state).decide(view).decisions)
+def _ran(world: IssueQueueWorld) -> SimulatedRun:
+    run = simulate(world)
+    assert run.finished
+    assert run.halted is None
+    assert not run.liveness_violations
+    return run
 
 
-@pytest.mark.parametrize("cursor", [Cursor.START, Cursor.DRAIN, Cursor.ASSESS, Cursor.AFTER_PERF])
-def test_a_board_that_may_be_stale_is_read_before_anything_is_decided_from_it(
-    cursor: Cursor,
+def _preload(world: IssueQueueWorld, statuses: list[IssueStatus]) -> None:
+    """Put issues in the given statuses on the world's board before the run starts."""
+    for number, status in enumerate(statuses):
+        issue = world.tracker.create(
+            type=IssueType.FEATURE,
+            title=f"issue {number}",
+            description="d",
+            created_by="human",
+            iteration=0,
+        )
+        if status is not IssueStatus.OPEN:
+            world.tracker.update_status(issue.id, status, actor="human", iteration=0)
+
+
+@settings(max_examples=6, deadline=None, derandomize=True, database=None)
+@given(
+    judged_bugs=st.lists(st.booleans(), min_size=1, max_size=3),
+    failing=st.lists(st.booleans(), min_size=1, max_size=3),
+)
+def test_every_attempt_starts_from_a_board_read_after_the_previous_attempt(
+    judged_bugs: list[bool], failing: list[bool]
 ) -> None:
-    decisions = _decide(IssueQueueStrategyState(cursor=cursor))
-    assert len(decisions) == 1
-    assert isinstance(decisions[0], Operation)
-    assert isinstance(decisions[0].request, ReadBoard)
+    world = IssueQueueWorld(
+        implementer=[implemented(f"turn {n}") for n in range(24)],
+        judge=[
+            judged(
+                passed=not failing[n % len(failing)],
+                bugs=("a bug",) if judged_bugs[n % len(judged_bugs)] and n == 0 else (),
+            )
+            for n in range(24)
+        ],
+        perf=[evaluated() for _ in range(4)],
+    )
+    run = _ran(world)
+    read_since_start = False
+    starts = 0
+    for item in works(run.decisions):
+        if isinstance(item, StartAttempt):
+            assert read_since_start or starts == 0, item.decision_id
+            read_since_start = False
+            starts += 1
+        elif isinstance(item, Operation) and isinstance(item.request, ReadBoard):
+            read_since_start = True
+    assert starts
 
 
 # Q4: the stop decision of a run is the legacy decision table, on any board.
 
-MAX_ROUNDS = 4
+STATUSES = st.lists(
+    st.sampled_from([IssueStatus.CLOSED, IssueStatus.BLOCKED]), min_size=1, max_size=4
+)
 
 
-def _row(number: int, status: IssueStatus) -> IssueRow:
-    return IssueRow(
-        id=number,
-        type=IssueType.BUG,
-        status=status,
-        title=f"issue {number}",
-        attempts=0,
-        created_by="t",
-        created_iter=1,
-    )
-
-
-def _board(statuses: list[IssueStatus]) -> BoardState:
-    return BoardState(issues=tuple(_row(n + 1, s) for n, s in enumerate(statuses)), fresh=True)
-
-
-def _blocked_queue(statuses: list[IssueStatus]) -> bool:
-    """Legacy: work remains and every remaining issue is blocked, before the evaluation."""
-    remaining = [status for status in statuses if status is not IssueStatus.CLOSED]
-    return bool(remaining) and all(status is IssueStatus.BLOCKED for status in remaining)
-
-
-def _proposal(state: IssueQueueStrategyState) -> Proposal[IssueQueueStrategyState]:
-    settings_ = issue_queue_config(max_rounds=MAX_ROUNDS)
-    strategy = IssueQueueStrategy(config=settings_)
-    return strategy.bind(state).decide(project(new_run(strategy, issue_queue_harness(settings_))))
-
-
-STATUSES = st.lists(st.sampled_from(list(IssueStatus)), max_size=6)
-
-
-@settings(max_examples=60, deadline=None, derandomize=True, database=None)
-@given(statuses=STATUSES, round_idx=st.integers(0, MAX_ROUNDS - 1))
-def test_a_blocked_queue_ends_the_run_before_the_evaluation_and_any_other_board_is_evaluated(
-    statuses: list[IssueStatus], round_idx: int
+@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@given(statuses=STATUSES)
+def test_a_queue_left_only_blocked_or_closed_ends_by_the_decision_table(
+    statuses: list[IssueStatus],
 ) -> None:
-    proposal = _proposal(
-        IssueQueueStrategyState(cursor=Cursor.ASSESS, round_idx=round_idx, board=_board(statuses))
-    )
-    starts = [item for item in proposal.decisions if isinstance(item, StartAttempt)]
-    if _blocked_queue(statuses):
-        assert starts == []
-        assert proposal.state.ending is not None
-        assert proposal.state.ending.outcome == "failure"
+    world = IssueQueueWorld(perf=[evaluated()], implementer=[implemented()], judge=[judged()])
+    _preload(world, statuses)
+    run = _ran(world)
+    final = works(run.decisions)[-1]
+    assert isinstance(final, Finish)
+    evaluations = [
+        item
+        for item in works(run.decisions)
+        if isinstance(item, StartAttempt) and item.attempt_id.root.startswith("attempt:perf")
+    ]
+    if IssueStatus.BLOCKED in statuses:
+        assert final.result.outcome == "failure"
+        assert "blocked" in final.result.reason
+        assert evaluations == []
     else:
-        assert len(starts) == 1
-        assert proposal.state.ending is None
-
-
-@settings(max_examples=60, deadline=None, derandomize=True, database=None)
-@given(statuses=STATUSES, filed=st.integers(0, 2), round_idx=st.integers(0, MAX_ROUNDS - 1))
-def test_after_an_evaluation_a_quiet_board_succeeds_and_otherwise_the_round_budget_decides(
-    statuses: list[IssueStatus], filed: int, round_idx: int
-) -> None:
-    # The issues the evaluation filed are on the board it filed them to.
-    statuses = [*statuses, *([IssueStatus.OPEN] * filed)]
-    record = Record(
-        iteration=round_idx + 1,
-        throughput_trend="improved",
-        latency_trend="mixed",
-        metrics_json="{}",
-        new_issues=tuple(range(100, 100 + filed)),
-    )
-    proposal = _proposal(
-        IssueQueueStrategyState(
-            cursor=Cursor.AFTER_PERF,
-            round_idx=round_idx,
-            board=_board(statuses),
-            performance=(record,),
-        )
-    )
-    ending = proposal.state.ending
-    if IssueStatus.OPEN not in statuses and not filed:
-        assert ending is not None
-        assert ending.outcome == "success"
-    elif round_idx + 1 >= MAX_ROUNDS:
-        assert ending is not None
-        assert ending.outcome == "failure"
-    else:
-        assert ending is None
-        assert proposal.state.round_idx == round_idx + 1
+        assert final.result.outcome == "success"
+        assert len(evaluations) == 1
 
 
 # Q5: at most the round cap of issues are worked between two evaluations.
@@ -200,24 +170,15 @@ def test_no_round_works_more_issues_than_the_cap(cap: int, humans: int) -> None:
         max_issues_per_round=cap,
         max_rounds=3,
     )
-    for number in range(humans):
-        world.tracker.create(
-            type=IssueType.FEATURE,
-            title=f"filed by a person {number}",
-            description="d",
-            created_by="human",
-            iteration=0,
-        )
-    run = simulate(world)
-    assert run.finished
-    assert run.halted is None
-    assert not run.liveness_violations
+    _preload(world, [IssueStatus.OPEN] * humans)
+    run = _ran(world)
     kinds = [
-        JobKind.PERF if decision.attempt_id.root.startswith("attempt:perf") else JobKind.ISSUE
-        for decision in run.decisions
-        if isinstance(decision, StartAttempt)
+        "perf" if item.attempt_id.root.startswith("attempt:perf") else "issue"
+        for item in works(run.decisions)
+        if isinstance(item, StartAttempt)
     ]
     for kind, group in groupby(kinds):
-        if kind is JobKind.ISSUE:
+        if kind == "issue":
             assert len(list(group)) <= cap
-    assert bootstrap_title(FACTS.objective) in world.titles()
+    if humans == 0:
+        assert bootstrap_title(FACTS.objective) in world.titles()

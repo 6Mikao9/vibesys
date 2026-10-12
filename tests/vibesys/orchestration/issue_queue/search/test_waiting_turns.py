@@ -14,7 +14,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.checkpoint_faults import CHECKPOINTS
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search.world import (
     IssueQueueWorld,
     evaluated,
     implemented,

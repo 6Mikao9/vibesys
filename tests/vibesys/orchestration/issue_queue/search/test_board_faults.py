@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search.world import (
     IssueQueueWorld,
     evaluated,
     implemented,

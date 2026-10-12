@@ -13,14 +13,14 @@ from vibesys.orchestration.issue_queue.core_policy.api import (
     PolicyInputs,
     RunBounds,
     build_core_policy,
+    plain_operation_registry,
 )
 from vibesys.orchestration.issue_queue.models import GenericIssuePerfEvalResult, IssueQueueOptions
-from vibesys.orchestration.issue_queue.strategy.api import (
+from vibesys.orchestration.issue_queue.search.api import (
+    IDS,
     IMPLEMENTER_REPLY,
     JUDGE_REPLY,
     PERF_REPLY,
-    plain_operation_registry,
-    role_id,
 )
 from vs_core.api import ArtifactId, ArtifactRef, AssessmentKind, Capabilities, validate_startup
 
@@ -175,7 +175,7 @@ def test_the_judge_is_the_declared_authority_for_the_only_required_assessment() 
     )
     (authority,) = policy.requirements.assessment_authorities
     assert authority.kind is AssessmentKind.LOCAL_VALIDATION
-    assert authority.role_id == role_id("judge")
+    assert authority.role_id == IDS.role_id("judge")
     assert policy.requirements.required_assessments == (AssessmentKind.LOCAL_VALIDATION,)
 
 
@@ -188,7 +188,7 @@ def test_the_declaration_is_served_by_the_operations_the_run_registers() -> None
     offered = Capabilities(
         lifecycle=frozenset({"suspend"}), operations=plain_operation_registry().descriptors
     )
-    selected = validate_startup(policy.strategy.declaration, offered)
+    selected = validate_startup(policy.search.declaration, offered)
     assert selected.operations == plain_operation_registry().descriptors
 
 

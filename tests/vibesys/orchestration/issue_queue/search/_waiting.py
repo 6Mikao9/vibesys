@@ -18,7 +18,7 @@ from tests.support.owed_submissions import owed_in
 from tests.support.synthesized_evidence import SynthesizedEvidence
 
 from vibesys.core_wiring import agent_evaluation_policy
-from vibesys.orchestration.issue_queue.strategy.api import measurement_recipe
+from vibesys.orchestration.issue_queue.search.api import measurement_recipe
 from vs_core.api import DispatchTurn, TurnObserved
 from vs_evaluation.api import SubmitCall, WaitCall
 from vs_runtime.api.core import (
@@ -32,7 +32,7 @@ from vs_runtime.contracts import AgentRole, AgentTool
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig
+    from vibesys.orchestration.issue_queue.search.api import IssueQueueConfig
     from vs_core.api import Request, RunFacts, Scope
     from vs_runtime.api.core import CoreRuntime
     from vs_sim.api.testing import VirtualClock

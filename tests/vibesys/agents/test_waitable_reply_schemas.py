@@ -24,13 +24,13 @@ from vibesys.orchestration.issue_queue.core_policy import prompts as issue_queue
 from vibesys.orchestration.issue_queue.core_policy.api import (
     reply_schemas as issue_queue_schemas,
 )
-from vibesys.orchestration.issue_queue.strategy.api import (
+from vibesys.orchestration.issue_queue.search.api import (
     IMPLEMENTER_REPLY as ISSUE_QUEUE_IMPLEMENTER_REPLY,
 )
-from vibesys.orchestration.issue_queue.strategy.api import (
+from vibesys.orchestration.issue_queue.search.api import (
     JUDGE_REPLY as ISSUE_QUEUE_JUDGE_REPLY,
 )
-from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig
+from vibesys.orchestration.issue_queue.search.api import IssueQueueConfig
 from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_schemas
 from vibesys.orchestration.multi.strategy.api import IMPLEMENTER_REPLY as MULTI_IMPLEMENTER_REPLY
 from vibesys.orchestration.multi.strategy.api import JUDGE_REPLY as MULTI_JUDGE_REPLY

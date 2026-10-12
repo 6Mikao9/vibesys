@@ -19,16 +19,16 @@ from tests.vibesys.orchestration.dynamic.search._replies import (
 )
 from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 from tests.vibesys.orchestration.evolve.strategy.world import EvolveWorld
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search.world import (
     IssueQueueWorld,
 )
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search.world import (
     evaluated as plain_evaluated,
 )
-from tests.vibesys.orchestration.issue_queue.strategy.world import (
+from tests.vibesys.orchestration.issue_queue.search.world import (
     implemented as plain_implemented,
 )
-from tests.vibesys.orchestration.issue_queue.strategy.world import judged as plain_judged
+from tests.vibesys.orchestration.issue_queue.search.world import judged as plain_judged
 from tests.vibesys.orchestration.multi.strategy.world import (
     PROFILER,
     RECIPE,
