@@ -1,44 +1,38 @@
-"""What a strategy must satisfy to run on the vs-core lifecycle (design note section 9.2).
+"""What a search must satisfy to run on the vs-core lifecycle, over the production shell.
 
-A `Subject` describes one strategy to the suite: how to build a fresh instance, the harness
+A `Subject` describes one search to the suite: how to build a fresh launch of it, the harness
 that hosts it, and a generator of scripted worlds (what the planner, agents and evaluators
-answer). The properties in this module (`check_*`) are written against that description
-only, so a ported strategy registers one `Subject` in `subjects.py` and inherits every
-property. Nothing here names a concrete strategy.
+answer). The properties in this module (`check_*`) are written against that description only, so
+a ported search registers one `Subject` in `subjects.py` and inherits every property. Nothing
+here names a concrete search.
 
-The pure tier uses no Fakes, clocks or asyncio: `Tape` records every `decide` and `on_event`
-call of a run on the production shell's scripted executors, and the properties are
-evaluated over the recorded (state, view) pairs. The crash tier lives in `test_conformance_crash.py`, on vs-dst.
+Replay determinism and the codec round trip of a search's state are the runtime's own rules and
+are held by `libs/vs-core/tests/test_flows_restart.py` and `test_flows_codec.py`; what is checked
+here is what only a whole run shows: liveness, limits, the winner the framework adopts, faults at
+the executors and at delivery, and a stop at any request. The crash tier lives in
+`test_conformance_crash.py`, on vs-dst.
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 from vs_core.api import (
-    ENVELOPE_SCHEMA_VERSION,
+    MAX_SUBMISSIONS_PER_MEASUREMENT,
     AdoptRevision,
     ControlId,
     ControlInput,
     DispatchTurn,
-    EventCursor,
-    HostFence,
-    HostId,
     MeasurementFailure,
     ObserveOwnedJob,
     OwnedJob,
-    Proposal,
-    ProposeWinner,
-    Rejected,
-    RejectionCode,
     ResourceId,
     ResumeSessionTurn,
     RetainedCandidate,
     RunControlEvent,
-    RunEnvelope,
-    RunResultProposal,
+    StopMode,
     SubmitMeasurement,
     TrustedBaseline,
     VerifyAdoption,
@@ -46,25 +40,15 @@ from vs_core.api import (
 )
 from vs_core.testing.drive import Failed, Faults, Retryable, Succeeded, Unknown, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
-from vs_runtime.api.testing import HostOptions, Run, drive_shell
+from vs_runtime.api.testing import HostOptions, Launch, Run, drive_shell
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Mapping
 
     from hypothesis.strategies import SearchStrategy
     from pydantic import BaseModel
 
-    from vs_core.api import (
-        CoreState,
-        Decision,
-        Request,
-        RevisionRef,
-        RunView,
-        SchemaRef,
-        Strategy,
-        StrategyEvent,
-        StrategyState,
-    )
+    from vs_core.api import CoreState, Request, RevisionRef, SchemaRef
     from vs_core.testing.drive import Answer, Harness
     from vs_runtime.api.core import CoreRuntime
 
@@ -83,11 +67,11 @@ class World(Protocol):
 
 @dataclass(frozen=True)
 class Subject:
-    """One strategy as the conformance suite sees it."""
+    """One search as the conformance suite sees it."""
 
     name: str
-    new_strategy: Callable[[], Strategy[Any]]
-    """A fresh strategy instance over its initial state; every call builds an equal one."""
+    launch: Callable[[], Launch[Any]]
+    """A fresh launch of the search with its config; every call builds an equal one."""
     harness: Harness
     """Registry, run facts, limits, envelope type and evidence requirements of the run."""
     schemas: Mapping[SchemaRef, type[BaseModel]]
@@ -95,11 +79,13 @@ class Subject:
     worlds: SearchStrategy[Callable[[], World]]
     """Factories of fresh scripted worlds: agents reply, measurements succeed or fail."""
     default_world: Callable[[], World]
-    """A fixed world in which the strategy runs its full course and adopts a candidate."""
+    """A fixed world in which the search runs its full course and adopts a candidate."""
     smallest_world: Callable[[], World]
     """The shortest full run (fewest durable commits), which the crash sweep uses."""
     issued: frozenset[str]
-    """Request kinds the strategy's own decisions cause in a run that has no fault."""
+    """Request kinds the search's own steps cause in a run that has no fault."""
+    start_budget: int
+    """How many attempts the search's config lets it start."""
     sweeps_crashes: bool = True
     """Whether the crash sweep (C2) runs on this subject: at a sample of its durable boundaries
     in CI, at every one under `--crash-points=all`."""
@@ -114,57 +100,12 @@ RECOVERY_ONLY = frozenset(
         "cancel_turn",
         "cancel_owned_job",
         "cancel_owned_resource",
-        "block_intent",
         "resume_session_turn",
         "collect_evidence",
         "snapshot_and_retain_run",
         "restore_revision",
     }
 )
-
-
-# -- the tape -----------------------------------------------------------------------------
-
-
-@dataclass
-class Tape:
-    """Every call a run made on its strategy, with the state and view it was made on."""
-
-    decided: list[tuple[StrategyState, RunView, Proposal[Any]]] = field(default_factory=list)
-    folded: list[tuple[StrategyState, RunView, StrategyEvent, StrategyState]] = field(
-        default_factory=list
-    )
-
-
-class Taped[S: StrategyState]:
-    """A strategy that records its calls on a `Tape` and otherwise behaves as its inner one."""
-
-    def __init__(self, inner: Strategy[S], tape: Tape) -> None:
-        """Wrap ``inner``; every binding shares one tape."""
-        self._inner = inner
-        self._tape = tape
-        self.declaration = inner.declaration
-
-    @property
-    def state(self) -> S:
-        """The wrapped strategy's state."""
-        return self._inner.state
-
-    def bind(self, state: S) -> Taped[S]:
-        """The same strategy over another state."""
-        return Taped(self._inner.bind(state), self._tape)
-
-    def decide(self, view: RunView) -> Proposal[S]:
-        """The inner proposal, recorded with the state and view it was made on."""
-        proposal = self._inner.decide(view)
-        self._tape.decided.append((self._inner.state, view, proposal))
-        return proposal
-
-    def on_event(self, view: RunView, event: StrategyEvent) -> S:
-        """The inner fold, recorded."""
-        folded = self._inner.on_event(view, event)
-        self._tape.folded.append((self._inner.state, view, event, folded))
-        return folded
 
 
 # -- generated faults over any world --------------------------------------------------------
@@ -242,9 +183,10 @@ class Faulted:
         self.stopped = True
         self._shell.submit(
             RunControlEvent(
-                control=ControlInput(control_id=ControlId(root="stop"), action="stop"),
+                control=ControlInput(
+                    control_id=ControlId(root="stop"), action="stop", mode=StopMode.DRAIN
+                ),
                 now_at=core.run.now_at,
-                result=RunResultProposal(outcome="cancelled", reason="operator stop"),
             ),
             now_at=core.run.now_at,
         )
@@ -294,10 +236,9 @@ class Faulted:
 
 @dataclass
 class Recorded:
-    """One finished run and the tape of the strategy calls it made."""
+    """One finished run and the world it ran against."""
 
     run: Run
-    tape: Tape
     world: World
 
 
@@ -308,186 +249,89 @@ def run_subject(
     host: HostOptions | None = None,
     live: bool = True,
 ) -> Recorded:
-    """Run a fresh strategy of ``subject`` to the end of its run on the production shell.
+    """Run a fresh launch of ``subject`` to the end of its run on the production shell.
 
     The run must satisfy the liveness invariants unless ``live`` is False.
     """
-    tape = Tape()
-    finished = drive_shell(
-        Taped(subject.new_strategy(), tape),
-        world,
-        subject.harness,
-        subject.schemas,
-        host,
-    )
+    finished = drive_shell(subject.launch(), world, subject.harness, subject.schemas, host)
     if live:
         assert_live(
-            finished.journal, finished.core, Budget(retries=subject.harness.limits.max_retries)
+            finished.journal,
+            finished.core,
+            Budget(retries=subject.harness.limits.request_retries.limit),
         )
     if finished.halted is not None:
         raise finished.halted
-    return Recorded(finished, tape, world)
+    return Recorded(finished, world)
 
 
 # -- properties ---------------------------------------------------------------------------------
 
 
-def check_decide_is_deterministic(subject: Subject, recorded: Recorded) -> None:
-    """C1: the same state and view always propose the same decisions and the same next state.
-
-    A fresh instance is bound to the recorded state, so nothing outside the state and the
-    view (a counter, a cache, a clock) can have influenced the proposal.
-    """
-    for state, view, proposal in recorded.tape.decided:
-        again = subject.new_strategy().bind(state).decide(view)
-        assert again == proposal, "decide is not a function of (state, view)"
-
-
-def check_a_replayed_proposal_is_deduplicated(subject: Subject, recorded: Recorded) -> None:
-    """C1: re-proposing after the commit repeats ids with the payloads they had.
-
-    After a crash the strategy is rebound to the committed state and asked again on the
-    current view. A decision it repeats must carry the identity and payload it had, because
-    core deduplicates by both and refuses the same identity with another payload.
-    """
-    seen: dict[str, str] = {}
-    for _, _, proposal in recorded.tape.decided:
-        for decision in proposal.decisions:
-            payload = decision.model_dump_json()
-            first = seen.setdefault(decision.decision_id.root, payload)
-            assert first == payload, f"decision {decision.decision_id.root} changed its payload"
-    for _, view, proposal in recorded.tape.decided:
-        replay = subject.new_strategy().bind(proposal.state).decide(view)
-        for decision in replay.decisions:
-            known = seen.get(decision.decision_id.root)
-            if known is not None:
-                assert known == decision.model_dump_json(), (
-                    f"replay of {decision.decision_id.root} changed its payload"
-                )
-
-
-def check_states_round_trip_the_codec(subject: Subject, recorded: Recorded) -> None:
-    """C3: every state the run reached survives the envelope codec unchanged."""
-    harness = subject.harness
-    envelope_type = harness.envelope_type
-    assert envelope_type is not None
-    final = recorded.run.core
-    seen: set[str] = set()
-    states = [proposal.state for _, _, proposal in recorded.tape.decided]
-    states += [folded for _, _, _, folded in recorded.tape.folded]
-    for state in states:
-        key = state.model_dump_json()
-        if key in seen:
-            continue
-        seen.add(key)
-        envelope = _envelope(subject, envelope_type, final, state)
-        loaded = harness.registry.decode_envelope(
-            envelope_type, harness.registry.encode_envelope(envelope)
-        )
-        assert loaded.strategy == state
-
-
-def _envelope(
-    subject: Subject,
-    envelope_type: type[RunEnvelope[Any]],
-    core: CoreState,
-    state: StrategyState,
-) -> RunEnvelope[Any]:
-    declaration = subject.new_strategy().declaration
-    return envelope_type(
-        schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="conformance"), epoch=1),
-        strategy_id=declaration.strategy_id,
-        state_schema=declaration.state_schema,
-        core=core,
-        strategy=state,
-        event_cursor=EventCursor(sequence=0),
-    )
-
-
-def check_a_folded_event_twice_changes_nothing(subject: Subject, recorded: Recorded) -> None:
-    """C7: folding an event the state already absorbed again leaves the state as it is."""
-    for _, view, event, folded in recorded.tape.folded:
-        again = subject.new_strategy().bind(folded).on_event(view, event)
-        assert again == folded, f"a duplicate {type(event).__name__} changed the state"
-
-
 def check_limits_hold(subject: Subject, recorded: Recorded) -> None:
-    """C6: the run never asked for more than its limits, and no decision was refused for budget."""
+    """C6: the run never asked for more than its limits or than its config lets it start."""
     limits = subject.harness.limits
     view = project(recorded.run.core)
     assert len(view.attempts) <= limits.max_attempts
+    assert len(view.attempts) <= subject.start_budget
     submissions = Counter(
         row.plan.model_dump_json()
         for row in recorded.run.core.evaluation.jobs
         if isinstance(row, OwnedJob)
     )
-    assert all(count <= limits.max_measurement_submissions for count in submissions.values())
-    refused = [
-        event
-        for _, _, event, _ in recorded.tape.folded
-        if isinstance(event, Rejected) and event.code is RejectionCode.BUDGET
-    ]
-    assert not refused, f"the strategy asked beyond its budget: {refused[0].detail}"
+    assert all(count <= MAX_SUBMISSIONS_PER_MEASUREMENT for count in submissions.values())
 
 
 def check_adoption_is_safe(recorded: Recorded) -> None:
-    """C8: a proposed winner is an eligible retained candidate with the best headline.
+    """C8: the adopted winner is an eligible retained candidate with the best headline.
 
-    The oracle is independent of the strategy: eligibility and retention come from core's
-    settlements and the ranking from the world's own measurements. A baseline selection is
-    legal only when no candidate settled eligible.
+    The oracle is independent of the search: eligibility and retention come from core's
+    settlements and the ranking from the world's own measurements. The input stands only when
+    no candidate settled eligible, and a run that ended without a result adopts nothing.
     """
     core = recorded.run.core
-    settlements = {row.settlement_id: row for row in core.settlement.settlements}
+    result = core.run.result
+    if result is None or result.selection is None:
+        return
     eligible = [
-        row for row in settlements.values() if row.eligible and row.retention == "candidate"
+        row for row in core.settlement.settlements if row.eligible and row.retention == "candidate"
     ]
-    for decision in _decisions(recorded.run):
-        if not isinstance(decision, ProposeWinner):
-            continue
-        selection = decision.selection
-        if isinstance(selection, TrustedBaseline):
-            assert not eligible, "the baseline was selected while an eligible candidate existed"
-            continue
-        assert isinstance(selection, RetainedCandidate)
-        chosen = settlements[selection.settlement_id]
-        assert chosen.eligible, "an ineligible settlement was proposed"
-        assert chosen.retention == "candidate", "a settlement that retained nothing was proposed"
-        scores = {row.settlement_id: _headline(recorded.world, row.candidate) for row in eligible}
-        best = max((score for score in scores.values() if score is not None), default=None)
-        assert scores[chosen.settlement_id] == best, "a better eligible candidate existed"
+    selection = result.selection
+    if isinstance(selection, TrustedBaseline):
+        assert not eligible, "the input was kept while an eligible candidate existed"
+        return
+    assert isinstance(selection, RetainedCandidate)
+    by_id = {row.settlement_id: row for row in core.settlement.settlements}
+    chosen = by_id[selection.settlement_id]
+    assert chosen.eligible, "an ineligible settlement was adopted"
+    assert chosen.retention == "candidate", "a settlement that retained nothing was adopted"
+    scores = {row.settlement_id: _headline(recorded.world, row.candidate) for row in eligible}
+    best = max((score for score in scores.values() if score is not None), default=None)
+    assert scores[chosen.settlement_id] == best, "a better eligible candidate existed"
 
 
 def _headline(world: World, candidate: RevisionRef | None) -> float | None:
     return None if candidate is None else world.headline(candidate.revision_id.root)
 
 
-def _decisions(run: Run) -> Sequence[Decision]:
-    return run.decisions
-
-
-def request_kinds(recorded: Recorded) -> Counter[str]:
-    """How many requests of each kind the run issued, as core's ledger recorded them."""
-    return Counter(row.request.kind for row in recorded.run.core.intents.intents)
-
-
 def run_pure(
     subject: Subject, world: World, faults: Faults, *, end: End = End.CUT_SHORT
 ) -> list[str]:
-    """Drive a fresh strategy on the pure driver under delivery ``faults``; its decision ids.
+    """Drive a fresh search on the pure driver under delivery ``faults``; the decisions it submitted, as JSON.
 
     The pure driver answers no agent turn (its sessions need the shell's owner events), so
     a world that reaches one is cut short there; the run must still be live up to it.
     """
-    trace = drive(subject.new_strategy(), world, subject.harness, faults)
+    launch = subject.launch()
+    driver = launch.search.driver(launch.config, subject.harness.registry)
+    trace = drive(driver, launch.config, world, subject.harness, faults)
     assert_live(
         Journal.from_log(trace.log),
         trace.core,
-        Budget(retries=subject.harness.limits.max_retries),
+        Budget(retries=subject.harness.limits.request_retries.limit),
         end,
     )
-    return [decision.decision_id.root for decision in trace.decisions]
+    return [decision.model_dump_json() for decision in trace.decisions]
 
 
 # -- request-kind recovery matrix (C9) ----------------------------------------------------------

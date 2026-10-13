@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from vibesys.candidates.api import limits_for
@@ -127,16 +127,15 @@ def limits(selected: DynamicConfig) -> Limits:
 
 def harness(selected: DynamicConfig, **overrides: object) -> Harness:
     """What hosts the dynamic search of ``selected`` on the real core."""
-    values: dict[str, object] = {
-        "registry": OPERATIONS.registry(),
-        "facts": FACTS,
-        "limits": limits(selected),
-        "envelope_type": RunEnvelope[FlowState],
-        "requirements": requirements_for(TERMS),
-        "schemas": dynamic.reply_schemas,
-        **overrides,
-    }
-    return Harness(**values)  # type: ignore[arg-type]  # keyword overrides are Harness fields
+    hosting = Harness(
+        registry=OPERATIONS.registry(),
+        facts=FACTS,
+        limits=limits(selected),
+        envelope_type=RunEnvelope[FlowState],
+        requirements=requirements_for(TERMS),
+        schemas=dynamic.reply_schemas,
+    )
+    return replace(hosting, **overrides)
 
 
 def lease(session_id: SessionId) -> ResourceId:

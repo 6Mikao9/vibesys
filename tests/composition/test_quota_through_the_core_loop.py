@@ -34,7 +34,7 @@ from vs_agent.api import (
     QuotaPlan,
 )
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider, FakeTurnScript
-from vs_core.api import RunResultProposal, RunStatus
+from vs_core.api import RunStatus
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core
 from vs_runtime.api.infrastructure import (
@@ -130,7 +130,6 @@ async def _play(
         controls = RunControlBridge(
             channel,
             _NoSteers(),  # type: ignore[arg-type]  # only stores steer text; none is sent
-            stop_result=RunResultProposal(outcome="cancelled", reason="operator"),
         )
         host = CoreRunHost(process.shell, process.delivery, clock, controls)
         process.shell.start("skeleton", now_at=1.0, lease_duration=LEASE)

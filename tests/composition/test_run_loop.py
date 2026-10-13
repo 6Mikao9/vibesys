@@ -140,9 +140,7 @@ def _host(
     process = world.runtime()
     controls = None
     if channel is not None:
-        controls = RunControlBridge(
-            channel, Steers(), stop_result=RunResultProposal(outcome="cancelled", reason="operator")
-        )
+        controls = RunControlBridge(channel, Steers())
     host = CoreRunHost(process.shell, process.delivery, clock, controls)
     return process, host
 
@@ -515,9 +513,7 @@ _OPERATIONS = st.lists(
 def test_the_control_bridge_emits_one_ordered_event_per_change(operations: list[str]) -> None:
     channel = _channel()
     steers = Steers()
-    bridge = RunControlBridge(
-        channel, steers, stop_result=RunResultProposal(outcome="cancelled", reason="operator")
-    )
+    bridge = RunControlBridge(channel, steers)
     core = initial_state()
     events = []
     for operation in operations:

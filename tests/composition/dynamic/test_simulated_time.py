@@ -8,7 +8,7 @@ run of ten virtual minutes takes seconds of host time and the same inputs always
 same timeline.
 
 The scenario is the production shell and loop (``CoreRuntime`` under ``drive_core``) over
-the dynamic strategy, not the CLI host: the host builds its own wall run clock and runs
+the dynamic search, not the CLI host: the host builds its own wall run clock and runs
 the cluster as a subprocess, neither of which a virtual clock can drive.
 
 Each property names the fix it guards and the commit before which it fails:
@@ -129,6 +129,30 @@ def _turn_windows(run: TimedRun) -> list[tuple[float, float]]:
     return [(span.start, span.end) for span in run.turns if span.end - span.start > 1.0]
 
 
+def _measurements_end(profile: TimingProfile, run: TimedRun) -> float:
+    """The latest a measurement submitted before the stop can finish.
+
+    A submission in flight cannot be cancelled by core: the run waits for its observation, and
+    in production the host's grace period abandons the wait (`STOP_GRACE_S`). This harness has
+    no host, so the wait lasts as long as the slowest job the profile allows.
+    """
+    assert run.stopped_at is not None
+    longest = profile.slurm.queue_wait_s.high + profile.slurm.run_s.high
+    longest += profile.slurm.completing_s.high + _POLL_SLACK_S
+    return max((at + longest for _, at in run.jobs if at <= run.stopped_at), default=0.0)
+
+
+def _is_planning(run: TimedRun, stop_at: float) -> bool:
+    """Whether the planner's turn is the one a stop at ``stop_at`` finds running.
+
+    The dynamic search's stop reaches its workstreams but not its planning call, which
+    finishes its turn first (`_search.py`); so a planner turn is the one turn a stop waits for.
+    """
+    return any(
+        span.role == "orchestrator" and span.start <= stop_at < span.end for span in run.turns
+    )
+
+
 @_SETTINGS
 @example(profile=TimingProfile(), turn=0, position=0.4)
 @example(profile=LONG_TURN, turn=1, position=0.9)
@@ -148,14 +172,22 @@ def test_a_stop_during_a_turn_is_acted_on_within_the_bound(
     stop_after = start + position * (end - start) - _finished(profile).started_at
     run = run_timed(profile, stop_after=stop_after)
     assert run.stopped_at is not None
-    # Core cancels the running turns promptly and ends the run terminal; a request core
-    # cannot cancel (a submission, a poll) in flight is waited for, within the grace bound.
     assert run.error is None or isinstance(run.error, RunStopped), run.error
-    assert run.ended_at - run.stopped_at <= DRAIN_BOUND_S
-    assert run.turns[-1].cancelled
-    assert run.turns[-1].end - run.stopped_at <= STOP_BOUND_S
-    # Nothing new started after the stop.
-    assert all(span.start <= run.stopped_at for span in run.turns)
+    if _is_planning(run, run.stopped_at):
+        # The planner's turn is not interrupted: it ends by itself and the run ends after it.
+        (planner,) = (
+            s for s in run.turns if s.role == "orchestrator" and s.start < run.stopped_at < s.end
+        )
+        assert not planner.cancelled
+        assert run.ended_at - planner.end <= DRAIN_BOUND_S
+    else:
+        # Core cancels the running turns promptly and ends the run terminal; a request core
+        # cannot cancel (a submission, a poll) in flight is waited for, within the grace bound.
+        assert run.ended_at <= max(run.stopped_at + DRAIN_BOUND_S, _measurements_end(profile, run))
+        assert run.turns[-1].cancelled
+        assert run.turns[-1].end - run.stopped_at <= STOP_BOUND_S
+    # No workstream turn started after the stop.
+    assert all(span.start <= run.stopped_at for span in run.turns if span.role != "orchestrator")
 
 
 def test_a_pause_during_a_long_turn_is_acted_on_within_one_control_poll() -> None:
@@ -172,7 +204,8 @@ def test_a_pause_during_a_long_turn_is_acted_on_within_one_control_poll() -> Non
 
 def test_a_stop_during_a_turn_cancels_it_through_core_and_ends_the_run_terminal() -> None:
     reference = _finished(EXACT)
-    start, end = _turn_windows(reference)[0]
+    # The second turn is a workstream's: the planner's first turn has ended.
+    (_, _), (start, end), *_ = _turn_windows(reference)
     run = run_timed(EXACT, stop_after=(start + end) / 2 - reference.started_at)
     if run.error is not None:
         raise run.error

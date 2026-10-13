@@ -22,6 +22,7 @@ from tests.composition.dynamic._harness import (
 from tests.support.task_project import task_path
 
 from vibesys.api import RunStatus
+from vibesys.candidates.api import InputFailureKind
 from vibesys.dynamic_roles import IMPLEMENTER, ORCHESTRATOR
 from vs_sim.api.testing import HostCrashedError
 
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
 
 # A benchmark killed with no result record is ambiguous: measured once more, then final.
 MAX_INPUT_ATTEMPTS = 2
-_UNMEASURABLE = "Input not measurable: warmup stopped: 1/100 rounds"
+_UNMEASURABLE = "Input not measurable: the input's own benchmark failed"
 
 
 def _failing_input(loop_input: LoopInput) -> None:
@@ -115,11 +116,10 @@ def test_permanent_input_failure_survives_a_crash_and_resume(tmp_path: Path) -> 
     assert _UNMEASURABLE in first.prompts(ORCHESTRATOR.id)[0]
     assert _UNMEASURABLE in second.prompts(ORCHESTRATOR.id)[0]
     records = CoreRecords(loop_input, crashed.run_id)
-    baseline = records.strategy["baseline"]
-    assert baseline["stage"] == "unmeasurable"
-    assert baseline["benchmark_passed"] is False
-    assert baseline["failure"] == "warmup stopped: 1/100 rounds"
-    assert baseline["attempts"] == 1
+    failure = records.baseline_failure()
+    assert failure is not None
+    assert failure.kind is InputFailureKind.BENCHMARK_FAILED
+    assert "warmup stopped: 1/100 rounds" in failure.output
     # The unmeasurable input has no baseline value, so the best candidate wins.
     assert resumed.status is RunStatus.COMPLETED
     assert records.run["result"]["reason"].startswith("adopted: ")
@@ -174,14 +174,13 @@ def test_transient_input_failure_is_retried_within_its_bound(tmp_path: Path, fai
     attempts = min(failures + 1, MAX_INPUT_ATTEMPTS)
     assert int(counter.read_text(encoding="utf-8")) == attempts
     assert loop_input.sbatch_count() == attempts + _candidate_jobs(1)
-    baseline = CoreRecords(loop_input, run.run_id).strategy["baseline"]
-    assert baseline["attempts"] == attempts
+    records = CoreRecords(loop_input, run.run_id)
     if failures == 1:
-        assert baseline["stage"] == "measured"
-        assert baseline["benchmark_passed"] is True
+        assert records.baseline_metric() is not None
     else:
-        assert baseline["stage"] == "unmeasurable"
-        # The second killed attempt is final: a failed benchmark, not a missing one.
-        assert baseline["benchmark_passed"] is False
-        # The agents are told why the input was given up, not only that it was.
-        assert "out of memory" in baseline["failure"]
+        # The last killed attempt is final: a failed benchmark, not a missing one, and the
+        # agents are told why the input was given up, not only that it was.
+        failure = records.baseline_failure()
+        assert failure is not None
+        assert failure.kind is InputFailureKind.BENCHMARK_FAILED
+        assert "out of memory" in failure.output

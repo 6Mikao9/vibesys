@@ -14,15 +14,15 @@ if TYPE_CHECKING:
 
 
 class SubjectWorld:
-    """The strategy a `Subject` describes, run against one of its scripted worlds.
+    """The search a `Subject` describes, run against one of its scripted worlds.
 
     `setup` is the subject's immutable description, which vs-dst shares between copies; the
     script is the part whose position a copy carries.
     """
 
     def __init__(self, subject: Subject, script: World) -> None:
-        """Run ``subject``'s strategy against ``script``."""
-        self.setup = RunSetup(subject.new_strategy, subject.harness, subject.schemas)
+        """Run ``subject``'s search against ``script``."""
+        self.setup = RunSetup(subject.launch, subject.harness, subject.schemas)
         self.script = script
 
     def __call__(self, request: Request, core: CoreState) -> Answer:

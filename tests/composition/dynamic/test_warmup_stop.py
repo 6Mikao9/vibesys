@@ -89,7 +89,7 @@ def test_a_stopped_warmup_reaches_the_planner_as_its_rate(tmp_path: Path) -> Non
     )
 
     run = run_request(
-        loop_input.request(max_rounds=2, max_retries_per_round=1),
+        loop_input.request(max_rounds=2),
         agents,
         slurm_process=loop_input.connector,
         state_stores=loop_input.state_stores,

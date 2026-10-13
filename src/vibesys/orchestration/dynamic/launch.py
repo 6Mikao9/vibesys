@@ -7,6 +7,8 @@ keys are rejected.
 
 from __future__ import annotations
 
+from pydantic import model_validator
+
 from vibesys.orchestration.agent_options import TaskInputs
 from vibesys.orchestration.dynamic.search.api import DynamicConfig
 
@@ -17,6 +19,13 @@ class DynamicLaunch(TaskInputs, DynamicConfig):
     ``profiling`` is not the operator's to set: it follows the run's evaluation plan (a profile
     command and a chosen profiler), which only the host knows (see `dynamic_core`).
     """
+
+    @model_validator(mode="after")
+    def _profiling_follows_the_plan(self) -> DynamicLaunch:
+        if "profiling" in self.model_fields_set:
+            msg = "'profiling' is not a launch option: it follows the run's evaluation plan"
+            raise ValueError(msg)
+        return self
 
     def search_config(self, *, profiling: bool) -> DynamicConfig:
         """The part the search reads, with the profiling the evaluation plan allows."""
