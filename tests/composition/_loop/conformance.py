@@ -15,6 +15,7 @@ the executors and at delivery, and a stop at any request. The crash tier lives i
 
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
@@ -337,7 +338,19 @@ def run_pure(
         Budget(retries=subject.harness.limits.request_retries.limit),
         end,
     )
-    return [decision.model_dump_json() for decision in trace.decisions]
+    return [_without_time_bound(decision) for decision in trace.decisions]
+
+
+def _without_time_bound(decision: BaseModel) -> str:
+    """The decision as JSON, minus the wait's bound.
+
+    A wait that lasts as long as the run has time left (a workspace opening, say) carries a
+    bound that shrinks by what the faults cost on the run clock. That is time, not a decision:
+    what the search asked for and in which order is the rest of the JSON.
+    """
+    data = decision.model_dump(mode="json")
+    data.pop("until", None)
+    return json.dumps(data, sort_keys=True)
 
 
 # -- request-kind recovery matrix (C9) ----------------------------------------------------------

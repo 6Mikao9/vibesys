@@ -58,6 +58,17 @@ def _lapsed_while_down(recovered: SimulatedRun) -> bool:
     return not recovered.finished and ":blocked" in str(recovered.halted)
 
 
+def _turn_lapsed_while_down(recovered: SimulatedRun, record: type[BaseModel]) -> bool:
+    """Whether a turn in flight at the crash timed out before any host was back.
+
+    The restart comes a lease after the crash, later than a turn's time limit, so the turn is
+    reported as timed out. A search that ends its run on a failed turn (the issue queue's
+    performance evaluation does) then ends differently than the uncrashed run; that is the
+    search's answer to a lost turn, not a lost or repeated effect.
+    """
+    return "(timed-out)" in str(_published(recovered.state, record))
+
+
 PARTS = 4 if crash_point_policy() == EVERY_POINT else 1
 
 
@@ -73,7 +84,7 @@ def test_c2_a_restart_after_any_crash_finishes_the_same_run(
 
     for crash in normal.crash_points(kind)[part::PARTS]:
         recovered = normal.rerun_with_crash(crash)
-        if _lapsed_while_down(recovered):
+        if _lapsed_while_down(recovered) or _turn_lapsed_while_down(recovered, subject.snapshot):
             continue
         assert recovered.finished, crash
         record = FlowDriver.published(recovered.state, subject.snapshot)  # ty: ignore[invalid-argument-type]
