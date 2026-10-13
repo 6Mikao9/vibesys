@@ -79,6 +79,33 @@ def test_a_stop_during_the_baseline_measurement_cancels_its_job_and_starts_no_wo
     _nothing_started_after_the_stop(timed)
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="fix on vic/fix-cancel-stop-inspect: a cancel stop that lands on a poll of a queued "
+    "job conflicts with that poll's inspection identity",
+)
+def test_a_cancel_stop_landing_on_a_poll_of_a_queued_job_cancels_its_job_and_starts_no_work() -> (
+    None
+):
+    """Pinned until the fix lands: the same scenario as the baseline test, with a cancel stop."""
+    timed = run_timed(
+        SkeletonStrategy.baseline_probe(),
+        Plan(
+            hold_from=0,
+            mode=StopMode.CANCEL,
+            stop_when=lambda _timeline, cluster: len(cluster.submissions) >= 1,
+        ),
+    )
+
+    assert timed.stopped_at is not None
+    assert timed.outcome is not None
+    assert timed.outcome.status is RunStatus.TERMINAL
+    assert len(timed.cluster.submissions) == 1
+    assert sorted((*timed.cancelled_during, *timed.cancelled_by_exit)) == timed.cluster.submissions
+    assert timed.timeline.starts == []
+    _nothing_started_after_the_stop(timed)
+
+
 @pytest.mark.parametrize("mode", list(StopMode))
 def test_a_stop_during_a_candidate_evaluation_cancels_its_job_and_starts_no_new_work(
     mode: StopMode,
