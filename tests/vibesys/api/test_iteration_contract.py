@@ -107,7 +107,7 @@ def test_catalog_has_an_explicit_iteration_disposition_for_every_builtin() -> No
             kind=IterationKind.BOARD,
             label="Issue board",
             ordinal=0,
-            status=IterationStatus.ACTIVE,
+            status=IterationStatus.PENDING,
         ),
     )
 

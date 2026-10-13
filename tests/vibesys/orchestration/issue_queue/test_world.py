@@ -62,7 +62,17 @@ def test_issues_the_evaluator_files_are_worked_and_adopted() -> None:
 
 
 def clean_world(**options: object) -> IssueQueueWorld:
-    """One issue whose first attempt the judge rejects, and the second passes."""
+    """One issue whose first attempt the judge rejects, and the second passes.
+
+    The script is kept this small on purpose, and the reason is a known gap in core, not a
+    property of the search. After a second host death a run with more issues can stop in
+    `closing` with `execute_registered_operation:blocked` open: the restart comes a lease after
+    the crash, later than the operation's reconciliation bound, so its record is `BLOCKED`,
+    `record_waits` does not count a blocked record as a wait, and `RESOLUTIONS` in
+    `vs_core/_waits.py` has no way to end a blocked record the close is waiting for. The
+    conformance sweep (`tests/composition/_loop/test_conformance_crash.py`) skips exactly that
+    stall (`_lapsed_while_down`). A larger script here stalls the same way and takes minutes.
+    """
     return IssueQueueWorld(
         implementer=[implemented(f"turn {n}") for n in range(2)],
         judge=[judged(passed=False), judged()],

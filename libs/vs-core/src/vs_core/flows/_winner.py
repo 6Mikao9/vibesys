@@ -46,10 +46,13 @@ INPUT: Final = Input()
 class NoWinner(Value):
     """What a root flow returns when the run ends without a winner, and why.
 
-    The run fails with this reason; nothing is adopted.
+    The run fails with this reason. Nothing is adopted, unless ``keep_choice`` says the work
+    chosen so far is worth keeping although the run failed: the framework then adopts the last
+    choice and the failed result carries it as its selection.
     """
 
     reason: str
+    keep_choice: bool = False
 
 
 class Kept(Value):
@@ -176,14 +179,23 @@ async def conclude(kit: Kit, returned: NoWinner | None) -> None:
     raise ContractError(("finish",), message)
 
 
+async def _no_winner(kit: Kit, returned: NoWinner, stopped: EndReason | None) -> RunResultProposal:
+    outcome: Literal["cancelled", "failure"] = "cancelled" if stopped else "failure"
+    reason = reason_text(stopped or EndReason.NO_WINNER, returned.reason)
+    if not returned.keep_choice or kit.run.choice is None:
+        return RunResultProposal(outcome=outcome, reason=reason)
+    adopted = await adopt(kit, kit.run.choice)
+    if isinstance(adopted, NotAdopted):
+        failed = reason_text(EndReason.ADOPTION_FAILED, adopted.reason.value)
+        return RunResultProposal(outcome=outcome, reason=f"{reason}; {failed}")
+    return RunResultProposal(outcome=outcome, reason=reason, selection=adopted.selection)
+
+
 async def _result(
     kit: Kit, returned: NoWinner | None, stopped: EndReason | None
 ) -> RunResultProposal:
     if isinstance(returned, NoWinner):
-        return RunResultProposal(
-            outcome="cancelled" if stopped else "failure",
-            reason=reason_text(stopped or EndReason.NO_WINNER, returned.reason),
-        )
+        return await _no_winner(kit, returned, stopped)
     selection = kit.run.choice or TrustedBaseline(revision=kit.run.facts.baseline)
     adopted = await adopt(kit, selection)
     if isinstance(adopted, NotAdopted):

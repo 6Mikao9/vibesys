@@ -5,7 +5,6 @@ import json
 from vibesys.orchestration.issue_queue.models import (
     IssueJudgeResult,
     IssuePerfEvalResult,
-    NewIssue,
 )
 from vibesys.orchestration.issue_queue.search._config import IssueQueueConfig
 from vibesys.orchestration.issue_queue.search._values import PerfRecord
@@ -22,11 +21,6 @@ class Rejection(Value):
 def rejection_of(reply: IssueJudgeResult) -> Rejection:
     """The judge's feedback (its analysis when it gave none) and analysis."""
     return Rejection(feedback=reply.feedback or reply.analysis, analysis=reply.analysis)
-
-
-def capped(issues: tuple[NewIssue, ...], limit: int) -> tuple[NewIssue, ...]:
-    """The issues an evaluation may file: the first ``limit`` it named."""
-    return issues[:limit]
 
 
 def metrics_json(reply: IssuePerfEvalResult) -> str:

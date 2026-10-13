@@ -274,7 +274,9 @@ returns, or the operator stops the run, or the deadline passes, the framework en
 path:
 
 1. If the root returned `NoWinner(reason)`: the run fails with reason `no-winner: <reason>`
-   (cancelled if it was stopped), and nothing is adopted.
+   (cancelled if it was stopped), and nothing is adopted. `NoWinner(reason, keep_choice=True)`
+   fails the run the same way but adopts the last choice first and carries it as the selection
+   (a search that ran out of budget after building something worth keeping).
 2. Otherwise core adopts the last choice (nothing chosen: the input, as it stands).
 3. If adoption fails, the run fails with `adoption-failed: <typed reason>`.
 4. If it succeeds, the run succeeds with the selection; a run that was stopped or timed out is

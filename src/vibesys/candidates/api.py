@@ -33,6 +33,7 @@ from vibesys.candidates._input import (
     reading,
     trusted,
 )
+from vibesys.candidates._review import ReviewEvaluation, review_evaluations
 from vibesys.candidates._run import (
     EligibleRound,
     RunPhase,
@@ -86,6 +87,7 @@ __all__ = [
     "Measured",
     "Measuring",
     "NotConfigured",
+    "ReviewEvaluation",
     "RunBudget",
     "RunPhase",
     "Unmeasurable",
@@ -111,6 +113,7 @@ __all__ = [
     "proposal",
     "propose",
     "reading",
+    "review_evaluations",
     "run_deadline_at",
     "selection_of",
     "settle_for",

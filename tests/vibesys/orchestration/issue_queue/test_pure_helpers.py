@@ -27,7 +27,6 @@ from vibesys.orchestration.issue_queue.search.api import (
     bootstrap_title,
     bootstrap_writes,
     briefs,
-    capped,
     claim,
     filing,
     has_open,
@@ -135,18 +134,6 @@ def test_a_bootstrap_title_is_one_short_line_of_the_objective(text: str) -> None
     assert len(title) <= 80
     if not text.strip():
         assert title == ""
-
-
-@SETTINGS
-@given(titles=st.lists(st.text(min_size=1, max_size=5), max_size=6), limit=st.integers(1, 6))
-def test_the_issues_an_evaluation_files_are_the_first_it_named_up_to_the_cap(
-    titles: list[str], limit: int
-) -> None:
-    named = evaluated(*titles) if titles else evaluated()
-    kept = capped(named.new_issues, limit)
-
-    assert kept == named.new_issues[:limit]
-    assert len(kept) <= limit
 
 
 def _job(run_id: str, sequence: int, issue: IssueRow) -> IssueJob:

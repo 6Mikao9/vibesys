@@ -11,15 +11,13 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
-from vibesys.candidates.api import InputFailure
+from vibesys.candidates.api import InputFailure, ReviewEvaluation
 from vibesys.metrics import MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search import _roles as roles
 from vibesys.orchestration.dynamic.search._values import Blocker, Failure, PlanProblem
 from vs_core.api.search import (
     Correction,
     EvidenceId,
-    EvidenceKind,
-    ObservationStatus,
     RevisionRef,
     RolePromptContext,
     SchemaRef,
@@ -181,25 +179,6 @@ class ImplementPrompt(RolePromptContext):
     last_blocker: Blocker | None = None
     """The latest turn of this workstream that ended without a candidate."""
     turns_without_candidate: int = Field(default=0, ge=0)
-
-
-class ReviewEvaluation(Value):
-    """One trusted evaluation result of the candidate under review, as the judge reads it.
-
-    ``passed`` is None when the evidence owner could not decode the record; the status
-    is core's own observation of the evaluation job. ``feedback`` is the end of the
-    evaluator's failure text and ``feedback_cut`` says its start was dropped.
-    """
-
-    evidence_id: EvidenceId
-    kind: EvidenceKind
-    revision: RevisionRef
-    status: ObservationStatus
-    passed: bool | None = None
-    metrics: tuple[MetricRow, ...] = ()
-    partial: PartialRow | None = None
-    feedback: str = ""
-    feedback_cut: bool = False
 
 
 class ReviewPrompt(RolePromptContext):
