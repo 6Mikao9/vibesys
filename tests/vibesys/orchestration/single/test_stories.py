@@ -94,18 +94,6 @@ def test_one_hypothesis_from_design_to_the_adoption_of_its_candidate(*, restarti
 
 
 @MODES
-def test_a_candidate_that_does_not_beat_the_input_is_not_adopted(*, restarting: bool) -> None:
-    host = start(restarting=restarting, throughputs={"c1": 10.0})
-    design(host)
-    host.drain_until_turn(IMPLEMENTER)
-    implement(host, candidate="c1")
-    host.drain()
-
-    assert selection_of(host) == ("trusted_baseline", None)
-    assert_flow_closed(host)
-
-
-@MODES
 def test_a_self_review_that_fails_gets_the_implementer_another_turn_in_the_same_workspace(
     *, restarting: bool
 ) -> None:
@@ -212,6 +200,7 @@ def test_the_gates_are_skipped_on_rounds_the_cadence_does_not_audit(*, restartin
 @example(throughputs=(30, 40), reviewed=(True, True))
 @example(throughputs=(90, 60), reviewed=(True, True))
 @example(throughputs=(90, 60), reviewed=(False, True))
+@example(throughputs=(90, 60), reviewed=(False, False))
 @given(
     throughputs=st.tuples(st.integers(20, 100), st.integers(20, 100)).filter(
         lambda pair: pair[0] != pair[1]

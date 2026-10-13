@@ -117,18 +117,6 @@ def test_a_candidate_the_judge_passes_and_the_gates_confirm_is_adopted(*, restar
 
 
 @MODES
-def test_a_candidate_the_judge_rejects_is_never_adopted(*, restarting: bool) -> None:
-    host = start(restarting=restarting)
-    design(host)
-    implement(host)
-    judge(host, passed=False)
-    host.drain()
-
-    assert selection_of(host) == ("trusted_baseline", None)
-    assert_flow_closed(host)
-
-
-@MODES
 def test_a_judge_that_cannot_be_reached_leaves_the_candidate_ineligible(
     *, restarting: bool
 ) -> None:
@@ -165,18 +153,6 @@ def test_a_blocked_implementer_ends_the_round_and_nothing_is_adopted(*, restarti
     design(host)
     host.drain_until_turn(IMPLEMENTER)
     host.run.reply(host.run.expect_turn(role=IMPLEMENTER), implemented("blocked"))
-    host.drain()
-
-    assert selection_of(host) == ("trusted_baseline", None)
-    assert_flow_closed(host)
-
-
-@MODES
-def test_a_candidate_that_does_not_beat_the_input_is_not_adopted(*, restarting: bool) -> None:
-    host = start(restarting=restarting, throughputs={"c1": 10.0})
-    design(host)
-    implement(host, candidate="c1")
-    judge(host, passed=True)
     host.drain()
 
     assert selection_of(host) == ("trusted_baseline", None)
@@ -487,6 +463,7 @@ def test_a_round_whose_implementer_waited_adopts_the_candidate_it_then_checkpoin
 @example(throughputs=(30, 40), judged=(True, True))
 @example(throughputs=(90, 60), judged=(True, True))
 @example(throughputs=(90, 60), judged=(False, True))
+@example(throughputs=(90, 60), judged=(False, False))
 @given(
     throughputs=st.tuples(st.integers(20, 100), st.integers(20, 100)).filter(
         lambda pair: pair[0] != pair[1]

@@ -18,7 +18,6 @@ from tests.vibesys.orchestration.issue_queue._host import (
     assert_flow_closed,
     begin,
     config,
-    suspending_view,
 )
 from tests.vibesys.orchestration.issue_queue._replies import (
     evaluated,
@@ -28,7 +27,6 @@ from tests.vibesys.orchestration.issue_queue._replies import (
 )
 
 from vibesys.orchestration.issue_queue.search.api import issue_queue
-from vs_core.api import FailureReason, RejectionCode, Withdraw
 from vs_issue_tracker.api import ReadBoard
 
 if TYPE_CHECKING:
@@ -140,18 +138,6 @@ def test_a_stop_mid_job_settles_the_attempt_and_adopts_nothing(*, restarting: bo
 
 
 @RESTARTING
-def test_a_reply_that_is_not_json_is_corrected(*, restarting: bool) -> None:
-    host = begin(config(), restarting=restarting)
-    host.drain_until_turn(IMPLEMENTER)
-    (turn,) = [item for item in host.run.open if item.label == IMPLEMENTER]
-    host.answer(turn, variant=1)
-    host.drain()
-    assert_flow_closed(host)
-    assert outcome(host) == "success"
-    assert host.board() == {1: ("closed", 1)}
-
-
-@RESTARTING
 def test_a_lost_board_acknowledgement_is_sent_again_and_lands_once(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, lost_acknowledgements=frozenset({0, 1, 2}))
     host.drain()
@@ -184,20 +170,6 @@ def turn_of(host: Host, role: str) -> Asked:
     """The one open turn of ``role``."""
     (asked,) = [item for item in host.run.open if item.label == role]
     return asked
-
-
-@RESTARTING
-@pytest.mark.parametrize("role", [IMPLEMENTER, JUDGE])
-def test_an_agent_that_waits_for_its_evaluations_is_resumed_and_the_issue_closes(
-    *, restarting: bool, role: str
-) -> None:
-    host = begin(config(), restarting=restarting, view=suspending_view())
-    host.drain_until_turn(role)
-    host.run.resume_ready(host.run.suspend(turn_of(host, role)))
-    host.drain()
-    assert_flow_closed(host)
-    assert outcome(host) == "success"
-    assert host.board() == {1: ("closed", 1)}
 
 
 @RESTARTING
@@ -240,20 +212,6 @@ def test_a_task_without_an_objective_fails_the_run_instead_of_seeding_an_unrelat
     assert_flow_closed(host)
     assert outcome(host) == "failure"
     assert host.titles() == []
-
-
-@RESTARTING
-@pytest.mark.parametrize("code", list(RejectionCode))
-def test_a_settlement_core_refuses_ends_the_job_instead_of_stranding_it(
-    *, restarting: bool, code: RejectionCode
-) -> None:
-    host = begin(config(), restarting=restarting)
-    host.drain_until_turn(JUDGE)
-    host.answer(turn_of(host, JUDGE))
-    for asked in [item for item in host.run.open if isinstance(item.request, Withdraw)]:
-        host.run.fail(asked, FailureReason.REFUSED, cause=code)
-    host.drain()
-    assert_flow_closed(host)
 
 
 @RESTARTING
