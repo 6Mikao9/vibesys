@@ -16,6 +16,7 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
+from vs_core.api import EvidenceKind
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
@@ -91,6 +92,11 @@ def trusted_evaluation_plan(
         ),
         benchmark_contract=contract,
         candidate_startup_causes=candidate_startup_causes,
+        accuracy_gated=(
+            (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK)
+            if bundle.manifest.benchmark.requires_accuracy
+            else (EvidenceKind.CORRECTNESS,)
+        ),
     )
 
 

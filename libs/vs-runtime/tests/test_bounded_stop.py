@@ -10,6 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from vs_core.api import StopMode
 from vs_runtime.api import Evaluation
 from vs_runtime.api.infrastructure import (
     RunStopped,
@@ -64,7 +65,7 @@ async def test_a_stop_that_outlives_the_grace_cancels_the_block_as_a_landed_stop
 
     task = asyncio.create_task(run())
     await asyncio.sleep(0)
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
     await _until_armed(timer)
     assert on_stop.calls == 1
     assert not task.done()
@@ -90,7 +91,7 @@ async def test_a_block_that_ends_within_the_grace_is_not_cancelled() -> None:
 
     task = asyncio.create_task(run())
     await asyncio.sleep(0)
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
     await _until_armed(timer)
     finish.set()
 
@@ -110,7 +111,7 @@ async def test_a_resume_within_the_grace_disarms_the_cancellation() -> None:
 
     task = asyncio.create_task(run())
     await asyncio.sleep(0)
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
     await _until_armed(timer)
     channel.resume()
     timer.expire()
@@ -125,7 +126,7 @@ async def test_a_resume_within_the_grace_disarms_the_cancellation() -> None:
 @pytest.mark.asyncio
 async def test_a_stop_pending_at_entry_is_bounded_and_a_cleanup_failure_is_kept() -> None:
     channel = create_run_control_channel(FakeRunControlEventSink())
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
     timer = FakeStopTimer()
     on_stop = _StopWork(RuntimeError("scancel failed"))
 
@@ -155,7 +156,7 @@ async def test_a_cleanup_failure_is_raised_when_the_block_ends_on_its_own() -> N
             on_stop=_StopWork(RuntimeError("scancel failed")),
             timer=timer,
         ):
-            channel.request_stop()
+            channel.request_stop(StopMode.DRAIN)
             await _until_armed(timer)
 
     with pytest.raises(RuntimeError, match="scancel failed"):
@@ -197,12 +198,12 @@ def test_stop_listeners_see_each_request_until_unsubscribed() -> None:
     unsubscribe = channel.on_stop_requested(lambda: seen.append(channel.stop_requested()))
 
     assert not channel.stop_requested()
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
     channel.resume()
     assert not channel.stop_requested()
     unsubscribe()
     unsubscribe()
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
 
     assert seen == [True]
     assert channel.stop_requested()
@@ -216,7 +217,7 @@ async def test_gated_evaluation_refuses_new_work_after_a_stop() -> None:
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
     await evaluation.accuracy(workspace)
 
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
     with pytest.raises(RunStopped):
         await evaluation.accuracy(workspace)
     with pytest.raises(RunStopped):
@@ -241,7 +242,7 @@ async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> No
 
     running = asyncio.create_task(evaluation.benchmark(workspace))
     await arrival(gate.entered.wait(), running)
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
 
     with pytest.raises(RunStopped):
         await running
@@ -311,7 +312,7 @@ async def test_a_block_that_ends_during_on_stop_does_not_abort_the_stop_cleanup(
 
     task = asyncio.create_task(run())
     await asyncio.sleep(0)
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
     await task
 
     assert outcome == ["finished"]
@@ -336,6 +337,6 @@ async def test_a_stop_cleanup_that_fails_after_the_block_ended_is_still_raised()
 
     task = asyncio.create_task(run())
     await asyncio.sleep(0)
-    channel.request_stop()
+    channel.request_stop(StopMode.DRAIN)
     with pytest.raises(RuntimeError, match="cancel failed"):
         await task

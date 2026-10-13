@@ -123,7 +123,7 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         operation_id=core.OperationId(root="operation:reopen"),
         operation=codec.encode(decision.request),
         scope=decision.scope,
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
     )
     assert request.request_id is not None
     close = core.CloseAttemptScope(

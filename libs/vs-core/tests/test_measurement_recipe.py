@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    EvidenceKind,
     MeasurementRecipe,
     RevisionId,
     RevisionRef,
@@ -30,6 +31,7 @@ def _recipe(seconds: tuple[float, float, float], queue: float) -> MeasurementRec
         ),
         queue_allowance=queue,
         accuracy_stage="accuracy",
+        accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
     )
 
 

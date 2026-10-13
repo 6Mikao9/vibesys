@@ -248,6 +248,7 @@ def measurement_fixture(
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=1.0,
+        accuracy_gated=(),
     )
     request = core.SubmitMeasurement(
         request_id=core.RequestId(root="submission"),
@@ -265,6 +266,7 @@ def measurement_fixture(
             environment_digest=plan.environment_digest,
             recipe_digest=plan.recipe.digest,
             stages=(),
+            accuracy_gated=(),
         ),
         limit=1,
         receipts=(core.PreparedSubmissionReceipt(request_id=request.request_id, ordinal=1),),

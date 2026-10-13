@@ -88,7 +88,7 @@ from vs_core.api import (
     translate,
     validate_startup,
 )
-from vs_core.testing.builders import initial_state
+from vs_core.testing.builders import initial_state, sample_limits
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -656,7 +656,7 @@ class Harness:
     registry: OperationRegistry
     facts: RunFacts
     lifecycle: frozenset[LifecycleCapability] = frozenset()
-    limits: Limits = field(default_factory=Limits)
+    limits: Limits = field(default_factory=sample_limits)
     events: tuple[CoreEvent, ...] = ()
     envelope_type: type[RunEnvelope] | None = None
     during_turn: Callable[[Request, CoreState], tuple[CoreEvent, ...]] = lambda _r, _c: ()

@@ -6,6 +6,7 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 
 def _scope(generation: int = 0) -> core.Scope:
@@ -154,11 +155,11 @@ def test_pool_capacities_are_positive_unique_and_preserved(capacities: list[int]
         core.PoolCapacity(pool_id=core.PoolId(root=f"pool-{index}"), capacity=capacity)
         for index, capacity in enumerate(capacities)
     )
-    limits = core.Limits(pool_capacities=pools)
+    limits = sample_limits(pool_capacities=pools)
     assert core.Limits.model_validate_json(limits.model_dump_json()) == limits
     if pools:
         with pytest.raises(ValidationError, match="duplicate pool_id"):
-            core.Limits(pool_capacities=(*pools, pools[0]))
+            sample_limits(pool_capacities=(*pools, pools[0]))
     with pytest.raises(ValidationError, match="capacity"):
         core.PoolCapacity(pool_id=core.PoolId(root="invalid"), capacity=0)
 
@@ -209,7 +210,9 @@ def test_registered_input_manifest_preserves_distinct_equal_artifact_occurrences
 def test_operator_stop_result_is_allowed_only_for_stop(action: str) -> None:
     result = core.RunResultProposal(outcome="cancelled", reason="operator requested stop")
     payload = {
-        "control": core.ControlInput(control_id=core.ControlId(root="stop"), action="stop"),
+        "control": core.ControlInput(
+            control_id=core.ControlId(root="stop"), action="stop", mode=core.StopMode.DRAIN
+        ),
         "now_at": 1.0,
     }
     bare = core.RunControlEvent.model_validate(payload)  # a stop without a result is soft

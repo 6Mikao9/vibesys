@@ -26,8 +26,8 @@ def plan(**updates: object) -> core.MeasurementPlan:
         "recipe": core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         "submitted_at": 0.0,
         "queue_allowance": 10.0,
-        "submission_limit": 3,
         "accuracy_stage": "accuracy",
+        "accuracy_gated": (core.EvidenceKind.CORRECTNESS, core.EvidenceKind.BENCHMARK),
     }
     merged = {**data, **updates}
     stages = updates.get("stages", data["stages"])
@@ -36,6 +36,8 @@ def plan(**updates: object) -> core.MeasurementPlan:
         stage.stage_id == "accuracy" for stage in stages
     ):
         merged["accuracy_stage"] = None
+    if merged["accuracy_stage"] is None and "accuracy_gated" not in updates:
+        merged["accuracy_gated"] = ()
     return core.MeasurementPlan.model_validate(merged)
 
 
@@ -202,7 +204,7 @@ def test_submission_receipt_and_request_are_allocated_atomically() -> None:
     assert isinstance(request, core.SubmitMeasurement)
     assert request.request_id is not None
     budget = result.state.evaluation.submission_budgets[0]
-    assert budget.limit == 3
+    assert budget.limit == core.MAX_SUBMISSIONS_PER_MEASUREMENT
     assert budget.receipts == (
         core.PreparedSubmissionReceipt(request_id=request.request_id, ordinal=1),
     )
@@ -285,7 +287,7 @@ def test_submission_retry_requires_conclusive_infrastructure_failure(
     retried = requested(
         result.state,
         identity="retry",
-        measurement=plan(submitted_at=2.0, submission_limit=99),
+        measurement=plan(submitted_at=2.0),
     )
     allowed = (
         terminal
@@ -295,7 +297,7 @@ def test_submission_retry_requires_conclusive_infrastructure_failure(
     )
     assert bool(retried.requests) == allowed
     budget = retried.state.evaluation.submission_budgets[0]
-    assert budget.limit == 3
+    assert budget.limit == core.MAX_SUBMISSIONS_PER_MEASUREMENT
     assert len(budget.receipts) == 1 + int(allowed)
 
 
@@ -324,13 +326,13 @@ def test_a_failure_after_the_run_stopped_is_never_resubmitted(
     retried = requested(
         stopped_state,
         identity="retry",
-        measurement=plan(submitted_at=2.0, submission_limit=99),
+        measurement=plan(submitted_at=2.0),
     )
     assert retried.requests == ()
     assert len(retried.state.evaluation.submission_budgets[0].receipts) == 1
 
 
-@given(count=st.integers(min_value=4, max_value=10))
+@given(count=st.integers(min_value=core.MAX_SUBMISSIONS_PER_MEASUREMENT + 1, max_value=10))
 def test_preacceptance_failures_are_bounded_and_timing_never_resets_identity(count: int) -> None:
     state = core.initial_state()
     for index in range(count):
@@ -339,9 +341,12 @@ def test_preacceptance_failures_are_bounded_and_timing_never_resets_identity(cou
             identity=f"measure-{index}",
             measurement=plan(submitted_at=float(index)),
         )
-        if index >= 3:
+        if index >= core.MAX_SUBMISSIONS_PER_MEASUREMENT:
             assert result.requests == ()
-            assert len(result.state.evaluation.submission_budgets[0].receipts) == 3
+            assert (
+                len(result.state.evaluation.submission_budgets[0].receipts)
+                == core.MAX_SUBMISSIONS_PER_MEASUREMENT
+            )
             state = result.state
             continue
         request = result.requests[0]

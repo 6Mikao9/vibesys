@@ -75,7 +75,7 @@ def test_stale_generation_is_rejected_and_recorded() -> None:
 
 def test_agent_call_and_measure_decision_share_one_budget() -> None:
     """The agent's call for an identity a Measure already charged is that submission, not a second."""
-    measured = requested(measurement=plan(evaluator_digest="evaluator-0", submission_limit=1))
+    measured = requested(measurement=plan(evaluator_digest="evaluator-0"))
     (measure,) = submissions(measured.state)
     result = call(measured.state, "c1")
     assert result.requests == ()
@@ -102,7 +102,7 @@ def test_any_call_sequence_never_exceeds_budget_or_duplicates_a_measurement(
 ) -> None:
     """Calls repeat ids, vary identity, go stale, and interleave with failed submissions."""
     state = core.initial_state()
-    limit = state.run.limits.max_measurement_submissions
+    limit = core.MAX_SUBMISSIONS_PER_MEASUREMENT
     seen_ids: set[str] = set()
     for call_number, (call_id, variant, stale, fail_previous) in enumerate(calls):
         if fail_previous and (rows := submissions(state)):

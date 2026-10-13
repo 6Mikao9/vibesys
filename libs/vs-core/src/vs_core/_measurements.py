@@ -38,6 +38,7 @@ from .types.attempts import (
     SnapshotAndRetain,
 )
 from .types.common import (
+    MAX_SUBMISSIONS_PER_MEASUREMENT,
     AttemptId,
     AttemptRef,
     EvidenceKind,
@@ -81,7 +82,7 @@ from .types.evaluation import (
     UnobservedJobFacts,
 )
 from .types.evaluation_history import EvaluationStageOutcome
-from .types.job_observations import MeasurementFailure, may_resubmit
+from .types.job_observations import MeasurementFailure
 from .types.kernel import AreaChange
 from .types.records import Outbound, RequestObserved, RequestPhase, inherit, within
 from .types.strategy import Measure
@@ -219,7 +220,7 @@ def _budget_ready(
         )
     ):
         return Missing(ProofReason.UNRESOLVED)
-    if not may_resubmit(latest.failure, submissions=len(budget.receipts), limit=budget.limit):
+    if len(budget.receipts) >= min(budget.limit, MAX_SUBMISSIONS_PER_MEASUREMENT):
         return Missing(ProofReason.ABSENT_CHARGE)
     return Proven(budget)
 
@@ -550,12 +551,10 @@ def _allocate(
     authority = _current(context, scope)
     if not isinstance(identity, Proven) or not isinstance(authority, Proven):
         return _rejected(state, scope)
-    if budget is not None and budget.limit > context.run.limits.max_measurement_submissions:
-        return _rejected(state, scope)
     if budget is None:
-        if plan.submission_limit > context.run.limits.max_measurement_submissions:
-            return _rejected(state, scope)
-        budget = SubmissionBudget(scope=scope, identity=identity.value, limit=plan.submission_limit)
+        budget = SubmissionBudget(
+            scope=scope, identity=identity.value, limit=MAX_SUBMISSIONS_PER_MEASUREMENT
+        )
     # New work is refused once the run's time is over, and a submission needs a positive limit.
     if not context.run.deadline_at > context.run.now_at or (
         origin.within is not None and origin.within.limit <= 0
@@ -914,7 +913,7 @@ def _registered_requested(
     budgets = state.submission_budgets
     if identity is not None:
         matches = tuple(b for b in budgets if b.scope == request.scope and b.identity == identity)
-        if matches or context.run.limits.max_measurement_submissions < 1:
+        if matches:
             return _rejected(state, request.scope)
         budgets = (
             *budgets,
@@ -950,9 +949,6 @@ def _job_identity(job: OwnedJob | RegisteredOwnedJob) -> Verdict[MeasurementIden
     )
 
 
-_ACCURACY_GATED = (EvidenceKind.BENCHMARK, EvidenceKind.CORRECTNESS)
-
-
 def _required_stages(identity: MeasurementIdentity, kind: EvidenceKind) -> frozenset[str]:
     """Stages that must have passed before this kind of evidence can be trusted.
 
@@ -975,7 +971,7 @@ def _scientific_evidence(
     if facts is None:
         return Missing(ProofReason.INCOMPLETE_HISTORY)
     outcomes = {stage.stage_id: stage.outcome for stage in facts.stages}
-    gated = evidence.kind in _ACCURACY_GATED
+    gated = evidence.kind in identity.accuracy_gated
     unsound = (
         # Scientific success cannot ride an execution that did not succeed.
         event.observation.status != ObservationStatus.SUCCEEDED

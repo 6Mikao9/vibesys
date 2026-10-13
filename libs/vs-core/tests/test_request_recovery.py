@@ -59,7 +59,6 @@ from vs_core.api import (
     InvocationRef,
     ItemId,
     LifecycleClass,
-    Limits,
     Observation,
     ObservationStatus,
     Operation,
@@ -113,6 +112,7 @@ from vs_core.api import (
     project,
     step,
 )
+from vs_core.api.testing import sample_limits
 
 
 class RegisteredOutcome(Value):
@@ -1116,7 +1116,7 @@ def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreStat
             "attempts": AttemptsState(attempts=(owner,)),
             "sessions": sessions,
             "run": state.run.model_copy(
-                update={"limits": Limits(max_attempts=200, max_refunds=200)}
+                update={"limits": sample_limits(max_attempts=200, max_refunds=200)}
             ),
         }
     )

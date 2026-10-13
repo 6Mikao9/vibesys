@@ -27,7 +27,7 @@ from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profile
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
-from vs_runtime.api import PollingEvaluationExecutor
+from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -383,10 +383,14 @@ class _ProductHostFactory:
                 facts=resources.facts,
                 options=self.options,
                 workspaces=workspaces,
-                evaluation=(
+                evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces)
+                    else PollingEvaluationExecutor(evaluation, workspaces),
+                    self.request.config.evaluation.evaluation_retries(),
+                    project.project.state.local_namespace(
+                        project.state.run_id, "core-evaluation-tries"
+                    ),
                 ),
                 environment=self._core_environment(resources),
                 roles=self._offered_roles(resources),
@@ -429,7 +433,11 @@ class _ProductHostFactory:
             queue_allowance_seconds=config.evaluation.queue_allowance_seconds,
             observe_interval_seconds=config.evaluation.observe_interval_seconds,
             observe_backoff_cap_seconds=config.evaluation.observe_backoff_cap_seconds,
+            request_retries=config.evaluation.request_retries(),
             max_run_seconds=config.run.max_run_seconds,
+            cancellation_bound_seconds=config.run.cancellation_bound_seconds,
+            cleanup_bound_seconds=config.run.cleanup_bound_seconds,
+            reconciliation_bound_seconds=config.run.reconciliation_bound_seconds,
             lifecycle=lifecycle,
         )
 

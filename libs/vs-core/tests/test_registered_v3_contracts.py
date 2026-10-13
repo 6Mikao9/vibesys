@@ -103,6 +103,7 @@ def expected_identity(fingerprint: str) -> core.MeasurementIdentity:
         environment_digest="environment",
         recipe_digest="recipe",
         stages=(core.MeasurementStageIdentity(stage_id="benchmark"),),
+        accuracy_gated=(),
     )
 
 

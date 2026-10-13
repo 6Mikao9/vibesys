@@ -6,6 +6,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 from .proof_digest import value_digest
 from .test_session_inputs import occurrence
@@ -137,7 +138,7 @@ def refund_state(
             "attempts": core.AttemptsState(attempts=(owner,)),
             "records": core.RecordsState(records=records),
             "run": state.run.model_copy(
-                update={"limits": core.Limits(max_turns=10, max_refunds=5)}
+                update={"limits": sample_limits(max_turns=10, max_refunds=5)}
             ),
         }
     )

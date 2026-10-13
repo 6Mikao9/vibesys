@@ -15,6 +15,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 RUN_SCOPE = core.Scope(owner=core.RunId(root="run"), generation=0)
 ATTEMPT_SCOPE = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
@@ -118,7 +119,9 @@ def world(max_retries: int = 0) -> core.CoreState:
     return state.model_copy(
         update={
             "run": state.run.model_copy(
-                update={"limits": core.Limits(max_retries=max_retries, max_attempts=4)}
+                update={
+                    "limits": sample_limits(max_adoption_rounds=max_retries + 1, max_attempts=4)
+                }
             ),
             "settlement": core.SettlementState(settlements=SETTLEMENTS),
             "evaluation": core.EvaluationState(

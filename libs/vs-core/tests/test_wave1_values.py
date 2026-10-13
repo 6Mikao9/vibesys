@@ -113,6 +113,7 @@ def _identity(stages: tuple[MeasurementStageIdentity, ...] = ()) -> MeasurementI
         environment_digest="environment",
         recipe_digest="recipe",
         stages=stages,
+        accuracy_gated=(),
     )
 
 

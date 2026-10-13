@@ -1197,7 +1197,7 @@ def _reopen_request(
             scope=decision.scope,
             decision_id=receipt.decision_id,
             operation=decision.registered_wire,
-            retry_limit=context.run.limits.max_retries,
+            retry_limit=context.run.limits.request_retries.limit,
         )
     return None
 

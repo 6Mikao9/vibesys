@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
-    from vs_core.api import CoreState, LifecycleCapability, Strategy
+    from vs_core.api import CoreState, LifecycleCapability, RequestRetries, Strategy
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
@@ -108,7 +108,11 @@ class CoreEnvironment:
     queue_allowance_seconds: int
     observe_interval_seconds: int
     observe_backoff_cap_seconds: int
+    request_retries: RequestRetries
     max_run_seconds: int | None
+    cancellation_bound_seconds: int
+    cleanup_bound_seconds: int
+    reconciliation_bound_seconds: int
     lifecycle: frozenset[LifecycleCapability]
     """Lifecycle capabilities this host offers the strategy."""
 
@@ -267,7 +271,11 @@ def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunConte
         queue_allowance_seconds=environment.queue_allowance_seconds,
         observe_interval_seconds=environment.observe_interval_seconds,
         observe_backoff_cap_seconds=environment.observe_backoff_cap_seconds,
+        request_retries=environment.request_retries,
         max_run_seconds=environment.max_run_seconds,
+        cancellation_bound_seconds=environment.cancellation_bound_seconds,
+        cleanup_bound_seconds=environment.cleanup_bound_seconds,
+        reconciliation_bound_seconds=environment.reconciliation_bound_seconds,
     )
 
 

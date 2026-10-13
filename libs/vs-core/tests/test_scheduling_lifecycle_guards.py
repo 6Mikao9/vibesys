@@ -6,6 +6,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 from .proof_digest import value_digest
 
@@ -69,7 +70,7 @@ def _queued_state(count: int, charge: int, generation: int) -> core.CoreState:
             "run": state.run.model_copy(
                 update={
                     "generation": generation,
-                    "limits": core.Limits(max_attempts=count * charge, max_parallel=1),
+                    "limits": sample_limits(max_attempts=count * charge, max_parallel=1),
                     "receipts": receipts,
                 }
             ),

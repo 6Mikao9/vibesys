@@ -43,7 +43,7 @@ def waiting_turn_state(spec: core.TurnSpec) -> core.CoreState:
     state = state.model_copy(
         update={
             "run": state.run.model_copy(
-                update={"limits": state.run.limits.model_copy(update={"max_retries": 2})}
+                update={"limits": state.run.limits.model_copy(update={"max_reask_chain": 2})}
             )
         }
     )

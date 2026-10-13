@@ -10,12 +10,10 @@ type Positive = Annotated[int, Field(gt=0)]
 
 
 class CandidateConfig(BaseModel):
-    """Which gates a run measures, how candidates rank and how often the input is retried."""
+    """Which gates a run measures and how candidates rank."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    # Core retries the input measurement only after an infrastructure failure, within this bound.
-    max_input_measurement_attempts: Positive = 3
     metric_space: MetricSpace = Field(default_factory=MetricSpace)
     benchmark_configured: bool = True
     accuracy_configured: bool = True

@@ -21,6 +21,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits, sample_retries
 
 from .test_adoption import GOOD, RUN_SCOPE, STATUSES, reload, world
 from .test_measurements import plan
@@ -284,7 +285,7 @@ def test_the_generator_reaches_a_queued_exclusive_root_behind_an_adoption() -> N
     session.state = session.state.model_copy(
         update={
             "run": session.state.run.model_copy(
-                update={"limits": core.Limits(max_attempts=4, max_parallel=1)}
+                update={"limits": sample_limits(max_attempts=4, max_parallel=1)}
             )
         }
     )
@@ -298,7 +299,9 @@ def test_the_generator_reaches_a_queued_exclusive_root_behind_an_adoption() -> N
 def seeded(mode: core.WorkspaceMode | None, parallel: int) -> core.CoreState:
     """The adoption world, optionally with a workspace-mode head queued behind a closing slot."""
     state = world(max_retries=1)
-    limits = core.Limits(max_attempts=6, max_parallel=parallel, max_retries=1)
+    limits = sample_limits(
+        max_attempts=6, max_parallel=parallel, max_reask_chain=1, request_retries=sample_retries(1)
+    )
     if mode is not None:
         queued, _ = queued_root_behind_full_slot(mode)
         state = queued.model_copy(

@@ -23,7 +23,6 @@ from vs_core.api import (
     EnsureWorkspace,
     ItemId,
     KernelNotImplementedError,
-    Limits,
     Rejected,
     RejectionCode,
     RunStatus,
@@ -39,6 +38,7 @@ from vs_core.api import (
     project,
     step,
 )
+from vs_core.api.testing import sample_limits
 
 
 def admission_fixture(
@@ -163,7 +163,7 @@ def test_rejected_submitted_start_cannot_authorize_public_admission() -> None:
     state = initial_state()
     # With no attempt budget, Scheduling rejects the submitted start.
     state = state.model_copy(
-        update={"run": state.run.model_copy(update={"limits": Limits(max_attempts=0)})}
+        update={"run": state.run.model_copy(update={"limits": sample_limits(max_attempts=0)})}
     )
     decision = StartAttempt(
         decision_id=event.request.decision_id,
@@ -220,7 +220,7 @@ def test_forged_registrations_do_not_exceed_attempt_budget() -> None:
     state = initial_state().model_copy(
         update={
             "run": initial_state().run.model_copy(
-                update={"limits": Limits(max_attempts=1)},
+                update={"limits": sample_limits(max_attempts=1)},
             )
         }
     )

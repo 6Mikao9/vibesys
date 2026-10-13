@@ -486,7 +486,7 @@ def registered_writer(
         scope=invocation.scope,
         admission_id=core.DecisionId(root="admission"),
         operation=codec.encode(decision.request),
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
     )
     feedback: core.Accepted | core.Rejected = core.Accepted(
         decision_id=decision.decision_id if guard != "wrong-id" else core.DecisionId(root="other")
@@ -825,7 +825,7 @@ def reopen_fixture() -> tuple[core.CoreState, core.ScopeReopenRequested, core.Op
         scope=decision.scope,
         operation_id=core.OperationId(root="operation:reopen"),
         operation=codec.encode(decision.request),
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
     )
     invocation = core.InvocationRef(
         session_id=core.SessionId(root="session"),
@@ -1088,7 +1088,7 @@ def test_reopen_cannot_dispatch_a_modified_registered_command(
         "operation": {"operation_id": core.OperationId(root="other")},
         "wire": {"operation": changed(request.operation, payload_json="{}")},
         "scope": {"scope": core.Scope(owner=state.run.run_id, generation=1)},
-        "retry": {"retry_limit": state.run.limits.max_retries + 1},
+        "retry": {"retry_limit": state.run.limits.request_retries.limit + 1},
     }
     request = request.model_copy(update=corruptions.get(corruption, {}))
     if corruption in ("park", "target"):

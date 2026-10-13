@@ -459,23 +459,16 @@ def _refine(
     return AreaChange(state=_replace(state, updated))
 
 
-RETRY_BACKOFF = 1.0
-"""Seconds of core time before the first retry; each further retry waits twice as long."""
-
-RETRY_BACKOFF_CAP = 30.0
-"""The longest wait between two attempts of one request, in seconds of core time."""
-
-
-def retry_delay(retries: int) -> float:
-    """Core seconds to wait before attempt number ``retries + 1``: 1, 2, 4, ... capped."""
-    return min(RETRY_BACKOFF * 2 ** max(retries - 1, 0), RETRY_BACKOFF_CAP)
+def retry_delay(context: RecordsContext, retries: int) -> float:
+    """Core seconds to wait before attempt number ``retries + 1``, as the backend declared."""
+    return context.run.limits.request_retries.delay(retries)
 
 
 def _retry_limit(context: RecordsContext, record: RequestRecord) -> int:
     request = record.request
     if isinstance(request, ExecuteRegisteredOperation):
         return request.retry_limit
-    return context.run.limits.max_retries
+    return context.run.limits.request_retries.limit
 
 
 def _next_phase(record: RequestRecord, observation: Observation) -> tuple[RequestPhase, int]:
@@ -674,7 +667,7 @@ def _advance_phase(
     facts = _exhausted(context, record, facts)
     phase, retries = _next_phase(record, facts.observation)
     retry_at = (
-        context.run.now_at + retry_delay(retries)
+        context.run.now_at + retry_delay(context, retries)
         if phase == RequestPhase.DISPATCHED and facts.observation.retryable
         else None
     )

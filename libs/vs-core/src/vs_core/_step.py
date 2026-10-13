@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache, partial
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Literal, assert_never
 
 from pydantic import TypeAdapter
 
@@ -51,6 +51,7 @@ from .types.common import (
     Area,
     AttemptId,
     AttemptRef,
+    ControlInput,
     DecisionId,
     DependencyStatus,
     InvocationRef,
@@ -944,7 +945,7 @@ def _operation_prepared(
         scope=decision.scope,
         operation_id=OperationId(root=f"operation:{decision.decision_id.root}"),
         operation=wire,
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
     )
     if decision.normalized_scope_reopen is not None:
         request = request.model_copy(
@@ -1137,7 +1138,7 @@ def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) 
     decision = Finish(
         decision_id=DecisionId(root=f"control:{event.control.control_id.root}"),
         scope=Scope(owner=state.run.run_id, generation=state.run.generation),
-        mode="drain",
+        mode=_finish_mode(event.control),
         result=event.result,
     )
     previous = next(
@@ -1163,6 +1164,13 @@ def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) 
             "events": (ControlChanged(control=event.control), *result.events),
         }
     )
+
+
+def _finish_mode(control: ControlInput) -> Literal["drain", "cancel"]:
+    """The operator's choice, given with the stop; core never picks one."""
+    if control.mode is None:
+        raise ContractError(("control", "mode"), "a stop names drain or cancel")
+    return control.mode.value
 
 
 def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
@@ -1223,7 +1231,8 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if event.control.action == "steer":
         result = Transition(state=updated)
     else:
-        action = "drain" if event.control.action == "stop" else event.control.action
+        # A stop returned above; only pause and resume reach core's admission.
+        action = "pause" if event.control.action == "pause" else "resume"
         result = propagate(updated, (AdmissionControl(action=action),), dispatch)
     return result.model_copy(
         update={"events": (*result.events, ControlChanged(control=event.control))}

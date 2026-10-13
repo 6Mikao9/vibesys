@@ -9,6 +9,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 from .proof_digest import value_digest
 
@@ -70,7 +71,7 @@ def _occupied_state(held: int, queued: int) -> core.CoreState:
                 update={
                     "now_at": 5.0,
                     "deadline_at": 100.0,
-                    "limits": core.Limits(max_attempts=20, max_parallel=max(held, 1)),
+                    "limits": sample_limits(max_attempts=20, max_parallel=max(held, 1)),
                     "receipts": tuple(receipts),
                 }
             ),

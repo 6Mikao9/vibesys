@@ -581,30 +581,66 @@ class PoolCapacity(Value):
     capacity: int = Field(ge=1)
 
 
-# How many times one measurement is submitted in all, unless the run says otherwise.
-DEFAULT_MAX_MEASUREMENT_SUBMISSIONS = 3
+# Hard caps no declaration can lift. A backend declares its own bounds below these; core
+# refuses a declaration above them and enforces them whatever a declaration says.
+MAX_REQUEST_RETRIES = 10
+MAX_SUBMISSIONS_PER_MEASUREMENT = 5
+
+
+class RequestRetries(Value):
+    """How core re-sends a request its executor said it did not run. Declared by the backend.
+
+    ``limit`` re-sends follow the first attempt, the n-th after ``backoff * 2**(n-1)`` seconds
+    of core time, never more than ``backoff_cap``. Core holds no default for any field and
+    refuses a ``limit`` above ``MAX_REQUEST_RETRIES``.
+    """
+
+    limit: Count
+    backoff: Seconds = Field(gt=0)
+    backoff_cap: Seconds = Field(gt=0)
+
+    @model_validator(mode="after")
+    def within_hard_cap(self) -> RequestRetries:
+        """Reject a limit above the hard cap and a cap below the first wait."""
+        if self.limit > MAX_REQUEST_RETRIES:
+            raise ContractValidationError("limit", f"above the hard cap {MAX_REQUEST_RETRIES}")
+        if self.backoff_cap < self.backoff:
+            raise ContractValidationError("backoff_cap", "below backoff")
+        return self
+
+    def delay(self, retries: int) -> float:
+        """Core seconds to wait before attempt number ``retries + 1``: doubling, capped."""
+        return min(self.backoff * 2 ** max(retries - 1, 0), self.backoff_cap)
 
 
 class Limits(Value):
-    """Run bounds; Scheduling enforces capacities before acquiring an episode."""
+    """Run bounds; every field is explicit, one field per meaning, no default.
 
-    max_attempts: Count = 1
-    max_turns: Count = 1
-    max_parallel: int = Field(default=1, ge=1)
-    pool_capacities: tuple[PoolCapacity, ...] = ()
-    max_retries: Count = 0
-    max_refunds: Count = 0
-    max_measurement_submissions: Count = DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
-    queue_allowance: Seconds = 900.0
-    cancellation_bound: Seconds = 60.0
+    Budget (the run's own): ``max_attempts``, ``max_turns``, ``max_parallel``,
+    ``pool_capacities``, ``max_refunds``, ``max_adoption_rounds`` and ``max_reask_chain``
+    (the longest chain of corrections and asks after a lost turn; it moves to the agent role).
+    Declared by the backend and applied by core: ``request_retries``. Core's own bounds on its
+    waits and cleanup: the remaining ``*_bound`` and ``observe_*`` fields.
+    """
+
+    max_attempts: Count
+    max_turns: Count
+    max_parallel: int = Field(ge=1)
+    pool_capacities: tuple[PoolCapacity, ...]
+    max_refunds: Count
+    max_adoption_rounds: int = Field(ge=1)
+    """AdoptRevision rounds per selection, the first included."""
+    max_reask_chain: Count
+    request_retries: RequestRetries
+    cancellation_bound: Seconds
     # The least time core gives its own cleanup and inspection requests, even once the run
     # deadline has passed (see `cleanup` in `_deadlines`).
-    cleanup_bound: Seconds = Field(default=60.0, gt=0)
-    reconciliation_bound: Seconds = 60.0
+    cleanup_bound: Seconds = Field(gt=0)
+    reconciliation_bound: Seconds
     # Poll cadence for a submitted measurement job, and the cap of the doubling
     # delay before re-polling a job whose last poll was unknown.
-    observe_interval: Seconds = Field(default=10.0, gt=0)
-    observe_backoff_cap: Seconds = Field(default=120.0, gt=0)
+    observe_interval: Seconds = Field(gt=0)
+    observe_backoff_cap: Seconds = Field(gt=0)
 
     @model_validator(mode="after")
     def observe_cap_covers_interval(self) -> Limits:
@@ -642,12 +678,28 @@ class RunFacts(Value):
     artifacts: tuple[ArtifactRef, ...] = ()
 
 
+class StopMode(StrEnum):
+    """How a stop treats work in flight: let it finish, or cancel it."""
+
+    DRAIN = "drain"
+    CANCEL = "cancel"
+
+
 class ControlInput(Value):
     """Control input lifecycle contract."""
 
     control_id: ControlId
     action: Literal["pause", "resume", "stop", "steer"]
+    mode: StopMode | None = None
+    """Drain or cancel what is in flight: the operator's choice, given with every stop."""
     artifact: ArtifactRef | None = None
+
+    @model_validator(mode="after")
+    def mode_belongs_to_stop(self) -> ControlInput:
+        """A stop names how it ends in-flight work; no other action has a mode."""
+        if (self.action == "stop") != (self.mode is not None):
+            raise ContractValidationError("mode", "required for stop and only for stop")
+        return self
 
 
 class CompletionStatus(StrEnum):

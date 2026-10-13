@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.orchestration.evolve.core_policy._limits import limits_for, run_deadline_at
+from vibesys.candidates.api import run_deadline_at
+from vibesys.orchestration.evolve.core_policy._limits import limits_for
 from vibesys.orchestration.evolve.core_policy._replies import reply_schemas
 from vibesys.orchestration.evolve.strategy.api import (
     JUDGE_REPLY,
@@ -22,6 +23,7 @@ from vs_core.api import (
     AssessmentAuthority,
     AssessmentKind,
     EvidenceRequirements,
+    RequestRetries,
     RevisionRef,
     WorkspaceMode,
 )
@@ -46,6 +48,10 @@ class RunBounds(_Value):
     queue_allowance_seconds: Seconds
     observe_interval_seconds: Seconds
     observe_backoff_cap_seconds: Seconds
+    request_retries: RequestRetries
+    cancellation_bound_seconds: Seconds
+    cleanup_bound_seconds: Seconds
+    reconciliation_bound_seconds: Seconds
     # None means the run has no wall-clock deadline.
     max_run_seconds: Seconds | None = None
 
@@ -176,11 +182,7 @@ def build_core_policy(
             workload_digest=inputs.workload_digest,
             environment_digest=inputs.environment_digest,
         ),
-        limits=limits_for(
-            config,
-            observe_interval=float(bounds.observe_interval_seconds),
-            observe_backoff_cap=float(bounds.observe_backoff_cap_seconds),
-        ),
+        limits=limits_for(config, bounds),
         deadline_at=run_deadline_at(bounds.max_run_seconds),
         reply_schemas=reply_schemas(),
         requirements=requirements_for(config),

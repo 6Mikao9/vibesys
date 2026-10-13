@@ -77,7 +77,9 @@ def test_interruption_fence_covers_all_successor_variants(
             state = state.model_copy(
                 update={
                     "run": state.run.model_copy(
-                        update={"limits": state.run.limits.model_copy(update={"max_retries": 2})}
+                        update={
+                            "limits": state.run.limits.model_copy(update={"max_reask_chain": 2})
+                        }
                     ),
                     "sessions": state.sessions.model_copy(
                         update={"invocations": (ancestor, corrected)}
@@ -87,7 +89,7 @@ def test_interruption_fence_covers_all_successor_variants(
         state = state.model_copy(
             update={
                 "run": state.run.model_copy(
-                    update={"limits": state.run.limits.model_copy(update={"max_retries": 2})}
+                    update={"limits": state.run.limits.model_copy(update={"max_reask_chain": 2})}
                 )
             }
         )

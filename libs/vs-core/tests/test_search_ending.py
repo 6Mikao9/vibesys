@@ -32,7 +32,9 @@ async def until_stopped(ctx: core.Flow, _config: Config) -> None:
 
 def _stop(control: str, at: float) -> core.RunControlEvent:
     return core.RunControlEvent(
-        control=core.ControlInput(control_id=core.ControlId(root=control), action="stop"),
+        control=core.ControlInput(
+            control_id=core.ControlId(root=control), action="stop", mode=core.StopMode.DRAIN
+        ),
         now_at=at,
     )
 

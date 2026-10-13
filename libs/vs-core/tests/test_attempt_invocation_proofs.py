@@ -33,7 +33,6 @@ from vs_core.api import (
     InvocationRef,
     ItemId,
     LifecycleClass,
-    Limits,
     Observation,
     ObservationStatus,
     Rejected,
@@ -59,6 +58,7 @@ from vs_core.api import (
     advance_attempt,
     initial_state,
 )
+from vs_core.api.testing import sample_limits
 
 
 def invocation_fixture(
@@ -223,7 +223,7 @@ def invocation_fixture(
             "run": state.run.model_copy(
                 update={
                     "receipts": () if receipt_kind == "absent" else (receipt,),
-                    "limits": Limits(max_turns=10, max_refunds=2),
+                    "limits": sample_limits(max_turns=10, max_refunds=2),
                 }
             ),
         }
@@ -481,7 +481,9 @@ def test_ambiguous_charge_identity_never_refunds_multiple_receipts(copies: int) 
                     )
                 }
             ),
-            "run": state.run.model_copy(update={"limits": Limits(max_turns=10, max_refunds=1)}),
+            "run": state.run.model_copy(
+                update={"limits": sample_limits(max_turns=10, max_refunds=1)}
+            ),
         }
     )
     state = CoreState.model_validate_json(state.model_dump_json())

@@ -18,7 +18,6 @@ from vs_core.api import (
     Flow,
     FlowState,
     ItemId,
-    Limits,
     OperationRegistry,
     ResourceId,
     RevisionRef,
@@ -31,7 +30,7 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspacePlan,
 )
-from vs_core.api.testing import Harness, Succeeded
+from vs_core.api.testing import Harness, Succeeded, sample_limits, sample_retries
 from vs_core.flows import search
 from vs_dst.api import RunSetup
 from vs_runtime.api.testing import Launch
@@ -80,7 +79,13 @@ def tiny_setup(items: int, max_concurrent: int = 1) -> RunSetup:
         harness=Harness(
             registry=OperationRegistry(()),
             facts=FACTS,
-            limits=Limits(max_attempts=8, max_turns=8, max_parallel=1, max_retries=2),
+            limits=sample_limits(
+                max_attempts=8,
+                max_turns=8,
+                max_parallel=1,
+                max_reask_chain=2,
+                request_retries=sample_retries(2),
+            ),
             envelope_type=RunEnvelope[FlowState],
         ),
         schemas={},

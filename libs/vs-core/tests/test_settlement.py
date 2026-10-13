@@ -328,6 +328,7 @@ def measured_state() -> tuple[core.CoreState, core.Settlement]:
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
+        accuracy_gated=(),
     )
     job = core.OwnedJob(
         resource_id=core.ResourceId(root="measurement"),

@@ -25,7 +25,13 @@ from vs_evaluator_protocol.api import PartialMeasurement
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import Limits, OperationRegistration, RevisionRef, SearchDef
+    from vs_core.api import (
+        Limits,
+        OperationRegistration,
+        RequestRetries,
+        RevisionRef,
+        SearchDef,
+    )
     from vs_core.api import RunFacts as CoreRunFacts
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
@@ -683,8 +689,16 @@ class CoreRunContext:
     """How often a running evaluation job is polled."""
     observe_backoff_cap_seconds: int
     """The longest wait after a poll that could not read the job."""
+    request_retries: RequestRetries
+    """How the backend wants a request its executor did not run re-sent; a fact, not a choice."""
     max_run_seconds: int | None
     """Wall-clock budget of the run, or ``None`` for no deadline."""
+    cancellation_bound_seconds: int
+    """The longest core waits for a cancelled job to be confirmed gone."""
+    cleanup_bound_seconds: int
+    """The least time core gives its own cleanup requests once the deadline has passed."""
+    reconciliation_bound_seconds: int
+    """The longest core waits to learn what became of a request it could not read."""
 
 
 @dataclass(frozen=True, slots=True)

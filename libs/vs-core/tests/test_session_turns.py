@@ -10,6 +10,7 @@ from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 from .proof_digest import value_digest
 
@@ -368,7 +369,7 @@ def test_all_charge_classes_dispatch_preserves_recorded_currency(charge: str) ->
         state = state.model_copy(
             update={
                 "run": state.run.model_copy(
-                    update={"limits": core.Limits(max_turns=10, max_retries=2)}
+                    update={"limits": sample_limits(max_turns=10, max_reask_chain=2)}
                 )
             }
         )
@@ -622,7 +623,7 @@ def malformed_planner_state() -> tuple[core.CoreState, core.InvocationRef]:
     state = state.model_copy(
         update={
             "run": state.run.model_copy(
-                update={"limits": core.Limits(max_turns=10, max_retries=2)}
+                update={"limits": sample_limits(max_turns=10, max_reask_chain=2)}
             ),
             "sessions": state.sessions.model_copy(update={"invocations": (original,)}),
         }
@@ -652,7 +653,9 @@ def test_f1_planner_acquisition_and_correction_reach_declared_input_boundary(
     state = state.model_copy(
         update={
             "run": state.run.model_copy(
-                update={"limits": state.run.limits.model_copy(update={"max_retries": max_retries})}
+                update={
+                    "limits": state.run.limits.model_copy(update={"max_reask_chain": max_retries})
+                }
             )
         }
     )
@@ -964,7 +967,7 @@ def test_decision_budget_and_retry_exhaustion_returns_typed_feedback(charge: str
         state = state.model_copy(
             update={
                 "run": state.run.model_copy(
-                    update={"limits": core.Limits(max_turns=10, max_retries=0)}
+                    update={"limits": sample_limits(max_turns=10, max_reask_chain=0)}
                 )
             }
         )
@@ -972,7 +975,7 @@ def test_decision_budget_and_retry_exhaustion_returns_typed_feedback(charge: str
         state = core.initial_state().model_copy(
             update={
                 "run": core.initial_state().run.model_copy(
-                    update={"limits": core.Limits(max_turns=0)}
+                    update={"limits": sample_limits(max_turns=0)}
                 )
             }
         )
@@ -1124,7 +1127,7 @@ def interrupted_attempt_state(
     state = state.model_copy(
         update={
             "run": state.run.model_copy(
-                update={"limits": core.Limits(max_turns=10, max_refunds=1)}
+                update={"limits": sample_limits(max_turns=10, max_refunds=1)}
             ),
             "attempts": core.AttemptsState(attempts=(owner,)),
             "sessions": core.SessionsState(
@@ -1875,7 +1878,7 @@ def test_generated_authority_ids_encode_components_without_delimiter_collisions(
 ) -> None:
     state = core.initial_state()
     state = state.model_copy(
-        update={"run": state.run.model_copy(update={"limits": core.Limits(max_turns=2)})}
+        update={"run": state.run.model_copy(update={"limits": sample_limits(max_turns=2)})}
     )
     specs = tuple(
         turn(identity=invocation_id).model_copy(
@@ -2051,7 +2054,7 @@ def attempt_turn_dispatch_state(charge: str) -> tuple[core.CoreState, core.TurnS
     state = state.model_copy(
         update={
             "run": state.run.model_copy(
-                update={"limits": core.Limits(max_turns=10, max_retries=2)}
+                update={"limits": sample_limits(max_turns=10, max_reask_chain=2)}
             ),
             "attempts": core.AttemptsState(attempts=(owner,)),
             "sessions": core.SessionsState(sessions=(session,), invocations=invocations),
@@ -2089,7 +2092,7 @@ def test_ready_lease_cannot_overwrite_an_invocation_waiting_for_dispatch() -> No
     original = turn()
     state = waiting_turn_state(original)
     state = state.model_copy(
-        update={"run": state.run.model_copy(update={"limits": core.Limits(max_turns=3)})}
+        update={"run": state.run.model_copy(update={"limits": sample_limits(max_turns=3)})}
     )
     next_turn = original.model_copy(update={"invocation_id": core.InvocationId(root="next")})
     before = state.model_dump_json()

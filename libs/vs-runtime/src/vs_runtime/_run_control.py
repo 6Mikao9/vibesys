@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_core.api import StopMode
+
 
 class RunControlTransitionKind(StrEnum):
     """Closed set of cooperative run-control observations."""
@@ -76,8 +78,8 @@ class RunControlChannel(Protocol):
         """Take the pending fallback request: True once per request."""
         ...
 
-    def request_stop(self) -> None:
-        """Request an unwind at the next cooperative boundary."""
+    def request_stop(self, mode: StopMode) -> None:
+        """Request an unwind at the next cooperative boundary, draining or cancelling work."""
         ...
 
     def take_pending_steer(self) -> list[str]:
@@ -116,6 +118,10 @@ class RunControlChannel(Protocol):
         """Return whether a stop is pending, without landing it."""
         ...
 
+    def stop_mode(self) -> StopMode | None:
+        """How the pending stop treats work in flight, or ``None`` when no stop is pending."""
+        ...
+
     def pause_requested(self) -> bool:
         """Return whether a pause is pending, without parking on it."""
         ...
@@ -143,6 +149,7 @@ class RuntimeRunControlChannel:
         self._pending_steer: list[str] = []
         self._paused = False
         self._stop_requested = False
+        self._stop_mode: StopMode | None = None
         self._fallback_requested = False
         self._stop_listeners: list[Callable[[], object]] = []
 
@@ -170,6 +177,7 @@ class RuntimeRunControlChannel:
         with self._lock:
             self._paused = False
             self._stop_requested = False
+            self._stop_mode = None
             self._fallback_requested = fallback
             self._lock.notify_all()
         self._emit(RunControlTransitionKind.RESUMED)
@@ -184,8 +192,8 @@ class RuntimeRunControlChannel:
             requested, self._fallback_requested = self._fallback_requested, False
         return requested
 
-    def request_stop(self) -> None:
-        """Request that the run unwind at its next cooperative boundary.
+    def request_stop(self, mode: StopMode) -> None:
+        """Request that the run unwind at its next cooperative boundary, as ``mode`` says.
 
         The request is published before a boundary can see it, so a run that
         reaches a boundary concurrently never reports ``STOPPED`` ahead of the
@@ -195,6 +203,7 @@ class RuntimeRunControlChannel:
         self._emit(RunControlTransitionKind.STOP_REQUESTED)
         with self._lock:
             self._stop_requested = True
+            self._stop_mode = mode
             self._lock.notify_all()
             listeners = tuple(self._stop_listeners)
         for listener in listeners:
@@ -204,6 +213,11 @@ class RuntimeRunControlChannel:
         """Return whether a stop is pending, without landing it."""
         with self._lock:
             return self._stop_requested
+
+    def stop_mode(self) -> StopMode | None:
+        """How the pending stop treats work in flight, or ``None`` when none is pending."""
+        with self._lock:
+            return self._stop_mode if self._stop_requested else None
 
     def pause_requested(self) -> bool:
         """Return whether a pause is pending, without parking on it."""

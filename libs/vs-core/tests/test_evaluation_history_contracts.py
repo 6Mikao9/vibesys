@@ -469,6 +469,7 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
                     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
                     submitted_at=0.0,
                     queue_allowance=100.0,
+                    accuracy_gated=(),
                 ),
             ),
             payload_digest="payload",

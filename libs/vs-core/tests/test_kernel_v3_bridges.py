@@ -11,7 +11,9 @@ import vs_core.api as core
 def test_stop_control_records_canonical_result_before_run_drain_and_replays(now: int) -> None:
     state = core.initial_state()
     proposal = core.RunResultProposal(outcome="cancelled", reason="explicit stop")
-    control = core.ControlInput(control_id=core.ControlId(root="stop"), action="stop")
+    control = core.ControlInput(
+        control_id=core.ControlId(root="stop"), action="stop", mode=core.StopMode.DRAIN
+    )
     event = core.RunControlEvent(control=control, now_at=float(now), result=proposal)
     drain = core.AdmissionControl(action="drain")
     result = core.trace_step(

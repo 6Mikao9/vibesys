@@ -20,10 +20,10 @@ what is chosen, proposed and stopped with.
 from dataclasses import dataclass
 from enum import StrEnum
 
-from vibesys.candidates._config import CandidateConfig
 from vibesys.candidates._settlement import measurement
+from vibesys.candidates._winner import Unranked, best_by
 from vibesys.hypothesis import RunEnding
-from vibesys.metrics import MetricRow
+from vibesys.metrics import MetricRow, MetricSpace
 from vs_core.api import (
     AdoptionResult,
     IdScheme,
@@ -36,6 +36,7 @@ from vs_core.api import (
     Selection,
     SettlementId,
     Stop,
+    StopMode,
     TrustedBaseline,
     Value,
     run_scope,
@@ -77,15 +78,23 @@ def ending_reason(ending: RunEnding, detail: str) -> str:
 
 
 def choose_winner(
-    rounds: tuple[EligibleRound, ...], config: CandidateConfig, baseline: RevisionRef
+    rounds: tuple[EligibleRound, ...],
+    *,
+    space: MetricSpace,
+    baseline: RevisionRef,
+    when_unranked: Unranked,
 ) -> Winner:
-    """The best eligible candidate by the metric space; earlier rounds win ties."""
-    points = sorted(rounds, key=lambda item: item.sequence)
-    best = config.metric_space.best(
-        points, lambda item: measurement(item.metrics[0] if item.metrics else None)
+    """The best eligible round by ``space``, else the trusted baseline.
+
+    Earlier rounds win ties. ``when_unranked`` says what happens when no round has a metric.
+    """
+    best = best_by(
+        rounds,
+        space=space,
+        reading=lambda item: measurement(item.metrics[0] if item.metrics else None),
+        order=lambda item: item.sequence,
+        when_unranked=when_unranked,
     )
-    if best is None and points and not any(item.metrics for item in points):
-        best = points[-1]  # no benchmark configured: the latest eligible candidate
     if best is None:
         return Winner(settlement=None, revision=baseline, hypothesis_id=None)
     return Winner(
@@ -114,13 +123,16 @@ def stop(
     view: RunView,
     winner: Winner | None,
     *,
-    stopping: bool,
+    operator_stop: StopMode | None,
     no_winner_reason: str,
 ) -> Stop:
     """End the run after the adoption result: success with a winner, else failure.
 
-    An operator stop ends it ``cancelled`` either way.
+    ``operator_stop`` is the stop control's mode when the operator stopped the run, which ends
+    it ``cancelled`` either way and drains or cancels what is in flight as the operator chose.
+    A run that ends by itself passes ``None``: nothing is in flight to cancel.
     """
+    stopping = operator_stop is not None
     if winner is None:
         result = RunResultProposal(
             outcome="cancelled" if stopping else "failure", reason=no_winner_reason
@@ -135,7 +147,7 @@ def stop(
     return Stop(
         decision_id=ids.decision_id("stop", "run"),
         scope=run_scope(view),
-        mode="drain",
+        mode=(operator_stop or StopMode.DRAIN).value,
         result=result,
     )
 

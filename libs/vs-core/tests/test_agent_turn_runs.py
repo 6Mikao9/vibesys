@@ -23,6 +23,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits, sample_retries
 from vs_core.testing.drive import Faults
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 
@@ -57,7 +58,7 @@ def assert_ended_closed(trace: Trace, limits: core.Limits = LIMITS) -> None:
         ("success", "kept-input: the input")
     ]
     journal = Journal.from_log(trace.log)
-    assert_live(journal, trace.core, Budget(retries=limits.max_retries), End.TERMINAL)
+    assert_live(journal, trace.core, Budget(retries=limits.request_retries.limit), End.TERMINAL)
     assert all(a.phase == core.AttemptPhase.TERMINAL for a in trace.core.attempts.attempts)
     assert not [c for c in trace.core.evaluation.continuations if c.phase in _OPEN]
     # Every wait core recorded was resumed once, and no turn was resumed without one.
@@ -229,11 +230,12 @@ def test_roles_of_a_workstream_asking_for_one_candidate_share_one_evaluation(
 
 
 _LIMITS = st.builds(
-    core.Limits,
+    sample_limits,
     max_attempts=st.integers(1, 3),
     max_turns=st.integers(1, 6),
     max_parallel=st.just(2),
-    max_retries=st.integers(0, 2),
+    max_reask_chain=st.integers(0, 2),
+    request_retries=st.integers(0, 2).map(sample_retries),
     max_refunds=st.integers(0, 2),
 )
 
@@ -255,3 +257,28 @@ def test_a_run_ends_with_every_workspace_closed_whatever_core_refuses_over_its_l
     trace = run_toy(ToyHost(waits=waits, polls=(1,)), config, limits=limits)
 
     assert_ended_closed(trace, limits)
+
+
+@_SETTINGS
+@given(
+    mode=st.sampled_from(core.StopMode),
+    config=st.builds(Config, workstreams=st.integers(1, 3), in_flight=st.integers(1, 2)),
+    waits=st.lists(st.booleans(), min_size=1, max_size=3).map(tuple),
+    at=st.sampled_from([0.0, 1.0, 5.0]),
+)
+def test_a_stop_ends_the_run_with_every_resource_released_in_the_mode_the_operator_chose(
+    mode: core.StopMode, config: Config, waits: tuple[bool, ...], at: float
+) -> None:
+    """Drain and cancel are the operator's choice; either way nothing is left open."""
+    stop = core.RunControlEvent(
+        control=core.ControlInput(control_id=core.ControlId(root="stop"), action="stop", mode=mode),
+        now_at=at,
+    )
+    trace = run_toy(ToyHost(waits=waits, polls=(1,)), config, events=(stop,))
+
+    assert trace.finished
+    finishes = [d for d in trace.decisions if isinstance(d, core.Finish)]
+    assert [f.mode for f in finishes] == [mode.value], "the mode the operator gave is the one used"
+    assert all(a.phase == core.AttemptPhase.TERMINAL for a in trace.core.attempts.attempts)
+    assert not [c for c in trace.core.evaluation.continuations if c.phase in _OPEN]
+    assert all(item.closed for item in summary(trace).done if item.opened)

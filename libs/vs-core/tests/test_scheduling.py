@@ -14,6 +14,7 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 from .proof_digest import value_digest
 from .reopen_facts import with_reopening_continuation
@@ -89,7 +90,7 @@ def _state(
             "run": state.run.model_copy(
                 update={
                     "status": core.RunStatus.PAUSED if paused else core.RunStatus.RUNNING,
-                    "limits": limits if limits is not None else core.Limits(max_attempts=20),
+                    "limits": limits if limits is not None else sample_limits(max_attempts=20),
                 }
             ),
             "attempts": core.AttemptsState(attempts=owners),
@@ -137,7 +138,7 @@ def test_supplied_clocks_are_monotonic_and_occupancy_is_derived(
     state = _state(
         owners=tuple(_owner(request, phase=core.AttemptPhase.ACTIVE) for request in requests),
         slots=tuple(_slot(request) for request in requests),
-        limits=core.Limits(max_attempts=20, max_parallel=slots),
+        limits=sample_limits(max_attempts=20, max_parallel=slots),
     )
     now = 0
     for increment in times:
@@ -320,7 +321,7 @@ def test_admission_usage_and_refunds_have_only_receipt_authority(
     )
     owner = owner.model_copy(update={"charges": (*owner.charges, unrelated)})
     state = _state(
-        owners=(owner,), queue=(request,), paused=True, limits=core.Limits(max_attempts=budget)
+        owners=(owner,), queue=(request,), paused=True, limits=sample_limits(max_attempts=budget)
     )
     for event in (
         core.ClockAdvanced(now_at=15.0),
@@ -475,7 +476,7 @@ def test_fifo_head_cannot_be_bypassed_when_any_admission_gate_is_closed(gate: st
         queue=(head, tail),
         slots=(_slot(running),),
         paused=gate == "paused",
-        limits=core.Limits(max_attempts=20, max_parallel=1 if gate == "capacity" else 3),
+        limits=sample_limits(max_attempts=20, max_parallel=1 if gate == "capacity" else 3),
     )
     if gate == "recovery":
         state = state.model_copy(
@@ -496,7 +497,7 @@ def test_already_paid_queue_head_admits_with_zero_remaining_admission_budget() -
     """Registration charged queued work; later capacity admission is free, K4."""
     request = _request(0)
     state = _canonical_start(
-        _state(owners=(_owner(request),), queue=(request,), limits=core.Limits(max_attempts=1)),
+        _state(owners=(_owner(request),), queue=(request,), limits=sample_limits(max_attempts=1)),
         request,
     )
     assert core.project(state).scheduling.available_tokens == 0
@@ -739,7 +740,7 @@ def test_exhausted_receipt_budget_rejects_reordered_duplicate_starts_once(order:
     state = _state(
         owners=(_owner(occupied, phase=core.AttemptPhase.ACTIVE),),
         slots=(_slot(occupied),),
-        limits=core.Limits(max_attempts=1, max_parallel=3),
+        limits=sample_limits(max_attempts=1, max_parallel=3),
     )
     seen: set[int] = set()
     for index in order:
@@ -781,7 +782,9 @@ def test_exhausted_receipt_budget_rejects_reordered_duplicate_starts_once(order:
 def test_host_stop_with_a_result_closes_admission_and_drains() -> None:
     """A RunControl stop that carries a result proposal drains; scheduling never invents one."""
     state = _state()
-    control = core.ControlInput(control_id=core.ControlId(root="host-stop"), action="stop")
+    control = core.ControlInput(
+        control_id=core.ControlId(root="host-stop"), action="stop", mode=core.StopMode.DRAIN
+    )
     proposal = core.RunResultProposal(outcome="cancelled", reason="host stop")
     result = _step(state, core.RunControlEvent(control=control, now_at=10.0, result=proposal))
     assert result.state.scheduling.admission_closed
@@ -801,7 +804,9 @@ def test_host_stop_with_a_result_closes_admission_and_drains() -> None:
 def test_host_stop_without_a_result_only_tells_the_search() -> None:
     """A soft stop is recorded once and leaves the run running: the search ends the run."""
     state = _state()
-    control = core.ControlInput(control_id=core.ControlId(root="host-stop"), action="stop")
+    control = core.ControlInput(
+        control_id=core.ControlId(root="host-stop"), action="stop", mode=core.StopMode.DRAIN
+    )
     event = core.RunControlEvent(control=control, now_at=10.0)
     result = _step(state, event)
     assert result.state.run.status == state.run.status
@@ -924,7 +929,7 @@ def test_root_mutation_and_independent_workspace_leases_can_share_capacity(
         ),
         slots=(_slot(running),),
         queue=(queued,),
-        limits=core.Limits(max_attempts=2, max_parallel=2),
+        limits=sample_limits(max_attempts=2, max_parallel=2),
     )
     _assert_attempts_boundary(state, core.ClockAdvanced(now_at=10.0), "attempt_admitted")
 
@@ -954,7 +959,7 @@ def test_updated_refund_receipts_authorize_only_the_restored_admission_budget(
             )
         }
     )
-    state = _state(owners=(owner,), limits=core.Limits(max_attempts=budget))
+    state = _state(owners=(owner,), limits=sample_limits(max_attempts=budget))
     request = _request(0, charge=new_cost)
     candidate = _owner(request)
     decision = core.StartAttempt(
@@ -1278,7 +1283,7 @@ def test_reentry_with_exact_canonical_park_authority_creates_a_fresh_free_episod
             ),
         }
     )
-    state = _state(owners=(owner,), limits=core.Limits(max_attempts=1))
+    state = _state(owners=(owner,), limits=sample_limits(max_attempts=1))
     state, codec, reopen = _reopen_proof(state, owner)
     state = state.model_copy(
         update={"scheduling": core.SchedulingState(queue=(reopen,), released_slot_seconds=5.0)}
@@ -1556,7 +1561,7 @@ def queued_root_behind_full_slot(
         ),
         slots=(_slot(running),),
         queue=(head,),
-        limits=core.Limits(max_attempts=2, max_parallel=1),
+        limits=sample_limits(max_attempts=2, max_parallel=1),
     )
     return state, core.SlotReleased(attempt=_ref(running), admission_id=running.decision_id)
 

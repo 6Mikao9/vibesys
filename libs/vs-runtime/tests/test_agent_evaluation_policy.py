@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    EvidenceKind,
     MeasurementRecipe,
     RevisionId,
     RevisionRef,
@@ -39,6 +40,7 @@ def test_the_agent_plan_is_the_recipes_plan(
         ),
         queue_allowance=queue,
         accuracy_stage="accuracy" if gated else None,
+        accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
     )
     policy = AgentEvaluationPolicy.from_recipe(recipe)
     assert policy.plan(CANDIDATE, now_at=now) == recipe.plan(

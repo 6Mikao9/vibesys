@@ -260,6 +260,7 @@ def test_settle_preserves_normal_finality_wip_and_evidence_eligibility() -> None
             recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
             submitted_at=0.0,
             queue_allowance=0.0,
+            accuracy_gated=(),
         ),
         status=ObservationStatus.SUCCEEDED,
         terminal=True,

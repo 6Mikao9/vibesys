@@ -1,8 +1,8 @@
 """Input baseline: one trusted measurement of the starting revision.
 
 Candidates and adoption are gated on this reading. A measurement that yields no evidence is
-retried up to `max_input_measurement_attempts`; a workload rejection of the input is a typed
-failure shown to the planner, not an exception. Every function takes the `BaselineState` and
+makes the input unmeasurable (the backend already measured again within its own bound); a
+workload rejection of the input is a typed failure shown to the planner, not an exception. Every function takes the `BaselineState` and
 returns the next one (and the decisions to propose); the strategy keeps the state.
 """
 
@@ -30,7 +30,6 @@ from vs_core.api import (
     Value,
     declared_operation,
     ledger_refs,
-    may_resubmit,
     run_scope,
     trusted_keys,
 )
@@ -99,7 +98,6 @@ def propose(
                 purpose="baseline",
                 now_at=view.run.now_at,
                 stages=names,
-                submission_limit=config.max_input_measurement_attempts,
             ),
         )
         return (
@@ -142,9 +140,9 @@ def propose(
 
 
 def on_measurement(
-    baseline: BaselineState, view: RunView, event: MeasurementResult, config: CandidateConfig
+    baseline: BaselineState, view: RunView, event: MeasurementResult
 ) -> BaselineState:
-    """Record the baseline's evidence, or retry or give up when it produced none.
+    """Record the baseline's evidence, or give up when it produced none.
 
     Only a result for the run's own scope and generation counts, and only its
     trusted baseline evidence of the input revision.
@@ -153,13 +151,9 @@ def on_measurement(
     if baseline.stage is not BaselineStage.AWAITING or event.scope != scope:
         return baseline
     evidence = trusted_keys(event, scope=scope, candidate=view.facts.baseline, purpose="baseline")
-    if may_resubmit(
-        event.failure, submissions=baseline.attempts, limit=config.max_input_measurement_attempts
-    ):
-        update: dict[str, object] = {"stage": BaselineStage.NEEDED}
-    elif evidence:
-        update = {"stage": BaselineStage.INTERPRET, "evidence": evidence}
-    elif baseline.attempts >= config.max_input_measurement_attempts:
+    if evidence:
+        update: dict[str, object] = {"stage": BaselineStage.INTERPRET, "evidence": evidence}
+    else:
         update = {
             "stage": BaselineStage.UNMEASURABLE,
             "failure": (
@@ -167,8 +161,6 @@ def on_measurement(
                 + (f": {event.diagnostic}" if event.diagnostic else "")
             ),
         }
-    else:
-        update = {"stage": BaselineStage.NEEDED}
     return baseline.model_copy(update={**update, "awaiting": None})
 
 
