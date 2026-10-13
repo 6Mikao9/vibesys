@@ -243,23 +243,10 @@ def _agent_policy_descriptor(
                 "objectives": (*metrics.objectives, Objective(benchmark.metric, "max")),
             }
         )
-    options = {
+    task = {
         "interface": args.interface,
         "modality": args.modality
         or ("text_generation" if bundle.domain is DomainName.LLM_SERVING else None),
-        "max_rounds": args.max_rounds,
-        "max_retries_per_round": args.max_retries_per_round,
-        "judge_every": args.judge_every,
-        "official_eval_every": args.official_eval_every,
-        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
-        **(
-            {
-                "max_in_flight": args.max_in_flight,
-                "max_unmeasured_turns": args.max_unmeasured_turns,
-            }
-            if args.outer_loop == "dynamic"
-            else {}
-        ),
         "operator_constraints": [item.strip() for item in args.constraint if item.strip()],
         "metric_space": metrics.model_dump(mode="json"),
         "profile_guided": bundle.manifest.profile_guided.model_dump(mode="json")
@@ -267,6 +254,24 @@ def _agent_policy_descriptor(
         and bundle.manifest.profile_guided is not None
         else None,
     }
+    if args.outer_loop == "dynamic":
+        # The dynamic search reads only its own knobs; its agents' retries are the roles'.
+        options = {
+            **task,
+            "max_rounds": args.max_rounds,
+            "max_in_flight": args.max_in_flight,
+            "judge_every": args.judge_every,
+            "max_unmeasured_turns": args.max_unmeasured_turns,
+        }
+    else:
+        options = {
+            **task,
+            "max_rounds": args.max_rounds,
+            "max_retries_per_round": args.max_retries_per_round,
+            "judge_every": args.judge_every,
+            "official_eval_every": args.official_eval_every,
+            "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
+        }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
 
 

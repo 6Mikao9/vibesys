@@ -1,107 +1,17 @@
-"""The dynamic core policy: every pure input the host passes the core for a dynamic run."""
+"""What a dynamic run needs core to know about its task, as plain values.
+
+The task's terms (how candidates are measured and compared) are resolved by the host and carried
+as the run's facts; this module derives the one thing that depends on the search's own roles: who
+may vouch for a candidate.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
-
-from pydantic import BaseModel, ConfigDict, Field
-
-from vibesys.candidates.api import run_deadline_at
-from vibesys.orchestration.dynamic.core_policy._limits import limits_for
-from vibesys.orchestration.dynamic.core_policy._replies import reply_schemas
-from vibesys.orchestration.dynamic.models import ProfileField
-from vibesys.orchestration.dynamic.strategy.api import (
-    JUDGE_REPLY,
-    DynamicConfig,
-    DynamicStrategy,
-    Role,
-    role_id,
-)
-from vs_core.api import (
-    ArtifactRef,
-    AssessmentAuthority,
-    AssessmentKind,
-    EvidenceRequirements,
-    RequestRetries,
-    RevisionRef,
-)
-from vs_core.api import RunFacts as CoreRunFacts
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from vibesys.orchestration.dynamic.models import DynamicOptions
-    from vs_core.api import Limits, SchemaRef
-
-type Seconds = Annotated[int, Field(gt=0)]
+from vibesys.orchestration.dynamic.search.api import JUDGE, dynamic
+from vs_core.api import AssessmentAuthority, AssessmentKind, EvidenceRequirements, TaskTerms
 
 
-class _Value(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-
-class RunBounds(_Value):
-    """Time bounds and pacing from the validated product config (`[evaluation]` and `[run]`)."""
-
-    queue_allowance_seconds: Seconds
-    # How often core polls a running measurement job, and the longest delay after a
-    # poll that could not read the job.
-    observe_interval_seconds: Seconds
-    observe_backoff_cap_seconds: Seconds
-    request_retries: RequestRetries
-    cancellation_bound_seconds: Seconds
-    cleanup_bound_seconds: Seconds
-    reconciliation_bound_seconds: Seconds
-    # None means the run has no wall-clock deadline.
-    max_run_seconds: Seconds | None = None
-
-
-class PolicyInputs(_Value):
-    """What the host resolved about the run before the strategy starts, as plain values.
-
-    The digests are the run's evaluator, workload and environment identities as the
-    evaluation backend computes them. `recipe` names the stored evaluation plan every
-    measurement plan cites. A stage budget of None means the plan declares no timeout
-    for it, and the strategy's own default applies.
-    """
-
-    objective: Annotated[str, Field(min_length=1)]
-    baseline_commit: Annotated[str, Field(min_length=1)]
-    evaluator_digest: Annotated[str, Field(min_length=1)]
-    workload_digest: Annotated[str, Field(min_length=1)]
-    environment_digest: Annotated[str, Field(min_length=1)]
-    recipe: ArtifactRef
-    accuracy_configured: bool
-    benchmark_configured: bool
-    profiling: bool
-    profile_measurement: bool
-    profile_capture_withheld: bool = False
-    profile_fields: tuple[ProfileField, ...] = ()
-    accuracy_seconds: Seconds | None = None
-    benchmark_seconds: Seconds | None = None
-    profile_seconds: Seconds | None = None
-
-
-@dataclass(frozen=True)
-class DynamicCorePolicy:
-    """What the shell needs to start, run and resume a dynamic search on the core.
-
-    `facts`, `limits` and `deadline_at` go into the core state; `reply_schemas` into
-    the session resolver; `strategy.declaration` names the operations to offer.
-    """
-
-    strategy: DynamicStrategy
-    facts: CoreRunFacts
-    limits: Limits
-    deadline_at: float
-    reply_schemas: Mapping[SchemaRef, type[BaseModel]]
-    requirements: EvidenceRequirements
-    profile_capture_withheld: bool = False
-    """The run asked for profile work this environment cannot capture, so none is offered."""
-
-
-def requirements_for(config: DynamicConfig) -> EvidenceRequirements:
+def requirements_for(terms: TaskTerms) -> EvidenceRequirements:
     """The judge vouches for local validation; each configured gate must be satisfied.
 
     Core grants no role implicit authority, so without the judge's declared authority its
@@ -111,61 +21,12 @@ def requirements_for(config: DynamicConfig) -> EvidenceRequirements:
         assessment_authorities=(
             AssessmentAuthority(
                 kind=AssessmentKind.LOCAL_VALIDATION,
-                role_id=role_id(Role.JUDGE.value),
-                output_schema=JUDGE_REPLY,
+                role_id=dynamic.ids.role_id(JUDGE.name),
+                output_schema=JUDGE.reply_schema,
             ),
         ),
         required_assessments=(
-            *((AssessmentKind.CORRECTNESS,) if config.accuracy_configured else ()),
-            *((AssessmentKind.BENCHMARK,) if config.benchmark_configured else ()),
+            *((AssessmentKind.CORRECTNESS,) if "accuracy" in terms.measured else ()),
+            *((AssessmentKind.BENCHMARK,) if "benchmark" in terms.measured else ()),
         ),
-    )
-
-
-def build_core_policy(
-    options: DynamicOptions, bounds: RunBounds, inputs: PolicyInputs
-) -> DynamicCorePolicy:
-    """The policy of one dynamic run from its validated options and resolved inputs.
-
-    The run's own facts override the strategy's defaults: which stages are
-    configured, whether it profiles, the queue allowance and each declared stage
-    budget.
-    """
-    stage_budgets = {
-        name: float(seconds)
-        for name, seconds in (
-            ("accuracy_seconds", inputs.accuracy_seconds),
-            ("benchmark_seconds", inputs.benchmark_seconds),
-            ("profile_seconds", inputs.profile_seconds),
-        )
-        if seconds is not None
-    }
-    config = DynamicConfig.from_options(
-        options,
-        recipe=inputs.recipe,
-        benchmark_configured=inputs.benchmark_configured,
-        accuracy_configured=inputs.accuracy_configured,
-        # A profiler agent alone cannot make a profile workstream useful. Offer
-        # one only when trusted evaluation also has a capture command, matching
-        # the evidence capability the workstream promises to the planner.
-        profiling=inputs.profile_measurement,
-        profile_measurement=inputs.profile_measurement,
-        profile_fields=inputs.profile_fields if inputs.profile_measurement else (),
-        queue_allowance_seconds=float(bounds.queue_allowance_seconds),
-        **stage_budgets,
-    )
-    return DynamicCorePolicy(
-        strategy=DynamicStrategy(config=config),
-        facts=CoreRunFacts(
-            objective=inputs.objective,
-            baseline=RevisionRef.of_git_commit(inputs.baseline_commit),
-            evaluator_digest=inputs.evaluator_digest,
-            workload_digest=inputs.workload_digest,
-            environment_digest=inputs.environment_digest,
-        ),
-        limits=limits_for(config, bounds),
-        deadline_at=run_deadline_at(bounds.max_run_seconds),
-        reply_schemas=reply_schemas(config),
-        requirements=requirements_for(config),
-        profile_capture_withheld=inputs.profile_capture_withheld,
     )

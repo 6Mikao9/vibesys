@@ -3,7 +3,6 @@
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.models import (
-    DynamicOptions,
     EvidenceReference,
     ImplementerResult,
     ImplementPortfolioPlan,
@@ -35,7 +34,6 @@ def __getattr__(name: str) -> object:
 __all__ = [
     "PLUGIN",
     "REGISTRATION",
-    "DynamicOptions",
     "EvidenceReference",
     "ImplementPortfolioPlan",
     "ImplementerResult",

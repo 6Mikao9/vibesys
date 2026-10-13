@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import RunFailure, RunFailureKind
-from vs_core.api import RetainedCandidate, RunResultProposal
+from vs_core.api import EndReason, RetainedCandidate, RunResultProposal
 from vs_project.api import Project
 from vs_runtime.api import RunStatus
 from vs_runtime.api.core import (
@@ -42,8 +42,6 @@ if TYPE_CHECKING:
     from vs_runtime.api import ArtifactStore
     from vs_runtime.api.core import AgentEvaluationBridge, ExecutorRefusal, StallNotes
 
-_STOP_RESULT = RunResultProposal(outcome="cancelled", reason="stop requested by the operator")
-_DEADLINE_RESULT = RunResultProposal(outcome="cancelled", reason="run deadline reached")
 _UNFINISHED_REASON = "the run ended without recording a result"
 
 
@@ -90,8 +88,6 @@ def _loop_config(run_id: str, lease_seconds: float) -> RunLoopConfig:
     return RunLoopConfig(
         host_id=f"vibesys:{run_id}:{os.getpid()}:{uuid.uuid4().hex[:8]}",
         lease_duration=lease_seconds,
-        stop_result=_STOP_RESULT,
-        deadline_result=_DEADLINE_RESULT,
     )
 
 
@@ -128,7 +124,11 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     """
     services = host.services
     shell = CoreRuntime(
-        services.store, services.strategy, services.state, bindings=services.bindings
+        services.store,
+        services.search.driver(services.config, services.bindings.registry),
+        services.state,
+        config=services.config,
+        bindings=services.bindings,
     )
     delivery = JournalPublicationDelivery(
         services.publications, services.bindings.registry, services.store
@@ -136,7 +136,6 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     controls = RunControlBridge(
         integration.control,
         _SteerTexts(services.artifacts),
-        stop_result=_STOP_RESULT,
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls)
     config = _loop_config(services.run_id, host.timing.lease_seconds)
@@ -175,20 +174,24 @@ def _unacknowledged_notes(bridge: AgentEvaluationBridge | None) -> StallNotes:
     return notes
 
 
+def _ended_by(result: RunResultProposal, ending: EndReason) -> bool:
+    """Whether the framework ended the run for ``ending`` (its reason starts with the ending)."""
+    return result.reason.split(":", 1)[0] == ending.value
+
+
 def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatus:
     """Map the run's recorded result to the status a plugin returns.
 
-    The kernel keeps the first stop result, so a run that reaches its deadline records
-    "cancelled" even when its strategy drained into an adopted candidate. A time budget
-    is the normal way an optimization run ends, so a deadline that found a verified
-    retained candidate is a success; with none it is a failure. An operator stop is
-    reported as stopped.
+    The framework ends a stopped run, an operator's or the deadline's, ``cancelled`` after
+    adopting the search's last choice. A time budget is the normal way an optimization run
+    ends, so a deadline that adopted a verified retained candidate is a success; with none it
+    is a failure. An operator stop is reported as stopped.
     """
     if result is None:
         return RunStatus.FAILED
-    if result == _STOP_RESULT:
+    if _ended_by(result, EndReason.STOPPED):
         raise RunStopped
-    kept = result == _DEADLINE_RESULT and _adopted_retained_candidate(shell)
+    kept = _ended_by(result, EndReason.DEADLINE) and _adopted_retained_candidate(shell)
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 
 
@@ -207,7 +210,7 @@ def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFail
     if result is None:
         kind = RunFailureKind.NO_RESULT
         reason = _UNFINISHED_REASON
-    elif result == _DEADLINE_RESULT:
+    elif _ended_by(result, EndReason.DEADLINE):
         kind = RunFailureKind.DEADLINE
         reason = result.reason
     elif started >= budget:

@@ -1216,18 +1216,29 @@ from = ["vibesys.serial_search"]
 expose = ["api", "api\\..*"]
 
 [[modules]]
-path = "vibesys.orchestration.dynamic.strategy"
+# The dynamic search as one flow: its roles, its values and the pure helpers its flows share.
+path = "vibesys.orchestration.dynamic.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.prompts"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.metrics"]
 
 [[interfaces]]
-from = ["vibesys.orchestration.dynamic.strategy"]
+from = ["vibesys.orchestration.dynamic.search"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+# The options a dynamic run is launched with: the search's config and the task's inputs.
+path = "vibesys.orchestration.dynamic.launch"
+layer = "loops"
+depends_on = ["vibesys.orchestration.agent_options", "vibesys.orchestration.dynamic.search"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.dynamic.launch"]
+expose = ["DynamicLaunch"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.run.contracts", "vibesys.candidates"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.search", "vibesys.run.contracts", "vibesys.candidates"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]
@@ -1235,14 +1246,14 @@ expose = ["api", "api\\..*"]
 
 [[interfaces]]
 from = ["vibesys.dynamic_core"]
-expose = ["ResolvedRun", "dynamic_core_registration", "dynamic_operation_catalog", "dynamic_projector", "resolve_core_policy"]
+expose = ["dynamic_core_registration", "dynamic_operation_catalog", "dynamic_projector"]
 
 [[modules]]
 # Assembles the dynamic core policy from the run's resolved resources: the one
 # place that stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.dynamic_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.evaluation_identity"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.launch", "vibesys.orchestration.dynamic.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.run.evaluation_identity"]
 
 [[interfaces]]
 from = ["vibesys.dynamic_roles"]
@@ -1274,7 +1285,7 @@ expose = ["CONTINUATION", "CONTINUING_READER", "EVALUATION_TOOL", "MEASURING", "
 # paths) that the pure core_policy may not hold.
 path = "vibesys.dynamic_roles"
 layer = "loops"
-depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.strategy"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.search"]
 
 [[modules]]
 path = "vibesys.orchestration.single.models"
