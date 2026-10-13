@@ -23,9 +23,15 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.testing import sample_limits, sample_retries
-from vs_core.testing.drive import Faults
-from vs_core.testing.liveness import Budget, End, Journal, assert_live
+from vs_core.api.testing import (
+    Budget,
+    End,
+    Faults,
+    Journal,
+    assert_live,
+    sample_limits,
+    sample_retries,
+)
 
 from .toy_agent_search import (
     ENDINGS,
@@ -39,7 +45,7 @@ from .toy_agent_search import (
 )
 
 if TYPE_CHECKING:
-    from vs_core.testing.drive import Trace
+    from vs_core.api.testing import Trace
 
 _SETTINGS = settings(max_examples=12, deadline=None, derandomize=True, database=None)
 _OPEN = {

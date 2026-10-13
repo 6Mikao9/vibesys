@@ -20,9 +20,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import vs_core.api as core
-from vs_core.api.testing import sample_limits, sample_retries
-from vs_core.flows import search
-from vs_core.testing.drive import (
+from vs_core.api.search import search
+from vs_core.api.testing import (
     Answer,
     Faults,
     Harness,
@@ -30,6 +29,8 @@ from vs_core.testing.drive import (
     Succeeded,
     Trace,
     drive,
+    sample_limits,
+    sample_retries,
 )
 
 from .test_measurements import plan as measurement_plan

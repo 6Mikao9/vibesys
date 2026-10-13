@@ -7,7 +7,7 @@ A search imports this module and nothing else from vs-core. It holds what a sear
 
 import vs_core.api as shell_facade
 import vs_core.api.search as search_facade
-from vs_core.types.search import AttemptSummary
+from vs_core.api.search import AttemptSummary
 
 PLUMBING = {
     "RequestRecord",

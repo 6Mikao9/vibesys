@@ -14,8 +14,8 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 import vs_core.api as core
-from vs_core.flows import search
-from vs_core.testing.flows import FAKE_OPERATIONS
+from vs_core.api.search import search
+from vs_core.api.testing import FAKE_OPERATIONS
 
 MODELS = ("model-a", "model-b", "claude-x")
 

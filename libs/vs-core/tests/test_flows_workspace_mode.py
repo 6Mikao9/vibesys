@@ -7,9 +7,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 import vs_core.api as core
-from vs_core.api.testing import FlowRun
-from vs_core.flows import search
-from vs_core.testing.flows import FAKE_OPERATIONS, Prompt
+from vs_core.api.search import search
+from vs_core.api.testing import FAKE_OPERATIONS, FlowRun, Prompt
 
 from .flow_support import EXCHANGES, Config, open_workspace
 

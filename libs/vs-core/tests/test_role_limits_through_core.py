@@ -28,7 +28,7 @@ from .toy_agent_search import (
 )
 
 if TYPE_CHECKING:
-    from vs_core.testing.drive import Trace
+    from vs_core.api.testing import Trace
 
 _SETTINGS = settings(max_examples=12, deadline=None, derandomize=True, database=None)
 

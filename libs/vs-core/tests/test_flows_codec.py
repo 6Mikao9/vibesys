@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, get_args
 
 import vs_core.api as core
-from vs_core.flows import (
-    JournaledEvent,
-)  # test-isolation: the internal journal union must not drift from `Event`
-from vs_core.testing.flows import FAKE_REGISTRY
+from vs_core.api.testing import FAKE_REGISTRY
+
+# test-isolation: the internal journal union must not drift from `Event`
+from vs_core.flows import JournaledEvent
 
 from .flow_support import Config, Plan, answer_of, ask, start
 

@@ -10,7 +10,10 @@ modules, and still flags every other kind of impurity there.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 SEARCH_API = "vs_core.api.search"
 
