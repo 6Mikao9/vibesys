@@ -150,10 +150,14 @@ def _peer_number(request: core.DispatchTurn) -> int:
 
 
 def run_peers(
-    script: tuple[Fault, ...], keeps: Keeps = "checkpoint", *, reorder: bool = False
+    script: tuple[Fault, ...],
+    keeps: Keeps = "checkpoint",
+    *,
+    reorder: bool = False,
+    host: PeerHost | None = None,
 ) -> Trace:
     """Drive the peers search on the real core; ``script[n]`` is how peer ``n`` ends."""
-    host = PeerHost(script=script)
+    host = host or PeerHost(script=script)
     config = Config(peers=len(script), keeps=keeps)
     harness = Harness(
         registry=OPERATIONS.registry(),

@@ -311,8 +311,12 @@ def test_f8_reordered_withdrawal_and_unknown_release_preserve_cleanup_and_capaci
             state,
             core.ReleaseDependencyObserved(attempt=ref, dependency=dependency, observation=proof),
         )
-        assert all(isinstance(request, core.InspectRequest) for request in result.requests)
         assert result.state.attempts.attempts[0].charges == charges
+        if status in (ObservationStatus.REJECTED, ObservationStatus.FAILED):
+            # The owner refused the discard: nothing is left to wait for, so the attempt ends.
+            assert dependency not in result.state.attempts.attempts[0].release_dependencies
+            return
+        assert all(isinstance(request, core.InspectRequest) for request in result.requests)
         assert dependency in result.state.attempts.attempts[0].release_dependencies
         state = result.state
 
@@ -1062,7 +1066,8 @@ def test_retention_crash_ack_requires_exact_checkpoint_history(
             observation=proof,
         ),
     )
-    if checkpoint == "exact" and status == ObservationStatus.SUCCEEDED and terminal:
+    refused = status in (ObservationStatus.REJECTED, ObservationStatus.FAILED) and terminal
+    if (checkpoint == "exact" and status == ObservationStatus.SUCCEEDED and terminal) or refused:
         assert edge not in result.state.attempts.attempts[0].release_dependencies
     else:
         assert edge in result.state.attempts.attempts[0].release_dependencies
@@ -1328,6 +1333,38 @@ def test_reopen_dispatch_requires_quiescent_reacquired_session(
     assert result.state.attempts == state.attempts
 
 
+def _assert_refusal_resolves(
+    state: core.CoreState,
+    event: core.ReleaseDependencyObserved,
+    edge: core.ReleaseDependency,
+    *,
+    discard: bool,
+) -> None:
+    if discard:
+        result = core.step(state, event, reducers=REDUCERS)
+        assert result.state.attempts.attempts[0].phase != core.AttemptPhase.CLOSING
+        return
+    result = checked_step(state, event)
+    assert edge not in result.state.attempts.attempts[0].release_dependencies
+    assert all(isinstance(request, core.DiscardWorkspace) for request in result.requests)
+
+
+def _refused(
+    status: ObservationStatus, *, terminal: bool, supplied: str, expected: str, disposition: str
+) -> bool:
+    """Whether the owner answered the disposal "no", so nothing is left to wait for.
+
+    A refused discard ends the attempt and a refused settle retention fails it and discards;
+    a park cannot give its state up.
+    """
+    return (
+        status in (ObservationStatus.REJECTED, ObservationStatus.FAILED)
+        and terminal
+        and supplied == expected
+        and (supplied == "discard" or disposition == "settle")
+    )
+
+
 @given(
     disposition=st.sampled_from(["park", "cancel", "settle"]),
     supplied=st.sampled_from(["discard", "wip", "candidate"]),
@@ -1430,7 +1467,12 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
     state = recorded_proof(state, proof)
     event = core.ReleaseDependencyObserved(attempt=ref, dependency=edge, observation=proof)
     expected = {"park": "wip", "cancel": "discard", "settle": "candidate"}[disposition]
-    if supplied == expected and not durable:
+    refused = _refused(
+        status, terminal=terminal, supplied=supplied, expected=expected, disposition=disposition
+    )
+    if refused:
+        _assert_refusal_resolves(state, event, edge, discard=supplied == "discard")
+    elif supplied == expected and not durable:
         result = checked_step(state, event)
         assert all(isinstance(request, core.InspectRequest) for request in result.requests)
     elif supplied == expected and supplied == "discard":
