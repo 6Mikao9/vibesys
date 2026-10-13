@@ -13,13 +13,9 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import ConfigDict, Field
 
-from vibesys.metrics import MetricRow, PartialRow
+from vibesys.candidates.api import ReviewEvaluation
 from vibesys.orchestration.issue_queue.search import _roles as roles
 from vs_core.api.search import (
-    EvidenceId,
-    EvidenceKind,
-    ObservationStatus,
-    RevisionRef,
     RolePromptContext,
     SchemaRef,
     Value,
@@ -32,6 +28,7 @@ class PromptTemplate(StrEnum):
     IMPLEMENT = "implement"
     REVIEW = "review"
     PERFORMANCE = "performance"
+    PERFORMANCE_OVER_CAP = "performance_over_cap"
 
 
 class IssueBrief(Value):
@@ -52,24 +49,6 @@ class IssueDetail(IssueBrief):
     """The issue under work, in full."""
 
     description: str
-
-
-class ReviewEvaluation(Value):
-    """One trusted evaluation result of the candidate under review, as the judge reads it.
-
-    ``passed`` is None when the evidence owner could not decode the record; the status is core's
-    own observation of the evaluation job. ``feedback`` is the end of the evaluator's failure
-    text.
-    """
-
-    evidence_id: EvidenceId
-    kind: EvidenceKind
-    revision: RevisionRef
-    status: ObservationStatus
-    passed: bool | None = None
-    metrics: tuple[MetricRow, ...] = ()
-    partial: PartialRow | None = None
-    feedback: str = ""
 
 
 class ImplementPrompt(RolePromptContext):
@@ -124,7 +103,18 @@ class PerformancePrompt(RolePromptContext):
     load_levels_json: str | None = None
 
 
+class OverCapPrompt(RolePromptContext):
+    """The evaluator named more issues than may be filed: ask for a reply within the cap."""
+
+    reply_schema: ClassVar[SchemaRef | None] = roles.PERF_EVALUATOR.reply_schema
+
+    template: Literal[PromptTemplate.PERFORMANCE_OVER_CAP] = PromptTemplate.PERFORMANCE_OVER_CAP
+    named: int = Field(gt=0)
+    max_new_issues: int = Field(gt=0)
+
+
 type PromptContext = Annotated[
-    ImplementPrompt | ReviewPrompt | PerformancePrompt, Field(discriminator="template")
+    ImplementPrompt | ReviewPrompt | PerformancePrompt | OverCapPrompt,
+    Field(discriminator="template"),
 ]
 """The union the render operation carries; the exchanges core starts are core's own contexts."""

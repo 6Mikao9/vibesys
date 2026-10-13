@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -9,6 +10,7 @@ from tests.vibesys.orchestration.issue_queue._host import (
     FACTS,
     IMPLEMENTER,
     JUDGE,
+    PERF,
     UNGATED,
     Host,
     assert_flow_closed,
@@ -23,9 +25,12 @@ from tests.vibesys.orchestration.issue_queue._replies import (
     judged,
 )
 
+from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vs_core.api import FailureReason, RejectionCode, Withdraw
+from vs_issue_tracker.api import ReadBoard
 
 if TYPE_CHECKING:
+    from vs_core.api.search import Flow
     from vs_core.api.testing import Asked
 
 RESTARTING = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])
@@ -99,11 +104,15 @@ def test_issues_the_evaluator_files_are_worked_in_the_next_round(*, restarting: 
 
 
 @RESTARTING
-def test_a_spent_round_budget_still_adopts_what_was_built(*, restarting: bool) -> None:
+def test_a_spent_round_budget_fails_the_run_but_still_adopts_what_was_built(
+    *, restarting: bool
+) -> None:
     host = begin(config(max_rounds=1), restarting=restarting, perf=[evaluated("more")])
     host.drain()
     assert_flow_closed(host)
-    assert outcome(host) == "success"
+    assert outcome(host) == "failure"
+    assert host.run.finished is not None
+    assert host.run.finished.result.selection is not None, "the work of the closed issues is kept"
     assert host.statuses()["more"] == "open"
     assert host.measured, "the built tip was proven and adopted"
 
@@ -251,3 +260,101 @@ def test_a_generic_domain_evaluation_is_accepted(*, restarting: bool) -> None:
     host.drain()
     assert_flow_closed(host)
     assert outcome(host) == "success"
+
+
+def work_until_second_issue(host: Host) -> None:
+    """Answer the ordinary way until the first issue is closed and the next one's implementer asks."""
+    for _ in range(300):
+        closed = "closed" in host.statuses().values()
+        if closed and any(item.label == IMPLEMENTER for item in host.run.open):
+            return
+        assert host.step(0), host.run.timeline()
+    message = f"no second issue was started: {host.run.timeline()}"
+    raise AssertionError(message)
+
+
+@RESTARTING
+def test_a_stop_adopts_the_last_closed_issue_when_the_task_needs_no_proof(
+    *, restarting: bool
+) -> None:
+    host = begin(config(), restarting=restarting, facts=UNGATED, judge=[judged(bugs=("second",))])
+    work_until_second_issue(host)
+    host.run.stop()
+    host.drain()
+    assert_flow_closed(host)
+    finished = host.run.finished
+    assert finished is not None
+    assert finished.result.outcome == "cancelled"
+    adopted = finished.result.selection
+    assert adopted is not None
+    assert adopted.revision.digest == "git-commit:c1", "the first issue's candidate"
+
+
+@RESTARTING
+def test_a_stop_adopts_nothing_when_the_task_needs_the_tip_proven(*, restarting: bool) -> None:
+    host = begin(config(), restarting=restarting, judge=[judged(bugs=("second",))])
+    work_until_second_issue(host)
+    host.run.stop()
+    host.drain()
+    assert_flow_closed(host)
+    finished = host.run.finished
+    assert finished is not None
+    assert finished.result.outcome == "cancelled"
+    assert host.measured == []
+
+
+async def _changed_root(ctx: Flow, cfg: object) -> object:
+    """The same search on changed code: it looks at the board first, so the old journal no longer replays."""
+    await ctx.owners.perform(ReadBoard(), within=30)
+    return await issue_queue.root(ctx, cfg)  # ty: ignore[invalid-argument-type]
+
+
+@RESTARTING
+def test_a_code_change_keeps_the_rounds_spent_and_the_performance_history(
+    *, restarting: bool
+) -> None:
+    host = begin(
+        config(),
+        restarting=restarting,
+        facts=UNGATED,
+        perf=[evaluated("more"), evaluated(), evaluated(), evaluated()],
+    )
+    work_until_second_issue(host)
+    assert host.answered(PERF) == 1
+    host.run.swap(replace(issue_queue, root=_changed_root))  # ty: ignore[invalid-argument-type]
+    host.drain()
+    assert_flow_closed(host)
+    assert outcome(host) == "success"
+    assert host.answered(PERF) == 2, "the round budget of 2 counts the round before the change"
+    assert host.record is not None
+    assert [item.iteration for item in host.record.performance] == [1, 2]
+    assert host.record.performance[0].new_issues, "the history before the change is kept"
+
+
+@RESTARTING
+def test_an_evaluator_that_names_too_many_issues_is_asked_again(*, restarting: bool) -> None:
+    host = begin(
+        config(),
+        restarting=restarting,
+        perf=[evaluated("a", "b", "c"), evaluated("a", "b")],
+    )
+    host.drain()
+    assert_flow_closed(host)
+    assert outcome(host) == "success"
+    assert host.answered(PERF) >= 2
+    assert {"a", "b"} <= set(host.titles())
+    assert "c" not in host.titles()
+
+
+@RESTARTING
+def test_an_evaluator_that_keeps_naming_too_many_issues_fails_the_run(*, restarting: bool) -> None:
+    host = begin(
+        config(), restarting=restarting, perf=[evaluated("a", "b", "c"), evaluated("a", "b", "c")]
+    )
+    host.drain()
+    assert_flow_closed(host)
+    assert outcome(host) == "failure"
+    assert host.record is not None
+    assert host.record.ending is not None
+    assert "performance evaluation 1 could not be completed" in host.record.ending.reason
+    assert not {"a", "b", "c"} & set(host.titles())

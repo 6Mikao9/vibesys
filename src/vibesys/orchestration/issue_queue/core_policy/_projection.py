@@ -25,7 +25,9 @@ def project_run_snapshot(snapshot: QueueSnapshot, *, experiment_revision: int) -
         "version": 1,
         "round_idx": snapshot.round_idx,
         "cursor": snapshot.cursor,
+        "phase": _phase(snapshot),
         "current_issue_id": snapshot.current_issue_id,
+        "bootstrap_done": bool(snapshot.issues),
         "issues": [
             {
                 "id": issue.id,
@@ -52,6 +54,16 @@ def project_run_snapshot(snapshot: QueueSnapshot, *, experiment_revision: int) -
         experiment_revision=experiment_revision,
         iterations=_iterations(snapshot),
     )
+
+
+def _phase(snapshot: QueueSnapshot) -> str | None:
+    """``"work"`` while a job is in flight, else None.
+
+    The state machine reported the step of the job (start, claim, work, record, ...). A flow has
+    no step phases, so the one fact left is whether a job is running.
+    """
+    working = snapshot.current_issue_id is not None or snapshot.cursor == "assess"
+    return "work" if working else None
 
 
 def _iterations(snapshot: QueueSnapshot) -> IterationTree:
@@ -90,7 +102,9 @@ def _board_status(snapshot: QueueSnapshot) -> IterationStatus:
         if snapshot.ending is not None and snapshot.ending.outcome == "failure":
             return IterationStatus.FAILED
         return IterationStatus.COMPLETED
-    return IterationStatus.ACTIVE
+    if snapshot.issues or snapshot.current_issue_id is not None or snapshot.round_idx > 0:
+        return IterationStatus.ACTIVE
+    return IterationStatus.PENDING
 
 
 def _issue_status(issue: IssueBrief, *, active: bool) -> IterationStatus:

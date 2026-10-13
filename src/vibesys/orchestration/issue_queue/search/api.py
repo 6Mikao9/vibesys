@@ -1,5 +1,7 @@
 """Public surface of the issue-queue search: the flow, its config, roles and shared pure helpers."""
 
+from vibesys.candidates.api import ReviewEvaluation
+from vibesys.candidates.api import review_evaluations as evaluations
 from vibesys.orchestration.issue_queue.search._board import (
     BOOTSTRAP_TEMPLATE,
     blocked_queue,
@@ -30,11 +32,11 @@ from vibesys.orchestration.issue_queue.search._prompts import (
     ImplementPrompt,
     IssueBrief,
     IssueDetail,
+    OverCapPrompt,
     PerformancePrompt,
     PriorPerformance,
     PromptContext,
     PromptTemplate,
-    ReviewEvaluation,
     ReviewPrompt,
 )
 from vibesys.orchestration.issue_queue.search._queue import (
@@ -47,13 +49,11 @@ from vibesys.orchestration.issue_queue.search._queue import (
 )
 from vibesys.orchestration.issue_queue.search._replies import (
     Rejection,
-    capped,
     load_levels_json,
     metrics_json,
     perf_record,
     rejection_of,
 )
-from vibesys.orchestration.issue_queue.search._review_evidence import evaluations
 from vibesys.orchestration.issue_queue.search._roles import (
     IMPLEMENTER,
     JUDGE,
@@ -111,6 +111,7 @@ __all__ = [
     "IssueQueueConfig",
     "JobDone",
     "JobKind",
+    "OverCapPrompt",
     "ParentVerification",
     "PerfDone",
     "PerfJob",
@@ -138,7 +139,6 @@ __all__ = [
     "brief",
     "briefs",
     "budget",
-    "capped",
     "change_key",
     "claim",
     "detail",

@@ -118,6 +118,42 @@ def test_no_winner_fails_the_run_and_adopts_nothing(begin: Begin) -> None:
     assert result.reason == "no-winner: nothing converged"
 
 
+def test_no_winner_that_keeps_the_choice_fails_the_run_and_adopts_it(begin: Begin) -> None:
+    async def partial(ctx: core.Flow, _config: Config) -> core.NoWinner:
+        ctx.choose(kept("a"))
+        return core.NoWinner(reason="out of rounds", keep_choice=True)
+
+    result = result_of(begin(partial))
+    assert result.outcome == "failure"
+    assert result.reason == "no-winner: out of rounds"
+    assert result.selection == core.RetainedCandidate(
+        settlement_id=kept("a").settlement.settlement_id, revision=kept("a").revision
+    )
+
+
+def test_no_winner_that_keeps_the_choice_but_chose_nothing_adopts_nothing(begin: Begin) -> None:
+    async def nothing(_ctx: core.Flow, _config: Config) -> core.NoWinner:
+        return core.NoWinner(reason="nothing to keep", keep_choice=True)
+
+    result = result_of(begin(nothing, adopting=False))
+    assert (result.outcome, result.selection) == ("failure", None)
+
+
+@given(reason=st.sampled_from(list(core.AdoptionFailureReason)))
+def test_a_kept_choice_that_core_refuses_is_named_in_the_failure(
+    reason: core.AdoptionFailureReason,
+) -> None:
+    async def partial(ctx: core.Flow, _config: Config) -> core.NoWinner:
+        ctx.choose(kept("a"))
+        return core.NoWinner(reason="out of rounds", keep_choice=True)
+
+    run = start(partial, adopting=False)
+    run.refuse_adoption(run.expect(core.ProposeWinner), reason)
+    result = result_of(run)
+    assert (result.outcome, result.selection) == ("failure", None)
+    assert result.reason == f"no-winner: out of rounds; adoption-failed: {reason.value}"
+
+
 @given(reason=st.sampled_from(list(core.AdoptionFailureReason)))
 def test_a_failed_adoption_is_a_failed_run_with_the_typed_reason(
     reason: core.AdoptionFailureReason,

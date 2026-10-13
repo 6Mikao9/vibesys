@@ -7,9 +7,12 @@ configured number) to the board and reports the evaluation for the next one to r
 
 from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult
 from vibesys.orchestration.issue_queue.search import _writes as writes
-from vibesys.orchestration.issue_queue.search._prompts import PerformancePrompt, PriorPerformance
+from vibesys.orchestration.issue_queue.search._prompts import (
+    OverCapPrompt,
+    PerformancePrompt,
+    PriorPerformance,
+)
 from vibesys.orchestration.issue_queue.search._replies import (
-    capped,
     load_levels_json,
     perf_record,
 )
@@ -23,7 +26,16 @@ from vibesys.orchestration.issue_queue.search._values import (
     PerfJob,
     failure_of,
 )
-from vs_core.api.search import Assessment, Failed, Flow, NotOpened, TurnFinished, Workspace, flow
+from vs_core.api.search import (
+    Assessment,
+    Failed,
+    Flow,
+    NotOpened,
+    Session,
+    TurnFinished,
+    Workspace,
+    flow,
+)
 
 
 @flow(snapshot=PerfJob)
@@ -46,8 +58,7 @@ async def evaluate(ctx: Flow, job: PerfJob, ws: Workspace) -> PerfDone:
     """Ask the evaluator, file what it found, and report the evaluation."""
     try:
         reply = await assess(ctx, job, ws)
-        issues = capped(reply.new_issues, job.config.max_issues_per_perf_eval)
-        filed = writes.filing(job, issues, reply.model_dump_json())
+        filed = writes.filing(job, reply.new_issues, reply.model_dump_json())
         applied = await write(ctx, job.config, filed, "filing the evaluation's issues")
         created = tuple(result.issue_id for result in applied.results)
         return PerfDone(iteration=job.iteration, record=perf_record(job.iteration, reply, created))
@@ -74,6 +85,20 @@ async def assess(ctx: Flow, job: PerfJob, ws: Workspace) -> IssuePerfEvalResult:
         ),
         load_levels_json=load_levels_json(job.config),
     )
+    reply = await ask(session, prompt)
+    cap = job.config.max_issues_per_perf_eval
+    if len(reply.new_issues) > cap:
+        # The reply schema cannot know the configured cap, so the flow holds the evaluator to it
+        # the way core holds a reply to its schema: one correction, then the job fails.
+        reply = await ask(session, OverCapPrompt(named=len(reply.new_issues), max_new_issues=cap))
+    if len(reply.new_issues) > cap:
+        failure = Failure(kind=FailureKind.AGENT, role=PERF_EVALUATOR.name, reason="invalid-reply")
+        raise JobEndedError(failure)
+    return reply
+
+
+async def ask(session: Session, prompt: PerformancePrompt | OverCapPrompt) -> IssuePerfEvalResult:
+    """One evaluator turn, or the failure that ended the job."""
     match await session.turn(prompt):
         case TurnFinished(reply=IssuePerfEvalResult() as reply):
             return reply

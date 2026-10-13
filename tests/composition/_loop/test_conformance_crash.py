@@ -20,6 +20,7 @@ from tests.composition._loop.dst_world import SubjectWorld
 from tests.composition._loop.subjects import SUBJECTS
 
 from vs_core.api import FlowDriver, FlowState, StrategyState
+from vs_core.testing.liveness import End, final_state
 from vs_dst.api import EVERY_POINT, CrashKind, SimulatedRun, crash_point_policy, simulate
 
 if TYPE_CHECKING:
@@ -63,10 +64,25 @@ def _turn_lapsed_while_down(recovered: SimulatedRun, record: type[BaseModel]) ->
 
     The restart comes a lease after the crash, later than a turn's time limit, so the turn is
     reported as timed out. A search that ends its run on a failed turn (the issue queue's
-    performance evaluation does) then ends differently than the uncrashed run; that is the
-    search's answer to a lost turn, not a lost or repeated effect.
+    performance evaluation does) then ends differently than the uncrashed run. That is the
+    search's typed answer to a lost turn, so the sweep checks the invariants of any ending
+    instead of equality with the uncrashed run.
     """
     return "(timed-out)" in str(_published(recovered.state, record))
+
+
+def _assert_ended_cleanly(recovered: SimulatedRun) -> None:
+    """The run ended typed, released everything it held and ran no effect twice."""
+    assert recovered.finished
+    result = recovered.result
+    assert result is not None
+    assert result.outcome in {"success", "failure", "cancelled"}
+    assert result.reason
+    assert final_state(recovered.core, End.TERMINAL) == []
+    core = recovered.core
+    jobs = [*core.evaluation.jobs, *core.evaluation.registered_jobs]
+    assert all(job.released for job in jobs), [(job.resource_id, job.status) for job in jobs]
+    assert recovered.no_effect_ran_twice()
 
 
 PARTS = 4 if crash_point_policy() == EVERY_POINT else 1
@@ -84,7 +100,10 @@ def test_c2_a_restart_after_any_crash_finishes_the_same_run(
 
     for crash in normal.crash_points(kind)[part::PARTS]:
         recovered = normal.rerun_with_crash(crash)
-        if _lapsed_while_down(recovered) or _turn_lapsed_while_down(recovered, subject.snapshot):
+        if _lapsed_while_down(recovered):
+            continue
+        if _turn_lapsed_while_down(recovered, subject.snapshot):
+            _assert_ended_cleanly(recovered)
             continue
         assert recovered.finished, crash
         record = FlowDriver.published(recovered.state, subject.snapshot)  # ty: ignore[invalid-argument-type]

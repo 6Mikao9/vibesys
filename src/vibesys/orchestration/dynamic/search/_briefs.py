@@ -14,12 +14,12 @@ from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
     ProfilePrompt,
-    ReviewEvaluation,
     ReviewPrompt,
 )
 from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
+    from vibesys.candidates.api import ReviewEvaluation
     from vibesys.orchestration.dynamic.search._values import RoundRecord, WorkPlan
     from vs_core.api.search import RevisionRef
 

@@ -9,6 +9,7 @@ when the operator stopped it wherever it awaited.
 
 from dataclasses import dataclass
 
+from vibesys.candidates.api import review_evaluations
 from vibesys.metrics import AcceptedReading, accept_readings
 from vibesys.orchestration.issue_queue.models import IssueImplementerResult, IssueJudgeResult
 from vibesys.orchestration.issue_queue.search import _board as board
@@ -16,7 +17,6 @@ from vibesys.orchestration.issue_queue.search import _writes as writes
 from vibesys.orchestration.issue_queue.search._operations import EvidenceReadings
 from vibesys.orchestration.issue_queue.search._prompts import ImplementPrompt, ReviewPrompt
 from vibesys.orchestration.issue_queue.search._replies import Rejection, rejection_of
-from vibesys.orchestration.issue_queue.search._review_evidence import evaluations
 from vibesys.orchestration.issue_queue.search._roles import IMPLEMENTER, JUDGE
 from vibesys.orchestration.issue_queue.search._settle import assessment_of, retained
 from vibesys.orchestration.issue_queue.search._tracker import write
@@ -181,7 +181,7 @@ async def review(
         summary=made.reply.summary,
         files_touched=made.reply.files_touched,
         self_check=made.reply.self_check,
-        evaluations=evaluations(refs, readings),
+        evaluations=review_evaluations(refs, readings),
     )
     match await judge.turn(prompt, revision=revision):
         case TurnFinished(reply=IssueJudgeResult() as reply, invocation=invocation):

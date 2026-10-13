@@ -165,6 +165,13 @@ class Queue(Value):
         )
 
 
+class QueueRun(Value):
+    """What the rounds restart from: the config and what the run knew between two jobs."""
+
+    config: IssueQueueConfig
+    queue: Queue
+
+
 class QueueSnapshot(Value):
     """What the run publishes about itself: the queue in the shape frontends read."""
 

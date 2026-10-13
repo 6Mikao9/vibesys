@@ -193,6 +193,7 @@ class Host:
     measured: list[RevisionRef] = field(default_factory=list)
     """The revisions the host measured, in order."""
     _replies: dict[str, deque[BaseModel]] = field(default_factory=dict)
+    _handed: dict[str, int] = field(default_factory=lambda: {IMPLEMENTER: 0, JUDGE: 0, PERF: 0})
     _commits: int = 0
     _sequence: int = 0
 
@@ -228,6 +229,10 @@ class Host:
     def statuses(self) -> dict[str, str]:
         """Every issue's status, by title."""
         return {issue.title: issue.status.value for issue in self.tracker.list()}
+
+    def answered(self, role: str) -> int:
+        """How many of the scripted replies of ``role`` were handed out."""
+        return self._handed[role]
 
     def open(self, kind: type, *, label: str | None = None) -> list[Asked]:
         """The open waits for a ``kind`` request."""
@@ -316,6 +321,7 @@ class Host:
     def _reply(self, asked: Asked, variant: int) -> None:
         role = asked.label
         queue = self._replies[role]
+        self._handed[role] += 1
         reply = (
             queue.popleft()
             if queue

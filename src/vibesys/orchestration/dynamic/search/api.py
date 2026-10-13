@@ -1,5 +1,7 @@
 """Public surface of the dynamic search: the flow, its config, roles and shared pure helpers."""
 
+from vibesys.candidates.api import ReviewEvaluation
+from vibesys.candidates.api import review_evaluations as evaluations
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
 from vibesys.orchestration.dynamic.search._budget import budget
@@ -59,10 +61,8 @@ from vibesys.orchestration.dynamic.search._prompts import (
     ProfilePrompt,
     PromptContext,
     PromptTemplate,
-    ReviewEvaluation,
     ReviewPrompt,
 )
-from vibesys.orchestration.dynamic.search._review_evidence import evaluations
 from vibesys.orchestration.dynamic.search._roles import (
     IMPLEMENTER,
     JUDGE,

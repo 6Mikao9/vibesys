@@ -1,5 +1,6 @@
 """The implementer's turns and the judge's review: until a candidate is ready to measure."""
 
+from vibesys.candidates.api import review_evaluations
 from vibesys.hypothesis import HypothesisConfig, HypothesisOutcome
 from vibesys.hypothesis.cadence import review_due
 from vibesys.metrics import AcceptedReading, accept_readings
@@ -18,7 +19,6 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     ended_by,
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
-from vibesys.orchestration.dynamic.search._review_evidence import evaluations as review_evaluations
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,

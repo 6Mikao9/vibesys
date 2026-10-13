@@ -9,9 +9,15 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vibesys.orchestration.issue_queue.core_policy.api import requirements_for
+from vibesys.orchestration.issue_queue.core_policy.api import project_run_snapshot, requirements_for
 from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult
-from vibesys.orchestration.issue_queue.search.api import IssueQueueConfig, budget, issue_queue
+from vibesys.orchestration.issue_queue.search.api import (
+    IssueBrief,
+    IssueQueueConfig,
+    QueueSnapshot,
+    budget,
+    issue_queue,
+)
 from vs_core.api import AssessmentKind, Capabilities, validate_startup
 
 OPTIONS = st.builds(
@@ -115,3 +121,50 @@ def test_a_non_positive_budget_is_refused_naming_the_option(field: str) -> None:
 def test_an_unknown_option_is_refused_naming_the_key() -> None:
     with pytest.raises(ValidationError, match="turn_drop_backoff_seconds"):
         IssueQueueConfig.model_validate({**MINIMAL, "turn_drop_backoff_seconds": 5})
+
+
+PROJECTED_KEYS = {
+    "version",
+    "round_idx",
+    "cursor",
+    "phase",
+    "current_issue_id",
+    "bootstrap_done",
+    "issues",
+    "performance",
+}
+
+
+@given(
+    round_idx=st.integers(0, 4),
+    cursor=st.sampled_from(["drain", "assess", "finished"]),
+    current=st.none() | st.integers(1, 5),
+    titles=st.lists(st.text(min_size=1, max_size=5), max_size=4),
+)
+def test_the_projection_keeps_the_fields_clients_have_always_been_given(
+    round_idx: int, cursor: str, current: int | None, titles: list[str]
+) -> None:
+    snapshot = QueueSnapshot(
+        round_idx=round_idx,
+        cursor=cursor,  # ty: ignore[invalid-argument-type]
+        current_issue_id=current,
+        issues=tuple(
+            IssueBrief(id=n, type="task", status="open", title=title, attempts=0)
+            for n, title in enumerate(titles, start=1)
+        ),
+    )
+
+    payload = project_run_snapshot(snapshot, experiment_revision=0).payload
+
+    assert set(payload) == PROJECTED_KEYS
+    assert payload["bootstrap_done"] is bool(titles)
+    assert (payload["phase"] is not None) is (current is not None or cursor == "assess")
+
+
+def test_a_run_that_has_not_filed_its_first_issue_is_pending() -> None:
+    projected = project_run_snapshot(
+        QueueSnapshot(round_idx=0, cursor="drain"), experiment_revision=0
+    )
+
+    assert projected.payload["bootstrap_done"] is False
+    assert projected.iterations.nodes[0].status.value == "pending"
