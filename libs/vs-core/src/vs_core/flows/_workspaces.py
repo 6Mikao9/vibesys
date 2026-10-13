@@ -123,8 +123,15 @@ class Workspaces:
         )
         return Resource(self._kit, _workspace(self._kit, request, within))
 
-    def keep(self, workspace: Workspace, revision: RevisionRef, assessment: Assessment) -> None:
-        """Record that the workspace keeps ``revision`` with ``assessment`` when it settles."""
+    def keep(
+        self, workspace: Workspace, revision: RevisionRef | None, assessment: Assessment
+    ) -> None:
+        """Record that the workspace settles with ``assessment`` about ``revision``.
+
+        ``revision`` is None when the work made no revision: the settlement then asserts only
+        how the workspace ended (a retained settlement needs a revision, and core refuses one
+        without).
+        """
         workspace.keeping = Settle(
             assessments=assessment.assessments,
             eligible=assessment.eligible,

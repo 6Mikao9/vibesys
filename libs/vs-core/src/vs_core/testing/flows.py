@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal, TypedDict, Unpack
 
 from vs_core.api import (
     AdoptionFailed,
@@ -34,6 +34,7 @@ from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     AttemptRef,
+    CheckpointKnown,
     Continuation,
     ContinuationId,
     ContinuationPhase,
@@ -94,7 +95,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import Decision, ProtocolContext, Role, RunView, SearchDef, Seconds, Within
+    from vs_core.api import Decision, Role, RunFacts, RunView, SearchDef, Seconds, Within
     from vs_core.flows._define import Root
     from vs_core.types.agents import Checkpoint
 
@@ -153,6 +154,15 @@ class FakeView:
         return base.model_copy(update={"now_at": self.now_at, **self.changes})
 
 
+class StartOptions(TypedDict, total=False):
+    """What a story may set when it starts a run."""
+
+    view: FakeView | None
+    restarting: bool
+    adopting: bool
+    facts: RunFacts
+
+
 @dataclass(frozen=True)
 class Asked:
     """One wait the search opened: its decision, the request and its limit."""
@@ -161,7 +171,7 @@ class Asked:
     request: Work | Finish
     until: Within | None
     """The limit of a wait; None for a ``Finish``, which core answers only by refusing it."""
-    context: Prompt | ProtocolContext | None = None
+    context: Value | None = None
     """For a turn request: the context its prompt was rendered from."""
     template: str | None = None
     """For a turn request: the template its prompt was rendered with."""
@@ -198,7 +208,9 @@ class FlowRun[C]:
         """Build a run that has not started; ``start`` is the way in."""
         self.definition = search
         self.config = config
-        self.driver = search.driver(config, FAKE_REGISTRY)
+        self.registry = FAKE_REGISTRY if search.operations is None else search.operations.registry()
+        """The codec of the namespace the search declared: its operations are answered through it."""
+        self.driver = search.driver(config, self.registry)
         self.view = view or FakeView()
         self.restarting = restarting
         self.adopting = adopting
@@ -208,7 +220,7 @@ class FlowRun[C]:
         """Every decision the search issued, in order."""
         self._open: list[Asked] = []
         self._sleeps: list[Seconds] = []
-        self._prompts: dict[ArtifactId, tuple[str, Prompt | ProtocolContext]] = {}
+        self._prompts: dict[ArtifactId, tuple[str, Value]] = {}
         self._queue: list[Event] = []
         self.finished: Finish | None = None
         """The ``Finish`` the search issued, once it did."""
@@ -217,18 +229,24 @@ class FlowRun[C]:
         self._sequence = 0
 
     @classmethod
-    def start(
-        cls,
-        search: SearchDef[C],
-        config: C,
-        *,
-        view: FakeView | None = None,
-        restarting: bool = False,
-        adopting: bool = True,
-    ) -> FlowRun[C]:
-        """Start the search and take its first decisions."""
-        run = cls(search, config, view=view, restarting=restarting, adopting=adopting)
-        run.state, issued = run.driver.init(config, initial_state().run.facts, run.view.current())
+    def start(cls, search: SearchDef[C], config: C, **options: Unpack[StartOptions]) -> FlowRun[C]:
+        """Start the search and take its first decisions.
+
+        ``options`` are those of ``StartOptions``: the run's ``facts`` (a search that reads
+        ``ctx.task`` needs them to carry its task terms), the ``view`` it reads, whether the host
+        is ``restarting`` after every step and whether it ``adopting`` any winner at once.
+        """
+        facts = options.get("facts")
+        run = cls(
+            search,
+            config,
+            view=options.get("view"),
+            restarting=options.get("restarting", False),
+            adopting=options.get("adopting", True),
+        )
+        run.state, issued = run.driver.init(
+            config, initial_state().run.facts if facts is None else facts, run.view.current()
+        )
         run._take(issued)
         run._pump()
         return run
@@ -281,11 +299,17 @@ class FlowRun[C]:
     def reply(
         self, asked: Asked, reply: BaseModel, *, checkpoint: Checkpoint | None = None
     ) -> None:
-        """The agent answered a turn request with ``reply``."""
-        del checkpoint
+        """The agent answered a turn request with ``reply``.
+
+        ``checkpoint`` is core's outcome for the revision the turn produced, which it reports
+        after the turn ended; a reply that asks for one waits for it.
+        """
         self._close(asked)
         self._timeline.append(f"{asked.decision.root}:{type(reply).__name__}")
-        self.send(self._ended(asked, ObservationStatus.SUCCEEDED, output=reply.model_dump_json()))
+        ended = self._ended(asked, ObservationStatus.SUCCEEDED, output=reply.model_dump_json())
+        self.send(ended)
+        if checkpoint is not None:
+            self.send(CheckpointKnown(invocation=ended.result.invocation, checkpoint=checkpoint))
 
     def suspend(self, asked: Asked, handles: tuple[str, ...] = ("h",)) -> Continuation:
         """The agent ended the turn waiting for evaluations and core recorded the wait.
@@ -423,6 +447,20 @@ class FlowRun[C]:
         self._timeline.append(f"{asked.decision.root}:{event.kind}")
         self.send(event)
 
+    def finish_operation(self, asked: Asked, outcome: BaseModel) -> None:
+        """An operation the search asked for ended with ``outcome`` (verify, interpret evidence)."""
+        request = asked.request
+        if not isinstance(request, Operation):
+            message = f"{asked.decision.root} is not an operation"
+            raise TypeError(message)
+        self._sequence += 1
+        result = self._operation_result(request.request, outcome)
+        self.answer(asked, OperationFinished(decision=asked.decision, result=result))
+
+    def published[M: BaseModel](self, model: type[M]) -> M | None:
+        """What the flow last published with ``ctx.publish``, as ``model``."""
+        return self.driver.published(self.state, model)
+
     def stop(self, control: str = "stop", mode: StopMode = StopMode.DRAIN) -> None:
         """The operator (or the host, at the deadline) asks the run to stop, draining or not."""
         self._timeline.append(control)
@@ -453,7 +491,8 @@ class FlowRun[C]:
     def swap(self, search: SearchDef[C]) -> None:
         """Continue the run under another definition of the search: the code changed on resume."""
         self.definition = search
-        self.driver = search.driver(self.config, FAKE_REGISTRY)
+        self.registry = FAKE_REGISTRY if search.operations is None else search.operations.registry()
+        self.driver = search.driver(self.config, self.registry)
 
     # -- bookkeeping -------------------------------------------------------------------------
 
@@ -469,8 +508,8 @@ class FlowRun[C]:
         self.decisions.extend(issued)
         for decision in issued:
             match decision:
-                case Wait(request=Operation(request=Render() as render) as operation):
-                    self._render(operation, render)
+                case Wait(request=Operation(request=render) as operation) if self._renders(render):
+                    self._render(operation, render)  # ty: ignore[invalid-argument-type]
                 case Wait(request=ProposeWinner() as proposal) if self.adopting:
                     self._open.append(Asked(proposal.decision_id, proposal, None))
                     self._queue.append(self._adopted(proposal))
@@ -484,14 +523,19 @@ class FlowRun[C]:
                     self.finished = decision
                     self._open.append(Asked(decision.decision_id, decision, None))
 
-    def _prompt(self, request: Work) -> tuple[str | None, Prompt | ProtocolContext | None]:
+    def _prompt(self, request: Work) -> tuple[str | None, Value | None]:
         if isinstance(request, RequestTurn) and request.turn.prompts:
             found = self._prompts.get(request.turn.prompts[0].artifact_id)
             if found is not None:
                 return found
         return None, None
 
-    def _render(self, operation: Operation, render: Render) -> None:
+    def _renders(self, request: object) -> bool:
+        """Whether ``request`` asks to render a prompt: the namespace's render operation."""
+        operations = self.definition.operations
+        return operations is not None and isinstance(request, operations.render)
+
+    def _render(self, operation: Operation, render: RenderRoleArtifactsBase[Value]) -> None:
         """Answer a prompt render at once: the artifact stands for the prompt it was made from."""
         self._sequence += 1
         artifact = ArtifactId(root=f"prompt-{self._sequence}")
@@ -506,7 +550,7 @@ class FlowRun[C]:
         )
 
     def _operation_result(self, request: object, outcome: BaseModel) -> OperationResult:
-        encoded = FAKE_REGISTRY.encode(request)  # ty: ignore[invalid-argument-type]
+        encoded = self.registry.encode(request)  # ty: ignore[invalid-argument-type]
         result = OperationResult(
             operation_id=OperationId(root=f"operation-{self._sequence}"),
             observation=self._observation(ObservationStatus.SUCCEEDED),
@@ -514,7 +558,7 @@ class FlowRun[C]:
             operation_schema=encoded.schema_ref,
             outcome=outcome,
         )
-        return FAKE_REGISTRY.validate_event(result)
+        return self.registry.validate_event(result)
 
     def _observation(self, status: ObservationStatus) -> Observation:
         self._sequence += 1

@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from vs_core.types.common import ArtifactRef, EvidenceKind, RevisionRef, Value
+from vs_core.types.common import ArtifactRef, EvidenceKind, RevisionRef, RunFacts, Value
 from vs_core.types.evaluation import MeasurementPlan, MeasurementStage, StageRequirements
 
 type MeasurementPurpose = Literal["baseline", "local-validation", "official", "profile"]
@@ -41,6 +41,27 @@ class MeasurementRecipe(Value):
     """The stage whose pass is the correctness gate, used by plans that include it."""
     accuracy_gated: tuple[EvidenceKind, ...]
     """Evidence kinds that count only if the accuracy stage passed; the task's trust rule."""
+
+    @classmethod
+    def of(cls, facts: RunFacts) -> MeasurementRecipe:
+        """The recipe the run's task fixes: its terms with the run's evaluation identities."""
+        task = facts.task
+        if task is None:
+            message = "the run carries no task terms: the host must resolve them"
+            raise ValueError(message)
+        return cls(
+            evaluator_digest=facts.evaluator_digest,
+            workload_digest=facts.workload_digest,
+            environment_digest=facts.environment_digest,
+            recipe=task.recipe,
+            stages=tuple(
+                StageBudget(stage_id=item.stage_id, execution_seconds=item.execution_seconds)
+                for item in task.stages
+            ),
+            queue_allowance=task.queue_allowance,
+            accuracy_stage=task.accuracy_stage,
+            accuracy_gated=task.accuracy_gated,
+        )
 
     def requiring(self, stage_id: str, outputs: tuple[str, ...]) -> MeasurementRecipe:
         """The same recipe whose ``stage_id`` evidence must contain ``outputs``."""
