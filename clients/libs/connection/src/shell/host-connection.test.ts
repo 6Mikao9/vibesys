@@ -74,6 +74,15 @@ class HeldReleaseLink extends FakeLink {
   }
 }
 
+class FailedReleaseLink extends FakeLink {
+  readonly failure = new ConnectionError('link', 'the old master is still reachable');
+
+  override async release(): Promise<void> {
+    this.released += 1;
+    throw this.failure;
+  }
+}
+
 async function rejection(promise: Promise<unknown>): Promise<Error> {
   try {
     await promise;
@@ -146,8 +155,15 @@ function fakeSsh(helper: FakeHelper) {
   return {spawn, seen};
 }
 
-function sshLink(spawn: Spawn): SshLink {
-  return new SshLink({alias: 'gpu', controlPath: '/tmp/cm-%C', askpass: '/askpass', spawn});
+function sshLink(spawn: Spawn, clock = new FakeClock()): SshLink {
+  return new SshLink({
+    alias: 'gpu',
+    controlPath: '/tmp/cm-%C',
+    askpass: '/askpass',
+    spawn,
+    scheduleTimeout: clock.scheduleTimeout,
+    retirementCommandTimeoutMs: 100,
+  });
 }
 
 describe('HostConnection over the FakeHelper', () => {
@@ -837,6 +853,83 @@ describe('ConnectionManager', () => {
     await manager[Symbol.asyncDispose]();
   });
 
+  test('a failed link release remains an admission barrier and is surfaced', async () => {
+    const first = new FailedReleaseLink();
+    const replacement = new FakeLink();
+    const links = [first, replacement];
+    const logged: string[] = [];
+    const manager = new ConnectionManager({
+      linkFor: () => {
+        const link = links.shift();
+        if (link === undefined) throw new Error('unexpected third link');
+        return link;
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: message => logged.push(message),
+      config: CONFIG,
+    });
+    const obsolete = await manager.acquire(GPU, '/a');
+    await obsolete.connection.ready();
+
+    await obsolete[Symbol.asyncDispose]();
+    const acquisitionError = await rejection(manager.acquire(GPU, '/b'));
+
+    expect(acquisitionError).toBe(first.failure);
+    expect(first.released).toBe(1);
+    expect(links).toEqual([replacement]);
+    expect(replacement.helper.running).toBe(0);
+    expect(logged.at(-1)).toBe('could not retire ssh:gpu: the old master is still reachable');
+    expect(await rejection(manager[Symbol.asyncDispose]())).toBe(first.failure);
+  });
+
+  test('manager disposal surfaces an active link retirement failure', async () => {
+    const link = new FailedReleaseLink();
+    const manager = fakeManager(() => link);
+    const lease = await manager.acquire(GPU, '/active');
+    await lease.connection.ready();
+
+    const error = await rejection(manager[Symbol.asyncDispose]());
+
+    expect(error).toBe(link.failure);
+    expect(link.released).toBe(1);
+    expect(lease.connection.phase.kind).toBe('closed');
+  });
+
+  test('manager disposal settles every host before surfacing a retirement failure', async () => {
+    const failed = new FailedReleaseLink();
+    const held = new HeldReleaseLink();
+    const links: FakeLink[] = [failed, held];
+    const manager = fakeManager(() => {
+      const link = links.shift();
+      if (link === undefined) throw new Error('unexpected third link');
+      return link;
+    });
+    const first = await manager.acquire({kind: 'ssh', alias: 'first'}, '/first');
+    const second = await manager.acquire({kind: 'ssh', alias: 'second'}, '/second');
+    await Promise.all([first.connection.ready(), second.connection.ready()]);
+
+    const disposing = manager[Symbol.asyncDispose]();
+    let settled = false;
+    void disposing.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await held.releaseStarted;
+
+    expect(settled).toBe(false);
+    expect(first.connection.phase.kind).toBe('closed');
+    expect(second.connection.phase.kind).toBe('closed');
+    held.finishRelease();
+    expect(await rejection(disposing)).toBe(failed.failure);
+    expect(failed.released).toBe(1);
+    expect(held.released).toBe(1);
+  });
+
   test('release cancels every ssh attempt and waits for every retired process to exit', async () => {
     const actions: string[] = [];
     const stale = deferredKillProcess(() => actions.push('term-stale'));
@@ -875,6 +968,60 @@ describe('ConnectionManager', () => {
     stale.end(null);
     await releasing;
     expect(actions).toEqual(['check-0', 'term-stale', 'check-1', 'term-fresh', 'exit']);
+  });
+
+  for (const outcome of [
+    {label: 'status 255', code: 255},
+    {label: 'a null signal status', code: null},
+  ] as const) {
+    test(`release rejects when exit returns ${outcome.label} and the master remains reachable`, async () => {
+      const operations: string[] = [];
+      const spawn: Spawn = (_command, args) => {
+        const operation = args.at(args.indexOf('-O') + 1) ?? 'missing';
+        operations.push(operation);
+        const process = fakeProcess();
+        process.end(operation === 'exit' ? outcome.code : 0);
+        return process.process;
+      };
+
+      const error = await rejection(sshLink(spawn).release());
+
+      expect(error).toBeInstanceOf(ConnectionError);
+      expect(error.message).toContain('remained reachable');
+      expect(operations).toEqual(['exit', 'check']);
+    });
+  }
+
+  test('release accepts a failed exit only after check confirms the master is absent', async () => {
+    const operations: string[] = [];
+    const spawn: Spawn = (_command, args) => {
+      const operation = args.at(args.indexOf('-O') + 1) ?? 'missing';
+      operations.push(operation);
+      const process = fakeProcess();
+      process.end(255);
+      return process.process;
+    };
+
+    await sshLink(spawn).release();
+
+    expect(operations).toEqual(['exit', 'check']);
+  });
+
+  test('release kills and rejects an exit command that stays unconfirmed past its bound', async () => {
+    const clock = new FakeClock();
+    const kills: string[] = [];
+    const hung = deferredKillProcess(signal => kills.push(signal));
+    const link = sshLink(() => hung.process, clock);
+
+    const releasing = link.release();
+    await clock.waitUntilScheduled(100);
+    clock.advanceBy(200);
+    const error = await rejection(releasing);
+
+    expect(kills).toEqual(['SIGKILL']);
+    expect(error).toBeInstanceOf(ConnectionError);
+    expect(error.message).toContain('could not confirm teardown');
+    hung.end(null);
   });
 
   test('abandoning one shared ssh waiter leaves the other waiter and process intact', async () => {
