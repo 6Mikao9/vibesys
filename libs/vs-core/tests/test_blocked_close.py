@@ -24,7 +24,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 _STOP = core.RunControlEvent(
-    control=core.ControlInput(control_id=core.ControlId(root="stop"), action="stop"),
+    control=core.ControlInput(
+        control_id=core.ControlId(root="stop"), action="stop", mode=core.StopMode.DRAIN
+    ),
     result=core.RunResultProposal(outcome="cancelled", reason="operator stop"),
     now_at=0.5,
 )
@@ -220,8 +222,11 @@ def _poll_blocked_by_late_restart(down_for: float) -> core.CoreState:
         assert request.request_id is not None
         state = core.step(state, core.DispatchAuthorized(request_id=request.request_id)).state
     poll = next(row for row in state.records.records if row.request.kind == "observe_owned_job")
-    late = poll.until.at + down_for
-    state = core.step(state, core.RecoveryStarted(epoch=2, now_at=late)).state
+    restart = poll.until.at + down_for
+    state = core.step(state, core.RecoveryStarted(epoch=2, now_at=restart)).state
+    # The restart inspects the poll first; its passed limit ends it once that inspection's own
+    # bound passes with no answer.
+    late = restart + state.run.limits.reconciliation_bound
     result = core.step(state, core.ReconciliationDeadline(request_id=poll.request_id, now_at=late))
     return _settle_blocks(result.state, result.requests, late)
 
