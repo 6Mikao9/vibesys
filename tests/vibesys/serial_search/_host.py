@@ -10,7 +10,7 @@ has a clock or a thread: `FlowRun` is the whole world.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, Self, TypedDict, Unpack, cast
 
 from vibesys.hypothesis import HypothesisState
 from vibesys.metrics import EvidenceReading, MetricRow
@@ -80,6 +80,18 @@ type Baseline = Literal["measured", "failed-workload", "no-evidence", "lost"]
 type Validation = Literal["passed", "failed", "unusable", "errored"]
 
 
+class World(TypedDict, total=False):
+    """How the world around a serial flow differs from the ordinary one."""
+
+    refusals: dict[str, int]
+    refusal_code: RejectionCode
+    throughputs: dict[str, float]
+    baseline: Baseline
+    validation: Validation
+    attribution_output: str
+    attribution_exit_code: int
+
+
 @dataclass
 class SerialHost:
     """The world around a serial flow, apart from its agents."""
@@ -113,11 +125,11 @@ class SerialHost:
         *,
         restarting: bool,
         view: FakeView | None = None,
-        **world: object,
-    ) -> SerialHost:
+        **world: Unpack[World],
+    ) -> Self:
         """Start ``search`` of ``config`` under a host; ``world`` sets how the far side behaves."""
         run = FlowRun.start(search, config, facts=FACTS, restarting=restarting, view=view)
-        return cls(cast("FlowRun[object]", run), **world)  # ty: ignore[invalid-argument-type]
+        return cls(cast("FlowRun[object]", run), **world)
 
     @property
     def record(self) -> HypothesisState | None:
@@ -274,8 +286,11 @@ class SerialHost:
         typed = request.request
         outcome: BaseModel
         if isinstance(typed, InterpretEvidenceBase):
-            outcome = typed.outcome_model(
-                status="succeeded", readings=tuple(self._reading_of(ref) for ref in typed.evidence)
+            outcome = typed.outcome_model.model_validate(
+                {
+                    "status": "succeeded",
+                    "readings": tuple(self._reading_of(ref) for ref in typed.evidence),
+                }
             )
         elif isinstance(typed, CaptureCommandBase):
             outcome = CommandCapture(

@@ -18,6 +18,7 @@ from vibesys.orchestration.issue_queue.search.api import (
     budget,
     issue_queue,
 )
+from vibesys.run.contracts import IterationTree
 from vs_core.api import AssessmentKind, Capabilities, validate_startup
 
 OPTIONS = st.builds(
@@ -105,6 +106,7 @@ def test_the_judge_is_the_declared_authority_for_the_only_required_assessment() 
 
 def test_the_declaration_is_served_by_the_operations_the_run_registers() -> None:
     registry = issue_queue.registry()
+    assert registry is not None
     offered = Capabilities(lifecycle=frozenset({"suspend"}), operations=registry.descriptors)
 
     selected = validate_startup(issue_queue.declaration, offered)
@@ -156,6 +158,7 @@ def test_the_projection_keeps_the_fields_clients_have_always_been_given(
 
     payload = project_run_snapshot(snapshot, experiment_revision=0).payload
 
+    assert payload is not None
     assert set(payload) == PROJECTED_KEYS
     assert payload["bootstrap_done"] is bool(titles)
     assert (payload["phase"] is not None) is (current is not None or cursor == "assess")
@@ -166,5 +169,7 @@ def test_a_run_that_has_not_filed_its_first_issue_is_pending() -> None:
         QueueSnapshot(round_idx=0, cursor="drain"), experiment_revision=0
     )
 
+    assert projected.payload is not None
     assert projected.payload["bootstrap_done"] is False
+    assert isinstance(projected.iterations, IterationTree)
     assert projected.iterations.nodes[0].status.value == "pending"

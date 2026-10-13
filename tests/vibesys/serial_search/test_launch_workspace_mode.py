@@ -20,8 +20,8 @@ def test_the_search_works_in_the_root_exactly_when_the_host_has_no_candidate_san
     options = launch.model_validate(OPTIONS)
     config = (
         options.search_config(workspace_mode=mode)
-        if launch is SingleLaunch
-        else options.search_config(profiling=False, workspace_mode=mode)  # ty: ignore[unknown-argument]
+        if isinstance(options, SingleLaunch)
+        else options.search_config(profiling=False, workspace_mode=mode)
     )
 
     assert config.exclusive_root is (mode is WorkspaceMode.EXCLUSIVE_ROOT)

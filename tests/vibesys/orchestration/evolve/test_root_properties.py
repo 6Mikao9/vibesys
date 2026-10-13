@@ -57,7 +57,7 @@ def _check_at_the_end(host: Host) -> None:
     assert (chosen is not None) == bool(passing), f"a passing individual and no winner: {where}"
     if chosen is None:
         return
-    adopted = [item for item in passing if item.commit == chosen.revision.git_commit]  # ty: ignore[unresolved-attribute]
+    adopted = [item for item in passing if item.commit == chosen.revision.git_commit]
     assert len(adopted) == 1, f"adopted a candidate that is no passing individual: {where}"
     best = max(item.perf_metric or 0.0 for item in passing)
     assert (adopted[0].perf_metric or 0.0) == best, (

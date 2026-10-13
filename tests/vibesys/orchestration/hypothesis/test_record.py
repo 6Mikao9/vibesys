@@ -132,7 +132,7 @@ def test_gate_retry_carries_approved_candidate_when_agent_omits_it() -> None:
     data.hypothesis.gate_approved_candidate_disposition = CandidateDisposition.PARETO_FRONTIER.value
     data.hypothesis.gate_approved_candidate_metrics = {"throughput": 12.0}
     data.hypothesis.gate_approved_candidate_evaluation_artifact = "approved.json"
-    assert data.attempt.implementation is not None
+    assert isinstance(data.attempt.implementation, ImplementerResponse)
     data.attempt.implementation = data.attempt.implementation.model_copy(
         update={"candidate_disposition": CandidateDisposition.UNASSESSED}
     )
@@ -164,7 +164,7 @@ def _unmeasured_candidate_input(
     outcome: HypothesisOutcome = HypothesisOutcome.DISPROVEN,
 ) -> RecordInput:
     data = _record_input()
-    assert data.attempt.implementation is not None
+    assert isinstance(data.attempt.implementation, ImplementerResponse)
     data.attempt.implementation = data.attempt.implementation.model_copy(
         update={
             "hypothesis_outcome": outcome,
@@ -227,7 +227,7 @@ def test_deferred_frontier_claim_cannot_create_a_retention_decision() -> None:
 
 def test_trusted_frontier_measurement_can_retain_a_disproven_hypothesis_candidate() -> None:
     data = _record_input()
-    assert data.attempt.implementation is not None
+    assert isinstance(data.attempt.implementation, ImplementerResponse)
     data.attempt.implementation = data.attempt.implementation.model_copy(
         update={"hypothesis_outcome": HypothesisOutcome.DISPROVEN}
     )

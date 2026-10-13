@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Unpack
 
-from tests.vibesys.serial_search._host import SerialHost
+from tests.vibesys.serial_search._host import SerialHost, World
 from tests.vibesys.serial_search._replies import plan_reply
 
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
@@ -51,9 +51,11 @@ class SingleHost(SerialHost):
     designs: int = 0
 
     @classmethod
-    def start(cls, selected: SingleConfig, *, restarting: bool, **world: object) -> SingleHost:
+    def start(
+        cls, selected: SingleConfig, *, restarting: bool, **world: Unpack[World]
+    ) -> SingleHost:
         """Start the single search of ``selected`` under a host."""
-        return cls.begin(single, selected, restarting=restarting, **world)  # ty: ignore[invalid-return-type]
+        return cls.begin(single, selected, restarting=restarting, **world)
 
     def answer_agent(self, asked: Asked, variant: int) -> None:
         """Answer a designer or implementer turn; ``variant`` chooses how it goes."""

@@ -153,21 +153,22 @@ def reference(
 
     def outcome(name: str, proposal: Proposal | None) -> CandidateOutcome:
         child = world.child(seed_world, name)
-        lineage = {
-            "parent_id": None if proposal is None else proposal.parent.id,
-            "inspiration_ids": ()
-            if proposal is None
-            else tuple(item.id for item in proposal.inspirations),
-            "summary": child.summary,
-            "policy_parent_id": None if proposal is None else proposal.policy_parent_id,
-            "target_island": None if proposal is None else proposal.target_island,
-        }
+        parent_id = None if proposal is None else proposal.parent.id
+        inspiration_ids = (
+            () if proposal is None else tuple(item.id for item in proposal.inspirations)
+        )
+        policy_parent_id = None if proposal is None else proposal.policy_parent_id
+        target_island = None if proposal is None else proposal.target_island
         if not child.judge_passes:
             return CandidateOutcome(
                 passed=False,
                 feedback=f"fails {name}",
                 commit=commit_of(name) if proposal is None else None,
-                **lineage,
+                parent_id=parent_id,
+                inspiration_ids=inspiration_ids,
+                summary=child.summary,
+                policy_parent_id=policy_parent_id,
+                target_island=target_island,
             )
         return CandidateOutcome(
             passed=True,
@@ -180,7 +181,11 @@ def reference(
                 ("ttft_ms", child.ttft_ms),
             ),
             code=f"patch for {commit_of(name)}",
-            **lineage,
+            parent_id=parent_id,
+            inspiration_ids=inspiration_ids,
+            summary=child.summary,
+            policy_parent_id=policy_parent_id,
+            target_island=target_island,
         )
 
     state = search.initial()

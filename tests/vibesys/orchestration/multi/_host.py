@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Unpack
 
-from tests.vibesys.serial_search._host import SerialHost
+from tests.vibesys.serial_search._host import SerialHost, World
 from tests.vibesys.serial_search._replies import plan_reply
 
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
@@ -93,7 +93,7 @@ class MultiHost(SerialHost):
         restarting: bool,
         validating: bool = False,
         suspending: bool = False,
-        **world: object,
+        **world: Unpack[World],
     ) -> MultiHost:
         """Start the multi search of ``selected`` under a host.
 
@@ -107,11 +107,11 @@ class MultiHost(SerialHost):
                 assert multi.operations is not None
                 operations = multi.operations.registry().descriptors
             offered = Capabilities(
-                operations=operations,  # ty: ignore[invalid-argument-type]
+                operations=operations,
                 lifecycle=frozenset({"suspend"}) if suspending else frozenset(),
             )
             view = FakeView(changes={"capabilities": offered})
-        return cls.begin(multi, selected, restarting=restarting, view=view, **world)  # ty: ignore[invalid-return-type]
+        return cls.begin(multi, selected, restarting=restarting, view=view, **world)
 
     def answer_agent(self, asked: Asked, variant: int) -> None:
         """Answer a turn of any agent; ``variant`` chooses how it goes."""

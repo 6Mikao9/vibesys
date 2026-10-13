@@ -177,10 +177,12 @@ def test_a_run_environment_that_cannot_open_a_sandbox_per_candidate_runs_one_chi
     tmp_path: Path,
 ) -> None:
     wide = plan_of(resolved(tmp_path), {"max_parallelism": 3})
+    assert isinstance(wide.config, EvolveConfig)
     assert (wide.config.exclusive_root, wide.config.max_parallelism) == (False, 3)
 
     environment = candidate_environment(share_agent_session=True)
     shared = plan_of(resolved(tmp_path, environment=environment), {"max_parallelism": 3})
+    assert isinstance(shared.config, EvolveConfig)
     assert (shared.config.exclusive_root, shared.config.max_parallelism) == (True, 1)
     assert shared.limits.max_parallel == 1
 

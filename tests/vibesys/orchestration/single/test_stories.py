@@ -8,6 +8,8 @@ tests; what is asserted here is only what the search decided.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Unpack
+
 import pytest
 from tests.vibesys.orchestration.single._host import (
     IMPLEMENTER,
@@ -16,7 +18,7 @@ from tests.vibesys.orchestration.single._host import (
     config,
     implemented,
 )
-from tests.vibesys.serial_search._host import assert_flow_closed
+from tests.vibesys.serial_search._host import Baseline, World, assert_flow_closed
 from tests.vibesys.serial_search._replies import plan_reply
 
 from vs_core.api import (
@@ -29,13 +31,20 @@ from vs_core.api import (
     StartAttempt,
 )
 
+if TYPE_CHECKING:
+    from vibesys.orchestration.single.search.api import SingleConfig
+
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
 CANDIDATE = RevisionRef.of_git_commit("def456")
 
 
-def start(selected: object = None, *, restarting: bool, **world: object) -> SingleHost:
+def start(
+    selected: SingleConfig | None = None, *, restarting: bool, **world: Unpack[World]
+) -> SingleHost:
     """Run the input's measurement up to the first design turn."""
-    host = SingleHost.start(selected or config(), restarting=restarting, **world)  # ty: ignore[invalid-argument-type]
+    host = SingleHost.start(
+        config() if selected is None else selected, restarting=restarting, **world
+    )
     host.drain_until_turn(PLANNER)
     return host
 
@@ -148,7 +157,9 @@ def test_a_start_core_refuses_is_a_failed_round_not_a_crash(*, restarting: bool)
 
 @MODES
 @pytest.mark.parametrize("baseline", ["failed-workload", "no-evidence", "lost"])
-def test_an_input_that_cannot_be_measured_is_not_hidden(*, restarting: bool, baseline: str) -> None:
+def test_an_input_that_cannot_be_measured_is_not_hidden(
+    *, restarting: bool, baseline: Baseline
+) -> None:
     host = SingleHost.start(config(), restarting=restarting, baseline=baseline)
     host.drain(limit=60)
     assert host.run.finished is not None or host.run.open

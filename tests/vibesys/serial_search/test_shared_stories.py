@@ -8,12 +8,14 @@ what a workspace is closed with. Every story runs live and again with a restart 
 
 from __future__ import annotations
 
+from typing import Unpack
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi import _host as multi_host
 from tests.vibesys.orchestration.single import _host as single_host
-from tests.vibesys.serial_search._host import FACTS, SerialHost, assert_flow_closed
+from tests.vibesys.serial_search._host import FACTS, SerialHost, World, assert_flow_closed
 from tests.vibesys.serial_search._replies import attribution, plan_reply
 
 from vs_core.api import (
@@ -38,7 +40,11 @@ PROFILE_GUIDED = {"command": ("profile",), "timeout_seconds": 10}
 
 
 def start(
-    search: str, *, restarting: bool, config: dict[str, object] | None = None, **world: object
+    search: str,
+    *,
+    restarting: bool,
+    config: dict[str, object] | None = None,
+    **world: Unpack[World],
 ) -> SerialHost:
     """Run the input's measurement up to the first design turn."""
     settings_ = {"max_rounds": 1, **(config or {})}

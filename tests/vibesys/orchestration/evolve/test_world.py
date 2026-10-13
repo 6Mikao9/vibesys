@@ -20,7 +20,7 @@ def adopted(run: SimulatedRun) -> str | None:
     final = run.decisions[-1]
     assert isinstance(final, Finish)
     chosen = final.result.selection
-    return None if chosen is None else chosen.revision.git_commit  # ty: ignore[unresolved-attribute]
+    return None if chosen is None else chosen.revision.git_commit
 
 
 def starts(run: SimulatedRun) -> int:

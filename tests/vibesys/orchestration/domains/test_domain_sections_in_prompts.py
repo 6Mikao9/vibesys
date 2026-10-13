@@ -272,7 +272,9 @@ def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
         "evolve": evolve_api.evolve,
     }
     schemas = (
-        searches[strategy.name].reply_schemas if strategy.name in searches else plan.reply_schemas
+        searches[strategy.name].reply_schemas
+        if strategy.name in searches
+        else plan.search.reply_schemas
     )
     fields = context_variables(context, schemas)
     # The host supplies the run's profiler to every prompt of the evolve search (`evolve_core`).
