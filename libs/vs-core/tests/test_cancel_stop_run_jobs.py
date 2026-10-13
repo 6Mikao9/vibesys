@@ -284,7 +284,7 @@ class _Run:
         match op:
             case ("tick", float(seconds)):
                 self.tick(seconds)
-            case ("observe", (_, status, bool(accepted))):
+            case ("observe", (_, core.ObservationStatus() as status, bool(accepted))):
                 self.observe(status, accepted=accepted)
             case ("stop", core.StopMode() as mode):
                 self.stop(mode)
