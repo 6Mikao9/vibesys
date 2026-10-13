@@ -1,0 +1,146 @@
+"""The single flow told as a story, by hand: no core, no clock, no event loop.
+
+Each story plays the host of `single`: it answers the waits the search opens in the order the story
+chooses and reads what the search decided. Every story runs live and again with a restart after
+every step: the decisions must not change. What core guarantees about these waits is core's own
+tests; what is asserted here is only what the search decided.
+"""
+
+from __future__ import annotations
+
+import pytest
+from tests.vibesys.orchestration.single._host import (
+    IMPLEMENTER,
+    PLANNER,
+    SingleHost,
+    config,
+    implemented,
+)
+from tests.vibesys.serial_search._host import assert_flow_closed
+from tests.vibesys.serial_search._replies import plan_reply
+
+from vs_core.api import FailureReason, Finish, Retained, RevisionRef, StartAttempt
+
+MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+CANDIDATE = RevisionRef.of_git_commit("def456")
+
+
+def start(selected: object = None, *, restarting: bool, **world: object) -> SingleHost:
+    """Run the input's measurement up to the first design turn."""
+    host = SingleHost.start(selected or config(), restarting=restarting, **world)  # ty: ignore[invalid-argument-type]
+    host.drain_until_turn(PLANNER)
+    return host
+
+
+def design(host: SingleHost, identifier: str = "h1") -> None:
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), plan_reply(identifier))
+
+
+def implement(host: SingleHost, *, passed: bool = True, candidate: str = "def456") -> None:
+    host.run.reply(
+        host.run.expect_turn(role=IMPLEMENTER),
+        implemented(passed=passed),
+        checkpoint=Retained(revision=RevisionRef.of_git_commit(candidate)),
+    )
+
+
+def selection_of(host: SingleHost) -> tuple[str, str | None]:
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    chosen = finish.result.selection
+    assert chosen is not None, finish.result
+    commit = chosen.revision.git_commit if chosen.kind == "retained_candidate" else None
+    return chosen.kind, commit
+
+
+@MODES
+def test_one_hypothesis_from_design_to_the_adoption_of_its_candidate(*, restarting: bool) -> None:
+    host = start(restarting=restarting)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    implement(host)
+    host.drain()
+
+    assert selection_of(host) == ("retained_candidate", "def456")
+    record = host.record
+    assert record is not None
+    assert [item.hypothesis_id for item in record.hypotheses] == ["h1"]
+    assert [row.passed for row in record.hypotheses[0].rounds] == [True]
+    assert_flow_closed(host)
+
+
+@MODES
+def test_a_candidate_that_does_not_beat_the_input_is_not_adopted(*, restarting: bool) -> None:
+    host = start(restarting=restarting, throughputs={"c1": 10.0})
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    implement(host, candidate="c1")
+    host.drain()
+
+    assert selection_of(host) == ("trusted_baseline", None)
+    assert_flow_closed(host)
+
+
+@MODES
+def test_a_self_review_that_fails_gets_the_implementer_another_turn_in_the_same_workspace(
+    *, restarting: bool
+) -> None:
+    host = start(config(max_retries_per_round=2), restarting=restarting)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    implement(host, passed=False)
+    host.drain_until_turn(IMPLEMENTER)
+    implement(host, candidate="c2")
+    host.drain()
+
+    assert len(host.opened) == 1
+    assert selection_of(host) == ("retained_candidate", "c2")
+    assert_flow_closed(host)
+
+
+@MODES
+def test_an_invalid_design_is_corrected_once_by_a_turn_that_names_the_problem(
+    *, restarting: bool
+) -> None:
+    host = start(restarting=restarting)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER), "not json")
+    correction = host.run.expect_turn(role=PLANNER)
+    assert getattr(correction.context, "errors", ())
+    host.run.reply_raw(correction, plan_reply("h1"))
+    host.drain_until_turn(IMPLEMENTER)
+
+
+@MODES
+def test_an_implementer_that_times_out_ends_the_round_and_nothing_is_adopted(
+    *, restarting: bool
+) -> None:
+    host = start(config(max_retries_per_round=1), restarting=restarting)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    host.run.fail(host.run.expect_turn(role=IMPLEMENTER), FailureReason.TIMED_OUT)
+    host.drain()
+
+    assert selection_of(host) == ("trusted_baseline", None)
+    assert_flow_closed(host)
+
+
+@MODES
+def test_a_start_core_refuses_is_a_failed_round_not_a_crash(*, restarting: bool) -> None:
+    host = start(restarting=restarting)
+    host.refusals["start"] = 1
+    design(host)
+    for asked in host.open(StartAttempt):
+        host.answer(asked)
+    host.drain()
+
+    assert host.refused_starts == 1
+    assert selection_of(host) == ("trusted_baseline", None)
+    assert_flow_closed(host)
+
+
+@MODES
+@pytest.mark.parametrize("baseline", ["failed-workload", "no-evidence", "lost"])
+def test_an_input_that_cannot_be_measured_is_not_hidden(*, restarting: bool, baseline: str) -> None:
+    host = SingleHost.start(config(), restarting=restarting, baseline=baseline)
+    host.drain(limit=60)
+    assert host.run.finished is not None or host.run.open

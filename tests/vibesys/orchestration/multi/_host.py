@@ -13,12 +13,14 @@ from vibesys.orchestration.multi.models import ImplementerResponse, JudgeRespons
 from vibesys.orchestration.multi.search.api import MultiConfig, multi
 from vibesys.orchestration.profilers import ProfilerSummary
 from vs_core.api import (
+    Capabilities,
     CheckpointDecline,
     Declined,
     FailureReason,
     Retained,
     TurnFailureKind,
 )
+from vs_core.api.testing import FakeView
 
 if TYPE_CHECKING:
     from vs_core.api.testing import Asked
@@ -84,9 +86,19 @@ class MultiHost(SerialHost):
     designs: int = 0
 
     @classmethod
-    def start(cls, selected: MultiConfig, *, restarting: bool, **world: object) -> MultiHost:
-        """Start the multi search of ``selected`` under a host."""
-        return cls.begin(multi, selected, restarting=restarting, **world)  # ty: ignore[invalid-return-type]
+    def start(
+        cls, selected: MultiConfig, *, restarting: bool, validating: bool = False, **world: object
+    ) -> MultiHost:
+        """Start the multi search of ``selected`` under a host.
+
+        ``validating`` offers the trusted run of validation recipes, which a core may not offer.
+        """
+        view = None
+        if validating:
+            assert multi.operations is not None
+            offered = Capabilities(operations=multi.operations.registry().descriptors)
+            view = FakeView(changes={"capabilities": offered})
+        return cls.begin(multi, selected, restarting=restarting, view=view, **world)  # ty: ignore[invalid-return-type]
 
     def answer_agent(self, asked: Asked, variant: int) -> None:
         """Answer a turn of any agent; ``variant`` chooses how it goes."""

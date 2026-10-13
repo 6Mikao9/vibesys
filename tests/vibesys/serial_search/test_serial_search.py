@@ -21,20 +21,21 @@ from vibesys.serial_search.api import (
 )
 
 _CONFIG = HypothesisConfig(max_rounds=4)
-_TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
 
 
-def _reply(identifier: str, **extra: object) -> str:
-    return json.dumps(
-        {
-            "hypothesis_id": identifier,
-            "title": "a title",
-            "hypothesis": "claim",
-            "task": "task",
-            "pass_criteria": "faster",
-            "reasoning": "because",
-            **extra,
-        }
+def _reply(identifier: str, **extra: object) -> OrchestratorPlan:
+    return OrchestratorPlan.model_validate_json(
+        json.dumps(
+            {
+                "hypothesis_id": identifier,
+                "title": "a title",
+                "hypothesis": "claim",
+                "task": "task",
+                "pass_criteria": "faster",
+                "reasoning": "because",
+                **extra,
+            }
+        )
     )
 
 
@@ -51,13 +52,6 @@ def test_a_valid_plan_gets_a_stripped_nonempty_id_whatever_the_designer_wrote(
     assert isinstance(plan, OrchestratorPlan)
     assert plan.hypothesis_id == (identifier.strip() or "hypothesis-0003")
     assert plan.recommended_skills == []
-
-
-@given(text=_TEXT)
-def test_a_reply_that_is_not_a_plan_is_refused_with_a_reason(text: str) -> None:
-    refused = accept_plan(_CONFIG, rounds.decode(rounds.EncodedLedger()), text, round_number=1)
-    assert isinstance(refused, str)
-    assert refused
 
 
 def test_a_plan_that_updates_itself_twice_or_reuses_an_id_is_refused() -> None:

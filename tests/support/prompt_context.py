@@ -13,8 +13,8 @@ from tests.support.reply_variables import context_variables, profiler_reply
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.evolve.search.api import evolve
 from vibesys.orchestration.issue_queue.search.api import issue_queue
-from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_schemas
-from vibesys.orchestration.single.core_policy.api import reply_schemas as single_schemas
+from vibesys.orchestration.multi.search.api import multi
+from vibesys.orchestration.single.search.api import single
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -28,6 +28,6 @@ def registered_reply_models() -> list[type[BaseModel]]:
         *dynamic.reply_schemas.values(),
         *evolve.reply_schemas.values(),
         *issue_queue.reply_schemas.values(),
-        *multi_schemas().values(),
-        *single_schemas().values(),
+        *multi.reply_schemas.values(),
+        *single.reply_schemas.values(),
     ]

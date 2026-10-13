@@ -11,8 +11,7 @@ from tests.vibesys.serial_search._replies import plan_reply
 
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.search.api import SingleConfig, single
-from vs_core.api import Declined, FailureReason, Retained, TurnFailureKind
-from vs_core.api import CheckpointDecline
+from vs_core.api import CheckpointDecline, Declined, FailureReason, Retained, TurnFailureKind
 
 if TYPE_CHECKING:
     from vs_core.api.testing import Asked

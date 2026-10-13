@@ -1,6 +1,6 @@
 """Commit a hypothesis ledger as the runtime record of a multi run, for read-path tests.
 
-A multi run keeps its state in the run's state store as a core runtime record. The server and the
+A multi run keeps what its flow published in the run's state store as a core runtime record. The server and the
 chat tools read the hypothesis ledger through the registration's projector, so a test of those
 read paths commits the ledger the same way, without driving a run.
 """
@@ -9,18 +9,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.vibesys.orchestration.multi.strategy.world import MultiWorld
+from tests.vibesys.orchestration.multi._host import MultiHost, config
 
-from vibesys.hypothesis import rounds
-from vibesys.orchestration.multi.strategy.api import MultiStrategyState
+from vibesys.orchestration.multi.search.api import multi
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     EventCursor,
+    FlowState,
     HostFence,
     HostId,
     RunEnvelope,
 )
-from vs_core.testing.drive import new_run
+from vs_core.testing.builders import initial_state
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import RuntimeRecord
 
@@ -40,17 +40,21 @@ class SearchRecord:
 
     def save(self, search: HypothesisState) -> None:
         """Commit a record whose strategy state holds ``search``."""
-        encoded = rounds.encode(rounds.Ledger(search))
-        state = MultiStrategyState(search_json=encoded.search_json, carry_json=encoded.carry_json)
-        setup = MultiWorld().setup
-        strategy = setup.new_strategy()
-        core = new_run(strategy, setup.harness)
-        record = RuntimeRecord[MultiStrategyState].fresh(
-            RunEnvelope[MultiStrategyState](
+        started = MultiHost.start(config(), restarting=False).run.state
+        state = started.model_copy(
+            update={"live": started.live.model_copy(update={"published": search.model_dump_json()})}
+        )
+        declaration = multi.declaration
+        core = initial_state()
+        core = core.model_copy(
+            update={"run": core.run.model_copy(update={"declaration": declaration})}
+        )
+        record = RuntimeRecord[FlowState].fresh(
+            RunEnvelope[FlowState](
                 schema_version=ENVELOPE_SCHEMA_VERSION,
                 fence=HostFence(host_id=HostId(root="writer"), epoch=1),
-                strategy_id=strategy.declaration.strategy_id,
-                state_schema=strategy.declaration.state_schema,
+                strategy_id=declaration.strategy_id,
+                state_schema=declaration.state_schema,
                 core=core,
                 strategy=state,
                 event_cursor=EventCursor(sequence=0),

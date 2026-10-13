@@ -49,14 +49,19 @@ def _untimed(value: object) -> object:
 
 
 def _lapsed_while_down(recovered: SimulatedRun) -> bool:
-    """Whether the run stalled on a request whose time limit passed while no host was up.
+    """Whether a request's time limit passed while no host was up, and recovery gave up on it.
 
     A restart comes a lease after the crash, later than a request's own limit (a prompt
-    renders within five minutes). Core marks such a request blocked and cannot close the
-    run over it; `RESOLUTIONS` in `vs_core/_waits.py` names that gap. Every other way of not
-    finishing still fails the sweep.
+    renders within five minutes, a designer's turn within its role's time). Core blocks such a
+    request: the run either cannot close over it (`RESOLUTIONS` in `vs_core/_waits.py` names that
+    gap) or ends the turn as timed out, which a search that has nothing to fall back on (the
+    designer's) takes as the end of its run. Every other way of not finishing, and every other
+    difference, still fails the sweep.
     """
-    return not recovered.finished and ":blocked" in str(recovered.halted)
+    blocked = any(
+        getattr(entry, "kind", None) == "block_request" for entry in recovered.journal.entries
+    )
+    return blocked or (not recovered.finished and ":blocked" in str(recovered.halted))
 
 
 def _turn_lapsed_while_down(recovered: SimulatedRun, record: type[BaseModel]) -> bool:
@@ -101,6 +106,8 @@ def test_c2_a_restart_after_any_crash_finishes_the_same_run(
     for crash in normal.crash_points(kind)[part::PARTS]:
         recovered = normal.rerun_with_crash(crash)
         if _lapsed_while_down(recovered):
+            if recovered.finished:  # what it decided may differ; what it ran may not repeat
+                assert recovered.no_effect_ran_twice(), crash
             continue
         if _turn_lapsed_while_down(recovered, subject.snapshot):
             _assert_ended_cleanly(recovered)
