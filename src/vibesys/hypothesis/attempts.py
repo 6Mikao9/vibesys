@@ -25,13 +25,33 @@ class CandidateReply(Protocol):
     (policies depend on search, not the reverse), so this describes the shared
     shape of a policy-owned implementer response and
     ``orchestration.single.models.SingleAgentRoundResponse`` without importing it.
+    Every member is read-only: a reply is a frozen value.
     """
 
-    candidate_disposition: CandidateDisposition
-    candidate_metrics: dict[str, float]
-    candidate_evaluation_artifact: str | None
-    candidate_operating_point: str
-    candidate_retention_reason: str
+    @property
+    def candidate_disposition(self) -> CandidateDisposition:
+        """The reply's candidate disposition."""
+        ...
+
+    @property
+    def candidate_metrics(self) -> dict[str, float]:
+        """The reply's candidate metrics."""
+        ...
+
+    @property
+    def candidate_evaluation_artifact(self) -> str | None:
+        """The reply's candidate evaluation artifact."""
+        ...
+
+    @property
+    def candidate_operating_point(self) -> str:
+        """The reply's candidate operating point."""
+        ...
+
+    @property
+    def candidate_retention_reason(self) -> str:
+        """The reply's candidate retention reason."""
+        ...
 
     def model_dump(self, *, mode: str = "python") -> dict[str, object]:
         """Serialize the reply, matching ``pydantic.BaseModel.model_dump``."""
@@ -41,23 +61,69 @@ class CandidateReply(Protocol):
 class ImplementerReply(CandidateReply, Protocol):
     """The multi implementer-response fields attempt policies read."""
 
-    hypothesis_outcome: HypothesisOutcome
-    next_step: str
-    perf_metric: float | None
-    perf_unit: str | None
-    metrics: dict[str, float]
-    evaluation_artifact: str | None
-    validation_recipe_artifact: str | None
+    @property
+    def hypothesis_outcome(self) -> HypothesisOutcome:
+        """The reply's hypothesis outcome."""
+        ...
+
+    @property
+    def next_step(self) -> str:
+        """The reply's next step."""
+        ...
+
+    @property
+    def perf_metric(self) -> float | None:
+        """The reply's perf metric."""
+        ...
+
+    @property
+    def perf_unit(self) -> str | None:
+        """The reply's perf unit."""
+        ...
+
+    @property
+    def metrics(self) -> dict[str, float]:
+        """The reply's metrics."""
+        ...
+
+    @property
+    def evaluation_artifact(self) -> str | None:
+        """The reply's evaluation artifact."""
+        ...
+
+    @property
+    def validation_recipe_artifact(self) -> str | None:
+        """The reply's validation recipe artifact."""
+        ...
 
 
 class SingleAgentReply(CandidateReply, Protocol):
     """The single plugin response fields attempt policies read."""
 
-    perf_metric: float | None
-    perf_unit: str | None
-    profile_analysis: str
-    bottlenecks: str
-    suggestions: str
+    @property
+    def perf_metric(self) -> float | None:
+        """The reply's perf metric."""
+        ...
+
+    @property
+    def perf_unit(self) -> str | None:
+        """The reply's perf unit."""
+        ...
+
+    @property
+    def profile_analysis(self) -> str:
+        """The reply's profile analysis."""
+        ...
+
+    @property
+    def bottlenecks(self) -> str:
+        """The reply's bottlenecks."""
+        ...
+
+    @property
+    def suggestions(self) -> str:
+        """The reply's suggestions."""
+        ...
 
 
 class JudgeSkipReason(StrEnum):

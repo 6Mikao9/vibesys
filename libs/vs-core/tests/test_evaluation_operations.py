@@ -22,7 +22,7 @@ from vs_core.testing.flows import FAKE_OPERATIONS, Interpret, Render, Verify
 from .flow_support import Config, open_workspace
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from vs_core.flows._define import Root
 
 REVISION = core.RevisionRef.of_git_commit("revision")
 
@@ -114,7 +114,7 @@ def validate_root(ctx: core.Flow, _config: Config):  # noqa: ANN201
 
 
 def start(
-    root: Callable[..., object], *, restarting: bool, operations: core.StrategyOperations = OPS
+    root: Root[Config], *, restarting: bool, operations: core.StrategyOperations = OPS
 ) -> FlowRun[Config]:
     definition = search("ops", config=Config, operations=operations)(root)
     return FlowRun.start(definition, Config(), restarting=restarting)
@@ -164,7 +164,7 @@ def test_validation_recipes_run_in_the_workspace_scope_against_the_revision(
     request = asked.request.request  # ty: ignore[unresolved-attribute]
     assert isinstance(request, Validate)
     assert (request.revision, request.recipe_artifact) == (REVISION, "recipes.json")
-    assert asked.request.scope.owner == workspace.attempt_id  # ty: ignore[unresolved-attribute]
+    assert asked.request.scope.owner == workspace.attempt_id
     run.finish_operation(asked, core.LocalValidationReport(status="succeeded", passed=passed))
     assert run.published(Seen) == Seen(passed=passed)
 

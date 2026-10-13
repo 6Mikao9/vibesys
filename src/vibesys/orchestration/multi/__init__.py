@@ -2,10 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.multi.models import (
-    MultiOptions,
-    ProfileGuidedMultiOptions,
-)
+from vibesys.orchestration.multi.launch import MultiLaunch, ProfileGuidedMultiLaunch
 
 if TYPE_CHECKING:
     from vibesys.orchestration.multi.plugin import (
@@ -44,6 +41,6 @@ __all__ = [
     "PROFILE_GUIDED_PLUGIN",
     "PROFILE_GUIDED_REGISTRATION",
     "REGISTRATION",
-    "MultiOptions",
-    "ProfileGuidedMultiOptions",
+    "MultiLaunch",
+    "ProfileGuidedMultiLaunch",
 ]

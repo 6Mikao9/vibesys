@@ -264,12 +264,14 @@ def _agent_policy_descriptor(
             "max_unmeasured_turns": args.max_unmeasured_turns,
         }
     else:
+        # The serial searches read only their own knobs; their agents' retries and timeouts are
+        # the roles'. Only the multi search has a judge to ask every so often.
         options = {
             **task,
             "max_rounds": args.max_rounds,
             "max_retries_per_round": args.max_retries_per_round,
-            "judge_every": args.judge_every,
             "official_eval_every": args.official_eval_every,
+            **({"judge_every": args.judge_every} if args.inner_loop == "multi-agent" else {}),
         }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
 

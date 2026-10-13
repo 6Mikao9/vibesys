@@ -274,12 +274,12 @@ depends_on = ["vibesys.hypothesis", "vs_runtime", "vibesys.run.contracts"]
 [[modules]]
 path = "vibesys.orchestration.single"
 layer = "loops"
-depends_on = ["vibesys.single_core", "vibesys.orchestration.single.models"]
+depends_on = ["vibesys.single_core", "vibesys.orchestration.single.launch", "vibesys.orchestration.single.models"]
 
 [[modules]]
 path = "vibesys.orchestration.multi"
 layer = "loops"
-depends_on = ["vibesys.multi_core", "vibesys.orchestration.multi.models"]
+depends_on = ["vibesys.multi_core", "vibesys.orchestration.multi.launch", "vibesys.orchestration.multi.models"]
 
 [[modules]]
 path = "vibesys.orchestration.dynamic"
@@ -892,11 +892,11 @@ expose = ["agent_options", "profilers", "review"]
 from = ["vibesys.orchestration"]
 
 [[interfaces]]
-expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "ProfileGuidedSingleOptions", "REGISTRATION", "SingleAgentRoundResponse", "SingleOptions"]
+expose = ["PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "ProfileGuidedSingleLaunch", "REGISTRATION", "SingleAgentRoundResponse", "SingleLaunch"]
 from = ["vibesys.orchestration.single"]
 
 [[interfaces]]
-expose = ["MultiOptions", "PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "ProfileGuidedMultiOptions", "REGISTRATION"]
+expose = ["MultiLaunch", "PLUGIN", "PROFILE_GUIDED_PLUGIN", "PROFILE_GUIDED_REGISTRATION", "ProfileGuidedMultiLaunch", "REGISTRATION"]
 from = ["vibesys.orchestration.multi"]
 
 [[interfaces]]
@@ -1220,7 +1220,7 @@ expose = ["api", "api\\..*"]
 # profile-guided attribution, the designer's view of the search so far and plan acceptance.
 path = "vibesys.serial_search"
 layer = "roles_search"
-depends_on = ["vs_core", "vibesys.hypothesis", "vibesys.profile_focus"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.hypothesis", "vibesys.inputs", "vibesys.metrics", "vibesys.profile_focus"]
 
 [[interfaces]]
 from = ["vibesys.serial_search"]
@@ -1301,25 +1301,35 @@ depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibe
 [[modules]]
 path = "vibesys.orchestration.single.models"
 layer = "roles_search"
-depends_on = ["vibesys.hypothesis", "vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.review"]
+depends_on = ["vs_core", "vibesys.hypothesis", "vibesys.orchestration.review"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]
 from = ["vibesys.orchestration.single.models"]
 
 [[modules]]
-path = "vibesys.orchestration.single.strategy"
+path = "vibesys.orchestration.single.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.single.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.profile_focus", "vibesys.prompts", "vibesys.orchestration.review", "vibesys.serial_search"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.single.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.review", "vibesys.serial_search"]
 
 [[interfaces]]
-from = ["vibesys.orchestration.single.strategy"]
+from = ["vibesys.orchestration.single.search"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+# The options a single run is launched with: the search's config and the task's inputs.
+path = "vibesys.orchestration.single.launch"
+layer = "loops"
+depends_on = ["vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.single.search", "vibesys.serial_search"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.single.launch"]
+expose = ["SingleLaunch", "ProfileGuidedSingleLaunch"]
 
 [[modules]]
 path = "vibesys.orchestration.single.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.single.models", "vibesys.orchestration.single.strategy", "vibesys.run.contracts", "vibesys.candidates"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.single.search", "vibesys.run.contracts"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.single.core_policy"]
@@ -1334,7 +1344,7 @@ expose = ["single_core_registration"]
 # stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.single_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.single_roles", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.models", "vibesys.orchestration.single.strategy", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.serial_search"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.single_roles", "vibesys.hypothesis", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.launch", "vibesys.orchestration.single.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.serial_search"]
 
 [[interfaces]]
 from = ["vibesys.single_roles"]
@@ -1345,30 +1355,40 @@ expose = ["CORE_ROLES", "DESIGNER", "IMPLEMENTER"]
 # that the pure core_policy may not hold.
 path = "vibesys.single_roles"
 layer = "loops"
-depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.strategy"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.search"]
 
 [[modules]]
 path = "vibesys.orchestration.multi.models"
 layer = "roles_search"
-depends_on = ["vibesys.hypothesis", "vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.review", "vs_runtime"]
+depends_on = ["vs_core", "vibesys.hypothesis", "vibesys.orchestration.review", "vs_runtime"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]
 from = ["vibesys.orchestration.multi.models"]
 
 [[modules]]
-path = "vibesys.orchestration.multi.strategy"
+path = "vibesys.orchestration.multi.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.multi.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.profile_focus", "vibesys.prompts", "vibesys.orchestration.review", "vibesys.serial_search"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.multi.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.review", "vibesys.serial_search", "vibesys.orchestration.profilers"]
 
 [[interfaces]]
-from = ["vibesys.orchestration.multi.strategy"]
+from = ["vibesys.orchestration.multi.search"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+# The options a multi run is launched with: the search's config and the task's inputs.
+path = "vibesys.orchestration.multi.launch"
+layer = "loops"
+depends_on = ["vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.multi.search", "vibesys.serial_search"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.multi.launch"]
+expose = ["MultiLaunch", "ProfileGuidedMultiLaunch"]
 
 [[modules]]
 path = "vibesys.orchestration.multi.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.multi.models", "vibesys.orchestration.multi.strategy", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vibesys.candidates"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.multi.search", "vibesys.run.contracts"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.multi.core_policy"]
@@ -1383,18 +1403,18 @@ expose = ["multi_core_registration"]
 # stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.multi_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.multi_roles", "vibesys.orchestration.multi.core_policy", "vibesys.orchestration.multi.models", "vibesys.orchestration.multi.strategy", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.serial_search"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.multi_roles", "vibesys.hypothesis", "vibesys.orchestration.multi.core_policy", "vibesys.orchestration.multi.launch", "vibesys.orchestration.multi.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.serial_search", "vibesys.orchestration.profilers"]
 
 [[interfaces]]
 from = ["vibesys.multi_roles"]
-expose = ["CORE_ROLES", "DESIGNER", "IMPLEMENTER", "JUDGE", "PROFILER"]
+expose = ["CORE_ROLES", "DESIGNER", "IMPLEMENTER", "JUDGE", "PROFILER", "ROUTER"]
 
 [[modules]]
 # The agent roles of a core multi run: host wiring (vs_runtime values, template file paths)
 # that the pure core_policy may not hold.
 path = "vibesys.multi_roles"
 layer = "loops"
-depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.multi.core_policy", "vibesys.orchestration.multi.strategy"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.multi.core_policy", "vibesys.orchestration.multi.search"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve.models"

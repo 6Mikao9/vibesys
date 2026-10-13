@@ -1,23 +1,16 @@
-"""Policy-owned values for the single-agent orchestration presets."""
+"""The reply of the single-agent implementer."""
 
-from __future__ import annotations
-
-from typing import Literal
-
-from pydantic import BaseModel, Field, FiniteFloat, model_validator
+from pydantic import Field, FiniteFloat
 
 from vibesys.hypothesis import (
     CandidateDisposition,
     SkillResourceSelection,
 )
-from vibesys.inputs import ProfileGuidedInput
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.review import Verdict
+from vs_core.api.search import RevisionReply
 
-_ProfileGuidedInput = ProfileGuidedInput
 
-
-class SingleAgentRoundResponse(BaseModel):
+class SingleAgentRoundResponse(RevisionReply):
     """One agent performs implementer + judge + profiler in a single shot.
 
     Used by the agent outer-loop's ``--inner-loop=single-agent`` ablation:
@@ -83,30 +76,4 @@ class SingleAgentRoundResponse(BaseModel):
     )
 
 
-class SingleOptions(AgentOrchestrationOptions):
-    """Strict production descriptor options for the profiling-off preset."""
-
-    profile_guided: Literal[None] = None
-
-    @model_validator(mode="after")
-    def _registered_values(self) -> SingleOptions:
-        if self.interface not in {"inprocess", "service"}:
-            message = f"unsupported single-agent interface {self.interface!r}"
-            raise ValueError(message)
-        return self
-
-
-class ProfileGuidedSingleOptions(AgentOrchestrationOptions):
-    """Strict production descriptor options for the profiling-on preset."""
-
-    profile_guided: _ProfileGuidedInput
-
-    @model_validator(mode="after")
-    def _registered_values(self) -> ProfileGuidedSingleOptions:
-        if self.interface not in {"inprocess", "service"}:
-            message = f"unsupported profile-guided single-agent interface {self.interface!r}"
-            raise ValueError(message)
-        return self
-
-
-__all__ = ["ProfileGuidedSingleOptions", "SingleAgentRoundResponse", "SingleOptions"]
+__all__ = ["SingleAgentRoundResponse"]

@@ -1,11 +1,13 @@
 """The agent roles of a single run on the core path.
 
-They are declared here, outside the legacy orchestration tree, because a role is host wiring: its
-capabilities and workspace access name `vs_runtime` values and its prompt is read from a template
-file, neither of which the pure policy may do. The designer may write the roadmap artifacts of
-its run-scoped turn; the combined implementer, reviewer and profiler edits its candidate and
-carries the bridged evaluation tool. Each role's id is the strategy's (`role_id`), so the roles
-the strategy names and the roles the host declares cannot drift apart.
+The search declares each role once (`orchestration/single/search/_roles`, the designer shared
+with multi in `serial_search`): the template, the reply, the workspace, the time and the
+corrections. A role here is what only the host can add: the system prompt read from a template
+file, the capabilities the provider must have and the tools the agent is given. The designer
+may write the roadmap artifacts of its run-scoped turn; the combined implementer, reviewer and
+profiler edits its candidate and carries the bridged evaluation tool. Each role's id comes from
+the search's id scheme, so the roles the search asks and the roles the host declares cannot
+drift apart.
 """
 
 from __future__ import annotations
@@ -15,11 +17,12 @@ from typing import TYPE_CHECKING
 
 from vibesys.core_roles import MEASURING_WRITER, RoleKind, core_role
 from vibesys.orchestration.single.core_policy.api import prompts
-from vibesys.orchestration.single.strategy.api import Role, role_id
+from vibesys.orchestration.single.search import api as search
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import WorkspaceAccess
 
 if TYPE_CHECKING:
+    from vs_core.api.search import Role
     from vs_runtime.api import AgentRole
 
 _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
@@ -31,13 +34,13 @@ DESIGNER_KIND = RoleKind(WorkspaceAccess.LIMITED, frozenset())
 def _role(role: Role, kind: RoleKind) -> AgentRole:
     return core_role(
         _RENDERER,
-        role_id=role_id(role.value).root,
-        system_template=f"{role.value}_system.j2",
+        role_id=search.single.ids.role_id(role.name).root,
+        system_template=f"{role.name}_system.j2",
         kind=kind,
     )
 
 
-DESIGNER = _role(Role.PLANNER, DESIGNER_KIND)
-IMPLEMENTER = _role(Role.IMPLEMENTER, MEASURING_WRITER)
+DESIGNER = _role(search.PLANNER, DESIGNER_KIND)
+IMPLEMENTER = _role(search.IMPLEMENTER, MEASURING_WRITER)
 
 CORE_ROLES = (DESIGNER, IMPLEMENTER)

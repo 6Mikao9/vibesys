@@ -9,18 +9,23 @@ hypothesis ledger, shared by every strategy that offers the preset.
 from __future__ import annotations
 
 import shlex
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
 from vibesys.hypothesis import rounds
 from vibesys.profile_focus import (
     FocusView,
+    ProfileAttributionError,
     ProfileBottleneck,
     ProfileFocus,
     ProfileFocusConfig,
     parse_attribution,
 )
+from vs_core.api.search import CommandCapture, Value
+
+if TYPE_CHECKING:
+    from vibesys.inputs import ProfileGuidedInput
 
 # The delimiters `parse_attribution` expects around the command's output.
 _BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
@@ -31,15 +36,25 @@ OUTPUT_ARGUMENT = "--vs-output"
 type Positive = Annotated[int, Field(gt=0)]
 
 
-class AttributionConfig(BaseModel):
+class AttributionConfig(Value):
     """The profile-guided preset's attribution command and its plateau policy."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     command: tuple[str, ...] = Field(min_length=1)
     timeout_seconds: Positive = 1800
     min_measured_rounds: Positive = 2
     min_relative_improvement: Annotated[float, Field(ge=0)] = 0.02
+
+
+def attribution_of(guided: ProfileGuidedInput | None) -> AttributionConfig | None:
+    """The attribution a profile-guided input selects, else None for a plain run."""
+    if guided is None:
+        return None
+    return AttributionConfig(
+        command=guided.command,
+        timeout_seconds=guided.timeout_seconds,
+        min_measured_rounds=guided.min_measured_rounds,
+        min_relative_improvement=guided.min_relative_improvement,
+    )
 
 
 def focus_policy(attribution: AttributionConfig | None) -> ProfileFocus | None:
@@ -135,3 +150,34 @@ def record_round(
     return rounds.Ledger(
         ledger.search.model_copy(update={"profile_guidance": focused}), ledger.carry
     )
+
+
+def attributed(
+    ledger: rounds.Ledger,
+    attribution: AttributionConfig,
+    capture: CommandCapture,
+    *,
+    round_number: int,
+) -> rounds.Ledger | str:
+    """The ledger with a finished capture folded into the focus state, else why it failed.
+
+    Profile guidance is the preset's contract, so a capture that did not produce a valid result
+    protocol is a failure the search ends with, not a note.
+    """
+    if capture.status != "succeeded" or capture.exit_code != 0:
+        detail = capture_failure(
+            attribution.command,
+            exit_code=capture.exit_code,
+            detail=capture.detail,
+            output=capture.output,
+        )
+        return f"profile-guided attribution failed: {detail}"
+    try:
+        bottlenecks = bottlenecks_of(capture.output)
+    except ProfileAttributionError as error:
+        return f"profile-guided attribution failed: {error}"
+    policy = focus_policy(attribution)
+    if policy is None:
+        message = "an attribution config always has a focus policy"
+        raise ValueError(message)
+    return observe(ledger, policy, round_number=round_number, bottlenecks=bottlenecks)

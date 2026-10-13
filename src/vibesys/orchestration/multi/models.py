@@ -1,51 +1,20 @@
-"""Policy-owned values for the multi-agent orchestration presets: options and agent replies."""
+"""The replies of the multi-agent roles."""
 
-from __future__ import annotations
+from typing import override
 
-from typing import Literal
-
-from pydantic import BaseModel, Field, FiniteFloat, model_validator
+from pydantic import BaseModel, Field, FiniteFloat
 
 from vibesys.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
     SkillResourceSelection,
 )
-from vibesys.inputs import ProfileGuidedInput
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.review import Verdict
+from vs_core.api.search import RevisionReply
 from vs_runtime.api import VALIDATION_RECIPE_ARTIFACT_DESCRIPTION, ValidationRecipeArtifactPath
 
-_ProfileGuidedInput = ProfileGuidedInput
 
-
-class MultiOptions(AgentOrchestrationOptions):
-    """Strict production descriptor options for the profiling-off preset."""
-
-    profile_guided: Literal[None] = None
-
-    @model_validator(mode="after")
-    def _registered_values(self) -> MultiOptions:
-        if self.interface not in {"inprocess", "service"}:
-            message = f"unsupported multi-agent interface {self.interface!r}"
-            raise ValueError(message)
-        return self
-
-
-class ProfileGuidedMultiOptions(AgentOrchestrationOptions):
-    """Strict production descriptor options for the profiling-on preset."""
-
-    profile_guided: _ProfileGuidedInput
-
-    @model_validator(mode="after")
-    def _registered_values(self) -> ProfileGuidedMultiOptions:
-        if self.interface not in {"inprocess", "service"}:
-            message = f"unsupported profile-guided multi-agent interface {self.interface!r}"
-            raise ValueError(message)
-        return self
-
-
-class ImplementerResponse(BaseModel):
+class ImplementerResponse(RevisionReply):
     """Structured response from a multi-policy implementer."""
 
     summary: str = Field(description="What was implemented or changed this iteration.")
@@ -114,6 +83,11 @@ class ImplementerResponse(BaseModel):
         description=VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
     )
 
+    @override
+    def produces_revision(self) -> bool:
+        """A blocked implementer claims no work, so core records no checkpoint for its turn."""
+        return self.hypothesis_outcome is not HypothesisOutcome.BLOCKED
+
 
 class JudgeResponse(BaseModel):
     """Structured response from a multi-policy judge."""
@@ -154,10 +128,4 @@ class PreRoundDecision(BaseModel):
     reasoning: str = Field(description="Short explanation of the decision.")
 
 
-__all__ = [
-    "ImplementerResponse",
-    "JudgeResponse",
-    "MultiOptions",
-    "PreRoundDecision",
-    "ProfileGuidedMultiOptions",
-]
+__all__ = ["ImplementerResponse", "JudgeResponse", "PreRoundDecision"]

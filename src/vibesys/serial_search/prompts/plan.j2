@@ -193,5 +193,10 @@ but its control is retained, do not leave the failed arm as an implicit default.
 Recommend zero or more narrow installed skill references with a purpose. Do not
 preload them or make an allowlist; the implementer may discover others.
 
+{% if problem %}
+Correction required: your previous plan was not accepted. {{ problem }}
+Answer again with a corrected plan.
+
+{% endif %}
 Return only the schema-valid JSON object. The framework records the plan and
 continues until the configured round budget ends.
