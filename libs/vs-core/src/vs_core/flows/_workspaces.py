@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import TypeAdapter
 
 from vs_core._registry import ContractError
-from vs_core._strategy_operations import ParentVerification
+from vs_core._strategy_operations import ParentVerification, PatchExport
 from vs_core.types.common import (
     THIS_RUN,
     AttemptId,
@@ -162,6 +162,29 @@ class Workspaces:
         if not isinstance(outcome, ParentVerification):
             message = "the verification returned something that is not a ParentVerification"
             raise ContractError(("workspaces", "verify"), message)
+        return outcome
+
+    async def export_patch(self, revision: RevisionRef, *, within: Seconds) -> PatchExport | Failed:
+        """The canonical patch of retained ``revision`` against the input, for a search that ranks by code.
+
+        The search must declare the export in its operations.
+        """
+        operations = self._kit.run.wiring.operations
+        if operations is None or operations.export_patch is None:
+            message = "this search was registered without an export_patch operation"
+            raise ContractError(("workspaces", "export_patch"), message)
+        request = Operation(
+            decision_id=DecisionId(root="export-patch"),
+            scope=THIS_RUN,
+            request=operations.export_patch(revision=revision),  # ty: ignore[missing-argument]
+        )
+        event = await self._kit.wait(request, Within(limit=within))
+        if isinstance(event, Failed):
+            return event
+        outcome = getattr(getattr(event, "result", None), "outcome", None)
+        if not isinstance(outcome, PatchExport):
+            message = "the export returned something that is not a PatchExport"
+            raise ContractError(("workspaces", "export_patch"), message)
         return outcome
 
     def kept(self) -> tuple[Kept, ...]:
