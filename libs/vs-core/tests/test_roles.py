@@ -94,7 +94,6 @@ def test_the_defaults_are_the_ones_written_on_the_role() -> None:
     assert role.may_wait_for_evaluations is False
     assert role.correctable == frozenset(core.Correctable)
     assert role.lost_turn_backoff == core.Backoff(first=5.0, cap=120.0)
-    assert role.lost_resumes == 0
     assert role.render_time == 300.0
     assert role.model is None
 
@@ -127,7 +126,7 @@ def test_how_a_role_is_carried_is_never_left_to_a_default(missing: str) -> None:
 
 
 @given(
-    field=st.sampled_from(["corrections", "lost_turns", "lost_resumes"]),
+    field=st.sampled_from(["corrections", "lost_turns"]),
     value=st.integers(min_value=core.MAX_LOST_TURNS + 1, max_value=10_000) | st.integers(-1000, -1),
 )
 def test_a_count_beyond_the_hard_cap_or_below_zero_is_rejected(field: str, value: int) -> None:

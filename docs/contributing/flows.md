@@ -84,7 +84,7 @@ match await session.turn(ImplementerPrompt(...), within=config.implementer_turn_
 
 A `Role` is the single declaration of how an agent is asked: name, prompt template, reply model
 (a `RevisionReply` holds for core's checkpoint), workspace mode, access, charge, `turn_time`,
-`corrections`, `lost_turns`, `lost_turn_backoff`, `lost_resumes`, `correctable`, `render_time`,
+`corrections`, `lost_turns`, `lost_turn_backoff`, `correctable`, `render_time`,
 the `Exchanges` templates for corrections and resumes, and whether it may wait on its own
 evaluations. It is frozen and rejects unknown keys; core caps `corrections`, `lost_turns` and the
 times (`MAX_*`). Only `model` is overridden per run (`SearchDef.with_models`). A session is one
@@ -95,7 +95,8 @@ model) or **one** `Failed`. In between core runs the turn: it renders the prompt
 namespace's template, runs the provider turn, validates the reply and asks the agent to correct
 an invalid one (up to `role.retry.corrections`), asks again after a lost turn with a backoff (up
 to `role.lost_turns`), suspends a turn that waits for evaluations and resumes it when core
-authorizes, and holds a write turn's reply until core recorded its checkpoint. A role with
+authorizes, and holds a write turn's reply until core recorded its checkpoint. A turn lost while it continued a wait is never asked again (core authorizes each resume
+once), so it fails with `LOST`. A role with
 `corrections=0` and `lost_turns=0` gets `Failed(INVALID_REPLY)` or `Failed(LOST)` at once and asks again itself. A
 prompt that is a `Correction` makes the turn a correction of the earlier turn it names.
 

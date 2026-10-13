@@ -101,8 +101,6 @@ class Role(BaseModel):
     """Which failed replies core may ask the agent to correct."""
     lost_turn_backoff: Backoff = Backoff(first=5.0, cap=120.0)
     """The wait before a lost turn is asked again; it doubles with each further loss."""
-    lost_resumes: Annotated[int, Field(ge=0, le=MAX_LOST_TURNS)] = 0
-    """How often a lost turn that continued a wait is asked again (as a correction of it)."""
     render_time: Annotated[float, Field(gt=0, le=MAX_RENDER_SECONDS, allow_inf_nan=False)] = 300.0
     """Seconds a prompt of this role may take to render."""
     model: Annotated[str, Field(min_length=1, max_length=256)] | None = None
