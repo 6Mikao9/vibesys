@@ -167,29 +167,29 @@ one-way dependencies and the [placement rule](../../../../docs/contributing/arch
 
 ## Worked example: DynamicSearch
 
-Read [DynamicSearch](../../../../src/vibesys/orchestration/dynamic/search/_search.py),
-its [state](../../../../src/vibesys/orchestration/dynamic/search/_state.py) and one
-[workstream machine](../../../../src/vibesys/orchestration/dynamic/search/_workstream.py).
+Read [DynamicSearch](../../../../src/vibesys/orchestration/dynamic/search/_search.py)
+and one [workstream flow](../../../../src/vibesys/orchestration/dynamic/search/_workstream.py).
 Then read the
-[story test](../../../../tests/vibesys/orchestration/dynamic/search/test_story_and_machine.py),
-which drives one hypothesis from baseline to adoption by feeding events to `update`
-and asserting on the decisions that come back.
+[story tests](../../../../tests/vibesys/orchestration/dynamic/test_stories.py),
+which drive one hypothesis from baseline to adoption by answering the waits the search opens
+and asserting on the decisions that come back. [Flows](../../../../docs/contributing/flows.md)
+says how a search is written.
 
-- `update(state, event, view)` is a pure function of the search state, one event and
-  the read-only `RunView`. It returns the next state and decisions and never starts
-  anything.
-- Each part of the run (baseline, each workstream) is a machine with a phase per kind
-  of wait: `Opening`, `Implementing`, `Judging`, `Measuring`, `Settling`. A phase says
-  what the machine is waiting for, so an event that does not fit the phase is an
-  error, not a guess.
-- A decision that asks for work is a `Wait` carrying the request and its `Within`
-  limit. The limit is stated by whoever asks; the shell enforces it and reports
-  expiry as a typed `Failed` event the phase must handle.
-- `Children` gives every machine its own decision identities and routes an event to the
-  machine whose decision it answers, so machines never read each other's state.
-- The shell executes each request through its interface and feeds the result back as
-  the next event. Slot and budget decisions need no async execution, and restart
-  replays the committed decisions against the same identities.
+- A search is ordinary `async def` code over `ctx`: the runtime journals what the flow
+  observes and replays it after a restart, so the flow itself holds no hand-written state
+  record. The flow is pure in the sense that matters here: its only inputs are the config
+  and the journaled values `ctx` returns, and it reaches the world only through `ctx`.
+- Each part of the run (baseline, each workstream) is a flow. Where it waits is where it
+  awaits (`session.turn`, `ctx.evaluation.measure`), so a wait that does not fit the flow's
+  position cannot be written, instead of being an event to reject.
+- A request that asks for work carries its `within` limit, stated by whoever asks; the
+  runtime enforces it and reports expiry as a typed `Failed` value the flow must match.
+- A workspace is a resource: it always settles, after the work, after a failure that ends it,
+  and after an operator stop.
+- Flows start child flows in a group, so concurrent parts never read each other's state; they
+  hand results back as values.
+- The runtime executes each request through its interface and returns the result to the
+  `await`. Restart replays the journal against the same identities.
 
 ## When not to use it
 
