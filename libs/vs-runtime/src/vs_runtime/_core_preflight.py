@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
-from vs_core.api import ContractError, OperationRegistry, Search, StrategyState, validate_startup
+from vs_core.api import (
+    ContractError,
+    OperationRegistry,
+    SearchDriver,
+    StrategyState,
+    validate_startup,
+)
 from vs_project.api import (
     Project,
     ProjectStateError,
@@ -135,7 +141,7 @@ def reject_legacy_resume(project: Project, run_id: str) -> None:
 
 def resolve_core_resume[S: StrategyState](
     project: Project,
-    search: Search[S, Any],
+    search: SearchDriver[S, Any],
     *,
     run_id: str | None = None,
     registry: OperationRegistry | None = None,

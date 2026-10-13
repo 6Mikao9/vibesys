@@ -33,7 +33,7 @@ from vs_core.api import (
     RequestPhase,
     RequestRecord,
     RunEnvelope,
-    Search,
+    SearchDriver,
     SearchHost,
     StrategyState,
     TimeReached,
@@ -44,6 +44,7 @@ from vs_core.api import (
     check_decisions,
     encode_json,
     orphan_waits,
+    run_view,
     share_unchanged,
     step,
     translate,
@@ -328,7 +329,7 @@ class CoreRuntime[S: StrategyState]:
     def __init__(
         self,
         store: StateStore,
-        search: Search[S, Any],
+        search: SearchDriver[S, Any],
         initial: CoreState,
         *,
         config: object,
@@ -382,7 +383,7 @@ class CoreRuntime[S: StrategyState]:
     def resume(
         cls,
         project: Project,
-        search: Search[S, Any],
+        search: SearchDriver[S, Any],
         *,
         config: object,
         run_id: str | None = None,
@@ -482,8 +483,8 @@ class CoreRuntime[S: StrategyState]:
         self._registry.validate_core(core)
         decisions: tuple[Decision, ...] = ()
         if self._record is None:
-            strategy_state, first = self._search.init(self._config, core.run.facts)
-            decisions = check_decisions(self._search.declaration, first)
+            strategy_state, first = self._search.init(self._config, core.run.facts, run_view(core))
+            decisions = check_decisions(first)
         else:
             strategy_state = self.record.envelope.strategy
         provisional = RunEnvelope[S](
