@@ -102,7 +102,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import EvaluationTerminalFacts, SchemaRef
+    from vs_core.api import EvaluationTerminalFacts, RequestId, SchemaRef
     from vs_core.types.evaluation import Continuation, EvidenceRef
 
 
@@ -210,7 +210,7 @@ class Faults:
     unsealed: Callable[[Request], bool] = lambda _request: False
 
 
-class _Crash(Exception):  # noqa: N818 - control flow of a drive, not an error
+class _CrashError(Exception):
     """The host died; the drive resumes in a new host."""
 
 
@@ -302,7 +302,7 @@ class _Driver[S: StrategyState]:
                     progressed = self.tick()
                 if not progressed:
                     return
-            except _Crash:
+            except _CrashError:
                 self.crash()
 
     def commit(self) -> None:
@@ -312,7 +312,7 @@ class _Driver[S: StrategyState]:
         self.commits += 1
         self.trace.commits = self.commits
         if self.commits in self.faults.crash_after:
-            raise _Crash
+            raise _CrashError
 
     def crash(self) -> None:
         """The host died: results in flight are lost, and executors that had begun may not have sealed."""
