@@ -1388,25 +1388,36 @@ depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchest
 [[modules]]
 path = "vibesys.orchestration.evolve.models"
 layer = "roles_search"
-depends_on = ["vibesys.metrics", "vibesys.orchestration.evolve.population", "vibesys.orchestration.review"]
+depends_on = ["vs_core", "vibesys.metrics", "vibesys.orchestration.evolve.population", "vibesys.orchestration.review"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]
 from = ["vibesys.orchestration.evolve.models"]
 
 [[modules]]
-path = "vibesys.orchestration.evolve.strategy"
+# The evolve search as one flow: its roles, its values and the pure helpers its flows share.
+path = "vibesys.orchestration.evolve.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.population", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.prompts"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.population", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
 
 [[interfaces]]
-from = ["vibesys.orchestration.evolve.strategy"]
+from = ["vibesys.orchestration.evolve.search"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+# The options an evolve run is launched with: the search's config and the task's inputs.
+path = "vibesys.orchestration.evolve.launch"
+layer = "loops"
+depends_on = ["vibesys.metrics", "vibesys.orchestration.evolve.search"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.evolve.launch"]
+expose = ["INTERFACE", "EvolveLaunch"]
 
 [[modules]]
 path = "vibesys.orchestration.evolve.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.strategy", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vibesys.candidates"]
+depends_on = ["vs_core", "vibesys.orchestration.evolve.search", "vibesys.orchestration.profilers", "vibesys.run.contracts"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.evolve.core_policy"]
@@ -1414,14 +1425,14 @@ expose = ["api", "api\\..*"]
 
 [[interfaces]]
 from = ["vibesys.evolve_core"]
-expose = ["evolve_core_registration"]
+expose = ["evolve_core_registration", "evolve_operation_catalog", "evolve_projector"]
 
 [[modules]]
 # Assembles the evolve core policy from the run's resolved resources: the one place that
 # stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.evolve_core"
 layer = "loops"
-depends_on = ["vs_project", "vs_runtime", "vibesys.core_wiring", "vibesys.evolve_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.strategy", "vibesys.plugin_registration", "vibesys.prompts"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.evolve_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.launch", "vibesys.orchestration.evolve.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts"]
 
 [[interfaces]]
 from = ["vibesys.evolve_roles"]
@@ -1432,7 +1443,7 @@ expose = ["CORE_ROLES", "JUDGE", "MUTATOR", "PROFILER"]
 # that the pure core_policy may not hold.
 path = "vibesys.evolve_roles"
 layer = "loops"
-depends_on = ["vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.strategy"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.core_roles", "vibesys.orchestration.evolve.core_policy", "vibesys.orchestration.evolve.search"]
 
 [[modules]]
 path = "vs_core._session_scope"

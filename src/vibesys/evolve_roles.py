@@ -1,11 +1,14 @@
 """The agent roles of an evolve run on the core path.
 
-They are declared here, outside the legacy orchestration tree, because a role is host wiring: its
-capabilities and workspace access name `vs_runtime` values and its prompt is read from a template
-file, neither of which the pure policy may do. The mutator edits its candidate and, like the judge
-that reads it, carries the bridged evaluation tool; the profiler only reads the candidate and
-analyses captures with the stateless profiler tool. Each role's id is the strategy's (`role_id`), so
-the roles the strategy names and the roles the host declares cannot drift apart.
+The search declares each role once (`orchestration/evolve/search/_roles`): the template, the
+reply, the workspace, the time and the corrections. A role here is what only the host can add:
+the system prompt read from a template file, the capabilities the provider must have and the
+tools the agent is given. Each role's id comes from the search's id scheme, so the roles the
+search asks and the roles the host declares cannot drift apart.
+
+The mutator edits its candidate and, like the judge that reads it, carries the bridged evaluation
+tool; the profiler only reads the candidate and analyses captures with the stateless profiler
+tool.
 """
 
 from __future__ import annotations
@@ -20,11 +23,12 @@ from vibesys.core_roles import (
     core_role,
 )
 from vibesys.orchestration.evolve.core_policy.api import prompts
-from vibesys.orchestration.evolve.strategy.api import Role, role_id
+from vibesys.orchestration.evolve.search import api as search
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentCapability, AgentTool, WorkspaceAccess
 
 if TYPE_CHECKING:
+    from vs_core.api.search import Role
     from vs_runtime.api import AgentRole
 
 _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
@@ -41,14 +45,14 @@ PROFILER_KIND = RoleKind(
 def _role(role: Role, kind: RoleKind) -> AgentRole:
     return core_role(
         _RENDERER,
-        role_id=role_id(role.value).root,
-        system_template=f"{role.value}_system.j2",
+        role_id=search.evolve.ids.role_id(role.name).root,
+        system_template=f"{role.name}_system.j2",
         kind=kind,
     )
 
 
-MUTATOR = _role(Role.MUTATOR, MEASURING_WRITER)
-JUDGE = _role(Role.JUDGE, MEASURING_READER)
-PROFILER = _role(Role.PROFILER, PROFILER_KIND)
+MUTATOR = _role(search.MUTATOR, MEASURING_WRITER)
+JUDGE = _role(search.JUDGE, MEASURING_READER)
+PROFILER = _role(search.PROFILER, PROFILER_KIND)
 
 CORE_ROLES = (MUTATOR, JUDGE, PROFILER)
