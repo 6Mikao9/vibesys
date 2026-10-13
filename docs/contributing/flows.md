@@ -123,7 +123,9 @@ it; if the body ended normally and kept nothing, the workspace is discarded as s
 was stopped, as cancelled; if it raised, as failed (the exception propagates). If core refuses
 what `keep` asserted, one plain `failed` settlement follows. `ws.kept` and `ctx.workspaces.kept()`
 give the `Kept` candidates the settlements retained. `await ctx.workspaces.verify(revision,
-within=s)` checks that a revision still reproduces its retained content.
+within=s)` checks that a revision still reproduces its retained content, and `await
+ctx.workspaces.export_patch(revision, within=s)` returns the canonical patch of a retained
+revision against the input (the search declares the `export_patch` operation).
 
 ### Evaluation
 
