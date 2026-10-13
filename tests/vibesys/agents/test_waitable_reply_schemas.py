@@ -11,8 +11,7 @@ from pydantic import ValidationError
 
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.orchestration.dynamic.search.api import dynamic
-from vibesys.orchestration.evolve.search.api import JUDGE as EVOLVE_JUDGE
-from vibesys.orchestration.evolve.search.api import MUTATOR as EVOLVE_MUTATOR
+from vibesys.orchestration.evolve.search.api import evolve
 from vibesys.orchestration.issue_queue.core_policy import prompts as issue_queue_prompts
 from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vibesys.orchestration.multi.search.api import multi
@@ -31,6 +30,7 @@ if TYPE_CHECKING:
 
 
 _DYNAMIC = {role.name: dynamic.reply_schemas[role.reply_schema] for role in dynamic.roles}
+_EVOLVE = {role.name: evolve.reply_schemas[role.reply_schema] for role in evolve.roles}
 _SINGLE = {role.name: single.reply_schemas[role.reply_schema] for role in single.roles}
 _MULTI = {role.name: multi.reply_schemas[role.reply_schema] for role in multi.roles}
 _ISSUE_QUEUE = {
@@ -67,8 +67,8 @@ _ISSUE_QUEUE_JUDGE = {
 _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
     ("dynamic-implementer", _DYNAMIC["implementer"], _IMPLEMENTER),
     ("dynamic-judge", _DYNAMIC["judge"], _JUDGE),
-    ("evolve-mutator", EVOLVE_MUTATOR.reply, _EVOLVE_MUTATOR),
-    ("evolve-judge", EVOLVE_JUDGE.reply, _EVOLVE_JUDGE),
+    ("evolve-mutator", _EVOLVE["mutator"], _EVOLVE_MUTATOR),
+    ("evolve-judge", _EVOLVE["judge"], _EVOLVE_JUDGE),
     ("single-implementer", _SINGLE["implementer"], _SINGLE_RESULT),
     ("multi-implementer", _MULTI["implementer"], _MULTI_IMPLEMENTER),
     ("multi-judge", _MULTI["judge"], _MULTI_JUDGE),
@@ -133,8 +133,8 @@ def test_pre_envelope_wait_replies_remain_compatible(
             ],
         ),
         (_MULTI["judge"], []),
-        (EVOLVE_MUTATOR.reply, []),
-        (EVOLVE_JUDGE.reply, []),
+        (_EVOLVE["mutator"], []),
+        (_EVOLVE["judge"], []),
         (_ISSUE_QUEUE["implementer"], []),
         (_ISSUE_QUEUE["judge"], []),
     ],

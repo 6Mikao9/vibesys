@@ -13,7 +13,15 @@ from typing import TYPE_CHECKING
 import pytest
 from jinja2 import Environment, meta
 
-from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionId, RevisionRef
+from vs_core.api import (
+    EvidenceId,
+    EvidenceKind,
+    ObservationStatus,
+    ReplyError,
+    ReplyErrorCode,
+    RevisionId,
+    RevisionRef,
+)
 
 if __name__ != "packaged_prompt_contract":
     from tests.support import run_test_command
@@ -33,7 +41,12 @@ from vibesys.hypothesis import (
     TerminalWorkspaceEdits,
 )
 from vibesys.metrics import Objective
-from vibesys.orchestration.dynamic.search.api import PlannerPrompt, ReviewEvaluation
+from vibesys.orchestration.dynamic.search.api import (
+    Blocker,
+    BlockerKind,
+    PlannerPrompt,
+    ReviewEvaluation,
+)
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.issue_queue.search.api import IssueBrief, PriorPerformance
 from vibesys.orchestration.multi.models import (
@@ -561,8 +574,14 @@ def core_policy_context() -> dict[str, object]:
         "required_fields": (),
         "prior_failure_tail": "AssertionError: fixture",
         "prior_failure_fence": "```",
-        "blocker": "tests/test_engine.py::test_decode fails to import",
-        "narrowed_step": "Make the import resolve first.",
+        "last_blocker": Blocker(
+            kind=BlockerKind.FAILED,
+            summary="tests/test_engine.py::test_decode fails to import",
+            next_step="Make the import resolve first.",
+        ),
+        "rejection": "The candidate removes the retry loop.",
+        # A correction names the request it repeats; the template only asks whether it is set.
+        "of": "planning request",
         "turns_without_candidate": 2,
         # The issue queue's typed contexts.
         "board": (
@@ -570,6 +589,7 @@ def core_policy_context() -> dict[str, object]:
         ),
         "analysis": "The health route is missing.",
         "max_new_issues": 2,
+        "named": 3,
         "prior": (
             PriorPerformance(
                 iteration=1,
@@ -613,9 +633,12 @@ def core_policy_context() -> dict[str, object]:
         "minimum_acceptance_criteria": "fixture",
         "no_valid_reply": None,
         "problem": None,
+        "agent": "implementer",
+        "retained": revision,
+        "errors": (ReplyError(path=("reasoning",), code=ReplyErrorCode.MISSING),),
         "official_due": True,
         "official_reason": "cadence",
-        "profiler_id": "none",
+        "profiler_id": "linux_cpu",
         "title": "fixture title",
     }
 

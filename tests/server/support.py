@@ -20,6 +20,7 @@ from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
+from vs_core.api import StopMode
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import (
     RunControlChannel,
@@ -65,7 +66,7 @@ class _ControlBridge:
         self._channel.resume_with_fallback()
 
     def stop(self) -> None:
-        self._channel.request_stop()
+        self._channel.request_stop(StopMode.DRAIN)
 
 
 def _record_control_transition(
