@@ -1,7 +1,7 @@
 """Owner of the prompt-rendering operation: templates in, stored artifacts out.
 
-Python passes data only. The request carries a typed context whose ``template``
-names one template file, and its other fields are the template's variables. The
+Python passes data only. The request names one template file (the role's prompt, or one of
+the exchanges core starts), and the fields of its typed context are the template's variables. The
 template owns all wording, and ``vs_prompts`` renders it with strict undefined
 variables, so a missing variable is a typed failure and never an empty string.
 Artifacts are content addressed, so the operation is idempotent by construction.
@@ -82,6 +82,7 @@ def _fields_of(schema: SchemaRef, replies: Mapping[SchemaRef, type[BaseModel]]) 
 class RenderRequest(Protocol):
     """The request shape this owner serves, declared by the strategy that issues it."""
 
+    template: str
     subject: str
     ordinal: int
     context: BaseModel
@@ -117,17 +118,15 @@ class RenderArtifactsOwner:
     def _render(self, request: OperationRequest) -> tuple[bytes, ArtifactId] | None:
         render = cast("RenderRequest", request)
         context = render.context
-        template = str(getattr(context, "template", ""))
         variables = {
             **self._variables,
             **{name: getattr(context, name) for name in type(context).model_fields},
         }
-        variables.pop("template", None)
         variables.update(reply_variable(context, self._replies))
         if CITED_EVIDENCE in variables:
             variables[CITED_EVIDENCE] = self._readings(variables[CITED_EVIDENCE])
         try:
-            text = self._renderer.render_template(f"{template}.j2", **variables)
+            text = self._renderer.render_template(render.template, **variables)
         except TemplateError:
             return None
         return text.encode(), ArtifactId(root=f"render:{render.subject}:{render.ordinal}")

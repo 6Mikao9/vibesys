@@ -59,6 +59,7 @@ from vs_core.api import (
     ObserveOwnedJob,
     OperationRegistry,
     OwnedJob,
+    ReplyError,
     Request,
     RequestObserved,
     RequestPhase,
@@ -82,6 +83,7 @@ from vs_core.api import (
     advance,
     begin,
     project,
+    reply_errors,
     step,
     translate,
     validate_startup,
@@ -144,6 +146,8 @@ class _InvalidReply:
     """The turn ran and its reply does not parse as the schema it was asked to answer."""
 
     resource_id: ResourceId | None
+    errors: tuple[ReplyError, ...]
+    """What the executor's schema check found wrong, by field."""
 
 
 type Answer = Succeeded | Running | Unknown | Retryable | Failed
@@ -392,8 +396,14 @@ class _Driver[S: StrategyState]:
         The reply and the wait the agent validated travel on the owner's event, never on the
         request's own observation.
         """
+        errors = reply.errors if isinstance(reply, _InvalidReply) else ()
         observed = observed.model_copy(
-            update={"outcome_json": None, "outcome_schema": None, "suspension": None}
+            update={
+                "outcome_json": None,
+                "outcome_schema": None,
+                "suspension": None,
+                "reply_errors": errors,
+            }
         )
         text = reply.output_json if isinstance(reply, Succeeded) else None
         return [
@@ -407,6 +417,7 @@ class _Driver[S: StrategyState]:
                 observation=observed.observation,
                 output_schema=None if text is None else request.turn.output_schema,
                 output_json=text,
+                reply_errors=errors,
                 suspension=reply.suspension if isinstance(reply, Succeeded) else None,
             ),
         ]
@@ -481,8 +492,8 @@ class _Driver[S: StrategyState]:
             checked = self.schemas[request.turn.output_schema].model_validate_json(
                 answer.output_json
             )
-        except ValidationError:
-            return _InvalidReply(answer.resource_id)
+        except ValidationError as error:
+            return _InvalidReply(answer.resource_id, reply_errors(error))
         return replace(answer, output_json=checked.model_dump_json())
 
     def job_event(

@@ -134,7 +134,9 @@ async def _asked(ctx: core.Flow, label: str) -> str:
 
 
 def _policy(tries: int, *, backoff: bool) -> core.RetryPolicy:
-    return core.RetryPolicy(max_tries=tries, backoff=core.Backoff(first=2.0) if backoff else None)
+    return core.RetryPolicy(
+        max_tries=tries, backoff=core.Backoff(first=2.0, cap=120.0) if backoff else None
+    )
 
 
 def _attempt(

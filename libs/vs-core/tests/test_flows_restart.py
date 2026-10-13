@@ -16,7 +16,7 @@ import vs_core.api as core
 from vs_core.api.testing import FlowRun
 from vs_core.testing.flows import fake_search
 
-from .flow_support import Config, Plan, ask, open_workspace, start
+from .flow_support import ROLES, Config, Plan, ask, open_workspace, start
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -69,7 +69,7 @@ async def renamed(ctx: core.Flow, _job: Job) -> int:
 def search_for(
     worker: Callable[[core.Flow, Job], Coroutine[Any, Any, int]],
 ) -> SearchDef[Config]:
-    @fake_search("flows", Config)
+    @fake_search("flows", Config, ROLES)
     async def root(ctx: core.Flow, config: Config) -> None:
         ctx.checkpoint(config)  # the root resumes only from a snapshot it recorded
         async with ctx.group() as workers:
@@ -185,13 +185,13 @@ def test_a_restart_settles_the_workspaces_a_flow_opened_after_its_checkpoint(
 
 
 def test_a_published_record_and_a_stop_survive_a_restart() -> None:
-    @fake_search("flows", Config)
+    @fake_search("flows", Config, ROLES)
     async def v1(ctx: core.Flow, config: Config) -> None:
         ctx.checkpoint(config)
         ctx.publish(Seen(marker="before"))
         await ask(ctx, "a")
 
-    @fake_search("flows", Config)
+    @fake_search("flows", Config, ROLES)
     async def v2(ctx: core.Flow, _config: Config) -> None:
         ctx.publish(Seen(marker="before"))
         await ask(ctx, "renamed")
@@ -216,7 +216,7 @@ def test_a_change_to_a_root_without_a_checkpoint_is_refused() -> None:
     run = start(v1)
     run.reply(run.expect_turn("a"), Plan(n=1))
     stale = run.expect_turn("b")
-    run.swap(fake_search("flows", Config)(v2))
+    run.swap(fake_search("flows", Config, ROLES)(v2))
     with pytest.raises(core.FlowCodeChanged):
         run.reply(stale, Plan(n=2))
 
@@ -234,7 +234,7 @@ def test_a_change_to_a_root_that_checkpointed_restarts_it_from_the_snapshot() ->
     run = start(v1)
     run.reply(run.expect_turn("a"), Plan(n=1))
     stale = run.expect_turn("b")
-    run.swap(fake_search("flows", Config)(v2))
+    run.swap(fake_search("flows", Config, ROLES)(v2))
     run.reply(stale, Plan(n=2))
     assert [d.decision for d in run.state.dropped] == [stale.decision]
     assert run.driver.published(run.state, Seen) == Seen(marker="width 3")
@@ -255,12 +255,12 @@ def test_a_flow_that_is_not_registered_cannot_be_restarted() -> None:
     async def loose(ctx: core.Flow) -> None:
         await ask(ctx, "loose")
 
-    @fake_search("flows", Config)
+    @fake_search("flows", Config, ROLES)
     async def parent(ctx: core.Flow, _config: Config) -> None:
         async with ctx.group() as tasks:
             tasks.start("l", loose)
 
-    @fake_search("flows", Config)
+    @fake_search("flows", Config, ROLES)
     async def parent_v2(ctx: core.Flow, _config: Config) -> None:
         await ask(ctx, "other")
 

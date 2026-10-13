@@ -6,8 +6,10 @@ A search is one root flow with a name and a config model::
     async def sequential(ctx: Flow, config: SequentialConfig) -> NoWinner | None: ...
 
 Everything else core needs is derived: the operations the search's namespace owns, the
-lifecycle capabilities it may use, the schema of its persisted state. The decorator returns a
-``SearchDef``; the host gives it a config and the operation registry and gets a ``FlowDriver``.
+lifecycle capabilities it may use, the schema of its persisted state, and from the declared
+``roles`` the reply schemas, the role ids and the exchanges core starts with each agent. The
+decorator returns a ``SearchDef``; the host gives it a config and the operation registry and
+gets a ``FlowDriver``.
 
 The driver is core's private mechanism for running flows: it delivers one event at a time and
 returns the decisions the flows issued. Persistence is replay. ``FlowState`` holds the run's
@@ -21,7 +23,7 @@ starts over from there.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from vs_core._ids import IdScheme
@@ -32,23 +34,23 @@ from vs_core.types.strategy import SearchDeclaration
 from ._defs import FlowDef
 from ._errors import FlowCodeChanged
 from ._resource import kit_of
+from ._roles import Role, with_models
 from ._run import Wiring, _Run
 from ._state import FlowState, Step, Waiting, digest, key, recorded
 from ._winner import NoWinner, conclude
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import Callable, Coroutine, Mapping
 
     from pydantic import BaseModel
 
     from vs_core._registry import OperationRegistry
     from vs_core._strategy_operations import StrategyOperations
-    from vs_core.types.common import RunFacts
+    from vs_core.types.common import RunFacts, SchemaRef
     from vs_core.types.search import Event, RunView
     from vs_core.types.strategy import Decision
 
     from ._flow import Flow
-    from ._roles import AgentProtocol
     from ._state import LiveFlows
 
 type Root[C] = Callable[[Flow, C], Coroutine[Any, Any, NoWinner | None]]
@@ -64,8 +66,22 @@ class SearchDef[C]:
     config: type[C]
     root: Root[C]
     operations: StrategyOperations | None = None
-    ids: IdScheme | None = None
-    protocol: AgentProtocol | None = None
+    roles: tuple[Role, ...] = ()
+    """The agents the search asks: the only ones ``ctx.agents.session`` accepts."""
+
+    @property
+    def ids(self) -> IdScheme:
+        """The identities the search's decisions, sessions and roles are named with."""
+        return IdScheme(self.name)
+
+    @property
+    def reply_schemas(self) -> Mapping[SchemaRef, type[BaseModel]]:
+        """The model every declared role's turn answers with, by the schema it is asked for."""
+        return {role.reply_schema: role.wire_reply for role in self.roles}
+
+    def with_models(self, models: Mapping[str, str]) -> SearchDef[C]:
+        """The same search with the models an operator chose per role (a launch-time setting)."""
+        return replace(self, roles=with_models(self.roles, models))
 
     @property
     def declaration(self) -> SearchDeclaration:
@@ -102,17 +118,22 @@ def search[C](
     *,
     config: type[C],
     operations: StrategyOperations | None = None,
-    ids: IdScheme | None = None,
-    protocol: AgentProtocol | None = None,
+    roles: tuple[Role, ...] = (),
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """Register ``root`` as the search ``name``, run on a ``config`` model.
 
-    ``operations``, ``ids`` and ``protocol`` are the seam through which a search's namespace
-    lends core what ``ctx.agents`` needs to render prompts and name turns.
+    ``roles`` are the agents the search asks; everything core needs to ask them is derived
+    from the declarations. ``operations`` are the namespace's shapes for what is not a role:
+    the verification, evidence and retention of workspaces and measurements, and the context
+    types of the prompts.
     """
+    names = [role.name for role in roles]
+    if len(set(names)) != len(names):
+        message = f"roles of search {name!r} must have distinct names: {sorted(names)}"
+        raise ContractError(("roles",), message)
 
     def register(root: Root[C]) -> SearchDef[C]:
-        return SearchDef(name, config, root, operations, ids or IdScheme(name), protocol)
+        return SearchDef(name, config, root, operations, roles)
 
     return register
 
@@ -133,7 +154,12 @@ class FlowDriver[C]:
         self.declaration = definition.declaration
         self._registry = registry
         self._config = config
-        self._wiring = Wiring(registry, definition.operations, definition.ids, definition.protocol)
+        self._wiring = Wiring(
+            registry,
+            definition.operations,
+            definition.ids,
+            {role.name: role for role in definition.roles},
+        )
         root = definition.root
 
         async def supervised(ctx: Flow, config: C) -> None:

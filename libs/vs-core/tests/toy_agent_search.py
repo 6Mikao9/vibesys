@@ -43,7 +43,6 @@ ENDINGS: tuple[Ending, ...] = ("wait", "result", "invalid")
 """How a turn that validated its wait can end: the waiting reply, its final result, junk."""
 
 ROLES = ("implementer", "judge")
-IDS = core.IdScheme("toy", role_prefix="toy-")
 
 
 # -- the operations and roles the search declares ----------------------------------------------
@@ -55,7 +54,7 @@ class Prompt(core.Value):
     text: str
 
 
-class Result(core.Value):
+class Result(core.RevisionReply):
     """What an implementer answers."""
 
     summary: str
@@ -65,14 +64,6 @@ class Verdict(core.Value):
     """What a judge answers."""
 
     passed: bool
-
-
-class ImplementerReply(core.WaitableReply[Result]):
-    """An implementer turn ends with a result or a wait for evaluations."""
-
-
-class JudgeReply(core.WaitableReply[Verdict]):
-    """A judge turn ends with a verdict or a wait for evaluations."""
 
 
 class Render(core.RenderRoleArtifactsBase[Prompt]):
@@ -99,37 +90,39 @@ class Interpret(core.InterpretEvidenceBase):
 
 
 OPERATIONS = core.StrategyOperations("toy", Render, Verify, Interpret)
+_TURN_TIME = 10_000.0
 
-_RETRY = core.Retry(corrections=1, lost_turns=1)
+EXCHANGES = core.Exchanges(
+    correction="toy/correction.j2", resume="toy/resume.j2", wait_unrecorded="toy/unrecorded.j2"
+)
 IMPLEMENTER = core.Role(
     name="implementer",
-    reply=ImplementerReply,
-    schema=core.SchemaRef(name="toy.implementer", version=1),
-    access=core.Access.WRITE_CANDIDATE,
+    prompt="toy/implementer.j2",
+    reply=Result,
     workspace=core.WorkspaceMode.ISOLATED_CHILD,
-    charge="paid",
-    retry=_RETRY,
-    waits=True,
-    checkpoint=lambda reply: isinstance(reply, Result),
+    access=core.Access.WRITE_CANDIDATE,
+    turn_time=_TURN_TIME,
+    corrections=1,
+    lost_turns=1,
+    charge=core.Charge.ATTEMPT,
+    may_wait_for_evaluations=True,
+    exchanges=EXCHANGES,
 )
 """The implementer writes a candidate."""
 JUDGE = core.Role(
     name="judge",
-    reply=JudgeReply,
-    schema=core.SchemaRef(name="toy.judge", version=1),
-    access=core.Access.READ_ONLY,
+    prompt="toy/judge.j2",
+    reply=Verdict,
     workspace=core.WorkspaceMode.READ_ONLY_REVISION,
-    charge="free",
-    retry=_RETRY,
-    waits=True,
+    access=core.Access.READ_ONLY,
+    turn_time=_TURN_TIME,
+    corrections=1,
+    lost_turns=1,
+    charge=core.Charge.TURN,
+    may_wait_for_evaluations=True,
+    exchanges=EXCHANGES,
 )
 """The judge only reads the candidate."""
-
-PROTOCOL = core.AgentProtocol(
-    correction=lambda role, errors: Prompt(text=f"correct {role} {len(errors)}"),
-    resume=lambda facts: Prompt(text=f"resume {facts.agent}"),
-    wait_unrecorded=lambda role: Prompt(text=f"wait unrecorded {role}"),
-)
 
 # -- the search ----------------------------------------------------------------------------------
 
@@ -159,11 +152,8 @@ class Summary(core.Value):
     done: tuple[Done, ...] = ()
 
 
-_LIMIT = 10_000.0
-
-
-async def workstream(ctx: core.Flow, key: str, number: int) -> Done:
-    """Open a workspace, ask the implementer then the judge in it, let the workspace settle."""
+async def workstream(ctx: core.Flow, key: str, number: int, roles: tuple[core.Role, ...]) -> Done:
+    """Open a workspace, ask each role in turn in it, let the workspace settle."""
     asked: list[str] = []
     failed: list[str] = []
     async with ctx.workspaces.open(
@@ -175,9 +165,9 @@ async def workstream(ctx: core.Flow, key: str, number: int) -> Done:
         if isinstance(workspace, core.NotOpened):
             return Done(key=key, opened=False)
         revision = ctx.facts.baseline
-        for role in (IMPLEMENTER, JUDGE):
+        for role in roles:
             session = ctx.agents.session(role, workspace=workspace, revision=revision)
-            event = await session.turn(Prompt(text=f"{role.name} {number}"), within=_LIMIT)
+            event = await session.turn(Prompt(text=f"{role.name} {number}"))
             match event:
                 case core.TurnFinished(checkpoint=core.Retained(revision=retained)):
                     revision = retained
@@ -195,20 +185,31 @@ async def workstream(ctx: core.Flow, key: str, number: int) -> Done:
     return Done(key=key, asked=tuple(asked), failed=tuple(failed), closed=closed)
 
 
-@search("toy", config=Config, operations=OPERATIONS, ids=IDS, protocol=PROTOCOL)
-async def toy(ctx: core.Flow, config: Config) -> None:
-    """Run the workstreams ``in_flight`` at a time; the framework then adopts the input."""
-    started = 0
-    done: list[Done] = []
-    async with ctx.group(limit=config.in_flight) as group:
-        while len(done) < config.workstreams:
-            while started < config.workstreams and group.free:
-                group.start(f"w{started}", workstream, f"w{started}", started)
-                started += 1
-            ended = await ctx.first(group)
-            assert isinstance(ended, Done)
-            done.append(ended)
-    ctx.publish(Summary(done=tuple(done)))
+def toy_search(
+    implementer: core.Role = IMPLEMENTER, judge: core.Role = JUDGE
+) -> core.SearchDef[Config]:
+    """The toy search over these two roles (a test varies a role to see what it governs)."""
+    roles = (implementer, judge)
+
+    @search("toy", config=Config, operations=OPERATIONS, roles=roles)
+    async def toy(ctx: core.Flow, config: Config) -> None:
+        """Run the workstreams ``in_flight`` at a time; the framework then adopts the input."""
+        started = 0
+        done: list[Done] = []
+        async with ctx.group(limit=config.in_flight) as group:
+            while len(done) < config.workstreams:
+                while started < config.workstreams and group.free:
+                    group.start(f"w{started}", workstream, f"w{started}", started, roles)
+                    started += 1
+                ended = await ctx.first(group)
+                assert isinstance(ended, Done)
+                done.append(ended)
+        ctx.publish(Summary(done=tuple(done)))
+
+    return toy
+
+
+toy = toy_search()
 
 
 # -- the world around core ------------------------------------------------------------------------
@@ -257,6 +258,8 @@ class ToyHost:
     ends: Sequence[Ending] = ("wait",)
     roles: Sequence[str] = ROLES
     submit_only: Sequence[str] = ()
+    junk: Sequence[str] = ()
+    """Roles whose turns end with a reply that does not parse."""
     shares: bool = True
     calls: list[tuple[str, str, str]] = field(default_factory=list)
     """(attempt, role, call id) of every evaluation a turn asked for."""
@@ -398,7 +401,9 @@ class ToyHost:
             ending = self._asking.pop(request.request_id.root, None)
             if ending is not None:
                 return self._waiting_turn(request, state, ending, role, lease)
-        return Succeeded(output_json=_final(role), resource_id=lease)
+        return Succeeded(
+            output_json="not json" if role in self.junk else _final(role), resource_id=lease
+        )
 
     @staticmethod
     def _waiting_turn(
@@ -446,6 +451,7 @@ def run_toy(
     *,
     limits: core.Limits = LIMITS,
     faults: Faults | None = None,
+    definition: core.SearchDef[Config] = toy,
 ) -> Trace:
     """Drive the toy search on the real core against ``host`` until nothing more happens."""
     chosen = config or Config()
@@ -456,10 +462,10 @@ def run_toy(
         lifecycle=frozenset({"suspend"}),
         during_turn=host.during_turn,
         shell_events=True,
-        schemas={role.schema: role.reply for role in (IMPLEMENTER, JUDGE)},
+        schemas=definition.reply_schemas,
         envelope_type=core.RunEnvelope[core.FlowState],
     )
-    return drive(toy.driver(chosen, OPERATIONS.registry()), chosen, host, harness, faults)
+    return drive(definition.driver(chosen, OPERATIONS.registry()), chosen, host, harness, faults)
 
 
 def summary(trace: Trace) -> Summary:

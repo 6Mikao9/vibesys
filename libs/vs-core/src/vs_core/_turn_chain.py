@@ -18,11 +18,12 @@ transition returns a new chain and never proposes a decision.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Self
 
 from pydantic import Field
 
 from vs_core._evidence_views import resolve_turn_candidate, turn_candidate
+from vs_core.types.agents import ChargeClass
 from vs_core.types.common import (
     ArtifactRef,
     ContinuationId,
@@ -36,8 +37,6 @@ if TYPE_CHECKING:
     from vs_core.types.common import AttemptId, RevisionRef
     from vs_core.types.kernel import CoreView
 
-type Charge = Literal["free", "paid", "correction", "resume"]
-
 
 class TurnChain[C: Value](Value):
     """Where one logical turn is: its serial, charge, limits spent and what core said."""
@@ -48,7 +47,7 @@ class TurnChain[C: Value](Value):
     drops: int = Field(default=0, ge=0)
     # Run-clock time before which a lost turn must not be asked again; None when due.
     ask_not_before: float | None = Field(default=None, ge=0)
-    charge: Charge = "paid"
+    charge: ChargeClass = "paid"
     context: C | None = None
     prompts: tuple[ArtifactRef, ...] = ()
     tool_policy: ArtifactRef | None = None
@@ -69,7 +68,7 @@ class TurnChain[C: Value](Value):
         """The chain once its prompt render succeeded."""
         return self.model_copy(update={"prompts": prompts, "tool_policy": tool_policy})
 
-    def followed_by(self, *, charge: Charge, context: C | None = None) -> Self:
+    def followed_by(self, *, charge: ChargeClass, context: C | None = None) -> Self:
         """A new logical turn after this one: serial one past, nothing else carried over."""
         return self.model_copy(
             update={

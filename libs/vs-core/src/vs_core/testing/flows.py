@@ -22,6 +22,7 @@ the ``RunView`` the search reads: set the clock, attempts and settlements on it.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Literal
 
@@ -30,10 +31,12 @@ from vs_core.api import (
     AdoptionFailureReason,
     AdoptionFinished,
     AdoptionResult,
-    AgentProtocol,
     ArtifactId,
     ArtifactRef,
     AttemptRef,
+    Continuation,
+    ContinuationId,
+    ContinuationPhase,
     ControlId,
     ControlInput,
     DecisionId,
@@ -45,6 +48,7 @@ from vs_core.api import (
     Finish,
     FlowState,
     InterpretEvidenceBase,
+    InvocationId,
     InvocationRef,
     ObservationStatus,
     Operation,
@@ -57,6 +61,8 @@ from vs_core.api import (
     RenderRoleArtifactsBase,
     RequestId,
     RequestTurn,
+    ResumeAuthorized,
+    ResumeReady,
     Scope,
     Settlement,
     SettlementId,
@@ -66,6 +72,7 @@ from vs_core.api import (
     TimeReached,
     TurnEnded,
     TurnResult,
+    TurnYielded,
     Value,
     VerifyParentRevisionBase,
     Wait,
@@ -87,7 +94,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import Decision, RunView, SearchDef, Seconds, Within
+    from vs_core.api import Decision, ProtocolContext, Role, RunView, SearchDef, Seconds, Within
     from vs_core.flows._define import Root
     from vs_core.types.agents import Checkpoint
 
@@ -123,16 +130,13 @@ class Interpret(InterpretEvidenceBase):
 
 FAKE_OPERATIONS = StrategyOperations("fake", Render, Verify, Interpret)
 FAKE_REGISTRY = FAKE_OPERATIONS.registry()
-FAKE_PROTOCOL = AgentProtocol(
-    correction=lambda role, errors: Prompt(text=f"correct {role} {len(errors)}"),
-    resume=lambda facts: Prompt(text=f"resume {facts.agent}"),
-    wait_unrecorded=lambda role: Prompt(text=f"wait unrecorded {role}"),
-)
 
 
-def fake_search[C](name: str, config: type[C]) -> Callable[[Root[C]], SearchDef[C]]:
+def fake_search[C](
+    name: str, config: type[C], roles: tuple[Role, ...] = ()
+) -> Callable[[Root[C]], SearchDef[C]]:
     """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
-    return search(name, config=config, operations=FAKE_OPERATIONS, protocol=FAKE_PROTOCOL)
+    return search(name, config=config, operations=FAKE_OPERATIONS, roles=roles)
 
 
 @dataclass
@@ -157,8 +161,15 @@ class Asked:
     request: Work | Finish
     until: Within | None
     """The limit of a wait; None for a ``Finish``, which core answers only by refusing it."""
-    prompt: Prompt | None = None
+    context: Prompt | ProtocolContext | None = None
     """For a turn request: the context its prompt was rendered from."""
+    template: str | None = None
+    """For a turn request: the template its prompt was rendered with."""
+
+    @property
+    def prompt(self) -> Prompt | None:
+        """The search's own prompt of a turn request, or None for a prompt core started."""
+        return self.context if isinstance(self.context, Prompt) else None
 
     @property
     def label(self) -> str:
@@ -197,7 +208,7 @@ class FlowRun[C]:
         """Every decision the search issued, in order."""
         self._open: list[Asked] = []
         self._sleeps: list[Seconds] = []
-        self._prompts: dict[ArtifactId, Prompt] = {}
+        self._prompts: dict[ArtifactId, tuple[str, Prompt | ProtocolContext]] = {}
         self._queue: list[Event] = []
         self.finished: Finish | None = None
         """The ``Finish`` the search issued, once it did."""
@@ -275,6 +286,40 @@ class FlowRun[C]:
         self._close(asked)
         self._timeline.append(f"{asked.decision.root}:{type(reply).__name__}")
         self.send(self._ended(asked, ObservationStatus.SUCCEEDED, output=reply.model_dump_json()))
+
+    def suspend(self, asked: Asked, handles: tuple[str, ...] = ("h",)) -> Continuation:
+        """The agent ended the turn waiting for evaluations and core recorded the wait.
+
+        ``resume_ready`` then lets core authorize the resume, as the evaluations settling does.
+        """
+        self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:suspended")
+        waiting = json.dumps({"kind": "waiting_for_evaluation", "handles": list(handles)})
+        ended = self._ended(asked, ObservationStatus.SUCCEEDED, output=waiting, suspending=True)
+        current = ended.result.invocation
+        continuation = Continuation(
+            continuation_id=ContinuationId(root=f"{current.invocation_id.root}/evaluation"),
+            invocation=current,
+            next_invocation=current.model_copy(
+                update={"invocation_id": InvocationId(root=f"{current.invocation_id.root}/resume")}
+            ),
+            jobs=(),
+            deadline_at=self.view.now_at + 1000.0,
+            phase=ContinuationPhase.WAITING,
+        )
+        self.send(ended)
+        self.send(TurnYielded(continuation=continuation))
+        return continuation
+
+    def resume_ready(self, continuation: Continuation) -> None:
+        """Core authorized the resume of a suspended turn: the evaluations it waited for settled."""
+        self._timeline.append("resume-ready")
+        authorization = ResumeAuthorized(
+            continuation_id=continuation.continuation_id,
+            next_invocation=continuation.next_invocation,
+            evidence=(),
+        )
+        self.send(ResumeReady(authorization=authorization))
 
     def reply_raw(self, asked: Asked, output_json: str) -> None:
         """The agent answered with text that may not be its reply model (a correction follows)."""
@@ -429,25 +474,26 @@ class FlowRun[C]:
                     self._queue.append(self._adopted(proposal))
                     self._close(self._open[-1])
                 case Wait(request=request, until=until):
-                    self._open.append(
-                        Asked(request.decision_id, request, until, self._prompt(request))
-                    )
+                    template, context = self._prompt(request)
+                    self._open.append(Asked(request.decision_id, request, until, context, template))
                 case WakeAt(time=time):
                     self._sleeps.append(time)
                 case Finish():
                     self.finished = decision
                     self._open.append(Asked(decision.decision_id, decision, None))
 
-    def _prompt(self, request: Work) -> Prompt | None:
+    def _prompt(self, request: Work) -> tuple[str | None, Prompt | ProtocolContext | None]:
         if isinstance(request, RequestTurn) and request.turn.prompts:
-            return self._prompts.get(request.turn.prompts[0].artifact_id)
-        return None
+            found = self._prompts.get(request.turn.prompts[0].artifact_id)
+            if found is not None:
+                return found
+        return None, None
 
     def _render(self, operation: Operation, render: Render) -> None:
         """Answer a prompt render at once: the artifact stands for the prompt it was made from."""
         self._sequence += 1
         artifact = ArtifactId(root=f"prompt-{self._sequence}")
-        self._prompts[artifact] = render.context
+        self._prompts[artifact] = (render.template, render.context)
         rendered = RenderedArtifacts(
             status="succeeded", prompts=(ArtifactRef(artifact_id=artifact, digest="d"),)
         )
@@ -498,6 +544,7 @@ class FlowRun[C]:
         *,
         output: str | None = None,
         failure: TurnFailureKind | None = None,
+        suspending: bool = False,
     ) -> TurnEnded:
         request = asked.request
         if not isinstance(request, RequestTurn):
@@ -518,6 +565,7 @@ class FlowRun[C]:
                 output_schema=spec.output_schema,
                 output_json=output,
                 failure=failure,
+                suspending=suspending,
             ),
         )
 

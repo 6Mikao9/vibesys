@@ -7,7 +7,7 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
-    Charge,
+    ChargeClass,
     ContinuationId,
     CoreView,
     Draft,
@@ -60,7 +60,7 @@ def _ref(name: str) -> InvocationRef:
 
 @given(charge=st.sampled_from(["free", "paid", "correction"]), serial=st.integers(0, 9))
 def test_a_turn_names_its_predecessor_and_a_fresh_session_identity(
-    charge: Charge, serial: int
+    charge: ChargeClass, serial: int
 ) -> None:
     chain = TurnChain[Note](charge=charge, serial=serial, invocation=_ref("before"))
     decision = request_turn(SCHEME, _shape(), chain, run_scope(_view()))

@@ -165,7 +165,6 @@ class EchoOwner:
 
 
 class PromptContext(Value):
-    template: Literal["greeting"] = "greeting"
     who: str
 
 
@@ -179,6 +178,7 @@ class RenderRoleArtifacts(OperationRequest):
     kind: Literal["test.render"] = "test.render"
     lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
     outcome_model: ClassVar[type[BaseModel]] = RenderedArtifacts
+    template: str
     subject: str
     ordinal: int
     context: PromptContext
@@ -318,7 +318,12 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
         OperationScenario(
             "render",
             entries["test.render"],
-            RenderRoleArtifacts(subject="planner", ordinal=0, context=PromptContext(who="world")),
+            RenderRoleArtifacts(
+                template="greeting.j2",
+                subject="planner",
+                ordinal=0,
+                context=PromptContext(who="world"),
+            ),
             lambda: len(list(artifacts.iterdir())) if artifacts.exists() else 0,
         ),
         OperationScenario(

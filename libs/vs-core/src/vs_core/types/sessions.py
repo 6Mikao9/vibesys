@@ -66,6 +66,8 @@ class SessionSpec(Value):
     policy: Literal["fresh", "reuse"]
     lifetime: Literal["ephemeral", "owner"]
     access: Access
+    model: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    """The model the operator chose for the role this run; None leaves the run's default."""
 
 
 class TurnSpec(Value):
