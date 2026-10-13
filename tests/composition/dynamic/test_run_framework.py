@@ -51,39 +51,6 @@ def _dispatched_turns(records: CoreRecords) -> list[dict[str, Any]]:
     ]
 
 
-def test_a_role_model_from_agent_toml_reaches_only_that_roles_sessions(tmp_path: Path) -> None:
-    loop_input = LoopInput.create(
-        tmp_path,
-        agent_config=_AGENT_CONFIG + '[agent.roles.dynamic-implementer]\nmodel = "builder-model"\n',
-    )
-    agents = (
-        ScriptedAgents()
-        .plan(portfolio(workstream("H1")))
-        .implement("H1", edit_to(2, "H1"))
-        .judge("H1", PASS)
-    )
-
-    run = run_request(
-        loop_input.request(),
-        agents,
-        slurm_process=loop_input.connector,
-        state_stores=loop_input.state_stores,
-    )
-
-    assert run.error is None
-    assert agents.unscripted == []
-    models = {
-        turn["session"]["role_id"]["root"]: turn["session"]["model"]
-        for turn in _dispatched_turns(CoreRecords(loop_input, run.run_id))
-    }
-    # The other roles name no model of their own: they inherit the run's.
-    assert models == {
-        "dynamic-orchestrator": None,
-        "dynamic-implementer": "builder-model",
-        "dynamic-judge": None,
-    }
-
-
 _FAILS_ABOVE_FIVE = """\
 import pathlib
 namespace = {}
@@ -126,7 +93,17 @@ def test_a_task_that_measures_no_accuracy_adopts_what_its_benchmark_admits() -> 
 def test_a_task_that_requires_accuracy_keeps_the_input_over_a_candidate_that_fails_it(
     tmp_path: Path,
 ) -> None:
-    loop_input = LoopInput.create(tmp_path)
+    """One run, one candidate, shows three behaviors that share its precondition.
+
+    The candidate fails the task's accuracy check, so the trusted input is kept and the run
+    still succeeds (the exit status of a search that found nothing better). The operator's
+    agent.toml names a model for the implementer only, and it reaches only that role's
+    sessions: the run dispatches every role's turn before it measures the candidate.
+    """
+    loop_input = LoopInput.create(
+        tmp_path,
+        agent_config=_AGENT_CONFIG + '[agent.roles.dynamic-implementer]\nmodel = "builder-model"\n',
+    )
     (loop_input.root / ".vibesys/tasks/default/accuracy.py").write_text(
         _FAILS_ABOVE_FIVE, encoding="utf-8"
     )
@@ -145,12 +122,26 @@ def test_a_task_that_requires_accuracy_keeps_the_input_over_a_candidate_that_fai
     )
 
     assert run.error is None
+    assert agents.unscripted == []
     assert (run.succeeded, run.status) == (True, RunStatus.COMPLETED)
     records = CoreRecords(loop_input, run.run_id)
     assert not records.hypothesis("H1").rounds[0].eligible
+    assert records.baseline_metric() is not None
+    assert records.outcome == ("terminal", "success")
+    assert records.run["result"]["reason"].startswith("kept-input: ")
     assert records.selection is not None
     assert records.selection["kind"] == "trusted_baseline"
     assert (loop_input.root / "queue.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+    models = {
+        turn["session"]["role_id"]["root"]: turn["session"]["model"]
+        for turn in _dispatched_turns(records)
+    }
+    # The other roles name no model of their own: they inherit the run's.
+    assert models == {
+        "dynamic-orchestrator": None,
+        "dynamic-implementer": "builder-model",
+        "dynamic-judge": None,
+    }
 
 
 def test_the_deadline_ends_a_run_that_has_kept_nothing_through_the_framework(
