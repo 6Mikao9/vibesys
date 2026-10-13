@@ -60,12 +60,14 @@ from ._roles import reply_errors
 from ._sources import First
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from vs_core.types.search import Event
 
     from ._kit import Kit
-    from ._roles import Role
+    from ._roles import AgentProtocol, Role
     from ._sources import Signal
     from ._workspaces import Workspace
 
@@ -374,14 +376,14 @@ class _Ask:
             digest=_digest(result.detail),
         )
 
-    def _protocol(self):  # noqa: ANN202  # LW-994812 [ANN202]; the return type is a TYPE_CHECKING name.
+    def _protocol(self) -> AgentProtocol:
         protocol = self.kit.run.wiring.protocol
         if protocol is None:
             message = "this search was registered without an agent protocol: no corrections"
             raise ContractError(("agents", "turn"), message)
         return protocol
 
-    def _corrected(self, context, exhausted: Failed) -> _Again | Failed:  # noqa: ANN001
+    def _corrected(self, context: Callable[[], Value], exhausted: Failed) -> _Again | Failed:
         """Ask the agent to fix its reply, or report ``exhausted`` once its corrections are spent.
 
         The correction prompt is built only when a correction is asked for: a role that is

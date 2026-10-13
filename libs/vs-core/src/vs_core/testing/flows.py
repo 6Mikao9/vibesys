@@ -81,9 +81,12 @@ from vs_core.types.common import Observation
 from vs_core.types.sessions import TurnFailureKind
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pydantic import BaseModel
 
     from vs_core.api import Decision, RunView, SearchDef, Seconds, Within
+    from vs_core.flows._define import Root
     from vs_core.types.agents import Checkpoint
 
 
@@ -125,7 +128,7 @@ FAKE_PROTOCOL = AgentProtocol(
 )
 
 
-def fake_search[C](name: str, config: type[C]):  # noqa: ANN201  # the decorator's type is `search`'s
+def fake_search[C](name: str, config: type[C]) -> Callable[[Root[C]], SearchDef[C]]:
     """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
     return search(name, config=config, operations=FAKE_OPERATIONS, protocol=FAKE_PROTOCOL)
 
