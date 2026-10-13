@@ -16,7 +16,8 @@ from typing import TYPE_CHECKING
 
 from vs_core.api import DiscardWorkspace, FailureReason, RequestPhase
 from vs_core.api.testing import Unknown
-from vs_dst.api import EVERY_POINT, CrashKind, simulate, using_crash_point_policy
+from vs_dst.api import CrashKind, simulate
+from vs_sim.api.testing import Depth, using_depth
 
 from ._tiny import TinyWorld
 
@@ -60,7 +61,7 @@ def test_a_committed_request_keeps_its_limit_through_a_crash_and_restart() -> No
     assert reference.failure.reason is FailureReason.TIMED_OUT
     assert reference.failure.limit_at == reference.until.at
 
-    with using_crash_point_policy(EVERY_POINT):
+    with using_depth(Depth.NIGHTLY):
         points = sorted(normal.crash_points(), key=_in_time_order)
     kept = []
     for crash in points:

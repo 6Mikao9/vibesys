@@ -16,7 +16,7 @@ from hypothesis import strategies as st
 from vs_core.api import EnsureWorkspace
 from vs_core.api.testing import Unknown
 from vs_dst.api import NondeterministicWorldError, simulate
-from vs_sim.api.testing import SweepBreadth, using_sweep_breadth
+from vs_sim.api.testing import Depth, using_depth
 
 from ._scratch import run_with_crash
 from ._tiny import TinyWorld
@@ -32,7 +32,7 @@ def test_a_cheap_crash_equals_rerunning_from_the_start_at_every_crash_point(
     items: int, concurrent: int
 ) -> None:
     normal = simulate(TinyWorld(items, concurrent))
-    with using_sweep_breadth(SweepBreadth.ALL):
+    with using_depth(Depth.NIGHTLY):
         points = normal.crash_points()
     assert len(points) == 2 * normal.commits
 
