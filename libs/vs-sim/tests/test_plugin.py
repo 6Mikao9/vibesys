@@ -395,21 +395,69 @@ def test_explore_budget_stops_extra_runs_but_never_the_first(suite: pytest.Pytes
 
 
 @pytest.mark.parametrize(
-    ("arguments", "chosen"), [([], "sampled"), (["--crash-points=all"], "all")]
+    ("arguments", "chosen"), [([], "pr"), (["--depth=pr"], "pr"), (["--depth=nightly"], "nightly")]
 )
-def test_the_crash_points_option_sets_the_one_sweep_breadth_of_the_session(
+def test_the_depth_option_sets_the_one_depth_of_the_session(
     suite: pytest.Pytester, arguments: list[str], chosen: str
 ) -> None:
     suite.makepyfile(
         """
-        from vs_sim.api.testing import sweep_breadth, swept
+        from vs_sim.api.testing import depth, examples, swept
 
-        def test_breadth():
-            print("BREADTH", sweep_breadth().value, *swept(10, 3))
+        def test_depth():
+            print("DEPTH", depth().value, examples(pr=3, nightly=12), *swept(10, 3))
         """
     )
     result = suite.runpytest_subprocess("-s", *arguments)
 
     result.assert_outcomes(passed=1)
-    swept_points = "0 1 2 3 4 5 6 7 8 9" if chosen == "all" else "0 4 9"
-    result.stdout.fnmatch_lines([f"*BREADTH {chosen} {swept_points}*"])
+    deep = chosen == "nightly"
+    swept_points = "0 1 2 3 4 5 6 7 8 9" if deep else "0 4 9"
+    result.stdout.fnmatch_lines([f"*DEPTH {chosen} {12 if deep else 3} {swept_points}*"])
+
+
+@pytest.mark.parametrize("value", ["", "all", "sampled", "NIGHTLY", "deep"])
+def test_an_unknown_depth_is_rejected_naming_the_option(suite: pytest.Pytester, value: str) -> None:
+    suite.makepyfile("def test_one():\n    pass\n")
+    result = suite.runpytest_subprocess(f"--depth={value}")
+
+    assert result.ret != 0
+    result.stderr.fnmatch_lines(["*argument --depth: invalid choice: *"])
+
+
+def test_the_removed_crash_points_option_is_rejected(suite: pytest.Pytester) -> None:
+    suite.makepyfile("def test_one():\n    pass\n")
+    result = suite.runpytest_subprocess("--crash-points=all")
+
+    assert result.ret != 0
+    result.stderr.fnmatch_lines(["*unrecognized arguments: --crash-points=all*"])
+
+
+@pytest.mark.parametrize(
+    ("arguments", "outcomes"),
+    [
+        ([], {"passed": 1, "deselected": 1}),
+        (["--depth=nightly"], {"passed": 2}),
+        (["-m", "slow"], {"passed": 1, "deselected": 1}),
+        (["--depth=nightly", "-m", "not slow"], {"passed": 1, "deselected": 1}),
+    ],
+)
+def test_slow_tests_run_at_nightly_depth_and_when_selected_by_marker(
+    suite: pytest.Pytester, arguments: list[str], outcomes: dict[str, int]
+) -> None:
+    suite.makeini("[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider\nmarkers = slow: s\n")
+    suite.makepyfile(
+        """
+        import pytest
+
+        def test_fast():
+            pass
+
+        @pytest.mark.slow
+        def test_slow():
+            pass
+        """
+    )
+    result = suite.runpytest_subprocess(*arguments)
+
+    result.assert_outcomes(**outcomes)

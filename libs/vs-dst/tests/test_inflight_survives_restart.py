@@ -16,7 +16,8 @@ from hypothesis import strategies as st
 
 from vs_core.api import EnsureWorkspace, FailureReason
 from vs_core.api.testing import Unknown
-from vs_dst.api import EVERY_POINT, simulate, using_crash_point_policy
+from vs_dst.api import simulate
+from vs_sim.api.testing import Depth, using_depth
 
 from ._tiny import TinyWorld
 
@@ -46,7 +47,7 @@ def _workspaces(run: SimulatedRun) -> list[RequestRecord]:
 @given(patience=LIMITS)
 def test_a_request_the_far_side_finished_is_not_timed_out_by_the_restart(patience: float) -> None:
     normal = simulate(TinyWorld(1, patience=patience))
-    with using_crash_point_policy(EVERY_POINT):
+    with using_depth(Depth.NIGHTLY):
         points = normal.crash_points()
 
     for crash in points:
