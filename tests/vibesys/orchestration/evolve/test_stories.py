@@ -20,7 +20,18 @@ from vibesys.orchestration.evolve.search.api import (
     ProfilerPrompt,
     Stage,
 )
-from vs_core.api import Capabilities, Finish, Measure, Operation, StartAttempt, Wait, Withdraw
+from vs_core.api import (
+    Capabilities,
+    Finish,
+    Measure,
+    Operation,
+    RequestTurn,
+    StartAttempt,
+    Wait,
+    Withdraw,
+    WorkspaceMode,
+    WorkspaceRef,
+)
 from vs_core.api.testing import FakeView
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
@@ -56,6 +67,32 @@ def test_a_cold_start_then_a_better_child_is_adopted(*, restarting: bool) -> Non
     seeded, child = individuals(host)
     assert (seeded.parent_id, seeded.passed) == (None, True)
     assert (child.parent_id, child.passed, child.perf_metric) == (seeded.id, True, 150.0)
+    assert not host.unsettled
+
+
+@MODES
+def test_a_run_in_the_hosts_root_asks_for_the_root_and_the_mutator_works_there(
+    *, restarting: bool
+) -> None:
+    host = begin(config(exclusive_root=True), restarting=restarting)
+    host.drain()
+
+    modes = {
+        item.request.workspace.mode
+        for item in host.run.decisions
+        if isinstance(item, Wait) and isinstance(item.request, StartAttempt)
+    }
+    assert modes == {WorkspaceMode.EXCLUSIVE_ROOT}
+    mutator_modes = {
+        item.request.turn.workspace.mode
+        for item in host.run.decisions
+        if isinstance(item, Wait)
+        and isinstance(item.request, RequestTurn)
+        and item.request.turn.session.role_id.root.endswith("mutator")
+        and isinstance(item.request.turn.workspace, WorkspaceRef)
+    }
+    assert mutator_modes == {WorkspaceMode.EXCLUSIVE_ROOT}
+    assert adopted(host) is not None
     assert not host.unsettled
 
 

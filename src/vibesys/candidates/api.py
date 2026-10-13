@@ -63,6 +63,7 @@ from vibesys.candidates._task import (
     terms_of,
 )
 from vibesys.candidates._winner import Unranked, best_by, improves_on
+from vibesys.candidates._workspace_mode import workspace_mode_for
 
 __all__ = [
     "ACCURACY",
@@ -118,4 +119,5 @@ __all__ = [
     "terms_of",
     "trusted",
     "turn_chain",
+    "workspace_mode_for",
 ]

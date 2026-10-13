@@ -25,7 +25,6 @@ from tests.vibesys.orchestration.evolve.core_policy._inputs import (
 
 from vibesys.candidates.api import Gates, Measuring, terms_of
 from vibesys.core_wiring import ResolvedRun
-from vibesys.errors import ConfigurationError
 from vibesys.evolve_core import evolve_operation_catalog
 from vibesys.metrics import MetricSpace
 from vibesys.orchestration.evolve.core_policy.api import requirements_for
@@ -174,12 +173,16 @@ def test_profiling_is_not_the_operators_to_set(tmp_path: Path) -> None:
         plan_of(resolved(tmp_path), {"profiling": True})
 
 
-def test_a_run_environment_that_cannot_open_a_sandbox_per_candidate_is_refused(
+def test_a_run_environment_that_cannot_open_a_sandbox_per_candidate_runs_one_child_at_a_time_in_its_root(
     tmp_path: Path,
 ) -> None:
+    wide = plan_of(resolved(tmp_path), {"max_parallelism": 3})
+    assert (wide.config.exclusive_root, wide.config.max_parallelism) == (False, 3)
+
     environment = candidate_environment(share_agent_session=True)
-    with pytest.raises(ConfigurationError, match="evolve"):
-        plan_of(resolved(tmp_path, environment=environment))
+    shared = plan_of(resolved(tmp_path, environment=environment), {"max_parallelism": 3})
+    assert (shared.config.exclusive_root, shared.config.max_parallelism) == (True, 1)
+    assert shared.limits.max_parallel == 1
 
 
 def test_every_launch_option_the_policy_reads_is_the_searchs_or_the_tasks() -> None:

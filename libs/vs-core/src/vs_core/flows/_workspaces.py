@@ -26,6 +26,7 @@ from vs_core.types.common import (
     RevisionRef,
     Scope,
     Value,
+    WorkspaceMode,
 )
 from vs_core.types.search import WorkspaceClosed, WorkspaceOpened
 from vs_core.types.settlement import AssessmentProposal, Settlement
@@ -70,6 +71,8 @@ class Workspace:
 
     ref: AttemptRef
     base: RevisionRef
+    mode: WorkspaceMode = WorkspaceMode.ISOLATED_CHILD
+    """How core admitted the workspace; a writing role works in it in this mode."""
     keeping: Settle | None = None
     """What the settlement will assert: set by ``ctx.workspaces.keep``."""
     settlement: Settlement | None = None
@@ -199,7 +202,9 @@ async def _workspace(
     event = await kit.wait(request, within or kit.until_deadline())
     match event:
         case WorkspaceOpened(attempt=opened):
-            workspace = Workspace(ref=opened, base=request.workspace.base)
+            workspace = Workspace(
+                ref=opened, base=request.workspace.base, mode=request.workspace.mode
+            )
             kit.task.holds.append(opened)
         case Failed():
             yield NotOpened(failed=event)

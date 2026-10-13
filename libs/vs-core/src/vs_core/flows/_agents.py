@@ -48,6 +48,7 @@ from vs_core.types.common import (
     Scope,
     Seconds,
     Value,
+    WorkspaceMode,
     WorkspaceRef,
 )
 from vs_core.types.search import (
@@ -306,7 +307,12 @@ class _Ask:
             message = f"{role.name} works on a revision: name it on the session or the turn"
             raise ContractError(("agents", "turn"), message)
         else:
-            where = WorkspaceRef(scope=scope, revision=self.revision, mode=role.workspace)
+            # A writing role works in its workspace as core admitted it (isolated, or the run's
+            # own root); a reading role reads the revision as declared.
+            mode = role.workspace
+            if workspace is not None and role.workspace is not WorkspaceMode.READ_ONLY_REVISION:
+                mode = workspace.mode
+            where = WorkspaceRef(scope=scope, revision=self.revision, mode=mode)
         spec = TurnSpec(
             session=session,
             invocation_id=invocation_id,

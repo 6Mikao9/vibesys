@@ -76,6 +76,14 @@ def test_c2_a_restart_after_any_crash_finishes_the_same_run(
         if _lapsed_while_down(recovered):
             continue
         assert recovered.finished, crash
+        record = FlowDriver.published(recovered.state, subject.snapshot)  # ty: ignore[invalid-argument-type]
+        if record is not None and subject.lapsed(record):
+            # A turn that lapsed while no host was up fails its child, typed; the run is still
+            # a run: it ended with a result, released everything and ran no effect twice.
+            assert recovered.result is not None, crash
+            assert not recovered.liveness_violations, crash
+            assert recovered.no_effect_ran_twice(), crash
+            continue
         assert recovered.result == normal.result, crash
         assert _published(recovered.state, subject.snapshot) == _published(
             normal.state, subject.snapshot

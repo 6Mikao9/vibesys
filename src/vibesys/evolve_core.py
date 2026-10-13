@@ -11,7 +11,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.candidates.api import Gates, Measuring, limits_for, run_deadline_at, terms_of
+from vibesys.candidates.api import (
+    Gates,
+    Measuring,
+    limits_for,
+    run_deadline_at,
+    terms_of,
+    workspace_mode_for,
+)
 from vibesys.core_wiring import (
     EvaluationInputs,
     ResolvedRun,
@@ -19,7 +26,6 @@ from vibesys.core_wiring import (
     domain_prompt_sections,
     evaluation_inputs,
     operation_catalog,
-    require_candidate_sandboxes,
 )
 from vibesys.evolve_roles import CORE_ROLES
 from vibesys.orchestration.evolve.core_policy.api import (
@@ -110,7 +116,6 @@ def _task_terms(
 
 def _core_plan(context: CoreRunContext) -> CorePlan:
     """The plan of one run: the search, its config and the task resolved from what the host opened."""
-    require_candidate_sandboxes(context.environment, loop="evolve")
     launch = EvolveLaunch.model_validate(context.options)
     commit = context.baseline.git_commit
     if commit is None:
@@ -135,8 +140,14 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         task=terms,
     )
     # The operator chooses how wide and how long to search; whether a passing child is profiled
-    # follows the profiler the run chose, which only the host knows.
-    config = launch.search_config(profiling=context.facts.profiler_id != "none")
+    # follows the profiler the run chose, and where children work follows the run environment:
+    # both are known only to the host.
+    config = launch.search_config(
+        profiling=context.facts.profiler_id != "none",
+        workspace_mode=workspace_mode_for(
+            isolated_candidates=context.environment.parallel_candidate_obstacle is None
+        ),
+    )
     models = {evolve.ids.role_id(role.name).root: role.name for role in evolve.roles}
     chosen = {models[role]: model for role, model in context.role_models.items() if role in models}
     return CorePlan(

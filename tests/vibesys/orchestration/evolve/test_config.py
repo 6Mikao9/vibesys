@@ -10,6 +10,7 @@ from tests.vibesys.orchestration.evolve._host import config
 
 from vibesys.orchestration.evolve.launch import EvolveLaunch
 from vibesys.orchestration.evolve.search.api import EvolveConfig, budget
+from vs_core.api.search import WorkspaceMode
 
 REQUIRED = {
     "max_generations": 2,
@@ -79,3 +80,18 @@ def test_the_launch_adds_the_tasks_inputs_to_the_searchs_knobs_and_leaves_profil
         EvolveLaunch.model_validate({**REQUIRED, "profiling": False})
     with pytest.raises(ValidationError, match="keep_deployments"):
         EvolveLaunch.model_validate({**REQUIRED, "keep_deployments": False})
+
+
+@given(parallel=st.integers(1, 6))
+def test_a_host_without_candidate_sandboxes_runs_the_children_one_at_a_time_in_its_root(
+    parallel: int,
+) -> None:
+    launch = EvolveLaunch.model_validate({**REQUIRED, "max_parallelism": parallel})
+    assert launch.search_config(profiling=False).max_parallelism == parallel
+    shared = launch.search_config(profiling=False, workspace_mode=WorkspaceMode.EXCLUSIVE_ROOT)
+    assert (shared.exclusive_root, shared.max_parallelism) == (True, 1)
+    with pytest.raises(ValidationError, match="'exclusive_root' is not a launch option"):
+        EvolveLaunch.model_validate({**REQUIRED, "exclusive_root": True})
+    if parallel > 1:
+        with pytest.raises(ValidationError, match="cannot run in parallel"):
+            config(exclusive_root=True, max_parallelism=parallel)

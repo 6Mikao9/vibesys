@@ -88,6 +88,10 @@ class Subject:
     """How many attempts the search's config lets it start."""
     snapshot: type[BaseModel]
     """The record type the search publishes."""
+    lapsed: Callable[[Any], bool] = lambda _record: False
+    """Whether a published record shows a child that ended because a turn lapsed while no host
+    was up (a restart comes a lease later than the turn's limit). Such a child fails, typed,
+    where the uninterrupted run's child went on; the run itself still has to end as a run does."""
     sweeps_crashes: bool = True
     """Whether the crash sweep (C2) runs on this subject: at a sample of its durable boundaries
     in CI, at every one under `--crash-points=all`."""

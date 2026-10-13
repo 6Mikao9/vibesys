@@ -127,6 +127,10 @@ within=s)` checks that a revision still reproduces its retained content, and `aw
 ctx.workspaces.export_patch(revision, within=s)` returns the canonical patch of a retained
 revision against the input (the search declares the `export_patch` operation).
 
+A role that writes (`WRITE_CANDIDATE`) works in its workspace in the mode core admitted it
+(`ws.mode`: isolated, or the run's own root on a host without candidate sandboxes); a read-only
+role keeps the mode its `Role` declares.
+
 ### Evaluation
 
 `await ctx.evaluation.measure(plan, workspace=ws, within=s)` returns the `MeasurementResult` or
