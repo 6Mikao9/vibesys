@@ -173,14 +173,6 @@ def test_a_job_the_run_never_saw_end_or_cancelled_is_a_violation() -> None:
     assert [violation.detail for violation in left] == ["job left left RUNNING"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: when one of the concurrent peer turns of an attempt fails (crash, timeout or a bad "
-        "reply) and another succeeds, the run never ends: it stalls with the attempt closing on "
-        "its retention release, or fails its orphan-wait check on the peer's session."
-    ),
-)
 # The crash case runs in every pull request; the other two reach the same bug through the same
 # path and run with the slow tests.
 @pytest.mark.parametrize(
@@ -207,14 +199,6 @@ async def test_a_failed_peer_turn_does_not_stop_the_run_from_ending(
     assert chaos.violations == [], chaos.report()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG: a schema-valid reply that names a commit which does not exist is retained and "
-        "measured; the measurement raises inside its executor, the request blocks, and the run "
-        "cannot close the attempt (orphan wait on the recovery check of the settlement close)."
-    ),
-)
 @pytest.mark.slow  # about 25 s of virtual-clock stall detection
 async def test_a_reply_naming_a_commit_that_does_not_exist_does_not_stop_the_run_from_ending(
     tmp_path: Path,
