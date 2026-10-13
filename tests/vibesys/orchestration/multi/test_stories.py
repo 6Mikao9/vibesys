@@ -26,7 +26,14 @@ from tests.vibesys.orchestration.multi._host import (
 from tests.vibesys.serial_search._host import assert_flow_closed
 from tests.vibesys.serial_search._replies import plan_reply
 
-from vs_core.api import FailureReason, Finish, Retained, RevisionRef
+from vs_core.api import (
+    CheckpointDecline,
+    Declined,
+    FailureReason,
+    Finish,
+    Retained,
+    RevisionRef,
+)
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
 
@@ -211,3 +218,43 @@ def test_an_input_that_cannot_be_measured_is_not_hidden(*, restarting: bool, bas
     host = MultiHost.start(config(), restarting=restarting, baseline=baseline)  # ty: ignore[invalid-argument-type]
     host.drain(limit=60)
     assert host.run.finished is not None or host.run.open
+
+
+@MODES
+@pytest.mark.parametrize("reason", list(CheckpointDecline))
+def test_a_checkpoint_core_declines_leaves_the_round_without_a_candidate(
+    *, restarting: bool, reason: CheckpointDecline
+) -> None:
+    host = start(restarting=restarting)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    host.run.reply(
+        host.run.expect_turn(role=IMPLEMENTER), implemented(), checkpoint=Declined(reason=reason)
+    )
+    host.drain()
+
+    assert selection_of(host) == ("trusted_baseline", None)
+    assert_flow_closed(host)
+
+
+@MODES
+def test_an_implementer_that_asks_to_continue_is_given_its_own_next_step_without_a_new_design(
+    *, restarting: bool
+) -> None:
+    host = start(config(max_rounds=2), restarting=restarting)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    host.run.reply(
+        host.run.expect_turn(role=IMPLEMENTER),
+        implemented("continue", next_step="try the fused kernel"),
+        checkpoint=Retained(revision=RevisionRef.of_git_commit("c1")),
+    )
+    judge(host, passed=True)
+    host.drain_until_turn(IMPLEMENTER)
+
+    prompt = host.run.expect_turn(role=IMPLEMENTER).context
+    assert getattr(prompt, "continuation_step", None) == "try the fused kernel"
+    assert not [item for item in host.run.open if item.label == PLANNER]
+    record = host.record
+    assert record is not None
+    assert [item.hypothesis_id for item in record.hypotheses] == ["h1"]

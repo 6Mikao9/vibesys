@@ -19,7 +19,15 @@ from tests.vibesys.orchestration.single._host import (
 from tests.vibesys.serial_search._host import assert_flow_closed
 from tests.vibesys.serial_search._replies import plan_reply
 
-from vs_core.api import FailureReason, Finish, Retained, RevisionRef, StartAttempt
+from vs_core.api import (
+    CheckpointDecline,
+    Declined,
+    FailureReason,
+    Finish,
+    Retained,
+    RevisionRef,
+    StartAttempt,
+)
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
 CANDIDATE = RevisionRef.of_git_commit("def456")
@@ -144,3 +152,38 @@ def test_an_input_that_cannot_be_measured_is_not_hidden(*, restarting: bool, bas
     host = SingleHost.start(config(), restarting=restarting, baseline=baseline)
     host.drain(limit=60)
     assert host.run.finished is not None or host.run.open
+
+
+@MODES
+@pytest.mark.parametrize("reason", list(CheckpointDecline))
+def test_a_checkpoint_core_declines_leaves_the_round_without_a_candidate(
+    *, restarting: bool, reason: CheckpointDecline
+) -> None:
+    host = start(config(max_retries_per_round=1), restarting=restarting)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    host.run.reply(
+        host.run.expect_turn(role=IMPLEMENTER), implemented(), checkpoint=Declined(reason=reason)
+    )
+    host.drain()
+
+    assert selection_of(host) == ("trusted_baseline", None)
+    assert_flow_closed(host)
+
+
+@MODES
+def test_the_gates_are_skipped_on_rounds_the_cadence_does_not_audit(*, restarting: bool) -> None:
+    host = start(config(max_rounds=2, official_eval_every=2), restarting=restarting)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    implement(host, candidate="c1")
+    host.drain_until_turn(PLANNER)
+
+    assert host.measured == []  # the first round was not audited, so nothing was measured
+    design(host, "h2")
+    host.drain_until_turn(IMPLEMENTER)
+    implement(host, candidate="c2")
+    host.drain()
+
+    assert host.measured == ["c2"]
+    assert_flow_closed(host)
