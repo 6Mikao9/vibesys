@@ -61,11 +61,6 @@ from vs_core.api.search import (
 
 async def workstream(ctx: Flow, w: WorkstreamStart) -> WorkstreamDone:
     """Run one scheduled workstream to the settlement of its attempt."""
-    if ctx.stop_requested:
-        # Opening an attempt is shielded, and a baseline parent has no unshielded await before
-        # it, so a stop that came before this task started would not be seen until the
-        # attempt was open.
-        return WorkstreamDone.stopped(w)
     try:
         await verify_parent(ctx, w)
         async with attempt(ctx, w) as a:

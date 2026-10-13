@@ -171,3 +171,25 @@ def test_a_refused_result_is_proposed_again_as_the_plain_failure(*, restarting: 
     assert isinstance(run.finished, Finish)
     assert run.finished.decision_id != first.decision_id
     assert run.finished.result.outcome == "failure"
+
+
+@MODES
+def test_a_plan_accepted_after_a_stop_is_recorded_stopped_and_opens_no_attempt(
+    *, restarting: bool
+) -> None:
+    run = begin(restarting=restarting)
+    asked = run.expect(AskAgent, label="planner")
+    run.stop()
+    reply = planner_reply_type(CONFIG.profile_offer).model_validate_json(
+        plan_reply(implement("h1"))
+    )
+    run.reply(asked, reply)
+
+    assert not [item for item in run.open if isinstance(item.request, StartAttempt)]
+    record = FlowSearch.published(run.state, RunSnapshot)
+    assert record is not None
+    (done,) = record.finished
+    assert done.plan.work_id == "h1"
+    assert done.failure is not None
+    assert done.failure.kind is FailureKind.STOPPED
+    assert not record.running
