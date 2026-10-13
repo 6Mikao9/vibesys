@@ -12,7 +12,13 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.issue_queue._host import Host, assert_flow_closed, begin, config
+from tests.vibesys.orchestration.issue_queue._host import (
+    Host,
+    assert_flow_closed,
+    begin,
+    config,
+    suspending_view,
+)
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, judged
 
 from vs_core.api import Finish, StartAttempt, Wait
@@ -43,7 +49,7 @@ def _check_always(host: Host) -> None:
 @MODES
 @settings(max_examples=30, deadline=None, derandomize=True, database=None)
 @given(
-    steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 11)), max_size=60),
+    steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 13)), max_size=60),
     stop_before=st.none() | st.integers(0, 60),
     rules=st.fixed_dictionaries(
         {"max_rounds": st.integers(1, 3), "max_attempts_per_issue": st.integers(1, 3)}
@@ -62,6 +68,8 @@ def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_oper
         config(**rules),
         restarting=restarting,
         lost_acknowledgements=lost,
+        suspending=True,
+        view=suspending_view(),
         judge=[judged(bugs=("bug one",)), judged(passed=False)],
         perf=[evaluated("faster")],
     )

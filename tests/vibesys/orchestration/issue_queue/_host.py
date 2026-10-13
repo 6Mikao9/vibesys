@@ -105,6 +105,16 @@ PERF = "perf-evaluator"
 BOARD_KINDS = frozenset(item.descriptor.kind for item in BOARD)
 
 
+def suspending_view() -> FakeView:
+    """A host whose agents may end a turn waiting for their evaluations (a fresh view each time)."""
+    capabilities = FakeView().current().capabilities
+    return FakeView(
+        changes={
+            "capabilities": capabilities.model_copy(update={"lifecycle": frozenset({"suspend"})})
+        }
+    )
+
+
 def config(**overrides: object) -> IssueQueueConfig:
     """Two rounds, two attempts per issue and room for four issues a round, unless told."""
     return IssueQueueConfig.model_validate(
@@ -144,6 +154,8 @@ class World(TypedDict, total=False):
     """The n-th board write is lost before it lands."""
     accurate: bool
     """Whether the trusted accuracy measurement passes."""
+    suspending: bool
+    """An agent turn may end waiting for its evaluations (the view must offer it)."""
 
 
 def begin(
@@ -170,6 +182,7 @@ class Host:
     lost_acknowledgements: frozenset[int] = frozenset()
     dropped_writes: frozenset[int] = frozenset()
     accurate: bool = True
+    suspending: bool = False
     tracker: FakeIssueTracker = field(default_factory=FakeIssueTracker)
     opened: list[AttemptRef] = field(default_factory=list)
     """Every attempt the host admitted, in order."""
@@ -286,7 +299,9 @@ class Host:
     # -- agents --------------------------------------------------------------------------------
 
     def _agent(self, asked: Asked, variant: int) -> None:
-        match variant % 6:
+        match variant % 7:
+            case 6 if self.suspending and asked.label != PERF:
+                self.run.resume_ready(self.run.suspend(asked))
             case 1:
                 self.run.reply_raw(asked, "not json")
             case 2:
@@ -308,7 +323,7 @@ class Host:
         )
         if role != IMPLEMENTER:
             self.run.reply(asked, reply)
-        elif variant % 6 == 5:
+        elif variant % 7 == 5:
             self.run.reply(asked, reply, checkpoint=Declined(reason=next(iter(CheckpointDecline))))
         else:
             self.run.reply(asked, reply, checkpoint=self._retained())
@@ -347,7 +362,7 @@ class Host:
         plan = request.plan
         assert isinstance(plan.candidate, RevisionRef)
         self.measured.append(plan.candidate)
-        if variant % 6 == 2:
+        if variant % 7 == 2:
             self.run.fail(asked, FailureReason.LOST)
             return
         refs = tuple(

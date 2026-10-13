@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from tests.vibesys.orchestration.issue_queue._host import (
     FACTS,
@@ -12,6 +14,7 @@ from tests.vibesys.orchestration.issue_queue._host import (
     assert_flow_closed,
     begin,
     config,
+    suspending_view,
 )
 from tests.vibesys.orchestration.issue_queue._replies import (
     evaluated,
@@ -21,16 +24,10 @@ from tests.vibesys.orchestration.issue_queue._replies import (
 )
 
 from vs_core.api import FailureReason, RejectionCode, Withdraw
-from vs_core.api.testing import Asked, FakeView
 
-SUSPENDING = FakeView(
-    changes={
-        "capabilities": FakeView()
-        .current()
-        .capabilities.model_copy(update={"lifecycle": frozenset({"suspend"})})
-    }
-)
-"""A host whose agents may end a turn waiting for their evaluations."""
+if TYPE_CHECKING:
+    from vs_core.api.testing import Asked
+
 RESTARTING = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])
 
 
@@ -183,7 +180,7 @@ def turn_of(host: Host, role: str) -> Asked:
 def test_an_agent_that_waits_for_its_evaluations_is_resumed_and_the_issue_closes(
     *, restarting: bool, role: str
 ) -> None:
-    host = begin(config(), restarting=restarting, view=SUSPENDING)
+    host = begin(config(), restarting=restarting, view=suspending_view())
     host.drain_until_turn(role)
     host.run.resume_ready(host.run.suspend(turn_of(host, role)))
     host.drain()
