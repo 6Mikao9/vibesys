@@ -671,6 +671,67 @@ class PureOption(Value):
     value: str | int | Annotated[float, Field(allow_inf_nan=False)] | bool | None
 
 
+class TaskStage(Value):
+    """One stage the task can measure and the seconds its execution may take."""
+
+    stage_id: str = Field(min_length=1)
+    execution_seconds: float = Field(ge=0, allow_inf_nan=False)
+
+
+class TaskObjective(Value):
+    """One axis the task compares candidates on, and which way is better."""
+
+    name: str = Field(min_length=1)
+    direction: Literal["max", "min"]
+
+
+class TaskTerms(Value):
+    """What the task fixes about measuring and comparing candidates.
+
+    Core carries these terms and holds none of them as a default: the host resolves them from
+    the task's input bundle and domain, and a search reads them through ``ctx.task``. The
+    evaluator, workload and environment identities that go with them are the run facts'.
+    """
+
+    recipe: ArtifactRef
+    """The stored evaluation plan every measurement plan cites."""
+    stages: tuple[TaskStage, ...]
+    """Every stage the task can measure, in dependency order, with its time limit."""
+    measured: tuple[str, ...]
+    """The stages a candidate is measured on, in order: the task's gates."""
+    queue_allowance: float = Field(ge=0, allow_inf_nan=False)
+    """Seconds a measurement may wait in the evaluation queue."""
+    accuracy_stage: str | None = Field(default=None, min_length=1)
+    """The stage whose pass is the correctness gate."""
+    accuracy_gated: tuple[EvidenceKind, ...] = ()
+    """Evidence kinds that count only if the accuracy stage passed."""
+    operation_seconds: float = Field(gt=0, allow_inf_nan=False)
+    """Seconds one read of the evidence (decoding it, verifying a parent) may take."""
+    objectives: tuple[TaskObjective, ...] = ()
+    """The directed axes candidates are ranked on, headline first."""
+    relative_noise: float = Field(default=0.0, ge=0.0, lt=1.0)
+    """The benchmark's declared variation: a reading must beat the input by more than this."""
+    profile_fields: tuple[str, ...] = ()
+    """The measurement fields the task's profile capture supplies."""
+
+    @property
+    def requires_accuracy_proof(self) -> bool:
+        """Whether a candidate must carry an accepted accuracy proof to be adopted.
+
+        Only a task that measures its accuracy stage can produce one; a task without that gate
+        adopts what its other gates admit.
+        """
+        return self.accuracy_stage is not None and self.accuracy_stage in self.measured
+
+    @model_validator(mode="after")
+    def _stages_exist(self) -> TaskTerms:
+        known = {item.stage_id for item in self.stages}
+        named = {*self.measured, *([self.accuracy_stage] if self.accuracy_stage else [])}
+        if unknown := sorted(named - known):
+            raise ContractValidationError("measured", f"names stages the task lacks: {unknown}")
+        return self
+
+
 class RunFacts(Value):
     """Run facts lifecycle contract."""
 
@@ -682,6 +743,8 @@ class RunFacts(Value):
     workload_digest: str
     environment_digest: str
     artifacts: tuple[ArtifactRef, ...] = ()
+    task: TaskTerms | None = None
+    """What the task fixes; a search that measures candidates reads it with ``ctx.task``."""
 
 
 class StopMode(StrEnum):

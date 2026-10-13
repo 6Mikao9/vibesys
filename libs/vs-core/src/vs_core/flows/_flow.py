@@ -6,7 +6,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Any, Self, overload
 
 from vs_core._registry import ContractError
-from vs_core.types.common import Capabilities, Limits, RevisionRef, Seconds, Value
+from vs_core.types.common import Capabilities, Limits, RevisionRef, Seconds, TaskTerms, Value
 from vs_core.types.settlement import RetainedCandidate, TrustedBaseline
 
 from ._agents import Agents
@@ -46,6 +46,8 @@ class RunTask(Value):
     baseline: RevisionRef
     deadline_at: Seconds
     limits: Limits
+    terms: TaskTerms
+    """What the task fixes about measuring and comparing candidates."""
 
 
 class Flow:
@@ -165,13 +167,18 @@ class Flow:
 
     @property
     def task(self) -> RunTask:
-        """The task of the run: objective, input, deadline and limits (a journaled read)."""
+        """The task of the run: objective, input, terms, deadline and limits (a journaled read)."""
+        terms = self.facts.task
+        if terms is None:
+            message = "this run carries no task terms: the host must resolve them for the search"
+            raise ContractError(("task",), message)
         return self._kit.read(
             lambda view: RunTask(
                 objective=view.facts.objective,
                 baseline=view.facts.baseline,
                 deadline_at=view.deadline_at,
                 limits=view.limits,
+                terms=terms,
             ),
             RunTask,
         )

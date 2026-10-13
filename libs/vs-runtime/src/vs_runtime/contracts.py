@@ -699,6 +699,8 @@ class CoreRunContext:
     """The least time core gives its own cleanup requests once the deadline has passed."""
     reconciliation_bound_seconds: int
     """The longest core waits to learn what became of a request it could not read."""
+    role_models: Mapping[str, str] = field(default_factory=dict)
+    """The model the operator chose for a role (by role id) where it differs from the run's."""
 
 
 @dataclass(frozen=True, slots=True)

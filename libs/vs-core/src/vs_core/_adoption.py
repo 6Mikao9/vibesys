@@ -242,8 +242,9 @@ def _ineligible(
     """Why this selection may not be adopted, or None when it may.
 
     A retained candidate needs one eligible settlement that retained exactly this
-    revision as a candidate (so never a work-in-progress partial) and an accepted
-    accuracy proof for the same revision. The baseline must be the run's own.
+    revision as a candidate (so never a work-in-progress partial) and, when the task gates on
+    accuracy, an accepted accuracy proof for the same revision. A run whose facts carry no task
+    terms keeps the proof requirement. The baseline must be the run's own.
     """
     if isinstance(selection, TrustedBaseline):
         if selection.revision != context.run.facts.baseline:
@@ -251,7 +252,10 @@ def _ineligible(
         return None
     if not state.retains(selection):
         return "selection is not an eligible retained candidate of this run"
-    if context.evaluation.accuracy_proof(selection.revision) is None:
+    task = context.run.facts.task
+    if (task is None or task.requires_accuracy_proof) and (
+        context.evaluation.accuracy_proof(selection.revision) is None
+    ):
         return "selected revision has no accepted accuracy proof"
     return None
 
