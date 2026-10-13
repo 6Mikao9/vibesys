@@ -432,3 +432,39 @@ receipt: TrustedEvidence
         "from vs_evaluation.api import EvaluationAgentService",
     )
     assert any(item.rule == "effect-path" for item in forbidden)
+
+
+_ASYNC_FLOW = "async def f(ctx):\n    async with ctx.group() as g:\n        async for x in g:\n            await ctx.first(x)\n"
+
+
+def test_flow_code_may_be_async_and_other_code_may_not() -> None:
+    assert scan_source("flow.py", _ASYNC_FLOW, flow_code=True) == ()
+    assert {site.rule for site in scan_source("plain.py", _ASYNC_FLOW)} == {
+        "async-def",
+        "async-with",
+        "async-for",
+        "await",
+    }
+
+
+@pytest.mark.parametrize(
+    "impurity",
+    [
+        "import asyncio\nasyncio.sleep(1)",
+        "import time\ntime.time()",
+        "import random\nrandom.random()",
+        "open('x')",
+        "import socket",
+    ],
+)
+def test_flow_code_is_still_flagged_for_real_impurity(impurity: str) -> None:
+    assert scan_source("flow.py", impurity, flow_code=True)
+    assert scan_source(
+        "flow.py", f"async def f(ctx):\n    await ctx.x()\n{impurity}", flow_code=True
+    )
+
+
+def test_async_builtins_are_only_allowed_in_flow_code() -> None:
+    source = "async def f(it):\n    return await anext(it)\n"
+    assert scan_source("flow.py", source, flow_code=True) == ()
+    assert "builtin" in {site.rule for site in scan_source("plain.py", source)}

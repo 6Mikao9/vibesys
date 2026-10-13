@@ -87,13 +87,6 @@
     "path": "src/vibesys/orchestration/evolve/population/openevolve_selector.py",
     "symbol": "<module>",
     "rule": "banned-import",
-    "subject": "contextlib",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/evolve/population/openevolve_selector.py",
-    "symbol": "<module>",
-    "rule": "banned-import",
     "subject": "openevolve.config",
     "occurrence": 1
   },
@@ -291,13 +284,6 @@
     "symbol": "select",
     "rule": "effect-path",
     "subject": "random.Random",
-    "occurrence": 1
-  },
-  {
-    "path": "src/vibesys/orchestration/issue_queue/launch.py",
-    "symbol": "IssueQueueLaunch",
-    "rule": "effect-path",
-    "subject": "vs_issue_tracker.api.IssueTrackerConfig.local",
     "occurrence": 1
   },
   {
