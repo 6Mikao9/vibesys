@@ -1,0 +1,231 @@
+"""The ending of a run: the framework adopts the last ``ctx.choose`` by one path.
+
+A flow never finishes the run. Whatever ends it (the root returning, the operator's stop, the
+deadline control), the framework proposes the last choice (nothing chosen: the input), then
+finishes with the result the adoption allows. Each story runs live and with a restart after
+every step, so the choice itself is proven to survive a restart.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+import vs_core.api as core
+
+from .flow_support import FACTS, Config, start
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vs_core.api.testing import FlowRun
+
+type Begin = Callable[..., FlowRun[Config]]
+
+BASELINE = core.TrustedBaseline(revision=FACTS.baseline)
+
+
+@pytest.fixture(params=[False, True], ids=["live", "restart-every-step"])
+def begin(request: pytest.FixtureRequest) -> Begin:
+    """Starts a flow; a live run, or a restart after every step."""
+    restarting = bool(request.param)
+    return lambda root, **kwargs: start(root, restarting=restarting, **kwargs)
+
+
+def kept(name: str) -> core.Kept:
+    """A candidate a closed workspace retained."""
+    revision = core.RevisionRef(revision_id=core.RevisionId(root=name), digest=f"{name}-digest")
+    return core.Kept(
+        settlement=core.Settlement(
+            settlement_id=core.SettlementId(root=name),
+            attempt=core.AttemptRef(attempt_id=core.AttemptId(root=name), generation=0),
+            candidate=revision,
+            assessments=(),
+            eligible=True,
+            retention="candidate",
+            outcome="succeeded",
+        )
+    )
+
+
+def selection_of(candidate: core.Kept) -> core.RetainedCandidate:
+    """The selection ``ctx.choose(candidate)`` stands for."""
+    return core.RetainedCandidate(
+        settlement_id=candidate.settlement.settlement_id, revision=candidate.revision
+    )
+
+
+def result_of(run: FlowRun[Config]) -> core.RunResultProposal:
+    """The result the run finished with."""
+    assert run.finished is not None
+    assert run.finished.mode == "drain"
+    return run.finished.result
+
+
+# -- a normal end ---------------------------------------------------------------------------------
+
+
+def test_nothing_chosen_means_the_input_stands(begin: Begin) -> None:
+    async def idle(_ctx: core.Flow, _config: Config) -> None:
+        return None
+
+    run = begin(idle)
+    result = result_of(run)
+    assert (result.outcome, result.selection) == ("success", BASELINE)
+    assert result.reason.startswith("kept-input")
+
+
+def test_the_last_choice_is_the_one_adopted(begin: Begin) -> None:
+    async def choosy(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(kept("a"))
+        ctx.choose(kept("b"))
+        await ctx.timer(5.0)
+
+    run = begin(choosy, adopting=False)
+    run.advance_to(5.0)
+    proposal = run.expect(core.ProposeWinner)
+    assert proposal.request.selection == selection_of(kept("b"))  # ty: ignore[unresolved-attribute]
+    run.adopt(proposal)
+    result = result_of(run)
+    assert (result.outcome, result.selection) == ("success", selection_of(kept("b")))
+    assert result.reason.startswith("adopted")
+
+
+def test_choosing_the_input_after_a_candidate_takes_the_candidate_back(begin: Begin) -> None:
+    async def regret(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(kept("a"))
+        ctx.choose(core.INPUT)
+
+    result = result_of(begin(regret))
+    assert result.selection == BASELINE
+
+
+def test_no_winner_fails_the_run_and_adopts_nothing(begin: Begin) -> None:
+    async def hopeless(ctx: core.Flow, _config: Config) -> core.NoWinner:
+        ctx.choose(kept("a"))  # even a choice made earlier is not adopted
+        return core.NoWinner(reason="nothing converged")
+
+    run = begin(hopeless, adopting=False)
+    assert not any(
+        isinstance(d, core.Wait) and isinstance(d.request, core.ProposeWinner)
+        for d in run.decisions
+    )
+    result = result_of(run)
+    assert (result.outcome, result.selection) == ("failure", None)
+    assert result.reason == "no-winner: nothing converged"
+
+
+@given(reason=st.sampled_from(list(core.AdoptionFailureReason)))
+def test_a_failed_adoption_is_a_failed_run_with_the_typed_reason(
+    reason: core.AdoptionFailureReason,
+) -> None:
+    async def choosy(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(kept("a"))
+
+    run = start(choosy, adopting=False)
+    run.refuse_adoption(run.expect(core.ProposeWinner), reason)
+    result = result_of(run)
+    assert result.outcome == "failure"
+    assert result.reason == f"adoption-failed: {reason.value}"
+
+
+def test_a_proposal_core_refuses_is_a_failed_run_too(begin: Begin) -> None:
+    async def choosy(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(kept("a"))
+
+    run = begin(choosy, adopting=False)
+    run.fail(run.expect(core.ProposeWinner), core.FailureReason.REFUSED)
+    result = result_of(run)
+    assert result.outcome == "failure"
+    assert result.reason.startswith("adoption-failed")
+
+
+def test_a_refused_result_is_proposed_again_as_a_plain_failure_once(begin: Begin) -> None:
+    async def idle(_ctx: core.Flow, _config: Config) -> None:
+        return None
+
+    run = begin(idle)
+    assert result_of(run).outcome == "success"
+    run.fail(run.expect(core.Finish), core.FailureReason.REFUSED)
+    result = result_of(run)
+    assert result.outcome == "failure"
+    assert result.reason.startswith("finish-refused")
+    with pytest.raises(core.ContractError, match="plain failure"):
+        run.fail(run.expect(core.Finish, label="finish"), core.FailureReason.REFUSED)
+
+
+# -- stop and deadline ---------------------------------------------------------------------------
+
+
+async def until_stopped(ctx: core.Flow, _config: Config) -> None:
+    ctx.choose(kept("a"))
+    await ctx.stopped
+
+
+def test_a_stop_adopts_the_last_choice_and_cancels_the_run(begin: Begin) -> None:
+    run = begin(until_stopped)
+    assert run.finished is None
+    run.stop()
+    result = result_of(run)
+    assert (result.outcome, result.selection) == ("cancelled", selection_of(kept("a")))
+    assert result.reason.startswith("stopped")
+
+
+def test_the_deadline_control_cancels_the_run_with_its_own_reason(begin: Begin) -> None:
+    run = begin(until_stopped)
+    run.stop("deadline")
+    result = result_of(run)
+    assert (result.outcome, result.selection) == ("cancelled", selection_of(kept("a")))
+    assert result.reason.startswith("deadline")
+
+
+def test_a_stop_with_no_choice_cancels_with_the_input(begin: Begin) -> None:
+    async def waiting(ctx: core.Flow, _config: Config) -> None:
+        await ctx.stopped
+
+    run = begin(waiting)
+    run.stop()
+    result = result_of(run)
+    assert (result.outcome, result.selection) == ("cancelled", BASELINE)
+
+
+def test_a_stop_that_ends_in_no_winner_is_cancelled_without_a_selection(begin: Begin) -> None:
+    async def giving_up(ctx: core.Flow, _config: Config) -> core.NoWinner:
+        await ctx.stopped
+        return core.NoWinner(reason="out of time")
+
+    run = begin(giving_up)
+    run.stop()
+    result = result_of(run)
+    assert (result.outcome, result.selection) == ("cancelled", None)
+    assert result.reason == "stopped: out of time"
+
+
+def test_a_failed_adoption_after_a_stop_is_still_a_failure(begin: Begin) -> None:
+    run = begin(until_stopped, adopting=False)
+    run.stop()
+    run.refuse_adoption(run.expect(core.ProposeWinner), core.AdoptionFailureReason.VERIFY_FAILED)
+    assert result_of(run).outcome == "failure"
+
+
+@given(stop_after=st.integers(min_value=0, max_value=2))
+def test_the_ending_is_the_same_whenever_the_stop_comes(stop_after: int) -> None:
+    """However many timers fired before the stop, the choice made along the way is adopted."""
+
+    async def ticking(ctx: core.Flow, _config: Config) -> None:
+        for number in range(3):
+            ctx.choose(kept(f"c{number}"))
+            await ctx.first(ctx.timer(float(number + 1)), ctx.stopped)
+            if ctx.stop_requested:
+                return
+
+    run = start(ticking, restarting=True)
+    for tick in range(stop_after):
+        run.advance_to(float(tick + 1))
+    run.stop()
+    result = result_of(run)
+    assert result.outcome == "cancelled"
+    assert result.selection == selection_of(kept(f"c{stop_after}"))

@@ -183,9 +183,10 @@ def test_a_restart_after_every_step_equals_the_live_run(
 
 def _action(data: st.DataObject, run: FlowRun[Config]) -> Callable[[FlowRun[Config]], None]:
     """Draw the next host action from what the live run has open."""
-    choices = ["advance", "stop"]
-    choices += [f"reply{i}" for i, _ in enumerate(run.open)]
-    choices += [f"fail{i}" for i, _ in enumerate(run.open)]
+    open_waits = [asked for asked in run.open if not isinstance(asked.request, core.Finish)]
+    choices = ["advance", "stop"]  # the host never answers the run's own Finish
+    choices += [f"reply{i}" for i, _ in enumerate(open_waits)]
+    choices += [f"fail{i}" for i, _ in enumerate(open_waits)]
     choice = data.draw(st.sampled_from(choices))
     step = data.draw(st.integers(1, 15))
     answer = data.draw(st.integers(0, 3))
@@ -194,7 +195,7 @@ def _action(data: st.DataObject, run: FlowRun[Config]) -> Callable[[FlowRun[Conf
     if choice == "advance":
         target = run.view.now_at + step
         return lambda r: r.advance_to(target)
-    asked = run.open[int(choice.removeprefix("reply").removeprefix("fail"))]
+    asked = open_waits[int(choice.removeprefix("reply").removeprefix("fail"))]
     if choice.startswith("fail") or not isinstance(asked.request, core.RequestTurn):
         return lambda r: r.fail(asked, core.FailureReason.TIMED_OUT)
     return lambda r: r.reply(asked, Plan(n=answer))

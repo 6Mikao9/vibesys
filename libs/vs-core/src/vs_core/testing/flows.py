@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from vs_core.api import (
+    AdoptionFailed,
+    AdoptionFailureReason,
     AdoptionFinished,
     AdoptionResult,
     AgentProtocol,
@@ -342,6 +344,34 @@ class FlowRun[C]:
         self.send(WorkspaceClosed(decision=asked.decision, settlement=settlement))
         return settlement
 
+    def adopt(self, asked: Asked) -> None:
+        """The host adopted the winner a ``ProposeWinner`` named (when ``adopting`` is off)."""
+        if not isinstance(asked.request, ProposeWinner):
+            message = f"{asked.decision.root} is not a ProposeWinner"
+            raise TypeError(message)
+        self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:adopted")
+        self.send(self._adopted(asked.request))
+
+    def refuse_adoption(self, asked: Asked, reason: AdoptionFailureReason) -> None:
+        """The host could not adopt the winner a ``ProposeWinner`` named."""
+        if not isinstance(asked.request, ProposeWinner):
+            message = f"{asked.decision.root} is not a ProposeWinner"
+            raise TypeError(message)
+        self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:adoption-failed({reason.value})")
+        self.send(
+            AdoptionFinished(
+                decision=None,
+                result=AdoptionFailed(
+                    selection=asked.request.selection,
+                    reason=reason,
+                    observation=self._observation(ObservationStatus.FAILED),
+                    rounds=1,
+                ),
+            )
+        )
+
     def answer(self, asked: Asked, event: Event) -> None:
         """Deliver any event as the answer to a wait (a measurement, an operation result)."""
         self._close(asked)
@@ -372,6 +402,11 @@ class FlowRun[C]:
         self.restarts += 1
         self.state = FlowState.model_validate_json(self.state.model_dump_json())
         self.driver = self.driver.fresh()
+
+    def swap(self, search: SearchDef[C]) -> None:
+        """Continue the run under another definition of the search: the code changed on resume."""
+        self.definition = search
+        self.driver = search.driver(self.config, FAKE_REGISTRY)
 
     # -- bookkeeping -------------------------------------------------------------------------
 

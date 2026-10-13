@@ -14,25 +14,20 @@ from vs_core.api import (
     ClockAdvanced,
     ControlId,
     ControlInput,
-    Decision,
-    Event,
-    EventKind,
+    Flow,
+    FlowState,
     InputId,
     RunControlEvent,
-    RunFacts,
-    RunView,
     Scope,
     ScopeInputTarget,
     SessionInput,
     SessionInputReceived,
-    TimeReached,
-    WakeAt,
-    WorkKind,
     initial_state,
 )
+from vs_core.flows import search
 from vs_project.api import FakeStateStore, Project, StoredEnvelope
 from vs_runtime.api.core import CoreRuntime, CoreRuntimeBindings, RuntimeRecord
-from vs_runtime.api.core_shell_fixtures import CounterSearch, CounterState, ShellTraceTransitions
+from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,41 +42,26 @@ class QueueInput(StrEnum):
     TICK = "tick"
 
 
-class _TickingSearch(CounterSearch):
+@search("ticking", config=CounterConfig)
+async def ticking(ctx: Flow, config: CounterConfig) -> None:
     """A search that, whenever it is woken at time t, asks to be woken again at t + 1."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.declaration = self.declaration.model_copy(
-            update={
-                "uses": frozenset({WorkKind.WAKE_AT}),
-                "handles": self.declaration.handles | {EventKind.TIME_REACHED},
-            }
-        )
-
-    def init(self, config: object, facts: RunFacts) -> tuple[CounterState, list[Decision]]:
-        state, _ = super().init(config, facts)
-        return state, [WakeAt(time=1)]
-
-    def update(
-        self, state: CounterState, event: Event, view: RunView
-    ) -> tuple[CounterState, list[Decision]]:
-        state, _ = super().update(state, event, view)
-        if isinstance(event, TimeReached):
-            return state, [WakeAt(time=event.time + 1)]
-        return state, []
+    del config
+    at = 1.0
+    while True:
+        await ctx.first(ctx.timer(at))
+        at += 1
 
 
-def ticking_runtime(store: StateStore) -> CoreRuntime[CounterState]:
+def ticking_runtime(store: StateStore) -> CoreRuntime[FlowState]:
     core = initial_state()
     declared = core.model_copy(
-        update={"run": core.run.model_copy(update={"declaration": _TickingSearch().declaration})}
+        update={"run": core.run.model_copy(update={"declaration": ticking.declaration})}
     )
     return CoreRuntime(
         store,
-        _TickingSearch(),
+        ticking.driver(CounterConfig()),
         declared,
-        config=None,
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
     )
 
@@ -137,13 +117,13 @@ def test_mixed_queue_commits_input_occurrences_controls_and_wakes_in_order(
         ticks += kind == QueueInput.TICK
         assert shell.storage_revision == index
         assert shell.record.envelope.core.revision == index + 1 - ticks
-        assert shell.record.envelope.strategy.callbacks == callbacks
+        assert len(shell.record.envelope.strategy.journal) == 1 + callbacks
         assert len(shell.record.envelope.core.run.controls) == controls
         assert len(shell.record.envelope.core.sessions.inputs) == inputs
         assert shell.record.envelope.event_cursor.sequence == events
         stored = store.load()
         assert isinstance(stored, StoredEnvelope)
-        assert RuntimeRecord[CounterState].model_validate_json(stored.payload) == shell.record
+        assert RuntimeRecord[FlowState].model_validate_json(stored.payload) == shell.record
     assert not shell.advance()
     before_inputs = shell.record.envelope.core.sessions.inputs
     restarted = ticking_runtime(store)
@@ -168,7 +148,7 @@ def test_disk_reopen_loads_identical_complete_runtime_record(tmp_path: Path) -> 
     reopened = Project.open(tmp_path).state_store("run")
     stored = reopened.load()
     assert isinstance(stored, StoredEnvelope)
-    assert RuntimeRecord[CounterState].model_validate_json(stored.payload) == shell.record
+    assert RuntimeRecord[FlowState].model_validate_json(stored.payload) == shell.record
     next_shell = ticking_runtime(reopened)
     next_shell.start("second", now_at=10, lease_duration=10)
     assert next_shell.record.envelope.strategy == shell.record.envelope.strategy

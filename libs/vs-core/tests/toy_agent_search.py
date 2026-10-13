@@ -191,9 +191,8 @@ async def workstream(ctx: core.Flow, key: str, number: int) -> Done:
             ctx.workspaces.keep(
                 workspace, revision, core.Assessment(outcome="failed", retention="discard")
             )
-    return Done(
-        key=key, asked=tuple(asked), failed=tuple(failed), closed=workspace.settlement is not None
-    )
+    closed = not isinstance(workspace, core.NotOpened) and workspace.settlement is not None
+    return Done(key=key, asked=tuple(asked), failed=tuple(failed), closed=closed)
 
 
 @search("toy", config=Config, operations=OPERATIONS, ids=IDS, protocol=PROTOCOL)
@@ -264,7 +263,7 @@ class ToyHost:
     _fresh: int = 0
     _jobs: int = 0
     _running: dict[str, int] = field(default_factory=dict)
-    _asking: dict[str, str] = field(default_factory=dict)
+    _asking: dict[str, Ending] = field(default_factory=dict)
 
     # -- the turns' tool calls --------------------------------------------------------------
 
@@ -317,21 +316,29 @@ class ToyHost:
                         prompts=(core.ArtifactRef(artifact_id=prompt, digest="prompt"),),
                     )
                 )
+            case _:
+                return self._resource(request)
+
+    @staticmethod
+    def _resource(request: core.Request) -> Answer:
+        """What the executors of workspaces, sessions, retention and adoption report."""
+        revision: core.RevisionRef | None = None
+        resource: core.ResourceId | None = None
+        match request:
             case core.EnsureWorkspace():
                 root = f"workspace:{request.scope.owner.root}:{request.attempt.generation}"
-                return Succeeded(resource_id=core.ResourceId(root=root), revision=request.plan.base)
-            case core.AdoptRevision() | core.VerifyAdoption():
-                return Succeeded(revision=request.selection.revision)
+                resource, revision = core.ResourceId(root=root), request.plan.base
             case core.EnsureSession():
-                return Succeeded(resource_id=_lease(request.spec.session_id))
+                resource = _lease(request.spec.session_id)
             case core.CloseSession():
-                return Succeeded(resource_id=_lease(request.session_id))
+                resource = _lease(request.session_id)
             case core.SnapshotAndRetain():
-                return Succeeded(revision=revision_of(request.attempt.attempt_id.root))
+                revision = revision_of(request.attempt.attempt_id.root)
             case core.RetainRevision():
-                return Succeeded(revision=request.revision)
-            case _:
-                return Succeeded()
+                revision = request.revision
+            case core.AdoptRevision() | core.VerifyAdoption():
+                revision = request.selection.revision
+        return Succeeded(resource_id=resource, revision=revision)
 
     def _submit(self, request: core.SubmitMeasurement) -> Answer:
         assert request.request_id is not None
@@ -358,6 +365,7 @@ class ToyHost:
             for stage in owned.plan.stages
         )
         plan = owned.plan
+        assert isinstance(plan.candidate, core.RevisionRef)
         evidence = tuple(
             core.EvidenceRef(
                 evidence_id=core.EvidenceId(root=f"{stage.stage_id}:{owned.submission_id.root}"),
@@ -447,7 +455,9 @@ def run_toy(
         limits=limits,
         lifecycle=frozenset({"suspend"}),
         during_turn=host.during_turn,
-        envelope_type=core.RunEnvelope[toy.state_model],
+        shell_events=True,
+        schemas={role.schema: role.reply for role in (IMPLEMENTER, JUDGE)},
+        envelope_type=core.RunEnvelope[core.FlowState],
     )
     return drive(toy.driver(chosen, OPERATIONS.registry()), chosen, host, harness, faults)
 
