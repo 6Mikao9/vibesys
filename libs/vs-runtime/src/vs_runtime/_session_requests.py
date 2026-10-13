@@ -44,6 +44,7 @@ from vs_agent.api import (
     Completed,
     InvalidResponse,
     InvocationConflictError,
+    InvocationOutcome,
     Pending,
     SchemaViolation,
     SessionConfigurationError,
@@ -697,10 +698,8 @@ class RuntimeSessionRequests:
             if binding is None:
                 continue
             try:
-                outcome = await asyncio.to_thread(
-                    self._sessions.inspect,
-                    AgentSessionKey.parse(binding.session_key),
-                    peer.invocation,
+                outcome, never_journaled = await asyncio.to_thread(
+                    self._inspect_peer, AgentSessionKey.parse(binding.session_key), peer.invocation
                 )
             except (
                 SessionPersistenceError,
@@ -710,10 +709,15 @@ class RuntimeSessionRequests:
                 message = f"invocation evidence is unreadable: {error}"
                 raise AccessSettlementError(message) from error
             if isinstance(outcome, (Completed, InvalidResponse)) or (
-                isinstance(outcome, Unknown)
-                and await asyncio.to_thread(self._never_journaled, peer.invocation)
+                isinstance(outcome, Unknown) and never_journaled
             ):
                 await self.settlement.settle(peer)
+
+    def _inspect_peer(
+        self, key: AgentSessionKey, invocation_id: str
+    ) -> tuple[InvocationOutcome, bool]:
+        """The invocation's evidence and whether it has no journal row (one blocking read)."""
+        return self._sessions.inspect(key, invocation_id), self._never_journaled(invocation_id)
 
     def _never_journaled(self, invocation_id: str) -> bool:
         """Whether the invocation has no journal row.

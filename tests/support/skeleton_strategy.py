@@ -1,100 +1,129 @@
-"""A scripted minimal strategy for the composition skeleton.
+"""A scripted minimal search for the composition skeleton, written as a flow.
 
-It plays one scenario through public core decisions only: measure the baseline,
-start one attempt, request one implementer turn, measure the revision that turn
-produced, settle the attempt as eligible, propose it as the winner, and stop with
-the adopted result. It holds no lifecycle or accounting state of its own; each
-phase advances on the strategy event that proves the previous one.
+It plays one scenario: measure the baseline, open one attempt, ask the implementer for
+one change, measure the revision that turn produced, keep it as the attempt's candidate,
+and let the framework adopt the winner and end the run. It holds no lifecycle or accounting
+state of its own; the flow is the whole script.
 """
 
 from __future__ import annotations
 
-import json
-from typing import Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
-from vs_core.api import (
-    Accepted,
-    Access,
-    AdoptionResult,
-    ArtifactId,
-    ArtifactRef,
-    AttemptBudget,
-    AttemptId,
-    AttemptReady,
-    AttemptRef,
-    AttemptSettled,
-    Command,
-    CoreView,
-    DecisionId,
-    Finish,
-    InvocationId,
-    ItemId,
-    Measure,
-    MeasurementPlan,
-    MeasurementResult,
-    MeasurementStage,
-    Proposal,
-    ProposeWinner,
-    RequestTurn,
-    RetainedCandidate,
-    RevisionRef,
-    RoleId,
-    RunResultProposal,
-    SchemaRef,
-    Scope,
-    SearchDeclaration,
-    SessionId,
-    SessionSpec,
-    Settle,
-    SettlementId,
-    StartAttempt,
-    StrategyEvent,
-    StrategyId,
-    StrategyState,
-    TrustedBaseline,
-    TurnResult,
-    TurnSpec,
-    Value,
-    Withdraw,
-    WorkspaceMode,
-    WorkspacePlan,
-    WorkspaceRef,
+from pydantic import BaseModel
+
+import vs_core.api as core
+from vs_core.api.search import (
+    INPUT,
+    Assessment,
+    Failed,
+    Flow,
+    NotOpened,
+    NoWinner,
+    Role,
+    TurnFinished,
+    search,
 )
 
-ATTEMPT = AttemptRef(attempt_id=AttemptId(root="attempt-0"), generation=0)
+if TYPE_CHECKING:
+    from vs_core.api import OperationRegistry
+
+ATTEMPT = core.AttemptRef(attempt_id=core.AttemptId(root="attempt-0"), generation=0)
 DIGEST = "ab" * 32
-DECLARATION = SearchDeclaration(
-    strategy_id=StrategyId(root="skeleton"), state_schema=SchemaRef(name="skeleton", version=1)
+
+
+class Implementation(BaseModel):
+    """The implementer's structured reply: the commit it made in its workspace."""
+
+    commit: str
+    waiting: bool = False
+
+
+IMPLEMENTATION = core.SchemaRef(name="implementation", version=1)
+IMPLEMENTER = core.RoleId(root="implementer")
+
+
+class Prompt(core.Value):
+    """What the implementer is asked: the template of the skeleton's one prompt."""
+
+    template: str = "skeleton"
+
+
+class Render(core.RenderRoleArtifactsBase[Prompt]):
+    """Render one role prompt."""
+
+    kind: Literal["skeleton.render_role_artifacts"] = "skeleton.render_role_artifacts"
+
+
+class Verify(core.VerifyParentRevisionBase):
+    """Verify a parent revision."""
+
+    kind: Literal["skeleton.verify_parent_revision"] = "skeleton.verify_parent_revision"
+
+
+class Readings(core.EvidenceReadingsBase[core.Value]):
+    """No readings: the skeleton never interprets evidence."""
+
+
+class Interpret(core.InterpretEvidenceBase):
+    """Decode evidence."""
+
+    kind: Literal["skeleton.interpret_evidence"] = "skeleton.interpret_evidence"
+    outcome_model: ClassVar[type[BaseModel]] = Readings
+
+
+OPERATIONS = core.StrategyOperations("skeleton", Render, Verify, Interpret)
+
+
+def _same_prompt(*_: object) -> Prompt:
+    """The skeleton has one prompt, whatever core is asking about."""
+    return Prompt()
+
+
+PROTOCOL = core.AgentProtocol(
+    correction=_same_prompt, resume=_same_prompt, wait_unrecorded=_same_prompt
+)
+IMPLEMENTER_ROLE = Role(
+    name=IMPLEMENTER.root,
+    reply=Implementation,
+    schema=IMPLEMENTATION,
+    access=core.Access.WRITE_CANDIDATE,
+    workspace=core.WorkspaceMode.ISOLATED_CHILD,
+    charge="paid",
+    retry=core.Retry.none(),
 )
 
-type Phase = Literal[
-    "baseline", "start", "turn", "measure", "settle", "propose", "stop", "cancel", "failed", "done"
-]
+_RUN_DEADLINE = 1000.0
+"""When the skeleton world's run ends (the run clock, in seconds)."""
+_TURN_SECONDS = 400.0
+_MEASURE_SECONDS = 880.0
 
 
-class SkeletonState(StrategyState):
-    phase: Phase = "baseline"
-    candidate: RevisionRef | None = None
-    settlement: SettlementId | None = None
-    failure: str | None = None
+class SkeletonConfig(core.Value):
+    """Which scenario the skeleton plays."""
+
+    measured: bool = True
+    keeps_candidate: bool = True
+    cancels_after_start: bool = False
+    probe: bool = False
 
 
 def measurement(
-    candidate: RevisionRef, purpose: Literal["baseline", "official"], *, now_at: float = 0.0
-) -> MeasurementPlan:
+    candidate: core.RevisionRef, purpose: Literal["baseline", "official"], *, now_at: float = 0.0
+) -> core.MeasurementPlan:
     """An accuracy-then-benchmark plan of one exact revision, ``now_at`` seconds into the clock."""
-    return MeasurementPlan(
+    return core.MeasurementPlan(
         purpose=purpose,
         candidate=candidate,
         evaluator_digest=DIGEST,
         workload_digest=DIGEST,
         environment_digest=DIGEST,
         stages=tuple(
-            MeasurementStage(stage_id=name, execution_budget=10.0)
+            core.MeasurementStage(stage_id=name, execution_budget=10.0)
             for name in ("accuracy", "benchmark")
         ),
         policy="ordered",
-        recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=DIGEST),
+        recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest=DIGEST),
         submitted_at=now_at,
         queue_allowance=880.0,
         # Absolute run-clock time, past any restart the scenarios make (the run ends at 1000 s).
@@ -102,29 +131,119 @@ def measurement(
     )
 
 
-class SkeletonStrategy(Value):
+def _origin(ctx: Flow, config: SkeletonConfig) -> float:
+    """The clock time the plans' deadlines count from.
+
+    Zero, so a plan is a pure function of the run's state, except for the probe, which is
+    driven on a real clock far from zero.
+    """
+    return ctx.clock.now() if config.probe else 0.0
+
+
+async def _measure(
+    ctx: Flow,
+    config: SkeletonConfig,
+    revision: core.RevisionRef,
+    purpose: Literal["baseline", "official"],
+    workspace: core.Workspace | None = None,
+) -> NoWinner | None:
+    """Measure ``revision``; a failed measurement is the reason the run has no winner."""
+    plan = measurement(revision, purpose, now_at=_origin(ctx, config))
+    match await ctx.evaluation.measure(plan, workspace=workspace, within=_MEASURE_SECONDS):
+        case Failed() as failed:
+            return NoWinner(reason=f"measurement {failed.reason}")
+        case core.MeasurementResult(failure=failure) if failure is not None:
+            return NoWinner(reason=f"measurement {failure.value}")
+    return None
+
+
+async def _probe(ctx: Flow, config: SkeletonConfig) -> None:
+    """Submit the input-baseline measurement, then wait for the run to be ended."""
+    async with ctx.group(limit=1) as group:
+        group.start("baseline", _measure, config, ctx.facts.baseline, "baseline")
+        await ctx.first(ctx.stopped)
+
+
+async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
+    """One attempt: an implementer turn, its measurement, and the candidate it keeps."""
+    baseline = ctx.facts.baseline
+    async with ctx.workspaces.open(
+        attempt=ATTEMPT.attempt_id,
+        item=core.ItemId(root="item-0"),
+        plan=core.WorkspacePlan(mode=core.WorkspaceMode.ISOLATED_CHILD, base=baseline),
+        budget=core.AttemptBudget(),
+    ) as workspace:
+        if isinstance(workspace, NotOpened):
+            return NoWinner(reason="the attempt workspace did not open")
+        if config.cancels_after_start:
+            # Wait for the stop; the timer is what keeps the shell from calling the wait a stall.
+            await ctx.first(ctx.stopped, ctx.timer(_RUN_DEADLINE))
+            return None
+        session = ctx.agents.session(IMPLEMENTER_ROLE, workspace=workspace, revision=baseline)
+        match await session.turn(Prompt(), within=_TURN_SECONDS):
+            case TurnFinished(reply=Implementation(commit=commit)) if commit:
+                candidate = core.RevisionRef.of_git_commit(commit)
+            case _:
+                return NoWinner(reason="the implementer turn produced no commit")
+        if config.measured and (
+            refused := await _measure(ctx, config, candidate, "official", workspace)
+        ):
+            return refused
+        if config.keeps_candidate:
+            # Eligible only with accepted evidence for the candidate, which core checks.
+            ctx.workspaces.keep(
+                workspace, candidate, Assessment(outcome="succeeded", eligible=True)
+            )
+    return None
+
+
+@search(
+    "skeleton",
+    config=SkeletonConfig,
+    operations=OPERATIONS,
+    ids=core.IdScheme("skeleton", role_prefix=""),
+    protocol=PROTOCOL,
+)
+async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
+    """Play the scenario ``config`` names; the framework adopts the chosen winner."""
+    if config.probe:
+        if config.measured:
+            await _probe(ctx, config)
+        return None
+    if config.measured and (refused := await _measure(ctx, config, ctx.facts.baseline, "baseline")):
+        return refused
+    if (refused := await _attempt(ctx, config)) is not None:
+        return refused
+    # A retained candidate wins only when core made its settlement eligible, which it does only
+    # with accepted evidence for that candidate. Without a measurement the input is all there is.
+    eligible = [kept for kept in ctx.workspaces.kept() if kept.settlement.eligible]
+    ctx.choose(eligible[0] if eligible else INPUT)
+    return None
+
+
+DECLARATION = skeleton.declaration
+
+
+class SkeletonStrategy(core.Value):
     """The scripted scenario; ``measured=False`` omits both measurements.
 
-    The unmeasured variant starts at the attempt and settles right after the turn, so
-    the workspace, session, retirement and adoption interfaces can be driven while the
-    measurement interfaces are still missing pieces. Its settlement keeps the candidate
-    but is ineligible (no evidence), so the run adopts the trusted baseline.
+    The unmeasured variant skips the baseline and candidate measurements, so the
+    workspace, session, retirement and adoption interfaces can be driven without the
+    measurement ones. Its settlement keeps the candidate but is ineligible (no evidence),
+    so the run adopts the trusted baseline.
     """
 
-    state: SkeletonState = SkeletonState(schema_version=1)
-    declaration: SearchDeclaration = DECLARATION
-    measured: bool = True
-    keeps_candidate: bool = True
-    cancels_after_start: bool = False
+    config: SkeletonConfig = SkeletonConfig()
 
-    def _origin(self, view: CoreView) -> float:
-        """The clock time the plans' deadlines count from.
+    @property
+    def declaration(self) -> core.SearchDeclaration:
+        """What the host must offer this scenario."""
+        return skeleton.declaration
 
-        Zero, so a plan is a pure function of the run's state: a plan that changed with the
-        clock would be a new decision at every tick of a virtual-clock run.
-        """
-        del view
-        return 0.0
+    @property
+    def measured(self) -> bool:
+        """Whether the scenario measures the baseline and the candidate."""
+        return self.config.measured
 
     @classmethod
     def unmeasured(cls, *, keeps_candidate: bool = True) -> SkeletonStrategy:
@@ -133,212 +252,26 @@ class SkeletonStrategy(Value):
         With ``keeps_candidate=False`` the attempt is discarded and the trusted
         baseline is adopted, which needs no retained revision.
         """
-        return cls(
-            state=SkeletonState(schema_version=1, phase="start"),
-            measured=False,
-            keeps_candidate=keeps_candidate,
-        )
+        return cls(config=SkeletonConfig(measured=False, keeps_candidate=keeps_candidate))
 
     @classmethod
     def cancelled(cls) -> SkeletonStrategy:
-        """Start one attempt and, once it is ready, stop the run with ``cancel``.
+        """Open one attempt and wait there until the run is stopped (the deadline, here).
 
         No session or measurement is involved: the attempt's workspace is acquired and
-        then closed and discarded by core, and the run ends with no adopted revision.
+        then discarded by the stop, and the run ends with no adopted revision.
         """
-        return cls(
-            state=SkeletonState(schema_version=1, phase="start"),
-            measured=False,
-            cancels_after_start=True,
-        )
+        return cls(config=SkeletonConfig(measured=False, cancels_after_start=True))
 
-    def _selection(self, view: CoreView) -> RetainedCandidate | TrustedBaseline:
-        state = self.state
-        settlement = next(
-            (row for row in view.settlements if row.settlement_id == state.settlement), None
-        )
-        # A retained candidate wins only on an eligible settlement, and core makes one eligible
-        # only with accepted evidence for that candidate. Without a measurement there is none,
-        # so the trusted baseline is the only revision this strategy may adopt.
-        if self.keeps_candidate and settlement is not None and settlement.eligible:
-            assert state.candidate is not None
-            return RetainedCandidate(
-                settlement_id=settlement.settlement_id, revision=state.candidate
-            )
-        return TrustedBaseline(revision=view.facts.baseline)
+    @classmethod
+    def baseline_probe(cls) -> SkeletonStrategy:
+        """Submit the input-baseline measurement once, then wait for the run to be ended.
 
-    def bind(self, state: SkeletonState) -> SkeletonStrategy:
-        return self.model_copy(update={"state": state})
+        It is a run that is always waiting on a job: for tests of what ends such a run (a
+        signal, an operator stop) and what the host then cancels.
+        """
+        return cls(config=SkeletonConfig(probe=True))
 
-    def decide(self, view: CoreView) -> Proposal[SkeletonState]:
-        run = Scope(owner=view.run.run_id, generation=view.run.generation)
-        state = self.state
-        match state.phase:
-            case "baseline":
-                decision = Measure(
-                    decision_id=DecisionId(root="measure-baseline"),
-                    scope=run,
-                    plan=measurement(view.facts.baseline, "baseline", now_at=self._origin(view)),
-                )
-            case "start":
-                decision = StartAttempt(
-                    decision_id=DecisionId(root="start-0"),
-                    scope=run,
-                    attempt_id=ATTEMPT.attempt_id,
-                    item_id=ItemId(root="item-0"),
-                    workspace=WorkspacePlan(
-                        mode=WorkspaceMode.ISOLATED_CHILD, base=view.facts.baseline
-                    ),
-                    budget=AttemptBudget(),
-                )
-            case "propose":
-                decision = ProposeWinner(
-                    decision_id=DecisionId(root="winner"),
-                    scope=run,
-                    selection=self._selection(view),
-                )
-            case "stop":
-                decision = Finish(
-                    decision_id=DecisionId(root="stop"),
-                    scope=run,
-                    mode="drain",
-                    result=RunResultProposal(
-                        outcome="success",
-                        reason="one attempt measured, settled and adopted",
-                        selection=self._selection(view),
-                    ),
-                )
-            case "cancel":
-                decision = Finish(
-                    decision_id=DecisionId(root="stop-cancel"),
-                    scope=run,
-                    mode="cancel",
-                    result=RunResultProposal(outcome="cancelled", reason="attempt cancelled"),
-                )
-            case "failed":
-                decision = Finish(
-                    decision_id=DecisionId(root="stop-failed"),
-                    scope=run,
-                    mode="cancel",
-                    result=RunResultProposal(outcome="failure", reason=state.failure or "failed"),
-                )
-            case "done":
-                return Proposal(state=state, decisions=())
-            case _:
-                decision = self._attempt_decision(view)
-        return Proposal(state=state, decisions=(decision,))
-
-    def _attempt_decision(self, view: CoreView) -> Command:
-        """The decision of a phase that acts on the attempt (turn, measure, settle)."""
-        run = Scope(owner=view.run.run_id, generation=view.run.generation)
-        attempt = Scope(owner=ATTEMPT.attempt_id, generation=0)
-        state = self.state
-        match state.phase:
-            case "turn":
-                return RequestTurn(
-                    decision_id=DecisionId(root="turn-0"),
-                    scope=attempt,
-                    turn=TurnSpec(
-                        session=SessionSpec(
-                            session_id=SessionId(root="implementer"),
-                            role_id=RoleId(root="implementer"),
-                            policy="fresh",
-                            lifetime="owner",
-                            access=Access.WRITE_CANDIDATE,
-                        ),
-                        invocation_id=InvocationId(root="implement-0"),
-                        workspace=WorkspaceRef(
-                            scope=attempt,
-                            revision=view.facts.baseline,
-                            mode=WorkspaceMode.ISOLATED_CHILD,
-                        ),
-                        prompts=(),
-                        output_schema=SchemaRef(name="implementation", version=1),
-                        deadline_at=self._origin(view) + 400.0,
-                        charge_class="paid",
-                    ),
-                )
-            case "measure":
-                assert state.candidate is not None
-                return Measure(
-                    decision_id=DecisionId(root="measure-candidate"),
-                    scope=attempt,
-                    plan=measurement(state.candidate, "official", now_at=self._origin(view)),
-                )
-            case "settle":
-                return Withdraw(
-                    decision_id=DecisionId(root="settle-0"),
-                    scope=run,
-                    target=ATTEMPT,
-                    disposition=Settle(
-                        assessments=(),
-                        eligible=self.keeps_candidate,
-                        retention="candidate" if self.keeps_candidate else "discard",
-                        outcome="succeeded" if self.keeps_candidate else "failed",
-                        candidate=state.candidate if self.keeps_candidate else None,
-                    ),
-                )
-            case _:
-                raise AssertionError(state.phase)
-
-    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
-        del view
-        return self.state.model_copy(update=self._advance(event))
-
-    def _advance(self, event: StrategyEvent) -> dict[str, object]:
-        """The state fields the event changes, if it proves the current phase done."""
-        if isinstance(event, MeasurementResult) and event.failure is not None:
-            return {"phase": "failed", "failure": f"measurement {event.failure.value}"}
-        phase = _NEXT.get((type(event), self.state.phase))
-        if phase == "turn" and self.cancels_after_start:
-            phase = "cancel"
-        if phase == "measure" and not self.measured:
-            phase = "settle"
-        if phase is None:
-            return {}
-        update: dict[str, object] = {"phase": phase}
-        if isinstance(event, TurnResult):
-            update["candidate"] = _committed(event)
-            if update["candidate"] is None:
-                # A turn that never ran (or committed nothing) has no revision to measure.
-                update.update(phase="failed", failure="the implementer turn produced no commit")
-        if isinstance(event, AttemptSettled):
-            update["settlement"] = event.settlement.settlement_id
-        return update
-
-
-class BaselineProbeStrategy(SkeletonStrategy):
-    """Submit the input-baseline measurement once, then wait for the run to be ended.
-
-    It is a run that is always waiting on a job: for tests of what ends such a run (a signal,
-    an operator stop) and what the host then cancels.
-    """
-
-    def _origin(self, view: CoreView) -> float:
-        """Count deadlines from now: this run is driven on a real clock, far from zero."""
-        return view.run.now_at
-
-    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
-        state = super().on_event(view, event)
-        if isinstance(event, Accepted) and state.phase == "baseline":
-            return state.model_copy(update={"phase": "done"})
-        return state
-
-
-def _committed(event: TurnResult) -> RevisionRef | None:
-    """The commit the implementer reports in its structured reply, if the turn produced one."""
-    if event.output_json is None:
-        return None
-    commit = json.loads(event.output_json).get("commit")
-    return RevisionRef.of_git_commit(commit) if commit else None
-
-
-# The one event that proves each phase done: (event type, phase) -> next phase.
-_NEXT: dict[tuple[type, Phase], Phase] = {
-    (MeasurementResult, "baseline"): "start",
-    (AttemptReady, "start"): "turn",
-    (TurnResult, "turn"): "measure",
-    (MeasurementResult, "measure"): "settle",
-    (AttemptSettled, "settle"): "propose",
-    (AdoptionResult, "propose"): "stop",
-}
+    def driver(self, registry: OperationRegistry | None = None) -> core.SearchDriver:
+        """The driver that plays this scenario."""
+        return skeleton.driver(self.config, registry)
