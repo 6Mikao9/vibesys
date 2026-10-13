@@ -151,9 +151,6 @@ def _start(draft: Draft, job: Job) -> Job:
     config = draft.config
     identifier = IDS.decision_id("start", key_of(job))
     paid = config.max_attempts_per_issue if job.kind is JobKind.ISSUE else 1
-    # A logical turn may be corrected or asked again this often; an issue has a turn for the
-    # implementer and one for the judge for each of its attempts.
-    turns = 2 * paid
     draft.emit(
         StartAttempt(
             decision_id=identifier,
@@ -164,7 +161,6 @@ def _start(draft: Draft, job: Job) -> Job:
             budget=AttemptBudget(
                 admission_charge=1,
                 paid_invocation_limit=paid,
-                retry_limit=(config.max_corrections + config.max_turn_drops) * turns,
             ),
         )
     )

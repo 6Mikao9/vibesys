@@ -154,7 +154,6 @@ def _start(draft: Draft, slot: SlotState) -> SlotState:
                 admission_charge=1,
                 # A child does not retry its mutation: a failed child is a failed individual.
                 paid_invocation_limit=1,
-                retry_limit=config.max_corrections + config.max_turn_drops,
             ),
         )
     )

@@ -30,6 +30,5 @@ def limits_for(config: SingleConfig, bounds: Bounds) -> Limits:
         parallel=1,
         refunds=config.max_rounds,
         adoption_rounds=reask + 1,
-        reask_chain=reask,
     )
     return limits_from(budget, bounds)

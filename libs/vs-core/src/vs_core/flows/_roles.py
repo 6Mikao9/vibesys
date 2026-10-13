@@ -28,7 +28,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vs_core._waitable import WaitableReply
 from vs_core.types.agents import Backoff, Charge, Correctable, Exchanges
-from vs_core.types.common import SchemaRef, Seconds, Value, WorkspaceMode
+from vs_core.types.common import (
+    MAX_CORRECTIONS,
+    MAX_LOST_TURNS,
+    SchemaRef,
+    Seconds,
+    Value,
+    WorkspaceMode,
+)
 from vs_core.types.sessions import Access
 from vs_core.types.until import ReplyError, ReplyErrorCode
 
@@ -37,10 +44,6 @@ if TYPE_CHECKING:
 
     from pydantic import ValidationError
 
-MAX_CORRECTIONS = 5
-"""The most corrections of one reply any role may ask for."""
-MAX_LOST_TURNS = 5
-"""The most times any role may have a lost turn asked again."""
 MAX_TURN_SECONDS = 6 * 3600.0
 """The longest any role may allow one provider turn."""
 MAX_RENDER_SECONDS = 3600.0

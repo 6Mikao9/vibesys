@@ -14,6 +14,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_retries
 
 from .test_agent_turn_runs import assert_ended_closed
 from .toy_agent_search import (
@@ -57,10 +58,8 @@ def waits_for(trace: Trace, role: str) -> list[core.Wait]:
 
 
 @_SETTINGS
-@given(corrections=st.integers(0, LIMITS.max_retries))
-def test_an_invalid_reply_is_corrected_as_often_as_the_role_says_when_the_run_allows_it(
-    corrections: int,
-) -> None:
+@given(corrections=st.integers(0, core.MAX_CORRECTIONS))
+def test_an_invalid_reply_is_corrected_as_often_as_the_role_says(corrections: int) -> None:
     implementer = IMPLEMENTER.model_copy(update={"corrections": corrections})
     trace = run_toy(ToyHost(junk=("implementer",)), definition=toy_search(implementer=implementer))
 
@@ -70,11 +69,11 @@ def test_an_invalid_reply_is_corrected_as_often_as_the_role_says_when_the_run_al
 
 
 @_SETTINGS
-@given(allowed=st.integers(0, LIMITS.max_retries))
-def test_a_role_cannot_correct_more_often_than_the_run_allows(allowed: int) -> None:
-    """The run's retry bound stops a role that asks for the most corrections the cap permits."""
+@given(retries=st.integers(0, core.MAX_REQUEST_RETRIES))
+def test_the_backends_request_retries_do_not_bound_a_roles_corrections(retries: int) -> None:
+    """One field per meaning: corrections are the role's, whatever the backend re-sends."""
     asks = core.MAX_CORRECTIONS
-    limits = LIMITS.model_copy(update={"max_retries": allowed})
+    limits = LIMITS.model_copy(update={"request_retries": sample_retries(retries)})
     implementer = IMPLEMENTER.model_copy(update={"corrections": asks})
 
     trace = run_toy(
@@ -84,9 +83,8 @@ def test_a_role_cannot_correct_more_often_than_the_run_allows(allowed: int) -> N
     )
 
     assert_ended_closed(trace, limits)
-    assert 1 <= len(implementer_turns(trace)) <= 1 + allowed
-    assert len(implementer_turns(trace)) < 1 + asks
-    assert summary(trace).done[0].failed == ("implementer",)
+    assert len(implementer_turns(trace)) == 1 + asks
+    assert 1 + asks <= 1 + core.MAX_REASK_CHAIN, "core's hard cap sits above every role's bound"
 
 
 # -- the time of a turn -------------------------------------------------------------------------------------

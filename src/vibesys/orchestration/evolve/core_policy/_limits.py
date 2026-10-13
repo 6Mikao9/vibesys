@@ -32,6 +32,5 @@ def limits_for(config: EvolveConfig, bounds: Bounds) -> Limits:
         parallel=config.max_parallelism,
         refunds=attempts,
         adoption_rounds=reask + 1,
-        reask_chain=reask,
     )
     return limits_from(budget, bounds)

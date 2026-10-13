@@ -42,6 +42,7 @@ from vs_core.api import (
     RunStatus,
     TurnSpec,
 )
+from vs_core.api.testing import sample_limits
 from vs_evaluation.api import ExecutorPoll, PollPhase
 from vs_project.api.testing import CliWorldGit, GitKind, WorldGit, world_git
 from vs_prompts.api import TemplateRenderer
@@ -181,7 +182,7 @@ class World:
     timed: tuple[Clock, float] | None = None
     polls: list[str] = field(default_factory=list)
     during_submit: Callable[[], Awaitable[None]] | None = None
-    limits: Limits = field(default_factory=Limits)
+    limits: Limits = field(default_factory=sample_limits)
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
     commits: CommitObserver | None = None

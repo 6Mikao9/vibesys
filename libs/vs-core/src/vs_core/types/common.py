@@ -585,6 +585,12 @@ class PoolCapacity(Value):
 # refuses a declaration above them and enforces them whatever a declaration says.
 MAX_REQUEST_RETRIES = 10
 MAX_SUBMISSIONS_PER_MEASUREMENT = 5
+MAX_CORRECTIONS = 5
+"""The most corrections of one reply any role may ask for."""
+MAX_LOST_TURNS = 5
+"""The most times any role may have a lost turn asked again."""
+MAX_REASK_CHAIN = MAX_CORRECTIONS + MAX_LOST_TURNS
+"""The longest chain of corrections and re-asks any role's bounds allow; core refuses a longer one."""
 
 
 class RequestRetries(Value):
@@ -617,8 +623,9 @@ class Limits(Value):
     """Run bounds; every field is explicit, one field per meaning, no default.
 
     Budget (the run's own): ``max_attempts``, ``max_turns``, ``max_parallel``,
-    ``pool_capacities``, ``max_refunds``, ``max_adoption_rounds`` and ``max_reask_chain``
-    (the longest chain of corrections and asks after a lost turn; it moves to the agent role).
+    ``pool_capacities``, ``max_refunds`` and ``max_adoption_rounds``. How often a reply is corrected or a lost turn
+    asked again is the role's (`Role.corrections`, `Role.lost_turns`); core keeps only
+    `MAX_REASK_CHAIN`.
     Declared by the backend and applied by core: ``request_retries``. Core's own bounds on its
     waits and cleanup: the remaining ``*_bound`` and ``observe_*`` fields.
     """
@@ -630,7 +637,6 @@ class Limits(Value):
     max_refunds: Count
     max_adoption_rounds: int = Field(ge=1)
     """AdoptRevision rounds per selection, the first included."""
-    max_reask_chain: Count
     request_retries: RequestRetries
     cancellation_bound: Seconds
     # The least time core gives its own cleanup and inspection requests, even once the run

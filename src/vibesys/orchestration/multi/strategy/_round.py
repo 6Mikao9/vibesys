@@ -147,7 +147,6 @@ def _start(draft: Draft, record: RoundState) -> RoundState:
             budget=AttemptBudget(
                 admission_charge=1,
                 paid_invocation_limit=config.max_retries_per_round,
-                retry_limit=config.max_corrections + config.max_turn_drops,
             ),
         )
     )

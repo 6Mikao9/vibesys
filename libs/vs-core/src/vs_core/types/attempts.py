@@ -59,7 +59,6 @@ class AttemptBudget(Value):
 
     admission_charge: Count = 1
     paid_invocation_limit: Count = 1
-    retry_limit: Count = 0
     refund_limit: Count = 0
 
 

@@ -41,11 +41,7 @@ def invocation(spec: core.TurnSpec) -> core.InvocationRef:
 def waiting_turn_state(spec: core.TurnSpec) -> core.CoreState:
     state = core.initial_state()
     state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={"limits": state.run.limits.model_copy(update={"max_reask_chain": 2})}
-            )
-        }
+        update={"run": state.run.model_copy(update={"limits": state.run.limits})}
     )
     return state.model_copy(
         update={

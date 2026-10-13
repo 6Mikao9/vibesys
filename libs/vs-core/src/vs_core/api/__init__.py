@@ -251,6 +251,7 @@ from vs_core.types.attempts import (
     WorkspaceRequest,
 )
 from vs_core.types.common import (
+    MAX_REASK_CHAIN,
     MAX_REQUEST_RETRIES,
     MAX_SUBMISSIONS_PER_MEASUREMENT,
     THIS_RUN,
@@ -650,10 +651,11 @@ __all__ = [
     "INTERPRET_SUFFIX",
     "MAX_CORRECTIONS",
     "MAX_LOST_TURNS",
+    "MAX_REASK_CHAIN",
     "MAX_RENDER_SECONDS",
-    "MAX_TURN_SECONDS",
     "MAX_REQUEST_RETRIES",
     "MAX_SUBMISSIONS_PER_MEASUREMENT",
+    "MAX_TURN_SECONDS",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "RENDER_SUFFIX",
     "REPLY_ERROR_MESSAGE_LIMIT",

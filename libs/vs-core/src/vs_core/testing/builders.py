@@ -28,7 +28,6 @@ def sample_limits(**overrides: object) -> Limits:
         "pool_capacities": (),
         "max_refunds": 0,
         "max_adoption_rounds": 1,
-        "max_reask_chain": 0,
         "request_retries": sample_retries(0),
         "cancellation_bound": 60.0,
         "cleanup_bound": 60.0,

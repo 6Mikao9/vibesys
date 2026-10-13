@@ -367,11 +367,7 @@ def test_all_charge_classes_dispatch_preserves_recorded_currency(charge: str) ->
                 }
             )
         state = state.model_copy(
-            update={
-                "run": state.run.model_copy(
-                    update={"limits": sample_limits(max_turns=10, max_reask_chain=2)}
-                )
-            }
+            update={"run": state.run.model_copy(update={"limits": sample_limits(max_turns=10)})}
         )
     result = reload_step(state, core.TurnInputsReserved(invocation=invocation(spec), input_ids=()))
     assert len(result.requests) == 1
@@ -622,19 +618,14 @@ def malformed_planner_state() -> tuple[core.CoreState, core.InvocationRef]:
     )
     state = state.model_copy(
         update={
-            "run": state.run.model_copy(
-                update={"limits": sample_limits(max_turns=10, max_reask_chain=2)}
-            ),
+            "run": state.run.model_copy(update={"limits": sample_limits(max_turns=10)}),
             "sessions": state.sessions.model_copy(update={"invocations": (original,)}),
         }
     )
     return state, ref
 
 
-@pytest.mark.parametrize("max_retries", [1, 2])
-def test_f1_planner_acquisition_and_correction_reach_declared_input_boundary(
-    max_retries: int,
-) -> None:
+def test_f1_planner_acquisition_and_correction_reach_declared_input_boundary() -> None:
     spec = turn()
     prepared = reload_step(
         core.initial_state(),
@@ -651,13 +642,7 @@ def test_f1_planner_acquisition_and_correction_reach_declared_input_boundary(
     assert_input_boundary(reload_state(prepared.state), event, "input_reservation_requested")
     state, predecessor = malformed_planner_state()
     state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={
-                    "limits": state.run.limits.model_copy(update={"max_reask_chain": max_retries})
-                }
-            )
-        }
+        update={"run": state.run.model_copy(update={"limits": state.run.limits})}
     )
     correction = turn(identity="correction", charge="correction").model_copy(
         update={"predecessor": predecessor}
@@ -960,15 +945,40 @@ def test_global_turn_budget_counts_only_turn_currency(other_currency: int) -> No
 @pytest.mark.parametrize("charge", ["free", "correction"])
 def test_decision_budget_and_retry_exhaustion_returns_typed_feedback(charge: str) -> None:
     if charge == "correction":
+        # A chain already as long as core's hard cap allows: one more correction is refused,
+        # whatever any role declared.
         state, predecessor = malformed_planner_state()
+        original = state.sessions.invocations[0]
+        chain = [original]
+        for index in range(core.MAX_REASK_CHAIN):
+            previous = chain[-1]
+            ref = core.InvocationRef(
+                invocation_id=core.InvocationId(root=f"correction-{index}"),
+                session_id=previous.invocation.session_id,
+                generation=previous.invocation.generation,
+            )
+            chain.append(
+                previous.model_copy(
+                    update={
+                        "invocation": ref,
+                        "turn": previous.turn.model_copy(
+                            update={
+                                "invocation_id": ref.invocation_id,
+                                "charge_class": "correction",
+                                "predecessor": previous.invocation,
+                            }
+                        ),
+                    }
+                )
+            )
+        predecessor = chain[-1].invocation
         spec = turn(identity="correction", charge=charge).model_copy(
             update={"predecessor": predecessor}
         )
         state = state.model_copy(
             update={
-                "run": state.run.model_copy(
-                    update={"limits": sample_limits(max_turns=10, max_reask_chain=0)}
-                )
+                "run": state.run.model_copy(update={"limits": sample_limits(max_turns=100)}),
+                "sessions": state.sessions.model_copy(update={"invocations": tuple(chain)}),
             }
         )
     else:
@@ -2053,9 +2063,7 @@ def attempt_turn_dispatch_state(charge: str) -> tuple[core.CoreState, core.TurnS
     )
     state = state.model_copy(
         update={
-            "run": state.run.model_copy(
-                update={"limits": sample_limits(max_turns=10, max_reask_chain=2)}
-            ),
+            "run": state.run.model_copy(update={"limits": sample_limits(max_turns=10)}),
             "attempts": core.AttemptsState(attempts=(owner,)),
             "sessions": core.SessionsState(sessions=(session,), invocations=invocations),
             "evaluation": evaluation,
