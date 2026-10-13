@@ -150,7 +150,6 @@ from .types.settlement import (
 )
 from .types.strategy import (
     Accepted,
-    AskAgent,
     Cancel,
     Command,
     Finish,
@@ -929,9 +928,6 @@ def _decision_signal(state: CoreState, decision: Command) -> tuple[Signal, ...]:
             signals = (AdmissionControl(action=decision.mode),)
         case Operation():
             signals = (_operation_prepared(state, decision),)
-        case AskAgent():
-            # the agent pipeline lowers every ask to its operations before the kernel sees it
-            raise ContractError(("request",), "an AskAgent reached the kernel unlowered")
         case _:
             assert_never(decision)
 
@@ -1137,7 +1133,7 @@ def _proposal(state: CoreState, event: ProposalSubmitted, dispatch: Dispatch) ->
 def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
     """Use the ordinary accepted Finish receipt as run-drain authority."""
     if event.result is None:
-        raise ContractError(("result",), "stop requires a run result proposal")
+        return _soft_stop(state, event)
     decision = Finish(
         decision_id=DecisionId(root=f"control:{event.control.control_id.root}"),
         scope=Scope(owner=state.run.run_id, generation=state.run.generation),
@@ -1166,6 +1162,24 @@ def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) 
             "state": result.state.model_copy(update={"run": updated_run}),
             "events": (ControlChanged(control=event.control), *result.events),
         }
+    )
+
+
+def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
+    """Record a stop request that carries no result: the search is told and ends the run."""
+    if any(control.control_id == event.control.control_id for control in state.run.controls):
+        return Transition(state=state)
+    if state.run.status == RunStatus.TERMINAL:
+        raise ContractError(("run", "status"), "terminal run rejects controls")
+    run = state.run.model_copy(
+        update={
+            "controls": (*state.run.controls, event.control),
+            "now_at": max(state.run.now_at, event.now_at),
+        }
+    )
+    return Transition(
+        state=state.model_copy(update={"run": run}),
+        events=(ControlChanged(control=event.control),),
     )
 
 

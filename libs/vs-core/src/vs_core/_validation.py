@@ -29,6 +29,7 @@ from .types.strategy import (
     Measure,
     Operation,
     Park,
+    ProposeWinner,
     Rejected,
     RequestTurn,
     StartAttempt,
@@ -76,6 +77,8 @@ def validate_decision(
 def _validate_until(state: CoreState, submission: Submission, decision: Command) -> Rejected | None:
     """Runtime backstop for the types: a wait has a positive limit and the run has time left.
 
+    Withdrawing an attempt and proposing the winner need no time left.
+
     The types already make a bare request, a missing ``until`` and a watch used as the
     ``until`` unrepresentable; this catches values built around them.
     """
@@ -91,7 +94,10 @@ def _validate_until(state: CoreState, submission: Submission, decision: Command)
         return _reject(decision, RejectionCode.UNKNOWN_KIND, ("until",), "until must be a Within")
     if not submission.until.limit > 0 or not isfinite(submission.until.limit):
         return _reject(decision, RejectionCode.BUDGET, ("until", "limit"), "limit must be positive")
-    if not state.run.deadline_at > state.run.now_at:
+    # Closing out (settling a workspace, adopting the winner) is allowed after the deadline:
+    # the run ends by it, within the cleanup bound its caller chose.
+    closing = isinstance(submission.request, Withdraw | ProposeWinner)
+    if not closing and not state.run.deadline_at > state.run.now_at:
         return _reject(
             decision,
             RejectionCode.BUDGET,

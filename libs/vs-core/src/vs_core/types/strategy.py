@@ -40,7 +40,6 @@ from .common import (
     Value,
 )
 from .evaluation import MeasurementIdentity, MeasurementPlan
-from .kinds import EventKind, WorkKind
 from .sessions import SessionSpec, TurnSpec
 from .settlement import AssessmentProposal, RunResultProposal, Selection
 from .until import Within
@@ -52,23 +51,6 @@ class DecisionBase(Value):
     decision_id: DecisionId
     scope: Scope
     """Who owns the work. ``THIS_RUN`` means the run itself; core fills in its own scope."""
-
-
-class AskAgent(DecisionBase):
-    """Ask a declared agent for a reply (a search's request; core's pipeline does the rest).
-
-    ``input`` is the typed context the agent's prompt template renders. The pipeline renders
-    it, runs the turn, validates the reply against the agent's model, asks again for
-    corrections and for turns the transport lost, resumes a turn that waited for its
-    evaluations, and delivers ONE ``TurnFinished`` (or one ``Failed``). An input that is a
-    ``Correction`` names the earlier turn it corrects, so the new turn is that turn's
-    correction. ``revision`` is the revision of the agent's workspace, when it has one.
-    """
-
-    kind: Literal["ask_agent"] = "ask_agent"
-    agent: str = Field(min_length=1)
-    input: SerializeAsAny[Value]
-    revision: RevisionRef | None = None
 
 
 class RequestTurn(DecisionBase):
@@ -254,7 +236,7 @@ class Operation(DecisionBase):
 
 
 type Work = Annotated[
-    AskAgent | RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation,
+    RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation,
     Field(discriminator="kind"),
 ]
 """What a search can ask for. It only starts inside a ``Wait``."""
@@ -286,7 +268,7 @@ type Submission = Annotated[Wait | Finish, Field(discriminator="kind")]
 """What the kernel accepts from a search: a ``Wait`` (with its ``until``) or a ``Finish``."""
 
 type Command = Annotated[
-    AskAgent | RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation | Finish,
+    RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation | Finish,
     Field(discriminator="kind"),
 ]
 """What the kernel acts on: a ``Work`` or the ``Finish``. ``Wait`` supplies the ``until``."""
@@ -299,20 +281,25 @@ class StrategyState(Value):
 
 
 class SearchDeclaration(Value):
-    """What a search needs from the host, and which event kinds it handles."""
+    """What core derives about a search: its identity and what it needs from the host.
+
+    A search author declares none of this. ``@search`` names the search, and the rest
+    (the operations its namespace owns, the lifecycle capabilities it requires) comes from the
+    registration; the event kinds it hears and the work it starts are whatever its flows do.
+    """
 
     strategy_id: StrategyId
-    state_schema: SchemaRef
     required_operations: tuple[OperationSchemaRef, ...] = ()
     optional_operations: tuple[OperationSchemaRef, ...] = ()
     required: frozenset[LifecycleCapability] = frozenset()
     optional: frozenset[LifecycleCapability] = frozenset()
-    uses: frozenset[WorkKind] = frozenset()
-    """The kinds of work the search starts (a ``WakeAt`` counts as ``WAKE_AT``)."""
-    handles: frozenset[EventKind] = frozenset()
-    """The event kinds ``Search.update`` handles. Core checks them against ``uses``."""
 
-    @field_serializer("required", "optional", "uses", "handles", when_used="json")
+    @property
+    def state_schema(self) -> SchemaRef:
+        """The schema of the persisted flow state, named by the search."""
+        return SchemaRef(name=f"{self.strategy_id.root}.flow-state", version=1)
+
+    @field_serializer("required", "optional", when_used="json")
     def _sorted_sets(self, value: frozenset[str]) -> list[str]:
         """Write the sets in sorted order, as `Capabilities.lifecycle` does."""
         return sorted(value)

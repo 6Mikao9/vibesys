@@ -1,57 +1,133 @@
-"""Drive a ``FlowSearch`` by hand, as a script: no asyncio, no clock, no core.
+"""Drive a flow search by hand, as a script: no asyncio, no clock, no core.
 
 ``FlowRun`` plays the host. It starts the search, keeps the list of waits the search has
-opened, and delivers the events a story names::
+opened, answers the prompt renders by itself (they are core's own business) and delivers the
+events a story names::
 
     run = FlowRun.start(search, config, facts)
-    asked = run.expect(AskAgent, label="planner")   # the next open wait that matches
-    run.reply(asked, Plan(...))                     # delivers TurnFinished for it
+    asked = run.expect_turn("worker")          # the next turn request that matches
+    run.reply(asked, Plan(...))                # the agent answered
     run.fail(asked2, FailureReason.TIMED_OUT)
     run.advance_to(30.0)
     run.stop()
-    assert run.finished is not None
+    assert run.finished is not None            # the framework adopted and finished
 
-``FlowRun.start(..., restarting=True)`` round-trips the state through JSON into a new
-``FlowSearch`` after every step, so any story can be repeated as a crash-at-every-step test.
-``FakeView`` is the ``RunView`` the search reads: set the clock, attempts and settlements on it.
+``FlowRun.start(..., restarting=True)`` round-trips the state through JSON into a new driver
+after every step, so any story can be repeated as a crash-at-every-step test. ``FakeView`` is
+the ``RunView`` the search reads: set the clock, attempts and settlements on it.
+
+``FAKE_OPERATIONS`` and ``fake_search`` are the namespace and the decorator a test search uses;
+``Prompt`` is the context its renders carry, so a turn request can be told by its prompt.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 from vs_core.api import (
-    AskAgent,
+    AdoptionFinished,
+    AdoptionResult,
+    AgentProtocol,
+    ArtifactId,
+    ArtifactRef,
+    AttemptRef,
+    ControlId,
     ControlInput,
+    DecisionId,
     Event,
+    EventId,
+    EvidenceReadingsBase,
     Failed,
     FailureReason,
     Finish,
-    FlowSearch,
     FlowState,
-    InvocationId,
+    InterpretEvidenceBase,
     InvocationRef,
+    ObservationStatus,
+    Operation,
+    OperationFinished,
+    OperationId,
+    OperationResult,
+    ProposeWinner,
     RejectionCode,
-    RunFacts,
-    SessionId,
+    RenderedArtifacts,
+    RenderRoleArtifactsBase,
+    RequestId,
+    RequestTurn,
+    Scope,
+    Settlement,
+    SettlementId,
+    StartAttempt,
     StopRequested,
+    StrategyOperations,
     TimeReached,
-    TurnFinished,
+    TurnEnded,
+    TurnResult,
+    Value,
+    VerifyParentRevisionBase,
     Wait,
     Waiting,
     WakeAt,
+    Withdraw,
     Work,
+    WorkspaceClosed,
+    WorkspaceOpened,
     run_view,
 )
+from vs_core.flows import search
 from vs_core.testing.builders import initial_state
-from vs_core.types.common import ControlId, DecisionId
+from vs_core.types.common import Observation
+from vs_core.types.sessions import TurnFailureKind
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vs_core.api import Decision, RunView, Seconds, Within
+    from vs_core.api import Decision, RunView, SearchDef, Seconds, Within
     from vs_core.types.agents import Checkpoint
+
+
+class Prompt(Value):
+    """What a fake renderer is asked to render: the text a test tells prompts apart by."""
+
+    text: str
+
+
+class Render(RenderRoleArtifactsBase[Prompt]):
+    """Render one role prompt."""
+
+    kind: Literal["fake.render_role_artifacts"] = "fake.render_role_artifacts"
+
+
+class Verify(VerifyParentRevisionBase):
+    """Verify a parent revision."""
+
+    kind: Literal["fake.verify_parent_revision"] = "fake.verify_parent_revision"
+
+
+class Readings(EvidenceReadingsBase[Value]):
+    """No readings: the fake namespace never interprets evidence."""
+
+
+class Interpret(InterpretEvidenceBase):
+    """Decode evidence."""
+
+    kind: Literal["fake.interpret_evidence"] = "fake.interpret_evidence"
+    outcome_model: ClassVar[type[BaseModel]] = Readings
+
+
+FAKE_OPERATIONS = StrategyOperations("fake", Render, Verify, Interpret)
+FAKE_REGISTRY = FAKE_OPERATIONS.registry()
+FAKE_PROTOCOL = AgentProtocol(
+    correction=lambda role, errors: Prompt(text=f"correct {role} {len(errors)}"),
+    resume=lambda facts: Prompt(text=f"resume {facts.agent}"),
+    wait_unrecorded=lambda role: Prompt(text=f"wait unrecorded {role}"),
+)
+
+
+def fake_search[C](name: str, config: type[C]):  # noqa: ANN201  # the decorator's type is `search`'s
+    """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
+    return search(name, config=config, operations=FAKE_OPERATIONS, protocol=FAKE_PROTOCOL)
 
 
 @dataclass
@@ -76,11 +152,19 @@ class Asked:
     request: Work | Finish
     until: Within | None
     """The limit of a wait; None for a ``Finish``, which core answers only by refusing it."""
+    prompt: Prompt | None = None
+    """For a turn request: the context its prompt was rendered from."""
 
     @property
     def label(self) -> str:
-        """The id root the author gave: ``a/planner.2`` was written as ``planner``."""
+        """The id root the framework gave: ``a/worker.2`` was issued as ``worker``."""
         return self.decision.root.rpartition("/")[2].rpartition(".")[0]
+
+    @property
+    def path(self) -> str:
+        """The flow that asked: empty for the root, ``a/b/`` for task ``b`` of task ``a``."""
+        head, slash, _ = self.decision.root.rpartition("/")
+        return f"{head}{slash}"
 
 
 class FlowRun[C]:
@@ -88,39 +172,49 @@ class FlowRun[C]:
 
     def __init__(
         self,
-        search: FlowSearch[C],
+        search: SearchDef[C],
+        config: C,
         *,
         view: FakeView | None = None,
         restarting: bool = False,
+        adopting: bool = True,
     ) -> None:
         """Build a run that has not started; ``start`` is the way in."""
-        self.search = search
+        self.definition = search
+        self.config = config
+        self.driver = search.driver(config, FAKE_REGISTRY)
         self.view = view or FakeView()
         self.restarting = restarting
+        self.adopting = adopting
+        """Whether the host adopts any proposed winner at once, as the real one does."""
         self.state: FlowState
         self.decisions: list[Decision] = []
         """Every decision the search issued, in order."""
         self._open: list[Asked] = []
         self._sleeps: list[Seconds] = []
+        self._prompts: dict[ArtifactId, Prompt] = {}
+        self._queue: list[Event] = []
         self.finished: Finish | None = None
         """The ``Finish`` the search issued, once it did."""
         self.restarts = 0
         self._timeline: list[str] = []
+        self._sequence = 0
 
     @classmethod
     def start(
         cls,
-        search: FlowSearch[C],
+        search: SearchDef[C],
         config: C,
-        facts: RunFacts,
         *,
         view: FakeView | None = None,
         restarting: bool = False,
+        adopting: bool = True,
     ) -> FlowRun[C]:
         """Start the search and take its first decisions."""
-        run = cls(search, view=view, restarting=restarting)
-        run.state, issued = search.init(config, facts)
+        run = cls(search, config, view=view, restarting=restarting, adopting=adopting)
+        run.state, issued = run.driver.init(config, initial_state().run.facts, run.view.current())
         run._take(issued)
+        run._pump()
         return run
 
     # -- what is open ------------------------------------------------------------------------
@@ -137,10 +231,10 @@ class FlowRun[C]:
 
     def waiting(self) -> tuple[Waiting, ...]:
         """What each suspended flow waits for, as data: its path and its sources."""
-        return self.search.waiting(self.state)
+        return self.driver.waiting(self.state)
 
     def timeline(self) -> str:
-        """The run so far as one line: ``planner.1:Plan ws-1/work.1:failed(timed-out) stop t=30``."""
+        """The run so far as one line: ``worker.1:Plan ws-1/work.1:failed(timed-out) stop t=30``."""
         return " ".join(self._timeline)
 
     def expect(self, kind: type[Work | Finish], *, label: str | None = None) -> Asked:
@@ -153,27 +247,49 @@ class FlowRun[C]:
         message = f"no open wait for {wanted}; open: {have}"
         raise TypeError(message)
 
+    def expect_turn(self, text: str | None = None, *, role: str | None = None) -> Asked:
+        """The first open turn request, of this role and asked with a prompt of this text."""
+        for asked in self._open:
+            if (
+                isinstance(asked.request, RequestTurn)
+                and role in (None, asked.label)
+                and (text is None or (asked.prompt is not None and asked.prompt.text == text))
+            ):
+                return asked
+        have = [f"{a.decision.root}:{a.prompt.text if a.prompt else ''}" for a in self._open]
+        message = f"no open turn for {role or ''} {text or ''}; open: {have}"
+        raise TypeError(message)
+
     # -- delivering events -------------------------------------------------------------------
 
     def reply(
         self, asked: Asked, reply: BaseModel, *, checkpoint: Checkpoint | None = None
     ) -> None:
-        """Deliver the agent's ``reply`` to an ``AskAgent`` wait."""
-        if not isinstance(asked.request, AskAgent):
-            message = f"{asked.decision.root} is not an AskAgent: it has no reply"
-            raise TypeError(message)
-        invocation = InvocationRef(
-            session_id=SessionId(root="session"),
-            invocation_id=InvocationId(root=f"invocation-{len(self.state.journal)}"),
-            generation=0,
-        )
+        """The agent answered a turn request with ``reply``."""
+        del checkpoint
         self._close(asked)
         self._timeline.append(f"{asked.decision.root}:{type(reply).__name__}")
+        self.send(self._ended(asked, ObservationStatus.SUCCEEDED, output=reply.model_dump_json()))
+
+    def reply_raw(self, asked: Asked, output_json: str) -> None:
+        """The agent answered with text that may not be its reply model (a correction follows)."""
+        self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:raw")
+        self.send(self._ended(asked, ObservationStatus.SUCCEEDED, output=output_json))
+
+    def lose(self, asked: Asked) -> None:
+        """The transport lost the turn."""
+        self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:lost")
         self.send(
-            TurnFinished(
-                decision=asked.decision, invocation=invocation, reply=reply, checkpoint=checkpoint
-            )
+            self._ended(asked, ObservationStatus.FAILED, failure=TurnFailureKind.TRANSPORT_LOST)
         )
+
+    def fail_turn(self, asked: Asked, failure: TurnFailureKind) -> None:
+        """The provider failed the turn for good."""
+        self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:turn-failed")
+        self.send(self._ended(asked, ObservationStatus.FAILED, failure=failure))
 
     def fail(self, asked: Asked, reason: FailureReason, **fields: object) -> None:
         """Deliver ``Failed(reason)`` for a wait; ``fields`` complete the reason's own fields."""
@@ -186,17 +302,54 @@ class FlowRun[C]:
         self._timeline.append(f"{asked.decision.root}:failed({reason.value})")
         self.send(Failed(reason=reason, decision=asked.decision, **{**defaults, **fields}))  # ty: ignore[invalid-argument-type]
 
+    def open_workspace(self, asked: Asked, generation: int = 0) -> AttemptRef:
+        """The host opened the workspace a ``StartAttempt`` asked for."""
+        request = asked.request
+        if not isinstance(request, StartAttempt):
+            message = f"{asked.decision.root} is not a StartAttempt"
+            raise TypeError(message)
+        ref = AttemptRef(attempt_id=request.attempt_id, generation=generation)
+        self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:opened")
+        self.send(WorkspaceOpened(decision=asked.decision, attempt=ref))
+        return ref
+
+    def close_workspace(self, asked: Asked, *, candidate_revision: object = None) -> Settlement:
+        """The host settled the workspace a ``Withdraw`` asked to settle, as it was asked to."""
+        request = asked.request
+        if not isinstance(request, Withdraw) or not isinstance(request.target, AttemptRef):
+            message = f"{asked.decision.root} is not a Withdraw of an attempt"
+            raise TypeError(message)
+        disposition = request.disposition
+        if disposition.kind != "settle":
+            message = "only a settling Withdraw is closed here"
+            raise TypeError(message)
+        self._sequence += 1
+        settlement = Settlement(
+            settlement_id=SettlementId(root=f"settlement-{self._sequence}"),
+            attempt=request.target,
+            candidate=disposition.candidate if candidate_revision is None else candidate_revision,  # ty: ignore[invalid-argument-type]
+            assessments=disposition.assessments,
+            eligible=disposition.eligible,
+            retention=disposition.retention,
+            outcome=disposition.outcome,
+        )
+        self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:closed")
+        self.send(WorkspaceClosed(decision=asked.decision, settlement=settlement))
+        return settlement
+
     def answer(self, asked: Asked, event: Event) -> None:
-        """Deliver any event as the answer to a wait (a workspace opened, an operation result)."""
+        """Deliver any event as the answer to a wait (a measurement, an operation result)."""
         self._close(asked)
         self._timeline.append(f"{asked.decision.root}:{event.kind}")
         self.send(event)
 
-    def stop(self) -> None:
-        """The operator stops the run."""
-        self._timeline.append("stop")
+    def stop(self, control: str = "stop") -> None:
+        """The operator (or the host, at the deadline) asks the run to stop."""
+        self._timeline.append(control)
         self.send(
-            StopRequested(control=ControlInput(control_id=ControlId(root="stop"), action="stop"))
+            StopRequested(control=ControlInput(control_id=ControlId(root=control), action="stop"))
         )
 
     def advance_to(self, time: Seconds) -> None:
@@ -207,31 +360,128 @@ class FlowRun[C]:
         self.send(TimeReached(time=time))
 
     def send(self, event: Event) -> None:
-        """Deliver an event as it is, then restart if the run is restarting after each step."""
-        self.state, issued = self.search.update(self.state, event, self.view.current())
-        self._take(issued)
-        if self.restarting:
-            self.restart()
+        """Deliver an event as it is (then what the host answers by itself)."""
+        self._queue.append(event)
+        self._pump()
 
     def restart(self) -> None:
-        """Round-trip the state through JSON and continue with a new ``FlowSearch``."""
+        """Round-trip the state through JSON and continue with a new driver."""
         self.restarts += 1
         self.state = FlowState.model_validate_json(self.state.model_dump_json())
-        self.search = self.search.fresh()
+        self.driver = self.driver.fresh()
 
     # -- bookkeeping -------------------------------------------------------------------------
+
+    def _pump(self) -> None:
+        while self._queue:
+            event = self._queue.pop(0)
+            self.state, issued = self.driver.update(self.state, event, self.view.current())
+            self._take(issued)
+            if self.restarting:
+                self.restart()
 
     def _take(self, issued: list[Decision]) -> None:
         self.decisions.extend(issued)
         for decision in issued:
             match decision:
+                case Wait(request=Operation(request=Render() as render) as operation):
+                    self._render(operation, render)
+                case Wait(request=ProposeWinner() as proposal) if self.adopting:
+                    self._open.append(Asked(proposal.decision_id, proposal, None))
+                    self._queue.append(self._adopted(proposal))
+                    self._close(self._open[-1])
                 case Wait(request=request, until=until):
-                    self._open.append(Asked(request.decision_id, request, until))
+                    self._open.append(
+                        Asked(request.decision_id, request, until, self._prompt(request))
+                    )
                 case WakeAt(time=time):
                     self._sleeps.append(time)
                 case Finish():
                     self.finished = decision
                     self._open.append(Asked(decision.decision_id, decision, None))
+
+    def _prompt(self, request: Work) -> Prompt | None:
+        if isinstance(request, RequestTurn) and request.turn.prompts:
+            return self._prompts.get(request.turn.prompts[0].artifact_id)
+        return None
+
+    def _render(self, operation: Operation, render: Render) -> None:
+        """Answer a prompt render at once: the artifact stands for the prompt it was made from."""
+        self._sequence += 1
+        artifact = ArtifactId(root=f"prompt-{self._sequence}")
+        self._prompts[artifact] = render.context
+        rendered = RenderedArtifacts(
+            status="succeeded", prompts=(ArtifactRef(artifact_id=artifact, digest="d"),)
+        )
+        self._queue.append(
+            OperationFinished(
+                decision=operation.decision_id, result=self._operation_result(render, rendered)
+            )
+        )
+
+    def _operation_result(self, request: object, outcome: BaseModel) -> OperationResult:
+        encoded = FAKE_REGISTRY.encode(request)  # ty: ignore[invalid-argument-type]
+        result = OperationResult(
+            operation_id=OperationId(root=f"operation-{self._sequence}"),
+            observation=self._observation(ObservationStatus.SUCCEEDED),
+            outcome_schema=encoded.schema_ref.outcome_schema,
+            operation_schema=encoded.schema_ref,
+            outcome=outcome,
+        )
+        return FAKE_REGISTRY.validate_event(result)
+
+    def _observation(self, status: ObservationStatus) -> Observation:
+        self._sequence += 1
+        return Observation(
+            event_id=EventId(root=f"event-{self._sequence}"),
+            request_id=RequestId(root=f"request-{self._sequence}"),
+            scope=Scope(owner=initial_state().run.run_id, generation=0),
+            sequence=1,
+            observed_at=self.view.now_at,
+            status=status,
+            accepted=True,
+            terminal=True,
+            released=True,
+        )
+
+    def _adopted(self, proposal: ProposeWinner) -> Event:
+        return AdoptionFinished(
+            decision=None,
+            result=AdoptionResult(
+                selection=proposal.selection,
+                observation=self._observation(ObservationStatus.SUCCEEDED),
+            ),
+        )
+
+    def _ended(
+        self,
+        asked: Asked,
+        status: ObservationStatus,
+        *,
+        output: str | None = None,
+        failure: TurnFailureKind | None = None,
+    ) -> TurnEnded:
+        request = asked.request
+        if not isinstance(request, RequestTurn):
+            message = f"{asked.decision.root} is not a turn request"
+            raise TypeError(message)
+        spec = request.turn
+        scope = request.scope if request.scope.owner else initial_state().run.run_id
+        invocation = InvocationRef(
+            session_id=spec.session.session_id,
+            invocation_id=spec.invocation_id,
+            generation=getattr(scope, "generation", 0),
+        )
+        return TurnEnded(
+            decision=asked.decision,
+            result=TurnResult(
+                invocation=invocation,
+                observation=self._observation(status),
+                output_schema=spec.output_schema,
+                output_json=output,
+                failure=failure,
+            ),
+        )
 
     def _close(self, asked: Asked) -> None:
         if asked in self._open:

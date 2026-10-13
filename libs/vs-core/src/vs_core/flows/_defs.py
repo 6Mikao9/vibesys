@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
-from ._sources import First, Pending, StopSource, Task
+from ._sources import First, Pending, Signal, StopSource, Task
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -35,7 +35,7 @@ def flow[F: Callable[..., Coroutine[Any, Any, Any]]](
 ) -> Callable[[F], F]:
     """Register a flow function that takes a ``snapshot`` as its argument and can restart from one.
 
-    ``group.start(key, fn, snapshot)`` starts it from that snapshot; ``ctx.safe_point(s)``
+    ``group.start(key, fn, snapshot)`` starts it from that snapshot; ``ctx.checkpoint(s)``
     records a newer one.
     """
 
@@ -73,3 +73,4 @@ class _Task:
     stop: StopSource = field(default_factory=StopSource)
     handle: Task[Any] = field(default_factory=lambda: Task("root"))
     started: list[Pending] = field(default_factory=list)
+    signals: list[Signal] = field(default_factory=list)

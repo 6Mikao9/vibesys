@@ -1,20 +1,16 @@
-"""The contract between a search and core: events in, decisions out, one narrow view.
+"""The events core reports to a run's flows, and the narrow read-only view of the run.
 
-A search is a pure state machine. ``init`` returns its first state and decisions;
-``update`` takes one event at a time and returns the next state and decisions. It reads
-facts other owners keep (the clock, the baseline, measurements, settlements) through
-``RunView`` and never copies them into its own state. Work starts only inside a ``Wait``,
-so every wait states how long it may take (see ``until``).
-
-Events are past tense and typed. A result carries the decision it answers, so a search
-(or ``Children``) can tell which of its waits ended. A wait that ends without a result
-arrives as ``Failed`` with a closed reason; nothing here is free text.
+Events are past tense and typed. A result carries the decision it answers, so the flow runtime
+can tell which of its waits ended. A wait that ends without a result arrives as ``Failed``
+with a closed reason; nothing here is free text. A flow reads facts other owners keep (the
+clock, the baseline, measurements, settlements) through ``RunView``, by way of ``ctx``, and
+never copies them into its own state.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, SerializeAsAny
 
@@ -49,9 +45,6 @@ from .sessions import InterruptCompleted, InterruptFailed, TurnResult, YieldPubl
 from .settlement import AdoptionFailed, AdoptionResult, Settlement
 from .until import Failed
 
-if TYPE_CHECKING:
-    from .strategy import Decision, SearchDeclaration, StrategyState
-
 
 class WorkspaceOpened(Value):
     """An attempt's workspace is ready to use."""
@@ -70,9 +63,9 @@ class WorkspaceClosed(Value):
 
 
 class TurnFinished(Value):
-    """An asked agent answered: its reply, valid against its model, once.
+    """What ``session.turn`` returns when the agent answered: its reply, valid against its model.
 
-    ``decision`` is the ``AskAgent`` it answers. ``checkpoint`` is core's outcome for the
+    ``decision`` is the turn request it answers. ``checkpoint`` is core's outcome for the
     revision the turn produced, present exactly when the agent's reply asks for one (the
     pipeline holds the reply until the outcome is known). A turn that ended any other way
     arrives as ``Failed``.
@@ -184,7 +177,6 @@ class Interrupted(Value):
 type Event = Annotated[
     WorkspaceOpened
     | WorkspaceClosed
-    | TurnFinished
     | MeasurementFinished
     | OperationFinished
     | AdoptionFinished
@@ -201,7 +193,7 @@ type Event = Annotated[
     | Failed,
     Field(discriminator="kind"),
 ]
-"""Everything ``Search.update`` can receive. A search declares which kinds it handles."""
+"""Everything core reports to a run's flows. The flow runtime routes each to what waits for it."""
 
 
 class AttemptSummary(Value):
@@ -277,29 +269,3 @@ class Discarded(Value):
     failure: Failed | None = None
     request: RequestId | None = None
     event: EventKind | None = None
-
-
-class Search[S: StrategyState, C](Protocol):
-    """A search: a pure state machine from events to decisions.
-
-    ``update`` is one exhaustive ``match`` over the search's phase and the event. An
-    unexpected pair raises. The search's state carries a ``schema_version``.
-    """
-
-    @property
-    def declaration(self) -> SearchDeclaration:
-        """The agents, operations, capabilities and event kinds the search declares."""
-        ...
-
-    @property
-    def state_model(self) -> type[S]:
-        """The class of the search's state, so the shell can decode a saved run."""
-        ...
-
-    def init(self, config: C, facts: RunFacts) -> tuple[S, list[Decision]]:
-        """The first state and decisions of a new run."""
-        ...
-
-    def update(self, state: S, event: Event, view: RunView) -> tuple[S, list[Decision]]:
-        """The next state and decisions after one event."""
-        ...

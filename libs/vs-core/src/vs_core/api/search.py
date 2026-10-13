@@ -1,13 +1,12 @@
 """The one module a search imports from vs-core.
 
-A search is a pure state machine: ``init`` and ``update`` take events and a read-only
-``RunView`` and return decisions (``Wait``, ``WakeAt``, ``Finish``). This module is
-everything that contract needs and nothing else: the request types a search puts in a
-``Wait``, the ``Within`` and watches that bound it, the events it receives, the typed
-``Failed`` it hears when a wait ends without a result, ``Children`` for concurrent work,
-and the declaration of what it uses and handles. It also holds what a search that asks agents
-needs: ``AskAgent`` and the ``Correction`` an ask's input may extend, the id scheme and the
-operation shapes (``StrategyOperations`` and the request and outcome bases) a search names.
+A search is ``@search(name, config=Model)`` over an ``async def root(ctx, config)`` flow. This
+module is everything that contract needs and nothing else: ``search`` and the ``Flow`` its
+code receives, the values its aspects take and return (``Role``, ``Session``, ``Workspace``,
+``Assessment``, ``Kept``, ``NoWinner``, ``INPUT``), the ``Within`` that bounds a wait, the typed
+``Failed`` a wait that ends without a result gives, the events a flow may read, the
+``Correction`` a prompt may extend, and the id scheme and operation shapes
+(``StrategyOperations`` and the request and outcome bases) a search names.
 
 What stays out on purpose belongs to core and the shell, which import ``vs_core.api``:
 request records and phases, ``Outbound`` and ``Until`` (the stored form of a ``Within``),
@@ -20,13 +19,15 @@ module (``tests/quality/test_searches_import_only_the_search_facade.py``).
 from __future__ import annotations
 
 from vs_core.api import (
+    INPUT,
     THIS_RUN,
     AdoptionFailed,
     AdoptionFinished,
     AdoptionResult,
     Again,
+    AgentProtocol,
     ArtifactRef,
-    AskAgent,
+    Assessment,
     AssessmentKind,
     AssessmentProposal,
     AttemptBudget,
@@ -38,8 +39,6 @@ from vs_core.api import (
     Cancel,
     Capabilities,
     CheckpointDecline,
-    Child,
-    Children,
     ControlInput,
     Correction,
     Deadlock,
@@ -48,6 +47,7 @@ from vs_core.api import (
     Declined,
     Disposition,
     Dropped,
+    EndReason,
     Event,
     EventKind,
     EvidenceId,
@@ -60,7 +60,6 @@ from vs_core.api import (
     Finish,
     Flow,
     FlowCodeChanged,
-    FlowSearch,
     FlowState,
     GaveUp,
     Group,
@@ -74,6 +73,7 @@ from vs_core.api import (
     InterruptFailed,
     InvocationRef,
     ItemId,
+    Kept,
     LifecycleCapability,
     Limits,
     Measure,
@@ -84,6 +84,8 @@ from vs_core.api import (
     MeasurementResult,
     MessageDelivered,
     MessageDropped,
+    NotOpened,
+    NoWinner,
     ObservationStatus,
     Operation,
     OperationFinished,
@@ -94,7 +96,6 @@ from vs_core.api import (
     Park,
     Pending,
     ProposeWinner,
-    Reads,
     RejectionCode,
     RenderedArtifacts,
     RenderRoleArtifactsBase,
@@ -103,15 +104,16 @@ from vs_core.api import (
     RequestTurn,
     RetryPolicy,
     RevisionRef,
+    Role,
     RunFacts,
     RunResultProposal,
+    RunTask,
     RunView,
     SchemaRef,
     Scope,
-    Search,
-    SearchDeclaration,
     Seconds,
     Selection,
+    Session,
     SessionSpec,
     Settle,
     Settlement,
@@ -141,7 +143,6 @@ from vs_core.api import (
     Wait,
     Waiting,
     WaitRefusal,
-    Waits,
     WakeAt,
     WhileAlive,
     WhileOpen,
@@ -149,6 +150,7 @@ from vs_core.api import (
     Within,
     Work,
     WorkKind,
+    Workspace,
     WorkspaceClosed,
     WorkspaceMode,
     WorkspaceOpened,
@@ -162,15 +164,18 @@ from vs_core.api import (
     resource,
     trusted_keys,
 )
+from vs_core.flows import search
 
 __all__ = [
+    "INPUT",
     "THIS_RUN",
     "AdoptionFailed",
     "AdoptionFinished",
     "AdoptionResult",
     "Again",
+    "AgentProtocol",
     "ArtifactRef",
-    "AskAgent",
+    "Assessment",
     "AssessmentKind",
     "AssessmentProposal",
     "AttemptBudget",
@@ -182,8 +187,6 @@ __all__ = [
     "Cancel",
     "Capabilities",
     "CheckpointDecline",
-    "Child",
-    "Children",
     "ControlInput",
     "Correction",
     "Deadlock",
@@ -192,6 +195,7 @@ __all__ = [
     "Declined",
     "Disposition",
     "Dropped",
+    "EndReason",
     "Event",
     "EventKind",
     "EvidenceId",
@@ -204,7 +208,6 @@ __all__ = [
     "Finish",
     "Flow",
     "FlowCodeChanged",
-    "FlowSearch",
     "FlowState",
     "GaveUp",
     "Group",
@@ -218,6 +221,7 @@ __all__ = [
     "Interrupted",
     "InvocationRef",
     "ItemId",
+    "Kept",
     "LifecycleCapability",
     "Limits",
     "Measure",
@@ -228,6 +232,8 @@ __all__ = [
     "MeasurementResult",
     "MessageDelivered",
     "MessageDropped",
+    "NoWinner",
+    "NotOpened",
     "ObservationStatus",
     "Operation",
     "OperationFinished",
@@ -238,7 +244,6 @@ __all__ = [
     "Park",
     "Pending",
     "ProposeWinner",
-    "Reads",
     "RejectionCode",
     "RenderRoleArtifactsBase",
     "RenderedArtifacts",
@@ -247,15 +252,16 @@ __all__ = [
     "RequestTurn",
     "RetryPolicy",
     "RevisionRef",
+    "Role",
     "RunFacts",
     "RunResultProposal",
+    "RunTask",
     "RunView",
     "SchemaRef",
     "Scope",
-    "Search",
-    "SearchDeclaration",
     "Seconds",
     "Selection",
+    "Session",
     "SessionSpec",
     "Settle",
     "Settlement",
@@ -285,7 +291,6 @@ __all__ = [
     "Wait",
     "WaitRefusal",
     "Waiting",
-    "Waits",
     "WakeAt",
     "WhileAlive",
     "WhileOpen",
@@ -293,6 +298,7 @@ __all__ = [
     "Within",
     "Work",
     "WorkKind",
+    "Workspace",
     "WorkspaceClosed",
     "WorkspaceMode",
     "WorkspaceOpened",
@@ -304,5 +310,6 @@ __all__ = [
     "ledger_refs",
     "may_resubmit",
     "resource",
+    "search",
     "trusted_keys",
 ]

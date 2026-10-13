@@ -1,25 +1,23 @@
 """Run a search against core: deliver events one at a time, submit what it decides.
 
-The shell hands this module the events that happened; it calls ``Search.update`` once per
-event, submits the decisions with the core step the shell supplies, and keeps feeding the
+The shell hands this module the events that happened; it calls the driver's ``update`` once
+per event, submits the decisions with the core step the shell supplies, and keeps feeding the
 events those steps publish until the search has nothing more to say. Everything happens
 inside one call, so the shell commits search state, core state and published events
 together. A ``WakeAt`` is not submitted to core: it is returned for the shell to wait on.
 
-Also here: the startup check of the event kinds a search declares, and the runtime check
-that backs up the type checker for what a search returns.
+Also here: the runtime check that backs up the type checker for what a search returns.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from ._registry import ContractError
 from ._search_events import run_view, translate
 from .types.common import THIS_RUN, RunStatus, Scope
 from .types.kernel import ProposalSubmitted
-from .types.kinds import OPT_IN, EventKind, WorkKind
 from .types.records import RecoveryPhase
 from .types.strategy import Finish, Wait, WakeAt
 from .types.until import Within
@@ -28,21 +26,21 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ._registry import OperationRegistry
-    from .types.common import Seconds
+    from .types.common import RunFacts, Seconds
     from .types.kernel import CoreEvent, CoreState, StrategyEvent, Transition
-    from .types.search import Discarded, Event, Search
+    from .types.search import Discarded, Event, RunView
     from .types.strategy import Decision, SearchDeclaration, StrategyState, Submission
 
 type CoreStep = Callable[[CoreState, CoreEvent], Transition]
 """The core step the shell uses (production or a fake of it)."""
 
 
-def check_decisions(declaration: SearchDeclaration, decisions: object) -> tuple[Decision, ...]:
-    """The runtime backstop for what a search returned (the type checker is the first line).
+def check_decisions(decisions: object) -> tuple[Decision, ...]:
+    """The runtime backstop for what a driver returned (the type checker is the first line).
 
-    A decision is a ``Wait`` with a ``Within``, a ``WakeAt`` or a ``Finish``, and only of a
-    kind the search declared it uses. A bare request, a bare watch, a bare number or a wait
-    without a limit is refused with the path of the offending item.
+    A decision is a ``Wait`` with a ``Within``, a ``WakeAt`` or a ``Finish``. A bare request, a
+    bare watch, a bare number or a wait without a limit is refused with the path of the
+    offending item.
     """
     if not isinstance(decisions, list | tuple):
         raise ContractError(("decisions",), "a search returns a list of decisions")
@@ -53,18 +51,12 @@ def check_decisions(declaration: SearchDeclaration, decisions: object) -> tuple[
             case Wait():
                 if not isinstance(decision.until, Within):
                     raise ContractError((*path, "until"), "a wait needs a Within, not a bare watch")
-                kind = WorkKind(decision.request.kind)
-            case WakeAt():
-                kind = WorkKind.WAKE_AT
-            case Finish():
-                checked.append(decision)
-                continue
+            case WakeAt() | Finish():
+                pass
             case _:
                 raise ContractError(
                     path, "a search returns Wait, WakeAt or Finish; start work inside a Wait"
                 )
-        if kind not in declaration.uses:
-            raise ContractError((*path, "request"), "work kind is not in the declaration's uses")
         checked.append(decision)
     return tuple(checked)
 
@@ -79,16 +71,30 @@ def _in_scope[D: Wait | Finish](decision: D, own: Scope) -> D:
     return decision.model_copy(update={"scope": own}) if decision.scope == THIS_RUN else decision
 
 
-def _deliverable(declaration: SearchDeclaration, event: Event) -> bool:
-    """Whether ``event`` reaches the search. Opt-in kinds the search skipped are core's."""
-    kind = EventKind(event.kind)
-    if kind in declaration.handles:
-        return True
-    if kind in OPT_IN:
-        return False
-    raise ContractError(
-        ("event", event.kind), "event kind was not declared in the search's handles"
-    )
+class SearchDriver[S: StrategyState, C](Protocol):
+    """What the shell runs a search with: core's private mechanism, not an author's surface.
+
+    ``flows.SearchDef.driver`` builds the one implementation. ``update`` is called once per
+    event with the run's read-only view and returns what the search decided.
+    """
+
+    @property
+    def declaration(self) -> SearchDeclaration:
+        """What the host must provide for the search."""
+        ...
+
+    @property
+    def state_model(self) -> type[S]:
+        """The class of the persisted state."""
+        ...
+
+    def init(self, config: C, facts: RunFacts, view: RunView) -> tuple[S, list[Decision]]:
+        """Start the search."""
+        ...
+
+    def update(self, state: S, event: Event, view: RunView) -> tuple[S, list[Decision]]:
+        """Deliver one event."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -163,16 +169,13 @@ class _Pass:
         return transition.state
 
     def drain[S: StrategyState, C](
-        self, search: Search[S, C], state: S, core: CoreState
+        self, search: SearchDriver[S, C], state: S, core: CoreState
     ) -> Advanced[S]:
         """Deliver queued events one at a time until the search has nothing more to say."""
-        declaration = search.declaration
         while self.queue:
             event = self.queue.pop(0)
-            if not _deliverable(declaration, event):
-                continue
             state, decisions = search.update(state, event, run_view(core))
-            core = self.submit(check_decisions(declaration, decisions), core)
+            core = self.submit(check_decisions(decisions), core)
         return Advanced(
             state=state,
             core=core,
@@ -185,7 +188,7 @@ class _Pass:
 
 
 def advance[S: StrategyState, C](
-    search: Search[S, C], state: S, core: CoreState, host: SearchHost, inbox: Inbox
+    search: SearchDriver[S, C], state: S, core: CoreState, host: SearchHost, inbox: Inbox
 ) -> Advanced[S]:
     """Submit what was held, deliver the events one by one, and feed back what that causes."""
     run = _Pass(host, list(inbox.events), discarded=list(inbox.discarded))
@@ -194,13 +197,13 @@ def advance[S: StrategyState, C](
 
 
 def begin[S: StrategyState, C](
-    search: Search[S, C],
+    search: SearchDriver[S, C],
     config: C,
     core: CoreState,
     host: SearchHost,
     arrived: Inbox | None = None,
 ) -> Advanced[S]:
     """Start a new run: ``init`` on the run's facts, submit its decisions, then ``arrived``."""
-    state, decisions = search.init(config, core.run.facts)
-    held = check_decisions(search.declaration, decisions)
+    state, decisions = search.init(config, core.run.facts, run_view(core))
+    held = check_decisions(decisions)
     return advance(search, state, core, host, replace(arrived or Inbox(), held=held))

@@ -1,49 +1,66 @@
 """Flows: a search written as straight-line async code whose effects are journaled and replayed.
 
 The vocabulary and the rules for flow code are in ``docs/contributing/flows.md``. In short, a
-flow is an ``async def`` whose first argument is ``ctx: Flow``. It starts requests
-(``ctx.wait``, ``ctx.start``), waits on sources (``ctx.first``), runs concurrent tasks in groups,
-and ends the run with ``ctx.finish``. It never touches the clock, I/O or randomness.
+search is ``@search(name, config=Model)`` over ``async def root(ctx, config)``. The root and the
+flows it starts receive ``ctx: Flow``: they ask agents (``ctx.agents``), run candidates in
+workspaces (``ctx.workspaces``), measure them (``ctx.evaluation``), run concurrent tasks in
+groups (``ctx.group``), wait on sources (``ctx.first``) and name their winner (``ctx.choose``).
+They never touch the clock, I/O or randomness, and they never finish the run: when the root
+returns, the framework adopts the last choice and ends the run.
 
-``FlowSearch`` runs a root flow as an ordinary ``Search``. There is no asyncio: awaiting
-suspends the coroutine, and ``update`` resumes exactly the flows whose sources the incoming
-event filled, until every flow is suspended again. The decisions issued along the way are the
-``update``'s output, in issue order.
+There is no asyncio. Awaiting suspends the coroutine; the driver resumes exactly the flows whose
+sources an incoming event filled, until every flow is suspended again. The decisions issued along
+the way are the output of that step, in issue order. Persistence is replay (see ``_define``).
 
-Persistence is replay. ``FlowState`` holds the run's facts and a journal with one ``Step`` per
-event: the event, every ``ctx.read`` made while handling it, and a digest of the decisions it
-produced. To resume a saved state the search runs the flow code again from ``init`` and feeds it
-the journal; the code is deterministic, so it ends up suspended where it was. A digest that
-differs means the code changed, and ``FlowCodeChanged`` is raised. A search built with
-``flows=(...)`` instead restarts every running flow from its latest ``safe_point`` snapshot.
-
-The files: ``_defs`` registers flows; ``_flow`` is ``Flow`` and ``Group``; ``_run`` drives the coroutines; ``_sources`` is
-what a flow waits on; ``_resource`` is ``@resource``; ``_retry`` is the retry values; ``_state``
-is the persisted state; ``_search`` is the ``Search`` that replays and restarts.
+The files: ``_define`` is ``@search`` and the driver; ``_defs`` registers flows; ``_flow`` is
+``Flow`` and ``Group``; ``_kit`` is the handle core's own aspects use; ``_agents``,
+``_workspaces``, ``_evaluation`` and ``_winner`` are the aspects and the ending; ``_roles`` is
+the role value; ``_run`` drives the coroutines; ``_sources`` is what a flow waits on;
+``_resource`` is ``@resource``; ``_retry`` is the retry values; ``_state`` is the persisted state.
 """
 
+from ._agents import Agents, Session
+from ._define import FlowDriver, SearchDef, search
 from ._defs import flow
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
-from ._flow import Flow, Group, Reads, Waits
+from ._evaluation import Evaluation
+from ._flow import Clock, Flow, Group, RunTask
 from ._resource import resource
 from ._retry import Again, GaveUp, RetryPolicy, Tries
-from ._search import FlowSearch
+from ._roles import AgentProtocol, Role, reply_errors
 from ._sources import Pending, Source, StopSource, Task, Timer
-from ._state import FlowState, JournaledEvent, Waiting
+from ._state import Dropped, FlowState, JournaledEvent, Waiting
+from ._winner import INPUT, EndReason, Input, Kept, NoWinner
+from ._workspaces import Assessment, NotOpened, Workspace, Workspaces
 
 __all__ = [
+    "INPUT",
     "Again",
+    "AgentProtocol",
+    "Agents",
+    "Assessment",
+    "Clock",
     "Deadlock",
+    "Dropped",
+    "EndReason",
+    "Evaluation",
     "Flow",
     "FlowCodeChanged",
-    "FlowSearch",
+    "FlowDriver",
     "FlowState",
     "GaveUp",
     "Group",
+    "Input",
     "JournaledEvent",
+    "Kept",
+    "NoWinner",
+    "NotOpened",
     "Pending",
-    "Reads",
     "RetryPolicy",
+    "Role",
+    "RunTask",
+    "SearchDef",
+    "Session",
     "Source",
     "StopSource",
     "Stopped",
@@ -53,7 +70,10 @@ __all__ = [
     "Timer",
     "Tries",
     "Waiting",
-    "Waits",
+    "Workspace",
+    "Workspaces",
     "flow",
+    "reply_errors",
     "resource",
+    "search",
 ]
