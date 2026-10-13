@@ -25,7 +25,7 @@ from vs_evaluator_protocol.api import PartialMeasurement
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, SearchDef
+    from vs_core.api import Limits, OperationRegistration, RevisionRef, SearchDef
     from vs_core.api import RunFacts as CoreRunFacts
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
@@ -704,8 +704,8 @@ class CorePlan:
     """
 
     search: SearchDef[Any]
+    """The pure search; its declared roles say what each agent answers with."""
     config: object
-    reply_schemas: Mapping[SchemaRef, type[BaseModel]]
     facts: CoreRunFacts
     limits: Limits
     deadline_seconds: float

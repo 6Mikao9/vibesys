@@ -25,8 +25,9 @@ async def sequential(ctx: Flow, config: SequentialConfig) -> NoWinner | None:
 else to declare: core derives what it needs from the registration (the operations the search's
 namespace owns, the lifecycle capabilities it may use, the schema of its persisted state).
 There is no event list, no "uses" list and no state class. A search that asks agents also passes
-`operations=`, `ids=` and `protocol=` (the namespace's operation shapes, id scheme, and the prompt
-contexts of corrections and resumes); these are the seam the role declaration will grow into.
+`roles=` (its `Role` declarations; the protocol and the reply schema table derive from them) and
+`operations=` (the namespace's operation shapes: verify, interpret, retain, render; these are not
+role data). The id scheme derives from the search name.
 
 The root flow starts with the config and returns `None` or `NoWinner(reason)`. **A flow never
 finishes the run.** See "The winner" below.
@@ -81,18 +82,21 @@ match await session.turn(ImplementerPrompt(...), within=config.implementer_turn_
     case Failed() as failed: ...
 ```
 
-A `Role` says who an agent is, what it answers with and how core retries it (its name, the
-reply model, the output schema, access, workspace mode, charge, `Retry`, whether it may wait on
-its own evaluations, and whether a reply holds for core's checkpoint). A session is one
+A `Role` is the single declaration of how an agent is asked: name, prompt template, reply model
+(a `RevisionReply` holds for core's checkpoint), workspace mode, access, charge, `turn_time`,
+`corrections`, `lost_turns`, `lost_turn_backoff`, `lost_resumes`, `correctable`, `render_time`,
+the `Exchanges` templates for corrections and resumes, and whether it may wait on its own
+evaluations. It is frozen and rejects unknown keys; core caps `corrections`, `lost_turns` and the
+times (`MAX_*`). Only `model` is overridden per run (`SearchDef.with_models`). A session is one
 conversation; the same session object continues it, a new session starts fresh.
 
 `session.turn` returns **one** `TurnFinished` (the reply, already valid against the role's
 model) or **one** `Failed`. In between core runs the turn: it renders the prompt from the
 namespace's template, runs the provider turn, validates the reply and asks the agent to correct
 an invalid one (up to `role.retry.corrections`), asks again after a lost turn with a backoff (up
-to `role.retry.lost_turns`), suspends a turn that waits for evaluations and resumes it when core
+to `role.lost_turns`), suspends a turn that waits for evaluations and resumes it when core
 authorizes, and holds a write turn's reply until core recorded its checkpoint. A role with
-`Retry.none()` gets `Failed(INVALID_REPLY)` or `Failed(LOST)` at once and asks again itself. A
+`corrections=0` and `lost_turns=0` gets `Failed(INVALID_REPLY)` or `Failed(LOST)` at once and asks again itself. A
 prompt that is a `Correction` makes the turn a correction of the earlier turn it names.
 
 ### Workspaces

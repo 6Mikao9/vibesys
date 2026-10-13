@@ -149,6 +149,8 @@ class ProductionSessionResolver:
         if role is None:
             return None
         spec = self._inputs.session_spec(role, workspace.path)
+        if turn.session.model is not None:  # the model the operator chose for this role's search
+            spec = replace(spec, model=turn.session.model)
         source = self._inputs.tool_servers
         if source is None:
             return spec

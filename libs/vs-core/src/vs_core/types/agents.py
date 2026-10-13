@@ -1,12 +1,13 @@
 """What a search says about the agents it asks, and what the agent pipeline hands back.
 
-A search names an agent in ``AskAgent`` and gets one ``TurnFinished`` or one ``Failed``. How
-the reply is rendered, validated, corrected, asked again and resumed is core's, set per
-agent by ``Retry``. These are the values both sides share.
+A search asks an agent through ``ctx.agents`` and gets one ``TurnFinished`` or one ``Failed``.
+How the reply is rendered, validated, corrected, asked again and resumed is core's mechanism,
+set per agent by its ``Role``. These are the values both sides share.
 """
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -14,36 +15,57 @@ from pydantic import Field
 from .common import CheckpointDecline, InvocationRef, RevisionRef, Seconds, Value
 from .evaluation import EvidenceRef
 from .evaluation_history import RepeatedFailureGuidance
+from .until import ReplyError
 
 
 class Backoff(Value):
     """Run-clock wait before a lost turn is asked again; each further ask doubles it."""
 
-    first: Seconds = 5.0
-    cap: Seconds = 120.0
+    first: Seconds
+    cap: Seconds
 
     def delay(self, drops: int) -> float:
         """Seconds to wait before re-asking a turn already lost ``drops`` times."""
         return min(self.cap, self.first * 2**drops)
 
 
-class Retry(Value):
-    """How many times core asks again on its own before it reports the failure.
+type ChargeClass = Literal["free", "paid", "correction", "resume"]
+"""The charge class of a turn request: a role's own (free or paid), a correction or a resume."""
 
-    ``corrections`` bounds the corrections of an invalid reply; ``lost_turns`` bounds the
-    asks after a turn the transport lost, each after ``backoff``. ``Retry.none()`` reports
-    ``Failed(INVALID_REPLY)`` or ``Failed(LOST)`` at once, for an agent whose search asks
-    again itself (with a fresh prompt, say).
+
+class Charge(StrEnum):
+    """What a role's first turn in a session costs the run's budget.
+
+    A turn that works on a candidate costs one ``ATTEMPT`` (and a turn); a turn that does not
+    (a judge, a planner) costs only a ``TURN``. Corrections and resumes cost a turn.
     """
 
-    corrections: Annotated[int, Field(ge=0)] = 1
-    lost_turns: Annotated[int, Field(ge=0)] = 2
-    backoff: Backoff = Backoff()
+    ATTEMPT = "paid"
+    TURN = "free"
 
-    @classmethod
-    def none(cls) -> Retry:
-        """No automatic corrections and no automatic asks after a lost turn."""
-        return cls(corrections=0, lost_turns=0)
+
+class Correctable(StrEnum):
+    """The failures of a reply that core may ask the agent to correct, within ``corrections``."""
+
+    INVALID_REPLY = "invalid-reply"
+    """The reply breaks the role's model."""
+    UNRECORDED_WAIT = "unrecorded-wait"
+    """The reply says it waits for evaluations but the run recorded no wait."""
+
+
+class Exchanges(Value):
+    """The templates of the exchanges core itself starts with a role's agent.
+
+    Each names a template file the renderer reads; the wording is the template's. A role needs
+    exactly the exchanges it can meet (see ``Role``), and a missing one is a declaration error.
+    """
+
+    correction: str | None = None
+    """Asks the agent to fix an invalid reply (renders a ``ReplyCorrection``)."""
+    resume: str | None = None
+    """Continues a turn that waited for evaluations (renders a ``ResumeFacts``)."""
+    wait_unrecorded: str | None = None
+    """Tells the agent its wait was not recorded (renders a ``WaitUnrecorded``)."""
 
 
 class Correction(Value):
@@ -60,11 +82,31 @@ class Correction(Value):
 class ResumeFacts(Value):
     """What the resume prompt of a suspended turn is built from."""
 
+    kind: Literal["resume"] = "resume"
     agent: str
     retained: RevisionRef | None
     timed_out: bool
     evidence: tuple[EvidenceRef, ...] = ()
     repeated_failure: RepeatedFailureGuidance | None = None
+
+
+class ReplyCorrection(Value):
+    """What the correction prompt of an invalid reply is built from."""
+
+    kind: Literal["reply-correction"] = "reply-correction"
+    role: str
+    errors: tuple[ReplyError, ...]
+
+
+class WaitUnrecorded(Value):
+    """What the prompt is built from when a reply waited and the run recorded no wait."""
+
+    kind: Literal["wait-unrecorded"] = "wait-unrecorded"
+    role: str
+
+
+type ProtocolContext = ReplyCorrection | ResumeFacts | WaitUnrecorded
+"""The contexts of the exchanges core starts: what their templates render."""
 
 
 class Retained(Value):

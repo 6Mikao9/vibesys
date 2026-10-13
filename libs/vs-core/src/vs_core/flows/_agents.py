@@ -10,22 +10,35 @@ gets one ``TurnFinished`` or one ``Failed``. Between the two, core runs the turn
     -> hold a write turn's reply until core recorded its checkpoint -> deliver ONE result.
 
 This is ordinary flow code over the runtime's own handle (a ``Kit``), so it is journaled and
-replayed like any flow: a restart after any step lands the turn in the same place. How often
-core asks again on its own is the role's ``Retry``; a role with ``Retry.none()`` gets
-``Failed(INVALID_REPLY)`` (or ``Failed(LOST)``) at once and asks again itself.
+replayed like any flow: a restart after any step lands the turn in the same place. Every rule
+of the ask is the role's (``Role``): how long a turn may take, how often core asks again on its
+own and after what wait, which failures it corrects, how long a prompt may render. A role with
+no corrections and no lost turns gets ``Failed(INVALID_REPLY)`` (or ``Failed(LOST)``) at once
+and asks again itself. What stays here is mechanism: every wait is bounded, and a resume names
+its continuation, which core authorizes once.
 """
 
 from __future__ import annotations
 
 from hashlib import sha256
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter, ValidationError
 
 from vs_core._registry import ContractError
 from vs_core._strategy_operations import RenderedArtifacts
 from vs_core._waitable import WaitableReply, WaitingForDependency
-from vs_core.types.agents import Checkpoint, Correction, ResumeFacts, Retained
+from vs_core.types.agents import (
+    ChargeClass,
+    Checkpoint,
+    Correctable,
+    Correction,
+    ProtocolContext,
+    ReplyCorrection,
+    ResumeFacts,
+    Retained,
+    WaitUnrecorded,
+)
 from vs_core.types.common import (
     THIS_RUN,
     DecisionId,
@@ -60,21 +73,15 @@ from ._roles import reply_errors
 from ._sources import First
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from pydantic import BaseModel
 
     from vs_core.types.search import Event
 
     from ._kit import Kit
-    from ._roles import AgentProtocol, Role
+    from ._roles import Role
     from ._sources import Signal
     from ._workspaces import Workspace
 
-_RENDER_LIMIT = 300.0
-"""Seconds a prompt may take to render."""
-
-type Charge = Literal["free", "paid", "correction", "resume"]
 
 _LIFECYCLE = TypeAdapter(bool)
 
@@ -107,8 +114,18 @@ class Agents:
         """A new conversation with ``role``, in ``workspace`` (the run when omitted).
 
         ``revision`` is the revision of the role's workspace for its turns, unless a turn names
-        another; it is needed for a role that works on a revision.
+        another; it is needed for a role that works on a revision. The role must be one the
+        search declares (``@search(roles=...)``); the declared role, with the model the operator
+        chose for this run, is the one asked.
         """
+        declared = self._kit.run.wiring.roles.get(role.name)
+        if declared is None:
+            message = f"role {role.name!r} is not declared by this search: list it in roles="
+            raise ContractError(("agents", "session"), message)
+        if declared.model_copy(update={"model": role.model}) != role:
+            message = f"role {role.name!r} differs from the one the search declared"
+            raise ContractError(("agents", "session"), message)
+        role = declared
         number = self._kit.count(f"session:{role.name}")
         subject = self._kit.path.rstrip("/") or "run"
         if number > 1:
@@ -138,15 +155,24 @@ class Session:
         self,
         prompt: Value,
         *,
-        within: Seconds | Within,
+        within: Seconds | Within | None = None,
         revision: RevisionRef | None = None,
     ) -> TurnFinished | Failed:
         """Ask the agent once: its validated reply, or the typed failure that ended the turn.
 
         ``prompt`` is the context the role's template renders; a ``Correction`` names the
-        earlier turn it corrects. ``within`` bounds each provider turn of the ask.
+        earlier turn it corrects. Each provider turn of the ask may take the role's
+        ``turn_time``; ``within`` narrows that for this ask (the smaller limit applies) and
+        adds the watches that may end it earlier.
         """
-        until = within if isinstance(within, Within) else Within(limit=within)
+        asked = (
+            None
+            if within is None
+            else (within if isinstance(within, Within) else Within(limit=within))
+        )
+        role = self.role
+        limit = role.turn_time if asked is None else min(asked.limit, role.turn_time)
+        until = Within(limit=limit, watches=() if asked is None else asked.watches)
         ask = _Ask(self._kit, self, prompt, until, revision or self.revision)
         while True:
             step = await ask.attempt()
@@ -165,14 +191,18 @@ class _Ask:
         self.role = session.role
         self.until = until
         self.revision = revision
-        self.input = prompt
+        self.input: Value = prompt
         follows = prompt.of if isinstance(prompt, Correction) else None
-        self.charge: Charge = "correction" if follows is not None else self.role.charge
+        self.charge: ChargeClass = "correction" if follows is not None else self.role.charge.value
+        self.template = self.role.prompt
+        """The template the next ask renders: the role's prompt, or one of its exchanges."""
         self.predecessor: InvocationRef | None = follows
         self.resume: InvocationRef | None = None
         self.continuation = None
         self.corrections = 0
         self.drops = 0
+        self.resuming = False
+        """Whether the ask in flight continues a wait: its losses count against ``lost_resumes``."""
         self.invocation: InvocationRef | None = None
         self.decision = DecisionId(root=self.role.name)
 
@@ -211,17 +241,19 @@ class _Ask:
         if operations is None:
             message = "this search was registered without operations: it cannot ask agents"
             raise ContractError(("agents", "turn"), message)
-        request = operations.render(
+        # The namespace's render class pins ``kind`` by default; the declared base type cannot say so.
+        request = operations.render(  # ty: ignore[missing-argument]
+            template=self.template,
             subject=f"{self.session.subject}.{self.role.name}",
             ordinal=serial,
             context=self.input,
-        )  # ty: ignore[missing-argument]
+        )
         scope: Scope = THIS_RUN if self.session.workspace is None else self.session.workspace.scope
         operation = Operation(
             decision_id=DecisionId(root=f"{self.role.name}.render"), scope=scope, request=request
         )
         event = await self.kit.wait(
-            operation, Within(limit=_RENDER_LIMIT, watches=self.until.watches)
+            operation, Within(limit=self.role.render_time, watches=self.until.watches)
         )
         match event:
             case Failed():
@@ -255,6 +287,7 @@ class _Ask:
             policy="reuse",
             lifetime="owner",
             access=role.access,
+            model=role.model,
         )
         invocation_id = (
             self.resume.invocation_id
@@ -280,7 +313,7 @@ class _Ask:
             continuation_id=self.continuation,
             workspace=where,
             prompts=rendered.prompts,
-            output_schema=role.schema,
+            output_schema=role.reply_schema,
             tool_policy=rendered.tool_policy,
             charge_class=self.charge,
             # A resume names its continuation, never a predecessor: core rejects both together.
@@ -301,7 +334,7 @@ class _Ask:
         if result.suspending:
             # Core recorded the wait: the reply is dropped and the agent answers when resumed.
             offered = self.kit.read(lambda view: "suspend" in view.capabilities.lifecycle, bool)
-            if not offered or not role.waits:
+            if not offered or not role.may_wait_for_evaluations:
                 return Failed(
                     reason=FailureReason.WAIT_REFUSED,
                     decision=self.decision,
@@ -310,13 +343,18 @@ class _Ask:
                 )
             return await self._suspended(yielded)
         try:
-            parsed = role.reply.model_validate_json(output)
+            parsed = role.wire_reply.model_validate_json(output)
         except ValidationError as error:
             errors = reply_errors(error)
             invalid = Failed(
                 reason=FailureReason.INVALID_REPLY, decision=self.decision, errors=errors, turn=turn
             )
-            return self._corrected(lambda: self._protocol().correction(role.name, errors), invalid)
+            return self._corrected(
+                Correctable.INVALID_REPLY,
+                role.exchanges.correction,
+                ReplyCorrection(role=role.name, errors=errors),
+                invalid,
+            )
         reply = parsed.reply if isinstance(parsed, WaitableReply) else parsed
         if isinstance(reply, WaitingForDependency):
             refused = Failed(
@@ -325,13 +363,18 @@ class _Ask:
                 turn=turn,
                 refusal=WaitRefusal.NOT_RECORDED,
             )
-            return self._corrected(lambda: self._protocol().wait_unrecorded(role.name), refused)
+            return self._corrected(
+                Correctable.UNRECORDED_WAIT,
+                role.exchanges.wait_unrecorded,
+                WaitUnrecorded(role=role.name),
+                refused,
+            )
         return await self._replied(turn, reply)
 
     async def _replied(self, turn: InvocationRef, reply: BaseModel) -> TurnFinished | Failed:
         """A valid reply: held until core's checkpoint is known when the role needs one."""
         role = self.role
-        if role.checkpoint is None or not role.checkpoint(reply):
+        if not role.reply_needs_checkpoint(reply):
             return self._finished(turn, reply, None)
         known = self.kit.run.checkpoints.get(turn)
         if known is None:
@@ -366,7 +409,10 @@ class _Ask:
             )
             self.invocation = turn
             return self._corrected(
-                lambda: self._protocol().correction(role.name, result.reply_errors), invalid
+                Correctable.INVALID_REPLY,
+                role.exchanges.correction,
+                ReplyCorrection(role=role.name, errors=result.reply_errors),
+                invalid,
             )
         return Failed(
             reason=FailureReason.TURN_FAILED,
@@ -376,38 +422,50 @@ class _Ask:
             digest=_digest(result.detail),
         )
 
-    def _protocol(self) -> AgentProtocol:
-        protocol = self.kit.run.wiring.protocol
-        if protocol is None:
-            message = "this search was registered without an agent protocol: no corrections"
-            raise ContractError(("agents", "turn"), message)
-        return protocol
+    def _corrected(
+        self,
+        kind: Correctable,
+        template: str | None,
+        context: ProtocolContext,
+        exhausted: Failed,
+    ) -> _Again | Failed:
+        """Ask the agent to fix its reply, or report ``exhausted``.
 
-    def _corrected(self, context: Callable[[], Value], exhausted: Failed) -> _Again | Failed:
-        """Ask the agent to fix its reply, or report ``exhausted`` once its corrections are spent.
-
-        The correction prompt is built only when a correction is asked for: a role that is
-        never corrected here owns no correction template.
+        Core asks only for a failure the role lists as correctable, and only while the role's
+        corrections are not spent. ``template`` renders ``context`` as the correction prompt.
         """
-        if self.corrections >= self.role.retry.corrections:
+        role = self.role
+        if kind not in role.correctable or self.corrections >= role.corrections:
             return exhausted
-        self.input = context()
+        if template is None:
+            message = f"{role.name} is corrected for {kind.value} but declares no such exchange"
+            raise ContractError(("agents", "turn"), message)
+        self.input = context
+        self.template = template
         self.charge = "correction"
         self.predecessor = self.invocation
         self.resume = None
         self.continuation = None
         self.corrections += 1
         self.drops = 0
+        self.resuming = False
         return _AGAIN
 
     async def _lost(self, lost: InvocationRef) -> Failed | _Again:
-        """The transport lost the turn: ask the same question again after a backoff, or report it."""
-        retry = self.role.retry
-        if self.charge == "resume" or self.drops >= retry.lost_turns:
+        """The transport lost the turn: ask the same question again after a backoff, or report it.
+
+        A turn that continued a wait is asked again, as a correction of the lost one, only as
+        often as the role's ``lost_resumes``: core authorizes each continuation's resume once.
+        """
+        role = self.role
+        allowed = role.lost_resumes if self.resuming else role.lost_turns
+        if self.drops >= allowed:
             return Failed(reason=FailureReason.LOST, decision=self.decision, turn=lost)
-        await self.kit.timer(self.kit.now() + retry.backoff.delay(self.drops))
+        await self.kit.timer(self.kit.now() + role.lost_turn_backoff.delay(self.drops))
         self.charge = "correction"
         self.predecessor = lost
+        self.resume = None
+        self.continuation = None
         self.invocation = None
         self.drops += 1
         return _AGAIN
@@ -470,7 +528,13 @@ class _Ask:
             evidence=authorization.evidence,
             repeated_failure=authorization.repeated_failure,
         )
-        self.input = self._protocol().resume(facts)
+        template = self.role.exchanges.resume
+        if template is None:
+            message = f"{self.role.name} waited for evaluations but declares no resume exchange"
+            raise ContractError(("agents", "turn"), message)
+        self.input = facts
+        self.template = template
+        self.resuming = True
         self.charge = "resume"
         self.predecessor = None
         self.resume = authorization.next_invocation

@@ -28,26 +28,29 @@ class Plan(core.Value):
     n: int
 
 
+EXCHANGES = core.Exchanges(
+    correction="fake/correction.j2",
+    resume="fake/resume.j2",
+    wait_unrecorded="fake/wait_unrecorded.j2",
+)
 WORKER = core.Role(
     name="worker",
+    prompt="fake/worker.j2",
     reply=Plan,
-    schema=core.SchemaRef(name="plan", version=1),
-    access=core.Access.READ_ONLY,
     workspace=None,
-    charge="free",
+    access=core.Access.READ_ONLY,
+    turn_time=600.0,
+    corrections=1,
+    lost_turns=2,
+    charge=core.Charge.TURN,
+    exchanges=EXCHANGES,
 )
 """The one role the toy flows ask: it answers a ``Plan``."""
 
-LENIENT = core.Role(
-    name="lenient",
-    reply=Plan,
-    schema=core.SchemaRef(name="plan", version=1),
-    access=core.Access.READ_ONLY,
-    workspace=None,
-    charge="free",
-    retry=core.Retry(corrections=0, lost_turns=0),
-)
+LENIENT = WORKER.model_copy(update={"name": "lenient", "corrections": 0, "lost_turns": 0})
 """A role core never retries for: its first failure is the flow's."""
+
+ROLES = (WORKER, LENIENT)
 
 
 async def ask(
@@ -72,7 +75,7 @@ def start(
     view: FakeView | None = None,
 ) -> FlowRun[Config]:
     """Start a flow search; with ``restarting`` it restarts from JSON after every step."""
-    definition = fake_search("flows", Config)(root)
+    definition = fake_search("flows", Config, ROLES)(root)
     return FlowRun.start(definition, Config(), view=view, restarting=restarting, adopting=adopting)
 
 

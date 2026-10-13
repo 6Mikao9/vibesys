@@ -26,6 +26,7 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field
 
 from vs_core._registry import OperationRegistration, OperationRegistry
+from vs_core.types.agents import ProtocolContext
 from vs_core.types.common import (
     ArtifactRef,
     LifecycleClass,
@@ -78,14 +79,17 @@ class RenderRoleArtifactsBase[C: Value](OperationRequest):
 
     Idempotent per (subject, ordinal): the executor must return the same artifacts
     for a repeated request, so replay after a crash never forks a prompt. ``C`` is the
-    strategy's prompt-context type.
+    strategy's prompt-context type. ``template`` is the template file to render, taken from
+    the role's declaration; the context is either the search's own prompt or one of the
+    contexts of the exchanges core starts (a correction, a resume).
     """
 
     lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
     outcome_model: ClassVar[type[BaseModel]] = RenderedArtifacts
+    template: str = Field(min_length=1)
     subject: str = Field(min_length=1)
     ordinal: int = Field(ge=0)
-    context: C
+    context: C | ProtocolContext
 
 
 class ParentVerification(Value):

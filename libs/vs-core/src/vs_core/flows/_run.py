@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
@@ -54,7 +54,7 @@ if TYPE_CHECKING:
     from vs_core.types.settlement import Selection
 
     from ._flow import Group
-    from ._roles import AgentProtocol
+    from ._roles import Role
 
 
 @dataclass(frozen=True)
@@ -64,7 +64,8 @@ class Wiring:
     registry: OperationRegistry | None = None
     operations: StrategyOperations | None = None
     ids: IdScheme | None = None
-    protocol: AgentProtocol | None = None
+    roles: Mapping[str, Role] = field(default_factory=dict)
+    """The roles the search declared, by name (with the models the operator chose)."""
 
 
 class _Run:

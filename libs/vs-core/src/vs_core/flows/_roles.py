@@ -1,53 +1,179 @@
-"""The minimal role value ``ctx.agents`` needs, and the prompts of core's own exchanges.
+"""``Role``: the one declaration of everything about how an agent is asked.
 
-A role says who an agent is, what it answers with and how core retries it. This is the seam
-the role declaration of the next change will grow into; until then it holds exactly what the
-turn mechanics of ``ctx.agents`` read.
+A search declares each agent it asks once, next to the search::
+
+    IMPLEMENTER = Role(
+        name="implementer", prompt="dynamic/implementer.j2", reply=ImplementerResult,
+        workspace=WorkspaceMode.ISOLATED_CHILD, access=Access.WRITE_CANDIDATE,
+        turn_time=minutes(45), corrections=1, lost_turns=2,
+        may_wait_for_evaluations=True, charge=Charge.ATTEMPT, exchanges=EXCHANGES,
+    )
+
+and lists the roles in ``@search(..., roles=(...))``. Core holds no agent rule of its own: how
+long a turn may take, how often an invalid reply is corrected, how often a lost turn is asked
+again and after what wait, which failed replies may be corrected, how long a prompt may take to
+render, whether the reply waits for evaluations, and whether the reply must wait for core's
+checkpoint are all declared here. Core keeps only mechanism, which no role can lift: every wait
+is bounded, and the caps below bound every field that repeats work.
+
+Every field is required or has its default written here. A role is frozen and rejects unknown
+keys; ``model`` is the one setting an operator may change per run (``SearchDef.with_models``).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Self
 
-from vs_core.types.agents import ResumeFacts, Retry
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from vs_core._waitable import WaitableReply
+from vs_core.types.agents import Backoff, Charge, Correctable, Exchanges
+from vs_core.types.common import SchemaRef, Seconds, Value, WorkspaceMode
+from vs_core.types.sessions import Access
 from vs_core.types.until import ReplyError, ReplyErrorCode
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Mapping
 
-    from pydantic import BaseModel, ValidationError
+    from pydantic import ValidationError
 
-    from vs_core.types.common import SchemaRef, Value, WorkspaceMode
-    from vs_core.types.sessions import Access
+MAX_CORRECTIONS = 5
+"""The most corrections of one reply any role may ask for."""
+MAX_LOST_TURNS = 5
+"""The most times any role may have a lost turn asked again."""
+MAX_TURN_SECONDS = 6 * 3600.0
+"""The longest any role may allow one provider turn."""
+MAX_RENDER_SECONDS = 3600.0
+"""The longest any role may allow a prompt to render."""
 
 
-@dataclass(frozen=True)
-class Role:
-    """One agent a search may ask: who it is, what it answers with and how core retries it."""
+def minutes(count: float) -> Seconds:
+    """``count`` minutes, in the seconds every duration is given in."""
+    return count * 60.0
 
-    name: str
+
+def hours(count: float) -> Seconds:
+    """``count`` hours, in the seconds every duration is given in."""
+    return count * 3600.0
+
+
+class RevisionReply(Value):
+    """Base of the reply of a role that works on a candidate and may leave work to keep.
+
+    Core holds such a reply until it recorded (or declined) the checkpoint of the turn, and
+    hands the checkpoint to the search with the reply. A reply for which ``produces_revision``
+    is false (the agent says it did nothing) is delivered at once, with no checkpoint.
+    """
+
+    def produces_revision(self) -> bool:
+        """Whether this reply claims work that core must checkpoint (override to say otherwise)."""
+        return True
+
+
+class Role(BaseModel):
+    """One agent a search may ask: what it is asked, what it answers and how core carries it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]*$")]
+    """The role's identity in ids, logs and ``agent.toml``."""
+    prompt: Annotated[str, Field(min_length=1)]
+    """The template file the renderer reads for the role's own turns."""
     reply: type[BaseModel]
-    """The wire model of the reply (a ``WaitableReply[R]`` for a role that may wait)."""
-    schema: SchemaRef
-    access: Access
+    """The model of the reply. Core wraps it for a role that may wait for evaluations."""
     workspace: WorkspaceMode | None
     """The mode of the role's workspace revision, or None for a role that works in the run."""
-    charge: Literal["free", "paid"]
-    retry: Retry = field(default_factory=Retry)
-    waits: bool = False
-    """Whether the role may end a turn waiting for its evaluations (its reply is waitable)."""
-    checkpoint: Callable[[BaseModel], bool] | None = None
-    """Whether a reply must wait for core's checkpoint of the turn before it is delivered."""
+    access: Access
+    """What the role's turns may write."""
+    turn_time: Annotated[float, Field(gt=0, le=MAX_TURN_SECONDS, allow_inf_nan=False)]
+    """Seconds one provider turn may take."""
+    corrections: Annotated[int, Field(ge=0, le=MAX_CORRECTIONS)]
+    """How often core asks the agent to correct a reply before it reports the failure."""
+    lost_turns: Annotated[int, Field(ge=0, le=MAX_LOST_TURNS)]
+    """How often core asks again after the transport lost the turn."""
+    charge: Charge
+    """What the role's first turn in a session costs."""
+    may_wait_for_evaluations: bool = False
+    """Whether the role may end a turn waiting for evaluations it submitted (and be resumed)."""
+    exchanges: Exchanges = Exchanges()
+    """The templates of the exchanges core starts: corrections and resumes."""
+    correctable: frozenset[Correctable] = frozenset(Correctable)
+    """Which failed replies core may ask the agent to correct."""
+    lost_turn_backoff: Backoff = Backoff(first=5.0, cap=120.0)
+    """The wait before a lost turn is asked again; it doubles with each further loss."""
+    lost_resumes: Annotated[int, Field(ge=0, le=MAX_LOST_TURNS)] = 0
+    """How often a lost turn that continued a wait is asked again (as a correction of it)."""
+    render_time: Annotated[float, Field(gt=0, le=MAX_RENDER_SECONDS, allow_inf_nan=False)] = 300.0
+    """Seconds a prompt of this role may take to render."""
+    model: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    """The model the role's turns use; None leaves the run's default."""
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        problems: list[str] = []
+        if issubclass(self.reply, WaitableReply):
+            problems.append("reply: name the role's own model; core wraps it when the role waits")
+        if issubclass(self.reply, RevisionReply) and (
+            self.workspace is None or self.access is not Access.WRITE_CANDIDATE
+        ):
+            problems.append("reply: a revision reply needs a workspace and write-candidate access")
+        if (
+            self.corrections
+            and Correctable.INVALID_REPLY in self.correctable
+            and self.exchanges.correction is None
+        ):
+            problems.append("exchanges.correction: needed to correct invalid replies")
+        if (
+            self.corrections
+            and self.may_wait_for_evaluations
+            and Correctable.UNRECORDED_WAIT in self.correctable
+            and self.exchanges.wait_unrecorded is None
+        ):
+            problems.append("exchanges.wait_unrecorded: needed to correct an unrecorded wait")
+        if self.may_wait_for_evaluations and self.exchanges.resume is None:
+            problems.append("exchanges.resume: needed by a role that waits for evaluations")
+        if problems:
+            message = f"role {self.name!r}: " + "; ".join(problems)
+            raise ValueError(message)
+        return self
+
+    @property
+    def reply_schema(self) -> SchemaRef:
+        """The schema the role's turns are asked to answer with: derived from its name."""
+        return SchemaRef(name=f"agent.{self.name}.reply", version=1)
+
+    @property
+    def wire_reply(self) -> type[BaseModel]:
+        """The model the agent answers with on the wire: the reply, or a result-or-wait of it."""
+        if self.may_wait_for_evaluations:
+            return WaitableReply[self.reply]  # ty: ignore[invalid-type-form]
+        return self.reply
+
+    def reply_needs_checkpoint(self, reply: BaseModel) -> bool:
+        """Whether ``reply`` must be held until core knows the checkpoint of its turn."""
+        return isinstance(reply, RevisionReply) and reply.produces_revision()
 
 
-@dataclass(frozen=True)
-class AgentProtocol:
-    """The prompt contexts of the exchanges core itself starts: corrections and resumes."""
+class UnknownRoleError(ValueError):
+    """A per-run setting names a role the search does not declare."""
 
-    correction: Callable[[str, tuple[ReplyError, ...]], Value]
-    resume: Callable[[ResumeFacts], Value]
-    wait_unrecorded: Callable[[str], Value]
+    def __init__(self, names: list[str], declared: list[str]) -> None:
+        """Name the unknown roles and the declared ones."""
+        super().__init__(
+            f"unknown role(s) {', '.join(names)}; the search declares {', '.join(declared)}"
+        )
+
+
+def with_models(roles: tuple[Role, ...], models: Mapping[str, str]) -> tuple[Role, ...]:
+    """The roles with the models an operator chose; an unknown role name is an error."""
+    declared = {role.name for role in roles}
+    unknown = sorted(models.keys() - declared)
+    if unknown:
+        raise UnknownRoleError(unknown, sorted(declared))
+    return tuple(
+        role.model_copy(update={"model": models[role.name]}) if role.name in models else role
+        for role in roles
+    )
 
 
 def reply_errors(error: ValidationError) -> tuple[ReplyError, ...]:
