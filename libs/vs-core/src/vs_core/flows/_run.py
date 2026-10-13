@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
 
     from vs_core._ids import IdScheme
-    from vs_core._registry import OperationRegistry
+    from vs_core._registry import OperationRegistration, OperationRegistry
     from vs_core._strategy_operations import StrategyOperations
     from vs_core.types.agents import Checkpoint
     from vs_core.types.search import RunView
@@ -64,6 +64,8 @@ class Wiring:
     registry: OperationRegistry | None = None
     operations: StrategyOperations | None = None
     ids: IdScheme | None = None
+    owned: tuple[OperationRegistration, ...] = ()
+    """The operations the search registered for other libraries' owners to perform."""
     roles: Mapping[str, Role] = field(default_factory=dict)
     """The roles the search declared, by name (with the models the operator chose)."""
 

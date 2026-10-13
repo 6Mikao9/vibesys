@@ -208,7 +208,7 @@ class FlowRun[C]:
         """Build a run that has not started; ``start`` is the way in."""
         self.definition = search
         self.config = config
-        self.registry = FAKE_REGISTRY if search.operations is None else search.operations.registry()
+        self.registry = search.registry() or FAKE_REGISTRY
         """The codec of the namespace the search declared: its operations are answered through it."""
         self.driver = search.driver(config, self.registry)
         self.view = view or FakeView()
@@ -491,7 +491,7 @@ class FlowRun[C]:
     def swap(self, search: SearchDef[C]) -> None:
         """Continue the run under another definition of the search: the code changed on resume."""
         self.definition = search
-        self.registry = FAKE_REGISTRY if search.operations is None else search.operations.registry()
+        self.registry = search.registry() or FAKE_REGISTRY
         self.driver = search.driver(self.config, self.registry)
 
     # -- bookkeeping -------------------------------------------------------------------------

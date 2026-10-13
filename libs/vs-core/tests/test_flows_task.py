@@ -42,6 +42,7 @@ class Seen(core.Value):
 
     measured: tuple[str, ...]
     stage_seconds: tuple[float, ...]
+    run_id: str
 
 
 @fake_search("flows", Config, ROLES)
@@ -53,6 +54,7 @@ async def read_task(ctx: core.Flow, _config: Config) -> None:
         Seen(
             measured=task.measured,
             stage_seconds=tuple(stage.execution_budget for stage in plan.stages),
+            run_id=ctx.task.run_id,
         )
     )
 
@@ -70,6 +72,7 @@ def test_a_flow_reads_the_tasks_terms_and_builds_its_plans_from_them(
     assert seen is not None
     assert seen.measured == measured
     assert seen.stage_seconds == (7.0,) * len(measured)
+    assert seen.run_id == core.initial_state().run.run_id.root
 
 
 def test_a_run_without_task_terms_cannot_be_asked_for_them() -> None:

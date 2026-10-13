@@ -27,7 +27,10 @@ namespace owns, the lifecycle capabilities it may use, the schema of its persist
 There is no event list, no "uses" list and no state class. A search that asks agents also passes
 `roles=` (its `Role` declarations; the protocol and the reply schema table derive from them) and
 `operations=` (the namespace's operation shapes: verify, interpret, retain, render; these are not
-role data). The id scheme derives from the search name.
+role data). A search whose flows act on a system another library owns (an issue board) passes
+`owned=` (the codecs of that library's operations); `ctx.owners.perform` sends one and returns the
+typed outcome or a `Failed`, and the declaration requires the host to provide an owner for each.
+The id scheme derives from the search name.
 
 The root flow starts with the config and returns `None` or `NoWinner(reason)`. **A flow never
 finishes the run.** See "The winner" below.
@@ -70,10 +73,11 @@ outside world is an aspect.
 | `ctx.checkpoint(snapshot)` | Where a code change may resume this flow |
 | `ctx.choose(kept_or_INPUT)` | Name the current winner |
 | `ctx.publish(record)` | Make a typed record of the flow's progress visible outside |
-| `ctx.facts`, `ctx.task`, `ctx.capabilities`, `ctx.clock.now()` | The run's facts and view (journaled reads) |
+| `ctx.facts`, `ctx.task`, `ctx.capabilities`, `ctx.clock.now()` | The run's facts and view (journaled reads); `ctx.task.run_id` keeps two runs' shared writes apart |
 | `ctx.agents.session(role, ...)` | A conversation with an agent; `await session.turn(prompt, within=s)` |
 | `ctx.workspaces.open(...)` | A workspace as a resource; `keep`, `verify`, `kept` |
 | `ctx.evaluation.measure(...)` | Measure a revision; `readings`, `taken` |
+| `ctx.owners.perform(request, within=s)` | Ask an owner of an `owned=` operation (an issue board, say) |
 | `async with my_resource(ctx, ...) as r` | Acquire and always release (`@resource`) |
 
 A flow has no way to start a raw request, finish the run, shield itself, or read an arbitrary

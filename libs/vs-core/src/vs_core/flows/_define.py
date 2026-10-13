@@ -27,8 +27,8 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from vs_core._ids import IdScheme
-from vs_core._registry import ContractError
-from vs_core.types.common import StrategyId
+from vs_core._registry import ContractError, OperationRegistration, OperationRegistry
+from vs_core.types.common import OperationSchemaRef, StrategyId
 from vs_core.types.strategy import SearchDeclaration
 
 from ._defs import FlowDef
@@ -44,7 +44,6 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core._registry import OperationRegistry
     from vs_core._strategy_operations import StrategyOperations
     from vs_core.types.common import RunFacts, SchemaRef
     from vs_core.types.search import Event, RunView
@@ -68,6 +67,8 @@ class SearchDef[C]:
     operations: StrategyOperations | None = None
     roles: tuple[Role, ...] = ()
     """The agents the search asks: the only ones ``ctx.agents.session`` accepts."""
+    owned: tuple[OperationRegistration, ...] = ()
+    """Operations other libraries' owners perform for the search (``ctx.owners.perform``)."""
 
     @property
     def ids(self) -> IdScheme:
@@ -83,6 +84,12 @@ class SearchDef[C]:
         """The same search with the models an operator chose per role (a launch-time setting)."""
         return replace(self, roles=with_models(self.roles, models))
 
+    def registry(self) -> OperationRegistry | None:
+        """The codec of every operation the search names, or None when it names none."""
+        if self.operations is None:
+            return None
+        return OperationRegistry((*self.operations.registrations(), *self.owned))
+
     @property
     def declaration(self) -> SearchDeclaration:
         """What the host must provide for this search, derived from the registration."""
@@ -96,6 +103,7 @@ class SearchDef[C]:
                 ops.schema_ref(kind)
                 for kind in sorted(registered - {f"{ops.namespace}.{k}" for k in kinds})
             )
+        required = (*required, *(_schema_ref(item) for item in self.owned))
         return SearchDeclaration(
             strategy_id=StrategyId(root=self.name),
             required_operations=required,
@@ -119,13 +127,16 @@ def search[C](
     config: type[C],
     operations: StrategyOperations | None = None,
     roles: tuple[Role, ...] = (),
+    owned: tuple[OperationRegistration, ...] = (),
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """Register ``root`` as the search ``name``, run on a ``config`` model.
 
     ``roles`` are the agents the search asks; everything core needs to ask them is derived
     from the declarations. ``operations`` are the namespace's shapes for what is not a role:
     the verification, evidence and retention of workspaces and measurements, and the context
-    types of the prompts.
+    types of the prompts. ``owned`` are the operations another library's owner performs
+    for the search (an issue board, say): their codec is registered, the host must provide an
+    owner for each, and a flow asks one with ``ctx.owners.perform``.
     """
     names = [role.name for role in roles]
     if len(set(names)) != len(names):
@@ -133,7 +144,7 @@ def search[C](
         raise ContractError(("roles",), message)
 
     def register(root: Root[C]) -> SearchDef[C]:
-        return SearchDef(name, config, root, operations, roles)
+        return SearchDef(name, config, root, operations, roles, owned)
 
     return register
 
@@ -158,6 +169,7 @@ class FlowDriver[C]:
             registry,
             definition.operations,
             definition.ids,
+            definition.owned,
             {role.name: role for role in definition.roles},
         )
         root = definition.root
@@ -293,3 +305,13 @@ class FlowDriver[C]:
         decisions = run.restore(state.live, view, None)
         restarted = self._first_state(run, state.facts, state.live, decisions)
         return restarted, run, decisions
+
+
+def _schema_ref(registration: OperationRegistration) -> OperationSchemaRef:
+    descriptor = registration.descriptor
+    return OperationSchemaRef(
+        kind=descriptor.kind,
+        request_schema=descriptor.request_schema,
+        outcome_schema=descriptor.outcome_schema,
+        lifecycle=descriptor.lifecycle,
+    )

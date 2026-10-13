@@ -14,7 +14,7 @@ the way are the output of that step, in issue order. Persistence is replay (see 
 
 The files: ``_define`` is ``@search`` and the driver; ``_defs`` registers flows; ``_flow`` is
 ``Flow`` and ``Group``; ``_kit`` is the handle core's own aspects use; ``_agents``,
-``_workspaces``, ``_evaluation`` and ``_winner`` are the aspects and the ending; ``_roles`` is
+``_workspaces``, ``_evaluation``, ``_owners`` and ``_winner`` are the aspects and the ending; ``_roles`` is
 the role declaration; ``_run`` drives the coroutines; ``_sources`` is what a flow waits on;
 ``_resource`` is ``@resource``; ``_retry`` is the retry values; ``_state`` is the persisted state.
 """
@@ -25,6 +25,7 @@ from ._defs import flow
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
 from ._evaluation import Evaluation
 from ._flow import Clock, Flow, Group, RunTask
+from ._owners import Owners
 from ._resource import resource
 from ._retry import Again, GaveUp, RetryPolicy, Tries
 from ._roles import (
@@ -69,6 +70,7 @@ __all__ = [
     "Kept",
     "NoWinner",
     "NotOpened",
+    "Owners",
     "Pending",
     "RetryPolicy",
     "RevisionReply",
