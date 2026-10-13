@@ -13,6 +13,11 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from tests.support.distribution_build import (
+    BuiltWheel,
+    build_distribution,
+    copy_private_packaging_source,
+)
 
 
 @pytest.fixture
@@ -56,3 +61,16 @@ def socket_dir() -> Iterator[Path]:
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return Path(__file__).parents[1]
+
+
+@pytest.fixture(scope="session")
+def built_wheel(tmp_path_factory: pytest.TempPathFactory, repo_root: Path) -> BuiltWheel:
+    """One wheel of the current checkout, built in private scratch, for every packaging check.
+
+    A build takes tens of seconds; the checks that read it only inspect its contents. Tests
+    using it carry ``xdist_group("built_wheel")`` so one worker builds it once.
+    """
+    scratch = tmp_path_factory.mktemp("built-wheel")
+    source = copy_private_packaging_source(repo_root, scratch / "checkout")
+    build_distribution(source, scratch / "dist", artifact="wheel")
+    return BuiltWheel(source=source, wheel=next((scratch / "dist").glob("vibesys-*.whl")))

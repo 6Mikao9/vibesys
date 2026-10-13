@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 from weakref import WeakKeyDictionary
@@ -70,6 +71,14 @@ class PrivatePackagingSourceError(ValueError):
     def not_owned(cls) -> PrivatePackagingSourceError:
         """Reject a value not issued by the private-source owner."""
         return cls("must be created by copy_private_packaging_source")
+
+
+@dataclass(frozen=True)
+class BuiltWheel:
+    """A built wheel and the private source snapshot it was built from."""
+
+    source: PrivatePackagingSource
+    wheel: Path
 
 
 def copy_private_packaging_source(source_root: Path, destination: Path) -> PrivatePackagingSource:

@@ -7,6 +7,7 @@ properties. The crash tier (C2) is `test_conformance_crash.py`.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import replace
 
@@ -22,8 +23,11 @@ from vs_runtime.api.core import REQUEST_DISPATCH
 from vs_runtime.api.testing import HostOptions
 
 SUBJECT_NAMES = sorted(SUBJECTS)
+# Each example drives whole runs. A pull request draws a sample; the nightly workflow sets
+# ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
+_EXAMPLES = 12 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 3
 PURE = settings(
-    max_examples=12,
+    max_examples=_EXAMPLES,
     deadline=None,
     derandomize=True,
     database=None,

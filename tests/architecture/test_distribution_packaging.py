@@ -18,6 +18,7 @@ from packaging.requirements import Requirement
 from scripts.example_repositories import is_example_repository_path
 from tests.support import run_test_command
 from tests.support.distribution_build import (
+    BuiltWheel,
     PrivatePackagingSource,
     build_distribution,
     copy_private_packaging_source,
@@ -383,14 +384,13 @@ def test_frontend_payload_belongs_to_the_entrypoints_package() -> None:
     assert "_tui/**/*" not in package_data["vibesys"]
 
 
+@pytest.mark.xdist_group("built_wheel")
 def test_built_distribution_caps_dependencies_without_current_intel_macos_wheels(
-    tmp_path: Path,
-    distribution_source: PrivatePackagingSource,
+    built_wheel: BuiltWheel,
 ) -> None:
     """Published metadata must preserve constraints needed by Intel macOS installs."""
-    build_distribution(distribution_source, tmp_path, artifact="wheel")
-    wheel = next(tmp_path.glob("vibesys-*.whl"))
-    with zipfile.ZipFile(wheel) as archive:
+    distribution_source = built_wheel.source
+    with zipfile.ZipFile(built_wheel.wheel) as archive:
         members = set(archive.namelist())
         assert not any(Path(name).name == "agent.toml" for name in members)
         assert not any(

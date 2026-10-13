@@ -25,11 +25,6 @@ from vs_core.api import (
 
 if __name__ != "packaged_prompt_contract":
     from tests.support import run_test_command
-    from tests.support.distribution_build import (
-        PrivatePackagingSource,
-        build_distribution,
-        copy_private_packaging_source,
-    )
 
 from vibesys.constants import ComputeBackend
 from vibesys.hypothesis import (
@@ -96,9 +91,9 @@ from vs_runtime.api.testing import FakeProjectMaterializationEffects
 from vs_sandbox.api import DockerSandbox, HostResourceAccess, host_resource_for_mount
 
 if TYPE_CHECKING:
-    from vs_sandbox.api import HostResource
+    from tests.support.distribution_build import BuiltWheel, PrivatePackagingSource
 
-ROOT = Path(__file__).resolve().parents[2]
+    from vs_sandbox.api import HostResource
 
 
 @dataclass(frozen=True)
@@ -110,15 +105,14 @@ class _PackagedTree:
 
 
 @pytest.fixture(scope="module")
-def packaged_tree(tmp_path_factory: pytest.TempPathFactory) -> _PackagedTree:
-    """Build in private scratch so concurrent packaging checks share no build output."""
-    scratch = tmp_path_factory.mktemp("prompt-wheel")
-    source = copy_private_packaging_source(ROOT, scratch / "checkout")
-    build_distribution(source, scratch / "dist", artifact="wheel")
-    installed = scratch / "installed"
-    with zipfile.ZipFile(next((scratch / "dist").glob("vibesys-*.whl"))) as archive:
+def packaged_tree(
+    tmp_path_factory: pytest.TempPathFactory, built_wheel: BuiltWheel
+) -> _PackagedTree:
+    """The session's one wheel, unpacked in private scratch."""
+    installed = tmp_path_factory.mktemp("prompt-wheel") / "installed"
+    with zipfile.ZipFile(built_wheel.wheel) as archive:
         archive.extractall(installed)
-    return _PackagedTree(source=source, installed=installed)
+    return _PackagedTree(source=built_wheel.source, installed=installed)
 
 
 def assert_every_source_prompt_is_in_the_wheel(packaged_tree: _PackagedTree) -> None:
@@ -138,6 +132,7 @@ def assert_every_source_prompt_is_in_the_wheel(packaged_tree: _PackagedTree) -> 
     assert not missing, f"Prompts missing from wheel: {missing}"
 
 
+@pytest.mark.xdist_group("built_wheel")
 def test_every_packaged_prompt_renders_without_checkout_fallback(
     packaged_tree: _PackagedTree,
 ) -> None:
