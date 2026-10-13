@@ -32,5 +32,5 @@ jobs:
       - name: Run slow crash sweep tests
         run: uv run pytest -m slow -n auto --no-cov
 
-      - name: Crash the conformance suite at every commit
-        run: uv run pytest tests/composition/_loop/test_conformance_crash.py --crash-points=all -n auto --no-cov
+      - name: Crash the skeleton run at every point, stop it at every request
+        run: uv run pytest tests/system --crash-points=all -n auto --no-cov
