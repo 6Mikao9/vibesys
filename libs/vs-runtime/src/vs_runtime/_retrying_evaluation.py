@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from vs_core.api import MAX_SUBMISSIONS_PER_MEASUREMENT, MeasurementFailure
+from vs_core.api import MAX_SUBMISSIONS_PER_MEASUREMENT, ContractValidationError, MeasurementFailure
 from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
@@ -59,10 +59,9 @@ class EvaluationRetries(BaseModel):
     def ambiguity_is_not_retried_harder(self) -> EvaluationRetries:
         """Reject retrying an ambiguous failure more than a proven machinery failure."""
         if self.ambiguous_attempts > self.infrastructure_attempts:
-            message = "ambiguous_attempts must not exceed infrastructure_attempts"
-            raise ValueError(
-                message
-            )  # lint-waiver: LW-940001 [TRY003]; a validator must raise ValueError with the offending field named.
+            raise ContractValidationError(
+                "ambiguous_attempts", "must not exceed infrastructure_attempts"
+            )
         return self
 
     def allows_another(self, failure: MeasurementFailure | None, *, tries: int) -> bool:
