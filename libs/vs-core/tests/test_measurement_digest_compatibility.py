@@ -1,6 +1,7 @@
 """A run stored before stages could require outputs still matches its digests when resumed.
 
-The digests below were computed by the code on main before ``required_outputs`` existed. A
+The digests below were computed by the code on main before ``required_outputs`` existed, except
+the plan's and the request's, which also drop ``deadline_at`` (a plan states no deadline). A
 stage that requires nothing must serialize byte-identically to that code, or every stored
 intent, receipt, submission budget key and recipe digest stops matching and a run started
 earlier cannot resume.
@@ -40,11 +41,13 @@ def test_stages_that_require_nothing_keep_the_digests_stored_by_main() -> None:
     decision = core.Measure(decision_id=core.DecisionId(root="d"), scope=scope, plan=plan)
     request = core.MeasurementRequested(scope=scope, plan=plan)
     assert digest(recipe) == "a5af68801ca8c2ec7dae9e831874844b8c3be0611aaf0bc20083f1e2a5366564"
-    assert digest(plan) == "a5e18155702d93b588379a327986f35304e3a7fb337c8d476e5f020ecfbb5260"
+    assert digest(plan) == "beb7e2685085d18839c235f03878bda736220b69d38de7f92a6e613a2f236d57"
     assert digest(identity) == "90a714606a5a0ab0984d11502d70b1d75616bae4d5fd4e4f9b54ec8d50d8604f"
     assert digest(identity)[:24] == "90a714606a5a0ab0984d1150"  # the submission budget key
-    assert digest(request) == "8604c1ab61451ba3fd312fdd7419c89d9c4b3cec5d0eeab6d2203479c94fb9ce"
-    assert digest(decision) == "23ee8b64fece1477f051306e0a3444efcdd1dd1224812fe137f94e86da00f1ac"
+    assert digest(request) == "748b5f5349a1cee91684d3b117b685d6569685758153861c500f1facbfbf494d"
+    # A decision's own digest is not pinned: decisions no longer carry deadlines or
+    # dependencies, so envelopes stored by main are refused rather than resumed (version 4).
+    assert "required_outputs" not in decision.model_dump_json()
 
 
 @given(

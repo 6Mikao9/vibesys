@@ -26,7 +26,7 @@ from vs_agent.contracts import (
     SteerableAgentClient,
     SteerOutcome,
 )
-from vs_agent.runner import describe_validation_error
+from vs_agent.runner import schema_error
 from vs_agent.sessions import AgentTurnExecutor
 from vs_faults.api import AgentFault, Boundary, FaultPlan, ReplyGenerator, prompt_vocabulary
 
@@ -62,7 +62,7 @@ def _validate(payload: object, response_cls: type[T]) -> T:
     try:
         return response_cls.model_validate(payload)
     except ValidationError as error:
-        raise AgentOutputSchemaError(describe_validation_error(error)) from error
+        raise schema_error(error) from error
 
 
 class DurableAgentClient(AgentClientProtocol, AgentTurnExecutor, Protocol):

@@ -98,6 +98,7 @@ from vs_core.api import (
     StageBudget,
     SuspensionRefusal,
     Transition,
+    Within,
     suspension_refusal,
 )
 from vs_evaluation.api import (
@@ -543,13 +544,14 @@ class AgentEvaluationBridge:
                 # same answer, not a second call.
                 return self._answer(shell, scoped, charged), self._acknowledger(owed)
             now = clock.now()
-            # Intent first: if the host dies after the charge commits, the entry names it.
+            # RequestRecord first: if the host dies after the charge commits, the entry names it.
             owed = OwedSubmission(key=key, call_id=f"agent:{uuid.uuid4().hex}", submitted_at=now)
             self._owed.record(owed)
             try:
                 event = AgentMeasurementRequested(
                     scope=scope,
                     plan=self._policy.plan(revision_ref(revision), now_at=now),
+                    within=Within(limit=self._policy.measurement.budget()),
                     call_id=owed.call_id,
                 )
                 transition = self._admit(shell, event, now)

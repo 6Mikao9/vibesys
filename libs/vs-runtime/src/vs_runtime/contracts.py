@@ -25,7 +25,7 @@ from vs_evaluator_protocol.api import PartialMeasurement
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Strategy
+    from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Search
     from vs_core.api import RunFacts as CoreRunFacts
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
@@ -697,13 +697,14 @@ class CoreOperation:
 
 @dataclass(frozen=True, slots=True)
 class CorePlan:
-    """What a policy resolves for one run: the pure strategy and the facts it starts from.
+    """What a policy resolves for one run: the pure search, its config and the facts it starts from.
 
     ``deadline_seconds`` is the run's budget, counted from the moment the run first
     starts; the host places it on the run clock's timeline.
     """
 
-    strategy: Strategy[Any]
+    search: Search[Any, Any]
+    config: object
     reply_schemas: Mapping[SchemaRef, type[BaseModel]]
     facts: CoreRunFacts
     limits: Limits

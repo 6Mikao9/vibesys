@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, SkipValidation
 from vs_core.api import (
     AdoptRevision,
     AttemptsEvent,
-    BlockIntent,
+    BlockRequest,
     CancelOwnedJob,
     CancelOwnedResource,
     CancelTurn,
@@ -49,6 +49,7 @@ from vs_core.api import (
     SnapshotAndRetain,
     SnapshotAndRetainRun,
     SubmitMeasurement,
+    Until,
     VerifyAdoption,
 )
 from vs_runtime._receipt_store import Settled, Transient
@@ -93,6 +94,13 @@ class ExecutionContext(BaseModel):
     fence: HostFence
     now_at: float = Field(ge=0, allow_inf_nan=False)
     payload_digest: str = Field(min_length=1)
+    until: Until
+    """When core ends the request: the run-clock time, and the watches that end it sooner.
+
+    An executor may use it to bound its own work. It need not enforce it: the loop cancels
+    a request that is still running once the time passes or a watch fires, and core
+    reports the request as ``Failed``.
+    """
     lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
 
 
@@ -207,7 +215,7 @@ class SemanticEvents(Protocol):
     """Committed diagnostic publication, deduplicated by canonical request ID."""
 
     async def execute(
-        self, request: BlockIntent, context: ExecutionContext
+        self, request: BlockRequest, context: ExecutionContext
     ) -> ExecutionOutcome: ...
 
 
@@ -236,7 +244,7 @@ REQUEST_DISPATCH: Mapping[type[RequestBase], ExecutorRole] = MappingProxyType(
         ExecuteRegisteredOperation: ExecutorRole.OPERATIONS,
         InspectRequest: ExecutorRole.OPERATIONS,
         CancelOwnedResource: ExecutorRole.OPERATIONS,
-        BlockIntent: ExecutorRole.SEMANTIC_EVENTS,
+        BlockRequest: ExecutorRole.SEMANTIC_EVENTS,
     }
 )
 
@@ -333,7 +341,7 @@ class RequestExecutors:
         """Typed refusal when the request's role has no bound translator, else None.
 
         The shell asks before it commits dispatch authorization, so an unbound
-        role never leaves a DISPATCHED intent behind.
+        role never leaves a DISPATCHED record behind.
         """
         role = self.role_of(request)
         if not isinstance(getattr(self, role.value), RefusingRequestExecution):
@@ -368,6 +376,6 @@ class RequestExecutors:
             case ExecutorRole.OPERATIONS:
                 return await self.operations.execute(cast("OperationRoleRequest", request), context)
             case ExecutorRole.SEMANTIC_EVENTS:
-                return await self.semantic_events.execute(cast("BlockIntent", request), context)
+                return await self.semantic_events.execute(cast("BlockRequest", request), context)
             case _:
                 assert_never(role)

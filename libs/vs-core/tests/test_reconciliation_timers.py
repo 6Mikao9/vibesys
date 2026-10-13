@@ -1,4 +1,4 @@
-"""New cleanup intents retain bounded future timers after the run expires."""
+"""New cleanup records retain bounded future timers after the run expires."""
 
 from hypothesis import example, given
 from hypothesis import strategies as st
@@ -25,9 +25,9 @@ def cleanup_evaluation(
     request = core.CancelOwnedJob(
         scope=owner.scope,
         resource_id=event.resource_id,
-        deadline_at=context.run.now_at + context.run.limits.cancellation_bound,
     )
-    return core.AreaChange(state=state, requests=(request,))
+    bound = context.run.limits.cancellation_bound
+    return core.AreaChange(state=state, requests=(core.within(request, bound),))
 
 
 @given(
@@ -65,13 +65,11 @@ def test_cleanup_registration_never_creates_past_timers(
     event = core.JobTerminationRequested(resource_id=core.ResourceId(root="job"), cause="deadline")
     result = core.step(state, event, reducers=core.CoreReducers(evaluation=cleanup_evaluation))
     assert len(result.requests) == 1
-    request = result.requests[0]
-    intent = result.state.intents.intents[0]
-    assert request.deadline_at == now + bound
-    assert intent.reconcile_deadline_at >= now
+    record = result.state.records.records[0]
+    assert record.until.at >= now
     if run_deadline <= now:
-        assert intent.reconcile_deadline_at == request.deadline_at
+        assert record.until.at == now + bound
     else:
-        assert intent.reconcile_deadline_at == min(request.deadline_at, run_deadline)
+        assert record.until.at == min(now + bound, run_deadline)
     assert core.CoreState.model_validate_json(result.state.model_dump_json()) == result.state
     assert state.model_dump_json() == before

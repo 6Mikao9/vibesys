@@ -14,6 +14,7 @@ from vs_core.api import (
     Capabilities,
     ContractError,
     EventId,
+    EventKind,
     EvidenceAcceptanceReceipt,
     EvidenceId,
     EvidenceKey,
@@ -34,8 +35,9 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
     SchemaRef,
-    StrategyDeclaration,
+    SearchDeclaration,
     StrategyId,
+    Until,
     Value,
     validate_startup,
 )
@@ -208,7 +210,10 @@ class _Retain(OperationRequest):
 
 def _context() -> ExecutionContext:
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1), now_at=1.0, payload_digest="d"
+        fence=HostFence(host_id=HostId(root="host"), epoch=1),
+        now_at=1.0,
+        payload_digest="d",
+        until=Until(at=100.0),
     )
 
 
@@ -329,7 +334,6 @@ def _inspect(resource: ResourceId) -> InspectOwnedJob:
         request_id=RequestId(root="inspect"),
         scope=SCOPE,
         admission_id=ADMISSION,
-        deadline_at=100.0,
         resource_id=resource,
     )
 
@@ -349,6 +353,7 @@ def _eval_context(request: BaseModel) -> ExecutionContext:
         now_at=5.0,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
         lease=_Lease(),
+        until=Until(at=100.0),
     )
 
 
@@ -521,11 +526,12 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         ),
     }
     interpret, retain = (r.descriptor for r in registrations.values())
-    declaration = StrategyDeclaration(
+    declaration = SearchDeclaration(
         strategy_id=StrategyId(root="s"),
         state_schema=SchemaRef(name="state", version=1),
         required_operations=(_schema(interpret),),
         optional_operations=(_schema(retain),),
+        handles=frozenset({EventKind.FAILED, EventKind.STOP_REQUESTED}),
     )
     ownerless = build_operation_catalog(registrations, {})
     with pytest.raises(ContractError, match=r"test\.interpret"):

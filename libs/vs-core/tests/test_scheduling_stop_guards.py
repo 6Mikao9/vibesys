@@ -1,4 +1,4 @@
-"""Committed Stop proof properties through the public, reloadable kernel."""
+"""Committed Finish proof properties through the public, reloadable kernel."""
 
 from __future__ import annotations
 
@@ -93,8 +93,8 @@ def _occupied_state(held: int, queued: int) -> core.CoreState:
     )
 
 
-def _stop(state: core.CoreState, mode: Literal["drain", "cancel"], identity: str) -> core.Stop:
-    return core.Stop(
+def _stop(state: core.CoreState, mode: Literal["drain", "cancel"], identity: str) -> core.Finish:
+    return core.Finish(
         decision_id=core.DecisionId(root=identity),
         scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
         mode=mode,
@@ -102,7 +102,7 @@ def _stop(state: core.CoreState, mode: Literal["drain", "cancel"], identity: str
     )
 
 
-def _receipt(stop: core.Stop, proof: str = "accepted") -> core.DecisionReceipt:
+def _receipt(stop: core.Finish, proof: str = "accepted") -> core.DecisionReceipt:
     decision = stop
     receipt_id = stop.decision_id
     feedback_id = stop.decision_id
@@ -124,7 +124,7 @@ def _receipt(stop: core.Stop, proof: str = "accepted") -> core.DecisionReceipt:
             decision_id=feedback_id,
             code=core.RejectionCode.CLOSED_SCOPE,
             path=("run",),
-            detail="Stop did not commit",
+            detail="Finish did not commit",
         )
     return core.DecisionReceipt(
         decision_id=receipt_id,
@@ -136,7 +136,7 @@ def _receipt(stop: core.Stop, proof: str = "accepted") -> core.DecisionReceipt:
 
 def _closing(
     state: core.CoreState,
-    stop: core.Stop,
+    stop: core.Finish,
     receipts: tuple[core.DecisionReceipt, ...],
     status: core.RunStatus = core.RunStatus.CLOSING,
 ) -> core.CoreState:
@@ -282,9 +282,9 @@ def test_rejected_stop_cannot_block_first_valid_cancel(held: int, queued: int) -
 def test_malformed_first_stop_denies_cancellation_authority(
     proof: str, held: int, queued: int
 ) -> None:
-    """The shared proof selects the first accepted Stop and never skips a malformed one.
+    """The shared proof selects the first accepted Finish and never skips a malformed one.
 
-    A later valid Stop must not inherit authority from a corrupted first commitment.
+    A later valid Finish must not inherit authority from a corrupted first commitment.
     """
     state = _occupied_state(held, queued)
     invalid = _stop(state, "drain", "invalid")

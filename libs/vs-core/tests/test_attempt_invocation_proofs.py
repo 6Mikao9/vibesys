@@ -25,8 +25,6 @@ from vs_core.api import (
     DecisionReceipt,
     DispatchTurn,
     EventId,
-    Intent,
-    IntentPhase,
     InterruptClaim,
     Invocation,
     InvocationChargeRequested,
@@ -41,6 +39,8 @@ from vs_core.api import (
     Rejected,
     RejectionCode,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     RequestTurn,
     ResourceId,
     RoleId,
@@ -53,6 +53,7 @@ from vs_core.api import (
     SessionView,
     SnapshotAndRetain,
     TurnSpec,
+    Until,
     WorkspaceMode,
     WorkspacePlan,
     advance_attempt,
@@ -88,7 +89,6 @@ def invocation_fixture(
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=1000,
         charge_class="paid",
     )
     request = DispatchTurn(
@@ -96,7 +96,6 @@ def invocation_fixture(
         scope=scope,
         admission_id=episode,
         decision_id=DecisionId(root="request-turn"),
-        deadline_at=1000,
         turn=turn,
     )
     assert request.request_id is not None
@@ -120,7 +119,12 @@ def invocation_fixture(
         )
     )
     invocation = Invocation(
-        invocation=ref, scope=scope, turn=turn, phase=phase, observation=observed
+        until=Until(at=100.0),
+        invocation=ref,
+        scope=scope,
+        turn=turn,
+        phase=phase,
+        observation=observed,
     )
     owner = AttemptView(
         attempt_id=scope.owner,
@@ -139,14 +143,14 @@ def invocation_fixture(
         invocation=ref.invocation_id,
         resource_id=ResourceId(root="conversation"),
     )
-    intent = Intent(
+    record = RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest="turn",
         lifecycle=LifecycleClass.SESSION_TURN,
-        phase=IntentPhase.COMPLETED,
+        phase=RequestPhase.COMPLETED,
         observation=observed if correlation == "exact" else None,
-        reconcile_deadline_at=1000,
+        until=Until(at=1000),
     )
     decision = RequestTurn(decision_id=request.decision_id, scope=scope, turn=turn)
     if receipt_kind == "mismatched":
@@ -185,7 +189,7 @@ def invocation_fixture(
     )
     if receipt_kind == "foreign-request-decision":
         request = request.model_copy(update={"decision_id": DecisionId(root="foreign")})
-        intent = intent.model_copy(update={"request": request})
+        record = record.model_copy(update={"request": request})
     elif receipt_kind == "missing-request-membership":
         receipt = receipt.model_copy(update={"request_ids": ()})
     elif receipt_kind == "foreign-session-scope":
@@ -213,8 +217,8 @@ def invocation_fixture(
                     ),
                 }
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": () if correlation == "unregistered" else (intent,)}
+            "records": state.records.model_copy(
+                update={"records": () if correlation == "unregistered" else (record,)}
             ),
             "run": state.run.model_copy(
                 update={
@@ -234,7 +238,7 @@ def context(state: CoreState) -> AttemptsContext:
         sessions=state.sessions,
         evaluation=state.evaluation,
         settlement=state.settlement,
-        intents=state.intents,
+        records=state.records,
     )
 
 
@@ -297,7 +301,10 @@ def test_checkpoint_requires_exact_current_terminal_invocation_proof(
         and observed_episode == "current"
         and correlation == "exact"
     )
-    assert any(isinstance(request, SnapshotAndRetain) for request in result.requests) == proven
+    assert (
+        any(isinstance(outbound.request, SnapshotAndRetain) for outbound in result.requests)
+        == proven
+    )
     if not proven:
         assert result.state == state.attempts
 

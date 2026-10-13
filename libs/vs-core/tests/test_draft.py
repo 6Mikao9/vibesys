@@ -9,11 +9,11 @@ from vs_core.api import (
     Access,
     Charge,
     ContinuationId,
+    CoreView,
     Draft,
     IdScheme,
     InvocationId,
     InvocationRef,
-    RunView,
     SchemaRef,
     SessionId,
     TurnChain,
@@ -37,11 +37,11 @@ class Note(Value):
     text: str
 
 
-def _view() -> RunView:
+def _view() -> CoreView:
     return project(initial_state())
 
 
-def _shape(seconds: float = 30.0) -> TurnShape:
+def _shape() -> TurnShape:
     scope = run_scope(_view())
     return TurnShape(
         role="judge",
@@ -49,7 +49,6 @@ def _shape(seconds: float = 30.0) -> TurnShape:
         workspace=scope,
         access=Access.READ_ONLY,
         output_schema=SCHEMA,
-        seconds=seconds,
     )
 
 
@@ -64,7 +63,7 @@ def test_a_turn_names_its_predecessor_and_a_fresh_session_identity(
     charge: Charge, serial: int
 ) -> None:
     chain = TurnChain[Note](charge=charge, serial=serial, invocation=_ref("before"))
-    decision = request_turn(_view(), SCHEME, _shape(), chain, run_scope(_view()))
+    decision = request_turn(SCHEME, _shape(), chain, run_scope(_view()))
     turn = decision.turn
     assert turn.predecessor == _ref("before")
     assert turn.charge_class == charge
@@ -82,18 +81,11 @@ def test_a_resume_names_its_continuation_and_the_invocation_core_authorized() ->
         resume_as=InvocationId(root="authorized"),
         continuation=ContinuationId(root="cont"),
     )
-    decision = request_turn(_view(), SCHEME, _shape(), chain, run_scope(_view()))
+    decision = request_turn(SCHEME, _shape(), chain, run_scope(_view()))
     assert decision.turn.predecessor is None
     assert decision.turn.continuation_id == ContinuationId(root="cont")
     assert decision.turn.invocation_id == InvocationId(root="authorized")
     assert invocation_for(SCHEME, "judge", "x", chain) == InvocationId(root="authorized")
-
-
-@given(seconds=st.floats(1, 1e4))
-def test_a_turn_is_due_its_own_budget_after_now(seconds: float) -> None:
-    view = _view()
-    decision = request_turn(view, SCHEME, _shape(seconds), TurnChain[Note](), run_scope(view))
-    assert decision.turn.deadline_at == view.run.now_at + seconds
 
 
 def test_a_session_is_always_declared_reusable() -> None:

@@ -55,7 +55,7 @@ class Cluster:
         # The submission stays open until its job ends; the job's own events close it.
         return tuple(
             request
-            for request in core.pending_requests(self.state.intents)
+            for request in core.pending_requests(self.state.records)
             if not isinstance(request, core.SubmitMeasurement)
         )
 
@@ -113,7 +113,19 @@ class Cluster:
 
     def tick(self) -> None:
         due = core.project(self.state).next_observe_at
-        self.now = max(self.state.run.now_at + 1.0, due if due is not None else 0.0)
+        target = max(self.state.run.now_at + 1.0, due if due is not None else 0.0)
+        # The far side answers within each request's limit: time never jumps past the limit of
+        # a request it has not answered yet (that would end the request, which is another test).
+        limits = [
+            record.until.at
+            for record in self.state.records.records
+            if record.request in self.pending()
+        ]
+        self.now = max(self.state.run.now_at, min([target, *(at - 1.0 for at in limits)]))
+        if limits and self.now >= min(limits) - 1.0:
+            # Core's own cleanup limits are short; answers carry times that may already have
+            # brought the clock to the edge of one. Waiting on the far side then changes nothing.
+            return
         self.feed(core.ClockAdvanced(now_at=self.now))
 
 
@@ -124,10 +136,13 @@ def started(running_polls: int, ending: core.ObservationStatus) -> Cluster:
     submitted = core.step(
         state,
         core.DecisionSubmitted(
-            decision=core.Measure(
-                decision_id=core.DecisionId(root="measure"),
-                scope=scope,
-                plan=plan(purpose="local-validation", candidate=state.run.facts.baseline),
+            decision=core.Wait(
+                request=core.Measure(
+                    decision_id=core.DecisionId(root="measure"),
+                    scope=scope,
+                    plan=plan(purpose="local-validation", candidate=state.run.facts.baseline),
+                ),
+                until=core.Within(limit=100.0),
             ),
             expected_revision=state.revision,
         ),

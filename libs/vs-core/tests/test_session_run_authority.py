@@ -45,7 +45,7 @@ def profiler_yield() -> tuple[core.CoreState, core.TurnObserved]:
         feedback=core.Accepted(decision_id=decision_id),
         request_ids=(request_id,),
     )
-    intents = tuple(
+    records = tuple(
         row.model_copy(
             update={
                 "request": request,
@@ -54,13 +54,13 @@ def profiler_yield() -> tuple[core.CoreState, core.TurnObserved]:
                         request.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
                     ).encode()
                 ).hexdigest(),
-                "phase": core.IntentPhase.COMPLETED,
+                "phase": core.RequestPhase.COMPLETED,
                 "observation": observation,
             }
         )
         if row.request_id == request.request_id
         else row
-        for row in dispatched.state.intents.intents
+        for row in dispatched.state.records.records
     )
     state = dispatched.state.model_copy(
         update={
@@ -70,7 +70,7 @@ def profiler_yield() -> tuple[core.CoreState, core.TurnObserved]:
                     "limits": dispatched.state.run.limits.model_copy(update={"max_turns": 10}),
                 }
             ),
-            "intents": dispatched.state.intents.model_copy(update={"intents": intents}),
+            "records": dispatched.state.records.model_copy(update={"records": records}),
         }
     )
     jobs = fixture(run_owned=True)[0].evaluation.jobs
@@ -167,8 +167,11 @@ def test_profiler_yield_checkpoint_authorization_and_one_resumed_dispatch() -> N
         }
     )
     proposal = core.DecisionSubmitted(
-        decision=core.RequestTurn(
-            decision_id=core.DecisionId(root="profiler-next"), scope=scope(), turn=spec
+        decision=core.Wait(
+            request=core.RequestTurn(
+                decision_id=core.DecisionId(root="profiler-next"), scope=scope(), turn=spec
+            ),
+            until=core.Within(limit=100.0),
         ),
         expected_revision=settled_state.revision,
     )
@@ -273,7 +276,7 @@ def test_pending_suspension_replays_once_with_reordered_duplicate_and_stale_even
 def run_drain_state() -> tuple[core.CoreState, core.RunSessionsDrainRequested]:
     state, _ = profiler_yield()
     result = core.RunResultProposal(outcome="cancelled", reason="stop")
-    decision = core.Stop(
+    decision = core.Finish(
         decision_id=core.DecisionId(root="first-stop"), scope=scope(), mode="cancel", result=result
     )
     receipt = core.DecisionReceipt(

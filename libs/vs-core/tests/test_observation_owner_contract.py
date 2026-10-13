@@ -46,23 +46,22 @@ def test_registered_root_outcome_rejects_another_owner_descriptor(schema_field: 
     request = core.ExecuteRegisteredOperation(
         request_id=request_id,
         scope=scope,
-        deadline_at=100.0,
         operation_id=core.OperationId(root="read"),
         operation=owner.encode(ReadRequest()),
         retry_limit=0,
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest="read-payload",
         lifecycle=core.LifecycleClass.QUERY,
-        phase=core.IntentPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.DISPATCHED,
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={
             "registry": owner.descriptors,
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     event = foreign.validate_event(

@@ -102,3 +102,14 @@ def test_two_namespaces_never_share_a_kind() -> None:
 def test_a_kind_outside_the_namespace_is_refused() -> None:
     with pytest.raises(OperationKindError, match=re.escape("demo.render_role_artifacts")):
         StrategyOperations("demo", OtherRender, DemoVerify, DemoInterpret, DemoRetain)
+
+
+def test_a_strategy_without_retention_registers_no_retain_operation() -> None:
+    operations = StrategyOperations("demo", DemoRender, DemoVerify, DemoInterpret)
+    kinds = [registration.descriptor.kind for registration in operations.registrations()]
+    assert kinds == [
+        "demo.render_role_artifacts",
+        "demo.verify_parent_revision",
+        "demo.interpret_evidence",
+    ]
+    assert operations.registration_of("retain_verified_revision") is None

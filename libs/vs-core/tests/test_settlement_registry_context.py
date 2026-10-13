@@ -33,7 +33,7 @@ def settlement_context(state: core.CoreState) -> core.SettlementContext:
         attempts=state.attempts,
         sessions=state.sessions,
         evaluation=state.evaluation,
-        intents=state.intents,
+        records=state.records,
     )
 
 
@@ -68,7 +68,7 @@ def test_registry_is_required_even_when_the_run_declares_no_operations() -> None
     request_version=st.integers(min_value=1, max_value=1000),
     outcome_version=st.integers(min_value=1, max_value=1000),
 )
-def test_declared_descriptor_survives_settlement_wake_and_envelope_reload(
+def test_declared_descriptor_survives_settlement_event_and_envelope_reload(
     *, declared: bool, request_version: int, outcome_version: int
 ) -> None:
     descriptor = core.OperationDescriptor(
@@ -97,8 +97,9 @@ def test_declared_descriptor_survives_settlement_wake_and_envelope_reload(
     )
     assert restored.core.registry == registry
     assert settlement_context(restored.core).registry == registry
-    signal = core.SettlementDependencyResolved(
-        decision_id=core.DecisionId(root="prerequisite"), status=core.CompletionStatus.SUCCEEDED
+    signal = core.OwnershipSettled(
+        attempt=core.AttemptRef(attempt_id=core.AttemptId(root="attempt"), generation=0),
+        released=False,
     )
     result = core.trace_step(
         restored.core,
@@ -124,8 +125,9 @@ def test_declared_descriptor_survives_settlement_wake_and_envelope_reload(
 def test_public_step_validates_registry_before_entering_settlement(invalid_entry: str) -> None:
     # model_copy intentionally bypasses ingress, so step must construct its typed context.
     state = core.initial_state().model_copy(update={"registry": (invalid_entry,)})
-    signal = core.SettlementDependencyResolved(
-        decision_id=core.DecisionId(root="prerequisite"), status=core.CompletionStatus.SUCCEEDED
+    signal = core.OwnershipSettled(
+        attempt=core.AttemptRef(attempt_id=core.AttemptId(root="attempt"), generation=0),
+        released=False,
     )
     with pytest.raises(ValidationError) as error:
         core.step(state, signal)

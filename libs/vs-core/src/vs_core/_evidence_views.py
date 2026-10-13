@@ -22,7 +22,8 @@ if TYPE_CHECKING:
         Scope,
     )
     from vs_core.types.evaluation import EvidenceRef, MeasurementResult
-    from vs_core.types.kernel import RunView
+    from vs_core.types.kernel import CoreView
+    from vs_core.types.search import RunView
 
 
 def trusted_keys(
@@ -47,7 +48,9 @@ def trusted_keys(
     )
 
 
-def ledger_refs(view: RunView, keys: tuple[EvidenceKey, ...]) -> tuple[EvidenceRef, ...] | None:
+def ledger_refs(
+    view: CoreView | RunView, keys: tuple[EvidenceKey, ...]
+) -> tuple[EvidenceRef, ...] | None:
     """The ledger records for ``keys`` in order, or None when core holds any of them not."""
     ledger = {item.key: item for item in view.measurements}
     refs = tuple(ledger.get(key) for key in keys)
@@ -80,7 +83,7 @@ type TurnCandidate = TurnCandidatePending | TurnCandidateRetained | TurnCandidat
 
 
 def turn_candidate(
-    view: RunView,
+    view: CoreView,
     attempt: AttemptId,
     invocation: InvocationRef,
     *,
@@ -102,7 +105,7 @@ def turn_candidate(
 
 
 def resolve_turn_candidate(
-    view: RunView,
+    view: CoreView,
     attempt: AttemptId,
     invocation: InvocationRef,
 ) -> TurnCandidate:

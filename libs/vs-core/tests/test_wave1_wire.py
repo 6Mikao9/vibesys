@@ -47,6 +47,8 @@ from vs_core.api import (
     StrategyState,
     TargetObservation,
     Value,
+    Wait,
+    Within,
     initial_state,
     step,
 )
@@ -106,9 +108,10 @@ def envelope() -> RunEnvelope[StrategyState]:
 def test_envelope_versions_are_rejected_before_decoding_new_contracts(version: int) -> None:
     codec = OperationRegistry()
     # Deliberately absent core proves the version barrier precedes nested decode.
-    with pytest.raises(ContractError, match=r"schema_version.*migration"):
+    named = rf"schema_version.*envelope version {version} is not supported"
+    with pytest.raises(ContractError, match=named):
         codec.decode_envelope(RunEnvelope[StrategyState], json.dumps({"schema_version": version}))
-    with pytest.raises(ContractError, match=r"schema_version.*migration"):
+    with pytest.raises(ContractError, match=named):
         codec.encode_envelope(envelope().model_copy(update={"schema_version": version}))
 
 
@@ -130,7 +133,7 @@ def test_previous_envelope_requires_selected_migration() -> None:
     codec = OperationRegistry()
     current = envelope()
     previous = current.model_copy(update={"schema_version": 1}).model_dump_json()
-    with pytest.raises(ContractError, match="migration"):
+    with pytest.raises(ContractError, match="envelope version 1 is not supported"):
         codec.decode_envelope(RunEnvelope[StrategyState], previous)
     loaded = codec.migrate_envelope(
         RunEnvelope[StrategyState],
@@ -160,7 +163,6 @@ def test_scope_reopen_normalization_is_bound_to_the_registered_payload(authority
         decision_id=DecisionId(root="reopen"),
         scope=Scope(owner=state.run.run_id, generation=0),
         request=ReopenRequest(target=target),
-        deadline_at=100.0,
     )
     validated = codec.validate_decision(decision)
     assert decision.registered_scope_reopen is None
@@ -334,7 +336,6 @@ def test_copied_scope_reopen_cannot_reuse_a_changed_registered_proof(change: str
             decision_id=DecisionId(root="reopen"),
             scope=Scope(owner=state.run.run_id, generation=0),
             request=ReopenRequest(target=target),
-            deadline_at=100.0,
         )
     )
     changed = target.model_copy(update={"park_authority": RequestId(root="new-park")})
@@ -345,7 +346,10 @@ def test_copied_scope_reopen_cannot_reuse_a_changed_registered_proof(change: str
     )
     result = step(
         state,
-        DecisionSubmitted(decision=proposal.model_copy(update=fields), expected_revision=0),
+        DecisionSubmitted(
+            decision=Wait(request=proposal.model_copy(update=fields), until=Within(limit=100.0)),
+            expected_revision=0,
+        ),
     )
     assert result.requests == ()
     assert isinstance(result.events[0], Rejected)

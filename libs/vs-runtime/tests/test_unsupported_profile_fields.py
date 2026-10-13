@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_core.api import HostFence, HostId, ObservationStatus
+from vs_core.api import HostFence, HostId, ObservationStatus, Until
 from vs_evaluation.api import EvaluationStep, ProfileField, SemanticEvaluationStage
 from vs_project.api import Project
 from vs_runtime.api.core import ExecutionContext, MeasurementRequests, ReceiptStore
@@ -121,6 +121,7 @@ async def test_a_request_the_capture_cannot_satisfy_resolves_as_a_rejection_nami
                 now_at=5.0,
                 payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
                 lease=_Lease(),
+                until=Until(at=100.0),
             )
 
             result = await requests.execute(request, context)

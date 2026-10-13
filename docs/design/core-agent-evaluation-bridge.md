@@ -90,7 +90,7 @@ cannot recur.
 
 - Cancel and stop: the run leaves RUNNING, new calls get `RUN_STOPPING` (the tool tells
   the agent the run is stopping), and admitted jobs drain through the existing cancel
-  intents.
+  records.
 - Deadline: `DeadlineReached` resumes the continuation once with a timeout outcome;
   later calls get `RUN_STOPPING` or `NOT_ALLOWED` by plan deadline.
 - Rejection: returned in the tool reply, nothing charged.

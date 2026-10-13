@@ -42,7 +42,7 @@ from .proof_facts import receipt_facts, required_facts
 )
 @given(receipt_facts())
 def test_accepted_receipt_requires_exact_facts(
-    variant: str, denial: Missing | Mismatch | None, facts: tuple[core.Stop, core.DecisionReceipt]
+    variant: str, denial: Missing | Mismatch | None, facts: tuple[core.Finish, core.DecisionReceipt]
 ) -> None:
     canonical, receipt = facts
     identity = canonical.decision_id
@@ -90,7 +90,7 @@ def test_mismatch_rejects_raw_and_wrong_enums(value: object) -> None:
 
 @given(receipt_facts())
 def test_nonempty_required_preserves_every_requirement(
-    facts: tuple[core.Stop, core.DecisionReceipt],
+    facts: tuple[core.Finish, core.DecisionReceipt],
 ) -> None:
     _, receipt = facts
     assert nonempty_required(()) == Missing(ProofReason.EMPTY_REQUIRED)
@@ -101,7 +101,7 @@ def test_nonempty_required_preserves_every_requirement(
 
 
 @given(receipt_facts())
-def test_receipt_failure_precedence(facts: tuple[core.Stop, core.DecisionReceipt]) -> None:
+def test_receipt_failure_precedence(facts: tuple[core.Finish, core.DecisionReceipt]) -> None:
     canonical, receipt = facts
     receipt = receipt.model_copy(
         update={
@@ -115,9 +115,12 @@ def test_receipt_failure_precedence(facts: tuple[core.Stop, core.DecisionReceipt
 
 
 def _receipt_variant(
-    variant: str, canonical: core.Stop, receipt: core.DecisionReceipt
+    variant: str, canonical: core.Finish, receipt: core.DecisionReceipt
 ) -> tuple[
-    tuple[core.DecisionReceipt, ...], core.DecisionId | None, core.Stop | None, core.DecisionReceipt
+    tuple[core.DecisionReceipt, ...],
+    core.DecisionId | None,
+    core.Finish | None,
+    core.DecisionReceipt,
 ]:
     identity = canonical.decision_id
     rows = (receipt,)
@@ -149,7 +152,7 @@ def _receipt_variant(
 
 
 def _receipt_identity_variant(
-    variant: str, canonical: core.Stop, receipt: core.DecisionReceipt
+    variant: str, canonical: core.Finish, receipt: core.DecisionReceipt
 ) -> core.DecisionReceipt:
     match variant:
         case "feedback":
@@ -214,13 +217,12 @@ class BytesRequest(core.OperationRequest):
 
 @given(receipt_facts())
 def test_canonicalization_failure_is_a_payload_verdict(
-    facts: tuple[core.Stop, core.DecisionReceipt],
+    facts: tuple[core.Finish, core.DecisionReceipt],
 ) -> None:
     ingress, receipt = facts
     canonical = core.Operation(
         decision_id=ingress.decision_id,
         scope=ingress.scope,
-        deadline_at=100.0,
         request=BytesRequest(payload=b"\xff"),
     )
     receipt = receipt.model_copy(update={"decision": canonical})

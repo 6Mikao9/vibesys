@@ -43,9 +43,19 @@ def _accepted(result: core.Transition) -> bool:
     return any(isinstance(event, core.Accepted) for event in result.events)
 
 
-def _submit(state: core.CoreState, decision: core.Decision) -> core.Transition:
+def _until_of(result: core.Transition, request: core.Request) -> float:
+    """The absolute time core stored for ``request`` when it registered it."""
+    record = next(r for r in result.state.records.records if r.request_id == request.request_id)
+    return record.until.at
+
+
+def _submit(state: core.CoreState, decision: core.Work, limit: float) -> core.Transition:
     return core.step(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=limit)),
+            expected_revision=state.revision,
+        ),
     )
 
 
@@ -53,13 +63,13 @@ def _submit(state: core.CoreState, decision: core.Decision) -> core.Transition:
 def test_a_measurement_is_issued_within_the_run_deadline(requested: float) -> None:
     state, scope = attempt_state()
     state = _bounded_run(state)
-    measurement = plan(deadline_at=min(requested, 100.0))
+    measurement = plan()
     decision = core.Measure(decision_id=core.DecisionId(root="m"), scope=scope, plan=measurement)
-    result = _submit(state, decision)
+    result = _submit(state, decision, requested)
     submitted = [r for r in result.requests if isinstance(r, core.SubmitMeasurement)]
     assert submitted
-    assert all(r.deadline_at <= RUN_DEADLINE for r in submitted)
-    assert submitted[0].deadline_at == min(measurement.deadline_at, RUN_DEADLINE)
+    assert all(_until_of(result, r) <= RUN_DEADLINE for r in submitted)
+    assert _until_of(result, submitted[0]) == min(requested, RUN_DEADLINE)
 
 
 @given(requested=REQUESTED)
@@ -78,14 +88,13 @@ def test_a_turn_is_dispatched_within_the_run_deadline(requested: float) -> None:
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=requested,
         charge_class="free",
     )
     decision = core.RequestTurn(decision_id=core.DecisionId(root="turn"), scope=scope, turn=turn)
-    result = _submit(state, decision)
+    result = _submit(state, decision, requested)
     assert _accepted(result), result.events
     assert result.requests
-    assert all(r.deadline_at <= RUN_DEADLINE for r in result.requests)
+    assert all(_until_of(result, r) <= RUN_DEADLINE for r in result.requests)
 
 
 @given(requested=REQUESTED)
@@ -117,24 +126,24 @@ def test_an_operation_is_issued_within_the_run_deadline(requested: float) -> Non
             decision_id=core.DecisionId(root="write"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
             request=Write(),
-            deadline_at=requested,
         )
     )
-    result = _submit(state, decision)
+    result = _submit(state, decision, requested)
     assert _accepted(result), result.events
     issued = [r for r in result.requests if isinstance(r, core.ExecuteRegisteredOperation)]
     assert issued
-    assert all(r.deadline_at == min(requested, RUN_DEADLINE) for r in issued)
-    stored = result.state.run.receipts[-1].decision
-    assert isinstance(stored, core.Operation)
-    assert stored.deadline_at <= RUN_DEADLINE
+    assert all(_until_of(result, r) == min(requested, RUN_DEADLINE) for r in issued)
+    stored = result.state.run.receipts[-1]
+    assert isinstance(stored.decision, core.Operation)
+    assert stored.until is not None
+    assert stored.until.at <= RUN_DEADLINE
     # The raw proposal replays against the bounded record without a payload conflict.
-    assert _submit(result.state, decision).events == ()
+    assert _submit(result.state, decision, requested).events == ()
 
 
-@given(deadline_at=st.floats(min_value=RUN_DEADLINE, max_value=500.0, allow_nan=False))
+@given(requested=st.floats(min_value=0.5, max_value=500.0, allow_nan=False))
 def test_a_request_with_no_time_left_is_refused_with_a_budget_rejection(
-    deadline_at: float,
+    requested: float,
 ) -> None:
     descriptor = core.OperationDescriptor(
         kind="test.deadline.write",
@@ -167,10 +176,9 @@ def test_a_request_with_no_time_left_is_refused_with_a_budget_rejection(
             decision_id=core.DecisionId(root="write"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
             request=Write(),
-            deadline_at=deadline_at,
         )
     )
-    result = _submit(state, decision)
+    result = _submit(state, decision, requested)
     rejected = [event for event in result.events if isinstance(event, core.Rejected)]
     assert [item.code for item in rejected] == [core.RejectionCode.BUDGET]
     assert result.requests == ()

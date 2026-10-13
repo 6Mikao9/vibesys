@@ -61,6 +61,7 @@ def turn_result(
         output_json=output_json,
         failure=failure,
         detail=observation.diagnostic[:TURN_FAILURE_DETAIL_LIMIT],
+        reply_errors=() if reply is None else reply.reply_errors,
     )
 
 

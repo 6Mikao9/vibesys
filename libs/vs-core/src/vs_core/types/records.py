@@ -19,10 +19,8 @@ from .attempts import (
     WorkspaceRequest,
 )
 from .common import (
-    CompletionStatus,
     ContractValidationError,
     Count,
-    DecisionId,
     ExecuteRegisteredOperation,
     LifecycleClass,
     Observation,
@@ -67,6 +65,7 @@ from .sessions import (
     TurnSpec,
 )
 from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
+from .until import Failed, FailureReason, Inherited, ReplyError, Until, Watch, Within
 
 
 class InspectRequest(RequestBase):
@@ -85,32 +84,17 @@ class CancelOwnedResource(RequestBase):
     target: RequestId
 
 
-class BlockIntent(RequestBase):
-    """Block intent lifecycle contract."""
+class BlockRequest(RequestBase):
+    """Fence a record that reconciliation gave up on, for the typed reason it ended."""
 
-    kind: Literal["block_intent"] = "block_intent"
+    kind: Literal["block_request"] = "block_request"
     target: RequestId
-    diagnostic: str
-
-
-class IntentBlocked(Value):
-    """Diagnostic that reconciliation blocked one intent, published once.
-
-    request_id is the BlockIntent request, target the blocked intent. Emitted when
-    the block is first prepared, never on replay, so hosts and strategies can
-    surface it without reading the intent ledger.
-    """
-
-    kind: Literal["intent_blocked"] = "intent_blocked"
-    request_id: RequestId
-    target: RequestId
-    scope: Scope
-    diagnostic: str
+    reason: FailureReason
 
 
 type RegisteredOperationRequest = ExecuteRegisteredOperation
 type ReconciliationRequest = Annotated[
-    InspectRequest | CancelOwnedResource | BlockIntent, Field(discriminator="kind")
+    InspectRequest | CancelOwnedResource | BlockRequest, Field(discriminator="kind")
 ]
 type Request = Annotated[
     WorkspaceRequest
@@ -123,8 +107,37 @@ type Request = Annotated[
 ]
 
 
-class IntentPhase(StrEnum):
-    """Intent phase lifecycle contract."""
+class Outbound(Value):
+    """A request together with how long it may take: the one way core creates a request.
+
+    ``until`` is a ``Within`` (a duration from now, plus watches) or ``Inherited`` (the
+    same ``Until`` as the decision that caused the request). Requests carry no deadline;
+    core stores the resolved ``Until`` on the ``RequestRecord`` when it registers this.
+    """
+
+    request: Request
+    until: Within | Inherited | Until
+
+
+def within(request: Request, limit: float, *watches: Watch) -> Outbound:
+    """``Outbound(request, Within(limit, watches))`` for core's own internal requests."""
+    return Outbound(request=request, until=Within(limit=limit, watches=watches))
+
+
+def inherit(request: Request) -> Outbound:
+    """``Outbound`` that ends with the decision that caused ``request``."""
+    return Outbound(request=request, until=Inherited())
+
+
+class Scheduled(Value):
+    """An ``Outbound`` whose ``until`` core has resolved to an absolute time."""
+
+    request: Request
+    until: Until
+
+
+class RequestPhase(StrEnum):
+    """RequestRecord phase lifecycle contract."""
 
     PREPARED = "prepared"
     DISPATCHED = "dispatched"
@@ -133,21 +146,21 @@ class IntentPhase(StrEnum):
     BLOCKED = "blocked"
 
 
-class Intent(OutcomeValue):
+class RequestRecord(OutcomeValue):
     """Canonical outcome ledger including immutable typed setup classification.
 
-    Intents A retains root/target setup_failure with the corresponding observation
+    Records A retains root/target setup_failure with the corresponding observation
     and checks equality on replay before forwarding SessionObserved.failure.
     UNKNOWN never supplies nonacceptance, unsupported refund or success proof.
     evaluation_result retains the exact scientific ingress facts alongside its
-    observation for same-sequence equality; Intents A forwards them unchanged.
+    observation for same-sequence equality; Records A forwards them unchanged.
     """
 
     request_id: RequestId
     request: Request
     payload_digest: str
     lifecycle: LifecycleClass
-    phase: IntentPhase
+    phase: RequestPhase
     sequence: Count | None = None
     observation: Observation | None = None
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
@@ -159,13 +172,16 @@ class Intent(OutcomeValue):
     retry_count: Count = 0
     retry_at: Seconds | None = None
     """Core time at which the request goes out again after a retryable failure, else None."""
-    reconcile_deadline_at: Seconds
+    until: Until
+    """When core ends this record if it is still open, and the watches that end it sooner."""
+    failure: Failed | None = None
+    """Why core ended it without a result (limit passed, watch fired), else None."""
 
     @property
     def retry_wait_until(self) -> float | None:
         """The core time at which a retryably failed request is sent again, else None."""
         if (
-            self.phase == IntentPhase.DISPATCHED
+            self.phase == RequestPhase.DISPATCHED
             and self.observation is not None
             and self.observation.retryable
         ):
@@ -173,7 +189,7 @@ class Intent(OutcomeValue):
         return None
 
     @model_validator(mode="after")
-    def registered_outcome(self, info: ValidationInfo) -> Intent:
+    def registered_outcome(self, info: ValidationInfo) -> RequestRecord:
         """Restore the owning subtype at the registered codec boundary."""
         if self.observation is None:
             if self.setup_failure != SetupFailureKind.UNKNOWN:
@@ -194,7 +210,7 @@ class Intent(OutcomeValue):
 class ChildObservationWatermark(Value):
     """Highest accepted observation from one child-discovery source.
 
-    The full immutable observation carries sequence and equality proof. Intents
+    The full immutable observation carries sequence and equality proof. Records
     B rejects an older sequence or conflicting facts at the same sequence before
     changing aggregate ownership, even when another source supplies that proof.
     """
@@ -211,11 +227,11 @@ class ChildObservationWatermark(Value):
 
 
 class ChildLease(Value):
-    """Discovered descendant ownership, distinct from its ancestor's intent.
+    """Discovered descendant ownership, distinct from its ancestor's record.
 
     Source requests and parent resources are unique, canonically ordered proofs.
     Conflicting scope or ancestry rejects; transfer to a typed owner is atomic.
-    Intents B maintains watermarks independently of aggregate observation.
+    Records B maintains watermarks independently of aggregate observation.
     Incomplete historical watermarks cannot authorize release or transfer;
     reconcile every source before marking the history complete.
     Retained source claims conservatively retain independent ownership: run
@@ -327,10 +343,10 @@ class RecoveryBarrier(Value):
         return self
 
 
-class IntentsState(Value):
-    """Intents state lifecycle contract."""
+class RecordsState(Value):
+    """Records state lifecycle contract."""
 
-    intents: tuple[Intent, ...] = ()
+    records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
     recovery: RecoveryBarrier = RecoveryBarrier()
 
@@ -341,16 +357,16 @@ class OperationView(Value):
     operation_id: OperationId
     scope: Scope
     schema_ref: OperationSchemaRef
-    phase: IntentPhase
+    phase: RequestPhase
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
 
 
 class RequestPrepared(Value):
-    """Canonical proposal before an executable intent acquires final payload.
+    """Canonical proposal before an executable record acquires final payload.
 
-    For registered session turns, Intents A delegates acquisition and input
+    For registered session turns, Records A delegates acquisition and input
     reservation first. Sessions A validates the accepted Operation receipt and
     normalized turn, then returns the same ExecuteRegisteredOperation identity
     with its fixed occurrence manifest. Only that final payload is registered
@@ -362,6 +378,7 @@ class RequestPrepared(Value):
 
     kind: Literal["request_prepared"] = "request_prepared"
     request: Request
+    until: Until
     lifecycle: LifecycleClass
     normalized_turn: TurnSpec | None = None
     normalized_measurement: MeasurementIdentity | None = None
@@ -406,6 +423,8 @@ class TargetObservation(OutcomeValue):
     suspension: Continuation | None = None
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
+    reply_errors: tuple[ReplyError, ...] = ()
+    """What a rejected turn reply got wrong, field by field, for the correction that follows."""
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     operation_schema: OperationSchemaRef | None = None
     reissue: ReissueProof | None = None
@@ -476,7 +495,7 @@ class RequestObserved(OutcomeValue):
     """Root request outcome with executor-owned typed setup failure.
 
     Inspection's setup classification belongs in target.setup_failure, separately
-    from the query outcome. Intents A forwards the exact corresponding value to
+    from the query outcome. Records A forwards the exact corresponding value to
     Sessions A and preserves it in the canonical ledger for equality on replay.
     """
 
@@ -490,6 +509,7 @@ class RequestObserved(OutcomeValue):
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
+    reply_errors: tuple[ReplyError, ...] = ()
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     evidence: tuple[EvidenceRef, ...] = ()
     revision: RevisionRef | None = None
@@ -525,12 +545,14 @@ class ReconciliationDeadline(Value):
     kind: Literal["reconciliation_deadline"] = "reconciliation_deadline"
     request_id: RequestId
     now_at: Seconds
+    reason: FailureReason = FailureReason.TIMED_OUT
+    """TIMED_OUT when the record's limit passed, else the reason of the watch that fired."""
 
 
 class RetryDue(Value):
     """Internal signal: core time reached the backoff of a request the executor failed retryably.
 
-    Raised on every clock tick for each intent whose ``retry_at`` has come; the ledger sends the
+    Raised on every clock tick for each record whose ``retry_at`` has come; the ledger sends the
     request out again, unchanged. Never shell input.
     """
 
@@ -554,9 +576,9 @@ class RequestUndispatchable(Value):
 class BlockedRecordStalled(Value):
     """Internal signal: a closing run holds a blocked record that nothing can still end.
 
-    Raised by the step when it reaches quiescence with the run closing and a ``BLOCKED`` intent
+    Raised by the step when it reaches quiescence with the run closing and a ``BLOCKED`` record
     that no live cancellation or inspection addresses: the bound already passed, the strategy
-    was told (``IntentBlocked``), and only the close is waiting on the record. The ledger ends
+    was told (``RequestBlocked``), and only the close is waiting on the record. The ledger ends
     it with a conclusive failure that keeps every ownership fact the executor reported (a
     resource it named or children it found are not released by this signal). Never shell input.
     """
@@ -565,16 +587,8 @@ class BlockedRecordStalled(Value):
     request_id: RequestId
 
 
-class DecisionDependencyResolved(Value):
-    """Completion wakes intents to release or reject prepared dependents."""
-
-    kind: Literal["decision_dependency_resolved"] = "decision_dependency_resolved"
-    decision_id: DecisionId
-    status: CompletionStatus
-
-
 class OperationRetireRequested(Value):
-    """Explicit retirement of a registered owned operation, resolved by intents."""
+    """Explicit retirement of a registered owned operation, resolved by records."""
 
     kind: Literal["operation_retire_requested"] = "operation_retire_requested"
     operation: OperationRef
@@ -603,7 +617,7 @@ class OperationResult(OutcomeValue):
         return validated
 
 
-type IntentsEvent = Annotated[
+type RecordsEvent = Annotated[
     RequestPrepared
     | DispatchAuthorized
     | RequestObserved
@@ -613,8 +627,7 @@ type IntentsEvent = Annotated[
     | RetryDue
     | RequestUndispatchable
     | BlockedRecordStalled
-    | OperationRetireRequested
-    | DecisionDependencyResolved,
+    | OperationRetireRequested,
     Field(discriminator="kind"),
 ]
 
@@ -651,7 +664,7 @@ def request_lifecycle(request: Request) -> LifecycleClass:
             | CancelOwnedJob()
             | AdoptRevision()
             | CancelOwnedResource()
-            | BlockIntent()
+            | BlockRequest()
         ):
             lifecycle = LifecycleClass.IDEMPOTENT_WRITE
         case _:

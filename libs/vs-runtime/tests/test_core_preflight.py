@@ -7,7 +7,15 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
-from vs_core.api import EventCursor, HostFence, HostId, RunEnvelope, RunId, initial_state
+from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
+    EventCursor,
+    HostFence,
+    HostId,
+    RunEnvelope,
+    RunId,
+    initial_state,
+)
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import (
@@ -18,7 +26,7 @@ from vs_runtime.api.core import (
     reject_legacy_resume,
     resolve_core_resume,
 )
-from vs_runtime.api.core_shell_fixtures import CounterState, CounterStrategy, ShellTraceTransitions
+from vs_runtime.api.core_shell_fixtures import CounterSearch, CounterState, ShellTraceTransitions
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -43,18 +51,18 @@ def project_run(root: Path) -> tuple[Project, str]:
 
 
 def record(run_id: str) -> RuntimeRecord[CounterState]:
-    strategy = CounterStrategy()
+    strategy = CounterSearch()
     core = initial_state()
     core = core.model_copy(
         update={"run": core.run.model_copy(update={"run_id": RunId(root=run_id)})}
     )
     envelope = RunEnvelope[CounterState](
-        schema_version=3,
+        schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="writer"), epoch=1),
         strategy_id=strategy.declaration.strategy_id,
         state_schema=strategy.declaration.state_schema,
         core=core,
-        strategy=strategy.state,
+        strategy=strategy.init(None, initial_state().run.facts)[0],
         event_cursor=EventCursor(sequence=0),
     )
     return RuntimeRecord[CounterState].fresh(envelope)
@@ -68,7 +76,7 @@ def test_legacy_state_rejected_without_changes(tmp_path: Path, version: int) -> 
     namespace.write_bytes("state.json", source)
     before = project.state.portable_run_export(run_id)
     with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+        resolve_core_resume(project, CounterSearch(), run_id=run_id)
     diagnostic = failure.value.diagnostic
     assert diagnostic.code == "dynamic_legacy_resume_unsupported"
     assert diagnostic.stage == "resume_resolution"
@@ -84,7 +92,7 @@ def test_journal_alone_does_not_authorize_resume(tmp_path: Path) -> None:
     namespace.write_bytes("invocations.jsonl", b'{"request_id":"legacy"}\n')
     before = project.state.portable_run_export(run_id)
     with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, CounterStrategy())
+        resolve_core_resume(project, CounterSearch())
     assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
     assert failure.value.diagnostic.path.endswith("agent/invocations.jsonl")
     assert project.state.portable_run_export(run_id) == before
@@ -103,7 +111,7 @@ def test_valid_new_envelope_preflight_is_read_only(tmp_path: Path) -> None:
         now=0,
     )
     before = project.state.portable_run_export(run_id)
-    resolved = resolve_core_resume(project, CounterStrategy())
+    resolved = resolve_core_resume(project, CounterSearch())
     assert resolved.run_id == run_id
     assert resolved.record == candidate
     assert resolved.store.load() == store.load()
@@ -131,7 +139,7 @@ def test_invalid_new_record_rejects_before_acquiring_a_lease(tmp_path: Path, mut
         now=0,
     )
     with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, CounterStrategy())
+        resolve_core_resume(project, CounterSearch())
     assert failure.value.diagnostic.code == "core_resume_invalid"
     assert store.acquire("next", now=1, duration=1) is not None
 
@@ -142,7 +150,7 @@ def test_resume_factory_enforces_legacy_preflight_before_start(tmp_path: Path) -
     namespace.write_bytes("state.json", b'{"schema_version":9}')
     before = project.state.portable_run_export(run_id)
     with pytest.raises(CoreResumeError, match="legacy dynamic resume unsupported"):
-        CoreRuntime[CounterState].resume(project, CounterStrategy())
+        CoreRuntime[CounterState].resume(project, CounterSearch(), config=None)
     assert project.state.portable_run_export(run_id) == before
 
 
@@ -160,12 +168,13 @@ def test_resume_factory_acquires_new_epoch_and_commits_recovery(tmp_path: Path) 
     )
     shell = CoreRuntime[CounterState].resume(
         project,
-        CounterStrategy(),
+        CounterSearch(),
+        config=None,
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
     )
     shell.start("reader", now_at=1, lease_duration=10)
     assert shell.record.envelope.fence.epoch > candidate.envelope.fence.epoch
-    assert shell.record.envelope.core.intents.recovery.epoch == shell.record.envelope.fence.epoch
+    assert shell.record.envelope.core.records.recovery.epoch == shell.record.envelope.fence.epoch
     assert shell.storage_revision == 1
 
 
@@ -187,7 +196,7 @@ def test_run_that_never_committed_a_record_is_not_labelled_legacy(tmp_path: Path
     project, run_id = project_run(tmp_path)
     before = project.state.portable_run_export(run_id)
     with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+        resolve_core_resume(project, CounterSearch(), run_id=run_id)
     diagnostic = failure.value.diagnostic
     assert diagnostic.code == "core_resume_invalid"
     assert diagnostic.source_schema == "absent"
@@ -202,7 +211,7 @@ def test_top_level_journal_file_is_a_legacy_diagnostic_not_a_project_error(
     run_directory = next(path for path in tmp_path.rglob(run_id) if path.is_dir())
     (run_directory / "events.jsonl").write_bytes(b'{"schema_version":4}\n')
     with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+        resolve_core_resume(project, CounterSearch(), run_id=run_id)
     assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
     assert failure.value.diagnostic.path.endswith("events.jsonl")
     assert failure.value.diagnostic.source_schema == "4"
@@ -214,7 +223,7 @@ def test_unreadable_legacy_state_path_is_a_resume_diagnostic(tmp_path: Path) -> 
     run_directory = next(path for path in tmp_path.rglob(run_id) if path.is_dir())
     (run_directory / "dynamic" / "state.json").mkdir(parents=True)
     with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+        resolve_core_resume(project, CounterSearch(), run_id=run_id)
     assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
     assert failure.value.diagnostic.path == namespace.agent_visible_path("state.json")
 
@@ -227,7 +236,7 @@ def test_legacy_state_file_rejects_even_beside_a_valid_new_envelope(tmp_path: Pa
     namespace = project.state.portable_namespace(run_id, "dynamic")
     namespace.write_bytes("state.json", b"not json")
     with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+        resolve_core_resume(project, CounterSearch(), run_id=run_id)
     assert failure.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
     assert failure.value.diagnostic.source_schema == "unparseable"
 
@@ -270,7 +279,7 @@ def test_early_rejection_agrees_with_resume_resolution_on_every_legacy_marker(
     with pytest.raises(CoreResumeError) as early:
         reject_legacy_resume(project, run_id)
     with pytest.raises(CoreResumeError) as resolved:
-        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+        resolve_core_resume(project, CounterSearch(), run_id=run_id)
 
     assert early.value.diagnostic == resolved.value.diagnostic
     assert early.value.diagnostic.code == "dynamic_legacy_resume_unsupported"
@@ -306,5 +315,5 @@ def test_a_damaged_store_document_is_a_resume_diagnostic(tmp_path: Path, damage:
     document.write_text(source, encoding="utf-8")
 
     with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, CounterStrategy(), run_id=run_id)
+        resolve_core_resume(project, CounterSearch(), run_id=run_id)
     assert failure.value.diagnostic.code == "core_resume_invalid"

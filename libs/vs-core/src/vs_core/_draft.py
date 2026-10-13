@@ -2,7 +2,7 @@
 
 `Draft` accumulates ordered decisions and the evolving strategy state inside a single pure
 call; nothing escapes it except the final proposal. The builders turn strategy intent into
-core `Scope`, `Operation`, `RequestTurn` and `WorkspaceRef` values using only the `RunView`
+core `Scope`, `Operation`, `RequestTurn` and `WorkspaceRef` values using only the `CoreView`
 and values the caller passes, so identical inputs always propose byte-identical decisions.
 They carry the protocol rules of the values they build (for example that a session is always
 declared as reusable) and no policy: every deadline, role and identity is an argument.
@@ -25,25 +25,25 @@ from vs_core.types.common import (
     WorkspaceRef,
 )
 from vs_core.types.sessions import Access, SessionSpec, TurnSpec
-from vs_core.types.strategy import Decision, Operation, OperationRequest, RequestTurn
+from vs_core.types.strategy import Command, Operation, OperationRequest, RequestTurn
 
 if TYPE_CHECKING:
     from vs_core._ids import IdScheme
     from vs_core._turn_chain import TurnChain
-    from vs_core.types.kernel import RunView
+    from vs_core.types.kernel import CoreView
 
 
 @dataclass(kw_only=True)
 class Draft[S: Value]:
     """The state and decisions one `decide` call is building."""
 
-    view: RunView
+    view: CoreView
     state: S
-    decisions: list[Decision] = field(default_factory=list)
+    decisions: list[Command] = field(default_factory=list)
     wake_at: float | None = None
     """Earliest run-clock time a held-back turn becomes due."""
 
-    def emit(self, decision: Decision) -> None:
+    def emit(self, decision: Command) -> None:
         """Append one decision in proposal order."""
         self.decisions.append(decision)
 
@@ -61,32 +61,24 @@ class Draft[S: Value]:
         return self
 
 
-def run_scope(view: RunView) -> Scope:
+def run_scope(view: CoreView) -> Scope:
     """The run's own scope at its current generation."""
     return Scope(owner=view.run.run_id, generation=view.run.generation)
 
 
-def attempt_scope(view: RunView, attempt: AttemptId, generation: int) -> Scope:
+def attempt_scope(view: CoreView, attempt: AttemptId, generation: int) -> Scope:
     """An attempt's scope; core reports the live generation, a new attempt starts at 0."""
     live = next((item for item in view.attempts if item.attempt_id == attempt), None)
     return Scope(owner=attempt, generation=generation if live is None else live.generation)
 
 
 def declared_operation(
-    view: RunView,
     identifier: DecisionId,
     scope: Scope,
     request: OperationRequest,
-    *,
-    seconds: float,
 ) -> Operation:
-    """A declared operation due ``seconds`` after now."""
-    return Operation(
-        decision_id=identifier,
-        scope=scope,
-        request=request,
-        deadline_at=view.run.now_at + seconds,
-    )
+    """A declared operation; the caller waits on it with ``Wait(operation, Within(seconds))``."""
+    return Operation(decision_id=identifier, scope=scope, request=request)
 
 
 def workspace_for(scope: Scope, revision: RevisionRef, mode: WorkspaceMode) -> WorkspaceRef:
@@ -120,7 +112,7 @@ def invocation_for[C: Value](
 
 
 def turn_decision_id[C: Value](scheme: IdScheme, subject: str, turn: TurnChain[C]) -> DecisionId:
-    """Decision ID of one turn request."""
+    """Command ID of one turn request."""
     return scheme.decision_id("turn", subject, turn.serial)
 
 
@@ -133,11 +125,10 @@ class TurnShape:
     workspace: WorkspaceRef | Scope
     access: Access
     output_schema: SchemaRef
-    seconds: float
 
 
 def request_turn[C: Value](
-    view: RunView, scheme: IdScheme, shape: TurnShape, turn: TurnChain[C], scope: Scope
+    scheme: IdScheme, shape: TurnShape, turn: TurnChain[C], scope: Scope
 ) -> RequestTurn:
     """Build the paid, free, correction or resume turn the chain describes."""
     role, subject = shape.role, shape.subject
@@ -152,7 +143,6 @@ def request_turn[C: Value](
             prompts=turn.prompts,
             output_schema=shape.output_schema,
             tool_policy=turn.tool_policy,
-            deadline_at=view.run.now_at + shape.seconds,
             charge_class=turn.charge,
             # A resume names its continuation, never a predecessor: core rejects both together.
             predecessor=None if turn.charge == "resume" else turn.invocation,

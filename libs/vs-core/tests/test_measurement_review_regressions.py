@@ -68,10 +68,10 @@ def test_inert_job_observations_emit_no_events(sequence: int, fault: str) -> Non
         # The ledger holds no observation of the submission, so nothing vouches for the job.
         rows = tuple(
             row.model_copy(update={"observation": None, "sequence": 0})
-            for row in state.intents.intents
+            for row in state.records.records
         )
         state = state.model_copy(
-            update={"intents": state.intents.model_copy(update={"intents": rows})}
+            update={"records": state.records.model_copy(update={"records": rows})}
         )
     else:
         state = committed(state, observed)
@@ -100,9 +100,7 @@ def test_failure_claim_cannot_grant_retry_after_accepted_execution(
         committed(state, classified),
         core.MeasurementSubmissionObserved(observation=classified, failure=claim),
     ).state
-    retried = requested(
-        state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
-    )
+    retried = requested(state, identity="again", measurement=plan(submitted_at=5.0))
     conclusive = terminal and status in CONCLUSIVE
     assert bool(retried.requests) == (
         conclusive and status != S.SUCCEEDED and claim in _RETRYABLE_CLAIMS
@@ -396,7 +394,11 @@ def test_profile_measurement_requires_the_profile_capture_capability(
         plan=plan(purpose=purpose, stages=stages, accuracy_stage=None),
     )
     result = core.step(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     refused = purpose == "profile" and not offered
     assert bool(result.requests) != refused
@@ -427,9 +429,7 @@ def test_a_job_observation_without_facts_charges_a_retry_only_for_a_retryable_cl
     claim: core.MeasurementFailure | None,
 ) -> None:
     state = _failed_job(claim, None)
-    retried = requested(
-        state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
-    )
+    retried = requested(state, identity="again", measurement=plan(submitted_at=5.0))
     assert bool(retried.requests) == (claim in _RETRYABLE_CLAIMS)
 
 
@@ -446,9 +446,7 @@ def test_a_retryable_claim_never_overrides_scientific_facts(
         accuracy_passed=False,
     )
     state = _failed_job(claim, facts)
-    retried = requested(
-        state, identity="again", measurement=plan(submitted_at=5.0, deadline_at=105.0)
-    )
+    retried = requested(state, identity="again", measurement=plan(submitted_at=5.0))
     assert retried.requests == ()
 
 

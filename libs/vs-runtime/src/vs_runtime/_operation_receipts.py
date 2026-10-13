@@ -1,8 +1,8 @@
-"""Durable intent and result receipts that make operation execution idempotent.
+"""Durable record and result receipts that make operation execution idempotent.
 
-An intent receipt is written before an owner performs an effect, and a result
+A record receipt is written before an owner performs an effect, and a result
 is sealed after it. Their presence is how a restarted host knows whether an effect
-may have started (intent without result) or finished (result). Both are keyed by
+may have started (record without result) or finished (result). Both are keyed by
 request identity and written atomically through the shared ``ReceiptStore``, which
 also owns the sealed-result rule.
 """
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 RECEIPT_SCHEMA_VERSION = 1
 
 
-class IntentReceipt(BaseModel):
+class RecordReceipt(BaseModel):
     """The effect is about to start. It carries what a later inspection must route on."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -55,9 +55,9 @@ class OperationReceipts(Protocol):
         """The shared store that runs the effect-once rule."""
         ...
 
-    def intent(self, request_id: str) -> IntentReceipt | None: ...
+    def record(self, request_id: str) -> RecordReceipt | None: ...
 
-    def record_intent(self, receipt: IntentReceipt) -> None: ...
+    def record_record(self, receipt: RecordReceipt) -> None: ...
 
     def result(self, request_id: str) -> ResultReceipt | None: ...
 
@@ -82,13 +82,13 @@ class NamespaceOperationReceipts:
         """The shared store, which runs the effect-once rule for these receipts."""
         return self._store
 
-    def intent(self, request_id: str) -> IntentReceipt | None:
-        """The recorded intent, or None when the effect never started."""
-        return self._store.load(self._FAMILY, "intent", request_id, IntentReceipt)
+    def record(self, request_id: str) -> RecordReceipt | None:
+        """The recorded record, or None when the effect never started."""
+        return self._store.load(self._FAMILY, "record", request_id, RecordReceipt)
 
-    def record_intent(self, receipt: IntentReceipt) -> None:
-        """Durably record the intent, idempotent for the identical payload."""
-        self._store.record_once(self._FAMILY, "intent", receipt.request_id, receipt)
+    def record_record(self, receipt: RecordReceipt) -> None:
+        """Durably record the record, idempotent for the identical payload."""
+        self._store.record_once(self._FAMILY, "record", receipt.request_id, receipt)
 
     def result(self, request_id: str) -> ResultReceipt | None:
         """The sealed terminal result, or None."""

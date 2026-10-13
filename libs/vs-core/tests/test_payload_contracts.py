@@ -61,10 +61,10 @@ import json, sys
 from typing import ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from vs_core.api import (
-    Capabilities, ExecuteRegisteredOperation, IntentsChange, LifecycleClass, OperationDescriptor,
+    Capabilities, ExecuteRegisteredOperation, RecordsChange, LifecycleClass, OperationDescriptor,
     OperationId, OperationRegistration, OperationRegistry, OperationRequest,
-    ReducerTrace, RequestPrepared, SchemaRef, Scope, TraceFrame, Value,
-    initial_state, trace_step,
+    ReducerTrace, RequestPrepared, SchemaRef, Scope, TraceFrame, Until, Value,
+    initial_state, trace_step, within,
 )
 class Outcome(Value):
     status: Literal["succeeded"] = "succeeded"
@@ -87,11 +87,12 @@ for argument in sys.stdin:
         "run": state.run.model_copy(update={"capabilities": Capabilities(operations=codec.descriptors)}),
     })
     scope = Scope(owner=state.run.run_id, generation=0)
-    request = ExecuteRegisteredOperation(scope=scope, deadline_at=100.0,
+    request = ExecuteRegisteredOperation(scope=scope,
         operation_id=OperationId(root="query"), operation=wire, retry_limit=0)
-    event = RequestPrepared(request=request, lifecycle=LifecycleClass.QUERY)
+    event = RequestPrepared(request=request, lifecycle=LifecycleClass.QUERY,
+        until=Until(at=100.0))
     result = trace_step(state, event, ReducerTrace(frames=(TraceFrame(signal=event,
-        change=IntentsChange(state=state.intents, requests=(request,))),)))
+        change=RecordsChange(state=state.records, requests=(within(request, 100.0),))),)))
     print(json.dumps([wire.payload_json, result.requests[0].request_id.root]))
     sys.stdout.flush()
 """

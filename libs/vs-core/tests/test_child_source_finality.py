@@ -54,10 +54,10 @@ def close_with_sources(
                     "result": core.RunResultProposal(outcome="cancelled", reason="cleanup"),
                 }
             ),
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
                     "children": (lease,),
-                    "intents": tuple(
+                    "records": tuple(
                         inspect_source(row.request_id, row.scope) for row in observations
                     ),
                 }
@@ -92,7 +92,7 @@ def close_with_sources(
         ),
     )
     assert restored == state
-    assert result.state.intents.children == (lease,)
+    assert result.state.records.children == (lease,)
     return result
 
 

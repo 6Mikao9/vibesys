@@ -225,7 +225,6 @@ def plan(
         recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=DIGEST),
         submitted_at=0.0,
         queue_allowance=10.0,
-        deadline_at=20.0,
     )
 
 
@@ -237,6 +236,5 @@ def submission(
         request_id=RequestId(root=name),
         scope=SCOPE,
         admission_id=ADMISSION,
-        deadline_at=100.0,
         plan=override or plan(candidate=candidate),
     )

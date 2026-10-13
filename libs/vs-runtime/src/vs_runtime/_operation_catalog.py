@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import OperationDescriptor, OperationRequest, StrategyDeclaration
+    from vs_core.api import OperationDescriptor, OperationRequest, SearchDeclaration
     from vs_runtime._core_requests import ExecutionContext
 
 
@@ -180,7 +180,7 @@ class OperationCatalog:
         """
         return tuple(entry.registration.descriptor for entry in self.entries if entry.owner)
 
-    def require_owned(self, declaration: StrategyDeclaration) -> None:
+    def require_owned(self, declaration: SearchDeclaration) -> None:
         """Fail, naming the operation, unless every required operation has an owner.
 
         A refused entry counts as absent, because it registers the schema but every

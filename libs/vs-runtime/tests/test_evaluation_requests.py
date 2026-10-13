@@ -35,6 +35,7 @@ from vs_core.api import (
     RevisionRef,
     SubmitMeasurement,
     TargetObservation,
+    Until,
 )
 from vs_core.api.proofs import Proven, fresh_observation
 from vs_evaluation.api import ExecutorPoll, PollPhase
@@ -116,6 +117,7 @@ def context_for(
         now_at=now_at,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
         lease=lease or FakeLease(),
+        until=Until(at=100.0),
     )
 
 
@@ -174,7 +176,6 @@ def query[RequestT: ObserveOwnedJob | InspectOwnedJob | CollectEvidence | Cancel
         request_id=RequestId(root=name),
         scope=SCOPE,
         admission_id=ADMISSION,
-        deadline_at=100.0,
         resource_id=resource,
     )
 
@@ -184,7 +185,6 @@ def close_request(name: str = "close", admission: DecisionId = ADMISSION) -> Clo
         request_id=RequestId(root=name),
         scope=SCOPE,
         admission_id=admission,
-        deadline_at=100.0,
         attempt=AttemptRef(attempt_id=AttemptId(root="attempt"), generation=0),
     )
 
@@ -465,7 +465,6 @@ async def test_job_of_another_scope_is_not_owned() -> None:
             request_id=RequestId(root="other-scope"),
             scope=SCOPE.model_copy(update={"generation": SCOPE.generation + 1}),
             admission_id=ADMISSION,
-            deadline_at=100.0,
             resource_id=resource,
         )
         got = await run(w, other)

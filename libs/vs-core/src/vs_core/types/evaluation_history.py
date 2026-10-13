@@ -80,7 +80,7 @@ class EvaluationHistoryCursor(Value):
 class EvaluationTerminalFacts(Value):
     """Owner-normalized scientific facts from one conclusive terminal observation.
 
-    Executors supply values, not history ordinals or coverage authority. Intents A
+    Executors supply values, not history ordinals or coverage authority. Records A
     forwards these unchanged to Measurements A, which validates canonical source,
     scope and stage identities before constructing the durable history record.
     Absent facts on accepted execution mean history is unavailable, never empty.

@@ -17,7 +17,10 @@ def call(
 ) -> core.Transition:
     scope = core.Scope(owner=state.run.run_id, generation=state.run.generation + generation_offset)
     event = core.AgentMeasurementRequested(
-        scope=scope, plan=plan(evaluator_digest=f"evaluator-{variant}"), call_id=call_id
+        scope=scope,
+        plan=plan(evaluator_digest=f"evaluator-{variant}"),
+        within=core.Within(limit=100.0),
+        call_id=call_id,
     )
     return transition(state, event)
 
@@ -25,9 +28,15 @@ def call(
 def submissions(state: core.CoreState) -> list[core.SubmitMeasurement]:
     return [
         row.request
-        for row in state.intents.intents
+        for row in state.records.records
         if isinstance(row.request, core.SubmitMeasurement)
     ]
+
+
+def limit_of(state: core.CoreState, request_id: core.RequestId | None) -> float:
+    """The absolute time core stored for the submission with this identity."""
+    (record,) = [r for r in state.records.records if r.request_id == request_id]
+    return record.until.at
 
 
 def test_call_allocates_one_submission_without_a_decision() -> None:
@@ -41,7 +50,7 @@ def test_call_allocates_one_submission_without_a_decision() -> None:
             call_id="c1",
             scope=request.scope,
             request_id=request.request_id,
-            deadline_at=request.deadline_at,
+            deadline_at=limit_of(result.state, request.request_id),
         ),
     )
     budget = result.state.evaluation.submission_budgets[0]
@@ -73,7 +82,7 @@ def test_agent_call_and_measure_decision_share_one_budget() -> None:
     assert len(submissions(result.state)) == 1
     (row,) = result.state.evaluation.agent_calls
     assert (row.request_id, row.repeat, row.rejection) == (measure.request_id, True, None)
-    assert row.deadline_at == measure.deadline_at
+    assert row.deadline_at == limit_of(result.state, measure.request_id)
 
 
 @given(
@@ -142,7 +151,8 @@ def test_each_refusal_names_its_reason_and_charges_nothing() -> None:
     state = core.initial_state()
     event = core.AgentMeasurementRequested(
         scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
-        plan=plan(deadline_at=0.0),
+        plan=plan(),
+        within=core.Within(limit=0.0),
         call_id="c1",
     )
     refused = transition(state, event)
@@ -173,7 +183,7 @@ def test_a_run_that_is_not_running_starts_no_agent_measurement(
 def charged(state: core.CoreState) -> list[str]:
     return [
         row.request_id.root
-        for row in state.intents.intents
+        for row in state.records.records
         if isinstance(row.request, core.SubmitMeasurement) and row.request_id is not None
     ]
 

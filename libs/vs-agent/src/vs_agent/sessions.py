@@ -20,6 +20,7 @@ from vs_agent.contracts import (
     AgentSessionSpec,
     AgentTurnRequest,
     AgentTurnResult,
+    SchemaViolation,
     session_spec_fingerprint,
 )
 from vs_agent.runner import parse_typed_response
@@ -132,6 +133,7 @@ class InvalidResponse(_InvocationObservation):
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["invalid_response"] = "invalid_response"
     detail: str
+    violations: tuple[SchemaViolation, ...] = ()
 
 
 type InvocationOutcome = Annotated[
@@ -643,6 +645,7 @@ class ClientAgentSessions:
             session_key=pending.session_key,
             invocation_id=pending.invocation_id,
             detail=error.detail,
+            violations=error.violations,
             checkpoint=checkpoint,
         )
 

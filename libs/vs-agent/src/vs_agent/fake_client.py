@@ -523,6 +523,11 @@ class FakeAgentClient:
         self._update_session(reuse_session=True, session_key=session_key)
         if session_key is not None:
             self._raw_fingerprints[session_key] = fingerprint
+            # The provider hands out the conversation id with the turn, so it is on record
+            # even when the reply that follows is rejected: a restarted host continues it.
+            self._record_raw_checkpoint(
+                session_spec, session_key, fingerprint, self.provider_session_id(session_key)
+            )
         self._emit_stream(session_spec.role, invocation)
         text = (
             self._resolve_text(session_spec.role, invocation)
@@ -538,7 +543,6 @@ class FakeAgentClient:
                 None if session_key is None else self.provider_session_id(session_key)
             ),
         )
-        self._record_raw_checkpoint(session_spec, session_key, fingerprint, result)
         if observer is not None:
             for chunk in self._stream_chunks.get(session_spec.role) or [text]:
                 observer.on_event(AgentEvent(kind=AgentEventKind.TEXT, text=chunk))
@@ -578,17 +582,17 @@ class FakeAgentClient:
         session_spec: AgentSessionSpec,
         session_key: AgentSessionKey | None,
         fingerprint: str,
-        result: AgentTurnResult,
+        provider_session_id: str | None,
     ) -> None:
         """Persist the provider session id a raw turn produced."""
-        if session_key is None or result.provider_session_id is None:
+        if session_key is None or provider_session_id is None:
             return
         self._session_store.record(
             session_key,
             spec_fingerprint=fingerprint,
             provider=session_spec.provider,
             model=session_spec.model,
-            session_id=result.provider_session_id,
+            session_id=provider_session_id,
             role=session_spec.role,
         )
 

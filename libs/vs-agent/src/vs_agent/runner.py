@@ -7,7 +7,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from vs_agent.contracts import AgentOutputSchemaError
+from vs_agent.contracts import AgentOutputSchemaError, SchemaViolation
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -32,12 +32,24 @@ def describe_validation_error(error: ValidationError) -> str:
     return "; ".join(clauses)
 
 
+def schema_error(error: ValidationError) -> AgentOutputSchemaError:
+    """The schema error for a reply that broke its model: the text and the errors by field."""
+    violations = tuple(
+        SchemaViolation(
+            path=tuple(part for part in item["loc"] if isinstance(part, str | int)),
+            message=item["msg"],
+        )
+        for item in error.errors(include_url=False)
+    )
+    return AgentOutputSchemaError(describe_validation_error(error), violations)
+
+
 def validate_typed_response(payload: object, response_cls: type[T]) -> T:
     """Validate one decoded payload, raising ``AgentOutputSchemaError`` with field-named errors."""
     try:
         return response_cls.model_validate(payload)
     except ValidationError as error:
-        raise AgentOutputSchemaError(describe_validation_error(error)) from error
+        raise schema_error(error) from error
 
 
 def parse_typed_response(text: str, response_cls: type[T]) -> T:
@@ -64,13 +76,13 @@ def parse_typed_response(text: str, response_cls: type[T]) -> T:
         fallback = fallback or parsed
     if fallback is not None:
         return fallback
-    raise AgentOutputSchemaError(_closest_failure(failures))
+    raise _closest_failure(failures)
 
 
-def _closest_failure(failures: list[ValidationError | TypeError]) -> str:
+def _closest_failure(failures: list[ValidationError | TypeError]) -> AgentOutputSchemaError:
     """Describe the failure nearest to valid: fewest errors, later wins ties, ``{}`` last."""
     if not failures:
-        return _NO_JSON_OBJECT
+        return AgentOutputSchemaError(_NO_JSON_OBJECT)
 
     def distance(failure: ValidationError | TypeError) -> tuple[bool, int]:
         if isinstance(failure, TypeError):
@@ -83,8 +95,8 @@ def _closest_failure(failures: list[ValidationError | TypeError]) -> str:
 
     closest = min(reversed(failures), key=distance)
     if isinstance(closest, TypeError):
-        return str(closest)
-    return describe_validation_error(closest)
+        return AgentOutputSchemaError(str(closest))
+    return schema_error(closest)
 
 
 def _candidates(text: str) -> list[str]:

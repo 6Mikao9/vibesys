@@ -31,6 +31,8 @@ from vs_core.api import (
     Scope,
     Slot,
     StartAttempt,
+    Wait,
+    Within,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -171,7 +173,12 @@ def test_rejected_submitted_start_cannot_authorize_public_admission() -> None:
         workspace=event.workspace,
         budget=event.budget,
     )
-    rejected = step(state, DecisionSubmitted(decision=decision, expected_revision=0))
+    rejected = step(
+        state,
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
+    )
     assert isinstance(rejected.events[0], Rejected)
     try:
         result = step(rejected.state, event)

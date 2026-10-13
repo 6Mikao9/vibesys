@@ -13,7 +13,7 @@ returns one :class:`Violation` per broken invariant:
   without new information cannot change the answer.
 - ``NOT_TERMINAL``: the run is quiescent but its status is not terminal (unless an operator
   stop interrupted it, see :class:`End`).
-- ``OPEN_INTENT``: an intent is still prepared, dispatched or reconciling.
+- ``OPEN_RECORD``: a record is still prepared, dispatched or reconciling.
 - ``ORPHAN_WAIT``: something waits for a producer that does not exist.
 
 A failure names the invariant and prints the offending request sequence.
@@ -29,15 +29,15 @@ from typing import TYPE_CHECKING
 
 from vs_core._waits import orphan_waits, phase_waits
 from vs_core.types.common import Observation, RunStatus
-from vs_core.types.intents import Intent, RequestObserved
+from vs_core.types.records import RequestObserved, RequestRecord
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from vs_core.types.evaluation import EvidenceRef
-    from vs_core.types.intents import Request
     from vs_core.types.job_observations import MeasurementFailure
     from vs_core.types.kernel import CoreState
+    from vs_core.types.records import Request
 
 
 class Invariant(StrEnum):
@@ -46,7 +46,7 @@ class Invariant(StrEnum):
     UNBOUNDED_REQUESTS = "unbounded_requests"
     SPIN = "spin"
     NOT_TERMINAL = "not_terminal"
-    OPEN_INTENT = "open_intent"
+    OPEN_RECORD = "open_record"
     ORPHAN_WAIT = "orphan_wait"
 
 
@@ -126,7 +126,7 @@ def _label(request: Request) -> str:
 
 def _key(request: Request) -> str:
     """The request's kind and target: everything it asks for except who asked and when."""
-    data = request.model_dump(mode="json", exclude=_IDENTITY | {"deadline_at"})
+    data = request.model_dump(mode="json", exclude=_IDENTITY)
     return _dump(data)
 
 
@@ -215,16 +215,16 @@ class Journal:
 
     @classmethod
     def from_ledger(cls, core: CoreState) -> Journal:
-        """Build a journal from core's intent ledger, in ledger order.
+        """Build a journal from core's record ledger, in ledger order.
 
         The ledger keeps each request and its latest observation but not their interleaving,
         so a request is followed by its own observation only.
         """
         journal = cls()
-        for intent in sorted(core.intents.intents, key=lambda row: row.sequence or 0):
-            journal.issue(intent.request)
-            if intent.observation is not None:
-                journal.observe(intent.observation, ())
+        for record in sorted(core.records.records, key=lambda row: row.sequence or 0):
+            journal.issue(record.request)
+            if record.observation is not None:
+                journal.observe(record.observation, ())
         return journal
 
 
@@ -341,7 +341,7 @@ class End(StrEnum):
 def final_state(core: CoreState, end: End = End.TERMINAL) -> list[Violation]:
     """Quiescence: no wait without a producer, and for a finished run a terminal status.
 
-    A finished run also has no open intent.
+    A finished run also has no open record.
     """
     found: list[Violation] = []
     if end is End.TERMINAL:
@@ -363,13 +363,15 @@ def _unfinished(core: CoreState) -> list[Violation]:
                 Invariant.NOT_TERMINAL, f"quiescent with run status {core.run.status.value!r}"
             )
         )
-    open_intents: list[Intent] = [row for row in core.intents.intents if phase_waits(row.phase)]
-    if open_intents:
+    open_records: list[RequestRecord] = [
+        row for row in core.records.records if phase_waits(row.phase)
+    ]
+    if open_records:
         listing = "; ".join(
             f"{row.request.kind} {row.request_id.root} is {row.phase.value}"
-            for row in open_intents[:6]
+            for row in open_records[:6]
         )
-        found.append(Violation(Invariant.OPEN_INTENT, f"{len(open_intents)} open: {listing}"))
+        found.append(Violation(Invariant.OPEN_RECORD, f"{len(open_records)} open: {listing}"))
     return found
 
 

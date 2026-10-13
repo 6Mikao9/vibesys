@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from .agents import Checkpoint
 from .common import (
     AttemptId,
     AttemptRef,
@@ -42,6 +43,7 @@ from .evaluation_history import (
 )
 from .scheduling import AttemptRequest
 from .sessions import SessionSpec
+from .until import Until
 
 
 class WorkspacePlan(Value):
@@ -103,6 +105,14 @@ class CheckpointDeclined(Value):
     reason: CheckpointDecline
 
 
+class CheckpointResolved(Value):
+    """Core recorded or declined the checkpoint of one invocation (a published fact)."""
+
+    kind: Literal["checkpoint_resolved"] = "checkpoint_resolved"
+    invocation: InvocationRef
+    checkpoint: Checkpoint
+
+
 class AttemptView(Value):
     """Attempt authority, receipt history, retained checkpoints and release graph.
 
@@ -123,7 +133,7 @@ class AttemptView(Value):
     checkpoints: tuple[AttemptCheckpoint, ...] = ()
     charges: tuple[ChargeReceipt, ...] = ()
     parent: AttemptRef | None = None
-    pending_intents: tuple[RequestId, ...] = ()
+    pending_records: tuple[RequestId, ...] = ()
     sessions: tuple[SessionId, ...] = ()
     release_dependencies: tuple[ReleaseDependency, ...] = ()
     evaluation_history: AttemptEvaluationHistory = AttemptEvaluationHistory()
@@ -169,6 +179,7 @@ class RevisionOperationRequested(Value):
     kind: Literal["revision_operation_requested"] = "revision_operation_requested"
     request: ExecuteRegisteredOperation
     authority: RevisionAuthority
+    until: Until
 
 
 class RevisionOperationObserved(Value):

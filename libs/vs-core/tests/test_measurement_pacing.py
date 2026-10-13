@@ -50,7 +50,8 @@ class World:
 
     @property
     def due(self) -> float | None:
-        return core.project(self.state).next_observe_at
+        """When the job's pacing next asks for a poll; None while a poll is outstanding."""
+        return self.job.pacing.next_at
 
     def tick(self, now: float) -> list[core.ObserveOwnedJob]:
         self.clock = max(self.clock, now)
@@ -89,14 +90,20 @@ class World:
 
     def check(self) -> None:
         """Post-step invariant: a live job has a poll outstanding or one due in the future."""
+        wake = core.project(self.state).next_observe_at
         if self.job.terminal:
             assert self.due is None
             return
         if self.outstanding:
             assert self.due is None
+            # The only wake-up is an open poll request's own limit, never another poll.
+            assert wake is None or wake > self.state.run.now_at
         else:
             assert self.due is not None
             assert self.due > self.state.run.now_at
+            # Earlier polls whose records this world never commits may still hold a limit.
+            assert wake is not None
+            assert wake <= self.due
 
 
 def polls(result: core.Transition) -> list[core.ObserveOwnedJob]:
@@ -141,11 +148,31 @@ def test_an_unanswered_poll_is_never_repeated(
     world = World(limits(interval, extra))
     issued = world.tick(interval)
     assert [p.resource_id for p in issued] == [JOB]
+    # While the poll's own limit has not passed, nothing asks again. Past it the poll is
+    # blocked, which is the next test.
+    limit = interval + world.limits.reconciliation_bound
     for quarters in ticks:
-        assert world.tick(world.clock + quarters * QUARTER) == []
+        world.tick(min(world.clock + quarters * QUARTER, limit - QUARTER))
+        assert polls_after(world) == []
         assert world.due is None
     world.answer()
     assert world.due == world.clock + interval
+
+
+def polls_after(world: World) -> list[core.ObserveOwnedJob]:
+    """The polls a further tick at the same time issues (none while one is outstanding)."""
+    return world.tick(world.clock)
+
+
+@given(interval=intervals, extra=caps)
+def test_a_poll_that_reached_its_limit_is_polled_anew_once(interval: float, extra: float) -> None:
+    world = World(limits(interval, extra))
+    assert [p.resource_id for p in world.tick(interval)] == [JOB]
+    late = interval + world.limits.reconciliation_bound + QUARTER
+    # The limit blocks the poll in the step that advances the clock, and the next step asks anew.
+    world.tick(late)
+    assert [p.resource_id for p in world.tick(late + QUARTER)] == [JOB]
+    assert world.tick(late + 2 * QUARTER) == []
 
 
 @given(interval=intervals, extra=caps, retries=st.integers(min_value=1, max_value=12))

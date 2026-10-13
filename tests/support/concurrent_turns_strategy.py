@@ -30,7 +30,7 @@ from vs_core.api import (
 )
 
 if TYPE_CHECKING:
-    from vs_core.api import RunView, StrategyEvent
+    from vs_core.api import CoreView, StrategyEvent
 
 FIRST = "first"
 """The invocation id of the turn that runs alone and submits the measurement."""
@@ -55,7 +55,7 @@ class ConcurrentTurnsStrategy(SkeletonStrategy):
     state: ConcurrentTurnsState = ConcurrentTurnsState(schema_version=1)  # type: ignore[assignment]
     wave: tuple[str, ...] = ()
 
-    def decide(self, view: RunView) -> Proposal[SkeletonState]:
+    def decide(self, view: CoreView) -> Proposal[SkeletonState]:
         """Propose the start budget, the first turn, then the whole wave and the resumes."""
         state = self.state
         if state.phase == "start":
@@ -84,14 +84,14 @@ class ConcurrentTurnsStrategy(SkeletonStrategy):
         )
         return Proposal(state=state, decisions=tuple(decisions))
 
-    def _turn(self, view: RunView, attempt: Scope, invocation: str) -> RequestTurn:
+    def _turn(self, view: CoreView, attempt: Scope, invocation: str) -> RequestTurn:
         """A fresh turn in its own session: one session runs one turn at a time."""
         spec = self._own_session(self._spec(view, invocation), invocation)
         return RequestTurn(
             decision_id=DecisionId(root=f"turn-{invocation}"), scope=attempt, turn=spec
         )
 
-    def _resume(self, view: RunView, attempt: Scope, event: ResumeAuthorized) -> RequestTurn:
+    def _resume(self, view: CoreView, attempt: Scope, event: ResumeAuthorized) -> RequestTurn:
         """The turn that continues a suspended turn once its measurements are in."""
         session = event.continuation_id.root.removesuffix("/evaluation").split("/")[0]
         spec = self._spec(view, session).model_copy(
@@ -115,13 +115,13 @@ class ConcurrentTurnsStrategy(SkeletonStrategy):
             }
         )
 
-    def _spec(self, view: RunView, invocation: str) -> TurnSpec:
+    def _spec(self, view: CoreView, invocation: str) -> TurnSpec:
         proposal = SkeletonStrategy.decide(self, view)
         (decision,) = proposal.decisions
         assert isinstance(decision, RequestTurn)
         return decision.turn.model_copy(update={"invocation_id": InvocationId(root=invocation)})
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
         """Record results and suspensions; measure once every turn and resume has finished."""
         state = self.state
         if isinstance(event, TurnSuspended):

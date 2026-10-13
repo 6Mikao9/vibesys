@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from .attempts import AttemptExhausted, AttemptsEvent, AttemptsState, AttemptView
+from .attempts import (
+    AttemptExhausted,
+    AttemptsEvent,
+    AttemptsState,
+    AttemptView,
+    CheckpointResolved,
+)
 from .common import (
     ArtifactRef,
     Capabilities,
@@ -37,12 +43,12 @@ from .evaluation import (
     ResumeAuthorized,
     TurnSuspended,
 )
-from .intents import (
-    IntentBlocked,
-    IntentsEvent,
-    IntentsState,
+from .records import (
     OperationResult,
     OperationView,
+    Outbound,
+    RecordsEvent,
+    RecordsState,
     Request,
 )
 from .scheduling import (
@@ -76,14 +82,24 @@ from .settlement import (
     SettlementEvent,
     SettlementState,
 )
-from .strategy import Decision, DecisionFeedback, Proposal, StrategyDeclaration, StrategyState
+from .strategy import (
+    Command,
+    DecisionFeedback,
+    SearchDeclaration,
+    StrategyState,
+    Submission,
+    Wait,
+)
+from .until import Failed, Until
 
 
 class DecisionReceipt(Value):
-    """Decision receipt lifecycle contract."""
+    """Command receipt lifecycle contract."""
 
     decision_id: DecisionId
-    decision: Decision | None = None
+    decision: Command | None = None
+    until: Until | None = None
+    """What core stored for the decision's ``Within``; None for a ``Finish``, which has none."""
     payload_digest: str
     feedback: DecisionFeedback
     request_ids: tuple[RequestId, ...] = ()
@@ -102,7 +118,7 @@ class RunState(Value):
     capabilities: Capabilities = Capabilities()
     limits: Limits = Limits()
     requirements: EvidenceRequirements = EvidenceRequirements()
-    declaration: StrategyDeclaration
+    declaration: SearchDeclaration
     controls: tuple[ControlInput, ...] = ()
     artifacts: tuple[ArtifactRef, ...] = ()
     receipts: tuple[DecisionReceipt, ...] = ()
@@ -131,10 +147,10 @@ class CoreState(Value):
     sessions: SessionsState = SessionsState()
     evaluation: EvaluationState = EvaluationState()
     settlement: SettlementState = SettlementState()
-    intents: IntentsState = IntentsState()
+    records: RecordsState = RecordsState()
 
 
-class RunView(Value):
+class CoreView(Value):
     """Run view lifecycle contract."""
 
     revision: RevisionNumber
@@ -153,23 +169,28 @@ class RunView(Value):
     inputs: tuple[InputRecord, ...]
     adoption: AdoptionView | None = None
     # Earliest core time a ClockAdvanced does work: a paced job poll comes due, or an
-    # answered-but-open intent passes its reconciliation bound. None when neither is scheduled.
+    # answered-but-open record passes its reconciliation bound. None when neither is scheduled.
     next_observe_at: Seconds | None = None
 
 
 class DecisionSubmitted(Value):
-    """Decision submitted lifecycle contract."""
+    """Command submitted lifecycle contract."""
 
     kind: Literal["decision_submitted"] = "decision_submitted"
-    decision: Decision
+    decision: Submission
     expected_revision: RevisionNumber
+
+    @property
+    def command(self) -> Command:
+        """The request or finish the decision asks core to act on."""
+        return self.decision.request if isinstance(self.decision, Wait) else self.decision
 
 
 class ProposalSubmitted(Value):
     """Ordered decisions observe one revision and commit with one revision increment."""
 
     kind: Literal["proposal_submitted"] = "proposal_submitted"
-    decisions: tuple[Decision, ...]
+    decisions: tuple[Submission, ...]
     expected_revision: RevisionNumber
 
 
@@ -229,7 +250,7 @@ type CoreEvent = Annotated[
     | SessionsEvent
     | EvaluationEvent
     | SettlementEvent
-    | IntentsEvent
+    | RecordsEvent
     | RunControlEvent,
     Field(discriminator="kind"),
 ]
@@ -241,6 +262,7 @@ type StrategyEvent = Annotated[
     | InputDelivered
     | InputDropped
     | AttemptExhausted
+    | CheckpointResolved
     | InterruptCompleted
     | MeasurementResult
     | ResumeAuthorized
@@ -248,7 +270,7 @@ type StrategyEvent = Annotated[
     | YieldPublicationFailed
     | InterruptFailed
     | OperationResult
-    | IntentBlocked
+    | Failed
     | ControlChanged
     | AdoptionResult
     | AdoptionFailed
@@ -263,7 +285,7 @@ type Signal = Annotated[
     | SessionsEvent
     | EvaluationEvent
     | SettlementEvent
-    | IntentsEvent
+    | RecordsEvent
     | AdmitAttempt
     | RegisterAttempt
     | CloseAdmission
@@ -277,7 +299,7 @@ class AreaChange[S: Value](Value):
 
     state: S
     signals: tuple[Signal, ...] = ()
-    requests: tuple[Request, ...] = ()
+    requests: tuple[Outbound, ...] = ()
     events: tuple[StrategyEvent, ...] = ()
 
 
@@ -290,7 +312,7 @@ class SchedulingContext(AreaContext):
 
     run: RunState
     attempts: AttemptsState
-    intents: IntentsState
+    records: RecordsState
     sessions: SessionsState
     settlement: SettlementState
 
@@ -303,7 +325,7 @@ class AttemptsContext(AreaContext):
     sessions: SessionsState
     evaluation: EvaluationState
     settlement: SettlementState
-    intents: IntentsState
+    records: RecordsState
 
 
 class SessionsContext(AreaContext):
@@ -312,7 +334,7 @@ class SessionsContext(AreaContext):
     run: RunState
     attempts: AttemptsState
     evaluation: EvaluationState
-    intents: IntentsState
+    records: RecordsState
 
 
 class EvaluationContext(AreaContext):
@@ -321,7 +343,7 @@ class EvaluationContext(AreaContext):
     run: RunState
     attempts: AttemptsState
     sessions: SessionsState
-    intents: IntentsState
+    records: RecordsState
 
 
 class SettlementContext(AreaContext):
@@ -336,11 +358,11 @@ class SettlementContext(AreaContext):
     attempts: AttemptsState
     sessions: SessionsState
     evaluation: EvaluationState
-    intents: IntentsState
+    records: RecordsState
 
 
-class IntentsContext(AreaContext):
-    """Required intents cross-area facts."""
+class RecordsContext(AreaContext):
+    """Required records cross-area facts."""
 
     run: RunState
     registry: tuple[OperationDescriptor, ...]
@@ -360,11 +382,9 @@ class Transition(Value):
 class RunEnvelope[S: StrategyState](Value):
     """Atomic core, strategy, fence and cursor envelope with explicit versioning.
 
-    Version 3 adds explicit history, source receipts and run-owned lifecycle
-    authority. Version 2 requires the selected v2_to_v3_migration(registry). Earlier
-    envelopes require an
-    explicitly selected pure migration before nested models are decoded; new
-    defaults never stand in for missing historical ownership proof.
+    Version 4 stores each request's ``until`` on its ``RequestRecord`` and no deadline on
+    the request. Decoding an envelope of any other version is refused with an error that
+    names the version; there is no migration from the strategy-API envelopes.
     """
 
     schema_version: int = Field(ge=1)
@@ -379,29 +399,3 @@ class RunEnvelope[S: StrategyState](Value):
     def revision(self) -> RevisionNumber:
         """Core owns revision; the envelope only projects it."""
         return self.core.revision
-
-
-class Strategy[S: StrategyState](Protocol):
-    """Strategy lifecycle contract."""
-
-    @property
-    def state(self) -> S:
-        """State lifecycle contract."""
-        ...
-
-    @property
-    def declaration(self) -> StrategyDeclaration:
-        """Declaration lifecycle contract."""
-        ...
-
-    def bind(self, state: S) -> Strategy[S]:
-        """Bind lifecycle contract."""
-        ...
-
-    def decide(self, view: RunView) -> Proposal[S]:
-        """Decide lifecycle contract."""
-        ...
-
-    def on_event(self, view: RunView, event: StrategyEvent) -> S:
-        """On_event lifecycle contract."""
-        ...

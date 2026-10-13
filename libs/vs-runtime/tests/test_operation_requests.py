@@ -29,6 +29,7 @@ from vs_core.api import (
     ResourceId,
     RevisionId,
     RevisionRef,
+    Until,
 )
 from vs_project.api import Project
 from vs_runtime.api.core import (
@@ -36,12 +37,12 @@ from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
     ExecutorRole,
-    IntentReceipt,
     NamespaceOperationReceipts,
     ObservationFactory,
     OperationCatalog,
     OperationEntry,
     ReceiptStore,
+    RecordReceipt,
     RegisteredOperationRequests,
     RequestExecutors,
     ResultReceipt,
@@ -80,7 +81,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateNamespace
 
 FENCE = HostFence(host_id=HostId(root="host"), epoch=1)
-POINTS = ("before_intent", "after_intent", "before_result", "after_result")
+POINTS = ("before_record", "after_record", "before_result", "after_result")
 
 
 class _Lease:
@@ -98,6 +99,7 @@ def context_for(request: Request) -> ExecutionContext:
         now_at=5.0,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
         lease=_Lease(),
+        until=Until(at=100.0),
     )
 
 
@@ -128,10 +130,10 @@ class CrashingReceipts(NamespaceOperationReceipts):
         if self._crash_at == point:
             raise SimulatedCrashError
 
-    def record_intent(self, receipt: IntentReceipt) -> None:
-        self._maybe("before_intent")
-        super().record_intent(receipt)
-        self._maybe("after_intent")
+    def record_record(self, receipt: RecordReceipt) -> None:
+        self._maybe("before_record")
+        super().record_record(receipt)
+        self._maybe("after_record")
 
 
 class HeldEchoOwner(EchoOwner):
@@ -311,7 +313,7 @@ async def test_unknown_operation_is_rejected_without_receipt_or_effect() -> None
         ).execute(request, context_for(request))
         assert observed(result).observation.status is ObservationStatus.REJECTED
         assert "not in the catalog" in observed(result).observation.diagnostic
-        assert receipts.intent("req-foreign") is None
+        assert receipts.record("req-foreign") is None
         assert echo.effects() == 0
 
 
@@ -393,7 +395,11 @@ async def test_same_identity_with_another_payload_is_a_rejected_observation() ->
         runner = executor(items, namespace)
         await runner.execute(request, context_for(request))
         other = ExecutionContext(
-            fence=FENCE, now_at=5.0, payload_digest="different", lease=_Lease()
+            fence=FENCE,
+            now_at=5.0,
+            payload_digest="different",
+            lease=_Lease(),
+            until=Until(at=100.0),
         )
         rejected = observed(await runner.execute(request, other)).observation
         assert rejected.status is ObservationStatus.REJECTED
@@ -422,7 +428,6 @@ async def inspect_of(
     request = InspectRequest(
         request_id=RequestId(root=f"inspect:{target}"),
         scope=SCOPE,
-        deadline_at=100.0,
         target=RequestId(root=target),
         resource_id=None if resource is None else ResourceId(root=resource),
     )
@@ -444,12 +449,12 @@ async def test_inspection_after_a_crash_reports_the_target_without_a_second_effe
         query = await inspect_of(executor(items, namespace), f"req-{name}")
         assert query.observation.status is ObservationStatus.SUCCEEDED
         assert query.target is not None
-        if crash_at == "before_intent":
+        if crash_at == "before_record":
             # Nothing proves the target was ever started, so the answer is Unknown.
             assert query.target.observation.status is ObservationStatus.UNKNOWN
             assert scenario.effects() == 0
             return
-        if crash_at == "after_intent" and not scenario.allows_repeat:
+        if crash_at == "after_record" and not scenario.allows_repeat:
             # The owner proves the effect never ran, so inspection seals a typed rejection.
             assert query.target.observation.status is ObservationStatus.REJECTED
             assert scenario.effects() == 0
@@ -486,12 +491,12 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
         receipts = NamespaceOperationReceipts(store)
         context = context_for(request)
 
-        async def crash_after_intent(
+        async def crash_after_record(
             *, resumed: bool
         ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
             del resumed
-            receipts.record_intent(
-                IntentReceipt(
+            receipts.record_record(
+                RecordReceipt(
                     request_id="req-never",
                     payload_digest=context.payload_digest,
                     operation=request.operation,
@@ -511,7 +516,7 @@ async def test_inspection_seals_an_effect_the_owner_proves_never_happened() -> N
             owner=owner_key(request),
             context=context,
             result_type=ResultReceipt,
-            perform=crash_after_intent,
+            perform=crash_after_record,
         )
         runner = RegisteredOperationRequests(
             catalog_of(items), receipts, ObservationFactory(ReceiptStore(namespace))
@@ -528,7 +533,6 @@ def cancel_request(target: str, name: str) -> CancelOwnedResource:
     return CancelOwnedResource(
         request_id=RequestId(root=name),
         scope=SCOPE,
-        deadline_at=100.0,
         resource_id=ResourceId(root="resource"),
         target=RequestId(root=target),
     )
@@ -679,7 +683,6 @@ async def _inspect_before_and_after_the_target_ran() -> list[ExecutionResult]:
         inspect = InspectRequest(
             request_id=RequestId(root="inspect-run"),
             scope=SCOPE,
-            deadline_at=100.0,
             target=RequestId(root="req-run"),
         )
         before = await executor(items, namespace).execute(inspect, context_for(inspect))
@@ -738,7 +741,11 @@ async def test_same_identity_with_another_payload_is_rejected_after_every_regist
         runner = executor(items, namespace)
         first = await runner.execute(request, context_for(request))
         other = ExecutionContext(
-            fence=FENCE, now_at=6.0, payload_digest="different", lease=_Lease()
+            fence=FENCE,
+            now_at=6.0,
+            payload_digest="different",
+            lease=_Lease(),
+            until=Until(at=100.0),
         )
         second = await runner.execute(request, other)
         assert observed(second).observation.status is ObservationStatus.REJECTED

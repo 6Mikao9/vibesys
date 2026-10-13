@@ -44,6 +44,7 @@ from vs_core.api import (
     SnapshotAndRetainRun,
     TurnObserved,
     TurnSpec,
+    Until,
     WorkspaceRef,
 )
 from vs_prompts.api import RenderedPrompt, TemplateRenderer
@@ -97,7 +98,6 @@ def ensure_request(
     return EnsureSession(
         request_id=RequestId(root=request_id),
         scope=SCOPE,
-        deadline_at=100.0,
         spec=session_spec(policy=policy),
     )
 
@@ -110,7 +110,6 @@ def turn_spec(invocation: str = "inv-1", *, session: SessionId = SESSION) -> Tur
         workspace=SCOPE,
         prompts=(ArtifactRef(artifact_id=ArtifactId(root="prompt"), digest="sha256:0"),),
         output_schema=SCHEMA,
-        deadline_at=100.0,
         charge_class="free",
     )
 
@@ -124,7 +123,6 @@ def dispatch_request(
     return DispatchTurn(
         request_id=RequestId(root=request_id),
         scope=SCOPE,
-        deadline_at=100.0,
         turn=turn_spec(invocation),
         inputs=inputs,
     )
@@ -140,7 +138,6 @@ def inspect_request(
         dispatch=None if dispatch is None else RequestId(root=dispatch),
         request_id=RequestId(root=request_id),
         scope=SCOPE,
-        deadline_at=100.0,
         invocation=InvocationRef(
             session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
         ),
@@ -157,7 +154,6 @@ def run_snapshot(invocation: str = "inv-1") -> SnapshotAndRetainRun:
     return SnapshotAndRetainRun(
         request_id=RequestId(root="req-snap"),
         scope=SCOPE,
-        deadline_at=100.0,
         invocation=InvocationRef(
             session_id=SESSION, invocation_id=InvocationId(root=invocation), generation=0
         ),
@@ -308,7 +304,7 @@ class SessionHost:
         digest: str | None = None,
     ) -> ExecutionResult:
         """Execute *request* once on a freshly started host over *store*."""
-        context = context_for(request, lease=lease)
+        context = context_for(request, lease=lease).model_copy(update={"until": Until(at=100.0)})
         if now_at is not None:
             context = context.model_copy(update={"now_at": now_at})
         if digest is not None:

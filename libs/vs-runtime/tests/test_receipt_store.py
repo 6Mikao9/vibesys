@@ -12,7 +12,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict
 
-from vs_core.api import BlockIntent, RequestId
+from vs_core.api import BlockRequest, FailureReason, RequestId
 from vs_project.api import Project, ProjectStateError
 from vs_runtime.api.core import (
     Conflict,
@@ -41,13 +41,12 @@ class Done(BaseModel):
     value: int
 
 
-def request(name: str = "r1") -> BlockIntent:
-    return BlockIntent(
+def request(name: str = "r1") -> BlockRequest:
+    return BlockRequest(
         request_id=RequestId(root=name),
         scope=SCOPE,
-        deadline_at=100.0,
         target=RequestId(root="t"),
-        diagnostic="d",
+        reason=FailureReason.LOST,
     )
 
 
@@ -238,7 +237,7 @@ async def test_a_conflicting_live_duplicate_never_enters_the_performer() -> None
         store = store_at(Path(raw))
         effect = HeldPerformer()
         first_context = context_for(request())
-        conflicting = context_for(request().model_copy(update={"diagnostic": "other"}))
+        conflicting = context_for(request().model_copy(update={"reason": FailureReason.OWNER_GONE}))
         first = asyncio.create_task(run(store, effect, first_context))
         await effect.started.wait(first)
         scheduled = Gate()
@@ -358,7 +357,7 @@ async def test_another_payload_under_the_same_identity_conflicts_without_an_effe
         effect = Performer()
         store = store_at(Path(raw))
         await run(store, effect, context_for(request()))
-        other = context_for(request().model_copy(update={"diagnostic": "other"}))
+        other = context_for(request().model_copy(update={"reason": FailureReason.OWNER_GONE}))
         assert await run(store, effect, other) == Conflict()
         assert effect.calls == 1
 
