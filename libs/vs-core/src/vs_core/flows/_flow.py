@@ -140,7 +140,7 @@ class Flow:
 
     def group[T](self, *, limit: int | None = None, stops: bool = True) -> Group[T]:
         """A scope for concurrent tasks; leaving it waits for all of them."""
-        return Group(self._run, self, limit, stops)
+        return Group(self._run, self, limit, stops=stops)
 
     @contextmanager
     def shielded(self) -> Iterator[None]:
@@ -198,7 +198,7 @@ class Group[T](Source[T | TaskStopped]):
     run, tasks of a group with ``stops=True`` get ``Stopped`` at their next unshielded await.
     """
 
-    def __init__(self, run: _Run, owner: Flow, limit: int | None, stops: bool) -> None:  # noqa: FBT001
+    def __init__(self, run: _Run, owner: Flow, limit: int | None, *, stops: bool) -> None:
         """Make the group; ``Flow.group`` is the way in."""
         self._run = run
         self._owner = owner

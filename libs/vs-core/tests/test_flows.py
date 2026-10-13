@@ -17,7 +17,7 @@ from vs_core.api.testing import FakeView
 from .flow_support import FACTS, SHORT, Config, Plan, answer_of, ask, finish, start
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Callable, Generator
 
     from vs_core.api.testing import FlowRun
 
@@ -186,7 +186,7 @@ def test_a_flow_that_waits_for_nothing_that_can_arrive_is_a_deadlock(begin: Begi
 
 def test_a_flow_may_await_only_ctx_operations(begin: Begin) -> None:
     class Foreign:
-        def __await__(self):  # noqa: ANN204
+        def __await__(self) -> Generator[int]:
             yield 1
 
     async def rogue(_ctx: core.Flow, _config: Config) -> None:

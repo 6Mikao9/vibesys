@@ -256,3 +256,17 @@ def test_a_stop_while_implementing_settles_the_attempt_as_stopped(begin: Begin) 
   and sequencing is `await`.
 - A crash-loop budget: a run whose replay keeps failing is stopped by the shell, which counts
   restarts; the flow state cannot count replays that never finished.
+
+## Implementation notes
+
+Where the runtime refines the contract above:
+
+- Operation results (`OperationFinished`) are journaled as JSON and rebuilt through the
+  `OperationRegistry` given to `FlowSearch`; turn replies are rebuilt from the `reply=` model.
+- Restart from snapshots is opt-in: `FlowSearch(..., flows=(worker, ...))` lists the `@flow`
+  functions that may be resumed. `@flow(snapshot=S, name=...)` names a flow explicitly.
+- `ctx.read` needs a view, so it cannot be called before the flow's first `await`.
+- `Group.free` is a large constant when the group has no limit. `ctx.stopped` yields the
+  `StopRequested` event itself. A stopped `Task` yields `TaskStopped(key)`.
+- Awaiting inside a `finally` while the run itself is being discarded is not supported; use
+  `except Stopped` (or `@resource`) for cleanup that awaits.

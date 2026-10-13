@@ -8,12 +8,17 @@ decisions that were in flight are dropped.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 import pytest
 
 import vs_core.api as core
 from vs_core.api.testing import FlowRun
 
 from .flow_support import DECLARATION, FACTS, SHORT, Config, Plan, ask, finish, start
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
 
 
 class Job(core.Value):
@@ -40,7 +45,7 @@ async def worker_v2(ctx: core.Flow, job: Job) -> int:
     return 3
 
 
-def root_for(worker: object):  # noqa: ANN201
+def root_for(worker: object) -> Callable[[core.Flow, Config], Coroutine[Any, Any, None]]:
     async def root(ctx: core.Flow, _config: Config) -> None:
         async with ctx.group() as workers:
             result = await workers.start("w", worker, Job())  # ty: ignore[invalid-argument-type]
