@@ -1,8 +1,8 @@
 # Orchestration strategies and the runtime
 
-Every VibeSys orchestration is a search on the `vs-core` lifecycle. `dynamic` is written as a
-flow: one `@search("dynamic", ...)` function that runs top to bottom, which the runtime journals
-and replays (see [flows.md](flows.md)). The other searches (`evolve`, `issue_queue`, `multi`,
+Every VibeSys orchestration is a search on the `vs-core` lifecycle. `dynamic` and `issue_queue`
+are written as flows: one `@search(...)` function each that runs top to bottom, which the runtime
+journals and replays (see [flows.md](flows.md)). The other searches (`evolve`, `multi`,
 `single`) are still state-machine strategies and are being ported to flows one at a time; the
 rest of this page describes that older form wherever it says "strategy", and says "search" where
 both forms apply. A strategy is a pure
@@ -105,6 +105,16 @@ Host wiring for `dynamic` is `src/vibesys/dynamic_core.py` (builds the run plan:
 config, the run facts and limits), `dynamic_roles.py`, and the dynamic `core_policy/` (prompt
 variables, evidence requirements, and the projection from `RunSnapshot`). Core, not the host,
 ends the run from the winner the flow chose with `ctx.choose`.
+
+`issue_queue` (search name `plain`) has the same layout in
+`src/vibesys/orchestration/issue_queue/search/`: the root `issue_queue` in `_search.py` reads the
+board, asks the pure `Queue` what the board calls for and runs each issue or performance job as a
+flow of its own (`_issue.py`, `_perf.py`); `_board.py`, `_writes.py`, `_queue.py` and the other
+helpers are pure. The board's operations belong to the tracker library: the search lists them in
+`owned=` and its flows ask their owner with `ctx.owners`. Its old `strategy/` package,
+`IssueQueueStrategyState` and `IssueQueueOptions` are gone; the operator's keys are
+`IssueQueueLaunch` (`issue_queue/launch.py`: `IssueQueueConfig` plus `modality` and `tracker`,
+unknown keys rejected).
 
 To add a search, follow [flows.md](flows.md) and the steps under "Adding a plugin" below.
 

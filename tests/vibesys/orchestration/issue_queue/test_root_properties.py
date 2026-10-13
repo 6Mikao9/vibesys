@@ -12,9 +12,9 @@ from __future__ import annotations
 import pytest
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
+from tests.vibesys.orchestration.issue_queue._host import Host, assert_flow_closed, begin, config
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, judged
 
-from tests.vibesys.orchestration.issue_queue._host import Host, assert_flow_closed, begin, config
 from vs_core.api import Finish, StartAttempt, Wait
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
@@ -31,7 +31,9 @@ def _check_always(host: Host) -> None:
     """What holds after every step."""
     rules, where = host.config, host.run.timeline()
     assert len(host.unsettled) <= 1, f"two jobs at once: {where}"
-    assert len(host.opened) <= rules.max_jobs + host.refused_starts, f"more jobs than allowed: {where}"
+    assert len(host.opened) <= rules.max_jobs + host.refused_starts, (
+        f"more jobs than allowed: {where}"
+    )
     for issue in host.tracker.list():
         assert issue.attempts <= rules.max_attempts_per_issue, f"too many attempts: {where}"
     titles = host.titles()
@@ -43,27 +45,25 @@ def _check_always(host: Host) -> None:
 @given(
     steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 11)), max_size=60),
     stop_before=st.none() | st.integers(0, 60),
-    rounds=st.integers(1, 3),
-    attempts=st.integers(1, 3),
+    rules=st.fixed_dictionaries(
+        {"max_rounds": st.integers(1, 3), "max_attempts_per_issue": st.integers(1, 3)}
+    ),
     lost=st.frozensets(st.integers(0, 12), max_size=4),
-    filing=st.booleans(),
 )
 def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_operator_stops(
     *,
     restarting: bool,
     steps: list[tuple[int, int]],
     stop_before: int | None,
-    rounds: int,
-    attempts: int,
+    rules: dict[str, int],
     lost: frozenset[int],
-    filing: bool,
 ) -> None:
     host = begin(
-        config(max_rounds=rounds, max_attempts_per_issue=attempts),
+        config(**rules),
         restarting=restarting,
         lost_acknowledgements=lost,
-        judge=[judged(bugs=("bug one",)), judged(passed=False)] if filing else [],
-        perf=[evaluated("faster")] if filing else [],
+        judge=[judged(bugs=("bug one",)), judged(passed=False)],
+        perf=[evaluated("faster")],
     )
     stopped_at: int | None = None
     try:

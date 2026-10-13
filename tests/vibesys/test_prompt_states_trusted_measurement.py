@@ -17,20 +17,10 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.issue_queue.strategy.world import issue_queue_config
 
 from vibesys.orchestration.evolve.core_policy.api import prompts as evolve_prompts
 from vibesys.orchestration.evolve.search.api import JudgePrompt as EvolveJudgePrompt
 from vibesys.orchestration.evolve.search.api import evolve
-from vibesys.orchestration.issue_queue.core_policy.api import prompts as issue_queue_prompts
-from vibesys.orchestration.issue_queue.core_policy.api import (
-    reply_schemas as issue_queue_replies,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
-    IssueDetail,
-    ReviewPrompt,
-)
-from vibesys.orchestration.issue_queue.strategy.api import ResumePrompt as IssueQueueResume
 from vibesys.prompts import CORE_PROTOCOL_DIR, ResumePrompt
 from vs_core.api import (
     ArtifactRef,
@@ -124,8 +114,8 @@ def _record(
     return ref, evidence
 
 
-# The reply types of both strategies whose prompts cite evidence; their schema names differ.
-_REPLIES = {**evolve.reply_schemas, **issue_queue_replies(issue_queue_config())}
+# The reply types of the strategies whose prompts cite evidence; their schema names differ.
+_REPLIES = dict(evolve.reply_schemas)
 
 
 def _render(
@@ -164,30 +154,6 @@ def _cases() -> dict[str, Callable[..., str]]:
         )
         return _render(root, (CORE_PROTOCOL_DIR,), context, (ref, evidence))
 
-    def queue_resume(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
-        context = IssueQueueResume(
-            role="implementer", retained_revision=REVISION, timed_out=False, cited_evidence=(ref,)
-        )
-        return _render(
-            root,
-            (Path(issue_queue_prompts.__file__).parent, CORE_PROTOCOL_DIR),
-            context,
-            (ref, evidence),
-        )
-
-    def queue_review(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
-        issue = IssueDetail(
-            id=1, type="feature", status="open", title="t", attempts=0, description="d"
-        )
-        context = ReviewPrompt(issue=issue, summary="s", cited_evidence=(ref,))
-        return _render(
-            root,
-            (Path(issue_queue_prompts.__file__).parent, CORE_PROTOCOL_DIR),
-            context,
-            (ref, evidence),
-            _RUN,
-        )
-
     def evolve_judge(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
         context = EvolveJudgePrompt(candidate=REVISION, cited_evidence=(ref,))
         return _render(
@@ -199,9 +165,7 @@ def _cases() -> dict[str, Callable[..., str]]:
         )
 
     return {
-        "single/multi/dynamic/evolve resume": core,
-        "issue_queue resume": queue_resume,
-        "issue_queue review": queue_review,
+        "single/multi/dynamic/evolve/issue_queue resume": core,
         "evolve judge": evolve_judge,
     }
 

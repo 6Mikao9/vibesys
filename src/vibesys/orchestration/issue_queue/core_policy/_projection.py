@@ -94,10 +94,11 @@ def _board_status(snapshot: QueueSnapshot) -> IterationStatus:
 
 
 def _issue_status(issue: IssueBrief, *, active: bool) -> IterationStatus:
-    if issue.status == IssueStatus.CLOSED.value:
+    status = IssueStatus(issue.status)
+    if status is IssueStatus.CLOSED:
         return IterationStatus.COMPLETED
-    if issue.status == IssueStatus.BLOCKED.value:
+    if status is IssueStatus.BLOCKED:
         return IterationStatus.FAILED
-    if active or issue.status == IssueStatus.IN_PROGRESS.value:
+    if active or status is IssueStatus.IN_PROGRESS:
         return IterationStatus.ACTIVE
     return IterationStatus.PENDING

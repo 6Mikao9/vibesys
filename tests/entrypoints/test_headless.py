@@ -41,7 +41,7 @@ from vibesys.orchestration.agent_options import (
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.launch import EvolveLaunch
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
-from vibesys.orchestration.issue_queue import IssueQueueOptions
+from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.core_run import RunEnd
 from vs_project.api import (
@@ -303,12 +303,11 @@ def _agent_configuration(
 
 
 def _plain_configuration(*, max_rounds: int = 6) -> _RecordedRun:
-    options = IssueQueueOptions(
+    options = IssueQueueLaunch(
         max_rounds=max_rounds,
         max_attempts_per_issue=4,
         max_issues_per_perf_eval=2,
         max_issues_per_round=3,
-        turn_drop_backoff_seconds=7.0,
     )
     return _RecordedRun(
         OrchestrationDescriptor(
@@ -1570,7 +1569,6 @@ def test_plain_resume_restores_its_configuration(
     assert args.max_attempts_per_issue == 4
     assert args.max_issues_per_perf_eval == 2
     assert args.max_issues_per_round == 3
-    assert args.turn_drop_backoff_seconds == 7.0
     assert args.agent_backend == "cli"
     assert args.cli_provider == "claude"
     assert args.backend is ComputeBackend.CPU

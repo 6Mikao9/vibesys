@@ -294,8 +294,8 @@
     "occurrence": 1
   },
   {
-    "path": "src/vibesys/orchestration/issue_queue/models.py",
-    "symbol": "IssueQueueOptions",
+    "path": "src/vibesys/orchestration/issue_queue/launch.py",
+    "symbol": "IssueQueueLaunch",
     "rule": "effect-path",
     "subject": "vs_issue_tracker.api.IssueTrackerConfig.local",
     "occurrence": 1

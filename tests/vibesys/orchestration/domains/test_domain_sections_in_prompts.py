@@ -37,7 +37,7 @@ from vibesys.domains.rendering import render_domain_sections
 from vibesys.orchestration import dynamic, evolve, issue_queue, multi, single
 from vibesys.orchestration.dynamic.search.api import PromptTemplate
 from vibesys.orchestration.evolve.search import api as evolve_api
-from vibesys.orchestration.issue_queue.strategy import api as plain_api
+from vibesys.orchestration.issue_queue.search import api as plain_api
 from vibesys.orchestration.multi.strategy import api as multi_api
 from vibesys.orchestration.single.strategy import api as single_api
 from vs_core.api import RevisionId, RevisionRef
@@ -285,7 +285,8 @@ def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
     core = strategy.plugin.core
     assert core is not None
     renderer = TemplateRenderer(core.prompt_templates, fallback_roots=core.prompt_fallback_roots)
-    fields = context_variables(context, plan.reply_schemas)
+    schemas = plan.search.reply_schemas if strategy.name == "plain" else plan.reply_schemas
+    fields = context_variables(context, schemas)
     return renderer.render_template(
         f"{context.model_dump()['template']}.j2", **plan.prompt_variables, **fields
     )

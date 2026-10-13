@@ -28,11 +28,10 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkPlan,
 )
 from vibesys.orchestration.issue_queue.core_policy.api import (
-    project_strategy_state as project_issue_queue_state,
+    project_run_snapshot as project_issue_queue_snapshot,
 )
-from vibesys.orchestration.issue_queue.strategy.api import BoardState, IssueQueueStrategyState
+from vibesys.orchestration.issue_queue.search.api import IssueBrief, QueueSnapshot
 from vs_core.api import AttemptId, RevisionRef
-from vs_issue_tracker.api import IssueRow, IssueStatus, IssueType
 
 
 def _node(identifier: str, ordinal: int) -> IterationSummary:
@@ -98,7 +97,9 @@ def test_catalog_has_an_explicit_iteration_disposition_for_every_builtin() -> No
         for registration in registrations
     )
 
-    projection = project_issue_queue_state(IssueQueueStrategyState(), experiment_revision=0)
+    projection = project_issue_queue_snapshot(
+        QueueSnapshot(round_idx=0, cursor="drain"), experiment_revision=0
+    )
     assert isinstance(projection.iterations, IterationTree)
     assert projection.iterations.nodes == (
         IterationSummary(
@@ -106,39 +107,35 @@ def test_catalog_has_an_explicit_iteration_disposition_for_every_builtin() -> No
             kind=IterationKind.BOARD,
             label="Issue board",
             ordinal=0,
-            status=IterationStatus.PENDING,
+            status=IterationStatus.ACTIVE,
         ),
     )
 
 
 def test_issue_queue_projects_board_items_in_stable_identity_order() -> None:
-    def issue(identifier: int, status: IssueStatus, *, attempts: int = 0) -> IssueRow:
-        return IssueRow(
+    def issue(identifier: int, status: str, *, attempts: int = 0) -> IssueBrief:
+        return IssueBrief(
             id=identifier,
-            type=IssueType.BUG,
+            type="bug",
             status=status,
             title=f"Issue {identifier}",
             attempts=attempts,
-            created_by="operator",
-            created_iter=1,
         )
 
-    state = IssueQueueStrategyState(
-        board=BoardState(
-            bootstrap_done=True,
-            issues=(
-                issue(4, IssueStatus.BLOCKED, attempts=2),
-                issue(1, IssueStatus.IN_PROGRESS, attempts=1),
-                issue(3, IssueStatus.CLOSED),
-                issue(2, IssueStatus.OPEN),
-            ),
-        )
+    state = QueueSnapshot(
+        round_idx=1,
+        cursor="drain",
+        issues=(
+            issue(4, "blocked", attempts=2),
+            issue(1, "in_progress", attempts=1),
+            issue(3, "closed"),
+            issue(2, "open"),
+        ),
     )
 
-    projected = project_issue_queue_state(state, experiment_revision=7).iterations
-    reopened = project_issue_queue_state(
-        IssueQueueStrategyState.model_validate_json(state.model_dump_json()),
-        experiment_revision=7,
+    projected = project_issue_queue_snapshot(state, experiment_revision=7).iterations
+    reopened = project_issue_queue_snapshot(
+        QueueSnapshot.model_validate_json(state.model_dump_json()), experiment_revision=7
     ).iterations
 
     assert isinstance(projected, IterationTree)

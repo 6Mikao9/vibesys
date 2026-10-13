@@ -14,16 +14,7 @@ from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.evolve.search.api import JUDGE as EVOLVE_JUDGE
 from vibesys.orchestration.evolve.search.api import MUTATOR as EVOLVE_MUTATOR
 from vibesys.orchestration.issue_queue.core_policy import prompts as issue_queue_prompts
-from vibesys.orchestration.issue_queue.core_policy.api import (
-    reply_schemas as issue_queue_schemas,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
-    IMPLEMENTER_REPLY as ISSUE_QUEUE_IMPLEMENTER_REPLY,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
-    JUDGE_REPLY as ISSUE_QUEUE_JUDGE_REPLY,
-)
-from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig
+from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_schemas
 from vibesys.orchestration.multi.strategy.api import IMPLEMENTER_REPLY as MULTI_IMPLEMENTER_REPLY
 from vibesys.orchestration.multi.strategy.api import JUDGE_REPLY as MULTI_JUDGE_REPLY
@@ -32,7 +23,7 @@ from vibesys.orchestration.single.strategy.api import IMPLEMENTER_REPLY as SINGL
 from vibesys.prompts import render_template
 from vs_agent.api import AgentClient, native_schema_problems
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
-from vs_core.api import ArtifactId, ArtifactRef, WaitableReply
+from vs_core.api import WaitableReply
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
@@ -44,15 +35,9 @@ if TYPE_CHECKING:
 _DYNAMIC = {role.name: dynamic.reply_schemas[role.reply_schema] for role in dynamic.roles}
 _SINGLE = single_schemas()
 _MULTI = multi_schemas()
-_ISSUE_QUEUE = issue_queue_schemas(
-    IssueQueueConfig(
-        recipe=ArtifactRef(artifact_id=ArtifactId(root="issue-recipe"), digest="issue-recipe"),
-        max_rounds=1,
-        max_attempts_per_issue=1,
-        max_issues_per_perf_eval=1,
-        max_issues_per_round=1,
-    )
-)
+_ISSUE_QUEUE = {
+    role.name: issue_queue.reply_schemas[role.reply_schema] for role in issue_queue.roles
+}
 
 _IMPLEMENTER = {"summary": "done", "outcome": HypothesisOutcome.SUPPORTED}
 _JUDGE = {"passed": True, "analysis": "checked"}
@@ -91,10 +76,10 @@ _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
     ("multi-judge", _MULTI[MULTI_JUDGE_REPLY], _MULTI_JUDGE),
     (
         "issue-queue-implementer",
-        _ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY],
+        _ISSUE_QUEUE["implementer"],
         _ISSUE_QUEUE_IMPLEMENTER,
     ),
-    ("issue-queue-judge", _ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], _ISSUE_QUEUE_JUDGE),
+    ("issue-queue-judge", _ISSUE_QUEUE["judge"], _ISSUE_QUEUE_JUDGE),
 )
 
 
@@ -152,8 +137,8 @@ def test_pre_envelope_wait_replies_remain_compatible(
         (_MULTI[MULTI_JUDGE_REPLY], []),
         (EVOLVE_MUTATOR.reply, []),
         (EVOLVE_JUDGE.reply, []),
-        (_ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY], []),
-        (_ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], []),
+        (_ISSUE_QUEUE["implementer"], []),
+        (_ISSUE_QUEUE["judge"], []),
     ],
 )
 def test_waitable_schemas_have_no_root_union_or_unresolved_reference(
@@ -181,10 +166,10 @@ def test_a_dynamic_role_answers_with_a_waitable_reply_exactly_when_it_may_wait(r
         (_DYNAMIC["implementer"], {"reply": _IMPLEMENTER}),
         (_DYNAMIC["judge"], {"reply": _JUDGE}),
         (
-            _ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY],
+            _ISSUE_QUEUE["implementer"],
             {"reply": _ISSUE_QUEUE_IMPLEMENTER},
         ),
-        (_ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], {"reply": _ISSUE_QUEUE_JUDGE}),
+        (_ISSUE_QUEUE["judge"], {"reply": _ISSUE_QUEUE_JUDGE}),
     ],
 )
 def test_waitable_replies_reach_codex_as_native_schemas(
