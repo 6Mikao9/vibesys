@@ -36,7 +36,7 @@ from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_sections
 from vibesys.orchestration import dynamic, evolve, issue_queue, multi, single
 from vibesys.orchestration.dynamic.search.api import PromptTemplate
-from vibesys.orchestration.evolve.strategy import api as evolve_api
+from vibesys.orchestration.evolve.search import api as evolve_api
 from vibesys.orchestration.issue_queue.strategy import api as plain_api
 from vibesys.orchestration.multi.strategy import api as multi_api
 from vibesys.orchestration.single.strategy import api as single_api
@@ -67,7 +67,6 @@ _EVOLVE: dict[str, JsonValue] = {
     "frontier_bias": 0.5,
     "k_random_inspirations": 1,
     "k_top_inspirations": 1,
-    "keep_deployments": False,
     "max_generations": 1,
     "max_parallelism": 1,
     "selection_temperature": 1.0,

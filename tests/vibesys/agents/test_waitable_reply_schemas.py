@@ -11,9 +11,8 @@ from pydantic import ValidationError
 
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.orchestration.dynamic.search.api import dynamic
-from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_schemas
-from vibesys.orchestration.evolve.strategy.api import JUDGE_REPLY as EVOLVE_JUDGE_REPLY
-from vibesys.orchestration.evolve.strategy.api import MUTATOR_REPLY as EVOLVE_MUTATOR_REPLY
+from vibesys.orchestration.evolve.search.api import JUDGE as EVOLVE_JUDGE
+from vibesys.orchestration.evolve.search.api import MUTATOR as EVOLVE_MUTATOR
 from vibesys.orchestration.issue_queue.core_policy import prompts as issue_queue_prompts
 from vibesys.orchestration.issue_queue.core_policy.api import (
     reply_schemas as issue_queue_schemas,
@@ -43,7 +42,6 @@ if TYPE_CHECKING:
 
 
 _DYNAMIC = {role.name: dynamic.reply_schemas[role.reply_schema] for role in dynamic.roles}
-_EVOLVE = evolve_schemas()
 _SINGLE = single_schemas()
 _MULTI = multi_schemas()
 _ISSUE_QUEUE = issue_queue_schemas(
@@ -86,8 +84,8 @@ _ISSUE_QUEUE_JUDGE = {
 _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
     ("dynamic-implementer", _DYNAMIC["implementer"], _IMPLEMENTER),
     ("dynamic-judge", _DYNAMIC["judge"], _JUDGE),
-    ("evolve-mutator", _EVOLVE[EVOLVE_MUTATOR_REPLY], _EVOLVE_MUTATOR),
-    ("evolve-judge", _EVOLVE[EVOLVE_JUDGE_REPLY], _EVOLVE_JUDGE),
+    ("evolve-mutator", EVOLVE_MUTATOR.reply, _EVOLVE_MUTATOR),
+    ("evolve-judge", EVOLVE_JUDGE.reply, _EVOLVE_JUDGE),
     ("single-implementer", _SINGLE[SINGLE_IMPLEMENTER_REPLY], _SINGLE_RESULT),
     ("multi-implementer", _MULTI[MULTI_IMPLEMENTER_REPLY], _MULTI_IMPLEMENTER),
     ("multi-judge", _MULTI[MULTI_JUDGE_REPLY], _MULTI_JUDGE),
@@ -152,8 +150,8 @@ def test_pre_envelope_wait_replies_remain_compatible(
             ],
         ),
         (_MULTI[MULTI_JUDGE_REPLY], []),
-        (_EVOLVE[EVOLVE_MUTATOR_REPLY], []),
-        (_EVOLVE[EVOLVE_JUDGE_REPLY], []),
+        (EVOLVE_MUTATOR.reply, []),
+        (EVOLVE_JUDGE.reply, []),
         (_ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY], []),
         (_ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], []),
     ],

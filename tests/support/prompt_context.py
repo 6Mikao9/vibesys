@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from tests.support.reply_variables import context_variables, profiler_reply
 
 from vibesys.orchestration.dynamic.search.api import dynamic
-from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_schemas
+from vibesys.orchestration.evolve.search.api import evolve
 from vibesys.orchestration.issue_queue.core_policy.api import reply_schemas as issue_queue_schemas
 from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig
 from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_schemas
@@ -29,7 +29,7 @@ def registered_reply_models() -> list[type[BaseModel]]:
     recipe = ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe")
     models = [
         *dynamic.reply_schemas.values(),
-        *evolve_schemas().values(),
+        *evolve.reply_schemas.values(),
         *multi_schemas().values(),
         *single_schemas().values(),
     ]

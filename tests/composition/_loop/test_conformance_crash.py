@@ -13,25 +13,29 @@ setting splits each sweep into interleaved parts that the workers share.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from tests.composition._loop.dst_world import SubjectWorld
 from tests.composition._loop.subjects import SUBJECTS
 
-from vibesys.orchestration.dynamic.search.api import RunSnapshot
 from vs_core.api import FlowDriver, FlowState, StrategyState
 from vs_dst.api import EVERY_POINT, CrashKind, SimulatedRun, crash_point_policy, simulate
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 SUBJECT_NAMES = sorted(name for name, subject in SUBJECTS.items() if subject.sweeps_crashes)
 
 
-def _published(state: StrategyState) -> object:
+def _published(state: StrategyState, snapshot: type[BaseModel]) -> object:
     """What the search published of its record, without the times its observations were made.
 
     A restart is late by the host's lease, so the observations it makes are stamped later;
     that changes when the search learned a fact, not what it decided.
     """
     assert isinstance(state, FlowState)
-    record = FlowDriver.published(state, RunSnapshot)
+    record = FlowDriver.published(state, snapshot)
     return None if record is None else _untimed(record.model_dump(mode="json"))
 
 
@@ -73,5 +77,7 @@ def test_c2_a_restart_after_any_crash_finishes_the_same_run(
             continue
         assert recovered.finished, crash
         assert recovered.result == normal.result, crash
-        assert _published(recovered.state) == _published(normal.state), crash
+        assert _published(recovered.state, subject.snapshot) == _published(
+            normal.state, subject.snapshot
+        ), crash
         assert recovered.no_effect_ran_twice(), crash

@@ -86,6 +86,8 @@ class Subject:
     """Request kinds the search's own steps cause in a run that has no fault."""
     start_budget: int
     """How many attempts the search's config lets it start."""
+    snapshot: type[BaseModel]
+    """The record type the search publishes."""
     sweeps_crashes: bool = True
     """Whether the crash sweep (C2) runs on this subject: at a sample of its durable boundaries
     in CI, at every one under `--crash-points=all`."""

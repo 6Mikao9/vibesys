@@ -1,6 +1,6 @@
-"""Every prompt the evolve strategy can request renders from the core policy's templates.
+"""Every prompt the evolve search can request renders from the core policy's templates.
 
-The strategy sends a typed `PromptContext`; the render owner passes its fields (plus the
+The search sends a typed `PromptContext`; the render owner passes its fields (plus the
 run-level variables) to the template under strict undefined variables. A template that reads a
 name no context supplies fails the render, which ends the turn, so each template is exercised
 over its context space, and the profiler template over every runnable profiler.
@@ -12,18 +12,19 @@ from pathlib import Path
 
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.prompt_context import context_variables
+from tests.support.reply_variables import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 
 import vibesys.orchestration.evolve.core_policy.prompts as templates
-from vibesys.orchestration.evolve.core_policy.api import reply_schemas, run_prompt_variables
+from vibesys.orchestration.evolve.core_policy.api import run_facts_variables, run_prompt_variables
 from vibesys.orchestration.evolve.population import Individual
-from vibesys.orchestration.evolve.strategy.api import (
+from vibesys.orchestration.evolve.search.api import (
     JudgePrompt,
     MutatePrompt,
     ObjectiveAxis,
     ProfilerPrompt,
     PromptTemplate,
+    evolve,
 )
 from vibesys.orchestration.profilers import ACTIVE_PROFILER_KINDS
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
@@ -55,7 +56,6 @@ _COLD = st.builds(
     repair_seed=st.booleans(),
     failed_lessons=st.lists(_TEXT, max_size=3).map(tuple),
     num_failed_attempts=st.integers(0, 4),
-    reference_path=st.sampled_from((".", "reference")),
 )
 _CHILD = st.builds(
     MutatePrompt,
@@ -68,21 +68,30 @@ _JUDGE = st.builds(JudgePrompt, candidate=_REVISIONS)
 _PROFILER = st.builds(
     ProfilerPrompt,
     candidate=_REVISIONS,
-    profiler_kind=st.sampled_from(sorted(kind.value for kind in ACTIVE_PROFILER_KINDS)),
-    profile_execution=st.sampled_from(("local", "remote")),
-    benchmark_command=st.none() | _TEXT,
     objectives=st.lists(
         st.builds(ObjectiveAxis, name=_TEXT, direction=st.sampled_from(("max", "min"))),
         max_size=2,
         unique_by=lambda axis: axis.name,
     ).map(tuple),
-    profiler_support_name=_TEXT,
-    profiler_mcp_name=_TEXT,
 )
+_PROFILERS = st.sampled_from(sorted(kind.value for kind in ACTIVE_PROFILER_KINDS))
 
 
-def _render(template: PromptTemplate, context: Value, *, agent_evaluation: bool = True) -> str:
-    variables = context_variables(context, reply_schemas())
+def _render(
+    template: PromptTemplate,
+    context: Value,
+    *,
+    agent_evaluation: bool = True,
+    **given: str | None,
+) -> str:
+    facts = {
+        "profiler_id": "none",
+        "execution": "local",
+        "command": None,
+        "reference": ".",
+        **given,
+    }
+    variables = context_variables(context, evolve.reply_schemas)
     text = _RENDERER.render_template(
         f"{template.value}.j2",
         **run_prompt_variables(
@@ -90,6 +99,13 @@ def _render(template: PromptTemplate, context: Value, *, agent_evaluation: bool 
             objective=_OBJECTIVE,
             environment_notes="note",
             agent_evaluation=agent_evaluation,
+            run_facts=run_facts_variables(
+                interface="inprocess",
+                reference_path=facts["reference"],
+                profiler_id=facts["profiler_id"],
+                profile_execution=facts["execution"],
+                benchmark_command=facts["command"],
+            ),
         ),
         **variables,
     )
@@ -97,10 +113,13 @@ def _render(template: PromptTemplate, context: Value, *, agent_evaluation: bool 
     return text
 
 
-@given(context=_COLD | _CHILD)
-def test_the_mutation_prompt_renders_for_every_context(context: MutatePrompt) -> None:
-    text = _render(PromptTemplate.MUTATE, context)
+@given(context=_COLD | _CHILD, reference=st.sampled_from((".", "reference")))
+def test_the_mutation_prompt_renders_for_every_context(
+    context: MutatePrompt, reference: str
+) -> None:
+    text = _render(PromptTemplate.MUTATE, context, reference=reference)
     assert _OBJECTIVE in text
+    assert (f"`{reference}`" in text) is (context.is_cold_start and not context.repair_seed)
     assert ("Bootstrap the first passing seed" in text) is context.is_cold_start
     if context.parent is not None:
         assert f"#{context.parent.id}" in text
@@ -118,9 +137,22 @@ def test_the_review_prompt_renders_for_every_context(context: JudgePrompt) -> No
     assert context.candidate.revision_id.root in _render(PromptTemplate.JUDGE, context)
 
 
-@given(context=_PROFILER)
-def test_the_profiler_prompt_renders_for_every_runnable_profiler(context: ProfilerPrompt) -> None:
-    text = _render(PromptTemplate.PROFILER, context)
+@given(
+    context=_PROFILER,
+    profiler=_PROFILERS,
+    execution=st.sampled_from(("local", "remote")),
+    command=st.none() | _TEXT,
+)
+def test_the_profiler_prompt_renders_for_every_runnable_profiler(
+    context: ProfilerPrompt, profiler: str, execution: str, command: str | None
+) -> None:
+    text = _render(
+        PromptTemplate.PROFILER,
+        context,
+        profiler_id=profiler,
+        execution=execution,
+        command=command,
+    )
     assert context.candidate.revision_id.root in text
     for axis in context.objectives:
         assert axis.name in text

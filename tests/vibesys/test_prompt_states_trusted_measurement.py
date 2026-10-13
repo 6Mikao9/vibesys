@@ -20,8 +20,8 @@ from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 from tests.vibesys.orchestration.issue_queue.strategy.world import issue_queue_config
 
 from vibesys.orchestration.evolve.core_policy.api import prompts as evolve_prompts
-from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_replies
-from vibesys.orchestration.evolve.strategy.api import JudgePrompt as EvolveJudgePrompt
+from vibesys.orchestration.evolve.search.api import JudgePrompt as EvolveJudgePrompt
+from vibesys.orchestration.evolve.search.api import evolve
 from vibesys.orchestration.issue_queue.core_policy.api import prompts as issue_queue_prompts
 from vibesys.orchestration.issue_queue.core_policy.api import (
     reply_schemas as issue_queue_replies,
@@ -125,7 +125,7 @@ def _record(
 
 
 # The reply types of both strategies whose prompts cite evidence; their schema names differ.
-_REPLIES = {**evolve_replies(), **issue_queue_replies(issue_queue_config())}
+_REPLIES = {**evolve.reply_schemas, **issue_queue_replies(issue_queue_config())}
 
 
 def _render(
