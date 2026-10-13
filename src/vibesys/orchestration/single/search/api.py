@@ -1,6 +1,6 @@
 """Public surface of the single search: the flow, its config, roles and pure helpers."""
 
-from vibesys.orchestration.single.search._attempt import UNSETTLED, Attempt, Next
+from vibesys.orchestration.single.search._attempt import UNSETTLED, Next, SingleAttempt
 from vibesys.orchestration.single.search._budget import budget
 from vibesys.orchestration.single.search._config import SingleConfig
 from vibesys.orchestration.single.search._operations import (
@@ -35,7 +35,6 @@ __all__ = [
     "ROLES",
     "UNSETTLED",
     "VERIFY_KIND",
-    "Attempt",
     "CaptureCommand",
     "CommandCapture",
     "EvidenceReadings",
@@ -47,6 +46,7 @@ __all__ = [
     "RenderRoleArtifacts",
     "RenderedArtifacts",
     "RoundPrompt",
+    "SingleAttempt",
     "SingleConfig",
     "SingleRound",
     "VerifyParentRevision",

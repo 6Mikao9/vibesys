@@ -14,7 +14,7 @@ from typing import Self
 from vibesys.candidates.api import space_of, workspace_mode_for
 from vibesys.hypothesis import Continue, Finished, NewHypothesis, rounds
 from vibesys.orchestration.single.models import SingleAgentRoundResponse
-from vibesys.orchestration.single.search._attempt import Attempt, Next
+from vibesys.orchestration.single.search._attempt import Next, SingleAttempt
 from vibesys.orchestration.single.search._config import SingleConfig
 from vibesys.orchestration.single.search._roles import IMPLEMENTER
 from vibesys.serial_search import api as serial
@@ -82,7 +82,7 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
                 None,
             )
             ctx.publish(ledger.search)
-    attempt = Attempt(
+    attempt = SingleAttempt(
         config=config,
         terms=ctx.task.terms,
         baseline=start.baseline,
@@ -105,7 +105,7 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
     )
 
 
-async def work(ctx: Flow, attempt: Attempt) -> Settlement | None:
+async def work(ctx: Flow, attempt: SingleAttempt) -> Settlement | None:
     """Open the round's workspace, let the implementer work in it, settle it; core's settlement."""
 
     async def turn(session: Session, ws: Workspace) -> str | None:
@@ -126,7 +126,7 @@ async def work(ctx: Flow, attempt: Attempt) -> Settlement | None:
     )
 
 
-async def take_turn(ctx: Flow, attempt: Attempt, session: Session, ws: Workspace) -> Next:
+async def take_turn(ctx: Flow, attempt: SingleAttempt, session: Session, ws: Workspace) -> Next:
     """One paid turn: the reply judged, and the trusted gates when it passes and they are due."""
     prompt = attempt.prompt()
     attempt.turns += 1

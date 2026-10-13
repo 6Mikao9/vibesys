@@ -2,7 +2,7 @@
 
 An attempt is the implementer's work on one hypothesis in one candidate workspace: up to
 `max_retries_per_round` paid turns, each ending in a reply that the guards judge, a candidate
-that the trusted gates measure, or a failure. `Attempt` holds what the turns established; its
+that the trusted gates measure, or a failure. `SingleAttempt` holds what the turns established; its
 methods decide what each reply, gate result and failure means and say whether to ask again.
 Nothing here awaits or reads the run, so the rules are property-tested on their own.
 """
@@ -45,7 +45,7 @@ class Next(StrEnum):
 
 
 @dataclass
-class Attempt:
+class SingleAttempt:
     """What the turns of one round have established so far."""
 
     config: SingleConfig

@@ -3,7 +3,7 @@
 An attempt is the implementer's work on one hypothesis in one candidate workspace: up to
 `max_retries_per_round` paid turns, each ending in a reply that the review (when the cadence
 asks for one), the validation of its recipes and the trusted gates judge, or in a failure.
-`Attempt` holds what the turns established; its methods decide what each reply, verdict,
+`MultiAttempt` holds what the turns established; its methods decide what each reply, verdict,
 validation and gate result means and say what to do next. Nothing here awaits or reads the run,
 so the rules are property-tested on their own.
 
@@ -172,7 +172,7 @@ def claims_of(reply: ImplementerResponse) -> ImplementerClaims:
 
 
 @dataclass
-class Attempt:
+class MultiAttempt:
     """What the turns of one round have established so far."""
 
     config: MultiConfig

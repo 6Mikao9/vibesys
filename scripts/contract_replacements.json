@@ -246,7 +246,7 @@
     {
       "module": "vibesys.orchestration.dynamic.control.core",
       "symbol": "StopRequested",
-      "canonical": "vs_core.api.Stop",
+      "canonical": "vs_core.api.StopRequested",
       "relation": "split",
       "shape": {
         "bases": [],
@@ -380,7 +380,7 @@
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "BlockIntent",
-      "canonical": "vs_core.api.BlockIntent",
+      "canonical": "vs_core.api",
       "relation": "gap",
       "shape": {
         "bases": [
@@ -639,8 +639,8 @@
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "IntentStage",
-      "canonical": "vs_core.api.IntentPhase",
-      "relation": "split",
+      "canonical": "vs_core.api",
+      "relation": "gap",
       "shape": {
         "bases": [
           "Name(id='StrEnum', ctx=Load())"
@@ -664,8 +664,8 @@
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "LifecycleIntent",
-      "canonical": "vs_core.api.Intent",
-      "relation": "split",
+      "canonical": "vs_core.api",
+      "relation": "gap",
       "shape": {
         "bases": [
           "Name(id='BaseModel', ctx=Load())"
