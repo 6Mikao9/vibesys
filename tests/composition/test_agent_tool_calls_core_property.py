@@ -32,11 +32,11 @@ import pytest
 from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
+from tests.support.dynamic_script import Executors
 from tests.support.owed_submissions import owed_namespace
 from tests.support.skeleton_strategy import ATTEMPT, DECLARATION, DIGEST
 from tests.support.synthesized_evidence import SynthesizedEvidence
 from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
-from tests.vibesys.orchestration.dynamic.strategy._executors import Executors
 
 from vs_core.api import (
     ArtifactId,

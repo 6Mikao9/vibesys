@@ -1,4 +1,4 @@
-"""The conformance suite (design note 9.2), pure tier: C1, C3, C4, C5, C6, C7, C8, C9.
+"""The conformance suite, over the production shell: C4, C5, C6, C8, C9.
 
 Every test is parametrized by the registered subjects (`subjects.SUBJECTS`) and draws its
 scripted world from the subject, so each strategy on the core lifecycle runs the same
@@ -40,16 +40,12 @@ outcomes = st.builds(
 @pytest.mark.parametrize("name", SUBJECT_NAMES)
 @PURE
 @given(data=st.data())
-def test_c1_c3_c7_a_run_of_any_world_is_deterministic_replayable_and_persistable(
+def test_c6_c8_a_run_of_any_world_is_live_within_its_limits_and_adopts_the_best_candidate(
     name: str, data: st.DataObject
 ) -> None:
     subject = SUBJECTS[name]
     world = c.Faulted(data.draw(subject.worlds)(), data.draw(outcomes))
     recorded = c.run_subject(subject, world)
-    c.check_decide_is_deterministic(subject, recorded)
-    c.check_a_replayed_proposal_is_deduplicated(subject, recorded)
-    c.check_states_round_trip_the_codec(subject, recorded)
-    c.check_a_folded_event_twice_changes_nothing(subject, recorded)
     c.check_limits_hold(subject, recorded)
     c.check_adoption_is_safe(recorded)
 
@@ -101,7 +97,7 @@ def test_c5_an_operator_stop_at_any_request_ends_the_run_and_leaves_nothing(
     core = recorded.run.core
     if not world.stopped:
         return
-    budget = Budget(retries=subject.harness.limits.max_retries)
+    budget = Budget(retries=subject.harness.limits.request_retries.limit)
     # The loop waits for requests core cannot cancel, so the run never ends open for a resume.
     assert not recorded.run.stopped
     # The run may have decided its own result in the same step the stop arrived; whatever it

@@ -32,7 +32,6 @@ from vs_core.api import (
     ControlInput,
     InputDelivered,
     InputRecord,
-    RunResultProposal,
     RunStatus,
     SessionInputReceived,
 )
@@ -126,11 +125,7 @@ async def _run(world: World, channel: RuntimeRunControlChannel) -> CoreState:
     assert isinstance(resolver, MessageResolver)
     resolver.messages = TurnMessages(artifacts)
     process = world.runtime()
-    bridge = RunControlBridge(
-        channel,
-        StoredSteers(artifacts),
-        stop_result=RunResultProposal(outcome="cancelled", reason="operator"),
-    )
+    bridge = RunControlBridge(channel, StoredSteers(artifacts))
     host = CoreRunHost(process.shell, process.delivery, clock_from(1.0), bridge)
     config = RunLoopConfig(
         host_id="steer", lease_duration=LEASE, recovery_poll_interval=50.0, max_dispatches=60
@@ -178,11 +173,7 @@ async def test_a_run_with_no_steer_sends_the_turn_no_operator_input(tmp_path: Pa
 def test_a_steer_control_core_holds_without_its_input_gets_the_input_exactly_once() -> None:
     """A crash between the control and its input is repaired by the next poll, never doubled."""
     channel = RuntimeRunControlChannel(FakeRunControlEventSink())
-    bridge = RunControlBridge(
-        channel,
-        _NoStore(),
-        stop_result=RunResultProposal(outcome="cancelled", reason="operator"),
-    )
+    bridge = RunControlBridge(channel, _NoStore())
     ref = ArtifactRef(artifact_id=ArtifactId(root="steer-control-1"), digest="d" * 64)
     control = ControlInput(control_id=ControlId(root="control-1"), action="steer", artifact=ref)
     core = initial_state()

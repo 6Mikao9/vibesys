@@ -372,12 +372,12 @@ def test_an_unknown_launch_option_is_rejected_naming_the_key(key: str) -> None:
 
 
 @_SETTINGS
-@given(options=_LAUNCHES, profiling=st.booleans(), asked=st.booleans())
+@given(options=_LAUNCHES, profiling=st.booleans())
 def test_the_search_config_keeps_the_search_keys_and_takes_profiling_from_the_run(
-    options: dict[str, int], *, profiling: bool, asked: bool
+    options: dict[str, int], *, profiling: bool
 ) -> None:
-    """The operator's own ``profiling`` never decides: the evaluation plan does."""
-    launch = launch_of({**options, "profiling": asked})
+    """Profiling is the evaluation plan's to decide; every other search key passes through."""
+    launch = launch_of(options)
 
     config = launch.search_config(profiling=profiling)
 
@@ -386,3 +386,24 @@ def test_the_search_config_keeps_the_search_keys_and_takes_profiling_from_the_ru
     assert config.model_dump(exclude={"profiling"}) == launch.model_dump(
         include=set(DynamicConfig.model_fields) - {"profiling"}
     )
+
+
+@given(accuracy=st.booleans(), benchmark=st.booleans(), needs_accuracy=st.booleans())
+def test_a_benchmark_awaits_accuracy_only_where_the_task_requires_it(
+    *, accuracy: bool, benchmark: bool, needs_accuracy: bool
+) -> None:
+    """``requires_accuracy = false`` frees the benchmark from the accuracy gate."""
+    terms = terms_of(
+        _RECIPE,
+        Gates(accuracy=accuracy, benchmark=benchmark),
+        MetricSpace(),
+        Measuring({}, 1.0, benchmark_needs_accuracy=needs_accuracy),
+    )
+
+    assert bool(terms.accuracy_gated) == (accuracy and needs_accuracy)
+
+
+def test_an_operator_cannot_set_profiling_at_launch() -> None:
+    """Profiling follows the evaluation plan, so a launch that sets it is refused by name."""
+    with pytest.raises(ValueError, match="profiling"):
+        DynamicLaunch.model_validate_json('{"max_rounds": 2, "profiling": true}', strict=True)

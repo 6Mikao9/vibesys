@@ -60,11 +60,10 @@ _LOST = "agent CLI exited"
 def _assert_long_text_kept_whole_yet_history_bounded(
     records: CoreRecords, agents: ScriptedAgents, long: str
 ) -> None:
-    attempt = records.attempt("H1")
+    plan = records.finished("H1").plan
     for field in ("hypothesis", "task", "pass_criteria"):
-        assert attempt["plan"][field] == long
-    assert attempt["summary"] == long
-    assert attempt["next_step"] == long
+        assert getattr(plan, field) == long
+    assert records.hypothesis("H1").rounds[0].summary == long
     second_prompt = agents.prompts(ORCHESTRATOR.id)[1]
     assert len(second_prompt) < 20_000
     assert long not in second_prompt
@@ -133,14 +132,14 @@ def test_a_hypothesis_is_adopted_and_the_next_one_builds_on_it(tmp_path: Path) -
     assert first_round["metrics"][0]["value"] == 2.0
     assert second_round["metrics"][0]["value"] == 3.0
     # The second hypothesis branches from the first's trusted candidate.
-    assert records.attempt("H2")["parent"] == first_round["candidate"]
+    assert records.finished("H2").parent.model_dump(mode="json") == first_round["candidate"]
     assert seen["second-start"] == 2
     _assert_long_text_kept_whole_yet_history_bounded(records, agents, long)
     # A workstream that names no parent starts from the input, not from the best trusted
     # candidate (VALUE = 1 here, while H1 and H2 retained 2 and 3); the prompt says so, and
     # the best candidate is reachable only as an explicitly named parent.
     assert seen["third-start"] == 1
-    assert records.attempt("H3")["parent"] != first_round["candidate"]
+    assert records.finished("H3").parent.model_dump(mode="json") != first_round["candidate"]
     third_prompt = agents.prompts(ORCHESTRATOR.id)[2]
     assert "root or the best trusted candidate" not in third_prompt
     assert "a new workstream that names no parent starts from it" in third_prompt
@@ -187,6 +186,7 @@ def test_every_kind_of_planner_mistake_is_corrected_in_one_run(tmp_path: Path) -
         loop_input.request(max_in_flight=2),
         agents,
         slurm_process=loop_input.connector,
+        clock=simulated_clock(),
         state_stores=loop_input.state_stores,
     )
 
@@ -199,8 +199,8 @@ def test_every_kind_of_planner_mistake_is_corrected_in_one_run(tmp_path: Path) -
     # A lost turn is asked again as it was; each mistake is corrected by naming it.
     assert all("Correction required" not in prompt for prompt in planner[:3])
     assert _SCHEMA_ERRORS in planner[3]
-    assert "Correction required" in planner[4]
-    assert "workstreams.0.implement.hypothesis_id" in planner[4]
+    assert "the reply violated the plan schema" in planner[4]
+    assert "workstreams[0].implement.hypothesis_id" in planner[4]
     assert "'0 ' is not a valid identifier" in planner[4]
     assert "Correction required" in planner[5]
     assert "'Q9' cannot be continued" in planner[5]
@@ -239,9 +239,10 @@ def test_implementer_and_judge_faults_in_parallel_workstreams_leave_the_others_u
     )
 
     run = run_request(
-        loop_input.request(max_in_flight=3, max_retries_per_round=3),
+        loop_input.request(max_in_flight=3),
         agents,
         slurm_process=loop_input.connector,
+        clock=simulated_clock(),
         state_stores=loop_input.state_stores,
     )
 
@@ -263,7 +264,7 @@ def test_implementer_and_judge_faults_in_parallel_workstreams_leave_the_others_u
     rounds = {item["hypothesis_id"]: item["rounds"] for item in records.strategy["hypotheses"]}
     (lost_round,) = rounds["A"]
     assert not lost_round["eligible"]
-    assert "lost" in lost_round["failure"]
+    assert lost_round["failure"]["ended"] == "lost"
     assert rounds["B"][-1]["metrics"][0]["value"] == 4.0
     assert rounds["C"][0]["eligible"]
     selection = records.selection
@@ -296,6 +297,7 @@ def test_a_planner_turn_killed_by_any_cli_failure_ends_the_run_without_a_stall(
         loop_input.request(),
         agents,
         slurm_process=loop_input.connector,
+        clock=simulated_clock(),
         state_stores=loop_input.state_stores,
     )
 
@@ -317,6 +319,7 @@ def test_a_planner_that_fails_its_schema_after_correction_ends_the_run(tmp_path:
         loop_input.request(),
         agents,
         slurm_process=loop_input.connector,
+        clock=simulated_clock(),
         state_stores=loop_input.state_stores,
     )
 
@@ -405,16 +408,18 @@ def test_failed_benchmarks_reach_the_planner_as_ranked_partial_measurements(
     assert re.search(r"progress 38(\.0)? of 72(\.0)? rounds", buildable)
     # No input and no candidate is trusted: the run fails, with a typed reason and counts.
     assert (run.succeeded, run.status) == (False, RunStatus.FAILED)
-    assert records.strategy["baseline"]["stage"] == "unmeasurable"
+    assert records.baseline_failure() is not None
     assert records.outcome == ("terminal", "failure")
-    assert records.run["result"]["reason"].startswith("no trusted result")
-    assert "warmup stopped: 1/72 rounds" in records.run["result"]["reason"]
+    assert records.run["result"]["reason"].startswith("no-winner: no trusted result")
+    input_failure = records.baseline_failure()
+    assert input_failure is not None
+    assert "warmup stopped: 1/72 rounds" in input_failure.output
     assert records.selection is None
     assert run.result is not None
     failure = run.result.failure
     assert failure is not None
     assert failure.kind is RunFailureKind.BUDGET_EXHAUSTED
-    assert failure.reason.startswith("no trusted result")
+    assert failure.reason.startswith("no-winner: no trusted result")
     assert failure.workstreams_started == len(rounds)
     assert failure.candidates_kept == 0
     published = [event.data for event in run.events if event.type is CoreEventType.RUN_FAILED]
@@ -453,6 +458,7 @@ def test_any_planned_id_and_title_reach_a_trusted_adopted_round(
             loop_input.request(),
             agents,
             slurm_process=loop_input.connector,
+            clock=simulated_clock(),
             state_stores=loop_input.state_stores,
         )
 

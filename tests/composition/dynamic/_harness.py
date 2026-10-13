@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from pydantic import ValidationError
 from tests.composition._loop.spec import loop_spec
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import RunRecords, check, terminal_event
@@ -47,9 +48,17 @@ from vibesys.api import (
     RunStatus,
     RunStopped,
 )
+from vibesys.candidates import api as candidates
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.search.api import (
+    OPERATIONS,
+    FinishedWork,
+    HypothesisRecord,
+    RunSnapshot,
+)
 from vs_agent.api import NULL_SKILL_SELECTION, AgentCapabilities, SessionScope
 from vs_agent.api.testing import FakeAgentClient
+from vs_core.api import FlowDriver, FlowState, RunEnvelope
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
@@ -61,6 +70,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
     from pathlib import Path
     from typing import Any
+
+    from pydantic import BaseModel
 
     from vibesys.api import CoreEvent, RunHandle
     from vs_agent.api import AgentClientProtocol, AgentSessionKey, SessionStore, SkillSelection
@@ -203,6 +214,8 @@ class Turn:
         return int(text.split("=", 1)[1].split()[0])
 
 
+type AgentReply = BaseModel | dict[str, object]
+"""What the Fake client accepts as one turn's reply."""
 type Reply = Mapping[str, object] | BaseException | Callable[[Turn], Mapping[str, object]]
 
 
@@ -287,7 +300,7 @@ class ScriptedAgents:
         """
         return self._cancel_seen.wait(timeout)
 
-    def _answer(self, invocation: FakeInvocation) -> dict[str, object]:
+    def _answer(self, invocation: FakeInvocation) -> AgentReply:
         member = _prompt_member(invocation)
         with self._lock:
             if invocation.session_key is not None:
@@ -306,9 +319,8 @@ class ScriptedAgents:
             reply = queue.popleft()
         if isinstance(reply, BaseException):
             raise reply
-        if isinstance(reply, Mapping):
-            return dict(reply)
-        return dict(reply(Turn(invocation)))
+        payload = dict(reply) if isinstance(reply, Mapping) else dict(reply(Turn(invocation)))
+        return _on_the_wire(invocation, payload)
 
     def _queue(self, kind: str, member: str | None) -> deque[Reply]:
         if kind == ORCHESTRATOR.id:
@@ -320,6 +332,30 @@ class ScriptedAgents:
         if kind == JUDGE.id:
             return self.judges[member]
         return deque()
+
+
+def _on_the_wire(invocation: FakeInvocation, payload: dict[str, object]) -> AgentReply:
+    """The reply as the provider returns it: decoded from JSON into the turn's reply type.
+
+    A role that may wait for evaluations answers inside a ``reply`` envelope, which is also
+    where a wait goes; a scenario scripts the bare result. A reply that is not valid for the
+    type is handed on as it is, so the client reports its fields the way a provider's reply
+    would be refused.
+    """
+    wrapped = payload
+    if (
+        invocation.kind in {IMPLEMENTER.id, JUDGE.id}
+        and "reply" not in payload
+        and payload.get("kind") != "waiting_for_evaluation"
+    ):
+        wrapped = {"reply": payload}
+    reply_type = invocation.response_cls
+    if reply_type is None:
+        return wrapped
+    try:
+        return reply_type.model_validate_json(json.dumps(wrapped))
+    except ValidationError:
+        return wrapped
 
 
 def _prompt_member(invocation: FakeInvocation) -> str | None:
@@ -418,12 +454,18 @@ class LoopInput:
 
     @classmethod
     def create(
-        cls, base: Path, *, poll_interval_s: float = 1.0, on_disk_state: bool = False
+        cls,
+        base: Path,
+        *,
+        poll_interval_s: float = 1.0,
+        on_disk_state: bool = False,
+        agent_config: str = _AGENT_CONFIG,
     ) -> LoopInput:
         """Write the input project, the executing cluster, and its Slurm config.
 
         The run's durable records live in memory unless ``on_disk_state``, which keeps
         the product's fsynced ``.vibesys`` store for the scenarios that prove it.
+        ``agent_config`` is the operator's agent.toml.
         """
         root = base / "project"
         root.mkdir(parents=True)
@@ -454,13 +496,13 @@ class LoopInput:
             f'transport = {{ kind = "connector", command = {command} }}\n',
             encoding="utf-8",
         )
-        agent_config = base / "agent.toml"
-        agent_config.write_text(_AGENT_CONFIG, encoding="utf-8")
+        agent_config_file = base / "agent.toml"
+        agent_config_file.write_text(agent_config, encoding="utf-8")
         return cls(
             root,
             cluster,
             config,
-            agent_config,
+            agent_config_file,
             connector,
             None if on_disk_state else FakeStateStores(),
         )
@@ -501,7 +543,6 @@ class LoopInput:
         chosen: dict[str, float | str] = {
             "max_rounds": 1,
             "max_in_flight": 1,
-            "turn_drop_backoff_seconds": 0.01,
             **flags,
         }
         argv = [
@@ -673,7 +714,9 @@ def assert_run_live(
     """
     assert envelope is not None, "a run that ended committed no core record"
     core = loop_spec(plugin_id).decode_core(json.dumps(envelope))
-    assert_live(Journal.from_ledger(core), core, Budget(retries=core.run.limits.max_retries), end)
+    assert_live(
+        Journal.from_ledger(core), core, Budget(retries=core.run.limits.request_retries.limit), end
+    )
 
 
 def load_envelope(project: Project, run_id: str) -> dict[str, Any] | None:
@@ -706,6 +749,12 @@ class CoreRecords:
         envelope = load_envelope(self.project, run_id)
         assert envelope is not None, f"no committed record for {run_id}"
         self.envelope: dict[str, Any] = envelope
+        decoded = OPERATIONS.registry().decode_envelope(
+            RunEnvelope[FlowState], json.dumps(envelope)
+        )
+        published = FlowDriver.published(decoded.strategy, RunSnapshot)
+        assert published is not None, "the search published no record"
+        self.snapshot: RunSnapshot = published
 
     @property
     def core(self) -> dict[str, Any]:
@@ -714,8 +763,8 @@ class CoreRecords:
 
     @property
     def strategy(self) -> dict[str, Any]:
-        """Return the strategy's committed state."""
-        return self.envelope["strategy"]
+        """Return what the search published of its record, as JSON."""
+        return self.snapshot.model_dump(mode="json")
 
     @property
     def run(self) -> dict[str, Any]:
@@ -735,18 +784,23 @@ class CoreRecords:
 
     def baseline_metric(self) -> float | None:
         """Return the trusted baseline's first metric value, if it was measured."""
-        baseline = self.strategy["baseline"]
-        return baseline["metrics"][0]["value"] if baseline["metrics"] else None
+        reading = candidates.reading(self.snapshot.baseline)
+        return reading.metrics[0].value if reading is not None and reading.metrics else None
 
-    def attempt(self, hypothesis_id: str, sequence: int | None = None) -> dict[str, Any]:
-        """Return the strategy's record of one attempt (the last of the hypothesis by default)."""
-        rows = [
-            row
-            for row in self.strategy["attempts"]
-            if row["plan"]["work_id"] == hypothesis_id
-            and (sequence is None or row["sequence"] == sequence)
-        ]
-        assert rows, f"no attempt of {hypothesis_id!r}"
+    def baseline_failure(self) -> candidates.InputFailure | None:
+        """Return why the input could not be measured, or None when it was."""
+        return candidates.failure(self.snapshot.baseline)
+
+    def hypothesis(self, hypothesis_id: str) -> HypothesisRecord:
+        """Return the search's record of one hypothesis."""
+        rows = [row for row in self.snapshot.hypotheses if row.hypothesis_id == hypothesis_id]
+        assert rows, f"no hypothesis {hypothesis_id!r}"
+        return rows[0]
+
+    def finished(self, hypothesis_id: str) -> FinishedWork:
+        """Return the search's record of the last workstream that worked on one hypothesis."""
+        rows = [row for row in self.snapshot.finished if row.plan.work_id == hypothesis_id]
+        assert rows, f"no finished workstream of {hypothesis_id!r}"
         return rows[-1]
 
     def publications(self) -> bytes:

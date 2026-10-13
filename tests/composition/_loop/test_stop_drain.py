@@ -103,7 +103,7 @@ def _hosts_until_ended(
     options = HostOptions(attach=world.attach, translator=translator)
     for hosts in range(1, MAX_HOSTS + 1):
         scripted = scripted_host(
-            subject.new_strategy(),
+            subject.launch(),
             world,
             subject.harness,
             subject.schemas,
@@ -123,7 +123,8 @@ def _hosts_until_ended(
         except RunStopped:
             outcome = None
         if outcome is None:
-            clock_at += LEASE + 1
+            # The next host starts once the dead host's lease, last renewed now, has lapsed.
+            clock_at = clock.now() + LEASE + 1
             continue
         assert outcome.status == RunStatus.TERMINAL
         return shell.record.envelope.core, hosts

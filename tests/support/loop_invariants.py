@@ -216,7 +216,7 @@ def terminal_event(records: RunRecords) -> Record | None:
     return terminal[-1] if terminal else None
 
 
-def _hypotheses(strategy: object) -> list[object] | None:
+def _hypotheses(strategy: object) -> list[Record] | None:
     """The hypotheses a search recorded, or None when its state does not keep any.
 
     A flow search publishes its record beside its journal (``live.published``, JSON); other

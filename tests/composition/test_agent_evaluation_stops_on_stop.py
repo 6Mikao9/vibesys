@@ -15,7 +15,7 @@ from pydantic import TypeAdapter
 from tests.composition.test_agent_evaluation_bridge import Scenario, scenario
 from tests.support.skeleton_world import LEASE, Process
 
-from vs_core.api import RunResultProposal, RunStatus
+from vs_core.api import RunStatus
 from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall
 from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core
 from vs_runtime.api.infrastructure import RunStopped, RuntimeRunControlChannel
@@ -84,7 +84,6 @@ async def _stopped_run(
     controls = RunControlBridge(
         channel,
         _NoSteers(),  # type: ignore[arg-type]  # only stores steer text; none is sent
-        stop_result=RunResultProposal(outcome="cancelled", reason="operator"),
     )
     host = CoreRunHost(process.shell, process.delivery, clock, controls)
     process.shell.start("skeleton", now_at=1.0, lease_duration=LEASE)

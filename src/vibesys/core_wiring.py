@@ -17,7 +17,7 @@ from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_sections
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
-from vs_core.api import ArtifactId, ArtifactRef
+from vs_core.api import ArtifactId, ArtifactRef, EvidenceKind
 from vs_runtime.api.core import (
     AgentEvaluationPolicy,
     OperationCatalog,
@@ -96,6 +96,8 @@ class EvaluationInputs:
     accuracy_seconds: float | None
     benchmark_seconds: float | None
     profile_seconds: float | None
+    benchmark_needs_accuracy: bool = True
+    """The task requires a benchmark to pass the accuracy gate (``requires_accuracy``)."""
 
 
 def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
@@ -121,6 +123,7 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         accuracy_seconds=plan.accuracy_timeout_seconds,
         benchmark_seconds=plan.benchmark_timeout_seconds,
         profile_seconds=plan.profile_timeout_seconds,
+        benchmark_needs_accuracy=EvidenceKind.BENCHMARK in plan.accuracy_gated,
     )
 
 

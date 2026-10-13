@@ -109,6 +109,7 @@ def _task_terms(
                 "profile": evaluation.profile_seconds,
             },
             queue_allowance=float(context.queue_allowance_seconds),
+            benchmark_needs_accuracy=evaluation.benchmark_needs_accuracy,
             profile_fields=(
                 tuple(item.value for item in evaluation.profile_fields)
                 if evaluation.profile_measurement

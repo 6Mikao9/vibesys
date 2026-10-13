@@ -52,6 +52,8 @@ class Measuring:
     queue_allowance: float
     """Seconds a measurement may wait in the evaluation queue."""
     profile_fields: tuple[str, ...] = ()
+    benchmark_needs_accuracy: bool = True
+    """A benchmark counts only where the accuracy gate passed (the task's ``requires_accuracy``)."""
     """The measurement fields the run's profile capture supplies."""
 
 
@@ -71,7 +73,9 @@ def terms_of(
         measured=measured,
         queue_allowance=measuring.queue_allowance,
         accuracy_stage=ACCURACY if gates.accuracy else None,
-        accuracy_gated=(EvidenceKind.BENCHMARK,) if gates.accuracy else (),
+        accuracy_gated=(
+            (EvidenceKind.BENCHMARK,) if gates.accuracy and measuring.benchmark_needs_accuracy else ()
+        ),
         operation_seconds=OPERATION_SECONDS,
         objectives=tuple(
             TaskObjective(name=item.name, direction=item.direction) for item in space.objectives

@@ -44,8 +44,8 @@ from vs_core.api import (
     ObserveOwnedJob,
     ResourceId,
     ResumeSessionTurn,
-    RunResultProposal,
     RunStatus,
+    StopMode,
     SubmitMeasurement,
     TurnObserved,
 )
@@ -439,9 +439,7 @@ def _run(
         ),
     )
     channel = RuntimeRunControlChannel(_ignore)
-    controls = RunControlBridge(
-        channel, _Steers(), stop_result=RunResultProposal(outcome="cancelled", reason="operator")
-    )
+    controls = RunControlBridge(channel, _Steers())
     host = CoreRunHost(shell, FakePublicationDelivery(store), clock, controls)
     # Production polls controls every second of run time. A stop does not wait for the
     # poll (the loop watches the channel), so a coarser poll does not change what the
@@ -465,7 +463,7 @@ def _run(
     async def stop_later(seconds: float) -> None:
         await clock.sleep(seconds)
         stopped.append(clock.now())
-        channel.request_stop()
+        channel.request_stop(StopMode.CANCEL)
 
     async def main() -> tuple[RunOutcome | None, BaseException | None]:
         timer = asyncio.ensure_future(stop_later(stop_after)) if stop_after is not None else None

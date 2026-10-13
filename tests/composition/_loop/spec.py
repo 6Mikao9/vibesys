@@ -11,15 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategyState,
-    dynamic_operation_registry,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
-    IssueQueueStrategyState,
-    plain_operation_registry,
-)
-from vs_core.api import RunEnvelope
+from vibesys.orchestration.dynamic.search.api import OPERATIONS
+from vs_core.api import FlowState, RunEnvelope
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,18 +31,11 @@ class LoopSpec:
 
 
 def _dynamic_core(envelope: str) -> CoreState:
-    codec = dynamic_operation_registry()
-    return codec.decode_envelope(RunEnvelope[DynamicStrategyState], envelope).core
-
-
-def _plain_core(envelope: str) -> CoreState:
-    codec = plain_operation_registry()
-    return codec.decode_envelope(RunEnvelope[IssueQueueStrategyState], envelope).core
+    return OPERATIONS.registry().decode_envelope(RunEnvelope[FlowState], envelope).core
 
 
 LOOPS = {
     "dynamic": LoopSpec("dynamic", _dynamic_core),
-    "plain": LoopSpec("plain", _plain_core),
 }
 
 

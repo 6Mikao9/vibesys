@@ -289,7 +289,6 @@ def run_chaos(base: Path, seed: int, plan: FaultPlan | None = None) -> ChaosRun:
     request = loop_input.request(
         max_rounds=rng.randint(1, 3),
         max_in_flight=rng.randint(1, 3),
-        max_retries_per_round=rng.randint(1, 2),
     )
 
     def remember(handle: RunHandle) -> None:
