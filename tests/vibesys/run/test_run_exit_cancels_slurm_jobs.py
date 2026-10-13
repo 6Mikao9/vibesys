@@ -23,6 +23,7 @@ from vibesys.run.contracts import RunRequest
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
+from vs_core.api import StopMode
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, RunStopped
@@ -124,7 +125,7 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
         submitted = await asyncio.to_thread((state / SUBMITTED_FILE).read_text, encoding="utf-8")
         assert submitted.isdigit()
         submitted_ids.append(submitted)
-        integration.control.request_stop()
+        integration.control.request_stop(StopMode.CANCEL)
         with pytest.raises(RunStopped):
             await run
 

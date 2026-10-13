@@ -20,6 +20,7 @@ from vibesys.errors import ConfigurationError
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    EvidenceKind,
     MeasurementRecipe,
     RevisionId,
     RevisionRef,
@@ -44,6 +45,7 @@ def _recipe() -> MeasurementRecipe:
         ),
         queue_allowance=5.0,
         accuracy_stage="accuracy",
+        accuracy_gated=(EvidenceKind.BENCHMARK,),
     )
 
 
@@ -54,6 +56,7 @@ def test_an_agent_measures_exactly_the_configured_gates(*, accuracy: bool, bench
     expected = [n for n, on in (("accuracy", accuracy), ("benchmark", benchmark)) if on]
     assert [stage.stage_id for stage in plan.stages] == expected
     assert plan.accuracy_stage == ("accuracy" if accuracy else None)
+    assert plan.accuracy_gated == ((EvidenceKind.BENCHMARK,) if accuracy else ())
     # The agent's plan is the recipe's plan over those stages: one identity.
     assert plan == _recipe().plan(
         CANDIDATE, purpose="local-validation", now_at=0.0, stages=tuple(expected)

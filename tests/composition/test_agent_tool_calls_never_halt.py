@@ -18,11 +18,12 @@ from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.agent_tool_world import Program, ScriptedAgent, scenario
+from tests.support.agent_tool_world import Program, ScriptedAgent, resumes, scenario, suspensions
+from tests.support.skeleton_strategy import SkeletonConfig, SkeletonStrategy
 from tests.support.skeleton_world import LEASE, Process, drive
-from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 
-from vs_core.api import Limits, RunStatus
+from vs_core.api import RunStatus
+from vs_core.api.testing import sample_limits
 from vs_sim.api.testing import VirtualClock, clock_from, run_virtual
 
 if TYPE_CHECKING:
@@ -33,12 +34,14 @@ async def play(
     tmp_path: Path, programs: tuple[Program, ...], total: int
 ) -> tuple[Process, ScriptedAgent]:
     """Drive the run to its end; it must not halt, refuse or raise."""
-    limits = Limits(max_turns=4 * total + 4, max_measurement_submissions=64)
+    limits = sample_limits(max_turns=4 * total + 4)
 
     def agent(root: Path) -> ScriptedAgent:
         return ScriptedAgent(root, programs=programs)
 
-    async with scenario(tmp_path, LoopStrategy(total=total), limits, agent) as played:
+    async with scenario(
+        tmp_path, SkeletonStrategy(config=SkeletonConfig(turns=total)), limits, agent
+    ) as played:
         process = played.world.runtime()
         clock = clock_from(0.0)
         process.shell.start("skeleton", now_at=0.0, lease_duration=LEASE)
@@ -55,11 +58,9 @@ async def play(
 def check(process: Process, agent: ScriptedAgent) -> None:
     """The run ended terminally, and every accepted suspension was resumed once."""
     state = process.shell.record.envelope.core
-    strategy = process.shell.record.envelope.strategy
-    assert isinstance(strategy, LoopState)
     assert state.run.status == RunStatus.TERMINAL
-    assert strategy.suspensions == strategy.resumes
-    assert strategy.suspensions <= agent.waits_accepted
+    assert suspensions(state) == resumes(state)
+    assert suspensions(state) <= agent.waits_accepted
 
 
 def run_play(tmp_path: Path, programs: tuple[Program, ...], total: int) -> ScriptedAgent:

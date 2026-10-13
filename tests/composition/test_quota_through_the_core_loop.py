@@ -1,6 +1,6 @@
 """A provider quota error during a core run is handled by the run's policy.
 
-The production loop drives the skeleton strategy over the real shell, executors and Fake
+The production loop drives the skeleton search over the real shell, executors and Fake
 cluster, with the agent client behind ``install_capacity_gate`` as the host installs it. The
 Fake provider raises the quota error for its first calls. The policy decides whether the
 turn pauses for the operator, waits for the reset and is sent again, or fails the turn, and
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.session_world import ProviderFaults, SessionHost
-from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_world import (
     IMPLEMENTATION,
     IMPLEMENTER,
@@ -84,7 +84,7 @@ class _Played:
     transitions: list[RunControlTransitionKind] = field(default_factory=list)
     timer: FakeCapacityTimer | None = None
     writer: CandidateWriter | None = None
-    state: SkeletonState | None = None
+    outcome: str | None = None
     status: RunStatus | None = None
 
 
@@ -145,8 +145,8 @@ async def _play(
         )
         record = process.shell.record.envelope
         played.status = record.core.run.status
-        assert isinstance(record.strategy, SkeletonState)
-        played.state = record.strategy
+        assert record.core.run.result is not None
+        played.outcome = record.core.run.result.outcome
     return played
 
 
@@ -160,8 +160,7 @@ def _quota(resets_at: float | None = None) -> AgentQuotaError:
 async def test_a_paused_run_resumes_and_the_turn_is_sent_again(tmp_path: Path, stops: int) -> None:
     played = await _play(tmp_path, QuotaPolicy(), _quota(), stops=stops)
     assert played.status == RunStatus.TERMINAL
-    assert played.state is not None
-    assert played.state.phase == "stop"
+    assert played.outcome == "success"
     assert played.sink.events == ["paused", "resumed:operator"] * stops
     assert played.transitions.count(RunControlTransitionKind.PAUSED) == stops
     assert played.writer is not None
@@ -173,8 +172,7 @@ async def test_a_wait_policy_resumes_by_itself_when_the_reported_reset_arrives(
 ) -> None:
     policy = QuotaPolicy(QuotaAction.WAIT, wait_seconds=3600.0)
     played = await _play(tmp_path, policy, _quota(START + 600), stops=1)
-    assert played.state is not None
-    assert played.state.phase == "stop"
+    assert played.outcome == "success"
     assert played.timer is not None
     assert played.timer.waits == [605.0], "the reset plus the policy's margin"
     assert played.sink.events == ["paused", "resumed:wait_elapsed"]
@@ -188,12 +186,11 @@ async def test_a_wait_policy_resumes_by_itself_when_the_reported_reset_arrives(
     ],
     ids=["fail", "wait budget spent"],
 )
-async def test_a_policy_that_gives_up_fails_the_turn_and_the_strategy_sees_it(
+async def test_a_policy_that_gives_up_fails_the_turn_and_the_search_sees_it(
     tmp_path: Path, policy: QuotaPolicy
 ) -> None:
     played = await _play(tmp_path, policy, _quota(START + 600), stops=1)
     assert played.status == RunStatus.TERMINAL
-    assert played.state is not None
-    assert played.state.phase == "failed"
+    assert played.outcome == "failure"
     assert played.sink.events == ["abandoned"]
     assert played.transitions == [], "a run that gives up never pauses"

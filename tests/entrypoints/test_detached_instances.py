@@ -290,7 +290,9 @@ def _project_with_run(root: Path) -> Path:
             id="dynamic",
             config_version=1,
             options=DynamicLaunch(interface="service", max_rounds=2, judge_every=2).model_dump(
-                mode="json"
+                # A run records its options as the operator wrote them: profiling follows the plan.
+                mode="json",
+                exclude={"profiling"},
             ),
         ),
         trusted_input_baseline="0" * 40,

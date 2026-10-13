@@ -155,7 +155,7 @@ async def test_a_steer_queued_before_the_turn_reaches_it_once_and_is_recorded(
     assert record.receipt.invocation == record.reserved_to
     reported = [t for t in sink.transitions if t.kind.value == "steer_consumed"]
     assert [(t.agent_kind, t.execution_id) for t in reported] == [
-        ("implementer", record.receipt.invocation.invocation_id.root)
+        ("skeleton-implementer", record.receipt.invocation.invocation_id.root)
     ]
 
 

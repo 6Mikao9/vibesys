@@ -8,6 +8,7 @@ state of its own; the flow is the whole script.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from pydantic import BaseModel
@@ -83,6 +84,8 @@ IMPLEMENTER_ROLE = Role(
     turn_time=400.0,
     corrections=0,
     lost_turns=0,
+    may_wait_for_evaluations=True,
+    exchanges=core.Exchanges(resume="skeleton-resume.j2"),
 )
 IMPLEMENTATION = IMPLEMENTER_ROLE.reply_schema
 
@@ -100,6 +103,16 @@ class SkeletonConfig(core.Value):
     probe: bool = False
     fails: bool = False
     """End at once with no winner: a run that only has to start and finish."""
+    idle: bool = False
+    """Ask for nothing and wait for the run to be stopped: a run that is open and has no work."""
+    wake_at: float | None = None
+    """Ask for nothing until this run-clock time, then end with no winner."""
+    baseline_only: bool = False
+    """Measure the baseline, then end with no winner: no attempt is run."""
+    turns: int = 1
+    """How many implementer turns the attempt asks in one session, one after another."""
+    peers: int = 0
+    """How many further implementer turns it then asks at once, each in a session of its own."""
 
 
 def measurement(
@@ -159,14 +172,48 @@ async def _probe(ctx: Flow, config: SkeletonConfig) -> None:
         await ctx.first(ctx.stopped)
 
 
+async def _peer_turn(ctx: Flow, workspace: core.Workspace, revision: core.RevisionRef) -> str:
+    """One turn in a session of its own; the commit it made, or empty."""
+    session = ctx.agents.session(IMPLEMENTER_ROLE, workspace=workspace, revision=revision)
+    match await session.turn(Prompt()):
+        case TurnFinished(reply=Implementation(commit=commit)):
+            return commit
+    return ""
+
+
+async def _turns(ctx: Flow, config: SkeletonConfig, workspace: core.Workspace) -> str:
+    """Ask the implementer ``config.turns`` turns in a row, then ``config.peers`` at once.
+
+    The commit of the last turn that finished, or empty when a turn produced none.
+    """
+    baseline = ctx.facts.baseline
+    session = ctx.agents.session(IMPLEMENTER_ROLE, workspace=workspace, revision=baseline)
+    commit = ""
+    for _ in range(config.turns):
+        match await session.turn(Prompt()):
+            case TurnFinished(reply=Implementation(commit=made)) if made:
+                commit = made
+            case _:
+                return ""
+    if config.peers:
+        async with ctx.group() as group:
+            for number in range(config.peers):
+                group.start(f"peer-{number}", _peer_turn, workspace, baseline)
+            async for made in group:
+                if isinstance(made, str) and made:
+                    commit = made
+    return commit
+
+
 async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
-    """One attempt: an implementer turn, its measurement, and the candidate it keeps."""
+    """One attempt: implementer turns, the measurement of the last revision, the candidate it keeps."""
     baseline = ctx.facts.baseline
     async with ctx.workspaces.open(
         attempt=ATTEMPT.attempt_id,
         item=core.ItemId(root="item-0"),
         plan=core.WorkspacePlan(mode=core.WorkspaceMode.ISOLATED_CHILD, base=baseline),
-        budget=core.AttemptBudget(),
+        # One paid turn for each turn asked; a resume after a wait is not a paid turn.
+        budget=core.AttemptBudget(paid_invocation_limit=config.turns + config.peers),
     ) as workspace:
         if isinstance(workspace, NotOpened):
             return NoWinner(reason="the attempt workspace did not open")
@@ -174,12 +221,10 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
             # Wait for the stop; the timer is what keeps the shell from calling the wait a stall.
             await ctx.first(ctx.stopped, ctx.timer(_RUN_DEADLINE))
             return None
-        session = ctx.agents.session(IMPLEMENTER_ROLE, workspace=workspace, revision=baseline)
-        match await session.turn(Prompt()):
-            case TurnFinished(reply=Implementation(commit=commit)) if commit:
-                candidate = core.RevisionRef.of_git_commit(commit)
-            case _:
-                return NoWinner(reason="the implementer turn produced no commit")
+        commit = await _turns(ctx, config, workspace)
+        if not commit:
+            return NoWinner(reason="the implementer turn produced no commit")
+        candidate = core.RevisionRef.of_git_commit(commit)
         if config.measured and (
             refused := await _measure(ctx, config, candidate, "official", workspace)
         ):
@@ -189,6 +234,27 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
             ctx.workspaces.keep(
                 workspace, candidate, Assessment(outcome="succeeded", eligible=True)
             )
+    return None
+
+
+@dataclass(frozen=True)
+class _Ended:
+    """A scenario that ran no attempt, and how its flow ends."""
+
+    result: NoWinner | None
+
+
+async def _bare(ctx: Flow, config: SkeletonConfig) -> _Ended | None:
+    """The scenarios that run no attempt: wait for a stop or a time, or measure the baseline only."""
+    if config.idle:
+        await ctx.first(ctx.stopped)
+        return _Ended(NoWinner(reason="no work was asked for"))
+    if config.wake_at is not None:
+        await ctx.first(ctx.timer(config.wake_at))
+        return _Ended(NoWinner(reason="woken"))
+    if config.baseline_only:
+        refused = await _measure(ctx, config, ctx.facts.baseline, "baseline")
+        return _Ended(refused or NoWinner(reason="the baseline is all there is"))
     return None
 
 
@@ -202,6 +268,8 @@ async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     """Play the scenario ``config`` names; the framework adopts the chosen winner."""
     if config.fails:
         return NoWinner(reason="scripted")
+    if (ended := await _bare(ctx, config)) is not None:
+        return ended.result
     if config.probe:
         if config.measured:
             await _probe(ctx, config)
@@ -272,6 +340,21 @@ class SkeletonStrategy(core.Value):
         signal, an operator stop) and what the host then cancels.
         """
         return cls(config=SkeletonConfig(probe=True))
+
+    @classmethod
+    def idle(cls) -> SkeletonStrategy:
+        """Ask for nothing: the run stays open until a control or the deadline ends it."""
+        return cls(config=SkeletonConfig(measured=False, idle=True))
+
+    @classmethod
+    def baseline_only(cls) -> SkeletonStrategy:
+        """Measure the baseline, then end the run with no winner: no attempt is run."""
+        return cls(config=SkeletonConfig(baseline_only=True))
+
+    @classmethod
+    def waiting_until(cls, at: float) -> SkeletonStrategy:
+        """Ask for nothing until the run clock reads ``at``, then end the run."""
+        return cls(config=SkeletonConfig(measured=False, wake_at=at))
 
     def driver(self, registry: OperationRegistry | None = None) -> core.SearchDriver:
         """The driver that plays this scenario."""

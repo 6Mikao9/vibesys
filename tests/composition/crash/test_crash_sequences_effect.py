@@ -11,6 +11,7 @@ import pytest
 from tests.support.crash_harness import (
     all_crossings,
     converges_after,
+    core_gap,
     following,
     name,
     representatives,
@@ -36,22 +37,25 @@ def _effect_firsts() -> list[Crossing]:
 def test_a_second_crash_at_the_next_crossing_of_representatives_converges(
     first: Crossing,
 ) -> None:
-    for second in following(first, CI_DEPTH):
-        converges_after(first, second)
+    with core_gap(first):
+        for second in following(first, CI_DEPTH):
+            converges_after(first, second)
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("first", _firsts())
 def test_a_second_crash_at_the_next_crossing_converges(first: Crossing) -> None:
-    for second in following(first, CI_DEPTH):
-        converges_after(first, second)
+    with core_gap(first):
+        for second in following(first, CI_DEPTH):
+            converges_after(first, second)
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("first", _firsts())
 def test_a_second_crash_at_any_of_the_next_three_crossings_converges(first: Crossing) -> None:
-    for second in following(first, SLOW_DEPTH):
-        converges_after(first, second)
+    with core_gap(first):
+        for second in following(first, SLOW_DEPTH):
+            converges_after(first, second)
 
 
 def _commit(ordinal: int) -> Crossing:

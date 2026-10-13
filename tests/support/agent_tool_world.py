@@ -27,7 +27,14 @@ from tests.support.skeleton_world import (
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
-from vs_core.api import ArtifactId, ArtifactRef, Limits, TurnSpec, WorkspaceRef
+from vs_core.api import (
+    ArtifactId,
+    ArtifactRef,
+    EvidenceKind,
+    Limits,
+    TurnSpec,
+    WorkspaceRef,
+)
 from vs_evaluation.api.tools import (
     SUBMIT_TOOL,
     VALIDATE_WAIT_TOOL,
@@ -54,6 +61,7 @@ if TYPE_CHECKING:
     from tests.support.skeleton_strategy import SkeletonStrategy
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
+    from vs_core.api import CoreState
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import AccessGuardedWorkspace, TurnYields
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
@@ -69,6 +77,7 @@ POLICY = AgentEvaluationPolicy(
     stages=(("accuracy", 10.0), ("benchmark", 10.0)),
     queue_allowance=880.0,
     accuracy_stage="accuracy",
+    accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
 )
 
 type Step = tuple[Literal["submit"]] | tuple[Literal["wait"], tuple[int, ...]]
@@ -119,6 +128,20 @@ class ScriptedAgent(CandidateWriter):
             except EvaluationServiceClientError as error:
                 self.errors.append(str(error))
         self.answer["waiting"] = waiting
+
+
+def suspensions(state: CoreState) -> int:
+    """How many waits core committed: each is one continuation."""
+    return len(state.evaluation.continuations)
+
+
+def resumes(state: CoreState) -> int:
+    """How many resume turns core ran: its continuation is cancelled once the attempt closes."""
+    return sum(
+        1
+        for row in state.sessions.invocations
+        if row.invocation.invocation_id.root.endswith("/resume")
+    )
 
 
 @dataclass

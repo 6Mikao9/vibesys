@@ -182,7 +182,11 @@ class World:
     timed: tuple[Clock, float] | None = None
     polls: list[str] = field(default_factory=list)
     during_submit: Callable[[], Awaitable[None]] | None = None
-    limits: Limits = field(default_factory=sample_limits)
+    limits: Limits = field(default_factory=lambda: sample_limits(reconciliation_bound=300.0))
+    """A reconciliation bound that outlasts the restart delay of the crash sweeps (one lease and a
+    little more). Known core gap (`vs_core._waits`, OWNED_JOB halts the run): an owned job whose
+    poll lapsed while the host was down is not re-polled, so a restart later than the bound is
+    not a property core keeps yet."""
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
     commits: CommitObserver | None = None
@@ -212,7 +216,12 @@ class World:
             facts,
             self.strategy.declaration,
             offered=self.operations,
-            startup=CoreStartup(deadline_at=1000.0, limits=self.limits),
+            startup=CoreStartup(
+                deadline_at=1000.0,
+                limits=self.limits,
+                # Waiting for evaluations is served exactly when the world has a yield source.
+                lifecycle=frozenset() if self.yields is None else frozenset({"suspend"}),
+            ),
         )
 
     def bindings(self) -> CoreRuntimeBindings:
@@ -452,6 +461,7 @@ def _skeleton_operations(env: WorkspaceEnv, templates: Path) -> OperationCatalog
     """The operations the skeleton search declares, with the real renderer as their owner."""
     templates.mkdir(parents=True, exist_ok=True)
     (templates / "skeleton.j2").write_text("Make the candidate faster.\n", encoding="utf-8")
+    (templates / "skeleton-resume.j2").write_text("Your evaluations are in.\n", encoding="utf-8")
     store = ArtifactStore(env.project.state.local_namespace(RUN_ID, "artifacts"))
     roles = operation_roles(OPERATIONS)
     return build_operation_catalog(

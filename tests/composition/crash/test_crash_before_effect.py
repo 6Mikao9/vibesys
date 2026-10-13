@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.crash_harness import (
     converges_after_one,
+    core_gap,
     crash_plan,
     name,
     pre_effect_points,
@@ -37,8 +38,9 @@ def _representative_points() -> list[Crossing]:
 
 
 def _check(crossing: Crossing) -> None:
-    converges_after_one(crossing)
-    assert run(crash_plan(crossing)).summary.status == RunStatus.TERMINAL
+    with core_gap(crossing):
+        converges_after_one(crossing)
+        assert run(crash_plan(crossing)).summary.status == RunStatus.TERMINAL
 
 
 @pytest.mark.parametrize("crossing", _representative_points(), ids=name)

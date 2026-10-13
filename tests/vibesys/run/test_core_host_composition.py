@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.container_credentials import set_container_cli_credentials
+from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
@@ -23,7 +24,6 @@ from vibesys.orchestration.profilers import ProfilerKind, ProfilerPreflightResul
 from vibesys.plugin_registration import OrchestrationRegistration
 from vibesys.run.contracts import RunRequest
 from vibesys.run.core_services import CoreCompositionError
-from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import (
@@ -35,27 +35,18 @@ from vs_agent.api import (
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_core.api import (
     Capabilities,
-    LifecycleClass,
-    Limits,
-    OperationDescriptor,
-    OperationRegistration,
-    OperationRequest,
-    RunFacts,
-    SchemaRef,
-    Value,
     validate_startup,
 )
 from vs_project.api import OrchestrationDescriptor, Project, StoredEnvelope
 from vs_runtime.api import (
     AgentRole,
-    CoreOperation,
     CorePlan,
     CorePolicy,
     CoreRunContext,
     OrchestrationPlugin,
     RunStatus,
 )
-from vs_runtime.api.core import OperationRole, RunTiming
+from vs_runtime.api.core import RunTiming
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api.testing import VirtualClock, run_virtual
 
@@ -65,35 +56,8 @@ if TYPE_CHECKING:
 
     from vibesys.run.core_services import CoreServices
     from vs_agent.api import AgentClientProtocol, CapacityGate
-    from vs_core.api import Strategy
 
 DIGEST_LENGTH = 64
-
-
-class _Rendered(Value):
-    status: Literal["succeeded", "failed"] = "succeeded"
-
-
-class _Render(OperationRequest):
-    kind: Literal["test.render"] = "test.render"
-    lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
-    outcome_model: ClassVar[type[Value]] = _Rendered
-    subject: str
-
-
-def _render_registration() -> OperationRegistration:
-    return OperationRegistration(
-        descriptor=OperationDescriptor(
-            kind="test.render",
-            request_schema=SchemaRef(name="test-render", version=1),
-            outcome_schema=SchemaRef(name="test-render-outcome", version=1),
-            lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-            inspect=True,
-            cancel=False,
-        ),
-        request_model=_Render,
-        outcome_model=_Rendered,
-    )
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
@@ -114,36 +78,17 @@ class _GateRecordingClient(FakeAgentClient):
 
 def _policy(
     templates: Path,
-    strategy: Strategy[Any] | None = None,
+    strategy: SkeletonStrategy | None = None,
     deadline_seconds: float = 1000.0,
     *,
     profile_capture_withheld: bool = False,
 ) -> CorePolicy:
-    def plan(context: CoreRunContext) -> CorePlan:
-        identity = semantic_evaluation_identity(
-            context.evaluation_plan, context.facts, context.environment
-        )
-        return CorePlan(
-            strategy=SkeletonStrategy() if strategy is None else strategy,
-            reply_schemas={},
-            facts=RunFacts(
-                objective=context.facts.objective,
-                baseline=context.baseline,
-                evaluator_digest=identity.evaluator.value,
-                workload_digest=identity.workload.value,
-                environment_digest=identity.environment.value,
-            ),
-            limits=Limits(),
-            deadline_seconds=deadline_seconds,
-            profile_capture_withheld=profile_capture_withheld,
-        )
+    policy = core_policy(templates, strategy, deadline_seconds)
 
-    return CorePolicy(
-        plan=plan,
-        operations=(CoreOperation(OperationRole.RENDER_ARTIFACTS, _render_registration()),),
-        retention_label="selected",
-        prompt_templates=templates,
-    )
+    def plan(context: CoreRunContext) -> CorePlan:
+        return replace(policy.plan(context), profile_capture_withheld=profile_capture_withheld)
+
+    return replace(policy, plan=plan)
 
 
 def _plugin(templates: Path, *, profile_capture_withheld: bool = False) -> OrchestrationPlugin:
@@ -252,12 +197,17 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
 
 def test_core_host_yields_services_whose_state_starts_the_strategy(tmp_path: Path) -> None:
     services = _open(tmp_path, client_factory=_resumable_client, journal=True)()
-    strategy = services.strategy
+    declaration = services.search.declaration
     state = services.state
     catalog = services.catalog
     offered = Capabilities(lifecycle=frozenset(), operations=catalog.offered_operations)
-    assert validate_startup(strategy.declaration, offered).operations == ()
-    assert [op.kind for op in catalog.offered_operations] == ["test.render"]
+    # The catalog offers every operation the policy registered, and the search's declaration
+    # is satisfied by them.
+    offered_kinds = {op.kind for op in catalog.offered_operations}
+    assert offered_kinds == {
+        operation.registration.descriptor.kind for operation in _policy(tmp_path).operations
+    }
+    assert {op.kind for op in validate_startup(declaration, offered).operations} <= offered_kinds
     assert state.run.facts.objective == "Improve the queue."
     assert len(state.run.facts.evaluator_digest) == DIGEST_LENGTH
 
@@ -408,7 +358,7 @@ def test_registration_rejects_an_invalid_core_policy_naming_the_key(
 
 
 def test_registration_rejects_a_duplicate_operation_role(tmp_path: Path) -> None:
-    operation = CoreOperation(OperationRole.RENDER_ARTIFACTS, _render_registration())
+    [operation, *_] = _policy(tmp_path).operations
     broken = replace(_policy(tmp_path), operations=(operation, operation))
     plugin = OrchestrationPlugin(id="core-test", agents=(), options=EmptyOptions, core=broken)
     with pytest.raises(ValueError, match=r"core\.operations\[1\]"):
@@ -433,10 +383,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
         _plugin(templates),
         core=_policy(
             templates,
-            SkeletonStrategy(
-                state=SkeletonState(schema_version=1, phase="failed", failure="scripted"),
-                measured=False,
-            ),
+            SkeletonStrategy.failing(),
         ),
     )
 

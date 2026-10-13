@@ -18,8 +18,9 @@ from typing import TYPE_CHECKING, Any
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
+from tests.support.agent_tool_world import resumes, suspensions
 from tests.support.session_world import ProviderFaults, SessionHost
-from tests.support.skeleton_strategy import ATTEMPT, DIGEST, SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import DIGEST, SkeletonStrategy
 from tests.support.skeleton_world import (
     IMPLEMENTATION,
     IMPLEMENTER,
@@ -36,20 +37,16 @@ from tests.support.skeleton_world import (
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_core.api import (
+    MAX_SUBMISSIONS_PER_MEASUREMENT,
     ArtifactId,
     ArtifactRef,
-    DecisionId,
-    Limits,
-    Proposal,
-    RequestTurn,
-    ResumeAuthorized,
+    EvidenceKind,
     RunStatus,
     Scope,
-    TurnResult,
     TurnSpec,
-    TurnSuspended,
     WorkspaceRef,
 )
+from vs_core.api.testing import sample_limits
 from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall, WaitCall
 from vs_evaluation.api.tools import (
     SUBMIT_TOOL,
@@ -77,7 +74,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
-    from vs_core.api import RunView, StrategyEvent
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import AccessGuardedWorkspace
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
@@ -94,66 +90,8 @@ POLICY = AgentEvaluationPolicy(
     stages=(("accuracy", 10.0), ("benchmark", 10.0)),
     queue_allowance=880.0,
     accuracy_stage="accuracy",
+    accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
 )
-
-
-class WaitingState(SkeletonState):
-    """The skeleton's state plus what the yield and resume looked like to the strategy."""
-
-    yielded: bool = False
-    suspensions: int = 0
-    resumes: int = 0
-    resume: ResumeAuthorized | None = None
-
-
-class WaitingStrategy(SkeletonStrategy):
-    """The skeleton, except that the implementer turn may yield and must be resumed once."""
-
-    state: WaitingState = WaitingState(schema_version=1)  # type: ignore[assignment]
-
-    def decide(self, view: RunView) -> Proposal[SkeletonState]:
-        """Hold while the turn is suspended; resume it with the invocation core named."""
-        state = self.state
-        if state.phase == "turn" and state.resume is not None:
-            attempt = Scope(owner=ATTEMPT.attempt_id, generation=0)
-            event = state.resume
-            spec = self._turn_spec(view).model_copy(
-                update={
-                    "invocation_id": event.next_invocation.invocation_id,
-                    "continuation_id": event.continuation_id,
-                    "charge_class": "resume",
-                }
-            )
-            return Proposal(
-                state=state,
-                decisions=(
-                    RequestTurn(
-                        decision_id=DecisionId(root="turn-resume"), scope=attempt, turn=spec
-                    ),
-                ),
-            )
-        if state.phase == "turn" and state.yielded:
-            return Proposal(state=state, decisions=())
-        return super().decide(view)
-
-    def _turn_spec(self, view: RunView) -> TurnSpec:
-        proposal = SkeletonStrategy.decide(self, view)
-        (decision,) = proposal.decisions
-        assert isinstance(decision, RequestTurn)
-        return decision.turn
-
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
-        """Record the yield and the one resume; everything else is the skeleton's."""
-        state = self.state
-        if isinstance(event, TurnSuspended):
-            return state.model_copy(update={"suspensions": state.suspensions + 1})
-        if isinstance(event, ResumeAuthorized):
-            return state.model_copy(update={"resumes": state.resumes + 1, "resume": event})
-        if isinstance(event, TurnResult) and state.phase == "turn" and state.resume is None:
-            reply = json.loads(event.output_json or "{}")
-            if reply.get("waiting"):
-                return state.model_copy(update={"yielded": True})
-        return super().on_event(view, event)
 
 
 @dataclass
@@ -258,9 +196,9 @@ async def scenario(
         bridges.append(bridge)
         return bridge
 
-    with open_skeleton_world(tmp_path, WaitingStrategy(), agents=agents, timed=timed) as world:
+    with open_skeleton_world(tmp_path, SkeletonStrategy(), agents=agents, timed=timed) as world:
         world.yields = yields
-        world.limits = Limits(max_turns=2)
+        world.limits = sample_limits(max_turns=2)
         yield Scenario(world, writers[0], bridges)
 
 
@@ -284,8 +222,6 @@ async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: P
     async with scenario(tmp_path) as played:
         process, _ = await run(played)
         state = process.shell.record.envelope.core
-        strategy = process.shell.record.envelope.strategy
-        assert isinstance(strategy, WaitingState)
         assert state.run.status == RunStatus.TERMINAL
         assert len(played.writer.handles) == 1
         assert played.writer.refusals == []
@@ -294,8 +230,8 @@ async def test_an_agent_submits_through_the_tool_and_is_resumed_once(tmp_path: P
         # Baseline, the agent's submission, and the strategy's own candidate measurement.
         assert len(played.world.cluster.submissions) == 3
         assert played.writer.turns == 2
-        assert strategy.suspensions == 1
-        assert strategy.resumes == 1
+        assert suspensions(state) == 1
+        assert resumes(state) == 1
         assert played.bridge[0].unacknowledged() == (), "the client confirmed it read the handle"
 
 
@@ -369,7 +305,7 @@ async def _synthesized(tmp_path: Path, calls: list[tuple[Any, ...]]) -> None:
         assert {handle_for(c.request_id) for c in admitted if c.request_id and not c.repeat} == set(
             handles
         )
-        assert len(admitted) <= core_state.run.limits.max_measurement_submissions
+        assert len(admitted) <= MAX_SUBMISSIONS_PER_MEASUREMENT
         assert len(admitted) <= 1, "an unchanged workspace is one identity with one submission"
 
 
