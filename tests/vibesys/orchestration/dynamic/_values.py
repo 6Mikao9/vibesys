@@ -23,18 +23,18 @@ from vibesys.orchestration.dynamic.models import (
     StrategyReason,
     WorkstreamPlan,
 )
-
-# test-isolation: a finished workstream is built from the values the workstream flow produces;
-# the flow exposes them only inside a `WorkstreamDone`, which tests must construct directly.
-from vibesys.orchestration.dynamic.search._outcomes import Candidate, Evidence, Result, Verdict
-from vibesys.orchestration.dynamic.search._values import Proof
 from vibesys.orchestration.dynamic.search.api import (
+    Candidate,
     DynamicConfig,
+    Evidence,
     FinishedWork,
     HypothesisRecord,
     ParentSnapshot,
+    Proof,
+    Result,
     RoundRecord,
     RunRecord,
+    Verdict,
     WorkKind,
     WorkPlan,
     WorkstreamDone,

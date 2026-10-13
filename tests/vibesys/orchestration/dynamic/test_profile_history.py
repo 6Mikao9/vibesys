@@ -28,16 +28,13 @@ from tests.vibesys.orchestration.dynamic._values import (
 
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.metrics import MetricRow
-
-# test-isolation: the proof of a profile is held by value on the finished record, and the
-# record offers no other way to give a workstream the evidence a capture left.
-from vibesys.orchestration.dynamic.search._values import Proof
 from vibesys.orchestration.dynamic.search.api import (
     Failure,
     FailureKind,
     FinishedWork,
     ProfileHistoryRow,
     ProfileHistoryStatus,
+    Proof,
     RunRecord,
     WorkKind,
     WorkPlan,

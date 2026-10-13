@@ -33,16 +33,14 @@ from vibesys.candidates.api import (
 )
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
-
-# test-isolation: the record is public; a validated update and a planning outcome are the values
-# the planning flow folds into it, and tests must construct them without running that flow.
-from vibesys.orchestration.dynamic.search._outcomes import Candidate, Result
-from vibesys.orchestration.dynamic.search._plan import PlanUpdate
 from vibesys.orchestration.dynamic.search.api import (
+    Candidate,
     Failure,
     FailureKind,
     NoPlan,
     PlanCheck,
+    PlanUpdate,
+    Result,
     RunRecord,
     RunSnapshot,
     Scheduled,
