@@ -12,10 +12,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
-from tests.support.skeleton_strategy import OPERATIONS, SkeletonStrategy, skeleton
+from tests.support.skeleton_strategy import OPERATIONS, SkeletonConfig, SkeletonStrategy, skeleton
 
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
-from vs_core.api import RunFacts
+from vs_core.api import RunFacts, SearchDef
 from vs_core.api.testing import sample_limits
 from vs_runtime.api import (
     AgentRole,
@@ -40,8 +40,13 @@ def core_policy(
     templates: Path = _TEMPLATES,
     strategy: SkeletonStrategy | None = None,
     deadline_seconds: float = 1000.0,
+    search: SearchDef[SkeletonConfig] = skeleton,
 ) -> CorePolicy:
-    """A core policy that plays ``strategy`` (the scripted skeleton by default)."""
+    """A core policy that plays ``strategy`` (the scripted skeleton by default).
+
+    ``search`` replaces the skeleton's flow for a test that scripts its own, over the same
+    operations and config.
+    """
     scenario = SkeletonStrategy() if strategy is None else strategy
 
     def plan(context: CoreRunContext) -> CorePlan:
@@ -49,7 +54,7 @@ def core_policy(
             context.evaluation_plan, context.facts, context.environment
         )
         return CorePlan(
-            search=skeleton,
+            search=search,
             config=scenario.config,
             facts=RunFacts(
                 objective=context.facts.objective,
@@ -81,9 +86,10 @@ def capability_plugin(  # noqa: PLR0913  # lint-waiver: LW-950002 [PLR0913]; eac
     config_version: int = 1,
     artifact_directories: tuple[str, ...] = (),
     strategy: SkeletonStrategy | None = None,
+    search: SearchDef[SkeletonConfig] = skeleton,
 ) -> OrchestrationPlugin:
     """A core plugin for a test that composes the host and drives the strategy it is given."""
-    policy = core_policy(strategy=strategy)
+    policy = core_policy(strategy=strategy, search=search)
     if artifact_directories:
         policy = replace(policy, artifact_directories=artifact_directories)
     return OrchestrationPlugin(

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_world import (
     LEASE,
     Process,
@@ -35,18 +35,17 @@ from vs_core.api import (
     AttemptsState,
     AttemptView,
     ItemId,
-    Limits,
-    Proposal,
     ReleaseDependency,
     ResourceId,
     RunControlEvent,
     RunResultProposal,
     RunStatus,
     SessionInputReceived,
+    StopMode,
     WorkspaceMode,
     WorkspacePlan,
 )
-from vs_core.testing.builders import initial_state
+from vs_core.testing.builders import initial_state, sample_limits
 from vs_runtime.api.core import (
     CoreRunHost,
     DispatchCapExceededError,
@@ -65,22 +64,14 @@ from vs_sim.api.testing import clock_from
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CoreState, RunView, StrategyEvent
+    from vs_core.api import CoreState
     from vs_sim.api.testing import VirtualClock
 
 #: Event loop turns a stuck fake turn lasts, standing for "longer than anything the run waits".
 _TURN_BOUND = 1000
 
-INERT = SkeletonStrategy(state=SkeletonState(schema_version=1, phase="done"), measured=False)
-
-
-class BaselineOnly(SkeletonStrategy):
-    """Measure the baseline, then cancel the run: no attempt is run."""
-
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
-        """Skip the attempt: the baseline measurement is followed by the cancellation."""
-        state = super().on_event(view, event)
-        return state.model_copy(update={"phase": "cancel"}) if state.phase == "start" else state
+INERT = SkeletonStrategy.idle()
+BASELINE_ONLY = SkeletonStrategy.baseline_only()
 
 
 class ScriptedClock(ProbedRunClock):
@@ -148,14 +139,16 @@ def _host(
 async def test_a_stop_control_ends_the_run_with_the_proposed_result(tmp_path: Path) -> None:
     channel = _channel()
     clock = ScriptedClock(clock_from(1.0))
-    clock.actions[2] = channel.request_stop
+    clock.actions[2] = lambda: channel.request_stop(StopMode.DRAIN)
     with open_skeleton_world(tmp_path, INERT) as world:
         process, host = _host(world, clock, channel)
         channel.request_pause()
         start_core(host, _config())
         outcome = await drive_core(host, _config())
     assert outcome.status == RunStatus.TERMINAL
-    assert outcome.result == RunResultProposal(outcome="cancelled", reason="operator")
+    assert outcome.result == RunResultProposal(
+        outcome="cancelled", reason="stopped: no work was asked for"
+    )
     assert process.shell.record.envelope.core.run.result == outcome.result
 
 
@@ -171,7 +164,9 @@ async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) ->
         )
         deadline = process.shell.record.envelope.core.run.deadline_at
     assert outcome.status == RunStatus.TERMINAL
-    assert outcome.result == RunResultProposal(outcome="cancelled", reason="run deadline reached")
+    assert outcome.result == RunResultProposal(
+        outcome="cancelled", reason="deadline: no work was asked for"
+    )
     assert clock.at >= deadline
 
 
@@ -224,7 +219,7 @@ async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World,
     Returns the world, the process and whether the run reached its terminal status.
     """
     clock = ProbedRunClock(clock_from(1.0))
-    with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, runtime)) as world:
+    with open_skeleton_world(tmp_path, BASELINE_ONLY, timed=(clock, runtime)) as world:
         process = world.runtime()
         process.shell.start("host-a", now_at=1.0, lease_duration=LEASE)
         try:
@@ -245,7 +240,7 @@ async def test_a_running_job_is_polled_at_the_observe_interval(
     (whether to submit, then its own view). The answers never fail, so the backoff never
     applies. A loop that polled on every wake would exceed it by orders of magnitude.
     """
-    interval = Limits().observe_interval
+    interval = sample_limits().observe_interval
     world, process, _ = await _measure_a_job_running(tmp_path, runtime)
     core = process.shell.record.envelope.core
     assert [job.status for job in core.evaluation.jobs] == ["succeeded"]
@@ -253,7 +248,8 @@ async def test_a_running_job_is_polled_at_the_observe_interval(
     assert runtime / interval - 1 <= len(world.polls) <= runtime / interval + 4
 
 
-@pytest.mark.parametrize("leases", [1, 3, 10])
+# Eight lease durations is the most that fit in the 880 s a skeleton measurement may take.
+@pytest.mark.parametrize("leases", [1, 3, 8])
 async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
     tmp_path: Path, leases: int
 ) -> None:
@@ -271,7 +267,7 @@ async def test_a_dispatch_longer_than_the_lease_does_not_lose_the_lease(
             # timeline passes each third of the lease, as it would beside a real turn.
             await clock.pass_time(LEASE / 4)
 
-    with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, 0.0)) as world:
+    with open_skeleton_world(tmp_path, BASELINE_ONLY, timed=(clock, 0.0)) as world:
         world.during_submit = lease_durations_pass
         process, host = _host(world, clock)
         start_core(host, _config())
@@ -300,12 +296,12 @@ async def test_a_stop_during_a_submission_waits_for_it_and_closes_the_run(
             # Real virtual time, not a jump of ``clock.at``: the heartbeat renews as the
             # timeline passes each third of the lease, as it would beside a real turn.
             await clock.pass_time(LEASE / 4)
-        channel.request_stop()
+        channel.request_stop(StopMode.DRAIN)
         for _ in range(_TURN_BOUND):
             await asyncio.sleep(0)
         stop_seen_in_flight.append(True)
 
-    with open_skeleton_world(tmp_path, BaselineOnly(), timed=(clock, 0.0)) as world:
+    with open_skeleton_world(tmp_path, BASELINE_ONLY, timed=(clock, 0.0)) as world:
         world.during_submit = slow_submission
         _, host = _host(world, clock, channel)
         start_core(host, _config())
@@ -333,13 +329,13 @@ async def test_a_run_nothing_can_wake_is_reported_stalled(tmp_path: Path) -> Non
 async def test_a_stalled_run_with_no_open_intent_still_names_what_is_unfinished(
     tmp_path: Path,
 ) -> None:
-    """``open intents []`` is never the whole report: core says it waits on nothing."""
+    """``open records []`` is never the whole report: core says it waits on nothing."""
     with open_skeleton_world(tmp_path, INERT) as world:
         _, host = _host(world, ProbedRunClock(clock_from(1.0)))
         start_core(host, _config())
         with pytest.raises(
             RunStalledError,
-            match=r"open intents \[\]; core waits on nothing, so the strategy is the one that has "
+            match=r"open records \[\]; core waits on nothing, so the strategy is the one that has "
             r"stopped proposing; unfinished attempts \[.*\], sessions \[.*\], continuations \[",
         ):
             await drive_core(host, _config())
@@ -349,7 +345,7 @@ async def test_a_stalled_run_reports_what_the_host_knows_about_the_cause(tmp_pat
     with open_skeleton_world(tmp_path, INERT) as world:
         _, host = _host(world, ProbedRunClock(clock_from(1.0)))
         start_core(host, _config())
-        with pytest.raises(RunStalledError, match=r"open intents \[\].*; a submission nobody told"):
+        with pytest.raises(RunStalledError, match=r"open records \[\].*; a submission nobody told"):
             await drive_core(host, _config(), stall_notes=lambda: ["a submission nobody told"])
 
 
@@ -388,26 +384,13 @@ async def test_a_stalled_run_names_the_release_a_closing_attempt_waits_for(tmp_p
             await drive_core(host, _config())
 
 
-class WaitsUntil(SkeletonStrategy):
-    """Holds all work back until a run-clock time, then cancels the run."""
-
-    until: float = 0.0
-
-    def decide(self, view: RunView) -> Proposal[SkeletonState]:
-        """Ask to be woken at ``until``; from then on stop the run."""
-        if view.run.now_at < self.until:
-            return Proposal(state=self.state, decisions=(), wake_at=self.until)
-        cancelling = self.bind(self.state.model_copy(update={"phase": "cancel"}))
-        return SkeletonStrategy.decide(cancelling, view)
-
-
 @settings(max_examples=5, derandomize=True, deadline=None)
 @example(until=7.0)
 @given(until=st.floats(min_value=2.0, max_value=900.0))
 async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_stalled(
     until: float,
 ) -> None:
-    waiting = WaitsUntil(state=SkeletonState(schema_version=1, phase="done"), until=until)
+    waiting = SkeletonStrategy.waiting_until(until)
     clock = ProbedRunClock(clock_from(1.0))
     with (
         tempfile.TemporaryDirectory() as directory,
@@ -417,7 +400,7 @@ async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_s
         start_core(host, _config())
         outcome = await drive_core(host, _config())
     assert outcome.status == RunStatus.TERMINAL
-    assert outcome.result == RunResultProposal(outcome="cancelled", reason="attempt cancelled")
+    assert outcome.result == RunResultProposal(outcome="failure", reason="no-winner: woken")
     # The loop slept toward the wanted time and was awake at or after it, never before.
     assert until <= clock.at < until + _config().lease_duration
 
@@ -425,8 +408,12 @@ async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_s
 async def test_restart_mid_run_resumes_from_durable_state(tmp_path: Path) -> None:
     """A shell stopped by the dispatch cap after its first request is replaced by a new
     process over the same disk, which finishes the run.
+
+    The run is waiting on its baseline measurement when the first process dies, so the
+    request in flight at the cap is one the new process can look up and carry on.
     """
-    with open_skeleton_world(tmp_path, SkeletonStrategy.cancelled()) as world:
+    channel = _channel()
+    with open_skeleton_world(tmp_path, SkeletonStrategy.baseline_probe()) as world:
         clock = ProbedRunClock(clock_from(1.0))
         first, host = _host(world, clock)
         start_core(host, _config(max_dispatches=1))
@@ -435,7 +422,8 @@ async def test_restart_mid_run_resumes_from_durable_state(tmp_path: Path) -> Non
         assert sum(capped.value.kinds.values()) >= 1
         assert first.shell.record.envelope.core.run.status != RunStatus.TERMINAL
         clock.at += LEASE + 1.0
-        second, resumed = _host(world, clock)
+        second, resumed = _host(world, clock, channel)
+        channel.request_stop(StopMode.CANCEL)
         start_core(resumed, _config())
         outcome = await drive_core(resumed, _config())
     assert outcome.status == RunStatus.TERMINAL
@@ -502,7 +490,7 @@ _OPERATIONS = st.lists(
     st.one_of(
         st.just("pause"),
         st.just("resume"),
-        st.just("stop"),
+        st.sampled_from(StopMode).map(lambda mode: f"stop:{mode.value}"),
         st.text(min_size=1, max_size=5).map(lambda text: f"steer:{text}"),
     ),
     max_size=12,
@@ -521,8 +509,8 @@ def test_the_control_bridge_emits_one_ordered_event_per_change(operations: list[
             channel.request_pause()
         elif operation == "resume":
             channel.resume()
-        elif operation == "stop":
-            channel.request_stop()
+        elif operation.startswith("stop:"):
+            channel.request_stop(StopMode(operation.removeprefix("stop:")))
         else:
             channel.queue_steer(operation.removeprefix("steer:"))
         events.extend(bridge.poll(core, now_at=1.0))
@@ -532,13 +520,19 @@ def test_the_control_bridge_emits_one_ordered_event_per_change(operations: list[
     assert identities == [f"control-{n}" for n in range(1, len(events) + 1)]
     actions = [event.control.action for event in events]
     assert actions.count("stop") <= 1
+    requested = [op.removeprefix("stop:") for op in operations if op.startswith("stop:")]
+    stops = [event.control for event in events if event.control.action == "stop"]
+    # The first stop asked for is the one the run gets, in the mode it was asked in.
+    assert [control.mode for control in stops] == [StopMode(mode) for mode in requested[:1]]
     if "stop" in actions:
         assert all(action == "steer" for action in actions[actions.index("stop") + 1 :])
     levels = [action for action in actions if action in ("pause", "resume")]
     assert all(a != b for a, b in itertools.pairwise(levels))
     assert not levels or levels[0] == "pause"
     for event in events:
-        assert (event.result is not None) == (event.control.action == "stop")
+        # The search proposes the run's result; a control never carries one.
+        assert event.result is None
+        assert (event.control.mode is not None) == (event.control.action == "stop")
         if event.control.action == "steer":
             assert event.control.artifact is not None
             assert event.control.artifact.digest in steers.texts

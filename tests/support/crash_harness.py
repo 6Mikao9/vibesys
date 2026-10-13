@@ -1,14 +1,18 @@
 """Crash points of the skeleton run and the plans that crash at them (shared by the crash tests)."""
 
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
+import pytest
 from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX, RECEIPT_SEALED
 from tests.support.skeleton_sim import Simulation, Summary, simulate
 
 from vs_faults.api import Boundary, Crossing, FaultPlan, FaultRule, HostFault
+from vs_runtime._core_loop import OrphanWaitError
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 _RUNS: dict[str, Simulation] = {}
@@ -126,6 +130,23 @@ def representatives() -> Representatives:
         sealed=tuple(crossings[i + 2] for i in at),
         commits=tuple(dict.fromkeys(commits)),
     )
+
+
+# Crash points that hit a known core gap: `vs_core._waits` lists RECOVERY_CHECK as
+# HALTS_THE_RUN (a recovery check whose inspection was lost has no deadline of its own), so the
+# restarted run halts with an orphan wait instead of converging. `core_gap` expects exactly that,
+# so the entry fails the day core fixes it and must then be removed.
+CORE_GAPS = frozenset({"durable_write:receipt_begun#4"})
+
+
+@contextmanager
+def core_gap(first: Crossing) -> Iterator[None]:
+    """Expect the known core halt at ``first`` (and nothing at any other crash point)."""
+    if name(first) not in CORE_GAPS:
+        yield
+        return
+    with pytest.raises(OrphanWaitError):
+        yield
 
 
 def name(crossing: Crossing) -> str:

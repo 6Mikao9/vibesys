@@ -11,12 +11,18 @@ import asyncio
 import signal
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from tests.support.core_plugins import capability_plugin
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.skeleton_strategy import Phase, SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import (
+    ATTEMPT,
+    IMPLEMENTER_ROLE,
+    OPERATIONS,
+    SkeletonConfig,
+    SkeletonStrategy,
+)
 from tests.support.task_project import write_task
 
 from entrypoints.run import supervise
@@ -30,7 +36,8 @@ from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
-from vs_core.api import AttemptReady, RunView, StrategyEvent
+from vs_core.api import AttemptBudget, ItemId, WorkspaceMode, WorkspacePlan
+from vs_core.api.search import Flow, NotOpened, NoWinner, search
 from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
@@ -98,34 +105,49 @@ class _Observed:
     containers: tuple[FakeContainer, ...] = ()
 
 
-# A count of checkpoints, not time: far above what an unwind needs.
-_MAX_CHECKPOINTS = 100_000
+_RUN_DEADLINE = 1000.0
 
 
-class _ProbeStrategy(SkeletonStrategy):
-    """Start one attempt, so the run owns a container, then act on the exit path once it is live.
+@search(
+    "container-exit",
+    config=SkeletonConfig,
+    operations=OPERATIONS,
+    roles=(IMPLEMENTER_ROLE,),
+)
+async def _probe(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
+    """Open one attempt, so the run owns a container, then act on the exit path once it is live.
 
-    Core strategies are pure, so the probe's side effects (reading the daemon, delivering the
-    signals) reach the test through a module-level hook the test installs for one run.
+    Flows are pure, so the probe's side effects (reading the daemon, delivering the signals)
+    reach the test through a module-level hook the test installs for one run.
     """
+    del config
+    async with ctx.workspaces.open(
+        attempt=ATTEMPT.attempt_id,
+        item=ItemId(root="item-0"),
+        plan=WorkspacePlan(mode=WorkspaceMode.ISOLATED_CHILD, base=ctx.facts.baseline),
+        budget=AttemptBudget(),
+    ) as workspace:
+        if isinstance(workspace, NotOpened):
+            return NoWinner(reason="the attempt workspace did not open")
+        if _LIVE_HOOK is None or _LIVE_HOOK() == "failed":
+            return NoWinner(reason="scripted")
+        # Signals were delivered: wait for the stop they cause; the timer keeps the shell from
+        # calling the wait a stall.
+        await ctx.first(ctx.stopped, ctx.timer(_RUN_DEADLINE))
+    return None
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
-        state = super().on_event(view, event)
-        if isinstance(event, AttemptReady) and _LIVE_HOOK is not None:
-            return state.model_copy(update={"phase": _LIVE_HOOK(str(view.run.run_id.root))})
-        return state
 
-
-_LIVE_HOOK: Callable[[str], Phase] | None = None
+_LIVE_HOOK: Callable[[], Literal["failed", "settle"]] | None = None
+_RUN_ID = "container-exit-run"
 
 
 def _live_hook(
     engine: FakeDockerEngine, observed: _Observed, signals: FakeSignalSource, exit_path: str
-) -> Callable[[str], Phase]:
+) -> Callable[[], Literal["failed", "settle"]]:
     """What happens once the run's container exists: note the daemon, then fail or signal."""
 
-    def live(run_id: str) -> Phase:
-        observed.run_id = run_id
+    def live() -> Literal["failed", "settle"]:
+        observed.run_id = _RUN_ID
         observed.containers = engine.containers()
         if exit_path == "failure":
             return "failed"
@@ -165,11 +187,8 @@ def _execute(
     _LIVE_HOOK = None if resumed is not None else _live_hook(engine, observed, signals, exit_path)
     plugin = capability_plugin(
         _PLUGIN_ID,
-        strategy=_ProbeStrategy(
-            state=SkeletonState(schema_version=1, phase="start"),
-            measured=False,
-            keeps_candidate=False,
-        ),
+        strategy=SkeletonStrategy.unmeasured(keeps_candidate=False),
+        search=_probe,
     )
     registry = OrchestrationRegistry()
     registry.register_plugin(plugin)
@@ -192,6 +211,7 @@ def _execute(
         input_bundle=load_task(root),
         objective="Improve the queue.",
         exp_name=_PLUGIN_ID,
+        run_id=_RUN_ID,
         agent_backend="cli",
         cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,

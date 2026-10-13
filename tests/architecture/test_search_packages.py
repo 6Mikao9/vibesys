@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import keyword
 from pathlib import Path
 
 import pytest
@@ -145,7 +146,9 @@ def test_the_private_import_scan_resolves_relative_imports() -> None:
 
 
 @given(
-    name=st.from_regex(r"[a-z][a-z0-9_]{0,12}", fullmatch=True),
+    name=st.from_regex(r"[a-z][a-z0-9_]{0,12}", fullmatch=True).filter(
+        lambda text: text.isidentifier() and not keyword.iskeyword(text)
+    ),
     private=st.booleans(),
 )
 def test_only_underscore_modules_count_as_private(*, name: str, private: bool) -> None:

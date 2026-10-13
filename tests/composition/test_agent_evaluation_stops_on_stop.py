@@ -15,7 +15,7 @@ from pydantic import TypeAdapter
 from tests.composition.test_agent_evaluation_bridge import Scenario, scenario
 from tests.support.skeleton_world import LEASE, Process
 
-from vs_core.api import RunStatus
+from vs_core.api import StopMode
 from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall
 from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core
 from vs_runtime.api.infrastructure import RunStopped, RuntimeRunControlChannel
@@ -61,8 +61,8 @@ async def _until_the_host_gives_up(
 ) -> None:
     """Wait for the loop; ``GRACE_S`` after the stop, cancel it as the host does.
 
-    The skeleton strategy lets an attempt drain, and its agent's job never ends, so the loop
-    would wait for the continuation's deadline. The host's grace bound is what ends the run.
+    The attempt drains, and its agent's job never ends, so the loop would wait for the
+    continuation's deadline. The host's grace bound is what ends the run.
     """
     while not running.done():
         if stopped_at and clock.now() >= stopped_at[0] + GRACE_S:
@@ -121,7 +121,7 @@ async def test_a_stop_while_an_agent_evaluation_runs_starts_no_further_work(tmp_
         if not at_stop:
             at_stop.append(len(holder[0].world.cluster.submissions))
             stopped_at.append(clock.now())
-            channel.request_stop()
+            channel.request_stop(StopMode.DRAIN)
 
     def act() -> None:
         cluster = holder[0].world.cluster
@@ -139,7 +139,9 @@ async def test_a_stop_while_an_agent_evaluation_runs_starts_no_further_work(tmp_
         core = process.shell.record.envelope.core
         cluster = played.world.cluster
         assert stopped
-        assert core.run.status == RunStatus.CLOSING
+        # The search is still draining the attempt whose agent waits on a job that never ends:
+        # the stop is recorded, the run is not over, and the host's grace bound ends the loop.
+        assert core.run.result is None
         assert [c.action for c in core.run.controls] == ["stop"]
         assert len(cluster.submissions) == submitted_at_stop, "a stop starts no further work"
         token = played.writer.descriptor_env["VS_EVALUATION_TOKEN"]

@@ -26,17 +26,17 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import pytest
 from hypothesis import HealthCheck, assume, example, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
+from tests.support.agent_tool_world import resumes, suspensions
 from tests.support.dynamic_script import Executors
 from tests.support.owed_submissions import owed_namespace
-from tests.support.skeleton_strategy import ATTEMPT, DECLARATION, DIGEST
+from tests.support.skeleton_strategy import ATTEMPT, DIGEST, OPERATIONS, SkeletonConfig, skeleton
 from tests.support.synthesized_evidence import SynthesizedEvidence
-from tests.support.waiting_loop_strategy import LoopState, LoopStrategy
 
 from vs_core.api import (
     ArtifactId,
@@ -44,8 +44,9 @@ from vs_core.api import (
     ClockAdvanced,
     CoreState,
     DispatchTurn,
-    Limits,
-    OperationRegistry,
+    EvidenceKind,
+    ExecuteRegisteredOperation,
+    RenderedArtifacts,
     Request,
     ResourceId,
     ResumeSessionTurn,
@@ -57,7 +58,8 @@ from vs_core.api import (
     SubmitMeasurement,
     TurnObserved,
 )
-from vs_core.testing.drive import Answer, Running, Succeeded
+from vs_core.api.testing import sample_limits
+from vs_core.testing.drive import Answer, Harness, Running, Succeeded, new_run
 from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall, WaitCall
 from vs_project.api import FakeStateStore
 from vs_runtime.api.core import (
@@ -67,7 +69,6 @@ from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
-    CoreStartup,
     ExecutionResult,
     OrphanWaitError,
     OwedSubmissions,
@@ -78,9 +79,7 @@ from vs_runtime.api.core import (
     RuntimeCommitError,
     RuntimeCommitUncertainError,
     drive_core,
-    empty_catalog,
     handle_for,
-    new_core_state,
     start_core_awaiting_lease,
 )
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
@@ -101,7 +100,6 @@ if TYPE_CHECKING:
         SnapshotWorkspace,
     )
 
-from tests.support.skeleton_world import IMPLEMENTATION, Implementation
 
 ROLE = AgentRole(
     id="implementer", system_prompt="implement", extra_tools=(AgentTool(id="evaluation"),)
@@ -114,6 +112,7 @@ POLICY = AgentEvaluationPolicy(
     stages=(("accuracy", 10.0), ("benchmark", 10.0)),
     queue_allowance=880.0,
     accuracy_stage="accuracy",
+    accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
 )
 FACTS = RunFacts(
     objective="make candidate.py faster",
@@ -224,10 +223,10 @@ class ShellView:
     concurrent commit would do; it is None except in the one test that needs it.
     """
 
-    def __init__(self, shell: CoreRuntime[LoopState]) -> None:
+    def __init__(self, shell: CoreRuntime[Any]) -> None:
         self._shell = shell
         self.shown: CoreState | None = None
-        self.admitting: CoreRuntime[LoopState] | None = None
+        self.admitting: CoreRuntime[Any] | None = None
         """Another shell to admit through, to stand for a halted or failing one."""
         self.admit_error: Exception | None = None
 
@@ -325,7 +324,7 @@ class Agent:
     pending: tuple[tuple[Scope, Program], ...] = ()
     diagnostics: list[str] = field(default_factory=list)
     view: ShellView | None = None
-    shell: CoreRuntime[LoopState] | None = None
+    shell: CoreRuntime[Any] | None = None
     current: Turn | None = None
     mortality: Mortality = field(default_factory=Mortality)
     read: list[tuple[str, str]] = field(default_factory=list)
@@ -485,12 +484,25 @@ class AgentExecutors(ScriptedExecutors):
         self._finished_in_submit_round = finished_in_submit_round
         self._evaluator = Executors(submit=_submitted)
         self._reply = ""
-        super().__init__(self._answer, core, OperationRegistry(), {IMPLEMENTATION: Implementation})
+        super().__init__(self._answer, core, OPERATIONS.registry(), skeleton.reply_schemas)
 
     def _answer(self, request: Request, core: CoreState) -> Answer:
         if isinstance(request, DispatchTurn | ResumeSessionTurn):
             lease = ResourceId(root=f"lease:{request.turn.session.session_id.root}")
             return Succeeded(output_json=self._reply, resource_id=lease)
+        if isinstance(request, ExecuteRegisteredOperation):
+            # The skeleton asks for nothing but its prompt to be rendered.
+            return Succeeded(
+                outcome=RenderedArtifacts(
+                    status="succeeded",
+                    prompts=(
+                        ArtifactRef(
+                            artifact_id=ArtifactId(root=f"prompt:{request.operation_id.root}"),
+                            digest="prompt",
+                        ),
+                    ),
+                )
+            )
         if (
             self._finished_in_submit_round
             and isinstance(request, SubmitMeasurement)
@@ -531,7 +543,7 @@ class AgentExecutors(ScriptedExecutors):
 class Played:
     """One finished run."""
 
-    shell: CoreRuntime[LoopState]
+    shell: CoreRuntime[Any]
     agent: Agent
     view: ShellView
     directory: tempfile.TemporaryDirectory[str] | None = None
@@ -584,18 +596,22 @@ def _play(
     already finished, with its evidence, as a verdict-cache replay does; otherwise the job is
     still running. Each of ``crashes`` ends one host process; the next one starts over the same
     durable run record and the same owed record, as after a restart."""
-    limits = Limits(max_turns=4 * total + 4, max_measurement_submissions=64)
-    state = new_core_state(
-        "run",
-        FACTS,
-        DECLARATION,
-        offered=empty_catalog(),
-        startup=CoreStartup(deadline_at=1000.0, limits=limits),
+    limits = sample_limits(max_turns=4 * total + 4)
+    selected = SkeletonConfig(turns=total)
+    state = new_run(
+        skeleton.driver(selected, OPERATIONS.registry()),
+        Harness(
+            registry=OPERATIONS.registry(),
+            facts=FACTS,
+            lifecycle=frozenset({"suspend"}),
+            limits=limits,
+            deadline_at=1000.0,
+        ),
     )
     store = FakeStateStore()
     clock = VirtualClock(1.0)
     workspaces = Workspaces()
-    shells: list[CoreRuntime[LoopState]] = []
+    shells: list[CoreRuntime[Any]] = []
     views: list[ShellView] = []
     ledgers: list[OwedSubmissions] = []
     diagnostics: list[str] = []
@@ -623,13 +639,15 @@ def _play(
     def boot(crash: Crash) -> CoreRunHost:
         """Start a host process over the durable record, dying where ``crash`` says."""
         shell = cast(
-            "CoreRuntime[LoopState]",
+            "CoreRuntime[Any]",
             CoreRuntime(
                 store,
-                LoopStrategy(total=total),  # type: ignore[arg-type]
+                # A driver holds its run's live flow: each host process starts its own.
+                skeleton.driver(selected, OPERATIONS.registry()),
                 state,
+                config=selected,
                 bindings=CoreRuntimeBindings(
-                    registry=OperationRegistry(),
+                    registry=OPERATIONS.registry(),
                     executors=RequestExecutors(
                         workspaces=executors,  # type: ignore[arg-type]  # one scripted object serves each role
                         sessions=executors,  # type: ignore[arg-type]
@@ -666,7 +684,9 @@ def _play(
         except ProcessKilledError:
             died = True
             continue
-        except RunStalledError as error:
+        except (RunStalledError, OrphanWaitError) as error:
+            # A host that died with a request in flight leaves one the scripts cannot inspect:
+            # core blocks it, and either stalls on it or finds a job nothing will end.
             if died:
                 raise UnrecoverableRestartError from error
             raise
@@ -677,11 +697,9 @@ def _play(
 def check(played: Played) -> None:
     """The run ended terminally and every accepted suspension was resumed once."""
     state = played.shell.record.envelope.core
-    strategy = played.shell.record.envelope.strategy
-    assert isinstance(strategy, LoopState)
     assert state.run.status == RunStatus.TERMINAL
-    assert strategy.suspensions == strategy.resumes
-    assert strategy.suspensions <= played.agent.waits_accepted
+    assert suspensions(state) == resumes(state)
+    assert suspensions(state) <= played.agent.waits_accepted
     assert not [row for row in state.sessions.invocations if row.phase == SessionPhase.EXECUTING], (
         "no turn is left executing"
     )
@@ -772,11 +790,12 @@ def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[N
         frame = SubmitCall(token=agent.token(scope)).model_dump_json().encode()
         if error is None:
             idle = cast(
-                "CoreRuntime[LoopState]",
+                "CoreRuntime[Any]",
                 CoreRuntime(
                     FakeStateStore(),
-                    LoopStrategy(total=1),
+                    skeleton.driver(SkeletonConfig(), OPERATIONS.registry()),
                     agent.view.core,  # type: ignore[arg-type]
+                    config=SkeletonConfig(),
                 ),
             )
             agent.view.admitting = idle
