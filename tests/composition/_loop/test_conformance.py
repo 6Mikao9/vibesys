@@ -7,6 +7,7 @@ properties. The crash tier (C2) is `test_conformance_crash.py`.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import pytest
@@ -66,6 +67,16 @@ DELIVERY_FAULTS = {
 }
 
 
+def _without_deadlines(decisions: list[str]) -> list[str]:
+    """The decisions with each absolute wait limit blanked.
+
+    A delivery fault delays the run by its retry backoff, so a search that settles after a
+    lost turn computes its later deadlines from a shifted clock; the limit is the only
+    thing that shifts.
+    """
+    return [re.sub(r'("until":\{[^{}]*?"limit":)[-0-9.eE+]+', r"\g<1>0", d) for d in decisions]
+
+
 @pytest.mark.parametrize("name", SUBJECT_NAMES)
 @pytest.mark.parametrize("fault", sorted(DELIVERY_FAULTS))
 @PURE
@@ -80,7 +91,7 @@ def test_c4_delivery_faults_never_change_the_decisions_or_the_liveness(
     quiet = c.Outcomes(measurements=("workload_failure",), turns=(c.LOST_TURN,))
     plain = c.run_pure(subject, c.Faulted(make(), quiet), Faults())
     faulty = c.run_pure(subject, c.Faulted(make(), quiet), DELIVERY_FAULTS[fault])
-    assert faulty == plain
+    assert _without_deadlines(faulty) == _without_deadlines(plain)
 
 
 @pytest.mark.parametrize("name", SUBJECT_NAMES)

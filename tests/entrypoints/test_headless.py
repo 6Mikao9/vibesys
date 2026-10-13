@@ -39,7 +39,7 @@ from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
-from vibesys.orchestration.evolve.models import EvolveOptions
+from vibesys.orchestration.evolve.launch import EvolveLaunch
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue import IssueQueueOptions
 from vibesys.orchestration.profilers import ProfilerKind
@@ -320,7 +320,7 @@ def _plain_configuration(*, max_rounds: int = 6) -> _RecordedRun:
 
 
 def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
-    options = EvolveOptions(
+    options = EvolveLaunch(
         max_generations=max_generations,
         children_per_generation=3,
         k_top_inspirations=4,
@@ -335,7 +335,6 @@ def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
         openevolve_migration_rate=0.25,
         frontier_bias=0.6,
         bootstrap_max_attempts=7,
-        keep_deployments=False,
         max_parallelism=2,
         metric_space=MetricSpace(
             objectives=(

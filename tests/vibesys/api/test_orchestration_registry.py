@@ -27,7 +27,7 @@ from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
-from vibesys.orchestration.evolve.models import EvolveOptions
+from vibesys.orchestration.evolve.launch import EvolveLaunch
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue import IssueQueueOptions
 from vibesys.orchestration.multi import (
@@ -291,7 +291,6 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
                 "selection_temperature": 1.0,
                 "frontier_bias": 0.7,
                 "bootstrap_max_attempts": 3,
-                "keep_deployments": False,
                 "max_parallelism": 2,
                 "metric_space": {
                     "objectives": [{"name": "throughput", "direction": "max"}],
@@ -324,7 +323,7 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
         assert parsed.load_levels is not None
         observed = tuple(level.rate for level in parsed.load_levels)
     else:
-        assert isinstance(parsed, EvolveOptions)
+        assert isinstance(parsed, EvolveLaunch)
         observed = tuple(item.name for item in parsed.metric_space.objectives)
     assert observed == expected_tuple
     if plugin_id == "plain":
@@ -353,7 +352,6 @@ def test_evolve_plugin_resumes_with_its_exact_options() -> None:
         "selection_temperature": 1.0,
         "frontier_bias": 0.7,
         "bootstrap_max_attempts": 3,
-        "keep_deployments": False,
         "max_parallelism": 2,
     }
     recorded = OrchestrationDescriptor(id="evolve", config_version=1, options=options)
