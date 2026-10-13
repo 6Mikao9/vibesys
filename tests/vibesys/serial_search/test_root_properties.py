@@ -55,7 +55,7 @@ def _check_always(host: SerialHost, rounds: int) -> None:
 @MODES
 @settings(max_examples=40, deadline=None, derandomize=True, database=None)
 @given(
-    steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 11)), max_size=50),
+    steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 13)), max_size=50),
     stop_before=st.none() | st.integers(0, 50),
     rounds=st.integers(1, 3),
 )

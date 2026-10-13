@@ -90,6 +90,7 @@ class SerialHost:
     settled: set[str] = field(default_factory=set)
     """The attempts whose workspace the host closed."""
     refused_starts: int = 0
+    refused_closes: int = 0
     refusals: dict[str, int] = field(default_factory=dict)
     """For a kind of wait (its label), how many times core still refuses it."""
     refusal_code: RejectionCode = RejectionCode.BUDGET
@@ -98,6 +99,7 @@ class SerialHost:
     baseline: Baseline = "measured"
     validation: Validation = "passed"
     attribution_output: str = ""
+    attribution_exit_code: int = 0
     commits: int = 0
     events: int = 0
     measured: list[str] = field(default_factory=list)
@@ -217,6 +219,7 @@ class SerialHost:
         assert isinstance(target, AttemptRef)
         disposition = request.disposition
         if variant % 4 == 3 and isinstance(disposition, Settle) and disposition.outcome != "failed":
+            self.refused_closes += 1
             self._refuse(asked)  # core takes the plain close instead
             return
         self.settled.add(target.attempt_id.root)
@@ -276,7 +279,9 @@ class SerialHost:
             )
         elif isinstance(typed, CaptureCommandBase):
             outcome = CommandCapture(
-                status="succeeded", exit_code=0, output=self.attribution_output
+                status="succeeded",
+                exit_code=self.attribution_exit_code,
+                output=self.attribution_output,
             )
         elif isinstance(typed, ValidateLocalBase):
             outcome = self._validated()

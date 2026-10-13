@@ -9,6 +9,8 @@ tests; what is asserted here is only what the search decided.
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi._host import (
     IMPLEMENTER,
     JUDGE,
@@ -31,8 +33,14 @@ from vs_core.api import (
     Declined,
     FailureReason,
     Finish,
+    Operation,
+    RequestTurn,
     Retained,
     RevisionRef,
+    Settle,
+    ValidateLocalBase,
+    Wait,
+    Withdraw,
 )
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
@@ -258,3 +266,196 @@ def test_an_implementer_that_asks_to_continue_is_given_its_own_next_step_without
     record = host.record
     assert record is not None
     assert [item.hypothesis_id for item in record.hypotheses] == ["h1"]
+
+
+@MODES
+@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@given(
+    judge_every=st.integers(1, 3),
+    outcomes=st.lists(
+        st.sampled_from(["nominated", "disproven", "inconclusive"]), min_size=3, max_size=3
+    ),
+)
+def test_the_judge_is_asked_exactly_when_the_review_cadence_says(
+    *, restarting: bool, judge_every: int, outcomes: list[str]
+) -> None:
+    """A round is reviewed at the cadence, in the final round, or on a nominated candidate."""
+    host = start(
+        config(max_rounds=3, judge_every=judge_every, official_eval_every=9), restarting=restarting
+    )
+    for number, outcome in enumerate(outcomes, start=1):
+        design(host, f"h{number}")
+        host.drain_until_turn(IMPLEMENTER)
+        host.run.reply(
+            host.run.expect_turn(role=IMPLEMENTER),
+            implemented(outcome),
+            checkpoint=Retained(revision=RevisionRef.of_git_commit(f"c{number}")),
+        )
+        for _ in range(50):
+            if any(item.label == PLANNER for item in host.run.open) or host.run.finished:
+                break
+            host.step(0)
+    host.drain()
+
+    expected = sum(
+        number == 3 or number % judge_every == 0 or outcome == "nominated"
+        for number, outcome in enumerate(outcomes, start=1)
+    )
+    assert len([item for item in host.run.decisions if _is_turn(item, "judge")]) == expected
+
+
+@MODES
+def test_a_round_whose_review_was_deferred_is_never_a_winner(*, restarting: bool) -> None:
+    host = start(config(max_rounds=2, judge_every=2, official_eval_every=9), restarting=restarting)
+    design(host, "h1")
+    host.drain_until_turn(IMPLEMENTER)
+    host.run.reply(
+        host.run.expect_turn(role=IMPLEMENTER),
+        implemented("disproven"),
+        checkpoint=Retained(revision=RevisionRef.of_git_commit("c1")),
+    )
+    host.drain_until_turn(PLANNER)
+
+    assert not [item for item in host.run.decisions if _is_turn(item, "judge")]
+    assert _settled_ineligible(host)
+
+
+@MODES
+def test_each_review_is_a_fresh_conversation(*, restarting: bool) -> None:
+    host = start(config(max_retries_per_round=2), restarting=restarting)
+    design(host)
+    implement(host)
+    judge(host, passed=False)
+    implement(host, candidate="c2")
+    judge(host, passed=True)
+    sessions = {
+        item.request.turn.session.session_id
+        for item in host.run.decisions
+        if _is_turn(item, "judge")
+    }
+
+    assert len(sessions) == 2
+
+
+@MODES
+def test_validation_runs_once_per_paid_turn_and_a_failure_repairs_the_attempt(
+    *, restarting: bool
+) -> None:
+    host = start(
+        config(max_retries_per_round=2), restarting=restarting, validating=True, validation="failed"
+    )
+    design(host)
+    for candidate in ("c1", "c2"):
+        host.drain_until_turn(IMPLEMENTER)
+        host.run.reply(
+            host.run.expect_turn(role=IMPLEMENTER),
+            implemented(validation_recipe_artifact=RECIPE),
+            checkpoint=Retained(revision=RevisionRef.of_git_commit(candidate)),
+        )
+        judge(host, passed=True)
+    host.drain()
+
+    validations = [
+        item
+        for item in host.run.decisions
+        if isinstance(item, Wait)
+        and isinstance(item.request, Operation)
+        and isinstance(item.request.request, ValidateLocalBase)
+    ]
+    assert len(validations) == 2
+    assert selection_of(host) == ("trusted_baseline", None)
+
+
+@MODES
+def test_a_run_that_cannot_validate_approves_on_the_judges_verdict(*, restarting: bool) -> None:
+    host = start(restarting=restarting, validating=True, validation="errored")
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    host.run.reply(
+        host.run.expect_turn(role=IMPLEMENTER),
+        implemented(validation_recipe_artifact=RECIPE),
+        checkpoint=Retained(revision=RevisionRef.of_git_commit("def456")),
+    )
+    judge(host, passed=True)
+    host.drain()
+
+    assert selection_of(host) == ("retained_candidate", "def456")
+
+
+@MODES
+def test_a_run_without_a_profiler_never_asks_the_routing_turn(*, restarting: bool) -> None:
+    host = start(config(profiling=False), restarting=restarting)
+    design(host)
+    implement(host)
+    judge(host, passed=True)
+    host.drain()
+
+    assert not [item for item in host.run.decisions if _is_turn(item, "router")]
+    assert not [item for item in host.run.decisions if _is_turn(item, "profiler")]
+
+
+@MODES
+def test_a_profiler_that_fails_does_not_stop_the_round(*, restarting: bool) -> None:
+    host = MultiHost.start(config(profiling=True), restarting=restarting)
+    host.drain_until_turn(ROUTER)
+    host.run.reply(host.run.expect_turn(role=ROUTER), routed(need_profile=True, focus="gemm"))
+    host.drain_until_turn(PROFILER)
+    host.run.fail(host.run.expect_turn(role=PROFILER), FailureReason.TIMED_OUT)
+    host.drain_until_turn(PLANNER)
+    design(host)
+    implement(host)
+    judge(host, passed=True)
+    host.drain()
+
+    assert selection_of(host) == ("retained_candidate", "def456")
+
+
+@MODES
+def test_a_requested_profile_is_collected_before_the_plan_and_reaches_the_designer(
+    *, restarting: bool
+) -> None:
+    host = MultiHost.start(config(profiling=True), restarting=restarting)
+    host.drain_until_turn(ROUTER)
+    host.run.reply(host.run.expect_turn(role=ROUTER), routed(need_profile=True, focus="gemm"))
+    host.drain_until_turn(PROFILER)
+    host.run.reply(host.run.expect_turn(role=PROFILER), profiled())
+    host.drain_until_turn(PLANNER)
+
+    prompt = host.run.expect_turn(role=PLANNER).context
+    assert getattr(prompt, "last_profile", None) is not None
+
+
+def _is_turn(item: object, role: str) -> bool:
+    return (
+        isinstance(item, Wait)
+        and isinstance(item.request, RequestTurn)
+        and item.request.turn.session.role_id.root.endswith(role)
+    )
+
+
+def _settled_ineligible(host: MultiHost) -> bool:
+    settles = [
+        item.request.disposition
+        for item in host.run.decisions
+        if isinstance(item, Wait)
+        and isinstance(item.request, Withdraw)
+        and isinstance(item.request.disposition, Settle)
+    ]
+    return bool(settles) and not settles[0].eligible
+
+
+@MODES
+def test_a_round_whose_implementer_waited_adopts_the_candidate_it_then_checkpointed(
+    *, restarting: bool
+) -> None:
+    host = MultiHost.start(config(), restarting=restarting, suspending=True)
+    host.drain_until_turn(PLANNER)
+    design(host)
+    host.drain_until_turn(IMPLEMENTER)
+    host.run.resume_ready(host.run.suspend(host.run.expect_turn(role=IMPLEMENTER)))
+    implement(host)
+    judge(host, passed=True)
+    host.drain()
+
+    assert selection_of(host) == ("retained_candidate", "def456")
+    assert_flow_closed(host)
