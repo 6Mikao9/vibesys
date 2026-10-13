@@ -131,7 +131,9 @@ async def attempt(ctx: Flow, w: WorkstreamStart) -> AsyncIterator[Attempt]:
         await settle(ctx, opened)
 ```
 
-The code before `yield` and after it is shielded: a stop that arrives while the workspace opens
+Entering a resource is a checkpoint: a stop already pending for the task is raised at
+`async with`, before the acquire runs, so a stopped task never acquires. The code before `yield`
+and after it is shielded: a stop that arrives while the workspace opens
 or settles waits, and is delivered at the first `await` inside the `async with` body. Whatever
 way the body ends, the release runs: one construct that every exit passes through.
 

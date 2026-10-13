@@ -366,6 +366,26 @@ def test_a_shielded_region_defers_the_stop(begin: Begin) -> None:
     assert "c/after.1" not in roots(run)  # the pending stop is raised before it is issued
 
 
+def test_a_stopped_task_never_acquires_a_resource(begin: Begin) -> None:
+    async def uses_resource(ctx: core.Flow) -> str:
+        async with attempt(ctx, "late"):
+            await ctx.wait(ask("body"), SHORT, reply=Plan)
+        return "unreachable"
+
+    async def parent(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as workers:
+            await ctx.stopped
+            workers.start("late", uses_resource)
+            done = await ctx.first(workers)
+        await ctx.finish(finish(f"{done!r}"))
+
+    run = begin(parent)
+    run.stop()
+    assert run.finished is not None
+    assert run.finished.result.reason == "TaskStopped(key='late')"
+    assert not any(root.startswith("late/") for root in roots(run))  # nothing acquired or released
+
+
 def test_a_pending_stop_is_raised_by_start_and_first_before_anything_is_issued(
     begin: Begin,
 ) -> None:
