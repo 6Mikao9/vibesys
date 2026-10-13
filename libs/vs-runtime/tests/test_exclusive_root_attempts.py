@@ -15,7 +15,6 @@ as a restarted shell does.
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -41,7 +40,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
     revision_ref,
 )
-from vs_sim.api.testing import swept
+from vs_sim.api.testing import examples, swept
 
 from .test_session_access import HostDied
 from .test_workspace_requests import (
@@ -61,9 +60,8 @@ if TYPE_CHECKING:
     from vs_project.api import GitRepository
     from vs_runtime.api.infrastructure import RuntimeWorkspace
 
-# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example builds real workspaces. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
 _ARTIFACT_DIR = "roadmap"
@@ -337,7 +335,7 @@ def _play(
 
 
 @settings(
-    max_examples=25 if _FULL else 5,
+    max_examples=examples(pr=5, nightly=25),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -498,7 +496,7 @@ async def _replay(env: WorkspaceEnv, ops: list[Op], crash: RestoreCrash) -> None
 
 
 @settings(
-    max_examples=40 if _FULL else 8,
+    max_examples=examples(pr=8, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )

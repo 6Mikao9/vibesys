@@ -25,6 +25,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import GitCommandError, GitRepository, StagingError
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -305,13 +306,12 @@ def _start(root: Path, make: RepositoryFactory) -> GitRepository:
 
 
 # Each step starts Git processes in the CLI implementation and the oracle. A pull request draws a
-# sample; the nightly workflow sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper, and
-# ``VIBESYS_GIT_CONTRACT_EXAMPLES`` sets the count for a long local run.
-_EXAMPLES = 12 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 2
+# sample; the nightly depth (`--depth=nightly`) searches deeper.
+_EXAMPLES = examples(pr=2, nightly=12)
 
 
 @settings(
-    max_examples=int(os.environ.get("VIBESYS_GIT_CONTRACT_EXAMPLES", str(_EXAMPLES))),
+    max_examples=_EXAMPLES,
     deadline=None,
 )
 @example(
