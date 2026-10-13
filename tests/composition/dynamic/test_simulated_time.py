@@ -13,15 +13,16 @@ the cluster as a subprocess, neither of which a virtual clock can drive.
 
 Each property names the fix it guards and the commit before which it fails:
 
-- the lease heartbeat and the renew floor (#1370): the lease and renewal tests;
+- the lease heartbeat and the renew floor (#1370): the lease and renewal checks;
 - stopping a turn from the loop (#1370): the stop-bound test;
-- concurrent dispatch (#1374, #1375): the overlap and wall-time tests.
+- concurrent dispatch (#1374, #1375): the overlap and wall-time checks (all of them read one run per profile).
 """
 
 from __future__ import annotations
 
 from functools import cache
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support.timed_dynamic_run import (
@@ -47,7 +48,9 @@ DRAIN_BOUND_S = 60.0
 #: minimum sleep, so noticing that a job ended costs up to one interval.
 _POLL_SLACK_S = OBSERVE_INTERVAL_S + 1.0
 
-_SETTINGS = settings(max_examples=8, deadline=None, derandomize=True)
+# Each example is a whole timed run with a stop; the two explicit examples below pin the cases
+# that failed before the fix, and a few derandomized draws spread the stop over the profiles.
+_SETTINGS = settings(max_examples=4, deadline=None, derandomize=True)
 
 
 EXACT = TimingProfile(
@@ -83,7 +86,14 @@ _SLOW = TimingProfile(
 )
 #: The profiles the properties range over. A run costs about a second of host time, so the
 #: properties draw from this spread (one run serves every property that draws it).
-PROFILES = st.sampled_from([TimingProfile(), EXACT, LONG_TURN, _SHORT, _SLOW])
+PROFILE_LIST = [
+    (TimingProfile(), "default"),
+    (EXACT, "exact"),
+    (LONG_TURN, "long_turn"),
+    (_SHORT, "short"),
+    (_SLOW, "slow"),
+]
+PROFILES = st.sampled_from([profile for profile, _ in PROFILE_LIST])
 
 
 @cache
@@ -98,12 +108,8 @@ def _ended_normally(run: TimedRun) -> None:
     assert run.outcome.status is RunStatus.TERMINAL
 
 
-@_SETTINGS
-@given(PROFILES)
-def test_the_state_lease_never_lapses_while_the_run_is_alive(profile: TimingProfile) -> None:
+def _the_state_lease_never_lapses_while_the_run_is_alive(run: TimedRun) -> None:
     """Guards the heartbeat (#1370): a drain over 60 s (agent turns) used to lose the lease."""
-    run = _finished(profile)
-    _ended_normally(run)
     times = [event.at for event in run.lease_events]
     assert times[0] == run.started_at
     # No stretch of the run lasts a full lease without a renewal that extended it.
@@ -111,14 +117,10 @@ def test_the_state_lease_never_lapses_while_the_run_is_alive(profile: TimingProf
         assert later - earlier < LEASE_SECONDS, (earlier, later)
 
 
-@_SETTINGS
-@given(PROFILES)
-def test_every_lease_renewal_is_accepted(profile: TimingProfile) -> None:
+def _every_lease_renewal_is_accepted(run: TimedRun) -> None:
     """Guards the renew floor (#1370): a renewal stamped with a turn's own, older request
     time (an agent tool call) was rejected once anything had advanced the store's time.
     """
-    run = _finished(profile)
-    _ended_normally(run)
     renewals = [event for event in run.lease_events if event.kind == "renew"]
     assert all(event.accepted for event in run.lease_events)
     # Every turn renews once mid-turn, besides the loop's own heartbeat.
@@ -196,27 +198,17 @@ def test_a_stop_during_a_turn_cancels_it_through_core_and_ends_the_run_terminal(
     assert run.ended_at - (run.stopped_at or run.ended_at) <= STOP_BOUND_S
 
 
-@_SETTINGS
-@given(PROFILES)
-def test_two_implementer_turns_overlap_with_two_in_flight(profile: TimingProfile) -> None:
+def _two_implementer_turns_overlap_with_two_in_flight(run: TimedRun) -> None:
     """Guards concurrent dispatch (#1374, #1375): turns used to run strictly one at a time."""
-    run = _finished(profile)
-    _ended_normally(run)
     implementers = [span for span in run.turns if span.role == "implementer"]
     assert len(implementers) == IMPLEMENTERS
     assert run.max_overlap("implementer") == IMPLEMENTERS
 
 
-@_SETTINGS
-@given(PROFILES)
-def test_a_finished_turn_is_followed_up_while_its_peer_turn_still_runs(
-    profile: TimingProfile,
-) -> None:
+def _a_finished_turn_is_followed_up_while_its_peer_turn_still_runs(run: TimedRun) -> None:
     """Guards deciding while requests run (#1375): a finished turn's follow-up (the review,
     then the evaluation submit) used to wait for every other running turn to end.
     """
-    run = _finished(profile)
-    _ended_normally(run)
     implementers = sorted((s for s in run.turns if s.role == "implementer"), key=lambda s: s.end)
     judges = sorted((s for s in run.turns if s.role == "judge"), key=lambda s: s.end)
     # Each review starts the moment its implementer's turn ends, not when the slowest ends.
@@ -228,15 +220,13 @@ def test_a_finished_turn_is_followed_up_while_its_peer_turn_still_runs(
     assert any(abs(at - judges[0].end) < 1e-6 for at in submits), (judges[0], submits)
 
 
-@_SETTINGS
-@given(PROFILES)
-def test_a_one_round_two_workstream_run_takes_the_critical_path(profile: TimingProfile) -> None:
+def _a_one_round_two_workstream_run_takes_the_critical_path(
+    profile: TimingProfile, run: TimedRun
+) -> None:
     """Guards concurrent dispatch (#1374, #1375): with two turns in flight the run is the
     baseline evaluation, then planner, implementers, reviews (each stage as long as its
     longest turn) and the candidates' evaluations; a serial shell adds a turn per stage.
     """
-    run = _finished(profile)
-    _ended_normally(run)
     slurm = profile.slurm
     evaluation = (
         slurm.queue_wait_s.high + slurm.run_s.high + slurm.completing_s.high + _POLL_SLACK_S
@@ -244,3 +234,23 @@ def test_a_one_round_two_workstream_run_takes_the_critical_path(profile: TimingP
     stages = 3  # planner, implementers, reviews
     bound = 2 * evaluation + stages * profile.turn_s.high
     assert run.wall_s <= bound, (run.wall_s, bound)
+
+
+@pytest.mark.parametrize(("profile", "name"), PROFILE_LIST, ids=[name for _, name in PROFILE_LIST])
+def test_a_run_with_no_stop_keeps_its_lease_overlaps_its_turns_and_takes_the_critical_path(
+    profile: TimingProfile, name: str
+) -> None:
+    """Every property of an uninterrupted run, over one run per profile.
+
+    A run costs seconds of host time and is a pure function of the profile, so the properties
+    below are checked on one run each instead of one run per property (a worker process runs
+    each profile's run once, however many properties read it).
+    """
+    assert name
+    run = _finished(profile)
+    _ended_normally(run)
+    _the_state_lease_never_lapses_while_the_run_is_alive(run)
+    _every_lease_renewal_is_accepted(run)
+    _two_implementer_turns_overlap_with_two_in_flight(run)
+    _a_finished_turn_is_followed_up_while_its_peer_turn_still_runs(run)
+    _a_one_round_two_workstream_run_takes_the_critical_path(profile, run)

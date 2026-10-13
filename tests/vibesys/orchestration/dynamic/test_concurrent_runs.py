@@ -414,20 +414,8 @@ def test_a_restart_after_a_crash_with_two_turns_in_flight_finishes_the_run_once_
     for run in recovered:
         assert run.finished
         assert run.no_effect_ran_twice()
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "found by this audit: a host that dies while a judge turn runs is replaced by one whose "
-        "recovered judge turn ends TIMED_OUT, so both workstreams fail and the input is kept "
-        "instead of the candidate (sampled crash points 96 of this run; not root-caused)"
-    ),
-)
-def test_a_restart_after_a_crash_with_two_turns_in_flight_reaches_the_uninterrupted_result() -> (
-    None
-):
-    normal, recovered = sweep()
-
-    for run in recovered:
-        assert run.result == normal.result
+    if any(run.result != normal.result for run in recovered):
+        # Found by this audit and not root-caused: a host that dies while a judge turn runs is
+        # replaced by one whose recovered judge turn ends TIMED_OUT, so both workstreams fail and
+        # the input is kept instead of the candidate. Remove this branch when it is fixed.
+        pytest.xfail("a recovered run does not reach the uninterrupted run's result")

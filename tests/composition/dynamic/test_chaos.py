@@ -31,8 +31,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # Each seed runs a whole search (several seconds on a CI runner), so a pull request runs a few
-# that cover no fault, an agent fault, and a cluster fault. The nightly workflow sweeps many more.
-_PR_SEEDS = "0,1,3"
+# that cover a tool-call fault and a cluster fault; the no-fault search is the explicit test below
+# (seed 0 is a no-fault seed too, and ran the same search again). The nightly workflow sweeps
+# many more, seed 0 included.
+_PR_SEEDS = "1,3"
 
 
 def _seeds() -> list[object]:
@@ -56,8 +58,12 @@ def test_the_search_keeps_its_invariants_under_generated_agents_and_faults(
 
 
 def test_a_run_without_faults_ends_without_an_error(tmp_path: Path) -> None:
-    """With no fault scheduled, the fault wrappers are the identity, so no turn's fate is unknown."""
-    chaos = run_chaos(tmp_path, 7000, plan_for(7000, faults=0))
+    """With no fault scheduled, the fault wrappers are the identity, so no turn's fate is unknown.
+
+    Seed 2 draws the smallest search (one round, one workstream in flight, no stop): the
+    property does not depend on the search's size, and a larger search only costs more.
+    """
+    chaos = run_chaos(tmp_path, 2, plan_for(2, faults=0))
 
     assert chaos.run is not None
     assert chaos.injected == []
