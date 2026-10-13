@@ -23,7 +23,7 @@ from ._agents import Agents, Session
 from ._define import FlowDriver, SearchDef, search
 from ._defs import flow
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
-from ._evaluation import Evaluation
+from ._evaluation import CaptureSpec, Evaluation
 from ._flow import Clock, Flow, Group, RunTask
 from ._owners import Owners
 from ._resource import resource
@@ -54,6 +54,7 @@ __all__ = [
     "Again",
     "Agents",
     "Assessment",
+    "CaptureSpec",
     "Clock",
     "Deadlock",
     "Dropped",
