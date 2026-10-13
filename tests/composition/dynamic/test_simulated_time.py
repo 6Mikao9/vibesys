@@ -142,17 +142,6 @@ def _measurements_end(profile: TimingProfile, run: TimedRun) -> float:
     return max((at + longest for _, at in run.jobs if at <= run.stopped_at), default=0.0)
 
 
-def _is_planning(run: TimedRun, stop_at: float) -> bool:
-    """Whether the planner's turn is the one a stop at ``stop_at`` finds running.
-
-    The dynamic search's stop reaches its workstreams but not its planning call, which
-    finishes its turn first (`_search.py`); so a planner turn is the one turn a stop waits for.
-    """
-    return any(
-        span.role == "orchestrator" and span.start <= stop_at < span.end for span in run.turns
-    )
-
-
 @_SETTINGS
 @example(profile=TimingProfile(), turn=0, position=0.4)
 @example(profile=LONG_TURN, turn=1, position=0.9)
@@ -173,19 +162,12 @@ def test_a_stop_during_a_turn_is_acted_on_within_the_bound(
     run = run_timed(profile, stop_after=stop_after)
     assert run.stopped_at is not None
     assert run.error is None or isinstance(run.error, RunStopped), run.error
-    if _is_planning(run, run.stopped_at):
-        # The planner's turn is not interrupted: it ends by itself and the run ends after it.
-        (planner,) = (
-            s for s in run.turns if s.role == "orchestrator" and s.start < run.stopped_at < s.end
-        )
-        assert not planner.cancelled
-        assert run.ended_at - planner.end <= DRAIN_BOUND_S
-    else:
-        # Core cancels the running turns promptly and ends the run terminal; a request core
-        # cannot cancel (a submission, a poll) in flight is waited for, within the grace bound.
-        assert run.ended_at <= max(run.stopped_at + DRAIN_BOUND_S, _measurements_end(profile, run))
-        assert run.turns[-1].cancelled
-        assert run.turns[-1].end - run.stopped_at <= STOP_BOUND_S
+    # Core cancels the running turns promptly (the planner's included) and ends the run terminal; a
+    # request core cannot cancel (a submission, a poll) in flight is waited for, within the grace
+    # bound.
+    assert run.ended_at <= max(run.stopped_at + DRAIN_BOUND_S, _measurements_end(profile, run))
+    assert run.turns[-1].cancelled
+    assert run.turns[-1].end - run.stopped_at <= STOP_BOUND_S
     # No workstream turn started after the stop.
     assert all(span.start <= run.stopped_at for span in run.turns if span.role != "orchestrator")
 

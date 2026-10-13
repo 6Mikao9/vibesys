@@ -22,6 +22,7 @@ from vibesys.core_wiring import (
     require_candidate_sandboxes,
 )
 from vibesys.dynamic_roles import CORE_ROLES
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.dynamic.core_policy.api import (
     project_run_snapshot,
     prompts,
@@ -147,9 +148,19 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
     )
     # The operator chooses how wide and how long to search; whether to profile follows the
     # evaluation plan (a profile command and a chosen profiler), which only the host knows.
-    config = launch.search_config(
-        profiling=evaluation.profile_measurement or evaluation.profile_capture_withheld
-    )
+    if evaluation.profile_capture_withheld:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="dynamic_profiling_unsupported",
+                stage="run_environment_validation",
+                message=(
+                    "profiling is on (a profile command and a profiler are chosen) but the "
+                    f"{context.environment.env_kind!r} run environment offers no profile capture; "
+                    "choose a profiler of 'none' or a run environment that can capture a profile"
+                ),
+            )
+        )
+    config = launch.search_config(profiling=evaluation.profile_measurement)
     models = {dynamic.ids.role_id(role.name).root: role.name for role in dynamic.roles}
     chosen = {models[role]: model for role, model in context.role_models.items() if role in models}
     return CorePlan(

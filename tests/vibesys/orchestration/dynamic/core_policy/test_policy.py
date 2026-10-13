@@ -27,6 +27,7 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
 from vibesys.candidates.api import UNBOUNDED_DEADLINE_AT, Gates, Measuring, terms_of
 from vibesys.core_wiring import ResolvedRun
 from vibesys.dynamic_core import dynamic_operation_catalog
+from vibesys.errors import ConfigurationError
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.dynamic.core_policy.api import requirements_for
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
@@ -315,9 +316,8 @@ def test_profile_work_follows_the_evaluation_plan_and_the_capture_the_run_offers
 ) -> None:
     """Profiling is on exactly when a profiler is chosen and the plan has a profile command.
 
-    The task's profile fields are what the run can capture, so a run that cannot capture
-    states none: the search then refuses to launch with profiling on (a loud failure), never
-    plans a profile workstream nothing can satisfy.
+    A run that wants profile work but cannot capture a profile is refused at launch with an
+    error that names the option; it never plans a profile workstream nothing can satisfy.
     """
     view = _environments(tmp_path)[environment]
     plan = TrustedEvaluationPlan(
@@ -328,15 +328,17 @@ def test_profile_work_follows_the_evaluation_plan_and_the_capture_the_run_offers
     )
     run = resolved(tmp_path, profiler_id=profiler_id, plan=plan, environment=view)
 
+    wants_profile = profiler_id != "none" and manifest_command is not None
+    if wants_profile and not view.captures_profile:
+        with pytest.raises(ConfigurationError, match="profiling"):
+            plan_of(run)
+        return
     made = plan_of(run)
 
-    wants_profile = profiler_id != "none" and manifest_command is not None
     supplied = {item.value for item in view.supported_profile_fields}
     assert _config(made).profiling is wants_profile
     assert made.facts.task is not None
-    assert set(made.facts.task.profile_fields) == (
-        supplied if wants_profile and view.captures_profile else set()
-    )
+    assert set(made.facts.task.profile_fields) == (supplied if wants_profile else set())
 
 
 @_SETTINGS

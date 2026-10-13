@@ -1,0 +1,24 @@
+{% macro failure_text(failure) -%}
+{% set kind = failure.kind.value -%}
+{% if kind == 'stopped' %}the operator stopped the run
+{%- elif kind == 'parent-unverified' %}the parent revision could not be verified to reproduce
+{%- elif kind == 'refused' %}the run refused a decision of the workstream ({{ failure.cause.value }})
+{%- elif kind == 'ended' %}a wait of the workstream ended without a result ({{ failure.ended.value }})
+{%- elif kind == 'out-of-budget' %}the run had no budget left to start it
+{%- elif kind == 'turn-failed' %}the {{ failure.role.value }}'s turn ended without a reply{% if failure.turn_failure %} ({{ failure.turn_failure.value }}){% elif failure.ended %} ({{ failure.ended.value }}){% endif %}
+{%- elif kind == 'invalid-reply' %}the {{ failure.role.value }} kept returning an invalid reply
+{%- elif kind == 'render-failed' %}the {{ failure.role.value }}'s prompt could not be rendered
+{%- elif kind == 'wait-refused' %}the {{ failure.role.value }} asked to wait for evaluations and the run could not honor it ({{ failure.refusal.value }})
+{%- elif kind == 'checkpoint-declined' %}the candidate could not be checkpointed ({{ failure.declined.value }})
+{%- elif kind == 'no-changed-candidate' %}the implementer made no changed candidate
+{%- elif kind == 'implementation-failed' %}the implementer reported that it could not implement the hypothesis
+{%- elif kind == 'review-rejected' %}the judge rejected the candidate
+{%- elif kind == 'no-trusted-evidence' %}the trusted measurement ended without evidence ({{ failure.status.value }})
+{%- elif kind == 'evidence-refused' %}the decoded readings did not match the evidence that was asked about
+{%- elif kind == 'evidence-undecodable' %}the evidence could not be decoded
+{%- elif kind == 'profile-capture-unavailable' %}the run offers no profile capture
+{%- elif kind == 'turn-limit' %}{{ failure.turns }} turns (limit {{ failure.limit }}) ended without a candidate that reached measurement{% if failure.blocker and failure.blocker.summary %}; the last said: {{ failure.blocker.summary }}{% endif %}
+{%- elif kind == 'repeated-turn' %}the last turn left nothing an earlier turn had not, so another would repeat it{% if failure.blocker and failure.blocker.summary %}; it said: {{ failure.blocker.summary }}{% endif %}
+{%- else %}{{ kind }}
+{%- endif %}
+{%- endmacro %}

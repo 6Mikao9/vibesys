@@ -26,6 +26,7 @@ from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import FailureKind
 from vs_core.api import (
     Finish,
+    RequestTurn,
     Retained,
     RevisionRef,
     StartAttempt,
@@ -109,17 +110,22 @@ def test_a_lost_planner_turn_is_asked_again(*, restarting: bool) -> None:
 
 
 @MODES
-def test_a_plan_accepted_after_a_stop_is_recorded_stopped_and_opens_no_attempt(
+def test_a_stop_while_planning_ends_the_run_without_waiting_for_the_planner(
     *, restarting: bool
 ) -> None:
     host = start(restarting=restarting)
-    asked = host.run.expect_turn(role=PLANNER_LABEL)
-    host.run.stop()
-    host.run.reply_raw(asked, plan_reply(implement("h1")))
+    host.run.expect_turn(role=PLANNER_LABEL)
 
-    assert not [item for item in host.run.open if isinstance(item.request, StartAttempt)]
+    host.run.stop()
+    host.drain()
+
+    # The planner never answered, and the run ended: its turn was stopped, not awaited.
+    assert isinstance(host.run.finished, Finish)
+    assert host.run.finished.result.outcome == "cancelled"
+    assert not [
+        item for item in host.run.open if isinstance(item.request, (RequestTurn, StartAttempt))
+    ]
     record = host.record
     assert record is not None
     assert not record.running
-    host.drain()
-    assert isinstance(host.run.finished, Finish)
+    assert not host.unsettled
