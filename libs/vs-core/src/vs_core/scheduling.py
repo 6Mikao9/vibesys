@@ -30,7 +30,7 @@ from .types.common import (
     RunStatus,
     WorkspaceMode,
 )
-from .types.evaluation import ObservationsDue
+from .types.evaluation import ObservationsDue, RunJobsCancelRequested
 from .types.kernel import AreaChange
 from .types.records import RecoveryPhase
 from .types.scheduling import (
@@ -519,7 +519,9 @@ def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal,
     # the carried new admission identity unless that exact episode is closing.
     episodes = tuple((slot.attempt, slot.admission_id) for slot in state.slots)
     episodes += tuple((_target(request), request.decision_id) for request in state.queue)
-    return tuple(
+    # The run's own jobs (its input baseline) belong to no attempt, so no retirement ends them.
+    run_jobs = RunJobsCancelRequested(scope=decision.scope, authority=decision.decision_id)
+    return run_jobs, *(
         RetireRequested(
             attempt=attempt,
             disposition="cancel",

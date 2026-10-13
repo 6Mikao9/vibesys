@@ -12,6 +12,7 @@ from .common import (
     ContinuationId,
     ContractValidationError,
     Count,
+    DecisionId,
     EvidenceId,
     EvidenceKey,
     EvidenceKind,
@@ -954,6 +955,18 @@ class JobsDrainRequested(Value):
     disposition: Literal["park", "cancel", "settle"]
 
 
+class RunJobsCancelRequested(Value):
+    """A committed cancel stop ends the jobs its scope owns that no attempt closure drains.
+
+    ``authority`` is the stop's decision; evaluation acts only while it is the run's first
+    committed stop, in cancel mode, for this scope.
+    """
+
+    kind: Literal["run_jobs_cancel_requested"] = "run_jobs_cancel_requested"
+    scope: Scope
+    authority: DecisionId
+
+
 class MeasurementSubmissionObserved(Value):
     """Classified submission observation updates its immutable budget receipt."""
 
@@ -977,6 +990,7 @@ type EvaluationEvent = Annotated[
     | ContinuationReopenRequested
     | ContinuationScopeReopened
     | JobsDrainRequested
+    | RunJobsCancelRequested
     | MeasurementSubmissionObserved,
     Field(discriminator="kind"),
 ]
