@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
-from hypothesis import event, given, note, settings
+from hypothesis import event, example, given, note, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -335,6 +335,10 @@ def _attempt(
     return attempt
 
 
+_MOVE = st.tuples(st.integers(0, 99), st.integers(1, 15), st.integers(0, 3))
+"""One host move: which of the open possibilities, how far the clock goes, what a reply says."""
+
+
 @dataclass
 class Host:
     """What the host saw while it played the live run: the ledger the end-of-run claims read."""
@@ -368,16 +372,34 @@ class Host:
 # the only warning these runs raise.
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 @settings(max_examples=60, deadline=None)
-@given(body=PROGRAMS, data=st.data())
+@given(body=PROGRAMS, script=st.lists(_MOVE, max_size=16))
+# The last choice stands: a first-choice-wins flow adopts the input here.
+@example(
+    body=(
+        Choose(name=None),
+        Work(asks=False, measure=False, verify=False, keep="candidate", choose=True),
+    ),
+    script=[],
+)
+# A stopped task still settles its workspace: stop while the task is inside it.
+@example(
+    body=(
+        Scope(
+            tasks=((Work(asks=True, measure=False, verify=False, keep="nothing", choose=False),),),
+            stops=True,
+        ),
+    ),
+    script=[(2, 1, 0), (2, 1, 0), (1, 1, 0)],
+)
 def test_a_restart_after_every_step_equals_the_live_run(
-    body: tuple[Op, ...], data: st.DataObject
+    body: tuple[Op, ...], script: list[tuple[int, int, int]]
 ) -> None:
     live_choices: list[core.Kept | None] = []
     live = start(make_root(body, live_choices))
     crashing = start(make_root(body, []), restarting=True)
     host = Host(live)
-    for _ in range(data.draw(st.integers(0, 16))):
-        if not _both(live, crashing, _action(data, host)):
+    for move in script:
+        if not _both(live, crashing, _action(move, host)):
             return
         note(live.timeline())
         host.note_sessions()
@@ -439,16 +461,15 @@ def _advance(target: float) -> Callable[[FlowRun[Config]], None]:
     return lambda run: run.advance_to(target)
 
 
-def _action(data: st.DataObject, host: Host) -> Callable[[FlowRun[Config]], None]:
+def _action(move: tuple[int, int, int], host: Host) -> Callable[[FlowRun[Config]], None]:
     """Draw the next host action from what the live run has open."""
     run = host.live
     open_waits = [asked for asked in run.open if not isinstance(asked.request, core.Finish)]
     choices = ["advance", "stop"]  # the host never answers the run's own Finish
     choices += [f"reply{i}" for i, _ in enumerate(open_waits)]
     choices += [f"fail{i}" for i, asked in enumerate(open_waits) if _may_fail(host, asked)]
-    choice = data.draw(st.sampled_from(choices))
-    step = data.draw(st.integers(1, 15))
-    answer = data.draw(st.integers(0, 3))
+    pick, step, answer = move
+    choice = choices[pick % len(choices)]
     if choice == "stop":
         return lambda r: r.stop()
     if choice == "advance":

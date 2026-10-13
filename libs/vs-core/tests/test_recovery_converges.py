@@ -22,7 +22,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hypothesis import event, given, note, settings
+from hypothesis import Phase, event, example, given, note, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -101,6 +101,10 @@ WORLDS = st.builds(
     roles=st.sampled_from((ROLES, ("judge",), ("implementer",))),
 )
 
+PINNED = World(
+    workstreams=1, in_flight=1, waits=(True,), polls=(1,), roles=("implementer", "judge")
+)
+
 UNSEALED = {
     "sealed": lambda _request: False,
     "unsealed": lambda _request: True,
@@ -138,12 +142,25 @@ def outcome(trace: Trace) -> dict[str, object]:
     }
 
 
-@settings(max_examples=16, deadline=None, derandomize=True, database=None)
+# No shrink phase: a crashed run costs ~0.3 s and a failing set of crash numbers shrinks through
+# hundreds of them. The pinned examples below are the minimal counterexamples we know; a new
+# failure prints its world and crash numbers (see ``note``) unshrunk.
+@settings(
+    max_examples=16,
+    deadline=None,
+    derandomize=True,
+    database=None,
+    phases=(Phase.explicit, Phase.generate),
+)
 @given(
     world=WORLDS,
     crashes=st.sets(st.integers(1, 120), min_size=1, max_size=3),
     unsealed=st.sampled_from(sorted(UNSEALED)),
 )
+# Pinned: both fail when core never sends an inspected request out again (``_reissuable`` false).
+# A crash at the first commit, and a crash during the recovery of an earlier one.
+@example(world=PINNED, crashes={1}, unsealed="sealed")
+@example(world=PINNED, crashes={2, 4}, unsealed="sealed")
 def test_a_run_that_crashes_and_recovers_ends_as_the_crash_free_run_did(
     world: World, crashes: set[int], unsealed: str
 ) -> None:
