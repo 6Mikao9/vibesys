@@ -31,12 +31,9 @@ from vs_core.api import (
     ProposeWinner,
     RetainedCandidate,
     RevisionRef,
-    RunResultProposal,
     RunView,
     Selection,
     SettlementId,
-    Stop,
-    StopMode,
     TrustedBaseline,
     Value,
     run_scope,
@@ -115,40 +112,6 @@ def proposal(ids: IdScheme, view: RunView, winner: Winner) -> ProposeWinner:
         decision_id=ids.decision_id("propose", "run"),
         scope=run_scope(view),
         selection=selection_of(winner),
-    )
-
-
-def stop(
-    ids: IdScheme,
-    view: RunView,
-    winner: Winner | None,
-    *,
-    operator_stop: StopMode | None,
-    no_winner_reason: str,
-) -> Stop:
-    """End the run after the adoption result: success with a winner, else failure.
-
-    ``operator_stop`` is the stop control's mode when the operator stopped the run, which ends
-    it ``cancelled`` either way and drains or cancels what is in flight as the operator chose.
-    A run that ends by itself passes ``None``: nothing is in flight to cancel.
-    """
-    stopping = operator_stop is not None
-    if winner is None:
-        result = RunResultProposal(
-            outcome="cancelled" if stopping else "failure", reason=no_winner_reason
-        )
-    else:
-        ending = RunEnding.NO_IMPROVEMENT if winner.hypothesis_id is None else RunEnding.ADOPTED
-        result = RunResultProposal(
-            outcome="cancelled" if stopping else "success",
-            reason=ending_reason(ending, winner.hypothesis_id or "kept the trusted input"),
-            selection=selection_of(winner),
-        )
-    return Stop(
-        decision_id=ids.decision_id("stop", "run"),
-        scope=run_scope(view),
-        mode=(operator_stop or StopMode.DRAIN).value,
-        result=result,
     )
 
 

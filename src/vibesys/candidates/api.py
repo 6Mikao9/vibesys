@@ -19,6 +19,20 @@ from vibesys.candidates._budget import (
     turn_chain,
 )
 from vibesys.candidates._config import CandidateConfig
+from vibesys.candidates._input import (
+    Baseline,
+    InputFailure,
+    InputFailureKind,
+    InputReading,
+    Measured,
+    NotConfigured,
+    Unmeasurable,
+    failure,
+    input_from_readings,
+    measure_input,
+    reading,
+    trusted,
+)
 from vibesys.candidates._run import (
     EligibleRound,
     RunPhase,
@@ -29,7 +43,6 @@ from vibesys.candidates._run import (
     ending_reason,
     proposal,
     selection_of,
-    stop,
 )
 from vibesys.candidates._settlement import (
     STOPPED,
@@ -40,11 +53,24 @@ from vibesys.candidates._settlement import (
     outcome_of,
     settle_for,
 )
+from vibesys.candidates._task import (
+    ACCURACY,
+    BENCHMARK,
+    PROFILE,
+    Measuring,
+    gates_of,
+    space_of,
+    terms_of,
+)
 from vibesys.candidates._winner import Unranked, best_by, improves_on
 
 __all__ = [
+    "ACCURACY",
+    "BENCHMARK",
+    "PROFILE",
     "STOPPED",
     "UNBOUNDED_DEADLINE_AT",
+    "Baseline",
     "BaselineStage",
     "BaselineState",
     "Bounds",
@@ -52,9 +78,16 @@ __all__ = [
     "EligibleRound",
     "FinishedAttempt",
     "Gates",
+    "InputFailure",
+    "InputFailureKind",
     "InputMeasurement",
+    "InputReading",
+    "Measured",
+    "Measuring",
+    "NotConfigured",
     "RunBudget",
     "RunPhase",
+    "Unmeasurable",
     "Unranked",
     "Winner",
     "after_adoption",
@@ -63,8 +96,12 @@ __all__ = [
     "best_by",
     "choose_winner",
     "ending_reason",
+    "failure",
+    "gates_of",
     "improves_on",
+    "input_from_readings",
     "limits_for",
+    "measure_input",
     "measurement",
     "on_measurement",
     "on_readings",
@@ -72,10 +109,13 @@ __all__ = [
     "outcome_of",
     "proposal",
     "propose",
+    "reading",
     "run_deadline_at",
     "selection_of",
     "settle_for",
+    "space_of",
     "stages",
-    "stop",
+    "terms_of",
+    "trusted",
     "turn_chain",
 ]
