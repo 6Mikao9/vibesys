@@ -1,7 +1,7 @@
 """A code change between stop and resume: flows restart from their latest checkpoint.
 
 The journal replays only code that is unchanged. After a code change every running flow is
-restarted instead: the root from its config, a task from its latest ``ctx.checkpoint`` snapshot
+restarted instead: the root from its latest checkpoint (refused without one), a task from its latest ``ctx.checkpoint`` snapshot
 when the new code starts the flow registered under the same name with the same group key, and
 the results of the decisions that were in flight are dropped.
 """
@@ -28,6 +28,12 @@ class Job(core.Value):
     """What the worker flow can be restarted from."""
 
     step: int = 0
+
+
+class Seen(core.Value):
+    """What a root publishes to show which code ran."""
+
+    marker: str
 
 
 class Gave(core.Value):
@@ -64,7 +70,8 @@ def search_for(
     worker: Callable[[core.Flow, Job], Coroutine[Any, Any, int]],
 ) -> SearchDef[Config]:
     @fake_search("flows", Config)
-    async def root(ctx: core.Flow, _config: Config) -> None:
+    async def root(ctx: core.Flow, config: Config) -> None:
+        ctx.checkpoint(config)  # the root resumes only from a snapshot it recorded
         async with ctx.group() as workers:
             workers.start("w", worker, Job())
             results = [result async for result in workers]
@@ -122,11 +129,9 @@ def test_a_change_before_the_first_checkpoint_restarts_the_task_from_its_first_s
 
 
 def test_a_published_record_and_a_stop_survive_a_restart() -> None:
-    class Seen(core.Value):
-        marker: str
-
     @fake_search("flows", Config)
-    async def v1(ctx: core.Flow, _config: Config) -> None:
+    async def v1(ctx: core.Flow, config: Config) -> None:
+        ctx.checkpoint(config)
         ctx.publish(Seen(marker="before"))
         await ask(ctx, "a")
 
@@ -143,7 +148,7 @@ def test_a_published_record_and_a_stop_survive_a_restart() -> None:
     assert run.state.base is not None
 
 
-def test_a_change_to_the_root_alone_restarts_it_from_its_config() -> None:
+def test_a_change_to_a_root_without_a_checkpoint_is_refused() -> None:
     async def v1(ctx: core.Flow, _config: Config) -> None:
         await ask(ctx, "a")
         await ask(ctx, "b")
@@ -156,9 +161,27 @@ def test_a_change_to_the_root_alone_restarts_it_from_its_config() -> None:
     run.reply(run.expect_turn("a"), Plan(n=1))
     stale = run.expect_turn("b")
     run.swap(fake_search("flows", Config)(v2))
+    with pytest.raises(core.FlowCodeChanged):
+        run.reply(stale, Plan(n=2))
+
+
+def test_a_change_to_a_root_that_checkpointed_restarts_it_from_the_snapshot() -> None:
+    async def v1(ctx: core.Flow, config: Config) -> None:
+        await ask(ctx, "a")
+        ctx.checkpoint(Config(width=config.width + 1))
+        await ask(ctx, "b")
+
+    async def v2(ctx: core.Flow, config: Config) -> None:
+        ctx.publish(Seen(marker=f"width {config.width}"))
+        await ask(ctx, "c")
+
+    run = start(v1)
+    run.reply(run.expect_turn("a"), Plan(n=1))
+    stale = run.expect_turn("b")
+    run.swap(fake_search("flows", Config)(v2))
     run.reply(stale, Plan(n=2))
     assert [d.decision for d in run.state.dropped] == [stale.decision]
-    run.reply(run.expect_turn("a"), Plan(n=1))  # the root starts over: its snapshot is the config
+    assert run.driver.published(run.state, Seen) == Seen(marker="width 3")
     run.reply(run.expect_turn("c"), Plan(n=3))
     assert run.finished is not None
 

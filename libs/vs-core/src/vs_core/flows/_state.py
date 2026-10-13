@@ -107,6 +107,8 @@ class LiveFlow(Value):
     path: str
     name: str | None
     snapshot_json: str
+    checkpointed: bool = False
+    """Whether the flow recorded a snapshot with ``ctx.checkpoint`` (its start is not one)."""
 
 
 class LiveFlows(Value):

@@ -67,6 +67,7 @@ class _Task:
     flow: FlowDef | None = None
     snapshot: object | None = None
     """The latest snapshot of a registered flow: what a restart resumes it from."""
+    checkpointed: bool = False
     shield: int = 0
     stop_pending: bool = False
     stopped: bool = False
