@@ -37,6 +37,7 @@ from vs_core.api import (
     RevisionRef,
     StartAttempt,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vibesys.orchestration.single.search.api import SingleConfig
@@ -196,7 +197,7 @@ def test_the_gates_are_skipped_on_rounds_the_cadence_does_not_audit(*, restartin
 
 
 @MODES
-@settings(max_examples=20, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=20, nightly=80), deadline=None, database=None)
 @example(throughputs=(30, 40), reviewed=(True, True))
 @example(throughputs=(90, 60), reviewed=(True, True))
 @example(throughputs=(90, 60), reviewed=(False, True))

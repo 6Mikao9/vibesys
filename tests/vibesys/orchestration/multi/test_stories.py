@@ -49,6 +49,7 @@ from vs_core.api import (
     Wait,
     Withdraw,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vibesys.orchestration.multi.search.api import MultiConfig
@@ -459,7 +460,7 @@ def test_a_round_whose_implementer_waited_adopts_the_candidate_it_then_checkpoin
 
 
 @MODES
-@settings(max_examples=20, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=20, nightly=80), deadline=None, database=None)
 @example(throughputs=(30, 40), judged=(True, True))
 @example(throughputs=(90, 60), judged=(True, True))
 @example(throughputs=(90, 60), judged=(False, True))

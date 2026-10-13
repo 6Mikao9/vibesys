@@ -28,6 +28,7 @@ from tests.vibesys.orchestration.issue_queue._replies import (
 
 from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vs_issue_tracker.api import ReadBoard
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_core.api.search import Flow
@@ -321,7 +322,7 @@ def test_an_evaluator_that_keeps_naming_too_many_issues_fails_the_run(*, restart
 
 
 @RESTARTING
-@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=12, nightly=48), deadline=None, database=None)
 @example(verdicts=[True, True, False])
 @example(verdicts=[True, False])
 @example(verdicts=[False, True])

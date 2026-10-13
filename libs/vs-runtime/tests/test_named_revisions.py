@@ -9,7 +9,6 @@ malformed or belong to another workspace.
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -48,6 +47,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -64,11 +64,9 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.asyncio
 
-# Each example builds a run. A pull request draws a sample; the nightly workflow sets
-# ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example builds a run. A pull request draws a sample; the nightly depth searches deeper.
 _EXAMPLES = settings(
-    max_examples=40 if _FULL else 10,
+    max_examples=examples(pr=10, nightly=40),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
