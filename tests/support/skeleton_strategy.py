@@ -16,6 +16,7 @@ import vs_core.api as core
 from vs_core.api.search import (
     INPUT,
     Assessment,
+    Charge,
     Failed,
     Flow,
     NotOpened,
@@ -39,14 +40,11 @@ class Implementation(BaseModel):
     waiting: bool = False
 
 
-IMPLEMENTATION = core.SchemaRef(name="implementation", version=1)
-IMPLEMENTER = core.RoleId(root="implementer")
+IMPLEMENTER = core.IdScheme("skeleton").role_id("implementer")
 
 
 class Prompt(core.Value):
-    """What the implementer is asked: the template of the skeleton's one prompt."""
-
-    template: str = "skeleton"
+    """What the implementer is asked: the context of the skeleton's one prompt."""
 
 
 class Render(core.RenderRoleArtifactsBase[Prompt]):
@@ -75,27 +73,21 @@ class Interpret(core.InterpretEvidenceBase):
 OPERATIONS = core.StrategyOperations("skeleton", Render, Verify, Interpret)
 
 
-def _same_prompt(*_: object) -> Prompt:
-    """The skeleton has one prompt, whatever core is asking about."""
-    return Prompt()
-
-
-PROTOCOL = core.AgentProtocol(
-    correction=_same_prompt, resume=_same_prompt, wait_unrecorded=_same_prompt
-)
 IMPLEMENTER_ROLE = Role(
-    name=IMPLEMENTER.root,
+    name="implementer",
+    prompt="skeleton.j2",
     reply=Implementation,
-    schema=IMPLEMENTATION,
     access=core.Access.WRITE_CANDIDATE,
     workspace=core.WorkspaceMode.ISOLATED_CHILD,
-    charge="paid",
-    retry=core.Retry.none(),
+    charge=Charge.ATTEMPT,
+    turn_time=400.0,
+    corrections=0,
+    lost_turns=0,
 )
+IMPLEMENTATION = IMPLEMENTER_ROLE.reply_schema
 
 _RUN_DEADLINE = 1000.0
 """When the skeleton world's run ends (the run clock, in seconds)."""
-_TURN_SECONDS = 400.0
 _MEASURE_SECONDS = 880.0
 
 
@@ -180,7 +172,7 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
             await ctx.first(ctx.stopped, ctx.timer(_RUN_DEADLINE))
             return None
         session = ctx.agents.session(IMPLEMENTER_ROLE, workspace=workspace, revision=baseline)
-        match await session.turn(Prompt(), within=_TURN_SECONDS):
+        match await session.turn(Prompt()):
             case TurnFinished(reply=Implementation(commit=commit)) if commit:
                 candidate = core.RevisionRef.of_git_commit(commit)
             case _:
@@ -201,8 +193,7 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     "skeleton",
     config=SkeletonConfig,
     operations=OPERATIONS,
-    ids=core.IdScheme("skeleton", role_prefix=""),
-    protocol=PROTOCOL,
+    roles=(IMPLEMENTER_ROLE,),
 )
 async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     """Play the scenario ``config`` names; the framework adopts the chosen winner."""
