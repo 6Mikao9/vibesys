@@ -74,7 +74,9 @@ def terms_of(
         queue_allowance=measuring.queue_allowance,
         accuracy_stage=ACCURACY if gates.accuracy else None,
         accuracy_gated=(
-            (EvidenceKind.BENCHMARK,) if gates.accuracy and measuring.benchmark_needs_accuracy else ()
+            (EvidenceKind.BENCHMARK,)
+            if gates.accuracy and measuring.benchmark_needs_accuracy
+            else ()
         ),
         operation_seconds=OPERATION_SECONDS,
         objectives=tuple(

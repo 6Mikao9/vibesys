@@ -40,7 +40,9 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 def main(project_root: Path, slurm_config: Path) -> None:
     """Run until the job ends or a signal ends the run."""
     registry = OrchestrationRegistry()
-    registry.register_plugin(capability_plugin(PLUGIN_ID, strategy=SkeletonStrategy.baseline_probe()))
+    registry.register_plugin(
+        capability_plugin(PLUGIN_ID, strategy=SkeletonStrategy.baseline_probe())
+    )
     request = RunRequest(
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=PLUGIN_ID, config_version=1, options={}),

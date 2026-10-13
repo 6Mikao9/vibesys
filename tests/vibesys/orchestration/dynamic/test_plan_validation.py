@@ -31,13 +31,11 @@ from vibesys.orchestration.dynamic.models import (
     ProfileField,
     ProfileOffer,
 )
-
-# test-isolation: the closed set of violation codes is the key space of the scenario table.
-from vibesys.orchestration.dynamic.search._values import ViolationCode
 from vibesys.orchestration.dynamic.search.api import (
     HypothesisRecord,
     ParentSnapshot,
     PlanCheck,
+    ViolationCode,
     WorkKind,
     WorkPlan,
     validate,

@@ -12,11 +12,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._values import config, revision
 
-# test-isolation: the progress policy is a pure function with no public entry; the flow that
-# calls it needs a whole workstream to reach one decision, and its property is over histories.
-from vibesys.orchestration.dynamic.search._progress import refusal
-from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
-from vibesys.orchestration.dynamic.search.api import FailureKind
+from vibesys.orchestration.dynamic.search.api import Blocker, BlockerKind, FailureKind, refusal
 
 PARENT = revision("parent")
 BLOCKERS = st.builds(

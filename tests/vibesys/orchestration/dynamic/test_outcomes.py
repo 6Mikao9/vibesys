@@ -27,28 +27,25 @@ from tests.vibesys.orchestration.dynamic._values import (
 )
 
 from vibesys.hypothesis import HypothesisOutcome
-
-# test-isolation: these pure functions have no public entry; the flow calls them at the end of
-# a workstream, and each property here ranges over inputs a scripted flow cannot all reach.
-from vibesys.orchestration.dynamic.search._outcomes import (
+from vibesys.orchestration.dynamic.search.api import (
     UNSETTLED,
+    AgentName,
+    Blocker,
+    BlockerKind,
+    Closing,
     Evidence,
+    Failure,
+    FailureKind,
+    Proof,
+    WorkKind,
+    WorkPlan,
+    WorkstreamDone,
     assertion,
     blocked_failure,
     ended_by,
     failure_of,
     round_of,
     snapshot_of,
-)
-from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind, Proof
-from vibesys.orchestration.dynamic.search.api import (
-    AgentName,
-    Closing,
-    Failure,
-    FailureKind,
-    WorkKind,
-    WorkPlan,
-    WorkstreamDone,
 )
 from vs_core.api import (
     AttemptId,

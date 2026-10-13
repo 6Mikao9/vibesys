@@ -17,11 +17,8 @@ from tests.vibesys.orchestration.dynamic._values import (
 )
 
 from vibesys.metrics import MetricRow
-
-# test-isolation: both are pure functions of values the review flow holds; the flow reaches them
-# only through a judge's prompt, and the properties here range over texts and records.
-from vibesys.orchestration.dynamic.search import _briefs as briefs
-from vibesys.orchestration.dynamic.search._review_evidence import evaluations
+from vibesys.orchestration.dynamic.search import api as search
+from vibesys.orchestration.dynamic.search.api import evaluations
 from vs_core.api import EvidenceKind, ObservationStatus
 
 CANDIDATE = revision("candidate")
@@ -76,7 +73,7 @@ def test_an_undecoded_record_keeps_core_s_own_status(status: ObservationStatus) 
 def test_a_fence_is_longer_than_any_backtick_run_the_text_holds_and_never_shorter_than_three(
     text: str,
 ) -> None:
-    fence = briefs.fence(text)
+    fence = search.fence(text)
     assert set(fence) == {"`"}
     assert len(fence) >= 3
     runs = [len(run) for run in text.replace("\n", " ").split(" ") if run and set(run) == {"`"}]
@@ -86,11 +83,11 @@ def test_a_fence_is_longer_than_any_backtick_run_the_text_holds_and_never_shorte
 
 @given(text=st.text(max_size=300), limit=st.integers(1, 100))
 def test_free_text_is_cut_to_its_limit_and_a_cut_is_visible(text: str, limit: int) -> None:
-    head, end = briefs.bounded(text, limit), briefs.tail(text, limit)
+    head, end = search.bounded(text, limit), search.tail(text, limit)
     if len(text) <= limit:
         assert head == end == text
     else:
         assert head.startswith(text[:limit])
-        assert head.endswith(briefs.CUT)
+        assert head.endswith(search.CUT)
         assert end.endswith(text[-limit:])
-        assert end.startswith(briefs.CUT.strip())
+        assert end.startswith(search.CUT.strip())

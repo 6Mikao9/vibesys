@@ -1,6 +1,7 @@
 """Public surface of the dynamic search: the flow, its config, roles and shared pure helpers."""
 
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
+from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
 from vibesys.orchestration.dynamic.search._budget import budget
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
@@ -17,10 +18,21 @@ from vibesys.orchestration.dynamic.search._operations import (
     VerifyParentRevision,
 )
 from vibesys.orchestration.dynamic.search._outcomes import (
+    UNSETTLED,
+    Candidate,
     Closing,
+    Evidence,
+    Result,
+    Verdict,
     WorkEndedError,
     WorkstreamDone,
     WorkstreamStart,
+    assertion,
+    blocked_failure,
+    ended_by,
+    failure_of,
+    round_of,
+    snapshot_of,
 )
 from vibesys.orchestration.dynamic.search._parents import (
     ParentConflictError,
@@ -30,7 +42,13 @@ from vibesys.orchestration.dynamic.search._parents import (
     options,
     resolve,
 )
-from vibesys.orchestration.dynamic.search._plan import PlanCheck, PlanViolation, validate
+from vibesys.orchestration.dynamic.search._plan import (
+    PlanCheck,
+    PlanUpdate,
+    PlanViolation,
+    validate,
+)
+from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
@@ -44,6 +62,7 @@ from vibesys.orchestration.dynamic.search._prompts import (
     ReviewEvaluation,
     ReviewPrompt,
 )
+from vibesys.orchestration.dynamic.search._review_evidence import evaluations
 from vibesys.orchestration.dynamic.search._roles import (
     IMPLEMENTER,
     JUDGE,
@@ -61,16 +80,21 @@ from vibesys.orchestration.dynamic.search._run_state import (
 from vibesys.orchestration.dynamic.search._search import dynamic
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
+    Blocker,
+    BlockerKind,
     Failure,
     FailureKind,
     FinishedWork,
     HypothesisRecord,
+    Proof,
     RoundRecord,
+    ViolationCode,
     WorkKind,
     WorkPlan,
 )
 
 __all__ = [
+    "CUT",
     "IMPLEMENTER",
     "INTERPRET_KIND",
     "JUDGE",
@@ -79,11 +103,16 @@ __all__ = [
     "PROFILER",
     "RENDER_KIND",
     "ROLES",
+    "UNSETTLED",
     "VERIFY_KIND",
     "AcceptedReading",
     "AgentName",
+    "Blocker",
+    "BlockerKind",
+    "Candidate",
     "Closing",
     "DynamicConfig",
+    "Evidence",
     "EvidenceCitation",
     "EvidenceReading",
     "EvidenceReadings",
@@ -101,6 +130,7 @@ __all__ = [
     "ParentVerification",
     "PartialRow",
     "PlanCheck",
+    "PlanUpdate",
     "PlanViolation",
     "PlannerCorrection",
     "PlannerPrompt",
@@ -109,8 +139,10 @@ __all__ = [
     "ProfilePrompt",
     "PromptContext",
     "PromptTemplate",
+    "Proof",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
+    "Result",
     "ReviewEvaluation",
     "ReviewPrompt",
     "RoundRecord",
@@ -118,18 +150,31 @@ __all__ = [
     "RunSnapshot",
     "Running",
     "Scheduled",
+    "Verdict",
     "VerifyParentRevision",
+    "ViolationCode",
     "WorkEndedError",
     "WorkKind",
     "WorkPlan",
     "WorkstreamDone",
     "WorkstreamStart",
+    "assertion",
+    "blocked_failure",
+    "bounded",
     "budget",
     "dynamic",
+    "ended_by",
+    "evaluations",
+    "failure_of",
+    "fence",
     "ingest",
     "options",
     "planning_key",
+    "refusal",
     "resolve",
+    "round_of",
+    "snapshot_of",
+    "tail",
     "validate",
     "workstream_key",
 ]
