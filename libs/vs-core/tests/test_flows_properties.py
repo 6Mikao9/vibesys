@@ -20,7 +20,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-import pytest
 from hypothesis import event, example, given, note, settings
 from hypothesis import strategies as st
 
@@ -366,11 +365,6 @@ class Host:
         assert len(set(self.sessions.values())) == len(self.sessions)
 
 
-# Runs are abandoned mid-flight on every restart (and on a deadlock), and Python then closes
-# their suspended coroutines: a workspace resource awaits its settlement on that close, which the
-# discarded run cannot serve. That is a documented limit of discarding a run (flows.md), and is
-# the only warning these runs raise.
-@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 @settings(max_examples=60, deadline=None)
 @given(body=PROGRAMS, script=st.lists(_MOVE, max_size=16))
 # The last choice stands: a first-choice-wins flow adopts the input here.
