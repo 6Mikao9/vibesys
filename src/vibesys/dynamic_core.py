@@ -30,7 +30,7 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     prompts,
     run_prompt_variables,
 )
-from vibesys.orchestration.dynamic.flow.api import published
+from vibesys.orchestration.dynamic.flow.api import RunSnapshot
 from vibesys.orchestration.dynamic.models import DynamicOptions
 from vibesys.orchestration.dynamic.search.api import (
     OPERATIONS,
@@ -40,7 +40,7 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vibesys.plugin_registration import OrchestrationRegistration, RuntimeRecordProjector
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vs_core.api import FlowState, Piped
+from vs_core.api import FlowSearch, FlowState, Piped
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
@@ -93,7 +93,7 @@ def dynamic_projector() -> RuntimeRecordProjector[Piped[FlowState, PromptContext
         record_type=RuntimeRecord[Piped[FlowState, PromptContext]],
         operations=dynamic_operation_registry(),
         project=lambda state, revision: project_published(
-            published(state.inner), experiment_revision=revision
+            FlowSearch.published(state.inner, RunSnapshot), experiment_revision=revision
         ),
     )
 

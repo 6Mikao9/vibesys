@@ -25,20 +25,24 @@ from vibesys.candidates.selection import (
     until_deadline,
 )
 from vibesys.candidates.selection import update as update_selection
-from vs_core.api import (
+from vs_core.api.search import (
     THIS_RUN,
+    Again,
     DecisionId,
     EvidenceReadingsBase,
-    EvidenceRef,
     Failed,
     Flow,
+    GaveUp,
     Measure,
     MeasurementFinished,
+    MeasurementResult,
     Operation,
     OperationFinished,
     ProposeWinner,
-    RunView,
+    RetryPolicy,
+    Tries,
     UnexpectedEvent,
+    Value,
     Within,
     may_resubmit,
     trusted_keys,
@@ -48,6 +52,13 @@ _MEASURE = DecisionId(root="measure")
 _INTERPRET = DecisionId(root="interpret")
 _RUN_START = 0.0
 """A run starts at 0 on its own clock, and the first measurement is asked before any event."""
+
+
+class Submitted(Value):
+    """A measurement of the input, and how many submissions it took to get it."""
+
+    result: MeasurementResult
+    submissions: int
 
 
 async def measure_input(
@@ -62,48 +73,59 @@ async def measure_input(
     if not names:
         return NotConfigured()
     limit = config.max_input_measurement_attempts
-    submissions = 0
-    while True:
-        submissions += 1
-        now_at = _RUN_START if submissions == 1 else ctx.read(_now, float)
-        plan = measuring.recipe.plan(
-            ctx.facts.baseline,
-            purpose="baseline",
-            now_at=now_at,
-            stages=names,
-            submission_limit=limit,
-        )
-        request = Measure(decision_id=_MEASURE, scope=THIS_RUN, plan=plan)
-        match await ctx.wait(request, Within(limit=measuring.recipe.budget(names))):
-            case MeasurementFinished(result=result):
-                if may_resubmit(result.failure, submissions=submissions, limit=limit):
-                    continue
-                keys = trusted_keys(
-                    result, scope=result.scope, candidate=ctx.facts.baseline, purpose="baseline"
-                )
-                if not keys:
-                    none = InputFailure(
-                        kind=InputFailureKind.NO_EVIDENCE,
-                        status=result.status,
-                        output=result.diagnostic,
-                    )
-                    return Unmeasurable(attempts=submissions, failure=none)
-                refs = tuple(item for item in result.evidence if item.key in keys)
-                return await _decode(ctx, measuring, submissions, refs)
-            case Failed() as failed:
-                return Unmeasurable(attempts=submissions, failure=_ended(failed))
-            case unexpected:
-                raise UnexpectedEvent("measure_input", unexpected)
+    policy = RetryPolicy(max_tries=max(1, limit))
+    done: Submitted | Unmeasurable | GaveUp[Submitted] = await ctx.retry(
+        lambda tries: _submit(ctx, measuring, names, tries, limit), policy
+    )
+    if isinstance(done, Unmeasurable):
+        return done
+    return await _decode(ctx, measuring, done.reasons[-1] if isinstance(done, GaveUp) else done)
 
 
-async def _decode(
-    ctx: Flow, measuring: InputMeasurement, submissions: int, refs: tuple[EvidenceRef, ...]
-) -> Baseline:
+async def _submit(
+    ctx: Flow,
+    measuring: InputMeasurement,
+    names: tuple[str, ...],
+    tries: Tries[Submitted],
+    limit: int,
+) -> Submitted | Unmeasurable | Again[Submitted]:
+    """Submit the measurement once: its result, to be submitted again or decoded."""
+    plan = measuring.recipe.plan(
+        ctx.facts.baseline,
+        purpose="baseline",
+        now_at=_RUN_START if tries.number == 1 else ctx.now(),
+        stages=names,
+        submission_limit=limit,
+    )
+    request = Measure(decision_id=_MEASURE, scope=THIS_RUN, plan=plan)
+    match await ctx.wait(request, Within(limit=measuring.recipe.budget(names))):
+        case MeasurementFinished(result=result):
+            submitted = Submitted(result=result, submissions=tries.number)
+            if may_resubmit(result.failure, submissions=tries.number, limit=limit):
+                return Again(reason=submitted)
+            return submitted
+        case Failed() as failed:
+            return Unmeasurable(attempts=tries.number, failure=_ended(failed))
+        case unexpected:
+            raise UnexpectedEvent("measure_input", unexpected)
+
+
+async def _decode(ctx: Flow, measuring: InputMeasurement, submitted: Submitted) -> Baseline:
     """Ask the search's evidence owner what the trusted evidence of the input says."""
+    result, submissions = submitted.result, submitted.submissions
+    keys = trusted_keys(
+        result, scope=result.scope, candidate=ctx.facts.baseline, purpose="baseline"
+    )
+    if not keys:
+        none = InputFailure(
+            kind=InputFailureKind.NO_EVIDENCE, status=result.status, output=result.diagnostic
+        )
+        return Unmeasurable(attempts=submissions, failure=none)
+    refs = tuple(item for item in result.evidence if item.key in keys)
     request = Operation(decision_id=_INTERPRET, scope=THIS_RUN, request=measuring.interpret(refs))
     match await ctx.wait(request, Within(limit=measuring.operation_seconds)):
-        case OperationFinished(result=result):
-            outcome = result.outcome
+        case OperationFinished(result=finished):
+            outcome = finished.outcome
             if not isinstance(outcome, EvidenceReadingsBase):
                 undecoded = InputFailure(kind=InputFailureKind.READINGS_UNDECODABLE)
                 return Unmeasurable(attempts=submissions, failure=undecoded)
@@ -123,7 +145,3 @@ async def adopt(ctx: Flow, winner: Winner) -> Winner | None:
     proposal = ProposeWinner(decision_id=PROPOSE, scope=THIS_RUN, selection=selection_of(winner))
     event = await ctx.wait(proposal, ctx.read(until_deadline, Within))
     return update_selection(Adopting(winner=winner), event)
-
-
-def _now(view: RunView) -> float:
-    return view.now_at

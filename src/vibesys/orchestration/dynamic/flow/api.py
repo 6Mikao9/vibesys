@@ -1,6 +1,5 @@
 """Public surface of the dynamic search written as flows."""
 
-from vibesys.orchestration.dynamic.flow._published import published
 from vibesys.orchestration.dynamic.flow._run_state import Running, RunSnapshot
 from vibesys.orchestration.dynamic.flow._search import (
     DECLARATION,
@@ -14,5 +13,4 @@ __all__ = [
     "RunSnapshot",
     "Running",
     "dynamic_search",
-    "published",
 ]

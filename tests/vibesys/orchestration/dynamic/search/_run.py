@@ -10,13 +10,14 @@ from vibesys.orchestration.dynamic.core_policy.api import (
     build_search,
     dynamic_operation_registry,
 )
-from vibesys.orchestration.dynamic.flow.api import RunSnapshot, published
+from vibesys.orchestration.dynamic.flow.api import RunSnapshot
 from vibesys.orchestration.dynamic.search.api import (
     DynamicConfig,
 )
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    FlowSearch,
     FlowState,
     Limits,
     RevisionRef,
@@ -99,6 +100,6 @@ def dynamic_state(finished: SimulatedRun) -> RunSnapshot:
     """The record the dynamic search published, read from its persisted state."""
     inner = getattr(finished.state, "inner", None)
     assert isinstance(inner, FlowState), type(finished.state)
-    record = published(inner)
+    record = FlowSearch.published(inner, RunSnapshot)
     assert record is not None, "the search published no record"
     return record

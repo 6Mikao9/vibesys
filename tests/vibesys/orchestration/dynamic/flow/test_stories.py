@@ -17,19 +17,20 @@ from tests.vibesys.orchestration.dynamic.search._replies import (
 )
 from tests.vibesys.orchestration.dynamic.search._run import FACTS, config
 
-from vibesys.orchestration.dynamic.flow.api import dynamic_search, published
+from vibesys.orchestration.dynamic.flow.api import RunSnapshot, dynamic_search
 from vibesys.orchestration.dynamic.models import (
     ImplementerResult,
     ReviewResult,
     planner_reply_type,
 )
-from vibesys.orchestration.dynamic.search.api import OPERATIONS, FailureKind
+from vibesys.orchestration.dynamic.search.api import FailureKind
 from vs_core.api import (
     AskAgent,
     AttemptRef,
     Failed,
     FailureReason,
     Finish,
+    FlowSearch,
     InvocationId,
     InvocationRef,
     ProposeWinner,
@@ -37,6 +38,7 @@ from vs_core.api import (
     Retained,
     RevisionRef,
     SessionId,
+    Settle,
     Settlement,
     SettlementId,
     StartAttempt,
@@ -52,9 +54,7 @@ MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "resta
 
 
 def begin(*, restarting: bool) -> FlowRun[object]:
-    run = FlowRun.start(dynamic_search(CONFIG), CONFIG, FACTS, restarting=restarting)
-    run.registry = OPERATIONS.registry()
-    return run
+    return FlowRun.start(dynamic_search(CONFIG), CONFIG, FACTS, restarting=restarting)
 
 
 def plan(run: FlowRun[object], body: str) -> None:
@@ -104,7 +104,7 @@ def test_one_hypothesis_from_planning_to_the_proposal_of_its_candidate(*, restar
     proposal = run.expect(ProposeWinner)
     assert isinstance(proposal.request, ProposeWinner)
     assert proposal.request.selection.revision == CANDIDATE
-    record = published(run.state)
+    record = FlowSearch.published(run.state, RunSnapshot)
     assert record is not None
     assert [item.hypothesis_id for item in record.hypotheses] == ["h1"]
     assert [row.eligible for row in record.hypotheses[0].rounds] == [True]
@@ -126,10 +126,11 @@ def test_a_stop_while_the_implementer_works_settles_the_attempt_and_ends_cancell
     run.fail(run.expect(ProposeWinner), FailureReason.REFUSED)
 
     assert isinstance(settle.request, Withdraw)
+    assert isinstance(settle.request.disposition, Settle)
     assert settle.request.disposition.outcome == "cancelled"
     assert isinstance(run.finished, Finish)
     assert run.finished.result.outcome == "cancelled"
-    record = published(run.state)
+    record = FlowSearch.published(run.state, RunSnapshot)
     assert record is not None
     assert record.finished[0].failure is not None
     assert record.finished[0].failure.kind is FailureKind.STOPPED

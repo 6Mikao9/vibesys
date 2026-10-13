@@ -1,16 +1,20 @@
 """The dynamic search as a story: measure the input, plan and run workstreams, then adopt a winner.
 
-This is the whole search, top to bottom. Planning and the workstreams are children, so they run
-concurrently with each other; the root decides only when to start one and when the search is
-over. `RunRecord` holds what the search knows, and the children report into it. An operator stop
-reaches the workstreams (they settle what they started); the root sees it as `stop_requested`,
-plans no more, and finishes once nothing is in flight.
+This is the whole search, top to bottom. Planning and the workstreams are tasks in two groups, so
+they run concurrently; the root decides only when to start one and when the search is over.
+`RunRecord` holds what the search knows, and the tasks' results are folded into it. An operator
+stop reaches the workstreams (they settle what they started) but not the planner; the root sees
+it as `StopRequested`, plans no more, and finishes once nothing is in flight.
 """
 
+from functools import partial
+
 from vibesys.candidates import api as candidates
-from vibesys.hypothesis import RunEnding
+from vibesys.orchestration.dynamic.flow._ending import finish
+from vibesys.orchestration.dynamic.flow._outcomes import WorkstreamDone
+from vibesys.orchestration.dynamic.flow._parents import offer_as_parent, parent_of
 from vibesys.orchestration.dynamic.flow._planner import plan
-from vibesys.orchestration.dynamic.flow._run_state import RunRecord
+from vibesys.orchestration.dynamic.flow._run_state import NoPlan, RunRecord, Scheduled
 from vibesys.orchestration.dynamic.flow._workstream import workstream
 from vibesys.orchestration.dynamic.search.api import (
     INTERPRET_KIND,
@@ -22,16 +26,13 @@ from vibesys.orchestration.dynamic.search.api import (
     measurement_recipe,
 )
 from vs_core.api.search import (
-    THIS_RUN,
-    DecisionId,
     EventKind,
-    FailureReason,
-    Finish,
     Flow,
     FlowSearch,
-    RunResultProposal,
     SchemaRef,
     SearchDeclaration,
+    StopRequested,
+    TaskStopped,
     WorkKind,
 )
 
@@ -84,40 +85,24 @@ async def dynamic(ctx: Flow, config: DynamicConfig) -> None:
     )
     baseline = await candidates.measure_input(ctx, config, measuring)
     run = RunRecord(config, base=ctx.facts.baseline, baseline=baseline)
-    while not run.over(stopping=ctx.stop_requested):
-        run.changed = False
-        run.publish_parents(ctx)
-        for start in run.take_starts(ctx):
-            ctx.spawn(start.key, workstream, start, stoppable=True, then=run.finished)
-        if run.may_plan(stopping=ctx.stop_requested):
-            ctx.spawn(run.begin_planning(), plan, run, then=run.planned)
-        # A stop wakes nothing here: it ends the workstreams, and their ending does.
-        await ctx.until(lambda: run.changed)
-        run.publish(ctx)
+    async with (
+        ctx.group(limit=config.max_in_flight) as workstreams,
+        ctx.group(limit=1, stops=False) as planning,
+    ):
+        while not run.over(planning=not planning.free, stopping=ctx.stop_requested):
+            for start in run.ready_to_start(workstreams.free, partial(parent_of, ctx, run)):
+                workstreams.start(start.key, workstream, start)
+            if planning.free and run.may_plan(stopping=ctx.stop_requested):
+                planning.start(run.next_call(), plan, run)
+            match await ctx.first(planning, workstreams, ctx.stopped):
+                case Scheduled() | NoPlan() as outcome:
+                    run.planned(outcome)
+                case WorkstreamDone() as done:
+                    run.finished(done)
+                    offer_as_parent(ctx, run, done)
+                case TaskStopped(key=key):
+                    run.stopped_before_start(key)
+                case StopRequested():
+                    pass  # the workstreams' group has stopped them
+            ctx.publish(run.snapshot())
     await finish(ctx, run)
-
-
-async def finish(ctx: Flow, run: RunRecord) -> None:
-    """Choose the winner, have it adopted, and end the run with the result."""
-    winner = await select_and_adopt(ctx, run)
-    run.publish(ctx, winner)
-    ending = candidates.finish(
-        winner, stopping=ctx.stop_requested, no_winner_reason=run.no_winner_reason()
-    )
-    await ctx.finish(ending)
-    # Core refused the result. A run that nobody ends would hang, so the plain failure is
-    # proposed once.
-    reason = candidates.ending_reason(RunEnding.NO_TRUSTED_RESULT, FailureReason.REFUSED.value)
-    plain = RunResultProposal(outcome="failure", reason=reason)
-    await ctx.finish(
-        Finish(decision_id=DecisionId(root="finish"), scope=THIS_RUN, mode="drain", result=plain)
-    )
-
-
-async def select_and_adopt(ctx: Flow, run: RunRecord) -> candidates.Winner | None:
-    """The winner core adopted, or None when there is nothing to adopt."""
-    rounds = run.eligible_rounds()
-    if (run.gate.failed and not rounds) or (not rounds and not candidates.trusted(run.baseline)):
-        return None
-    winner = candidates.choose_winner(rounds, run.config, ctx.facts.baseline)
-    return await candidates.adopt(ctx, winner)

@@ -41,7 +41,7 @@ from vibesys.orchestration.dynamic.search._parents import (
     options,
     resolve,
 )
-from vibesys.orchestration.dynamic.search._plan import PlanCheck, PlanLedger, validate
+from vibesys.orchestration.dynamic.search._plan import PlanCheck, PlanLedger, PlanUpdate, validate
 from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
@@ -138,6 +138,7 @@ __all__ = [
     "PlanCheck",
     "PlanLedger",
     "PlanProblem",
+    "PlanUpdate",
     "PlanViolation",
     "PlanWorld",
     "PlannerCorrection",

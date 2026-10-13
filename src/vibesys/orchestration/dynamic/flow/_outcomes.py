@@ -24,6 +24,7 @@ from vibesys.orchestration.dynamic.search.api import (
     RoundRecord,
     Unreachable,
     UnreachableReason,
+    WorkKind,
     WorkPlan,
 )
 from vs_core.api.search import (
@@ -33,6 +34,7 @@ from vs_core.api.search import (
     Failed,
     FailureReason,
     InvocationRef,
+    RetryPolicy,
     RevisionRef,
     Scope,
     Settlement,
@@ -63,18 +65,11 @@ class WorkstreamStart:
         """The identity of the attempt this workstream opens."""
         return attempt_id(self.plan.work_id, self.sequence)
 
-
-@dataclass
-class Attempt:
-    """The opened attempt, and the candidate a stop or a failure settles it with."""
-
-    ref: AttemptRef
-    carried: "Result | None" = None
-
     @property
-    def scope(self) -> Scope:
-        """The scope the attempt's own work runs in."""
-        return Scope(owner=self.ref.attempt_id, generation=self.ref.generation)
+    def retries(self) -> RetryPolicy:
+        """How many implementer turns this workstream may take: one, unless it implements."""
+        implementing = self.plan.kind is WorkKind.IMPLEMENT
+        return RetryPolicy(max_tries=self.config.max_retries_per_round if implementing else 1)
 
 
 # -- what a workstream establishes ---------------------------------------------------------------------
@@ -130,6 +125,10 @@ class Closing(Value):
     failure: Failure | None = None
     unreachable: Unreachable | None = None
 
+    def refused_by(self, refusal: Failure) -> "Closing":
+        """The closing with the refusal of its assertion as the failure, unless it has one."""
+        return self.model_copy(update={"failure": self.failure or refusal})
+
     @property
     def readings(self) -> tuple[AcceptedReading, ...]:
         """The decoded trusted evaluations of the attempt's candidate."""
@@ -168,7 +167,62 @@ class Closing(Value):
         return self.failure is not None
 
 
-# -- how a workstream ends ---------------------------------------------------------------------------
+@dataclass
+class Attempt:
+    """An opened attempt: what it carries, what it will assert when closed, how it settled."""
+
+    ref: AttemptRef
+    carried: Result | None = None
+    """The candidate a stop or a failure settles the attempt with."""
+    closing: Closing = field(default_factory=Closing)
+    """What the close asserts; the work fills it in, a failure or a stop replaces it."""
+    settlement: Settlement | None = None
+    """Core's settlement of the attempt; None if core would not take any."""
+
+    @property
+    def scope(self) -> Scope:
+        """The scope the attempt's own work runs in."""
+        return Scope(owner=self.ref.attempt_id, generation=self.ref.generation)
+
+    def ended(self, ended: "WorkEndedError") -> None:
+        """The work did not finish: assert what the attempt has, with the failure."""
+        self.closing = Closing(
+            result=self.carried,
+            evidence=Evidence(proof=ended.proof),
+            failure=ended.failure,
+            unreachable=ended.unreachable,
+        )
+
+
+class WorkEndedError(Exception):
+    """A workstream cannot go on: it ends with this failure and settles with what it has."""
+
+    def __init__(
+        self,
+        failure: Failure,
+        *,
+        proof: Proof | None = None,
+        unreachable: Unreachable | None = None,
+    ) -> None:
+        """Carry the failure and the facts that settle with it."""
+        super().__init__(failure.kind.value)
+        self.failure = failure
+        self.proof = proof
+        self.unreachable = unreachable
+
+
+class NotOpenedError(Exception):
+    """The attempt could not be opened: the slot was never used, and the workstream is refunded."""
+
+    def __init__(self, failure: Failure, *, withheld: RevisionRef | None = None) -> None:
+        """Carry the failure, and the parent revision that failed verification, if it did."""
+        super().__init__(failure.kind.value)
+        self.failure = failure
+        self.withheld = withheld
+
+
+STOPPED = Failure(kind=FailureKind.STOPPED)
+"""How an operator stop ends a workstream."""
 
 
 @dataclass(frozen=True)
@@ -189,27 +243,32 @@ class WorkstreamDone:
     evidence: Evidence = field(default_factory=Evidence)
     unreachable: Unreachable | None = None
 
+    @classmethod
+    def stopped(cls, start: WorkstreamStart) -> "WorkstreamDone":
+        """Stopped before it had an attempt: the slot counts as used."""
+        return cls(start, failure=STOPPED)
 
-class WorkEndedError(Exception):
-    """A workstream cannot go on: it ends with this failure and settles with what it has."""
+    @classmethod
+    def not_opened(cls, start: WorkstreamStart, error: NotOpenedError) -> "WorkstreamDone":
+        """No attempt was admitted: the slot is refunded."""
+        return cls(start, failure=error.failure, refunded=True, withheld=error.withheld)
 
-    def __init__(
-        self,
-        failure: Failure,
-        *,
-        proof: Proof | None = None,
-        unreachable: Unreachable | None = None,
-        withheld: RevisionRef | None = None,
-    ) -> None:
-        """Carry the failure and the facts that settle with it."""
-        super().__init__(failure.kind.value)
-        self.failure = failure
-        self.proof = proof
-        self.unreachable = unreachable
-        self.withheld = withheld
+    @classmethod
+    def settled(cls, start: WorkstreamStart, attempt: Attempt) -> "WorkstreamDone":
+        """The attempt was closed with what it established."""
+        closing = attempt.closing
+        return cls(
+            start,
+            failure=closing.failure,
+            generation=attempt.ref.generation,
+            settlement=attempt.settlement,
+            result=closing.result,
+            evidence=closing.evidence,
+            unreachable=closing.unreachable,
+        )
 
 
-STOPPED = Failure(kind=FailureKind.STOPPED)
+# -- how a workstream ends ---------------------------------------------------------------------------
 
 
 def failure_of(event: Failed, role: Role | None) -> Failure:  # noqa: PLR0911  # LW-220402 [PLR0911]; one return per wait-failure reason keeps the mapping to the typed failure exhaustive and visible.
@@ -235,6 +294,11 @@ def failure_of(event: Failed, role: Role | None) -> Failure:  # noqa: PLR0911  #
             | FailureReason.MEASUREMENT_UNTRUSTED
         ):
             return Failure(kind=FailureKind.ENDED, ended=event.reason, role=role)
+
+
+def not_opened_by(event: Failed, *, withheld: RevisionRef | None = None) -> NotOpenedError:
+    """The end of a workstream whose verification or opening failed."""
+    return NotOpenedError(failure_of(event, None), withheld=withheld)
 
 
 def ended_by(event: Failed, role: Role | None, *, plan: WorkPlan | None = None) -> WorkEndedError:
@@ -333,7 +397,9 @@ def snapshot_of(done: WorkstreamDone) -> ParentSnapshot | None:
     accuracy = reading_of(done.evidence.readings, EvidenceKind.CORRECTNESS)
     result = done.result
     if (
-        accuracy is None
+        done.settlement is None
+        or done.start.plan.kind is WorkKind.PROFILE
+        or accuracy is None
         or not accuracy.passed
         or result is None
         or result.candidate.revision is None

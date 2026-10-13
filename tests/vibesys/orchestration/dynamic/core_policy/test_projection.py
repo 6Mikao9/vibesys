@@ -144,9 +144,9 @@ type _Stored = Piped[FlowState, PromptContext]
 
 
 async def _publish_then_end(ctx: Flow, record: RunSnapshot) -> None:
-    await ctx.wake_at(1.0)
-    ctx.read(lambda _view: record, RunSnapshot)
-    await ctx.wake_at(2.0)
+    await ctx.timer(1.0)
+    ctx.publish(record)
+    await ctx.timer(2.0)
 
 
 def _flow_state(record: RunSnapshot) -> FlowState:
