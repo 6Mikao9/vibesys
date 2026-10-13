@@ -310,4 +310,3 @@ def test_a_start_core_refuses_is_a_failed_round_not_a_stall(
 
     assert host.refused_starts == 1
     assert_flow_closed(host)
-

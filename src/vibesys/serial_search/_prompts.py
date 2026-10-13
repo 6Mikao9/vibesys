@@ -54,7 +54,7 @@ class PlanCorrection(_Plan, Correction):
     template: Literal[PlanTemplate.PLAN_CORRECTION] = PlanTemplate.PLAN_CORRECTION
 
 
-def plan_prompt(  # noqa: PLR0913  # LW-641201 [PLR0913]; the request is built from independent facts of the run that no one record holds.
+def plan_prompt(  # noqa: PLR0913  # LW-641208 [PLR0913]; the request is built from independent facts of the run that no one record holds.
     hypotheses: HypothesisConfig,
     ledger: rounds.Ledger,
     planning: PlanningContext,
