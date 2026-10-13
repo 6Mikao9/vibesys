@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Self, TypedDict
+from typing import TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
-from vibesys.metrics import MetricSpace
 from vibesys.orchestration.evolve.population import OpenEvolveSelectorConfig
 from vibesys.orchestration.review import Verdict
+from vs_core.api.search import RevisionReply
 
 
-class MutatorResponse(BaseModel):
-    """Mutation rationale recorded on the resulting population member."""
+class MutatorResponse(RevisionReply):
+    """Mutation rationale recorded on the resulting population member.
+
+    Every mutation claims work, so core checkpoints the turn's workspace and hands the checkpoint
+    to the search with this reply. Unknown keys are ignored: an agent may add notes.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     summary: str = Field(
         description=(
@@ -90,66 +96,7 @@ def resolve_openevolve_options(
     return search_policy or "openevolve", resolved
 
 
-class EvolveOptions(BaseModel):
-    """Resolved evolutionary-search policy."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    modality: Annotated[str, Field(min_length=1, max_length=256)] | None = None
-    max_generations: Annotated[int, Field(gt=0)]
-    children_per_generation: Annotated[int, Field(gt=0)]
-    k_top_inspirations: Annotated[int, Field(ge=0)]
-    k_random_inspirations: Annotated[int, Field(ge=0)]
-    selection_temperature: Annotated[float, Field(gt=0, allow_inf_nan=False)]
-    seed: int | None = None
-    search_policy: Literal["vibesys", "openevolve"] | None = None
-    openevolve_population_size: Annotated[int, Field(gt=0)] | None = None
-    openevolve_archive_size: Annotated[int, Field(gt=0)] | None = None
-    openevolve_num_islands: Annotated[int, Field(gt=0)] | None = None
-    openevolve_migration_interval: Annotated[int, Field(gt=0)] | None = None
-    openevolve_migration_rate: Annotated[float, Field(ge=0, le=1)] | None = None
-    frontier_bias: Annotated[float, Field(ge=0, le=1)]
-    bootstrap_max_attempts: Annotated[int, Field(gt=0)]
-    keep_deployments: Literal[False]
-    max_parallelism: Annotated[int, Field(gt=0)]
-    turn_drop_backoff_seconds: Annotated[float, Field(gt=0, le=600)] = 5.0
-    metric_space: MetricSpace = Field(default_factory=MetricSpace)
-
-    @model_validator(mode="after")
-    def _validate_selector(self) -> Self:
-        configured = self.openevolve_config() is not None
-        if self.search_policy == "vibesys" and configured:
-            message = "OpenEvolve settings require search_policy='openevolve'"
-            raise ValueError(message)
-        return self
-
-    def openevolve_config(self) -> OpenEvolveSelectorConfig | None:
-        """Return the configured OpenEvolve policy, if any knob selected it."""
-        values = (
-            self.openevolve_population_size,
-            self.openevolve_archive_size,
-            self.openevolve_num_islands,
-            self.openevolve_migration_interval,
-            self.openevolve_migration_rate,
-        )
-        if all(value is None for value in values):
-            return None
-        defaults = OpenEvolveSelectorConfig()
-        return OpenEvolveSelectorConfig(
-            population_size=self.openevolve_population_size or defaults.population_size,
-            archive_size=self.openevolve_archive_size or defaults.archive_size,
-            num_islands=self.openevolve_num_islands or defaults.num_islands,
-            migration_interval=(self.openevolve_migration_interval or defaults.migration_interval),
-            migration_rate=(
-                self.openevolve_migration_rate
-                if self.openevolve_migration_rate is not None
-                else defaults.migration_rate
-            ),
-        )
-
-
 __all__ = [
-    "EvolveOptions",
     "JudgeResponse",
     "MutatorResponse",
     "resolve_openevolve_options",

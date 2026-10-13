@@ -14,40 +14,26 @@ from vibesys.run.contracts import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.evolve.strategy.api import EvolveStrategyState
+    from vibesys.orchestration.evolve.search.api import EvolveSnapshot
 
 
-def project_strategy_state(
-    state: EvolveStrategyState, *, experiment_revision: int
-) -> PluginProjection:
-    """Project one strategy state; `experiment_revision` is the core revision it was read at."""
-    population = state.population
+def project_snapshot(snapshot: EvolveSnapshot, *, experiment_revision: int) -> PluginProjection:
+    """Project the published record; `experiment_revision` is the core revision it was read at."""
+    population = snapshot.population
     return PluginProjection(
         payload={
-            "population": None if population is None else population.model_dump(mode="json"),
-            "generation": 0 if population is None else population.generation,
-            "stage": state.stage.value,
+            "population": population.model_dump(mode="json"),
+            "generation": population.generation,
+            "stage": snapshot.stage.value,
         },
         experiment_revision=experiment_revision,
-        iterations=_iterations(state),
+        iterations=_iterations(snapshot),
     )
 
 
-def _iterations(state: EvolveStrategyState) -> IterationTree:
+def _iterations(snapshot: EvolveSnapshot) -> IterationTree:
     """Map generations and candidates without borrowing round semantics."""
-    population = state.population
-    if population is None:
-        return IterationTree.from_nodes(
-            (
-                IterationSummary(
-                    id="generation:0",
-                    kind=IterationKind.GENERATION,
-                    label="Generation 0",
-                    ordinal=0,
-                    status=IterationStatus.PENDING,
-                ),
-            )
-        )
+    population = snapshot.population
     by_generation = {
         generation: tuple(
             sorted(
@@ -67,7 +53,7 @@ def _iterations(state: EvolveStrategyState) -> IterationTree:
                 label=f"Generation {generation}",
                 ordinal=generation,
                 status=_generation_status(
-                    state,
+                    snapshot,
                     generation,
                     current_generation=population.generation,
                     bootstrap_has_candidates=bool(candidates),
@@ -109,7 +95,7 @@ def _iterations(state: EvolveStrategyState) -> IterationTree:
 
 
 def _generation_status(
-    state: EvolveStrategyState,
+    snapshot: EvolveSnapshot,
     generation: int,
     *,
     current_generation: int,
@@ -117,7 +103,7 @@ def _generation_status(
 ) -> IterationStatus:
     if generation < current_generation:
         return IterationStatus.COMPLETED
-    if generation == current_generation and state.generation_start is not None:
+    if generation == current_generation and snapshot.generation_open:
         return IterationStatus.ACTIVE
     if generation > 0:
         return IterationStatus.COMPLETED

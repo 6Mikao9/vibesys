@@ -270,7 +270,6 @@ def _agent_policy_descriptor(
             "max_retries_per_round": args.max_retries_per_round,
             "judge_every": args.judge_every,
             "official_eval_every": args.official_eval_every,
-            "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
         }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
 
@@ -282,7 +281,6 @@ def _plain_policy_descriptor(args: argparse.Namespace) -> OrchestrationDescripto
         "max_attempts_per_issue": args.max_attempts_per_issue,
         "max_issues_per_perf_eval": args.max_issues_per_perf_eval,
         "max_issues_per_round": args.max_issues_per_round,
-        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
         "tracker": IssueTrackerConfig.from_backend(
             args.tracker_backend,
             repository=args.tracker_repository,
@@ -311,9 +309,7 @@ def _evolve_policy_descriptor(
         **openevolve,
         "frontier_bias": args.frontier_bias,
         "bootstrap_max_attempts": args.bootstrap_max_attempts,
-        "keep_deployments": args.keep_deployments,
         "max_parallelism": args.max_parallelism,
-        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
         "metric_space": space.model_dump(mode="json"),
     }
     return OrchestrationDescriptor(id="evolve", config_version=1, options=options)
