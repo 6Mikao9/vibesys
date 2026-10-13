@@ -325,6 +325,46 @@ def test_a_better_failed_partial_is_never_adopted_over_the_frozen_parents() -> N
     assert adopt.selection == GOOD[1]
 
 
+UNPROVEN = BAD[1]
+"""A retained, eligible candidate with no accepted accuracy proof."""
+
+
+def task_measuring(*measured: str) -> core.TaskTerms:
+    """A task over the two gate stages that measures only ``measured`` of them."""
+    return core.TaskTerms(
+        recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
+        stages=tuple(core.TaskStage(stage_id=name, execution_seconds=1.0) for name in GATES),
+        measured=measured,
+        queue_allowance=1.0,
+        accuracy_stage="accuracy" if "accuracy" in measured else None,
+        operation_seconds=1.0,
+    )
+
+
+GATES = ("accuracy", "benchmark")
+
+
+@given(
+    measured=st.lists(st.sampled_from(GATES), unique=True).map(tuple),
+    declared=st.booleans(),
+)
+def test_an_accuracy_proof_is_asked_only_of_a_task_that_measures_accuracy(
+    measured: tuple[str, ...], *, declared: bool
+) -> None:
+    """The proof is the accuracy gate's product: a task without that gate cannot supply one."""
+    state = world()
+    facts = state.run.facts.model_copy(
+        update={"task": task_measuring(*measured) if declared else None}
+    )
+    run = Run(state.model_copy(update={"run": state.run.model_copy(update={"facts": facts})}))
+
+    transition = run.propose(UNPROVEN)
+
+    needs_proof = not declared or "accuracy" in measured
+    assert bool(new_requests(transition)) is not needs_proof
+    assert bool([e for e in transition.events if isinstance(e, core.Rejected)]) is needs_proof
+
+
 def test_applied_but_unverified_is_recovered_by_verify_not_by_adopting_again() -> None:
     run = start()
     selection = GOOD[0]
