@@ -15,11 +15,9 @@ from vibesys.orchestration.evolve.search.api import JUDGE as EVOLVE_JUDGE
 from vibesys.orchestration.evolve.search.api import MUTATOR as EVOLVE_MUTATOR
 from vibesys.orchestration.issue_queue.core_policy import prompts as issue_queue_prompts
 from vibesys.orchestration.issue_queue.search.api import issue_queue
-from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_schemas
-from vibesys.orchestration.multi.strategy.api import IMPLEMENTER_REPLY as MULTI_IMPLEMENTER_REPLY
-from vibesys.orchestration.multi.strategy.api import JUDGE_REPLY as MULTI_JUDGE_REPLY
-from vibesys.orchestration.single.core_policy.api import reply_schemas as single_schemas
-from vibesys.orchestration.single.strategy.api import IMPLEMENTER_REPLY as SINGLE_IMPLEMENTER_REPLY
+from vibesys.orchestration.multi.search.api import multi
+from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.single.search.api import single
 from vibesys.prompts import render_template
 from vs_agent.api import AgentClient, native_schema_problems
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
@@ -33,8 +31,8 @@ if TYPE_CHECKING:
 
 
 _DYNAMIC = {role.name: dynamic.reply_schemas[role.reply_schema] for role in dynamic.roles}
-_SINGLE = single_schemas()
-_MULTI = multi_schemas()
+_SINGLE = {role.name: single.reply_schemas[role.reply_schema] for role in single.roles}
+_MULTI = {role.name: multi.reply_schemas[role.reply_schema] for role in multi.roles}
 _ISSUE_QUEUE = {
     role.name: issue_queue.reply_schemas[role.reply_schema] for role in issue_queue.roles
 }
@@ -46,7 +44,7 @@ _SINGLE_RESULT = {
     "expected_behavior": "faster",
     "self_review": "checked",
     "feedback": "",
-    "verdict": "pass",
+    "verdict": Verdict.PASS,
     "bottlenecks": "",
     "suggestions": "",
     "profile_analysis": "",
@@ -54,7 +52,7 @@ _SINGLE_RESULT = {
 _MULTI_IMPLEMENTER = {"summary": "done", "expected_behavior": "faster"}
 _EVOLVE_MUTATOR = {"summary": "did it", "hypothesis": "because", "expected_behavior": "faster"}
 _EVOLVE_JUDGE = {"analysis": "checked", "feedback": "", "verdict": "pass"}
-_MULTI_JUDGE = {"analysis": "checked", "feedback": "", "verdict": "pass"}
+_MULTI_JUDGE = {"analysis": "checked", "feedback": "", "verdict": Verdict.PASS}
 _ISSUE_QUEUE_IMPLEMENTER = {
     "summary": "done",
     "files_touched": (),
@@ -71,9 +69,9 @@ _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
     ("dynamic-judge", _DYNAMIC["judge"], _JUDGE),
     ("evolve-mutator", EVOLVE_MUTATOR.reply, _EVOLVE_MUTATOR),
     ("evolve-judge", EVOLVE_JUDGE.reply, _EVOLVE_JUDGE),
-    ("single-implementer", _SINGLE[SINGLE_IMPLEMENTER_REPLY], _SINGLE_RESULT),
-    ("multi-implementer", _MULTI[MULTI_IMPLEMENTER_REPLY], _MULTI_IMPLEMENTER),
-    ("multi-judge", _MULTI[MULTI_JUDGE_REPLY], _MULTI_JUDGE),
+    ("single-implementer", _SINGLE["implementer"], _SINGLE_RESULT),
+    ("multi-implementer", _MULTI["implementer"], _MULTI_IMPLEMENTER),
+    ("multi-judge", _MULTI["judge"], _MULTI_JUDGE),
     (
         "issue-queue-implementer",
         _ISSUE_QUEUE["implementer"],
@@ -122,19 +120,19 @@ def test_pre_envelope_wait_replies_remain_compatible(
         (_DYNAMIC["implementer"], []),
         (_DYNAMIC["judge"], []),
         (
-            _SINGLE[SINGLE_IMPLEMENTER_REPLY],
+            _SINGLE["implementer"],
             [
                 "#/$defs/SingleAgentRoundResponse/properties/candidate_metrics allows arbitrary object keys"
             ],
         ),
         (
-            _MULTI[MULTI_IMPLEMENTER_REPLY],
+            _MULTI["implementer"],
             [
                 "#/$defs/ImplementerResponse/properties/metrics allows arbitrary object keys",
                 "#/$defs/ImplementerResponse/properties/candidate_metrics allows arbitrary object keys",
             ],
         ),
-        (_MULTI[MULTI_JUDGE_REPLY], []),
+        (_MULTI["judge"], []),
         (EVOLVE_MUTATOR.reply, []),
         (EVOLVE_JUDGE.reply, []),
         (_ISSUE_QUEUE["implementer"], []),

@@ -21,7 +21,7 @@ from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
     TEMPLATE_FILES,
 )
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
-    COMMIT,
+    context_of,
     plan_of,
     resolved,
     write_project,
@@ -38,12 +38,12 @@ from vibesys.orchestration import dynamic, evolve, issue_queue, multi, single
 from vibesys.orchestration.dynamic.search.api import PromptTemplate
 from vibesys.orchestration.evolve.search import api as evolve_api
 from vibesys.orchestration.issue_queue.search import api as plain_api
-from vibesys.orchestration.multi.strategy import api as multi_api
-from vibesys.orchestration.single.strategy import api as single_api
+from vibesys.orchestration.multi.search import api as multi_api
+from vibesys.orchestration.single.search import api as single_api
+from vibesys.serial_search.api import PlanPrompt
 from vs_core.api import RevisionId, RevisionRef
 from vs_project.api import OrchestrationDescriptor
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import CorePlan, CoreRunContext
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel, JsonValue
 
     from vibesys.plugin_registration import OrchestrationRegistration
-    from vs_runtime.api import OrchestrationPlugin, RunFacts
+    from vs_runtime.api import CorePlan, OrchestrationPlugin, RunFacts
 
 _CRITERIA = "criteria"
 _REV = RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1")
@@ -61,6 +61,7 @@ _ROUND: dict[str, JsonValue] = {
     "max_retries_per_round": 1,
 }
 _ROUNDS: dict[str, JsonValue] = {**_ROUND, "max_rounds": 2, "official_eval_every": 1}
+_SINGLE: dict[str, JsonValue] = {k: v for k, v in _ROUNDS.items() if k != "judge_every"}
 _EVOLVE: dict[str, JsonValue] = {
     "bootstrap_max_attempts": 1,
     "children_per_generation": 1,
@@ -107,11 +108,11 @@ _STRATEGIES = (
     _Strategy(
         "single",
         single.REGISTRATION,
-        _ROUNDS,
+        _SINGLE,
         (
             (
                 DomainRole.ORCHESTRATOR,
-                single_api.PlanPrompt(round_number=1, max_rounds=2, base_revision=_REV),
+                PlanPrompt(round_number=1, max_rounds=2, base_revision=_REV),
             ),
             (
                 DomainRole.SINGLE_AGENT,
@@ -134,7 +135,7 @@ _STRATEGIES = (
         (
             (
                 DomainRole.ORCHESTRATOR,
-                multi_api.PlanPrompt(round_number=1, max_rounds=2, base_revision=_REV),
+                PlanPrompt(round_number=1, max_rounds=2, base_revision=_REV),
             ),
             (
                 DomainRole.IMPLEMENTER,
@@ -165,11 +166,7 @@ _STRATEGIES = (
                 DomainRole.PROFILER,
                 multi_api.ProfilerPrompt(
                     round_number=1,
-                    profiler_kind="torch",
                     profile_focus="hot path",
-                    profile_execution="local",
-                    profiler_support_name="torch_profiler",
-                    profiler_mcp_name="vibesys-torch-profiler",
                     evidence_directory="profile",
                 ),
             ),
@@ -245,7 +242,7 @@ def _plan(strategy: _Strategy, domain: DomainName, root: Path) -> CorePlan:
     if strategy.name == "dynamic":
         run = resolved(root)
         return plan_of(replace(run, facts=run.facts.model_copy(update={"domain_id": domain.value})))
-    run = resolved(root)
+    run = resolved(root, profiler_id="torch" if strategy.name == "multi" else "none")
     facts: RunFacts = run.facts.model_copy(update={"domain_id": domain.value})
     descriptor = OrchestrationDescriptor(
         id=strategy.plugin.id,
@@ -253,26 +250,9 @@ def _plan(strategy: _Strategy, domain: DomainName, root: Path) -> CorePlan:
         options=strategy.options,
     )
     assert strategy.plugin.core is not None
+    context = context_of(replace(run, facts=facts))
     return strategy.plugin.core.plan(
-        CoreRunContext(
-            run_id="policy",
-            options=strategy.registration.parse_options(descriptor),
-            facts=facts,
-            baseline=RevisionRef.of_git_commit(COMMIT),
-            evaluation_plan=run.evaluation_plan,
-            environment=replace(
-                run.environment,
-                env_kind="docker",
-                cli_sandboxed=True,
-                share_agent_session=False,
-            ),
-            artifacts=run.artifacts,
-            evaluation_capacity=1,
-            queue_allowance_seconds=900,
-            observe_interval_seconds=10,
-            observe_backoff_cap_seconds=120,
-            max_run_seconds=None,
-        )
+        replace(context, options=strategy.registration.parse_options(descriptor))
     )
 
 
@@ -285,7 +265,14 @@ def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
     core = strategy.plugin.core
     assert core is not None
     renderer = TemplateRenderer(core.prompt_templates, fallback_roots=core.prompt_fallback_roots)
-    schemas = plan.search.reply_schemas if strategy.name == "plain" else plan.reply_schemas
+    searches = {
+        "plain": plan.search,
+        "single": single_api.single,
+        "multi": multi_api.multi,
+    }
+    schemas = (
+        searches[strategy.name].reply_schemas if strategy.name in searches else plan.reply_schemas
+    )
     fields = context_variables(context, schemas)
     return renderer.render_template(
         f"{context.model_dump()['template']}.j2", **plan.prompt_variables, **fields

@@ -23,7 +23,13 @@ from vibesys.orchestration.multi.plugin import PLUGIN, PROFILE_GUIDED_PLUGIN
 if TYPE_CHECKING:
     from vs_runtime.api import OrchestrationPlugin
 
-MULTI_ROLES = ("multi-orchestrator", "multi-profiler", "multi-implementer", "multi-judge")
+MULTI_ROLES = (
+    "multi-orchestrator",
+    "multi-router",
+    "multi-profiler",
+    "multi-implementer",
+    "multi-judge",
+)
 LEGACY_ROLES = ("orchestrator", "profiler", "implementer", "judge")
 
 

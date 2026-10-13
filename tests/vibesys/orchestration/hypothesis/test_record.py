@@ -133,7 +133,9 @@ def test_gate_retry_carries_approved_candidate_when_agent_omits_it() -> None:
     data.hypothesis.gate_approved_candidate_metrics = {"throughput": 12.0}
     data.hypothesis.gate_approved_candidate_evaluation_artifact = "approved.json"
     assert data.attempt.implementation is not None
-    data.attempt.implementation.candidate_disposition = CandidateDisposition.UNASSESSED
+    data.attempt.implementation = data.attempt.implementation.model_copy(
+        update={"candidate_disposition": CandidateDisposition.UNASSESSED}
+    )
     data.attempt.passed = False
 
     record = build_round_record(replace(data, reviewed=False))
@@ -163,12 +165,16 @@ def _unmeasured_candidate_input(
 ) -> RecordInput:
     data = _record_input()
     assert data.attempt.implementation is not None
-    data.attempt.implementation.hypothesis_outcome = outcome
-    data.attempt.implementation.candidate_disposition = disposition
-    data.attempt.implementation.candidate_metrics = {"throughput": 12.0}
-    data.attempt.implementation.candidate_evaluation_artifact = "agent-profile.json"
-    data.attempt.implementation.candidate_operating_point = "agent-selected workload"
-    data.attempt.implementation.candidate_retention_reason = "agent reports a tradeoff"
+    data.attempt.implementation = data.attempt.implementation.model_copy(
+        update={
+            "hypothesis_outcome": outcome,
+            "candidate_disposition": disposition,
+            "candidate_metrics": {"throughput": 12.0},
+            "candidate_evaluation_artifact": "agent-profile.json",
+            "candidate_operating_point": "agent-selected workload",
+            "candidate_retention_reason": "agent reports a tradeoff",
+        }
+    )
     data.attempt.official_reason = None
     data.attempt.framework_benchmark = FrameworkBenchmarkOutcome()
     data.attempt.framework_perf_metric = None
@@ -222,7 +228,9 @@ def test_deferred_frontier_claim_cannot_create_a_retention_decision() -> None:
 def test_trusted_frontier_measurement_can_retain_a_disproven_hypothesis_candidate() -> None:
     data = _record_input()
     assert data.attempt.implementation is not None
-    data.attempt.implementation.hypothesis_outcome = HypothesisOutcome.DISPROVEN
+    data.attempt.implementation = data.attempt.implementation.model_copy(
+        update={"hypothesis_outcome": HypothesisOutcome.DISPROVEN}
+    )
 
     record = build_round_record(data)
 

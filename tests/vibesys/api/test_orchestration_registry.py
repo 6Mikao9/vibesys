@@ -36,7 +36,7 @@ from vibesys.orchestration.multi import (
 from vibesys.orchestration.multi import (
     PROFILE_GUIDED_PLUGIN as PROFILE_MULTI_PLUGIN,
 )
-from vibesys.orchestration.multi.models import MultiOptions
+from vibesys.orchestration.multi.launch import MultiLaunch
 from vibesys.orchestration.single import (
     PLUGIN as SINGLE_PLUGIN,
 )
@@ -316,7 +316,7 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
     parsed = registration.parse_options(descriptor)
 
     if plugin_id == "multi-agent":
-        assert isinstance(parsed, MultiOptions)
+        assert isinstance(parsed, MultiLaunch)
         observed = parsed.operator_constraints
     elif plugin_id == "plain":
         assert isinstance(parsed, IssueQueueLaunch)

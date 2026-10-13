@@ -41,7 +41,7 @@ from vibesys.orchestration.multi.models import (
     JudgeResponse,
     PreRoundDecision,
 )
-from vibesys.orchestration.multi.strategy.api import (
+from vibesys.orchestration.multi.search.api import (
     GateFacts,
     ImplementerClaims,
     ValidationFailure,
@@ -612,6 +612,7 @@ def core_policy_context() -> dict[str, object]:
         "invariants": "fixture",
         "minimum_acceptance_criteria": "fixture",
         "no_valid_reply": None,
+        "problem": None,
         "official_due": True,
         "official_reason": "cadence",
         "profiler_id": "none",

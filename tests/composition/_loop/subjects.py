@@ -4,8 +4,7 @@ A ported search adds one `Subject` here: its fresh-launch factory, its harness, 
 schemas and a generator of scripted worlds. The properties themselves live in
 `conformance.py` and are not edited per search.
 
-The dynamic, evolve and issue-queue searches are registered. The other searches (multi, single)
-join as they are written as flows.
+The dynamic, evolve, issue-queue, single and multi searches are registered.
 """
 
 from __future__ import annotations
@@ -16,6 +15,12 @@ from hypothesis import strategies as st
 from tests.composition._loop.conformance import Subject, World
 from tests.composition._loop.dynamic_world import DynamicWorld
 from tests.composition._loop.evolve_world import EvolveWorld
+from tests.composition._loop.serial_world import (
+    SerialWorld,
+    multi_implemented,
+    multi_reviewed,
+    single_implemented,
+)
 from tests.support.evolve_script import mutated
 from tests.support.evolve_script import reviewed as evolve_reviewed
 from tests.vibesys.orchestration.dynamic._replies import (
@@ -27,7 +32,9 @@ from tests.vibesys.orchestration.dynamic._replies import (
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, judged
 from tests.vibesys.orchestration.issue_queue._replies import implemented as issue_implemented
 from tests.vibesys.orchestration.issue_queue.world import IssueQueueWorld
+from tests.vibesys.serial_search._replies import plan_reply as serial_plan
 
+from vibesys.hypothesis.state import HypothesisState
 from vibesys.orchestration.dynamic.search.api import RunSnapshot
 from vibesys.orchestration.evolve.search.api import EvolveSnapshot
 from vibesys.orchestration.issue_queue.search.api import QueueSnapshot
@@ -152,6 +159,32 @@ def _evolve(
 
 
 @st.composite
+def _serial(
+    search: str,
+    designs: int,
+    throughputs: tuple[float | None, ...],
+    passes: tuple[bool, ...],
+    settings: Mapping[str, Any],
+) -> SerialWorld:
+    """A serial search's world, with each candidate's throughput and verdict drawn."""
+    rounds = settings["max_rounds"]
+    if search == "single":
+        implementer = [single_implemented(passed=passes[n % len(passes)]) for n in range(8)]
+        judge = None
+    else:
+        implementer = [multi_implemented() for _ in range(8)]
+        judge = [multi_reviewed(passed=passes[n % len(passes)]) for n in range(8)]
+    return SerialWorld(
+        search,
+        designer=[serial_plan(f"h{n}") for n in range(max(designs, rounds))],
+        implementer=implementer,
+        judge=judge,
+        throughputs=throughputs,
+        **settings,
+    )
+
+
+@st.composite
 def _evolve_world(draw: st.DrawFn, settings: Mapping[str, Any]) -> Callable[[], World]:
     throughputs = tuple(draw(st.lists(st.sampled_from(_THROUGHPUTS), min_size=1, max_size=4)))
     passes = tuple(draw(st.lists(st.booleans(), min_size=1, max_size=3)))
@@ -182,6 +215,32 @@ def evolve_subject(name: str, settings: Mapping[str, Any], *, sweeps_crashes: bo
     )
 
 
+@st.composite
+def _serial_world(draw: st.DrawFn, search: str, settings: Mapping[str, Any]) -> Callable[[], World]:
+    designs = draw(st.integers(min_value=1, max_value=2))
+    throughputs = tuple(draw(st.lists(st.sampled_from(_THROUGHPUTS), min_size=1, max_size=4)))
+    passes = tuple(draw(st.lists(st.booleans(), min_size=1, max_size=3)))
+    return lambda: _serial(search, designs, throughputs, passes, settings)
+
+
+def serial_subject(search: str, settings: Mapping[str, Any]) -> Subject:
+    """The single or multi search under the config ``settings``."""
+    world = SerialWorld(search, **settings)
+    return Subject(
+        name=search,
+        launch=world.setup.new_launch,
+        harness=world.setup.harness,
+        schemas=world.setup.schemas,
+        worlds=_serial_world(search, settings),
+        default_world=lambda: _serial(search, 2, (120.0, 80.0), (True,), settings),
+        smallest_world=lambda: _serial(search, 1, (120.0,), (True,), settings),
+        snapshot=HypothesisState,
+        sweeps_crashes=True,
+        issued=_ISSUED,
+        start_budget=world.config.max_rounds,
+    )
+
+
 SUBJECTS = {
     subject.name: subject
     for subject in (
@@ -192,5 +251,7 @@ SUBJECTS = {
         ),
         evolve_subject("evolve-serial", {"bootstrap_max_attempts": 1}, sweeps_crashes=True),
         issue_queue_subject("plain", {}),
+        serial_subject("single", {"max_rounds": 2}),
+        serial_subject("multi", {"max_rounds": 2}),
     )
 }
