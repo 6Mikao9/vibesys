@@ -14,6 +14,7 @@ from ._defs import UNBOUNDED, _Task
 from ._errors import Stopped, TaskStopped
 from ._evaluation import Evaluation
 from ._kit import Kit
+from ._owners import Owners
 from ._retry import Again, GaveUp, RetryPolicy, Tries
 from ._sources import First, Source, StopSource, Task, Timer
 from ._winner import INPUT, Input, Kept
@@ -42,6 +43,8 @@ class Clock:
 class RunTask(Value):
     """What the run is for and how much of it is left: the task as the flow reads it."""
 
+    run_id: str
+    """The run's identity: what keeps two runs' writes to one shared place apart."""
     objective: str
     baseline: RevisionRef
     deadline_at: Seconds
@@ -65,6 +68,8 @@ class Flow:
         """Workspaces: ``open`` as a resource, ``keep``, ``verify`` and ``kept``."""
         self.evaluation = Evaluation(self._kit)
         """Evaluation: ``measure`` a revision, read what the agents measured themselves."""
+        self.owners = Owners(self._kit)
+        """Operations of other libraries' owners the search registered: ``perform``."""
         self.clock = Clock(self._kit)
 
     # control flow
@@ -174,6 +179,7 @@ class Flow:
             raise ContractError(("task",), message)
         return self._kit.read(
             lambda view: RunTask(
+                run_id=view.run.owner.root,
                 objective=view.facts.objective,
                 baseline=view.facts.baseline,
                 deadline_at=view.deadline_at,
