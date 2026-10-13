@@ -68,12 +68,16 @@ _LOOP_RUN_TARGETS = {
 def agent_descriptor(
     options: AgentOrchestrationOptions, *, orchestration_id: str
 ) -> OrchestrationDescriptor:
-    """Build the persisted descriptor at the product composition boundary."""
-    return OrchestrationDescriptor(
-        id=orchestration_id,
-        config_version=1,
-        options=options.model_dump(mode="json"),
-    )
+    """Build the persisted descriptor at the product composition boundary.
+
+    The serial searches read only their own knobs: only the multi search has a judge to ask
+    every so often, and neither retries a dropped turn (the roles' policies do).
+    """
+    recorded = options.model_dump(mode="json")
+    recorded.pop("turn_drop_backoff_seconds")
+    if "multi" not in orchestration_id:
+        recorded.pop("judge_every")
+    return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=recorded)
 
 
 def _write_input_project(parent: Path, name: str = "queue-spsc") -> Path:
@@ -346,7 +350,8 @@ def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
         OrchestrationDescriptor(
             id=EVOLVE_PLUGIN.id,
             config_version=EVOLVE_PLUGIN.config_version,
-            options=options.model_dump(mode="json"),
+            # What the host decides is not a launch option (it follows the environment and plan).
+            options=options.model_dump(mode="json", exclude={"profiling", "exclusive_root"}),
         )
     )
 
@@ -1477,7 +1482,6 @@ def test_agent_resume_restores_its_configuration(
 
     assert args.max_rounds == 7
     assert args.max_retries_per_round == 4
-    assert args.judge_every == 2
     assert args.official_eval_every == 5
     assert args.inner_loop == "single-agent"
     assert args.interface == "service"
@@ -1772,9 +1776,9 @@ def test_resume_rejects_changes_to_immutable_configuration(
     monkeypatch.chdir(project)
 
     with pytest.raises(ConfigurationError) as exc:
-        parse_cli_invocation(["--resume", run_id, "--judge-every", "3"])
+        parse_cli_invocation(["--resume", run_id, "--official-eval-every", "3"])
     assert exc.value.diagnostic.code == "project_resume_configuration_mismatch"
-    assert "judge_every" in exc.value.diagnostic.message
+    assert "official_eval_every" in exc.value.diagnostic.message
 
 
 def _write_unsupported_schema_run(project: Path, run_id: str) -> None:

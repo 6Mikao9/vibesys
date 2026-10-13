@@ -21,7 +21,7 @@ from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
 from vibesys.orchestration.evolve.core_policy.api import prompts as evolve_prompts
 from vibesys.orchestration.evolve.search.api import JudgePrompt as EvolveJudgePrompt
 from vibesys.orchestration.evolve.search.api import evolve
-from vibesys.prompts import CORE_PROTOCOL_DIR, ResumePrompt
+from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import (
     ArtifactRef,
     EvidenceId,
@@ -31,10 +31,12 @@ from vs_core.api import (
     HostId,
     ObservationStatus,
     RequestId,
+    ResumeFacts,
     RevisionId,
     RevisionRef,
     RunId,
     Scope,
+    Until,
 )
 from vs_evaluation.api import (
     ContentDigest,
@@ -79,6 +81,9 @@ class _Request:
 
     def __init__(self, context: BaseModel) -> None:
         self.context = context
+        # A search's prompt context names its template; core's exchanges name theirs by kind.
+        dumped = context.model_dump()
+        self.template = f"{dumped.get('template', dumped.get('kind'))}.j2"
 
 
 def _record(
@@ -139,7 +144,10 @@ def _render(
         _REPLIES,
     )
     fence = ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1), now_at=1.0, payload_digest="d"
+        fence=HostFence(host_id=HostId(root="host"), epoch=1),
+        now_at=1.0,
+        payload_digest="d",
+        until=Until(at=100.0),
     )
     outcome = asyncio.run(owner.execute(cast("OperationRequest", _Request(context)), fence))
     assert outcome["status"] == "succeeded", outcome
@@ -149,8 +157,8 @@ def _render(
 
 def _cases() -> dict[str, Callable[..., str]]:
     def core(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
-        context = ResumePrompt(
-            role="implementer", retained_revision=REVISION, timed_out=False, cited_evidence=(ref,)
+        context = ResumeFacts(
+            agent="implementer", retained=REVISION, timed_out=False, evidence=(ref,)
         )
         return _render(root, (CORE_PROTOCOL_DIR,), context, (ref, evidence))
 

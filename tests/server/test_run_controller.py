@@ -21,6 +21,7 @@ from server.run_lifecycle import RunStatus
 from vibesys.api import RunStopped
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
+from vs_core.api import StopMode
 
 
 def _status_changes(parts: ServerParts) -> list[tuple[RunStatus, RunStatus]]:
@@ -264,7 +265,7 @@ def test_stopped_run_refuses_the_next_controlled_invocation(tmp_path: Path) -> N
     """After the stop lands, entering the next boundary unwinds the run."""
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")
-    parts.control.request_stop()
+    parts.control.request_stop(StopMode.DRAIN)
     parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
 
     with pytest.raises(RunStopped):
@@ -274,7 +275,7 @@ def test_stopped_run_refuses_the_next_controlled_invocation(tmp_path: Path) -> N
 def test_stop_requested_between_invocations_starts_no_further_call(tmp_path: Path) -> None:
     """The entry side of the boundary is a boundary: nothing else starts."""
     parts = build_server_parts(tmp_path)
-    parts.control.request_stop()
+    parts.control.request_stop(StopMode.DRAIN)
 
     with pytest.raises(RunStopped):
         _enter_boundary(parts, "implementer", "round 1", "work")
@@ -305,7 +306,7 @@ def test_stop_releases_the_pause_wait_and_ends_the_run(tmp_path: Path) -> None:
     waiter = run_at_paused_boundary(parts, wait_at_boundary)
     assert raised == []  # a paused boundary cannot be passed
 
-    parts.control.request_stop()
+    parts.control.request_stop(StopMode.DRAIN)
 
     waiter.join(timeout=DEADLOCK_GUARD_S)
     assert not waiter.is_alive()
@@ -332,7 +333,7 @@ def test_resume_before_the_boundary_cancels_the_pending_stop(tmp_path: Path) -> 
 def test_finish_after_a_landed_stop_records_no_terminal_event(tmp_path: Path) -> None:
     """The terminal status change is the stop's terminal record."""
     parts = build_server_parts(tmp_path)
-    parts.control.request_stop()
+    parts.control.request_stop(StopMode.DRAIN)
     with pytest.raises(RunStopped):
         _enter_boundary(parts, "implementer", "round 1", "work")
 
@@ -349,7 +350,7 @@ def test_finish_after_a_landed_stop_records_no_terminal_event(tmp_path: Path) ->
 def test_stop_does_not_block_presentation_only_chat(tmp_path: Path) -> None:
     """Chat stays available on a stopped run, exactly as on a finished one."""
     parts = build_server_parts(tmp_path)
-    parts.control.request_stop()
+    parts.control.request_stop(StopMode.DRAIN)
     with pytest.raises(RunStopped):
         _enter_boundary(parts, "implementer", "round 1", "work")
 

@@ -24,7 +24,6 @@ from vibesys.api import (
 )
 from vibesys.api.request import load_task
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.launch import EvolveLaunch
@@ -43,6 +42,7 @@ from vibesys.orchestration.single import (
 from vibesys.orchestration.single import (
     PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
 )
+from vibesys.orchestration.single.launch import SingleLaunch
 from vibesys.plugin_catalog import OrchestrationRegistration
 from vibesys.run.contracts import RoundSummary
 from vibesys.run.core_services import CoreCompositionError
@@ -185,7 +185,6 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
                     "interface": "inprocess",
                     "max_rounds": 1,
                     "max_retries_per_round": 1,
-                    "judge_every": 1,
                     "official_eval_every": 1,
                 },
             )
@@ -205,25 +204,33 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
 
 def test_builtin_plugin_metadata_declares_product_policy() -> None:
     registry = built_in_orchestrations()
-    agent_options: dict[str, JsonValue] = {
+    single_options: dict[str, JsonValue] = {
         "interface": "service",
         "max_rounds": 4,
         "max_retries_per_round": 2,
-        "judge_every": 1,
         "official_eval_every": 3,
     }
-    descriptors = (
-        OrchestrationDescriptor(id="single-agent", config_version=1, options=agent_options),
-        OrchestrationDescriptor(id="multi-agent", config_version=1, options=agent_options),
+    # Only the multi search has a judge to ask every so often.
+    multi_options: dict[str, JsonValue] = {**single_options, "judge_every": 1}
+    cases = (
+        (
+            OrchestrationDescriptor(id="single-agent", config_version=1, options=single_options),
+            SingleLaunch,
+            ("roadmap",),
+        ),
+        (
+            OrchestrationDescriptor(id="multi-agent", config_version=1, options=multi_options),
+            MultiLaunch,
+            ("roadmap", "profile"),
+        ),
     )
     # A core strategy declares only the artifact directories its run-scoped turns write, and
     # resumes with exact options (no round-budget variant until core can extend limits, #2013).
-    for descriptor, paths in zip(descriptors, (("roadmap",), ("roadmap", "profile")), strict=True):
+    for descriptor, launch, paths in cases:
         registration = registry.resolve(descriptor.id)
         options = registration.parse_options(descriptor)
-        assert isinstance(options, AgentOrchestrationOptions)
+        assert isinstance(options, launch)
         assert registration.plugin.id == descriptor.id
-        assert descriptor.options == agent_options
         assert options.max_rounds == descriptor.options["max_rounds"]
         assert registration.project_max_rounds is not None
         assert registration.project_max_rounds(options) == 4
