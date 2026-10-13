@@ -97,7 +97,7 @@ _KINDS = {
 }
 _REGISTRY = OPERATIONS.registry()
 PLANNER_LABEL = "orchestrator"
-_INPUT_THROUGHPUT = 50.0
+INPUT_THROUGHPUT = 50.0
 _CANDIDATE_THROUGHPUT = 100.0
 
 
@@ -380,7 +380,7 @@ class Host:
         passed = ref.status is ObservationStatus.SUCCEEDED
         if ref.kind is EvidenceKind.BENCHMARK and passed:
             value = (
-                _INPUT_THROUGHPUT
+                INPUT_THROUGHPUT
                 if ref.purpose == "baseline"
                 else self.throughputs.get(ref.candidate.revision_id.root, _CANDIDATE_THROUGHPUT)
             )

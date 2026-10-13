@@ -6,6 +6,8 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.issue_queue._host import (
     FACTS,
     IMPLEMENTER,
@@ -358,3 +360,43 @@ def test_an_evaluator_that_keeps_naming_too_many_issues_fails_the_run(*, restart
     assert host.record.ending is not None
     assert "performance evaluation 1 could not be completed" in host.record.ending.reason
     assert not {"a", "b", "c"} & set(host.titles())
+
+
+@RESTARTING
+@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@example(verdicts=[True, True, False])
+@example(verdicts=[True, False])
+@example(verdicts=[False, True])
+@example(verdicts=[True, True, True])
+@given(verdicts=st.lists(st.booleans(), min_size=2, max_size=3))
+def test_the_adopted_revision_is_the_last_closed_issue_and_a_rejected_later_issue_leaves_it(
+    *, restarting: bool, verdicts: list[bool]
+) -> None:
+    """Each issue builds on the one before, so the winner is the tip of the last one that closed.
+
+    A passed issue files the next one (the last files none). An issue the judge rejects through
+    every attempt ends the run; the issues before it stay adopted. An implementer commit is
+    numbered in the order the attempts run, so the n-th closed issue's tip is `c{n}`.
+    """
+    judge = []
+    for position, passed in enumerate(verdicts):
+        if passed:
+            more = position + 1 < len(verdicts)
+            judge.append(judged(bugs=(f"issue {position + 2}",) if more else ()))
+        else:
+            judge.extend([judged(passed=False)] * 2)  # both attempts the issue is allowed
+            break
+    host = begin(config(), restarting=restarting, judge=judge)
+    host.drain()
+    assert_flow_closed(host)
+
+    closed = verdicts.index(False) if False in verdicts else len(verdicts)
+    finished = host.run.finished
+    assert finished is not None
+    adopted = finished.result.selection
+    if closed == 0:
+        assert adopted is None, "no issue closed, so the input stands and the run names no winner"
+    else:
+        assert adopted is not None
+        assert adopted.revision.digest == f"git-commit:c{closed}"
+    assert finished.result.outcome == ("success" if closed == len(verdicts) else "failure")
