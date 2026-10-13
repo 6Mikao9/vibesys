@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import TypeAdapter
 
 from vs_core._registry import ContractError
-from vs_core.types.common import AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
+from vs_core.types.common import THIS_RUN, AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
 from vs_core.types.kinds import EventKind
 from vs_core.types.records import OperationResult
 from vs_core.types.search import (
@@ -25,7 +25,17 @@ from vs_core.types.search import (
     WorkspaceClosed,
     YieldFailed,
 )
-from vs_core.types.strategy import Decision, Finish, ProposeWinner, WakeAt, Withdraw, Work
+from vs_core.types.strategy import (
+    Decision,
+    Finish,
+    ProposeWinner,
+    Settle,
+    Wait,
+    WakeAt,
+    Withdraw,
+    Work,
+)
+from vs_core.types.until import Within
 
 from ._defs import FlowDef, _adapter, _Task, definition_of
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
@@ -113,6 +123,9 @@ class _Run:
         root = next(live for live in base.flows if not live.path)
         if root.name != self._root.name or not root.checkpointed:
             raise FlowCodeChanged(0)  # the root resumes only from a snapshot it recorded
+        for live in base.flows:
+            for held in live.holds:
+                self._settle_held(held)
         if base.stop is not None:
             self._tasks[0].stop.set(base.stop)
         self._launch(self._tasks[0], self._root, self._snapshot_of(self._root, root))
@@ -166,6 +179,7 @@ class _Run:
                     path=task.path,
                     name=definition.name if definition else None,
                     snapshot_json=text,
+                    holds=tuple(task.holds),
                     checkpointed=task.checkpointed,
                 )
             )
@@ -280,8 +294,10 @@ class _Run:
         restored = self._restorable.pop(path, None)
         definition = definition_of(fn)
         if restored is not None:  # after a code change: resume from the flow's own snapshot
-            if definition is None or definition.name != restored.name:
-                raise FlowCodeChanged(0)  # the new code starts something else under this key
+            if definition is None or definition.name != restored.name or not restored.checkpointed:
+                raise FlowCodeChanged(
+                    0
+                )  # something else under this key, or no checkpoint to resume
             self._launch(task, definition, self._snapshot_of(definition, restored))
         elif definition is not None:
             if len(args) != 1 or not isinstance(args[0], definition.snapshot):
@@ -292,6 +308,27 @@ class _Run:
             task.coro = fn(Flow(self, task), *args)
             self._resume(task, None, None)
         return task.handle
+
+    def _settle_held(self, held: AttemptRef) -> None:
+        """Settle a workspace a restarted flow had open, so the restart leaks none.
+
+        The flow that held it starts over from its checkpoint and opens its workspaces again;
+        the old one is closed plainly as cancelled. Its answer reaches no waiting flow and is
+        recorded as dropped.
+        """
+        limit = self.read(lambda view: view.limits.cleanup_bound, float)
+        work = self.stamp(
+            self._tasks[0],
+            Withdraw(
+                decision_id=DecisionId(root="restart-settle"),
+                scope=THIS_RUN,
+                target=held,
+                disposition=Settle(
+                    assessments=(), eligible=False, retention="discard", outcome="cancelled"
+                ),
+            ),
+        )
+        self.out.append(Wait(request=work, until=Within(limit=limit)))
 
     @staticmethod
     def _snapshot_of(definition: FlowDef, live: LiveFlow) -> object:

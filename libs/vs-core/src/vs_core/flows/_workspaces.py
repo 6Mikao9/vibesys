@@ -168,6 +168,7 @@ async def _workspace(
     match event:
         case WorkspaceOpened(attempt=opened):
             workspace = Workspace(ref=opened, base=request.workspace.base)
+            kit.task.holds.append(opened)
         case Failed():
             yield NotOpened(failed=event)
             return
@@ -191,6 +192,8 @@ async def _settle(kit: Kit, workspace: Workspace, disposition: Settle) -> None:
     if isinstance(settled, Failed):
         settled = await _withdraw(kit, workspace.ref, _plain("failed"))
     workspace.settlement = None if isinstance(settled, Failed) else settled
+    if workspace.ref in kit.task.holds:
+        kit.task.holds.remove(workspace.ref)
 
 
 async def _withdraw(kit: Kit, target: AttemptRef, disposition: Settle) -> Settlement | Failed:

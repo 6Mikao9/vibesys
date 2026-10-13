@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import Field, TypeAdapter
 
 from vs_core._registry import ContractError
-from vs_core.types.common import DecisionId, RunFacts, Value
+from vs_core.types.common import AttemptRef, DecisionId, RunFacts, Value
 from vs_core.types.kinds import EventKind
 from vs_core.types.search import (
     AdoptionFinished,
@@ -107,6 +107,8 @@ class LiveFlow(Value):
     path: str
     name: str | None
     snapshot_json: str
+    holds: tuple[AttemptRef, ...] = ()
+    """Workspaces the flow had open: a restart settles them, so none leaks."""
     checkpointed: bool = False
     """Whether the flow recorded a snapshot with ``ctx.checkpoint`` (its start is not one)."""
 

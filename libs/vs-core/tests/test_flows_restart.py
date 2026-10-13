@@ -16,7 +16,7 @@ import vs_core.api as core
 from vs_core.api.testing import FlowRun
 from vs_core.testing.flows import fake_search
 
-from .flow_support import Config, Plan, ask, start
+from .flow_support import Config, Plan, ask, open_workspace, start
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -119,13 +119,69 @@ def test_a_restarted_run_can_itself_be_restarted_from_json_after_every_step() ->
     assert run.restarts >= 3
 
 
-def test_a_change_before_the_first_checkpoint_restarts_the_task_from_its_first_snapshot() -> None:
+def test_a_child_without_a_checkpoint_is_refused_after_a_code_change() -> None:
     run = _run_v1()
-    stale = run.expect_turn("one")
+    stale = run.expect_turn("one")  # worker_v1 has not checkpointed yet
     run.swap(search_for(worker_v2))
+    with pytest.raises(core.FlowCodeChanged):
+        run.reply(stale, Plan(n=1))
+
+
+@core.flow(snapshot=Job, name="careful")
+async def careful_v1(ctx: core.Flow, job: Job) -> int:
+    ctx.checkpoint(job)  # the idiom: restartable from its arguments
+    await ask(ctx, "first")
+    return 1
+
+
+@core.flow(snapshot=Job, name="careful")
+async def careful_v2(ctx: core.Flow, job: Job) -> int:
+    ctx.checkpoint(job)
+    await ask(ctx, "again")
+    return 2
+
+
+def test_a_child_that_checkpoints_its_arguments_first_restarts_from_them() -> None:
+    run = FlowRun.start(search_for(careful_v1), Config())
+    stale = run.expect_turn("first")
+    run.swap(search_for(careful_v2))
     run.reply(stale, Plan(n=1))
-    run.reply(run.expect_turn("uno"), Plan(n=1))
-    assert run.expect_turn("two")
+    run.reply(run.expect_turn("again"), Plan(n=2))
+    assert run.finished is not None
+
+
+@core.flow(snapshot=Job, name="holder")
+async def holder_v1(ctx: core.Flow, job: Job) -> int:
+    ctx.checkpoint(job)
+    async with open_workspace(ctx, "ws") as ws:
+        assert not isinstance(ws, core.NotOpened)
+        await ask(ctx, "inside")
+    return 1
+
+
+@core.flow(snapshot=Job, name="holder")
+async def holder_v2(ctx: core.Flow, job: Job) -> int:
+    ctx.checkpoint(job)
+    await ask(ctx, "outside")
+    return 2
+
+
+@pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+def test_a_restart_settles_the_workspaces_a_flow_opened_after_its_checkpoint(
+    *, restarting: bool
+) -> None:
+    run = FlowRun.start(search_for(holder_v1), Config(), restarting=restarting)
+    opened = run.open_workspace(run.expect(core.StartAttempt))
+    inside = run.expect_turn("inside")
+    run.swap(search_for(holder_v2))
+    run.reply(inside, Plan(n=1))  # the first event the new code sees
+    release = run.expect(core.Withdraw, label="restart-settle")
+    assert release.request.target == opened  # ty: ignore[unresolved-attribute]
+    assert release.request.disposition.outcome == "cancelled"  # ty: ignore[unresolved-attribute]
+    run.close_workspace(release)
+    run.reply(run.expect_turn("outside"), Plan(n=2))
+    assert run.finished is not None
+    assert not [a for a in run.open if isinstance(a.request, core.Withdraw)]
 
 
 def test_a_published_record_and_a_stop_survive_a_restart() -> None:

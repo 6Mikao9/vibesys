@@ -213,13 +213,30 @@ projections and tests read about a run in flight. It is kept in the state beside
 A flow registered with `@flow(snapshot=S)` takes its snapshot as its argument and records newer
 ones with `ctx.checkpoint(s)` (synchronous). The flow's name defaults to the function's name.
 If a run resumes on changed code (the journal no longer replays), every live flow restarts from
-its latest snapshot with the new code: the restart resolves each flow through `group.start(key,
-fn, ...)`, which resumes the flow that had that key from its snapshot if the new code starts a
-flow of the same name there (otherwise `FlowCodeChanged`). Work since the last checkpoint is
-redone, and the results of requests in flight at the change are dropped when they arrive. The root
-follows the same rule: its snapshot type is the config, it resumes from its latest
-`ctx.checkpoint(config)`, and a root that never recorded one raises `FlowCodeChanged` rather than
-silently redoing (and paying for) its work.
+its latest snapshot with the new code. **One rule for every flow, the root included: a flow
+resumes only from a checkpoint it recorded; with none, the restart raises `FlowCodeChanged`.**
+Silently restarting a flow from its start arguments would redo work that was paid for (agent
+turns, measurements). A flow that is safe to restart from its arguments says so by calling
+`ctx.checkpoint(args)` as its first act:
+
+```python
+@flow(snapshot=Job)
+async def worker(ctx: Flow, job: Job) -> Done:
+    ctx.checkpoint(job)            # restartable from its arguments
+    ...
+    ctx.checkpoint(job.after(step))  # later, a newer resume point
+```
+
+The root's snapshot type is the config (`ctx.checkpoint(config)`). The restart resolves each flow
+through `group.start(key, fn, ...)`, which resumes the flow that had that key from its snapshot if
+the new code starts a flow of the same name there (otherwise `FlowCodeChanged`). Work since the
+last checkpoint is redone, and the results of requests in flight at the change are dropped when
+they arrive.
+
+**Resources do not leak across a restart.** A workspace a flow opened after its checkpoint is
+settled as part of the restart: the restart's first decisions withdraw each such attempt plainly
+as `cancelled` (decision ids `restart-settle.<n>`), and the restarted flow opens its workspaces
+again.
 
 ## The winner
 
