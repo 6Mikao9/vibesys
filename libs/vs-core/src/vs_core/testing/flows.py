@@ -39,6 +39,7 @@ from vs_core.api import (
     TimeReached,
     TurnFinished,
     Wait,
+    Waiting,
     WakeAt,
     Work,
     run_view,
@@ -104,6 +105,7 @@ class FlowRun[C]:
         self.finished: Finish | None = None
         """The ``Finish`` the search issued, once it did."""
         self.restarts = 0
+        self._timeline: list[str] = []
 
     @classmethod
     def start(
@@ -133,6 +135,14 @@ class FlowRun[C]:
         """The wake-up times asked for and not yet reached."""
         return tuple(self._sleeps)
 
+    def waiting(self) -> tuple[Waiting, ...]:
+        """What each suspended flow waits for, as data: its path and its sources."""
+        return self.search.waiting(self.state)
+
+    def timeline(self) -> str:
+        """The run so far as one line: ``planner.1:Plan ws-1/work.1:failed(timed-out) stop t=30``."""
+        return " ".join(self._timeline)
+
     def expect(self, kind: type[Work | Finish], *, label: str | None = None) -> Asked:
         """The first open wait for a ``kind`` request (with this id root, if given)."""
         for asked in self._open:
@@ -158,6 +168,7 @@ class FlowRun[C]:
             generation=0,
         )
         self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:{type(reply).__name__}")
         self.send(
             TurnFinished(
                 decision=asked.decision, invocation=invocation, reply=reply, checkpoint=checkpoint
@@ -172,15 +183,18 @@ class FlowRun[C]:
         if reason is FailureReason.REFUSED:
             defaults["cause"] = RejectionCode.BUDGET
         self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:failed({reason.value})")
         self.send(Failed(reason=reason, decision=asked.decision, **{**defaults, **fields}))  # ty: ignore[invalid-argument-type]
 
     def answer(self, asked: Asked, event: Event) -> None:
         """Deliver any event as the answer to a wait (a workspace opened, an operation result)."""
         self._close(asked)
+        self._timeline.append(f"{asked.decision.root}:{event.kind}")
         self.send(event)
 
     def stop(self) -> None:
         """The operator stops the run."""
+        self._timeline.append("stop")
         self.send(
             StopRequested(control=ControlInput(control_id=ControlId(root="stop"), action="stop"))
         )
@@ -188,6 +202,7 @@ class FlowRun[C]:
     def advance_to(self, time: Seconds) -> None:
         """Move the clock to ``time`` and deliver ``TimeReached`` for it."""
         self.view.now_at = time
+        self._timeline.append(f"t={time:g}")
         self._sleeps = [t for t in self._sleeps if t > time]
         self.send(TimeReached(time=time))
 

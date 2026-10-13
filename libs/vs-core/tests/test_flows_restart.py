@@ -1,9 +1,9 @@
 """A code change between stop and resume: flows restart from their latest safe point.
 
 The journal replays only code that is unchanged. A search built with registered flows
-(``FlowDef``) restarts instead of raising: each running flow resumes from its latest snapshot with
-the new code, a child is re-attached to its parent by key, and the results of the decisions that
-were in flight are dropped.
+(``@flow``) restarts instead of raising: each running flow resumes from its latest snapshot with
+the new code, a task is resumed by its key when its group starts it again, and the results of the
+decisions that were in flight are dropped.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ class Job(core.Value):
     step: int = 0
 
 
+@core.flow(snapshot=Job, name="worker")
 async def worker_v1(ctx: core.Flow, _job: Job) -> int:
     await ctx.wait(ask("one"), SHORT, reply=Plan)
     await ctx.safe_point(Job(step=1))
@@ -29,6 +30,7 @@ async def worker_v1(ctx: core.Flow, _job: Job) -> int:
     return 2
 
 
+@core.flow(snapshot=Job, name="worker")
 async def worker_v2(ctx: core.Flow, job: Job) -> int:
     if job.step < 1:
         await ctx.wait(ask("uno"), SHORT, reply=Plan)
@@ -38,30 +40,23 @@ async def worker_v2(ctx: core.Flow, job: Job) -> int:
     return 3
 
 
-async def root(ctx: core.Flow, _config: Config) -> None:
-    folded: list[int] = []
-    child = ctx.spawn("w", worker_v1, Job(), then=folded.append)
-    await ctx.join(child)
-    await ctx.finish(finish(f"worker gave {folded}"))
+def root_for(worker: object):  # noqa: ANN201
+    async def root(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as workers:
+            result = await workers.start("w", worker, Job())  # ty: ignore[invalid-argument-type]
+        await ctx.finish(finish(f"worker gave {result}"))
 
-
-async def root_v2(ctx: core.Flow, _config: Config) -> None:
-    folded: list[int] = []
-    child = ctx.spawn("w", worker_v2, Job(), then=folded.append)
-    await ctx.join(child)
-    await ctx.finish(finish(f"worker gave {folded}"))
+    return root
 
 
 def _run_v1() -> FlowRun[Config]:
     config = Config()
-    flows = (core.FlowDef("worker", worker_v1, Job),)
-    search = core.FlowSearch(DECLARATION, root, config, flows=flows)
+    search = core.FlowSearch(DECLARATION, root_for(worker_v1), config, flows=(worker_v1,))
     return FlowRun.start(search, config, FACTS)
 
 
 def _upgrade(run: FlowRun[Config]) -> None:
-    flows = (core.FlowDef("worker", worker_v2, Job),)
-    run.search = core.FlowSearch(DECLARATION, root_v2, Config(), flows=flows)
+    run.search = core.FlowSearch(DECLARATION, root_for(worker_v2), Config(), flows=(worker_v2,))
 
 
 def test_after_a_code_change_flows_resume_from_their_latest_snapshot() -> None:
@@ -73,7 +68,7 @@ def test_after_a_code_change_flows_resume_from_their_latest_snapshot() -> None:
     _upgrade(run)
     run.reply(in_flight, Plan(n=2))  # the first event the new code sees: a result of the old run
 
-    # the child resumed at step 1: no "one" again; its numbering continued, so no id repeats
+    # the task resumed at step 1 by its key: no "uno"; numbering continued, so no id repeats
     assert [a.decision.root for a in run.open if a is not in_flight] == ["w/two.2"]
     assert [d.decision for d in run.state.dropped] == [in_flight.decision]
     assert run.state.base is not None
@@ -82,7 +77,7 @@ def test_after_a_code_change_flows_resume_from_their_latest_snapshot() -> None:
     run.reply(run.expect(core.AskAgent, label="two"), Plan(n=2))
     run.reply(run.expect(core.AskAgent, label="three"), Plan(n=3))
     assert run.finished is not None
-    assert run.finished.result.reason == "worker gave [3]"
+    assert run.finished.result.reason == "worker gave 3"
 
 
 def test_a_restarted_run_can_itself_be_restarted_from_json_after_every_step() -> None:
@@ -98,22 +93,42 @@ def test_a_restarted_run_can_itself_be_restarted_from_json_after_every_step() ->
     assert run.restarts >= 3
 
 
+def test_a_published_record_and_a_stop_survive_a_restart() -> None:
+    class Seen(core.Value):
+        marker: str
+
+    async def v1(ctx: core.Flow, _config: Config) -> None:
+        ctx.publish(Seen(marker="before"))
+        await ctx.wait(ask("a"), SHORT, reply=Plan)
+
+    async def v2(ctx: core.Flow, _config: Config) -> None:
+        ctx.publish(Seen(marker="before"))
+        await ctx.wait(ask("renamed"), SHORT, reply=Plan)
+
+    config = Config()
+    run = FlowRun.start(core.FlowSearch(DECLARATION, v1, config, flows=()), config, FACTS)
+    run.search = core.FlowSearch(DECLARATION, v2, config, flows=())
+    run.stop()
+    assert run.search.published(run.state, Seen) == Seen(marker="before")
+    assert run.state.live.stop is not None
+    assert run.state.base is not None
+
+
 def test_without_registered_flows_a_code_change_is_refused() -> None:
-    run = start(_plain_v1)
+    async def v1(ctx: core.Flow, _config: Config) -> None:
+        await ctx.wait(ask("a"), SHORT, reply=Plan)
+        await ctx.wait(ask("b"), SHORT, reply=Plan)
+
+    async def v2(ctx: core.Flow, _config: Config) -> None:
+        await ctx.wait(ask("a"), SHORT, reply=Plan)
+        await ctx.wait(ask("c"), SHORT, reply=Plan)
+
+    run = start(v1)
     run.reply(run.expect(core.AskAgent), Plan(n=1))
-    changed = core.FlowSearch(DECLARATION, _plain_v2, Config())
-    with pytest.raises(core.FlowCodeChanged):
+    changed = core.FlowSearch(DECLARATION, v2, Config())
+    with pytest.raises(core.FlowCodeChanged) as caught:
         changed.update(run.state, core.TimeReached(time=1.0), run.view.current())
-
-
-async def _plain_v1(ctx: core.Flow, _config: Config) -> None:
-    await ctx.wait(ask("a"), SHORT, reply=Plan)
-    await ctx.wait(ask("b"), SHORT, reply=Plan)
-
-
-async def _plain_v2(ctx: core.Flow, _config: Config) -> None:
-    await ctx.wait(ask("a"), SHORT, reply=Plan)
-    await ctx.wait(ask("c"), SHORT, reply=Plan)
+    assert caught.value.step == 1
 
 
 def test_a_flow_that_is_not_registered_cannot_be_restarted() -> None:
@@ -121,15 +136,14 @@ def test_a_flow_that_is_not_registered_cannot_be_restarted() -> None:
         await ctx.wait(ask("loose"), SHORT, reply=Plan)
 
     async def parent(ctx: core.Flow, _config: Config) -> None:
-        ctx.spawn("l", loose)
-        await ctx.wake_at(100.0)
+        async with ctx.group() as tasks:
+            tasks.start("l", loose)
+
+    async def parent_v2(ctx: core.Flow, _config: Config) -> None:
+        await ctx.wait(ask("other"), SHORT, reply=Plan)
 
     config = Config()
     run = FlowRun.start(core.FlowSearch(DECLARATION, parent, config, flows=()), config, FACTS)
-
-    async def parent_v2(ctx: core.Flow, _config: Config) -> None:
-        await ctx.wake_at(100.0)
-
     changed = core.FlowSearch(DECLARATION, parent_v2, config, flows=())
     with pytest.raises(core.FlowCodeChanged):
         changed.update(run.state, core.TimeReached(time=1.0), run.view.current())
@@ -140,7 +154,8 @@ def test_only_a_registered_flow_has_safe_points() -> None:
         await ctx.safe_point(Job())
 
     async def parent(ctx: core.Flow, _config: Config) -> None:
-        ctx.spawn("s", sloppy)
+        async with ctx.group() as tasks:
+            tasks.start("s", sloppy)
 
     with pytest.raises(core.ContractError, match="registered"):
         start(parent)

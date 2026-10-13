@@ -41,8 +41,15 @@ REGISTRY = core.OperationRegistry(
 )
 
 
+class Note(core.Value):
+    """The record the toy flow publishes."""
+
+    plan: int
+
+
 async def ask_then_query(ctx: core.Flow, _config: Config) -> None:
     plan = answer_of(await ctx.wait(ask("planner"), SHORT, reply=Plan))
+    ctx.publish(Note(plan=plan))
     request = core.Operation(
         decision_id=core.DecisionId(root="query"), scope=core.THIS_RUN, request=Query()
     )
@@ -103,6 +110,7 @@ def test_a_flow_state_with_a_typed_reply_and_an_operation_outcome_round_trips_th
 
     restored = _through_the_envelope(run.state)
     assert restored == run.state
+    assert core.FlowSearch.published(restored, Note) == Note(plan=4)
     assert any(
         step.recorded is not None and step.recorded.kind == "recorded_turn"
         for step in restored.journal

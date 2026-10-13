@@ -6,19 +6,22 @@ from typing import TYPE_CHECKING, Any
 
 from vs_core._registry import ContractError
 
+from ._defs import FlowDef, definition_of
 from ._errors import FlowCodeChanged
-from ._runtime import FlowDef, _Run
-from ._state import FlowState, Step, digest, key, recorded
+from ._run import _Run
+from ._state import FlowState, Step, Waiting, digest, key, recorded
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
+
+    from pydantic import BaseModel
 
     from vs_core._registry import OperationRegistry
     from vs_core.types.common import RunFacts
     from vs_core.types.search import Event, RunView
     from vs_core.types.strategy import Decision, SearchDeclaration
 
-    from ._runtime import Flow
+    from ._flow import Flow
     from ._state import LiveFlows
 
 
@@ -43,15 +46,26 @@ class FlowSearch[C]:
         root: Callable[[Flow, C], Coroutine[Any, Any, None]],
         config: C,
         registry: OperationRegistry | None = None,
-        flows: tuple[FlowDef, ...] | None = None,
+        flows: tuple[Callable[..., Coroutine[Any, Any, Any]], ...] | None = None,
     ) -> None:
         """Build the search; ``registry`` is needed only by flows that wait on operations."""
         self.declaration = declaration
         self._registry = registry
         self._restartable = flows is not None
-        self._defs = (FlowDef("root", root, type(config)), *(flows or ()))
+        root_def = definition_of(root) or FlowDef("root", root, type(config))
+        self._defs = (root_def, *(d for fn in flows or () if (d := definition_of(fn))))
         self._config = config
         self._cached: tuple[tuple[int, str], _Run] | None = None
+
+    def close(self) -> None:
+        """Retire the live runtime (when the search is dropped, or replaced by a fresh one)."""
+        if self._cached is not None:
+            self._cached[1].close()
+            self._cached = None
+
+    def __del__(self) -> None:
+        """Retire the live runtime with the search."""
+        self.close()
 
     def fresh(self) -> FlowSearch[C]:
         """A search with the same flows and config and no live runtime, as a restart builds one."""
@@ -61,7 +75,7 @@ class FlowSearch[C]:
             root.fn,
             self._config,
             self._registry,
-            tuple(flows) if self._restartable else None,
+            tuple(d.fn for d in flows) if self._restartable else None,
         )
 
     @property
@@ -110,6 +124,18 @@ class FlowSearch[C]:
         self._cached = (key(new), run)
         return new, [*restarted, *decisions]
 
+    @staticmethod
+    def published[M: BaseModel](state: FlowState, model: type[M]) -> M | None:
+        """The record the flows last published (``ctx.publish``), or None if none yet."""
+        text = state.live.published
+        return None if text is None else model.model_validate_json(text)
+
+    def waiting(self, state: FlowState) -> tuple[Waiting, ...]:
+        """What each suspended flow waits for in ``state``: its sources, as data."""
+        return tuple(
+            Waiting(flow=path, sources=sources) for path, sources in self._runtime(state).waiting()
+        )
+
     # -- replay and restart ------------------------------------------------------------------
 
     def _new_run(self, facts: RunFacts) -> _Run:
@@ -138,6 +164,7 @@ class FlowSearch[C]:
         """The live runtime for ``state``: the cached one, or one rebuilt by replay."""
         if self._cached is not None and self._cached[0] == key(state):
             return self._cached[1]
+        self.close()
         run = self._new_run(state.facts)
         before = ""
         for index, step in enumerate(state.journal):

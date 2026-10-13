@@ -1,0 +1,66 @@
+"""``@resource``: acquire and always release, written like ``contextlib.asynccontextmanager``."""
+
+from __future__ import annotations
+
+from functools import wraps
+from typing import TYPE_CHECKING, Concatenate
+
+from vs_core._registry import ContractError
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+
+    from ._flow import Flow
+
+
+class _Resource[T]:
+    """The ``async with`` of one resource. Setup and teardown are shielded from a stop."""
+
+    def __init__(self, ctx: Flow, body: AsyncIterator[T]) -> None:
+        self._ctx = ctx
+        self._body = body
+
+    async def __aenter__(self) -> T:
+        with self._ctx.shielded():
+            return await anext(self._body)
+
+    async def __aexit__(
+        self, kind: type[BaseException] | None, error: BaseException | None, _tb: object
+    ) -> bool:
+        with self._ctx.shielded():
+            if error is None:
+                return await self._finished()
+            try:
+                await self._body.athrow(error)  # ty: ignore[unresolved-attribute]
+            except StopAsyncIteration:
+                return True  # the resource handled the exit; the body's exception ends here
+            except BaseException as raised:
+                if raised is error:
+                    return False
+                raise
+            raise ContractError(("resource",), "a resource yields exactly once")
+
+    async def _finished(self) -> bool:
+        try:
+            await anext(self._body)
+        except StopAsyncIteration:
+            return False
+        raise ContractError(("resource",), "a resource yields exactly once")
+
+
+def resource[**P, T](
+    body: Callable[Concatenate[Flow, P], AsyncIterator[T]],
+) -> Callable[Concatenate[Flow, P], _Resource[T]]:
+    """Make ``async with name(ctx, ...) as value`` from an async generator that yields once.
+
+    The code before the ``yield`` acquires, the code after releases, and an exception of the
+    ``async with`` body (a ``Stopped``, say) is thrown in at the ``yield`` so the release can
+    tell how the body ended. Both parts run shielded: a stop that arrives meanwhile is delivered
+    at the first ``await`` after.
+    """
+
+    @wraps(body)
+    def enter(ctx: Flow, *args: P.args, **kwargs: P.kwargs) -> _Resource[T]:
+        return _Resource(ctx, body(ctx, *args, **kwargs))
+
+    return enter

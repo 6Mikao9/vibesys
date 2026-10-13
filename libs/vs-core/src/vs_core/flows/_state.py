@@ -113,7 +113,6 @@ class LiveFlow(Value):
 
     path: str
     name: str | None
-    stoppable: bool
     snapshot_json: str
 
 
@@ -122,7 +121,17 @@ class LiveFlows(Value):
 
     flows: tuple[LiveFlow, ...]
     issued: tuple[Issued, ...]
-    stopping: bool
+    stop: StopRequested | None
+    """The stop that arrived, if any: restarted flows are stopped again."""
+    published: str | None
+    """The flow's published record as JSON (``ctx.publish``), kept beside the journal."""
+
+
+class Waiting(Value):
+    """What one suspended flow waits for: its path (empty for the root) and its sources."""
+
+    flow: str
+    sources: tuple[str, ...]
 
 
 class FlowState(StrategyState):
