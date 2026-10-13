@@ -1,44 +1,17 @@
-"""A ``FlowState`` survives the envelope codec: typed replies and operation outcomes included."""
+"""A ``FlowState`` survives the envelope codec: typed replies and operation results included."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, Literal
-
-import vs_core.api as core
-from vs_core.api.testing import FakeView, FlowRun
-
-if TYPE_CHECKING:
-    from pydantic import BaseModel
-
 from typing import get_args
 
+import vs_core.api as core
+from vs_core.api.testing import FlowRun
 from vs_core.flows import (
     JournaledEvent,
 )  # test-isolation: the internal journal union must not drift from `Event`
+from vs_core.testing.flows import FAKE_REGISTRY
 
-from .flow_support import DECLARATION, FACTS, SHORT, Config, Plan, answer_of, ask, finish
-
-
-class Outcome(core.Value):
-    status: Literal["succeeded"] = "succeeded"
-    result: tuple[str, ...]
-
-
-class Query(core.OperationRequest):
-    kind: Literal["test.typed"] = "test.typed"
-    lifecycle: Literal[core.LifecycleClass.QUERY] = core.LifecycleClass.QUERY
-    outcome_model: ClassVar[type[BaseModel]] = Outcome
-
-
-DESCRIPTOR = core.OperationDescriptor(
-    kind="test.typed",
-    lifecycle=core.LifecycleClass.QUERY,
-    request_schema=core.SchemaRef(name="query", version=1),
-    outcome_schema=core.SchemaRef(name="outcome", version=1),
-)
-REGISTRY = core.OperationRegistry(
-    (core.OperationRegistration(descriptor=DESCRIPTOR, request_model=Query, outcome_model=Outcome),)
-)
+from .flow_support import Config, Plan, answer_of, ask, start
 
 
 class Note(core.Value):
@@ -47,38 +20,10 @@ class Note(core.Value):
     plan: int
 
 
-async def ask_then_query(ctx: core.Flow, _config: Config) -> None:
-    plan = answer_of(await ctx.wait(ask("planner"), SHORT, reply=Plan))
+async def ask_twice(ctx: core.Flow, _config: Config) -> None:
+    plan = answer_of(await ask(ctx, "first"))
     ctx.publish(Note(plan=plan))
-    request = core.Operation(
-        decision_id=core.DecisionId(root="query"), scope=core.THIS_RUN, request=Query()
-    )
-    event = await ctx.wait(request, SHORT)
-    assert isinstance(event, core.OperationFinished)
-    assert isinstance(event.result.outcome, Outcome)
-    await ctx.finish(finish(f"{plan} {event.result.outcome.result}"))
-
-
-def _operation_finished(decision: core.DecisionId) -> core.OperationFinished:
-    state = core.initial_state()
-    observation = core.Observation(
-        event_id=core.EventId(root="event"),
-        request_id=core.RequestId(root="request"),
-        scope=core.Scope(owner=state.run.run_id, generation=0),
-        sequence=1,
-        observed_at=1.0,
-        status=core.ObservationStatus.SUCCEEDED,
-        terminal=True,
-        released=True,
-    )
-    result = core.OperationResult(
-        operation_id=core.OperationId(root="operation"),
-        observation=observation,
-        outcome_schema=DESCRIPTOR.outcome_schema,
-        operation_schema=REGISTRY.encode(Query()).schema_ref,
-        outcome=Outcome(result=("typed",)),
-    )
-    return core.OperationFinished(decision=decision, result=REGISTRY.validate_event(result))
+    await ask(ctx, "second")
 
 
 def _through_the_envelope(state: core.FlowState) -> core.FlowState:
@@ -92,56 +37,45 @@ def _through_the_envelope(state: core.FlowState) -> core.FlowState:
         strategy=state,
         event_cursor=core.EventCursor(sequence=0),
     )
-    text = REGISTRY.encode_envelope(envelope)
-    return REGISTRY.decode_envelope(core.RunEnvelope[core.FlowState], text).strategy
+    text = FAKE_REGISTRY.encode_envelope(envelope)
+    return FAKE_REGISTRY.decode_envelope(core.RunEnvelope[core.FlowState], text).strategy
 
 
-def test_a_flow_state_with_a_typed_reply_and_an_operation_outcome_round_trips_the_envelope() -> (
-    None
-):
-    config = Config()
-    search = core.FlowSearch(DECLARATION, ask_then_query, config, REGISTRY)
-    run = FlowRun.start(search, config, FACTS, view=FakeView())
-    run.reply(run.expect(core.AskAgent), Plan(n=4))
-    queried = run.expect(core.Operation)
-    run.answer(queried, _operation_finished(queried.decision))
+def _asked_once(run: FlowRun[Config]) -> None:
+    run.reply(run.expect_turn("first"), Plan(n=4))
+
+
+def test_a_flow_state_with_a_typed_reply_and_operation_results_round_trips_the_envelope() -> None:
+    run = start(ask_twice)
+    _asked_once(run)
+    run.reply(run.expect_turn("second"), Plan(n=5))
     assert run.finished is not None
-    assert run.finished.result.reason == "4 ('typed',)"
 
     restored = _through_the_envelope(run.state)
     assert restored == run.state
-    assert core.FlowSearch.published(restored, Note) == Note(plan=4)
+    assert run.driver.published(restored, Note) == Note(plan=4)
+    kinds = {step.recorded.kind for step in restored.journal if step.recorded is not None}
+    assert kinds == {"recorded_operation"}  # the prompt renders are the operations of the run
     assert any(
-        step.recorded is not None and step.recorded.kind == "recorded_turn"
-        for step in restored.journal
-    )
-    assert any(
-        step.recorded is not None and step.recorded.kind == "recorded_operation"
-        for step in restored.journal
+        step.event is not None and step.event.kind == "turn_ended" for step in restored.journal
     )
 
 
 def test_a_search_resumes_from_the_state_read_back_from_the_envelope() -> None:
-    config = Config()
-    search = core.FlowSearch(DECLARATION, ask_then_query, config, REGISTRY)
-    run = FlowRun.start(search, config, FACTS, view=FakeView())
-    run.reply(run.expect(core.AskAgent), Plan(n=4))
-    queried = run.expect(core.Operation)
+    run = start(ask_twice)
+    _asked_once(run)
+    second = run.expect_turn("second")
 
-    state = _through_the_envelope(run.state)
-    resumed = core.FlowSearch(DECLARATION, ask_then_query, config, REGISTRY)
-    _, decisions = resumed.update(
-        state, _operation_finished(queried.decision), FakeView().current()
-    )
-    assert [type(d) for d in decisions] == [core.Finish]
+    run.state = _through_the_envelope(run.state)
+    run.driver = run.driver.fresh()
+    run.reply(second, Plan(n=5))
+    assert run.finished is not None
+    assert run.driver.published(run.state, Note) == Note(plan=4)
 
 
-def test_the_journal_holds_every_event_as_it_is_but_turns_and_operation_results() -> None:
+def test_the_journal_holds_every_event_as_it_is_but_operation_results() -> None:
     def members(alias: object) -> set[type]:
         annotated = alias.__value__  # ty: ignore[unresolved-attribute]
         return set(get_args(get_args(annotated)[0]))
 
-    assert members(JournaledEvent) == members(core.Event) - {
-        core.TurnFinished,
-        core.OperationFinished,
-    }
+    assert members(JournaledEvent) == members(core.Event) - {core.OperationFinished}

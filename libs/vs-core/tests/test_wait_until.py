@@ -112,7 +112,7 @@ def test_a_watch_alone_is_not_an_until() -> None:
     work = wait(codec, "w", core.Within(limit=10.0)).request
     bad = core.Wait.model_construct(request=work, until=_closed_workspace())
     with pytest.raises(core.ContractError, match="until"):
-        core.check_decisions(core.initial_state().run.declaration, [bad])
+        core.check_decisions([bad])
 
 
 def _with_open_workspace(state: core.CoreState) -> tuple[core.CoreState, core.AttemptRef]:

@@ -206,14 +206,14 @@ def test_registered_input_manifest_preserves_distinct_equal_artifact_occurrences
 
 
 @given(st.sampled_from(["pause", "resume", "steer"]))
-def test_operator_stop_result_is_required_only_for_stop(action: str) -> None:
+def test_operator_stop_result_is_allowed_only_for_stop(action: str) -> None:
     result = core.RunResultProposal(outcome="cancelled", reason="operator requested stop")
     payload = {
         "control": core.ControlInput(control_id=core.ControlId(root="stop"), action="stop"),
         "now_at": 1.0,
     }
-    with pytest.raises(ValidationError, match="result"):
-        core.RunControlEvent.model_validate(payload)
+    bare = core.RunControlEvent.model_validate(payload)  # a stop without a result is soft
+    assert bare.result is None
     event = core.RunControlEvent.model_validate({**payload, "result": result})
     assert TypeAdapter(core.CoreEvent).validate_json(event.model_dump_json()) == event
     payload["control"] = core.ControlInput.model_validate(

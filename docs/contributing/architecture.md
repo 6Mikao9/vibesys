@@ -99,9 +99,10 @@ version constraint.
 The strategy and plugin contract is in
 [orchestration-runtime.md](orchestration-runtime.md).
 
-A search written as flows (straight-line `async` code that the runtime journals and
-replays) follows [flows.md](flows.md): the vocabulary, the rule for flow code, and how to
-test it.
+A search is `@search(name, config=Model)` over a flow (straight-line `async` code that the
+runtime journals and replays). It follows [flows.md](flows.md): the `ctx` vocabulary (agents,
+workspaces, evaluation, groups), the rule for flow code, how core ends the run from the winner
+the flow chose, and how to test it.
 
 [//]: # (tach-graph:start)
 ## Architecture overview

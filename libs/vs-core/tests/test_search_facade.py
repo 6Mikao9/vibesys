@@ -1,7 +1,7 @@
 """``vs_core.api.search`` is the search contract and only that.
 
 A search imports this module and nothing else from vs-core. It holds what a search writes
-(decisions, the requests inside a ``Wait``, ``Within`` and watches) and what it reads (events,
+(``@search``, the roles it asks, the values its aspects take) and what it reads (events,
 ``Failed``, ``RunView``), and keeps out the plumbing that belongs to core and the shell.
 """
 
@@ -44,14 +44,16 @@ def test_the_search_facade_exports_every_name_it_lists_and_nothing_of_core_plumb
 
 
 def test_the_facade_names_are_the_shell_facades_own_objects() -> None:
-    for name in search_facade.__all__:
+    # `vs_core.api.search` is also a module of that package, so `search` itself is the one name
+    # the shell facade does not carry.
+    for name in set(search_facade.__all__) - {"search"}:
         assert getattr(search_facade, name) is getattr(shell_facade, name), name
 
 
 def test_a_search_can_write_a_decision_and_read_a_failure_with_only_the_facade() -> None:
     names = set(search_facade.__all__)
-    assert {"Search", "Decision", "Wait", "WakeAt", "Finish", "Within"} <= names
-    assert {"WhileOpen", "WhileAlive", "Failed", "FailureReason", "RunView", "Children"} <= names
+    assert {"search", "Flow", "Role", "Session", "Within", "NoWinner", "INPUT", "Kept"} <= names
+    assert {"WhileOpen", "WhileAlive", "Failed", "FailureReason", "RunView", "Assessment"} <= names
     assert {"RequestTurn", "StartAttempt", "Withdraw", "Measure", "ProposeWinner"} <= names
     assert {"WorkspaceOpened", "WorkspaceClosed", "TurnFinished", "MeasurementFinished"} <= names
 
