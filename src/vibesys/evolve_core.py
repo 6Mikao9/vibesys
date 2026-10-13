@@ -205,7 +205,7 @@ def evolve_core_policy() -> CorePolicy:
 
 def _project_max_rounds(options: BaseModel) -> int:
     """The operator's ``--max-generations``, which ``run_started`` reports as ``max_rounds``."""
-    return EvolveLaunch.model_validate(options.model_dump()).max_generations
+    return EvolveLaunch.model_validate(options).max_generations
 
 
 def evolve_core_registration() -> OrchestrationRegistration:

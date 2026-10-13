@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.vibesys.orchestration.evolve._host import config
 
+from vibesys.evolve_core import evolve_core_registration
 from vibesys.orchestration.evolve.launch import EvolveLaunch
 from vibesys.orchestration.evolve.search.api import EvolveConfig, budget
 from vs_core.api.search import WorkspaceMode
@@ -95,3 +96,14 @@ def test_a_host_without_candidate_sandboxes_runs_the_children_one_at_a_time_in_i
     if parallel > 1:
         with pytest.raises(ValidationError, match="cannot run in parallel"):
             config(exclusive_root=True, max_parallelism=parallel)
+
+
+@given(generations=st.integers(1, 50))
+def test_the_run_reports_the_operators_generations_from_the_launch_it_parsed(
+    generations: int,
+) -> None:
+    """The registration reads a parsed launch, whose host-decided fields it must not re-validate."""
+    launch = EvolveLaunch.model_validate({**REQUIRED, "max_generations": generations})
+    registration = evolve_core_registration()
+    assert registration.project_max_rounds is not None
+    assert registration.project_max_rounds(launch) == generations
