@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import os
 import shlex
 import tempfile
 from contextlib import asynccontextmanager
@@ -66,7 +65,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
-from vs_sim.api.testing import swept
+from vs_sim.api.testing import examples, swept
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -82,9 +81,8 @@ if TYPE_CHECKING:
     )
     from vs_project.api import StateNamespace
 
-# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example builds real workspaces. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 pytestmark = pytest.mark.asyncio
 
@@ -554,7 +552,7 @@ async def test_a_revision_the_workspace_named_is_measurable() -> None:
 
 
 @settings(
-    max_examples=25 if _FULL else 5,
+    max_examples=examples(pr=5, nightly=25),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -931,7 +929,7 @@ async def _failed_target(
 
 
 @settings(
-    max_examples=12 if _FULL else 2,
+    max_examples=examples(pr=2, nightly=12),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -951,7 +949,7 @@ async def test_a_benchmark_without_a_result_record_is_ambiguous_and_keeps_its_ev
 
 
 @settings(
-    max_examples=6 if _FULL else 2,
+    max_examples=examples(pr=2, nightly=6),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -995,7 +993,7 @@ async def test_a_server_that_never_became_ready_is_classified_from_its_log(
 
 
 @settings(
-    max_examples=6 if _FULL else 2,
+    max_examples=examples(pr=2, nightly=6),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
