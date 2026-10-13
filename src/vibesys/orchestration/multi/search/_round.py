@@ -16,7 +16,7 @@ a failure of either ends the search.
 
 from typing import Self
 
-from vibesys.candidates.api import space_of
+from vibesys.candidates.api import space_of, workspace_mode_for
 from vibesys.hypothesis import Continue, Finished, NewHypothesis, rounds
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
 from vibesys.orchestration.multi.search._attempt import Attempt, Next, planned_reason
@@ -207,7 +207,10 @@ async def work(ctx: Flow, attempt: Attempt) -> Settlement | None:
         ctx,
         attempt,
         implementer=IMPLEMENTER,
-        paid_turns=attempt.config.max_retries_per_round,
+        room=serial.Room(
+            mode=workspace_mode_for(isolated_candidates=not attempt.config.exclusive_root),
+            paid_turns=attempt.config.max_retries_per_round,
+        ),
         turn=turn,
     )
 

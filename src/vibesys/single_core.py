@@ -11,7 +11,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.candidates.api import Gates, Measuring, limits_for, run_deadline_at, terms_of
+from vibesys.candidates.api import (
+    Gates,
+    Measuring,
+    limits_for,
+    run_deadline_at,
+    terms_of,
+    workspace_mode_for,
+)
 from vibesys.core_wiring import (
     EvaluationInputs,
     ResolvedRun,
@@ -19,7 +26,6 @@ from vibesys.core_wiring import (
     domain_prompt_sections,
     evaluation_inputs,
     operation_catalog,
-    require_candidate_sandboxes,
 )
 from vibesys.hypothesis import HypothesisState
 from vibesys.orchestration.single.core_policy.api import (
@@ -113,7 +119,6 @@ def _task_terms(
 
 def _plan_for(launch_type: type[SingleRunLaunch]) -> Callable[[CoreRunContext], CorePlan]:
     def plan(context: CoreRunContext) -> CorePlan:
-        require_candidate_sandboxes(context.environment, loop="single")
         launch = launch_type.model_validate(context.options)
         commit = context.baseline.git_commit
         if commit is None:
@@ -137,8 +142,12 @@ def _plan_for(launch_type: type[SingleRunLaunch]) -> Callable[[CoreRunContext], 
             environment_digest=evaluation.environment_digest,
             task=terms,
         )
-        config = launch.search_config()
-        models = {single.ids.role_id(role.name).root: role.name for role in single.roles}
+        config = launch.search_config(
+            workspace_mode=workspace_mode_for(
+                isolated_candidates=context.environment.parallel_candidate_obstacle is None
+            )
+        )
+        models = {single.ids.role_id(role.identity).root: role.identity for role in single.roles}
         chosen = {
             models[role]: model for role, model in context.role_models.items() if role in models
         }

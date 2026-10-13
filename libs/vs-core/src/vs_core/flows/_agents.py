@@ -284,7 +284,7 @@ class _Ask:
         subject = self.session.subject
         session = SessionSpec(
             session_id=ids.session_id(role.name, subject),
-            role_id=ids.role_id(role.name),
+            role_id=ids.role_id(role.identity),
             policy="reuse",
             lifetime="owner",
             access=role.access,

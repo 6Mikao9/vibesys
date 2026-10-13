@@ -59,7 +59,7 @@ from vibesys.serial_search._prompts import (
 )
 from vibesys.serial_search._roles import LOST_TURN_BACKOFF, ORCHESTRATOR
 from vibesys.serial_search._run import Closed, RoundDone, RoundStart, SerialRun, round_done
-from vibesys.serial_search._work import Attempting, Turn, work
+from vibesys.serial_search._work import Attempting, Room, Turn, work
 
 PROMPTS_DIR = Path(_prompts.__file__).parent
 """Where the shared `plan.j2` lives; a search lists it as a fallback root of its core policy."""
@@ -90,6 +90,7 @@ __all__ = [
     "PlanEvidence",
     "PlanPrompt",
     "PlanTemplate",
+    "Room",
     "RoundDone",
     "RoundRow",
     "RoundStart",

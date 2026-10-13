@@ -108,6 +108,17 @@ class Role(BaseModel):
     """Seconds a prompt of this role may take to render."""
     model: Annotated[str, Field(min_length=1, max_length=256)] | None = None
     """The model the role's turns use; None leaves the run's default."""
+    agent: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]*$")] | None = None
+    """The agent this role puts another question to, when a role of the search declares that agent.
+
+    The agent's id, its system prompt and its model (``agent.toml``) are that role's; sessions,
+    decisions and replies stay this role's own. None for a role that is its own agent.
+    """
+
+    @property
+    def identity(self) -> str:
+        """The name of the agent that answers this role: ``agent``, else the role's own name."""
+        return self.name if self.agent is None else self.agent
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -166,13 +177,15 @@ class UnknownRoleError(ValueError):
 
 
 def with_models(roles: tuple[Role, ...], models: Mapping[str, str]) -> tuple[Role, ...]:
-    """The roles with the models an operator chose; an unknown role name is an error."""
-    declared = {role.name for role in roles}
+    """The roles with the models an operator chose, by agent; an unknown agent is an error."""
+    declared = {role.identity for role in roles}
     unknown = sorted(models.keys() - declared)
     if unknown:
         raise UnknownRoleError(unknown, sorted(declared))
     return tuple(
-        role.model_copy(update={"model": models[role.name]}) if role.name in models else role
+        role.model_copy(update={"model": models[role.identity]})
+        if role.identity in models
+        else role
         for role in roles
     )
 
