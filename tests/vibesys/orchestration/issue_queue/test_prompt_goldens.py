@@ -11,37 +11,26 @@ import json
 from pathlib import Path
 
 import pytest
-from tests.support.prompt_context import context_variables
+from tests.support.reply_variables import context_variables
 from tests.vibesys.golden.helpers import assert_exact_text
-from tests.vibesys.orchestration.issue_queue.strategy.world import issue_queue_config
 
 from vibesys.core_wiring import domain_prompt_sections
 from vibesys.issue_queue_board import IssueQueueTexts
 from vibesys.issue_queue_core import CORE_ROLES
-from vibesys.orchestration.issue_queue.core_policy.api import (
-    PolicyInputs,
-    RunBounds,
-    build_core_policy,
-    prompts,
-    reply_schemas,
-)
-from vibesys.orchestration.issue_queue.models import IssueQueueOptions
-from vibesys.orchestration.issue_queue.strategy.api import (
+from vibesys.orchestration.issue_queue.core_policy.api import prompts
+from vibesys.orchestration.issue_queue.search.api import (
     BOOTSTRAP_TEMPLATE,
-    PERF_REPLY,
     ImplementPrompt,
     IssueBrief,
     IssueDetail,
     PerformancePrompt,
     PriorPerformance,
     PromptContext,
-    ReplyCorrectionPrompt,
-    ResumePrompt,
     ReviewPrompt,
-    WaitUnrecordedPrompt,
+    issue_queue,
 )
+from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vs_core.api import ArtifactId, ArtifactRef, RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentRole, ProfileExecution, RunFacts
 
@@ -72,7 +61,6 @@ _BOARD = (
     IssueBrief(id=8, type="bug", status="open", title="Health route 500s", attempts=0),
     IssueBrief(id=9, type="perf", status="closed", title="Batch prefill", attempts=2),
 )
-_REVISION = RevisionRef(revision_id=RevisionId(root="a1b2c3"), digest="git-commit:a1b2c3")
 _PRIOR = (
     PriorPerformance(
         iteration=1,
@@ -121,24 +109,6 @@ _CASES: dict[str, tuple[PromptContext | str, RunFacts]] = {
         ),
         _CONFIGURED,
     ),
-    "resume": (
-        ResumePrompt(
-            role="implementer",
-            retained_revision=_REVISION,
-            timed_out=False,
-            repeated_failure="same error three times",
-        ),
-        _CONFIGURED,
-    ),
-    "resume_timed_out": (
-        ResumePrompt(role="judge", retained_revision=None, timed_out=True),
-        _CONFIGURED,
-    ),
-    "reply_correction": (
-        ReplyCorrectionPrompt(role="judge", error="verdict: Input should be 'pass' or 'fail'"),
-        _CONFIGURED,
-    ),
-    "wait_unrecorded": (WaitUnrecordedPrompt(), _CONFIGURED),
     "bootstrap_configured": (BOOTSTRAP_TEMPLATE, _CONFIGURED),
     "bootstrap_bare": (BOOTSTRAP_TEMPLATE, _BARE),
 }
@@ -153,7 +123,7 @@ def _render(context: PromptContext | str, facts: RunFacts) -> str:
     }
     if isinstance(context, str):
         return IssueQueueTexts(variables).issue_body(context)
-    replies = reply_schemas(issue_queue_config(domain_id=facts.domain_id))
+    replies = issue_queue.reply_schemas
     return TemplateRenderer(
         Path(prompts.__file__).parent, fallback_roots=(CORE_PROTOCOL_DIR,)
     ).render_template(f"{context.template}.j2", **variables, **context_variables(context, replies))
@@ -242,28 +212,12 @@ def test_performance_prompt_field_names_match_the_domain_reply_schema(
     task = _render(PerformancePrompt(iteration=1, max_new_issues=1), facts)
     system = next(role.system_prompt for role in CORE_ROLES if role.id == "plain-perf-evaluator")
     combined = f"{system}\n{task}"
-    policy = build_core_policy(
-        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
-        RunBounds(
-            queue_allowance_seconds=1, observe_interval_seconds=1, observe_backoff_cap_seconds=1
-        ),
-        PolicyInputs(
-            objective=facts.objective,
-            domain_id=facts.domain_id,
-            baseline_commit="abc123",
-            evaluator_digest="e",
-            workload_digest="w",
-            environment_digest="env",
-            recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
-            accuracy_configured=True,
-            benchmark_configured=True,
-        ),
-    )
-    schema = json.dumps(policy.reply_schemas[PERF_REPLY].model_json_schema())
+    schema = json.dumps(IssuePerfEvalResult.model_json_schema())
 
     for field in expected:
         assert field in combined
         assert field in schema
     for field in foreign:
         assert field not in combined
-        assert field not in schema
+    assert all(field in schema for field in (*expected, *foreign)), "one reply serves both"
+
