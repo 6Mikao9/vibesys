@@ -326,8 +326,9 @@ def test_setup_and_teardown_are_shielded_and_the_stop_comes_at_the_first_await_a
     run.stop()  # while both workstreams are still opening
     assert roots(run) == ["a/open.1", "b/open.1", "p/work.1"]
     run.reply(run.expect(core.AskAgent, label="open"), Plan(n=0))
-    # a's body asks for work and is stopped at once; its teardown settles it as stopped
-    assert roots(run)[-2:] == ["a/work.1", "a/settle-stopped.1"]
+    # a's body is stopped before it asks for work; its teardown settles it as stopped
+    assert "a/work.1" not in roots(run)
+    assert roots(run)[-1] == "a/settle-stopped.1"
 
 
 def test_a_stop_ends_a_task_that_lets_it_escape_as_task_stopped(begin: Begin) -> None:
@@ -362,7 +363,39 @@ def test_a_shielded_region_defers_the_stop(begin: Begin) -> None:
     run.reply(run.expect(core.AskAgent, label="critical"), Plan(n=0))
     assert run.finished is not None
     assert run.finished.result.reason == "TaskStopped(key='c')"
-    assert "c/after.1" in roots(run)  # issued, then abandoned by the stop
+    assert "c/after.1" not in roots(run)  # the pending stop is raised before it is issued
+
+
+def test_a_pending_stop_is_raised_by_start_and_first_before_anything_is_issued(
+    begin: Begin,
+) -> None:
+    async def via_start(ctx: core.Flow) -> str:
+        with ctx.shielded():
+            await ctx.wait(ask("critical"), SHORT, reply=Plan)
+        ctx.start(ask("after-start"), SHORT, reply=Plan)
+        return "unreachable"
+
+    async def via_first(ctx: core.Flow) -> str:
+        with ctx.shielded():
+            await ctx.wait(ask("critical"), SHORT, reply=Plan)
+        await ctx.first(ctx.timer(99.0))
+        return "unreachable"
+
+    async def parent(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as workers:
+            workers.start("s", via_start)
+            workers.start("f", via_first)
+            first = await ctx.first(workers)
+            second = await ctx.first(workers)
+        await ctx.finish(finish(f"{first!r} {second!r}"))
+
+    run = begin(parent)
+    run.stop()
+    for pending in run.open:
+        run.reply(pending, Plan(n=0))
+    assert run.finished is not None
+    assert run.finished.result.reason == "TaskStopped(key='s') TaskStopped(key='f')"
+    assert not any("after-start" in root for root in roots(run))
 
 
 def test_a_task_started_in_a_stopping_group_is_stopped_at_its_first_await(begin: Begin) -> None:
@@ -377,7 +410,7 @@ def test_a_task_started_in_a_stopping_group_is_stopped_at_its_first_await(begin:
     run.stop()
     assert run.finished is not None
     assert run.finished.result.reason == "TaskStopped(key='late')"
-    assert roots(run)[0] == "late/work.1"  # it ran to its first await before it was stopped
+    assert "late/work.1" not in roots(run)  # stopped before its first request is issued
 
 
 def test_a_late_result_of_an_abandoned_wait_is_dropped_and_recorded(begin: Begin) -> None:

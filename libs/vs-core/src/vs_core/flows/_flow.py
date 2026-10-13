@@ -71,10 +71,18 @@ class Flow:
         self.facts: RunFacts = run.facts
         """The run's facts, constant for the run."""
 
+    def _deliver_stop(self) -> None:
+        """Raise a pending stop before anything is issued or awaited (unless shielded)."""
+        task = self._task
+        if task.stop_pending and task.shield == 0:
+            task.stop_pending, task.stopped = False, True
+            raise Stopped
+
     # requests and waiting
 
     def start(self, request: Work, until: Within, *, reply: type[BaseModel] = BaseModel) -> Pending:
         """Start ``request`` now, bounded by ``until``; its outcome is the ``Pending``'s value."""
+        self._deliver_stop()
         stamped = self._run.stamp(self._task, request)
         return self._run.issue(
             self._task, Pending(stamped, reply), Wait(request=stamped, until=until)
@@ -107,6 +115,7 @@ class Flow:
 
     async def first(self, *sources: Source[object]) -> object:
         """The next value of whichever source is ready first; ties go to the earliest."""
+        self._deliver_stop()
         return await First(sources)
 
     def timer(self, at: Seconds) -> Timer:

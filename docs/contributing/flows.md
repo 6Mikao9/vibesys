@@ -109,8 +109,9 @@ second start while one runs is a bug, not a queue).
 receives `Stopped` at its current `await`, once. A task that lets `Stopped` escape ends, and its
 group yields `TaskStopped(key)` in its place; cleanup belongs in a resource (below), so most flows
 never mention `Stopped`. A group with `stops=False` (for example a planner call whose reply the
-search still wants) is not interrupted. Tasks started in a stopping group are stopped at their
-first `await`. The root flow is never interrupted; it sees `ctx.stopped` and `ctx.stop_requested`.
+search still wants) is not interrupted. A stop is raised before anything is issued: at an unshielded `wait`, `start` or `first`,
+a pending stop raises `Stopped` first, so a task started in a stopping group (or one leaving a
+shielded region) issues nothing more and needs no `if ctx.stop_requested` guard. The root flow is never interrupted; it sees `ctx.stopped` and `ctx.stop_requested`.
 
 ### Resources
 
@@ -270,3 +271,6 @@ Where the runtime refines the contract above:
   `StopRequested` event itself. A stopped `Task` yields `TaskStopped(key)`.
 - Awaiting inside a `finally` while the run itself is being discarded is not supported; use
   `except Stopped` (or `@resource`) for cleanup that awaits.
+- `ctx.retry` infers `V | GaveUp[R]` when the attempt is a named function or closure. `ty`
+  cannot infer `R` through a bare `lambda tries: ...`; give the attempt a name (or annotate the
+  result).
