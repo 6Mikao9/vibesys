@@ -47,6 +47,7 @@ from vs_core.api import (
     RequestTurn,
     Retained,
     RevisionRef,
+    RunFacts,
     Settle,
     StartAttempt,
     TurnFailureKind,
@@ -141,7 +142,7 @@ class _Texts:
 class World(TypedDict, total=False):
     """How the world around the flow differs from the ordinary one."""
 
-    facts: object
+    facts: RunFacts
     implementer: Sequence[IssueImplementerResult]
     """The implementer's replies, in order; past them it reports a change again."""
     judge: Sequence[IssueJudgeResult]
@@ -162,10 +163,10 @@ def begin(
     cfg: IssueQueueConfig, *, restarting: bool, view: FakeView | None = None, **world: Unpack[World]
 ) -> Host:
     """Start the issue-queue search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
-    facts = world.pop("facts", FACTS)
+    facts = world.get("facts", FACTS)
     view = view or FakeView(changes={"facts": facts})
-    run = FlowRun.start(issue_queue, cfg, facts=facts, restarting=restarting, view=view)  # ty: ignore[invalid-argument-type]
-    return Host(run, cfg, baseline=facts.baseline, **world)  # ty: ignore[invalid-argument-type]
+    run = FlowRun.start(issue_queue, cfg, facts=facts, restarting=restarting, view=view)
+    return Host(run, cfg, **world)
 
 
 @dataclass
@@ -174,7 +175,7 @@ class Host:
 
     run: FlowRun[IssueQueueConfig]
     config: IssueQueueConfig
-    baseline: RevisionRef
+    facts: RunFacts = FACTS
     implementer: Sequence[IssueImplementerResult] = ()
     judge: Sequence[IssueJudgeResult] = ()
     perf: Sequence[IssuePerfEvalResult] = ()
@@ -196,6 +197,11 @@ class Host:
     _handed: dict[str, int] = field(default_factory=lambda: {IMPLEMENTER: 0, JUDGE: 0, PERF: 0})
     _commits: int = 0
     _sequence: int = 0
+
+    @property
+    def baseline(self) -> RevisionRef:
+        """The input revision the run starts from."""
+        return self.facts.baseline
 
     def __post_init__(self) -> None:
         """Hold the scripted replies as queues, so a reply is handed out once."""

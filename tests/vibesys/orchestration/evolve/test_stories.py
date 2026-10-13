@@ -42,7 +42,7 @@ def adopted(host: Host) -> str | None:
     finish = host.run.finished
     assert isinstance(finish, Finish)
     chosen = finish.result.selection
-    return None if chosen is None else chosen.revision.git_commit  # ty: ignore[unresolved-attribute]
+    return None if chosen is None else chosen.revision.git_commit
 
 
 def individuals(host: Host) -> tuple:
@@ -124,7 +124,7 @@ def test_a_failed_cold_start_is_repaired_in_place_by_the_next_one(*, restarting:
 
     second = mutate_context(host)
     assert second.repair_seed
-    assert second.base_revision.git_commit == "c1"  # ty: ignore[unresolved-attribute]
+    assert second.base_revision.git_commit == "c1"
     assert second.failed_lessons == ("needs work",)
     assert second.num_failed_attempts == 1
     (failed,) = individuals(host)
@@ -196,7 +196,7 @@ def test_the_judge_reviews_the_revision_the_mutator_left(*, restarting: bool) ->
     host.answer(host.run.expect_turn(role="mutator"))
     review = host.run.expect_turn(role="judge").context
     assert isinstance(review, JudgePrompt)
-    assert review.candidate.git_commit == "c1"  # ty: ignore[unresolved-attribute]
+    assert review.candidate.git_commit == "c1"
 
 
 @MODES
@@ -211,7 +211,7 @@ def test_the_child_of_a_generation_builds_on_a_verified_parent_and_sees_it(
 
     prompt = mutate_context(host)
     assert not prompt.is_cold_start
-    assert prompt.base_revision.git_commit == "c1"  # ty: ignore[unresolved-attribute]
+    assert prompt.base_revision.git_commit == "c1"
     assert prompt.parent is not None
     assert prompt.parent.commit == "c1"
 

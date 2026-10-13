@@ -76,6 +76,10 @@ if TYPE_CHECKING:
     from vs_core.api import CoreState, Request
     from vs_issue_tracker.api import FaultPhase
 
+_REGISTRY = issue_queue.registry()
+assert _REGISTRY is not None, "the issue-queue search declares its operations"
+REGISTRY = _REGISTRY
+
 _KINDS = {
     "accuracy": EvidenceKind.CORRECTNESS,
     "benchmark": EvidenceKind.BENCHMARK,
@@ -111,7 +115,7 @@ def issue_queue_config(**settings: object) -> IssueQueueConfig:
 def issue_queue_harness(settings: IssueQueueConfig, **overrides: object) -> Harness:
     """What hosts the search: its codec, the run's facts, limits and evidence requirements."""
     hosting = Harness(
-        registry=issue_queue.registry(),
+        registry=REGISTRY,
         facts=FACTS,
         limits=limits_for(budget(settings), _Bounds()),
         envelope_type=RunEnvelope[FlowState],
@@ -275,7 +279,7 @@ class IssueQueueWorld:
 
     def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
         """An operation answered in process: a board operation is performed by the real owner."""
-        typed = issue_queue.registry().decode(request.operation)
+        typed = REGISTRY.decode(request.operation)
         if isinstance(typed, RenderRoleArtifacts):
             return Succeeded(
                 outcome=RenderedArtifacts(

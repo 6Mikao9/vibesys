@@ -23,6 +23,7 @@ from vibesys.orchestration.multi.search.api import (
     ConflictMetric,
     Dominator,
     MultiAttempt,
+    MultiConfig,
     Next,
 )
 from vibesys.serial_search.api import Gated, NotMeasured, Unreadable
@@ -45,7 +46,9 @@ JUDGE_TURN = InvocationRef(
 
 
 def attempt(*, validation_offered: bool = False, **changes: object) -> MultiAttempt:
-    selected = changes.pop("config", None) or config()
+    given = changes.pop("config", None)
+    assert given is None or isinstance(given, MultiConfig)
+    selected = config() if given is None else given
     plan = OrchestratorPlan.model_validate_json(plan_reply("h1"))
     ledger, _ = rounds.start(
         selected.hypotheses,

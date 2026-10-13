@@ -28,17 +28,17 @@ def violations(tree: ast.Module) -> list[str]:
     """What a flow module does that flow code may not: banned imports and blind ``except``."""
     found: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            names = [node.module or ""]
-        else:
-            names = []
-        found += [
-            f"line {node.lineno}: imports {name}"
-            for name in names
-            if name.split(".")[0] in BANNED_MODULES
-        ]
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = (
+                [alias.name for alias in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+            )
+            found += [
+                f"line {node.lineno}: imports {name}"
+                for name in names
+                if name.split(".")[0] in BANNED_MODULES
+            ]
         if isinstance(node, ast.ExceptHandler) and (
             node.type is None
             or (isinstance(node.type, ast.Name) and node.type.id in {"Exception", "BaseException"})

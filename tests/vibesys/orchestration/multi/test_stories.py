@@ -8,6 +8,8 @@ tests; what is asserted here is only what the search decided.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Unpack
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -25,7 +27,7 @@ from tests.vibesys.orchestration.multi._host import (
     reviewed,
     routed,
 )
-from tests.vibesys.serial_search._host import assert_flow_closed
+from tests.vibesys.serial_search._host import Baseline, World, assert_flow_closed
 from tests.vibesys.serial_search._replies import plan_reply
 
 from vs_core.api import (
@@ -43,16 +45,26 @@ from vs_core.api import (
     Withdraw,
 )
 
+if TYPE_CHECKING:
+    from vibesys.orchestration.multi.search.api import MultiConfig
+
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
 
 
 def start(
-    selected: object = None, *, restarting: bool, validating: bool = False, **world: object
+    selected: MultiConfig | None = None,
+    *,
+    restarting: bool,
+    validating: bool = False,
+    **world: Unpack[World],
 ) -> MultiHost:
     """Run the input's measurement up to the first design turn."""
     host = MultiHost.start(
-        selected or config(), restarting=restarting, validating=validating, **world
-    )  # ty: ignore[invalid-argument-type]
+        config() if selected is None else selected,
+        restarting=restarting,
+        validating=validating,
+        **world,
+    )
     host.drain_until_turn(PLANNER)
     return host
 
@@ -222,8 +234,10 @@ def test_a_router_that_fails_does_not_stop_the_round(*, restarting: bool) -> Non
 
 @MODES
 @pytest.mark.parametrize("baseline", ["failed-workload", "no-evidence", "lost"])
-def test_an_input_that_cannot_be_measured_is_not_hidden(*, restarting: bool, baseline: str) -> None:
-    host = MultiHost.start(config(), restarting=restarting, baseline=baseline)  # ty: ignore[invalid-argument-type]
+def test_an_input_that_cannot_be_measured_is_not_hidden(
+    *, restarting: bool, baseline: Baseline
+) -> None:
+    host = MultiHost.start(config(), restarting=restarting, baseline=baseline)
     host.drain(limit=60)
     assert host.run.finished is not None or host.run.open
 
@@ -331,7 +345,9 @@ def test_each_review_is_a_fresh_conversation(*, restarting: bool) -> None:
     sessions = {
         item.request.turn.session.session_id
         for item in host.run.decisions
-        if _is_turn(item, "judge")
+        if isinstance(item, Wait)
+        and isinstance(item.request, RequestTurn)
+        and _is_turn(item, "judge")
     }
 
     assert len(sessions) == 2

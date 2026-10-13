@@ -19,6 +19,8 @@ from vs_core.api import Finish
 from vs_dst.api import SimulatedRun, simulate
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from vs_issue_tracker.api import FaultPhase
 
 
@@ -61,7 +63,7 @@ def test_issues_the_evaluator_files_are_worked_and_adopted() -> None:
     assert set(world.titles()) >= {"faster", "leaner"}
 
 
-def clean_world(**options: object) -> IssueQueueWorld:
+def clean_world(*, tracker_faults: Mapping[int, FaultPhase] | None = None) -> IssueQueueWorld:
     """One issue whose first attempt the judge rejects, and the second passes.
 
     The script is kept this small on purpose, and the reason is a known gap in core, not a
@@ -77,7 +79,7 @@ def clean_world(**options: object) -> IssueQueueWorld:
         implementer=[implemented(f"turn {n}") for n in range(2)],
         judge=[judged(passed=False), judged()],
         perf=[evaluated()],
-        **options,
+        tracker_faults=tracker_faults,
     )
 
 

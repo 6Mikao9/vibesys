@@ -321,7 +321,7 @@ def test_a_code_change_keeps_the_rounds_spent_and_the_performance_history(
     )
     work_until_second_issue(host)
     assert host.answered(PERF) == 1
-    host.run.swap(replace(issue_queue, root=_changed_root))  # ty: ignore[invalid-argument-type]
+    host.run.swap(replace(issue_queue, root=_changed_root))
     host.drain()
     assert_flow_closed(host)
     assert outcome(host) == "success"
