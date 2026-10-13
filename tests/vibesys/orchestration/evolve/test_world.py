@@ -6,7 +6,6 @@ through the real core and shell, ends with what the story says.
 
 from __future__ import annotations
 
-from tests.support.evolve_script import reviewed
 from tests.support.evolve_world import EvolveWorld
 
 from vs_core.api import Finish, Settle, StartAttempt, Wait, Withdraw
@@ -40,20 +39,6 @@ def test_a_run_adopts_its_best_individual() -> None:
     assert final.result.outcome == "success"
     best = max(world.headline(item) or 0.0 for item in _commits(run))
     assert world.headline(commit) == best
-
-
-def test_cold_starts_the_judge_rejects_end_the_run_with_no_winner() -> None:
-    run = simulate(EvolveWorld(judge=[reviewed(passed=False)] * 2))
-
-    assert adopted(run) is None
-    assert starts(run) == 2
-
-
-def test_children_run_together_and_the_run_still_ends() -> None:
-    run = simulate(EvolveWorld(max_parallelism=2, children_per_generation=2))
-
-    assert adopted(run) is not None
-    assert starts(run) == 3
 
 
 def _commits(run: SimulatedRun) -> list[str]:

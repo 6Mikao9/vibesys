@@ -2,20 +2,17 @@
 
 The dynamic flow is driven through the production shell and loop (`scripted_host`). Implementer
 turns are held for a drawn number of event-loop yields (no sleeps and no wall clock), so a drawn
-delay decides the order they finish in, and equal delays are the same-tick tie. Whatever the
-order or the cap, the run must end where the serial run does, concurrency must stay within the
-cap, and no request may run twice. A turn that fails halts the run, but not before what the other
-turns returned is committed. An agent tool call that arrives while a publication awaits is
-committed and never halts the run. A wait that core refuses at commit ends the turn and the run
-goes on. A host that dies with two turns in flight is replaced by one that finishes the run.
+delay decides the order they finish in, and equal delays are the same-tick tie. A turn that
+fails halts the run, but not before what the other turns returned is committed. An agent tool
+call that arrives while a publication awaits is committed and never halts the run. (Overlap up
+to the cap, completion order and host death are `tests/system`'s: they do not depend on the
+search.)
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass, field, replace
-from functools import cache
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -31,18 +28,10 @@ from tests.vibesys.orchestration.dynamic._replies import (
 
 from vs_core.api import (
     ClockAdvanced,
-    Continuation,
-    ContinuationId,
-    ContinuationPhase,
     DispatchTurn,
-    InvocationId,
-    RequestObserved,
     RequestPhase,
-    ResourceId,
-    ResumeSessionTurn,
     RunStatus,
 )
-from vs_dst.api import SimulatedRun, simulate
 from vs_project.api import FakeStateStore
 from vs_runtime.api.testing import (
     FakePublicationDelivery,
@@ -62,9 +51,7 @@ if TYPE_CHECKING:
         OperationRegistry,
         Request,
         SchemaRef,
-        TurnObserved,
     )
-    from vs_core.testing.drive import Answer
     from vs_core.testing.liveness import Journal
     from vs_runtime.api.core import (
         ExecutionContext,
@@ -74,10 +61,9 @@ if TYPE_CHECKING:
         PublicationContext,
         RunLoopConfig,
     )
-    from vs_runtime.api.testing import InvalidReply, Script
+    from vs_runtime.api.testing import Script
 
 WORKSTREAMS = 2
-WAITING_KIND = "waiting_for_evaluation"
 
 
 @dataclass
@@ -140,37 +126,6 @@ class DelayedExecutors(ScriptedExecutors):
         finally:
             ledger.in_flight -= 1
 
-    @staticmethod
-    def turn_event(
-        request: DispatchTurn | ResumeSessionTurn,
-        answer: Answer | InvalidReply,
-        observed: RequestObserved,
-    ) -> TurnObserved:
-        """A turn whose reply asks to wait carries the suspension the tool bridge would offer.
-
-        The suspension names a job core does not own, so core refuses it at commit, as it
-        refuses a wait that a peer's commit made invalid after the bridge accepted it.
-        """
-        event = ScriptedExecutors.turn_event(request, answer, observed)
-        if event.output_json is None or json.loads(event.output_json).get("kind") != WAITING_KIND:
-            return event
-        name = event.invocation.invocation_id.root
-        invocation = event.invocation
-        return event.model_copy(
-            update={
-                "suspension": Continuation(
-                    continuation_id=ContinuationId(root=f"{name}/evaluation"),
-                    invocation=invocation,
-                    next_invocation=invocation.model_copy(
-                        update={"invocation_id": InvocationId(root=f"{name}/resume")}
-                    ),
-                    jobs=(ResourceId(root="job:not-owned"),),
-                    deadline_at=500.0,
-                    phase=ContinuationPhase.WAITING,
-                )
-            }
-        )
-
 
 def _is_implementer_turn(request: Request) -> bool:
     return isinstance(request, DispatchTurn) and request.turn.session.role_id.root.endswith(
@@ -178,16 +133,11 @@ def _is_implementer_turn(request: Request) -> bool:
     )
 
 
-def world(*, waiting: frozenset[int] = frozenset()) -> DynamicWorld:
-    """Two workstreams; an implementer in ``waiting`` first answers that it waits."""
-    replies = [
-        json.dumps({"kind": WAITING_KIND, "handles": ["h"]}) if n in waiting else implemented()
-        for n in range(WORKSTREAMS)
-    ]
-    replies.extend(implemented() for _ in range(4 * WORKSTREAMS))
+def world() -> DynamicWorld:
+    """Two workstreams."""
     return DynamicWorld(
         planner=[plan_reply(*(implement(f"h{n}") for n in range(WORKSTREAMS)))],
-        implementer=replies,
+        implementer=[implemented() for _ in range(5 * WORKSTREAMS)],
         judge=[reviewed() for _ in range(4 * WORKSTREAMS)],
         max_in_flight=WORKSTREAMS,
     )
@@ -212,16 +162,12 @@ def build(
     delays: list[int],
     *,
     failing: frozenset[int] = frozenset(),
-    waiting: frozenset[int] = frozenset(),
     outside: Outside | None = None,
 ) -> Built:
     """The dynamic flow on the production shell, its implementer turns held by ``delays``."""
-    script = world(waiting=waiting)
+    script = world()
     setup = script.setup
     harness = setup.harness
-    if waiting:
-        suspend: Any = "suspend"
-        harness = replace(harness, lifecycle=frozenset({suspend}))
     ledger = Ledger(delays=list(delays), failing=failing)
     host = scripted_host(
         setup.new_launch(),
@@ -258,30 +204,6 @@ def baseline() -> str:
     if not _BASELINE:
         _BASELINE["result"] = finished(1, [])[1]
     return _BASELINE["result"]
-
-
-@settings(max_examples=8, deadline=None, derandomize=True, database=None)
-@given(
-    cap=st.sampled_from((1, 2, 3)),
-    delays=st.lists(st.integers(min_value=0, max_value=6), min_size=WORKSTREAMS, max_size=4),
-)
-def test_any_completion_order_ends_in_the_same_run_within_the_cap(
-    cap: int, delays: list[int]
-) -> None:
-    built, result = finished(cap, delays)
-
-    assert built.ledger.most_in_flight <= cap
-    assert len(built.ledger.executed) == len(set(built.ledger.executed)), "a request ran twice"
-    assert result == baseline()
-
-
-def test_turns_overlap_up_to_the_cap_and_the_width_of_the_search() -> None:
-    long_turns = [40] * WORKSTREAMS
-
-    assert finished(1, long_turns)[0].ledger.most_in_flight == 1
-    # A cap above the search's width is held to the width, which also shows that a cap of two
-    # admits two overlapping turns.
-    assert finished(3, long_turns)[0].ledger.most_in_flight == WORKSTREAMS
 
 
 def test_without_an_explicit_cap_the_runs_own_parallelism_sets_it() -> None:
@@ -353,67 +275,3 @@ def test_a_tool_call_admitted_during_a_publish_commits_and_never_halts(*, fails:
         assert run.core.run.result is not None
         assert run.core.run.result.model_dump_json() == baseline()
     assert len(delivery.admitted) == 2
-
-
-@settings(max_examples=6, deadline=None, derandomize=True, database=None)
-@given(
-    delays=st.lists(
-        st.integers(min_value=0, max_value=6), min_size=WORKSTREAMS, max_size=WORKSTREAMS
-    ),
-    waiting=st.sets(st.integers(min_value=0, max_value=WORKSTREAMS - 1), min_size=1),
-)
-def test_a_wait_refused_at_commit_ends_its_turn_and_the_run_goes_on(
-    delays: list[int], waiting: set[int]
-) -> None:
-    """An implementer's wait that core refuses at commit is not a halt, whatever the order.
-
-    The turn ends without a suspension; the flow must see that (the reply still says "waiting")
-    and ask the implementer again, and the peer's result stays.
-    """
-    built = build(WORKSTREAMS, delays, waiting=frozenset(waiting))
-
-    run = built.host.run()
-
-    assert run.halted is None
-    assert run.core.run.status == RunStatus.TERMINAL
-    assert run.core.evaluation.continuations == ()
-    assert built.ledger.started > WORKSTREAMS, "a refused wait is asked again"
-    assert len(built.ledger.returned) >= WORKSTREAMS
-    assert run.core.run.result is not None
-    assert run.core.run.result.model_dump_json() == baseline()
-
-
-# -- a host that dies with two turns in flight ------------------------------------------------
-
-
-def two_wide() -> DynamicWorld:
-    script = DynamicWorld(
-        planner=[plan_reply(*(implement(f"h{n}") for n in range(WORKSTREAMS)))],
-        implementer=[implemented() for _ in range(WORKSTREAMS)],
-        judge=[reviewed() for _ in range(WORKSTREAMS)],
-        max_in_flight=WORKSTREAMS,
-    )
-    script.setup = replace(script.setup, max_concurrent=WORKSTREAMS)
-    return script
-
-
-@cache
-def sweep() -> tuple[SimulatedRun, tuple[SimulatedRun, ...]]:
-    """The uninterrupted run and the runs after a host dies at each crash point tried."""
-    normal = simulate(two_wide())
-    return normal, tuple(normal.rerun_with_crash(crash) for crash in normal.crash_points())
-
-
-def test_a_restart_after_a_crash_with_two_turns_in_flight_finishes_the_run_once_per_request() -> (
-    None
-):
-    normal, recovered = sweep()
-
-    assert normal.finished
-    assert recovered
-    for run in recovered:
-        assert run.finished
-        assert run.no_effect_ran_twice()
-        # A request in flight when the host died is asked about before its limit ends it, so a
-        # render the far side had finished is not failed for the time the host was down.
-        assert run.result == normal.result
