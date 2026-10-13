@@ -306,47 +306,23 @@ def test_a_lost_turn_is_asked_again_as_often_and_after_as_long_as_the_role_says(
 
 
 @_SETTINGS
-@given(
-    lost_resumes=st.integers(0, core.MAX_LOST_TURNS),
-    lost_turns=st.integers(0, core.MAX_LOST_TURNS),
-)
+@given(lost_turns=st.integers(0, core.MAX_LOST_TURNS))
 @_RESTARTING
-def test_a_lost_resume_is_asked_again_only_as_often_as_the_roles_lost_resumes(
-    *, restarting: bool, lost_resumes: int, lost_turns: int
+def test_a_lost_resume_is_never_asked_again_whatever_the_roles_lost_turns(
+    *, restarting: bool, lost_turns: int
 ) -> None:
-    backoff = core.Backoff(first=1.0, cap=4.0)
-    role = role_of(
-        may_wait_for_evaluations=True,
-        lost_resumes=lost_resumes,
-        lost_turns=lost_turns,
-        lost_turn_backoff=backoff,
-    )
+    role = role_of(may_wait_for_evaluations=True, lost_turns=lost_turns)
     run = start(role, restarting=restarting, view=SUSPENDING)
     run.advance_to(0.0)
-    now = 0.0
 
     run.resume_ready(run.suspend(turn(run)))
     asked = turn(run)
     assert spec_of(asked).charge_class == "resume"
     assert asked.template == EXCHANGES.resume
-    assert isinstance(asked.context, core.ResumeFacts)
-
-    for lost in range(lost_resumes):
-        run.lose(asked)
-        now += backoff.delay(lost)
-        run.advance_to(now)
-        again = turn(run)
-        # The same continuation prompt, asked as a correction of the lost turn: core
-        # authorizes each continuation's resume once.
-        assert again.template == EXCHANGES.resume
-        assert again.context == asked.context
-        assert spec_of(again).charge_class == "correction"
-        assert spec_of(again).predecessor == invocation_of(asked)
-        assert spec_of(again).continuation_id is None
-        asked = again
 
     run.lose(asked)
     assert published(run) == Outcome(ended="Failed", reason="lost")
+    assert min(run.sleeping_until, default=1000.0) >= 1000.0  # no backoff: only the deadline
 
 
 # -- the checkpoint --------------------------------------------------------------------------------------

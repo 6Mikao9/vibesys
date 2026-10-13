@@ -202,7 +202,7 @@ class _Ask:
         self.corrections = 0
         self.drops = 0
         self.resuming = False
-        """Whether the ask in flight continues a wait: its losses count against ``lost_resumes``."""
+        """Whether the ask in flight continues a wait: a loss of it is never asked again."""
         self.invocation: InvocationRef | None = None
         self.decision = DecisionId(root=self.role.name)
 
@@ -454,11 +454,11 @@ class _Ask:
     async def _lost(self, lost: InvocationRef) -> Failed | _Again:
         """The transport lost the turn: ask the same question again after a backoff, or report it.
 
-        A turn that continued a wait is asked again, as a correction of the lost one, only as
-        often as the role's ``lost_resumes``: core authorizes each continuation's resume once.
+        A turn that continued a wait is never asked again, whatever the role's ``lost_turns``:
+        core authorizes each continuation's resume once, so the caller decides what follows.
         """
         role = self.role
-        allowed = role.lost_resumes if self.resuming else role.lost_turns
+        allowed = 0 if self.resuming else role.lost_turns
         if self.drops >= allowed:
             return Failed(reason=FailureReason.LOST, decision=self.decision, turn=lost)
         await self.kit.timer(self.kit.now() + role.lost_turn_backoff.delay(self.drops))
