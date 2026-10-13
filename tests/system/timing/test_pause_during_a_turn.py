@@ -6,6 +6,8 @@ after the operator asked. The pause is acted on within one control poll and the 
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support.skeleton_timing import (
@@ -18,8 +20,11 @@ from tests.support.skeleton_timing import (
 
 _TURN_S = 100.0
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-def _into_the_turn(seconds: float):  # noqa: ANN202
+
+def _into_the_turn(seconds: float) -> Callable[[TurnTimeline, object], bool]:
     def reached(timeline: TurnTimeline, _cluster: object) -> bool:
         return bool(timeline.starts) and timeline.clock.now() >= timeline.starts[0] + seconds
 

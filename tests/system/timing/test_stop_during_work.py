@@ -16,6 +16,8 @@ bound (#1370): the obeyed-cancel bound below.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
@@ -39,12 +41,15 @@ _MODES = st.sampled_from(StopMode)
 # A run costs seconds of host time, so the explicit examples pin the cases and one draw explores.
 _SETTINGS = settings(max_examples=1, deadline=None, derandomize=True, database=None)
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 def _one_worker() -> StaggeredStrategy:
     return StaggeredStrategy(config=StaggeredConfig(workers=1))
 
 
-def _into_the_turn(seconds: float):  # noqa: ANN202
+def _into_the_turn(seconds: float) -> Callable[[TurnTimeline, object], bool]:
     """A stop condition: ``seconds`` after the first turn began."""
 
     def reached(timeline: TurnTimeline, _cluster: object) -> bool:

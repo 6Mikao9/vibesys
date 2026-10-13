@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.system.skeleton.test_skeleton import _assert_adopted, _started
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_world import (
     IMPLEMENTATION,
@@ -27,6 +26,7 @@ from tests.support.skeleton_world import (
     open_skeleton_world,
 )
 from tests.support.stream_session_world import StreamHost, open_stream_host
+from tests.system.skeleton.test_skeleton import _assert_adopted, _started
 
 from vs_agent.api import AgentExecutionPolicy, AgentSessionSpec
 from vs_agent.api.testing import answering_with

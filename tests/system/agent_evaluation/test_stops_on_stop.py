@@ -12,8 +12,8 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
-from tests.system.agent_evaluation.test_bridge import Scenario, scenario
 from tests.support.skeleton_world import LEASE, Process
+from tests.system.agent_evaluation.test_bridge import Scenario, scenario
 
 from vs_core.api import StopMode
 from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall

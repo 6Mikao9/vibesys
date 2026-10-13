@@ -28,7 +28,13 @@ from typing import TYPE_CHECKING
 
 from tests.support.loop_invariants import RunRecords, cluster_jobs
 from tests.support.session_world import ProviderFaults, SessionHost
-from tests.support.skeleton_strategy import IMPLEMENTER, SkeletonConfig, SkeletonStrategy
+from tests.support.skeleton_strategy import (
+    IMPLEMENTATION,
+    IMPLEMENTER,
+    Implementation,
+    SkeletonConfig,
+    SkeletonStrategy,
+)
 from tests.support.skeleton_world import (
     LEASE,
     CandidateResolver,
@@ -367,8 +373,6 @@ class FaultedHost(SessionHost):
 
 def _faulted_agents(plan: FaultPlan) -> Callable[[Path], SessionHost]:
     def open_agents(root: Path) -> SessionHost:
-        from tests.support.skeleton_strategy import IMPLEMENTATION, Implementation  # noqa: PLC0415
-
         writer = CandidateWriter(root)
         client = AgentClient(FakeProvider(answer=writer.answer, on_turn=writer))
         resolver = CandidateResolver(
