@@ -14,6 +14,7 @@ from vs_core.api import (
     CoreEvent,
     CoreState,
     DecisionId,
+    FlowState,
     HostFence,
     HostId,
     InspectRequest,
@@ -34,12 +35,20 @@ from vs_runtime.api.core import (
     RuntimeRecord,
 )
 from vs_runtime.api.core_shell_fixtures import (
-    CounterSearch,
-    CounterState,
+    CounterConfig,
     LostAcknowledgementStateStore,
     ShellTraceTransitions,
+    counter,
 )
 from vs_runtime.api.testing import FakeRequestExecution
+
+
+def declared() -> CoreState:
+    """A new run whose declaration is the counter search's."""
+    core = initial_state()
+    return core.model_copy(
+        update={"run": core.run.model_copy(update={"declaration": counter.declaration})}
+    )
 
 
 class CrashPoint(StrEnum):
@@ -67,7 +76,7 @@ def shell_with_requests(
     *,
     crash_step: bool = False,
     operations: FakeRequestExecution | None = None,
-) -> CoreRuntime[CounterState]:
+) -> CoreRuntime[FlowState]:
     transitions = (
         CrashAfterStepTransitions(with_requests=True)
         if crash_step
@@ -75,9 +84,9 @@ def shell_with_requests(
     )
     return CoreRuntime(
         store,
-        CounterSearch(),
-        initial_state(),
-        config=None,
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(
             transitions=transitions,
             executors=RequestExecutors(
@@ -114,7 +123,7 @@ async def test_generated_crash_points_preserve_exact_committed_envelopes_and_no_
         assert shell.advance()
         stored = store.load()
         assert isinstance(stored, StoredEnvelope)
-        assert RuntimeRecord[CounterState].decode(stored, OperationRegistry()) == shell.record
+        assert RuntimeRecord[FlowState].decode(stored, OperationRegistry()) == shell.record
         if crash == CrashPoint.AFTER_DISPATCH:
             assert await shell.dispatch_one(now_at=time) == DispatchProgress.DISPATCHED
             # Drop the process-local completion queue. The next host must inspect,
@@ -123,7 +132,7 @@ async def test_generated_crash_points_preserve_exact_committed_envelopes_and_no_
         assert executor.executions == ()
     stored = store.load()
     assert isinstance(stored, StoredEnvelope)
-    exact = RuntimeRecord[CounterState].decode(stored, OperationRegistry())
+    exact = RuntimeRecord[FlowState].decode(stored, OperationRegistry())
     assert exact == shell.record
     restarted = shell_with_requests(store, executor, operations=operations)
     restarted.start("second", now_at=100, lease_duration=100)
@@ -179,9 +188,9 @@ async def test_unbound_executor_returns_named_typed_refusal() -> None:
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        CounterSearch(),
-        initial_state(),
-        config=None,
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions(with_requests=True)),
     )
     shell.start("host", now_at=0, lease_duration=100)

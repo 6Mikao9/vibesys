@@ -18,13 +18,19 @@ any script.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, cast
+
+from pydantic import ValidationError
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    AdoptionObserved,
+    AdoptRevision,
     Capabilities,
     ClockAdvanced,
+    CloseSession,
+    CollectEvidence,
     ContractError,
     CoreEvent,
     CoreState,
@@ -32,6 +38,9 @@ from vs_core.api import (
     Decision,
     Discarded,
     DispatchAuthorized,
+    DispatchTurn,
+    EnsureSession,
+    EnsureWorkspace,
     Event,
     EventCursor,
     EventId,
@@ -39,25 +48,37 @@ from vs_core.api import (
     HostFence,
     HostId,
     Inbox,
+    InvocationRef,
+    JobObserved,
     LifecycleCapability,
     Limits,
     MeasurementFailure,
+    MeasurementSubmissionObserved,
     Observation,
     ObservationStatus,
+    ObserveOwnedJob,
     OperationRegistry,
+    OwnedJob,
     Request,
     RequestObserved,
     RequestPhase,
     ResourceId,
+    RestoreRevision,
+    ResumeSessionTurn,
     RevisionRef,
     RunEnvelope,
     RunFacts,
     SearchDriver,
     SearchHost,
+    SessionObserved,
     StrategyEvent,
     StrategyState,
     Submission,
+    SubmitMeasurement,
     TimeReached,
+    TurnObserved,
+    VerifyAdoption,
+    WorkspaceObserved,
     advance,
     begin,
     project,
@@ -68,11 +89,11 @@ from vs_core.api import (
 from vs_core.testing.builders import initial_state
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
 
-    from vs_core.api import EvaluationTerminalFacts
+    from vs_core.api import EvaluationTerminalFacts, SchemaRef
     from vs_core.types.evaluation import Continuation, EvidenceRef
 
 
@@ -118,6 +139,13 @@ class Failed:
     accepted: bool = False
 
 
+@dataclass(frozen=True)
+class _InvalidReply:
+    """The turn ran and its reply does not parse as the schema it was asked to answer."""
+
+    resource_id: ResourceId | None
+
+
 type Answer = Succeeded | Running | Unknown | Retryable | Failed
 """One executor observation; a tuple of answers is a sequence of observations."""
 
@@ -125,9 +153,11 @@ type Script = Callable[[Request, CoreState], Answer | tuple[Answer, ...]]
 """What the executors answer for one request, given core's state when it is authorized."""
 
 
-def _shape(answer: Answer) -> tuple[ObservationStatus, bool, bool]:
+def _shape(answer: Answer | _InvalidReply) -> tuple[ObservationStatus, bool, bool]:
     """Status, accepted and terminal of the observation an answer stands for."""
     match answer:
+        case _InvalidReply():
+            return ObservationStatus.FAILED, True, True
         case Succeeded():
             return ObservationStatus.SUCCEEDED, True, True
         case Running():
@@ -203,6 +233,9 @@ class _Driver[S: StrategyState]:
         self.clock = 1.0
         self.calls: dict[str, int] = {}
         self.envelope_type = harness.envelope_type
+        self.during_turn = harness.during_turn
+        self.shell_events = harness.shell_events
+        self.schemas = harness.schemas
 
     # -- the shell loop ---------------------------------------------------
 
@@ -310,6 +343,9 @@ class _Driver[S: StrategyState]:
         key = request.request_id.root if request.request_id is not None else ""
         self.trace.requests.append(request)
         self.trace.log.append(request)
+        for event in self.during_turn(request, self.trace.core):
+            self.consume(event)
+            self.dispatch_all()
         answer = self.script(request, self.trace.core)
         answers = list(answer) if isinstance(answer, tuple) else [answer]
         if self.faults.retry_first(request):
@@ -320,11 +356,170 @@ class _Driver[S: StrategyState]:
         for item in answers:
             sequence = self.calls.get(key, 0)
             self.calls[key] = sequence + 1
-            observed = self.observation(request, item, sequence)
-            events.append(observed)
+            if self.shell_events:
+                events.extend(self.shell_observation(request, item, sequence))
+            else:
+                events.append(self.observation(request, item, sequence))
         return events
 
-    def observation(self, request: Request, answer: Answer, sequence: int) -> RequestObserved:
+    # -- the production executors' owner events -----------------------------------------
+
+    def shell_observation(self, request: Request, answer: Answer, sequence: int) -> list[CoreEvent]:
+        """The observation of ``request`` and the owner events its production executor attaches."""
+        reply = self.parsed(request, answer)
+        observed = self.observation(
+            request, reply if isinstance(reply, _InvalidReply) else answer, sequence
+        )
+        match request:
+            case DispatchTurn() | ResumeSessionTurn():
+                return self.turn_events(request, observed, reply)
+            case SubmitMeasurement():
+                return self.submission_events(observed)
+            case ObserveOwnedJob() | CollectEvidence():
+                return self.job_events(request, answer, observed, sequence)
+            case _:
+                owner = self.owner_event(request, observed)
+                return [observed] if owner is None else [observed, owner]
+
+    @staticmethod
+    def turn_events(
+        request: DispatchTurn | ResumeSessionTurn,
+        observed: RequestObserved,
+        reply: Answer | _InvalidReply,
+    ) -> list[CoreEvent]:
+        """The turn's observation, and the session owner's event that carries its reply.
+
+        The reply and the wait the agent validated travel on the owner's event, never on the
+        request's own observation.
+        """
+        observed = observed.model_copy(
+            update={"outcome_json": None, "outcome_schema": None, "suspension": None}
+        )
+        text = reply.output_json if isinstance(reply, Succeeded) else None
+        return [
+            observed,
+            TurnObserved(
+                invocation=InvocationRef(
+                    session_id=request.turn.session.session_id,
+                    invocation_id=request.turn.invocation_id,
+                    generation=request.scope.generation,
+                ),
+                observation=observed.observation,
+                output_schema=None if text is None else request.turn.output_schema,
+                output_json=text,
+                suspension=reply.suspension if isinstance(reply, Succeeded) else None,
+            ),
+        ]
+
+    @staticmethod
+    def submission_events(observed: RequestObserved) -> list[CoreEvent]:
+        """A measurement submission, and the job it started when it was accepted."""
+        view = observed.observation
+        events: list[CoreEvent] = [
+            observed,
+            MeasurementSubmissionObserved(observation=view, failure=observed.measurement_failure),
+        ]
+        if view.accepted and view.resource_id is not None:
+            events.append(
+                JobObserved(
+                    resource_id=view.resource_id,
+                    observation=view,
+                    evidence=observed.evidence,
+                    evaluation_result=observed.evaluation_result,
+                )
+            )
+        return events
+
+    def job_events(
+        self,
+        request: ObserveOwnedJob | CollectEvidence,
+        answer: Answer,
+        observed: RequestObserved,
+        sequence: int,
+    ) -> list[CoreEvent]:
+        """A poll or a collection, and the job state it found when the job was accepted."""
+        if not (
+            isinstance(answer, Succeeded | Running)
+            or (isinstance(answer, Failed) and answer.accepted)
+        ):
+            return [observed]
+        job = self.job_event(request, observed)
+        if isinstance(answer, Running):
+            # A poll is a query: it completes with the job's state, and the state
+            # it found is the job's own observation.
+            return [self.observation(request, Succeeded(), sequence), job]
+        return [observed, job]
+
+    @staticmethod
+    def owner_event(request: Request, observed: RequestObserved) -> CoreEvent | None:
+        """The event of the session, workspace or adoption owner that ``request`` causes."""
+        view = observed.observation
+        match request:
+            case EnsureSession():
+                return SessionObserved(session_id=request.spec.session_id, observation=view)
+            case CloseSession():
+                return SessionObserved(session_id=request.session_id, observation=view)
+            case AdoptRevision() | VerifyAdoption():
+                return AdoptionObserved(observation=view, revision=observed.revision)
+            case EnsureWorkspace() | RestoreRevision():
+                return WorkspaceObserved(
+                    attempt=request.attempt, observation=view, revision=observed.revision
+                )
+            case _:
+                return None
+
+    def parsed(self, request: Request, answer: Answer) -> Answer | _InvalidReply:
+        """A turn's reply is what its schema parses it to, as the session executor reports it."""
+        if (
+            not isinstance(request, DispatchTurn | ResumeSessionTurn)
+            or not isinstance(answer, Succeeded)
+            or answer.output_json is None
+            or request.turn.output_schema not in self.schemas
+        ):
+            return answer
+        try:
+            checked = self.schemas[request.turn.output_schema].model_validate_json(
+                answer.output_json
+            )
+        except ValidationError:
+            return _InvalidReply(answer.resource_id)
+        return replace(answer, output_json=checked.model_dump_json())
+
+    def job_event(
+        self, request: ObserveOwnedJob | CollectEvidence, observed: RequestObserved
+    ) -> JobObserved:
+        """The job's own observation, carrying its submission's identity as production does."""
+        job = next(
+            row
+            for row in self.trace.core.evaluation.jobs
+            if isinstance(row, OwnedJob) and row.resource_id == request.resource_id
+        )
+        key = job.submission_id.root
+        sequence = self.calls.get(key, 0)
+        self.calls[key] = sequence + 1
+        source = job.observation if isinstance(request, CollectEvidence) else None
+        view = (source or observed.observation).model_copy(
+            update={
+                "event_id": EventId(root=f"{key}:observation:{sequence}"),
+                "request_id": job.submission_id,
+                "sequence": sequence,
+                "observed_at": observed.observation.observed_at,
+                "resource_id": request.resource_id,
+            }
+        )
+        return JobObserved(
+            resource_id=request.resource_id,
+            observation=view,
+            evidence=tuple(
+                item.model_copy(update={"observation_sequence": sequence})
+                for item in observed.evidence
+            ),
+            evaluation_result=observed.evaluation_result,
+        )
+
+    def observation(
+        self, request: Request, answer: Answer | _InvalidReply, sequence: int
+    ) -> RequestObserved:
         self.clock += 1.0
         if request.request_id is None:
             message = "a dispatched request carries its identity"
@@ -341,8 +536,13 @@ class _Driver[S: StrategyState]:
             accepted=accepted,
             terminal=terminal,
             released=terminal,
-            children_complete=terminal,
-            resource_id=answer.resource_id if isinstance(answer, Succeeded | Running) else None,
+            children_complete=terminal
+            or (self.shell_events and accepted and isinstance(request, SubmitMeasurement)),
+            resource_id=(
+                answer.resource_id
+                if isinstance(answer, Succeeded | Running | _InvalidReply)
+                else None
+            ),
             revision=answer.revision if isinstance(answer, Succeeded) else None,
         )
         if isinstance(answer, Failed):
@@ -433,7 +633,13 @@ class Harness:
 
     ``events`` are delivered before the first decision (operator controls, for
     example). ``envelope_type`` is the concrete ``RunEnvelope[State]``, needed only
-    for the reload fault.
+    for the reload fault. ``during_turn`` says which events a dispatched turn's own tool
+    calls cause while it runs (an agent's evaluation request); they are delivered, and every
+    request they prepare is dispatched, before the turn's observation. With ``shell_events``
+    the driver attaches to each observation the owner events the production executors attach
+    (a turn's reply, a session, workspace or adoption, a submission's job): without them a
+    run cannot get past its first turn. ``schemas`` are the reply types of the turns, by the
+    schema they are asked to answer; a reply that does not parse is reported as invalid.
     """
 
     registry: OperationRegistry
@@ -442,6 +648,9 @@ class Harness:
     limits: Limits = field(default_factory=Limits)
     events: tuple[CoreEvent, ...] = ()
     envelope_type: type[RunEnvelope] | None = None
+    during_turn: Callable[[Request, CoreState], tuple[CoreEvent, ...]] = lambda _r, _c: ()
+    shell_events: bool = False
+    schemas: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
     deadline_at: float = 100000.0
     max_steps: int = 2000
     requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)

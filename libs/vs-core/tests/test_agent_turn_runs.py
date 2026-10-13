@@ -51,6 +51,11 @@ _OPEN = {
 def assert_ended_closed(trace: Trace, limits: core.Limits = LIMITS) -> None:
     """The run is terminal and live, every workspace closed, no wait left, every ask answered."""
     assert trace.finished
+    # The root only returned: the framework adopted the input and ended the run, once.
+    finishes = [d for d in trace.decisions if isinstance(d, core.Finish)]
+    assert [(f.result.outcome, f.result.reason) for f in finishes] == [
+        ("success", "kept-input: the input")
+    ]
     journal = Journal.from_log(trace.log)
     assert_live(journal, trace.core, Budget(retries=limits.max_retries), End.TERMINAL)
     assert all(a.phase == core.AttemptPhase.TERMINAL for a in trace.core.attempts.attempts)
@@ -116,7 +121,16 @@ def test_a_run_ends_whatever_its_agents_wait_for(scenario: Scenario) -> None:
 
 def test_a_judge_that_waits_for_its_own_evaluation_is_resumed() -> None:
     """The v12 stall: a read-only turn that ends waiting is resumed once its job ends."""
-    trace = Scenario(1, 1, (True,), (2,), ("judge",), ("wait",), True, Faults()).run()
+    trace = Scenario(
+        workstreams=1,
+        in_flight=1,
+        waits=(True,),
+        polls=(2,),
+        roles=("judge",),
+        ends=("wait",),
+        shares=True,
+        faults=Faults(),
+    ).run()
 
     assert_ended_closed(trace)
     assert len(trace.core.evaluation.continuations) == 1
@@ -151,7 +165,16 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
     """
 
     def run(chosen: tuple[Ending, ...]) -> Trace:
-        return Scenario(1, 1, (True,), (polls,), roles, chosen, True, Faults()).run()
+        return Scenario(
+            workstreams=1,
+            in_flight=1,
+            waits=(True,),
+            polls=(polls,),
+            roles=roles,
+            ends=chosen,
+            shares=True,
+            faults=Faults(),
+        ).run()
 
     trace = run(ends)
 
@@ -205,38 +228,30 @@ def test_roles_of_a_workstream_asking_for_one_candidate_share_one_evaluation(
     assert len(submitted) == len(by_attempt), "one charge per candidate"
 
 
-@_SETTINGS
-@given(
-    workstreams=st.integers(1, 3),
-    in_flight=st.integers(1, 2),
+_LIMITS = st.builds(
+    core.Limits,
     max_attempts=st.integers(1, 3),
     max_turns=st.integers(1, 6),
-    max_refunds=st.integers(0, 2),
+    max_parallel=st.just(2),
     max_retries=st.integers(0, 2),
+    max_refunds=st.integers(0, 2),
+)
+
+
+@_SETTINGS
+@given(
+    config=st.builds(Config, workstreams=st.integers(1, 3), in_flight=st.integers(1, 2)),
+    limits=_LIMITS,
     waits=st.lists(st.booleans(), min_size=1, max_size=3).map(tuple),
 )
 def test_a_run_ends_with_every_workspace_closed_whatever_core_refuses_over_its_limits(
-    workstreams: int,
-    in_flight: int,
-    max_attempts: int,
-    max_turns: int,
-    max_refunds: int,
-    max_retries: int,
-    waits: tuple[bool, ...],
+    config: Config, limits: core.Limits, waits: tuple[bool, ...]
 ) -> None:
     """Core refuses a start, a turn or a settlement the limits do not allow.
 
     The search takes a refusal as a typed failure and settles what it opened, so the run must
     still reach terminal with nothing left open, whichever limit bites and wherever it does.
     """
-    limits = core.Limits(
-        max_attempts=max_attempts,
-        max_turns=max_turns,
-        max_parallel=2,
-        max_retries=max_retries,
-        max_refunds=max_refunds,
-    )
-    host = ToyHost(waits=waits, polls=(1,))
-    trace = run_toy(host, Config(workstreams=workstreams, in_flight=in_flight), limits=limits)
+    trace = run_toy(ToyHost(waits=waits, polls=(1,)), config, limits=limits)
 
     assert_ended_closed(trace, limits)

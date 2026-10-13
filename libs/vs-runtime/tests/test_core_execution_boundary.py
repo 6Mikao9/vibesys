@@ -21,6 +21,7 @@ from vs_core.api import (
     DecisionId,
     EnsureSession,
     EventId,
+    FlowState,
     InputId,
     Observation,
     ObservationStatus,
@@ -60,13 +61,21 @@ from vs_runtime.api.core import (
     RuntimeCommitError,
     RuntimeExecutionError,
 )
-from vs_runtime.api.core_shell_fixtures import CounterSearch, CounterState, ShellTraceTransitions
+from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
 from vs_runtime.api.testing import FakePublicationDelivery, FakeRequestExecution
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_runtime.api.core import ExecutionLease
+
+
+def declared() -> CoreState:
+    """A new run whose declaration is the counter search's."""
+    core = initial_state()
+    return core.model_copy(
+        update={"run": core.run.model_copy(update={"declaration": counter.declaration})}
+    )
 
 
 class ScriptedExecution:
@@ -87,12 +96,12 @@ class ScriptedExecution:
 
 def make_shell(
     store: FakeStateStore, sessions: ScriptedExecution | None = None
-) -> CoreRuntime[CounterState]:
+) -> CoreRuntime[FlowState]:
     return CoreRuntime(
         store,
-        CounterSearch(),
-        initial_state(),
-        config=None,
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(
             transitions=ShellTraceTransitions(with_requests=True),
             executors=RequestExecutors(
@@ -119,7 +128,7 @@ def with_owner_events(result: ExecutionResult, *events: OwnerEvent) -> Execution
     return result.model_copy(update={"owner_events": events})
 
 
-async def prepared(shell: CoreRuntime[CounterState], store: FakeStateStore) -> None:
+async def prepared(shell: CoreRuntime[FlowState], store: FakeStateStore) -> None:
     del store
     shell.start("first", now_at=0, lease_duration=100)
     shell.submit(ClockAdvanced(now_at=1), now_at=1)
@@ -157,7 +166,7 @@ async def test_lease_is_renewable_while_an_executor_is_in_flight() -> None:
 @pytest.mark.asyncio
 async def test_shell_renew_is_not_rejected_as_busy_during_dispatch() -> None:
     store = FakeStateStore()
-    holder: list[CoreRuntime[CounterState]] = []
+    holder: list[CoreRuntime[FlowState]] = []
 
     async def renewing(
         request: Request, context: ExecutionContext, result: ExecutionResult
@@ -258,9 +267,9 @@ async def test_unbound_role_is_refused_before_authorization_is_committed() -> No
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        CounterSearch(),
-        initial_state(),
-        config=None,
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions(with_requests=True)),
     )
     shell.start("host", now_at=0, lease_duration=100)
@@ -472,9 +481,9 @@ async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() 
     sessions = ScriptedExecution()
     shell = CoreRuntime(
         store,
-        CounterSearch(),
-        initial_state(),
-        config=None,
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(
             transitions=RejectingObservations(with_requests=True),
             executors=RequestExecutors(
@@ -523,9 +532,9 @@ async def test_an_owner_event_core_rejects_halts_the_shell_instead_of_being_drop
 
     shell = CoreRuntime(
         store,
-        CounterSearch(),
-        initial_state(),
-        config=None,
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(
             transitions=RejectingOwnerInputs(with_requests=True),
             executors=RequestExecutors(

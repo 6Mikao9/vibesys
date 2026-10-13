@@ -13,9 +13,7 @@ from hypothesis import strategies as st
 from vs_core.api import (
     Capabilities,
     ContractError,
-    EventKind,
     OperationRegistry,
-    SchemaRef,
     SearchDeclaration,
     StrategyId,
     validate_startup,
@@ -49,9 +47,7 @@ def _declaration(
     by_name = {item.name: item for item in items}
     return SearchDeclaration(
         strategy_id=StrategyId(root="s"),
-        state_schema=SchemaRef(name="state", version=1),
         required_operations=tuple(by_name[name].entry.schema for name in required),
-        handles=frozenset({EventKind.FAILED, EventKind.STOP_REQUESTED}),
     )
 
 

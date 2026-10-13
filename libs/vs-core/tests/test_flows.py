@@ -4,7 +4,7 @@ A story reads as a script: the search opens waits, the test answers them. Every 
 twice: once on one live search, once where the state is written to JSON and a new search
 replays it after each step. Both must tell the same story. A flow never finishes the run, so
 a story reads how its flow went off the run's ``Finish`` (the reason of a ``NoWinner`` the root
-returns) or off what the flow published.
+returns, a ``cancelled`` one after a stop) or off what the flow published.
 """
 
 from __future__ import annotations
@@ -33,17 +33,6 @@ def begin(request: pytest.FixtureRequest) -> Begin:
     return lambda root, view=None, adopting=True: start(
         root, restarting=restarting, view=view, adopting=adopting
     )
-
-
-class Log(core.Value):
-    """What a toy flow publishes to tell a story the test reads back."""
-
-    lines: list[str]
-
-
-def told(run: FlowRun[Config]) -> list[str]:
-    """The lines the flow has published so far."""
-    return run.driver.published(run.state, Log).lines
 
 
 def ended(run: FlowRun[Config]) -> core.RunResultProposal:
@@ -407,7 +396,7 @@ def test_a_stopped_task_never_acquires_a_resource(begin: Begin) -> None:
     run = begin(parent)
     run.stop()
     assert ended(run).reason == "stopped: TaskStopped(key='late')"
-    assert run.open == ()  # nothing acquired or released
+    assert waits(run) == []  # nothing acquired or released
 
 
 def test_a_task_started_in_a_stopping_group_is_stopped_at_its_first_await(begin: Begin) -> None:
@@ -505,14 +494,6 @@ def test_the_clock_is_read_once_and_journaled(begin: Begin) -> None:
     answer(run, "b", 2)
     # a replay takes the journaled first reading, not the view as it is now
     assert ended(run).reason == "no-winner: read 5.0 now 99.0"
-
-
-def test_the_view_cannot_be_read_while_the_run_starts() -> None:
-    async def eager(ctx: core.Flow, _config: Config) -> None:
-        ctx.clock.now()
-
-    with pytest.raises(core.ContractError, match="view is not available"):
-        start(eager)
 
 
 def test_a_published_record_is_readable_from_the_state(begin: Begin) -> None:
