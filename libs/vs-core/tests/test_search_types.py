@@ -33,10 +33,8 @@ def test_a_bare_request_is_not_a_decision() -> None:
     decisions.append(_work())  # ty: ignore[invalid-argument-type]
     assert [type(d) for d in decisions[:2]] == [core.Wait, core.WakeAt]
     # Without the type checker, core still refuses the bare request, naming where it is.
-    uses = frozenset({core.WorkKind.WITHDRAW, core.WorkKind.WAKE_AT})
-    declaration = core.initial_state().run.declaration.model_copy(update={"uses": uses})
     with pytest.raises(core.ContractError, match="start work inside a Wait") as refused:
-        core.check_decisions(declaration, decisions)
+        core.check_decisions(decisions)
     assert refused.value.path == ("decisions", 2)
 
 

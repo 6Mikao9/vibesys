@@ -1,4 +1,4 @@
-"""Shared pieces of the flow tests: a declaration, requests, replies and a run starter."""
+"""Shared pieces of the flow tests: a role, a prompt, replies and a run starter."""
 
 from __future__ import annotations
 
@@ -6,15 +6,13 @@ from typing import TYPE_CHECKING, Any
 
 import vs_core.api as core
 from vs_core.api.testing import FakeView, FlowRun
+from vs_core.testing.flows import Prompt, fake_search
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
+    from contextlib import AbstractAsyncContextManager
 
 FACTS = core.initial_state().run.facts
-DECLARATION = core.SearchDeclaration(
-    strategy_id=core.StrategyId(root="flows"),
-    state_schema=core.SchemaRef(name="flows", version=1),
-)
 SHORT = core.Within(limit=10.0)
 
 
@@ -24,39 +22,42 @@ class Config(core.Value):
     width: int = 2
 
 
-class Prompt(core.Value):
-    """What a toy agent is asked."""
-
-    text: str
-
-
 class Plan(core.Value):
     """What a toy agent answers."""
 
     n: int
 
 
-def ask(label: str, agent: str = "worker") -> core.AskAgent:
-    """An ask whose decision id root is ``label``."""
-    return core.AskAgent(
-        decision_id=core.DecisionId(root=label),
-        scope=core.THIS_RUN,
-        agent=agent,
-        input=Prompt(text=label),
-    )
+WORKER = core.Role(
+    name="worker",
+    reply=Plan,
+    schema=core.SchemaRef(name="plan", version=1),
+    access=core.Access.READ_ONLY,
+    workspace=None,
+    charge="free",
+)
+"""The one role the toy flows ask: it answers a ``Plan``."""
+
+LENIENT = core.Role(
+    name="lenient",
+    reply=Plan,
+    schema=core.SchemaRef(name="plan", version=1),
+    access=core.Access.READ_ONLY,
+    workspace=None,
+    charge="free",
+    retry=core.Retry(corrections=0, lost_turns=0),
+)
+"""A role core never retries for: its first failure is the flow's."""
 
 
-def finish(reason: str, outcome: str = "success") -> core.Finish:
-    """A drain-finish with a reason."""
-    return core.Finish(
-        decision_id=core.DecisionId(root="done"),
-        scope=core.THIS_RUN,
-        mode="drain",
-        result=core.RunResultProposal(outcome=outcome, reason=reason),  # ty: ignore[invalid-argument-type]
-    )
+async def ask(
+    ctx: core.Flow, label: str, role: core.Role = WORKER, *, within: float = 10.0
+) -> core.TurnFinished | core.Failed:
+    """Ask ``role`` with a prompt whose text is ``label`` (a fresh session each call)."""
+    return await ctx.agents.session(role).turn(Prompt(text=label), within=within)
 
 
-def answer_of(event: core.Event) -> int:
+def answer_of(event: object) -> int:
     """The ``n`` of a plan reply, or -1 for anything else."""
     if isinstance(event, core.TurnFinished) and isinstance(event.reply, Plan):
         return event.reply.n
@@ -64,12 +65,24 @@ def answer_of(event: core.Event) -> int:
 
 
 def start(
-    root: Callable[[core.Flow, Config], Coroutine[Any, Any, None]],
+    root: Callable[[core.Flow, Config], Coroutine[Any, Any, core.NoWinner | None]],
     *,
     restarting: bool = False,
+    adopting: bool = True,
     view: FakeView | None = None,
 ) -> FlowRun[Config]:
     """Start a flow search; with ``restarting`` it restarts from JSON after every step."""
-    config = Config()
-    search = core.FlowSearch(DECLARATION, root, config)
-    return FlowRun.start(search, config, FACTS, view=view, restarting=restarting)
+    definition = fake_search("flows", Config)(root)
+    return FlowRun.start(definition, Config(), view=view, restarting=restarting, adopting=adopting)
+
+
+def open_workspace(
+    ctx: core.Flow, name: str
+) -> AbstractAsyncContextManager[core.Workspace | core.NotOpened]:
+    """``ctx.workspaces.open`` for an exclusive-root workspace of ``name`` on the run's input."""
+    return ctx.workspaces.open(
+        attempt=core.AttemptId(root=name),
+        item=core.ItemId(root=name),
+        plan=core.WorkspacePlan(mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=ctx.facts.baseline),
+        budget=core.AttemptBudget(),
+    )

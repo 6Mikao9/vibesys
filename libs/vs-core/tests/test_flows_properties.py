@@ -1,8 +1,7 @@
 """Crash-at-every-step sweep: a restart after every step tells the same story as a live run.
 
-Toy flows are generated from small programs (asks, timers, races between a request and a timer
-or the stop, retries, shielded regions, resources, and groups of tasks with their own
-programs), and so are the event orders (answer an open wait with a reply or a failure, move the
+Toy flows are generated from small programs (asks, timers, races between a turn and a timer
+or the stop, retries, resources, and groups of tasks with their own programs), and so are the event orders (answer an open wait with a reply or a failure, move the
 clock, stop). The same orders drive two runs in lockstep: one live, one that writes its state to
 JSON and replays it in a new search after every step. They must agree on every decision, every
 state and what every flow waits for. A counterexample is printed as a timeline.
@@ -18,12 +17,18 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
-from .flow_support import SHORT, Config, Plan, answer_of, ask, finish, start
+from .flow_support import Config, Plan, answer_of, ask, start
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Coroutine
 
     from vs_core.api.testing import FlowRun
+
+
+class Seen(core.Value):
+    """What the toy flow publishes at its end: what its program saw."""
+
+    text: str
 
 
 @dataclass(frozen=True)
@@ -51,11 +56,6 @@ class Retry:
 
 
 @dataclass(frozen=True)
-class Shield:
-    label: str
-
-
-@dataclass(frozen=True)
 class Guarded:
     """A resource around one ask: setup, body, teardown."""
 
@@ -70,7 +70,7 @@ class Scope:
     stops: bool
 
 
-type Op = Ask | Sleep | Race | Retry | Shield | Guarded | Scope
+type Op = Ask | Sleep | Race | Retry | Guarded | Scope
 
 _LEAVES = st.one_of(
     st.builds(Ask, label=st.sampled_from(["x", "y"])),
@@ -79,7 +79,6 @@ _LEAVES = st.one_of(
         Race, label=st.sampled_from(["r", "s"]), until=st.none() | st.integers(1, 30).map(float)
     ),
     st.builds(Retry, tries=st.integers(1, 3), backoff=st.booleans()),
-    st.builds(Shield, label=st.just("z")),
     st.builds(Guarded, label=st.just("g")),
 )
 
@@ -94,13 +93,13 @@ PROGRAMS = st.recursive(st.lists(_LEAVES, max_size=3).map(tuple), _bodies, max_l
 
 @core.resource
 async def guard(ctx: core.Flow, label: str) -> AsyncGenerator[str]:
-    await ctx.wait(ask(f"{label}-open"), SHORT, reply=Plan)
+    await ask(ctx, f"{label}-open")
     try:
         yield label
     except core.Stopped:
-        await ctx.wait(ask(f"{label}-close"), SHORT, reply=Plan)
+        await ask(ctx, f"{label}-close")
         raise
-    await ctx.wait(ask(f"{label}-close"), SHORT, reply=Plan)
+    await ask(ctx, f"{label}-close")
 
 
 async def interpret(ctx: core.Flow, body: tuple[Op, ...]) -> str:
@@ -109,27 +108,29 @@ async def interpret(ctx: core.Flow, body: tuple[Op, ...]) -> str:
     for op in body:
         match op:
             case Ask(label=label):
-                seen.append(type(await ctx.wait(ask(label), SHORT, reply=Plan)).__name__)
+                seen.append(type(await ask(ctx, label)).__name__)
             case Sleep(until=until):
                 await ctx.timer(until)
             case Race(label=label, until=until):
-                pending = ctx.start(ask(label), SHORT, reply=Plan)
-                other = ctx.stopped if until is None else ctx.timer(until)
-                seen.append(type(await ctx.first(pending, other)).__name__)
+                async with ctx.group(stops=False) as racing:
+                    pending = racing.start("race", _asked, label)
+                    other = ctx.stopped if until is None else ctx.timer(until)
+                    seen.append(type(await ctx.first(pending, other)).__name__)
             case Retry(tries=tries, backoff=backoff):
                 seen.append(str(await ctx.retry(_attempt(ctx), _policy(tries, backoff=backoff))))
-            case Shield(label=label):
-                with ctx.shielded():
-                    await ctx.wait(ask(label), SHORT, reply=Plan)
             case Guarded(label=label):
                 async with guard(ctx, label):
-                    await ctx.wait(ask(f"{label}-body"), SHORT, reply=Plan)
+                    await ask(ctx, f"{label}-body")
             case Scope(tasks=tasks, stops=stops):
                 async with ctx.group(stops=stops) as group:
                     for index, task in enumerate(tasks):
                         group.start(f"t{index}", interpret, task)
                     seen.extend([str(done) async for done in group])
     return ",".join(seen)
+
+
+async def _asked(ctx: core.Flow, label: str) -> str:
+    return type(await ask(ctx, label)).__name__
 
 
 def _policy(tries: int, *, backoff: bool) -> core.RetryPolicy:
@@ -140,7 +141,7 @@ def _attempt(
     ctx: core.Flow,
 ) -> Callable[[core.Tries[str]], Coroutine[Any, Any, int | core.Again[str]]]:
     async def attempt(tries: core.Tries[str]) -> int | core.Again[str]:
-        n = answer_of(await ctx.wait(ask("t"), SHORT, reply=Plan))
+        n = answer_of(await ask(ctx, "t"))
         return n if n > 0 else core.Again(reason=str(tries.number))
 
     return attempt
@@ -148,8 +149,8 @@ def _attempt(
 
 def make_root(body: tuple[Op, ...]) -> Callable[[core.Flow, Config], Coroutine[Any, Any, None]]:
     async def root(ctx: core.Flow, _config: Config) -> None:
-        await ctx.wait(ask("start"), SHORT, reply=Plan)  # the view is readable after it
-        await ctx.finish(finish(await interpret(ctx, body) or "empty"))
+        await ask(ctx, "start")
+        ctx.publish(Seen(text=await interpret(ctx, body) or "empty"))
 
     return root
 
@@ -194,6 +195,6 @@ def _action(data: st.DataObject, run: FlowRun[Config]) -> Callable[[FlowRun[Conf
         target = run.view.now_at + step
         return lambda r: r.advance_to(target)
     asked = run.open[int(choice.removeprefix("reply").removeprefix("fail"))]
-    if choice.startswith("fail") or not isinstance(asked.request, core.AskAgent):
+    if choice.startswith("fail") or not isinstance(asked.request, core.RequestTurn):
         return lambda r: r.fail(asked, core.FailureReason.TIMED_OUT)
     return lambda r: r.reply(asked, Plan(n=answer))

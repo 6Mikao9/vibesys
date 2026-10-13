@@ -779,12 +779,10 @@ def test_exhausted_receipt_budget_rejects_reordered_duplicate_starts_once(order:
         assert len(ids) == len(set(ids))
 
 
-def test_host_stop_requires_explicit_result_and_closes_admission() -> None:
-    """RunControl stop carries its own result proposal; scheduling never invents one."""
+def test_host_stop_with_a_result_closes_admission_and_drains() -> None:
+    """A RunControl stop that carries a result proposal drains; scheduling never invents one."""
     state = _state()
     control = core.ControlInput(control_id=core.ControlId(root="host-stop"), action="stop")
-    with pytest.raises(PydanticValidationError, match="required exactly for stop control"):
-        core.RunControlEvent(control=control, now_at=10.0)
     proposal = core.RunResultProposal(outcome="cancelled", reason="host stop")
     result = _step(state, core.RunControlEvent(control=control, now_at=10.0, result=proposal))
     assert result.state.scheduling.admission_closed
@@ -799,6 +797,22 @@ def test_host_stop_requires_explicit_result_and_closes_admission() -> None:
     assert result.state.evaluation == state.evaluation
     assert result.state.settlement == state.settlement
     assert result.state.records == state.records
+
+
+def test_host_stop_without_a_result_only_tells_the_search() -> None:
+    """A soft stop is recorded once and leaves the run running: the search ends the run."""
+    state = _state()
+    control = core.ControlInput(control_id=core.ControlId(root="host-stop"), action="stop")
+    event = core.RunControlEvent(control=control, now_at=10.0)
+    result = _step(state, event)
+    assert result.state.run.status == state.run.status
+    assert result.state.run.result is None
+    assert not result.state.scheduling.admission_closed
+    assert result.state.run.controls == (*state.run.controls, control)
+    assert [type(e) for e in result.events] == [core.ControlChanged]
+    again = _step(result.state, event)
+    assert again.state.run.controls == result.state.run.controls
+    assert again.events == ()
 
 
 @pytest.mark.parametrize(

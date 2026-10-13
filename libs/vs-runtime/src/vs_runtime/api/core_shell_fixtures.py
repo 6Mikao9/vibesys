@@ -41,7 +41,7 @@ from vs_core.api import (
     trace_step,
     within,
 )
-from vs_core.flows import search
+from vs_core.api.search import search
 from vs_project.api import Committed, FakeStateStore, Unknown
 from vs_runtime.api.core import CoreRuntime, CoreRuntimeBindings
 
