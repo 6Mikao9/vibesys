@@ -135,7 +135,9 @@ def representatives() -> Representatives:
 # Crash points that hit a known core gap: `vs_core._waits` lists RECOVERY_CHECK as
 # HALTS_THE_RUN (a recovery check whose inspection was lost has no deadline of its own), so the
 # restarted run halts with an orphan wait instead of converging. `core_gap` expects exactly that,
-# so the entry fails the day core fixes it and must then be removed.
+# so the entry fails the day core fixes it and must then be removed. Remove it, and the larger
+# `reconciliation_bound` of the skeleton world, when the separate core liveness fix for lapsed
+# polls after a late restart lands on main.
 CORE_GAPS = frozenset({"durable_write:receipt_begun#4"})
 
 

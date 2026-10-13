@@ -155,8 +155,8 @@ def _selection_name(selection: Selection) -> str:
 async def conclude(kit: Kit, returned: NoWinner | None) -> None:
     """End the run: adopt the last choice (unless there is no winner), then finish.
 
-    A stop or a deadline makes the result ``cancelled`` whatever else happened; a failed
-    adoption or a ``NoWinner`` is a ``failure`` with a typed reason.
+    A stop or a deadline makes the result ``cancelled`` (a proposal core refuses because the run
+    is closing included); a failed adoption or a ``NoWinner`` is a ``failure`` with a typed reason.
     """
     stopped = _stop_ending(kit)
     result = await _result(kit, returned, stopped)
@@ -187,10 +187,12 @@ async def _result(
     selection = kit.run.choice or TrustedBaseline(revision=kit.run.facts.baseline)
     adopted = await adopt(kit, selection)
     if isinstance(adopted, NotAdopted):
-        return RunResultProposal(
-            outcome="failure",
-            reason=reason_text(EndReason.ADOPTION_FAILED, adopted.reason.value),
-        )
+        # Core may refuse the proposal because the stop closed the run to decisions: the operator
+        # ended it and nothing failed. An adoption that was tried and failed still fails the run.
+        detail = reason_text(EndReason.ADOPTION_FAILED, adopted.reason.value)
+        if stopped is not None and adopted.reason is FailureReason.REFUSED:
+            return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
+        return RunResultProposal(outcome="failure", reason=detail)
     kind = EndReason.KEPT_INPUT if isinstance(selection, TrustedBaseline) else EndReason.ADOPTED
     detail = reason_text(kind, _selection_name(selection))
     if stopped is not None:

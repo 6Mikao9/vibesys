@@ -186,7 +186,9 @@ class World:
     """A reconciliation bound that outlasts the restart delay of the crash sweeps (one lease and a
     little more). Known core gap (`vs_core._waits`, OWNED_JOB halts the run): an owned job whose
     poll lapsed while the host was down is not re-polled, so a restart later than the bound is
-    not a property core keeps yet."""
+    not a property core keeps yet. Remove this override, and `core_gap` in
+    `tests/support/crash_harness.py`, when the separate core liveness fix for lapsed polls after a
+    late restart lands on main."""
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
     commits: CommitObserver | None = None

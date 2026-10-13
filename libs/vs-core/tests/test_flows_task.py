@@ -120,3 +120,31 @@ def test_a_workspace_kept_without_a_revision_settles_with_the_assessment_and_no_
     assert (disposition.outcome, disposition.retention) == ("failed", "discard")
     settlement = run.close_workspace(settle)
     assert settlement.candidate is None
+
+
+@pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+def test_a_workspace_core_refuses_to_settle_as_asked_settles_plainly_and_says_why(
+    *, restarting: bool
+) -> None:
+    seen: list[core.Failed | None] = []
+
+    @fake_search("flows", Config, ROLES)
+    async def refused(ctx: core.Flow, _config: Config) -> None:
+        async with open_workspace(ctx, "ws") as ws:
+            assert not isinstance(ws, core.NotOpened)
+            ctx.workspaces.keep(ws, None, KEPT)
+        seen.append(ws.refused)
+
+    run = FlowRun.start(refused, Config(), restarting=restarting)
+    run.open_workspace(run.expect(core.StartAttempt))
+    run.fail(run.expect(core.Withdraw), core.FailureReason.REFUSED)
+    plain = run.expect(core.Withdraw)
+    assert isinstance(plain.request, core.Withdraw)
+    assert isinstance(plain.request.disposition, core.Settle)
+    assert plain.request.disposition.outcome == "failed"
+    run.close_workspace(plain)
+    assert seen
+    failure = seen[-1]
+    assert failure is not None
+    assert failure.reason is core.FailureReason.REFUSED
+    assert failure.cause is not None
