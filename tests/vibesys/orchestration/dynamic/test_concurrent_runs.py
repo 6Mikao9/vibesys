@@ -415,7 +415,12 @@ def test_a_restart_after_a_crash_with_two_turns_in_flight_finishes_the_run_once_
         assert run.finished
         assert run.no_effect_ran_twice()
     if any(run.result != normal.result for run in recovered):
-        # Found by this audit and not root-caused: a host that dies while a judge turn runs is
-        # replaced by one whose recovered judge turn ends TIMED_OUT, so both workstreams fail and
-        # the input is kept instead of the candidate. Remove this branch when it is fixed.
+        # Root cause (vs-core): the clock a restarted host starts at is later than every limit
+        # the dead host set, so recovery's deadline events end each request that was in flight
+        # as timed out before it can be reattached or run again; a render operation that had
+        # already succeeded is failed that way, the judge turn is never asked, the workstream
+        # ends as render-failed and the input is kept. Core keeps this on purpose today:
+        # libs/vs-dst/tests/test_limits_survive_restart.py pins that a limit is fixed when core
+        # accepts the request and a restart does not renew it. Remove this branch when core
+        # raises deadlines only after the recovery inspections have resolved.
         pytest.xfail("a recovered run does not reach the uninterrupted run's result")

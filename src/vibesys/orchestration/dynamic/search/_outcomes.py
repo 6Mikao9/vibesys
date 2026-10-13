@@ -289,7 +289,7 @@ class WorkstreamDone:
             return cls.stopped(start)
         return cls(
             start,
-            failure=closing.cause,
+            failure=closing.cause or _refusal(workspace),
             generation=workspace.ref.generation,
             settlement=workspace.settlement,
             result=closing.result,
@@ -338,6 +338,12 @@ UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATI
 
 
 # -- how a workstream ends ---------------------------------------------------------------------------
+
+
+def _refusal(workspace: Workspace) -> Failure | None:
+    """Why core would not settle the workspace as the workstream asked, when it would not."""
+    refused = workspace.refused
+    return None if refused is None else failure_of(refused, None)
 
 
 def failure_of(event: Failed, role: AgentName | None) -> Failure:  # noqa: PLR0911  # LW-220433 [PLR0911]; one return per wait-failure reason keeps the mapping to the typed failure exhaustive and visible.

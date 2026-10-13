@@ -229,3 +229,20 @@ def test_the_ending_is_the_same_whenever_the_stop_comes(stop_after: int) -> None
     result = result_of(run)
     assert result.outcome == "cancelled"
     assert result.selection == selection_of(kept(f"c{stop_after}"))
+
+
+def test_a_stopped_run_whose_proposal_core_refuses_is_cancelled_not_failed() -> None:
+    async def choosy(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(kept("a"))
+        await ctx.stopped
+
+    run = start(choosy, adopting=False)
+    run.stop()
+    run.fail(
+        run.expect(core.ProposeWinner),
+        core.FailureReason.REFUSED,
+        cause=core.RejectionCode.CLOSED_SCOPE,
+    )
+    result = result_of(run)
+    assert result.outcome == "cancelled"
+    assert result.reason == "stopped: adoption-failed: refused"

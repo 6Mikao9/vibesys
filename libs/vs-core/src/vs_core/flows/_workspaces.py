@@ -74,6 +74,8 @@ class Workspace:
     """What the settlement will assert: set by ``ctx.workspaces.keep``."""
     settlement: Settlement | None = None
     """Core's settlement of the workspace; None until it closes, or if core took none."""
+    refused: Failed | None = None
+    """Why core refused what ``keep`` asserted, when it did: the workspace then settled plainly."""
 
     @property
     def scope(self) -> Scope:
@@ -197,6 +199,7 @@ async def _settle(kit: Kit, workspace: Workspace, disposition: Settle) -> None:
     """Close the workspace, asserting ``disposition``; plainly, once, if core refuses that."""
     settled = await _withdraw(kit, workspace.ref, disposition)
     if isinstance(settled, Failed):
+        workspace.refused = settled
         settled = await _withdraw(kit, workspace.ref, _plain("failed"))
     workspace.settlement = None if isinstance(settled, Failed) else settled
     if workspace.ref in kit.task.holds:

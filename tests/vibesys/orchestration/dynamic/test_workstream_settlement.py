@@ -17,6 +17,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
 )
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
+from vibesys.orchestration.dynamic.search.api import FailureKind
 from vs_core.api import (
     Finish,
     Measure,
@@ -128,6 +129,10 @@ def test_a_settlement_core_refuses_ends_the_workstream_instead_of_stranding_it(
     assert record is not None
     assert not record.running
     assert len(record.finished) == 1
+    # The planner is told core refused to settle the workstream as asked.
+    refusal = record.finished[0].failure
+    assert refusal is not None
+    assert (refusal.kind, refusal.cause) == (FailureKind.REFUSED, code)
     # Core took no assertion about the candidate, so it is not eligible and the input stands.
     assert not any(row.eligible for item in record.hypotheses for row in item.rounds)
     finish = host.run.finished

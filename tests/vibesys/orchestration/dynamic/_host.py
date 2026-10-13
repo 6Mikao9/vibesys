@@ -111,10 +111,13 @@ def begin(
     *,
     restarting: bool,
     view: FakeView | None = None,
+    adopting: bool = True,
     **world: Unpack[World],
 ) -> Host:
     """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
-    run = FlowRun.start(dynamic, cfg, facts=FACTS, restarting=restarting, view=view)
+    run = FlowRun.start(
+        dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting
+    )
     return Host(run, cfg, **world)
 
 

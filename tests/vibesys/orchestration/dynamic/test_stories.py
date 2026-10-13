@@ -25,7 +25,10 @@ from tests.vibesys.orchestration.dynamic._replies import (
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import FailureKind
 from vs_core.api import (
+    FailureReason,
     Finish,
+    ProposeWinner,
+    RejectionCode,
     RequestTurn,
     Retained,
     RevisionRef,
@@ -38,9 +41,9 @@ CANDIDATE = RevisionRef.of_git_commit("def456")
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
 
 
-def start(*, restarting: bool) -> Host:
+def start(*, restarting: bool, adopting: bool = True) -> Host:
     """Run the baseline measurement the root begins with, up to the first planner turn."""
-    host = begin(CONFIG, restarting=restarting)
+    host = begin(CONFIG, restarting=restarting, adopting=adopting)
     host.drain_until_turn(PLANNER_LABEL)
     return host
 
@@ -129,3 +132,20 @@ def test_a_stop_while_planning_ends_the_run_without_waiting_for_the_planner(
     assert record is not None
     assert not record.running
     assert not host.unsettled
+
+
+@MODES
+def test_a_stopped_run_core_will_not_adopt_ends_cancelled_not_failed(*, restarting: bool) -> None:
+    host = start(restarting=restarting, adopting=False)
+    host.run.expect_turn(role=PLANNER_LABEL)
+
+    host.run.stop()
+    host.run.fail(
+        host.run.expect(ProposeWinner), FailureReason.REFUSED, cause=RejectionCode.CLOSED_SCOPE
+    )
+    host.drain()
+
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    assert finish.result.outcome == "cancelled"
+    assert finish.result.reason.startswith("stopped")
