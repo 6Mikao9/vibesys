@@ -114,7 +114,7 @@ vs-sim pytest plugin: pull requests sample and
 `.github/workflows/nightly.yml` explores. State a count as
 `vs_sim.api.testing.examples(pr=3, nightly=12)` and a crash sweep as
 `swept(count, sample)`; never read an environment variable or define a
-per-file `_FULL` constant.
+per-file depth constant.
 
 A timeout verdict is a timeout or clock reading that decides the outcome rather
 than only failing a hung test: `assert not ev.wait(timeout=T)`,

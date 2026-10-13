@@ -43,7 +43,7 @@ def test_a_restart_after_any_crash_finishes_the_same_run():
   `rerun_with_crash(point)`.
 - `CrashPoint` (`CrashKind.BEFORE_COMMIT` or `AFTER_COMMIT` of commit k; it prints as
   `before commit 17`) and the one setting that chooses which of them a suite tries
-  (`CrashPointPolicy`, `SAMPLED`, `EVERY_POINT`, `set_crash_point_policy`).
+  (`CrashPointPolicy`, `SAMPLED`, `EVERY_POINT`, `crash_point_policy()`, which follows `vs_sim`'s `--depth`).
 
 ## Cheap crashes
 

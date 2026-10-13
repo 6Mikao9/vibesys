@@ -17,8 +17,6 @@ Past bugs these guard, and the commits before which they fail:
 
 from __future__ import annotations
 
-import os
-
 from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
 from tests.support.skeleton_timing import (
@@ -29,6 +27,8 @@ from tests.support.skeleton_timing import (
     run_timed,
 )
 from tests.support.skeleton_world import LEASE
+
+from vs_sim.api.testing import Depth, depth, examples
 
 #: The loop wakes at most one observe interval after the last job ends (``Plan.observe_s``),
 #: plus the cost of the cluster's own polls.
@@ -41,11 +41,11 @@ _DURATIONS = st.lists(
 )
 
 # A run costs seconds of host time, so a pull request replays the pinned examples only; the
-# scheduled workflow (VIBESYS_FULL_PROPERTIES=1) also draws generated ones.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# nightly depth also draws generated ones.
+_NIGHTLY = depth() is Depth.NIGHTLY
 _SETTINGS = settings(
-    max_examples=8 if _FULL else 1,
-    phases=(Phase.explicit, Phase.generate) if _FULL else (Phase.explicit,),
+    max_examples=examples(pr=1, nightly=8),
+    phases=(Phase.explicit, Phase.generate) if _NIGHTLY else (Phase.explicit,),
     deadline=None,
     derandomize=True,
     database=None,

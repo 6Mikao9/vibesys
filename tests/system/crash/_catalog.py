@@ -6,7 +6,7 @@ what the dying host had made durable (the boundary kind) and on how core recover
 was in flight (its lifecycle class: a query is asked again, an idempotent write is issued again
 under its key, an owned job and a session turn are inspected first). So a pull request crashes the
 host once per (boundary kind, lifecycle class) and the nightly job crashes it at every point of
-each group. `vs_sim.api.testing.swept` makes that choice, from the session's `--crash-points`.
+each group. `vs_sim.api.testing.swept` makes that choice, from the session's `--depth`.
 
 A crash inside the recovery of an earlier crash is one more boundary kind (`RECOVERY`), not a
 second sweep: its points are the crossings of the recovery window that follows the reference crash
@@ -37,7 +37,7 @@ from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_SEALED
 from tests.support.skeleton_sim import Simulation, simulate
 
 from vs_faults.api import Boundary, Crossing, FaultGate, FaultPlan, HostCrashError
-from vs_sim.api.testing import SweepBreadth, VirtualClock, run_virtual, sweep_breadth, swept
+from vs_sim.api.testing import VirtualClock, examples, run_virtual, swept
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -188,7 +188,7 @@ def sampled_recoveries(lifecycle: LifecycleClass, part: int = 0, parts: int = 1)
 
 def recovery_parts() -> int:
     """How many parts the exhaustive recovery sweep of a class is split into."""
-    return 4 if sweep_breadth() is SweepBreadth.ALL else 1
+    return examples(pr=1, nightly=4)
 
 
 def params(chosen: list[Point]) -> list[object]:

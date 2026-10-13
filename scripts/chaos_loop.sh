@@ -11,7 +11,7 @@ workers="${3:-8}"
 last=$((first + count - 1))
 root="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$root/.logs"
-export CHAOS_SEEDS="${first}-${last}"
+export CHAOS_SEED_RANGE="${first}-${last}"
 export CHAOS_LOG="$root/.logs/chaos-${first}-${last}.jsonl"
 cd "$root"
 exec uv run pytest tests/system/chaos/test_chaos.py \

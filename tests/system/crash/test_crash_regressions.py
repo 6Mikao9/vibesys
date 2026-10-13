@@ -1,7 +1,7 @@
 """Crashes that once broke recovery, kept as named cases.
 
 Each case pins a crash point of the skeleton run (named by its boundary, target and ordinal) that
-a bug was found at. They stay whatever `--crash-points` says: the sample of
+a bug was found at. They stay whatever `--depth` says: the sample of
 `test_crash_convergence.py` need not reach them.
 """
 

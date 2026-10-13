@@ -205,7 +205,7 @@ def repro(seed: int) -> str:
     """Return the one-line command that reruns ``seed``."""
     return (
         "uv run pytest tests/system/chaos/test_chaos.py "
-        f"-k 'seed_{seed}]' -p no:randomly  # or CHAOS_SEEDS={seed}"
+        f"-k 'seed_{seed}]' -p no:randomly  # or CHAOS_SEED_RANGE={seed}"
     )
 
 

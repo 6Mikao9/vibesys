@@ -5,7 +5,7 @@ while one is in flight must wait for its observation, then cancel the run's owne
 requests core issues. Whichever request the stop lands on, however long the host waits before
 giving up on it, and however the measurements and turns before it went, the run reaches a
 terminal record with every owned job released, and a resumed host finishes the drain instead of
-giving up again. A pull request stops at a sample of the requests; `--crash-points=all` at each.
+giving up again. A pull request stops at a sample of the requests; `--depth=nightly` at each.
 """
 
 from __future__ import annotations

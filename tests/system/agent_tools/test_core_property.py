@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -85,7 +84,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
 from vs_runtime.api.testing import FakePublicationDelivery, ScriptedExecutors
 from vs_runtime.contracts import AgentRole, AgentTool
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import VirtualClock, examples, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -732,10 +731,9 @@ _TURNS = st.lists(
 ).map(tuple)
 
 
-# A pull request draws a sample; the scheduled workflow sets ``VIBESYS_FULL_PROPERTIES=1``
-# and draws the full count. An example costs about 0.15 s (the core validates the whole
+# A pull request draws a sample; the nightly depth draws the full count. An example costs about 0.15 s (the core validates the whole
 # run record at every step), so the full count is a half-minute run.
-_EXAMPLES = 200 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 30
+_EXAMPLES = examples(pr=30, nightly=200)
 
 
 @settings(

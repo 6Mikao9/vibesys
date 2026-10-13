@@ -10,7 +10,6 @@ result, and it must be live.
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -24,8 +23,9 @@ from tests.system.delivery._skeleton_subject import (
 
 from vs_core.testing.drive import Faults, Trace, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
+from vs_sim.api.testing import examples
 
-_EXAMPLES = 12 if os.environ.get("VIBESYS_FULL_PROPERTIES") == "1" else 4
+_EXAMPLES = examples(pr=4, nightly=12)
 PURE = settings(
     max_examples=_EXAMPLES,
     deadline=None,

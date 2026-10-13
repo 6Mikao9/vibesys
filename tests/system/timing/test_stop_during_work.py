@@ -16,7 +16,6 @@ bound (#1370): the obeyed-cancel bound below.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -34,6 +33,7 @@ from tests.support.skeleton_timing import (
 )
 
 from vs_core.api import RunStatus, StopMode
+from vs_sim.api.testing import Depth, depth, examples
 
 #: A stop during a turn the agent obeys a cancel for is acted on within this many virtual seconds.
 STOP_BOUND_S = 5.0
@@ -44,11 +44,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 # A run costs seconds of host time, so a pull request replays the pinned examples only; the
-# scheduled workflow (VIBESYS_FULL_PROPERTIES=1) also draws generated ones.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# nightly depth also draws generated ones.
+_NIGHTLY = depth() is Depth.NIGHTLY
 _SETTINGS = settings(
-    max_examples=8 if _FULL else 1,
-    phases=(Phase.explicit, Phase.generate) if _FULL else (Phase.explicit,),
+    max_examples=examples(pr=1, nightly=8),
+    phases=(Phase.explicit, Phase.generate) if _NIGHTLY else (Phase.explicit,),
     deadline=None,
     derandomize=True,
     database=None,

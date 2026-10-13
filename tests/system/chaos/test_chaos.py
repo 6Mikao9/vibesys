@@ -1,7 +1,7 @@
 """Chaos on the skeleton search: generated fault plans and a seeded stop, through the shell.
 
-The PR tier runs a small fixed set of seeds. ``CHAOS_SEEDS=A-B`` (or a comma list) runs other
-seeds, ``CHAOS_LOG=path`` appends one JSON summary per run, and ``scripts/chaos_loop.sh N``
+The PR tier runs a small fixed set of seeds. ``CHAOS_SEED_RANGE=A-B`` (or a comma list) runs an explicit
+range of seeds, ``CHAOS_LOG=path`` appends one JSON summary per run, and ``scripts/chaos_loop.sh N``
 sweeps N seeds in parallel. A failure prints its seed, the injected faults, the violations and a
 one-line repro.
 
@@ -39,6 +39,7 @@ from vs_agent.api.testing import AgentCrashError
 from vs_faults.api import AgentFault, Boundary, ClusterFault, ClusterOperation, FaultPlan, FaultRule
 from vs_runtime.api import RunCleanupError, RuntimeContractError
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
+from vs_sim.api.testing import Depth, depth
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,12 +51,16 @@ def _ignore(transition: object) -> None:
 
 # Each seed runs a whole skeleton search on real Git and the Fake cluster, so a pull request runs
 # a few that cover a cluster fault, an agent crash, and a stop with two faults; the nightly
-# workflow sweeps many more.
-_PR_SEEDS = "2,4,9"
+# workflow's depth draws twelve.
+_PR_SEEDS = (2, 4, 9)
+_NIGHTLY_SEEDS = tuple(range(12))
 
 
 def _seeds() -> list[object]:
-    spec = os.environ.get("CHAOS_SEEDS", _PR_SEEDS)
+    spec = os.environ.get("CHAOS_SEED_RANGE")
+    if spec is None:
+        chosen = _NIGHTLY_SEEDS if depth() is Depth.NIGHTLY else _PR_SEEDS
+        return [pytest.param(seed, id=f"seed_{seed}") for seed in chosen]
     seeds: list[object] = []
     for part in spec.split(","):
         low, _, high = part.partition("-")

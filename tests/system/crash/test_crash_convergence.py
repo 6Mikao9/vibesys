@@ -4,7 +4,7 @@ The skeleton is the one search here: what the shell guarantees (intent before ef
 in a new epoch, an effect that ran is never repeated) does not depend on the search, so a search
 that is correct on core's contract inherits it. The crash points are grouped by what the host had
 made durable (`PointKind`) and by the lifecycle class of the request in flight; a pull request
-crashes the host once per group, the nightly job (`--crash-points=all`) at every point of each.
+crashes the host once per group, the nightly job (`--depth=nightly`) at every point of each.
 Whatever the crash, the run ends exactly as the straight run does: the same result, the same adopted
 tree, one cluster submission per measurement and one agent dispatch per turn.
 """

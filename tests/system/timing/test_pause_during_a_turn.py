@@ -6,7 +6,6 @@ after the operator asked. The pause is acted on within one control poll and the 
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 from hypothesis import Phase, example, given, settings
@@ -19,17 +18,19 @@ from tests.support.skeleton_timing import (
     run_timed,
 )
 
+from vs_sim.api.testing import Depth, depth, examples
+
 _TURN_S = 100.0
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 # A run costs seconds of host time, so a pull request replays the pinned examples only; the
-# scheduled workflow (VIBESYS_FULL_PROPERTIES=1) also draws generated ones.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# nightly depth also draws generated ones.
+_NIGHTLY = depth() is Depth.NIGHTLY
 _SETTINGS = settings(
-    max_examples=8 if _FULL else 1,
-    phases=(Phase.explicit, Phase.generate) if _FULL else (Phase.explicit,),
+    max_examples=examples(pr=1, nightly=8),
+    phases=(Phase.explicit, Phase.generate) if _NIGHTLY else (Phase.explicit,),
     deadline=None,
     derandomize=True,
     database=None,
