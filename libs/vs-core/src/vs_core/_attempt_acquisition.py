@@ -1286,6 +1286,54 @@ def _decline_checkpoint(
     return AreaChange(state=_replace(state, updated), events=declined(event.invocation, reason))
 
 
+def _resume_deferred_checkpoint(
+    state: AttemptsState,
+    context: AttemptsContext,
+    attempt: AttemptView,
+    event: InvocationEnded,
+) -> AreaChange[AttemptsState]:
+    """Keep the promise of a ``WRITER_ACTIVE`` decline when the later writer ends empty-handed.
+
+    A conclusive write turn that ends while another writer of the workspace is still running
+    is declined, because a snapshot would be torn; the decline leaves the checkpoint to the
+    later writer's own terminal turn. That turn earns one only when it succeeds. When it
+    fails (crash, timeout, bad reply, cancellation) it requests nothing, and the earlier
+    writer's work would stay unretained: a search that keeps its revision then has the
+    closure's retention rejected, and the attempt never releases. So every end of a writer
+    that earns no checkpoint of its own asks again for the last deferred one; if another
+    writer is still running, the ask is declined again, silently, and the next end repeats it.
+    """
+    ended = _invocation(context, attempt, event.invocation)
+    if (
+        ended is None
+        or ended.turn.session.access != Access.WRITE_CANDIDATE
+        or retains_write_turn(ended)
+    ):
+        return AreaChange(state=state)
+    deferred = [
+        row
+        for row in attempt.checkpoint_declines
+        if row.reason == CheckpointDecline.WRITER_ACTIVE
+        and row.authority == write_turn_authority(row.invocation)
+        and row.authority not in attempt.pending_records
+        and all(checkpoint.request_id != row.authority for checkpoint in attempt.checkpoints)
+    ]
+    if not deferred:
+        return AreaChange(state=state)
+    last = deferred[-1]
+    return AreaChange(
+        state=state,
+        signals=(
+            InvocationCheckpointRequested(
+                attempt=_ref(attempt),
+                invocation=last.invocation,
+                retention="wip",
+                authority=last.authority,
+            ),
+        ),
+    )
+
+
 def _checkpoint_request(
     state: AttemptsState,
     context: AttemptsContext,
@@ -1991,10 +2039,19 @@ def _advance_accounting(
         return _inspection(state, context, attempt, observation)
     if isinstance(event, InvocationChargeRequested):
         return _charge(state, context, attempt, event)
-    if isinstance(event, InvocationCheckpointRequested):
-        return _checkpoint_request(state, context, attempt, event)
-    if isinstance(event, InvocationCheckpointed):
-        return _checkpointed(state, context, attempt, event)
     if isinstance(event, AttemptChargeRefundRequested):
         return _refund(state, context, attempt, event)
-    return AreaChange(state=state)
+    return _advance_checkpoint(state, context, attempt, event)
+
+
+def _advance_checkpoint(
+    state: AttemptsState,
+    context: AttemptsContext,
+    attempt: AttemptView,
+    event: InvocationEnded | InvocationCheckpointRequested | InvocationCheckpointed,
+) -> AreaChange[AttemptsState]:
+    if isinstance(event, InvocationEnded):
+        return _resume_deferred_checkpoint(state, context, attempt, event)
+    if isinstance(event, InvocationCheckpointRequested):
+        return _checkpoint_request(state, context, attempt, event)
+    return _checkpointed(state, context, attempt, event)

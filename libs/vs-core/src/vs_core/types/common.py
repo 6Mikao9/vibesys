@@ -26,7 +26,9 @@ class CheckpointDecline(StrEnum):
 
     WRITER_ACTIVE = "writer_active"
     """Another writer of the attempt's workspace has not ended, so a snapshot would
-    be torn. The later writer's own terminal turn requests the checkpoint."""
+    be torn. The later writer's own terminal turn requests the checkpoint; when that turn
+    ends without earning one (it failed or was cancelled), core asks again for the last
+    declined one, and a ``Retained`` then follows the ``Declined``."""
 
     UNAUTHORIZED = "unauthorized"
     """Neither an interruption claim nor a terminal write turn authorizes it."""
