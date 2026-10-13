@@ -12,8 +12,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.testing import FlowRun
-from vs_core.testing.flows import fake_search
+from vs_core.api.testing import FlowRun, fake_search
 
 from .flow_support import FACTS, ROLES, Config, open_workspace
 

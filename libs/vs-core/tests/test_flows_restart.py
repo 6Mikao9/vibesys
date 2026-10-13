@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 import vs_core.api as core
-from vs_core.api.testing import FlowRun
-from vs_core.testing.flows import fake_search
+from vs_core.api.testing import FlowRun, fake_search
 
 from .flow_support import ROLES, Config, Plan, ask, open_workspace, start
 

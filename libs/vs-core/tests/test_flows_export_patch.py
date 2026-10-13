@@ -11,9 +11,8 @@ from typing import ClassVar, Literal
 import pytest
 
 import vs_core.api as core
-from vs_core.api.testing import FlowRun
-from vs_core.flows import search
-from vs_core.testing.flows import FAKE_OPERATIONS, Interpret, Render, Verify
+from vs_core.api.search import search
+from vs_core.api.testing import FAKE_OPERATIONS, FlowRun, Interpret, Render, Verify
 
 from .flow_support import FACTS, Config
 

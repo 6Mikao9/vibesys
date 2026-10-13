@@ -17,8 +17,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.testing import FakeView, FlowRun
-from vs_core.testing.flows import Prompt, fake_search
+from vs_core.api.testing import FakeView, FlowRun, Prompt, fake_search
 
 from .flow_support import Config, Plan
 

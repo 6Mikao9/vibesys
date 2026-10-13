@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import vs_core.api as core
-from vs_core.api.testing import FakeView, FlowRun
-from vs_core.testing.flows import Prompt, fake_search
+from vs_core.api.testing import FakeView, FlowRun, Prompt, fake_search
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine

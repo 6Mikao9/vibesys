@@ -17,14 +17,16 @@ from pydantic import (
 )
 
 import vs_core.api as core
-from vs_core.api.testing import FlowRun
-from vs_core.flows import search
-from vs_core.testing.flows import FAKE_OPERATIONS, Interpret, Render, Verify
+from vs_core.api.search import search
+from vs_core.api.testing import FAKE_OPERATIONS, FlowRun, Interpret, Render, Verify
 
 from .flow_support import Config, open_workspace
 
 if TYPE_CHECKING:
-    from vs_core.flows._define import Root
+    from collections.abc import Callable, Coroutine
+    from typing import Any
+
+    from vs_core.api.search import Flow, NoWinner
 
 REVISION = core.RevisionRef.of_git_commit("revision")
 
@@ -108,7 +110,10 @@ async def validate_root(ctx: core.Flow, _config: Config) -> None:
 
 
 def start(
-    root: Root[Config], *, restarting: bool, operations: core.StrategyOperations = OPS
+    root: Callable[[Flow, Config], Coroutine[Any, Any, NoWinner | None]],
+    *,
+    restarting: bool,
+    operations: core.StrategyOperations = OPS,
 ) -> FlowRun[Config]:
     definition = search("ops", config=Config, operations=operations)(root)
     return FlowRun.start(definition, Config(), restarting=restarting)
