@@ -1,8 +1,7 @@
 """Run-level policy: which candidate wins and how the run ends.
 
 The winner is the best winner-eligible retained candidate by the configured metric space, else
-the trusted baseline. Adoption is proposed once, and the run stops only after core reports the
-adoption result.
+the trusted baseline. The search names it with `ctx.choose`; core adopts it.
 
 A run ends in one of three typed ways, so that success always means the operator has a trusted,
 measured result to use:
@@ -13,41 +12,17 @@ measured result to use:
 - ``no trusted result``: the input failed its measurement and no trusted candidate was found,
   so there is nothing to keep (failure).
 
-The strategy decides *when* each phase begins (it knows what is in flight); this module decides
-what is chosen, proposed and stopped with.
+The search decides *when* the run ends (it knows what is in flight); this module decides what is
+chosen and what reason a failed run carries.
 """
 
 from dataclasses import dataclass
-from enum import StrEnum
 
 from vibesys.candidates._settlement import measurement
 from vibesys.candidates._winner import Unranked, best_by
 from vibesys.hypothesis import RunEnding
 from vibesys.metrics import MetricRow, MetricSpace
-from vs_core.api import (
-    AdoptionResult,
-    IdScheme,
-    ObservationStatus,
-    ProposeWinner,
-    RetainedCandidate,
-    RevisionRef,
-    RunView,
-    Selection,
-    SettlementId,
-    TrustedBaseline,
-    Value,
-    run_scope,
-)
-
-
-class RunPhase(StrEnum):
-    """Where the whole search is."""
-
-    SEARCHING = "searching"
-    SELECTING = "selecting"
-    ADOPTING = "adopting"
-    STOPPING = "stopping"
-    FINISHED = "finished"
+from vs_core.api import RevisionRef, SettlementId, Value
 
 
 class Winner(Value):
@@ -97,42 +72,3 @@ def choose_winner(
     return Winner(
         settlement=best.settlement, revision=best.candidate, hypothesis_id=best.hypothesis_id
     )
-
-
-def selection_of(winner: Winner) -> Selection:
-    """The core selection a winner proposes for adoption."""
-    if winner.settlement is None:
-        return TrustedBaseline(revision=winner.revision)
-    return RetainedCandidate(settlement_id=winner.settlement, revision=winner.revision)
-
-
-def proposal(ids: IdScheme, view: RunView, winner: Winner) -> ProposeWinner:
-    """Propose the winner for adoption, once."""
-    return ProposeWinner(
-        decision_id=ids.decision_id("propose", "run"),
-        scope=run_scope(view),
-        selection=selection_of(winner),
-    )
-
-
-def after_adoption(
-    phase: RunPhase, winner: Winner | None, event: AdoptionResult
-) -> tuple[RunPhase, Winner | None]:
-    """Stop after a successful adoption; a failed one stops without a winner."""
-    if phase is not RunPhase.ADOPTING:
-        return phase, winner
-    if event.observation.status is ObservationStatus.SUCCEEDED:
-        return RunPhase.STOPPING, winner
-    return RunPhase.STOPPING, None
-
-
-def after_failed_adoption(phase: RunPhase, winner: Winner | None) -> tuple[RunPhase, Winner | None]:
-    """Stop without a winner when core reports that the adoption ended for good.
-
-    Core publishes `AdoptionFailed` (not `AdoptionResult`) when the restore or its
-    verification failed and its retries are spent. Without this the run would stay in
-    ``ADOPTING`` with nothing in flight and never reach a result.
-    """
-    if phase is not RunPhase.ADOPTING:
-        return phase, winner
-    return RunPhase.STOPPING, None
