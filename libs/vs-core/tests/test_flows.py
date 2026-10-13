@@ -17,7 +17,7 @@ from vs_core.api.testing import FakeView
 from .flow_support import FACTS, SHORT, Config, Plan, answer_of, ask, finish, start
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Generator
+    from collections.abc import AsyncGenerator, Callable, Generator
 
     from vs_core.api.testing import FlowRun
 
@@ -270,7 +270,7 @@ def test_leaving_a_group_waits_for_every_task(begin: Begin) -> None:
 
 
 @core.resource
-async def attempt(ctx: core.Flow, name: str) -> AsyncIterator[str]:
+async def attempt(ctx: core.Flow, name: str) -> AsyncGenerator[str]:
     await ctx.wait(ask("open"), SHORT, reply=Plan)
     try:
         yield name

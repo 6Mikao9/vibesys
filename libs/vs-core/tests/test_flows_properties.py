@@ -21,7 +21,7 @@ import vs_core.api as core
 from .flow_support import SHORT, Config, Plan, answer_of, ask, finish, start
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Coroutine
+    from collections.abc import AsyncGenerator, Callable, Coroutine
 
     from vs_core.api.testing import FlowRun
 
@@ -93,7 +93,7 @@ PROGRAMS = st.recursive(st.lists(_LEAVES, max_size=3).map(tuple), _bodies, max_l
 
 
 @core.resource
-async def guard(ctx: core.Flow, label: str) -> AsyncIterator[str]:
+async def guard(ctx: core.Flow, label: str) -> AsyncGenerator[str]:
     await ctx.wait(ask(f"{label}-open"), SHORT, reply=Plan)
     try:
         yield label

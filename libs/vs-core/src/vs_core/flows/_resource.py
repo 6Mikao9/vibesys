@@ -10,7 +10,7 @@ from vs_core._registry import ContractError
 from ._errors import Stopped
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from ._flow import Flow
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 class _Resource[T]:
     """The ``async with`` of one resource. Entry is a checkpoint; setup and teardown are shielded."""
 
-    def __init__(self, ctx: Flow, body: AsyncIterator[T]) -> None:
+    def __init__(self, ctx: Flow, body: AsyncGenerator[T]) -> None:
         self._ctx = ctx
         self._body = body
 
@@ -26,7 +26,7 @@ class _Resource[T]:
         try:
             self._ctx.checkpoint()  # a stopped task never acquires
         except Stopped:
-            await self._body.aclose()  # ty: ignore[unresolved-attribute]
+            await self._body.aclose()
             raise
         with self._ctx.shielded():
             return await anext(self._body)
@@ -38,7 +38,7 @@ class _Resource[T]:
             if error is None:
                 return await self._finished()
             try:
-                await self._body.athrow(error)  # ty: ignore[unresolved-attribute]
+                await self._body.athrow(error)
             except StopAsyncIteration:
                 return True  # the resource handled the exit; the body's exception ends here
             except BaseException as raised:
@@ -56,7 +56,7 @@ class _Resource[T]:
 
 
 def resource[**P, T](
-    body: Callable[Concatenate[Flow, P], AsyncIterator[T]],
+    body: Callable[Concatenate[Flow, P], AsyncGenerator[T]],
 ) -> Callable[Concatenate[Flow, P], _Resource[T]]:
     """Make ``async with name(ctx, ...) as value`` from an async generator that yields once.
 

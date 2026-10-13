@@ -61,21 +61,20 @@ class _Once[T](Source[T]):
     """A source with at most one value, set from outside."""
 
     def __init__(self) -> None:
-        self._value: T | None = None
-        self._set = False
+        self._values: list[T] = []
         self._taken = False
 
     def set(self, value: T) -> None:
         """Make the value available (only the first call counts)."""
-        if not self._set:
-            self._value, self._set = value, True
+        if not self._values and not self._taken:
+            self._values.append(value)
 
     def ready(self) -> bool:
-        return self._set and not self._taken
+        return bool(self._values)
 
     def take(self) -> T:
         self._taken = True
-        return self._value  # ty: ignore[invalid-return-type]
+        return self._values.pop()
 
     def alive(self) -> bool:
         return not self._taken

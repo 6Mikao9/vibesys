@@ -119,7 +119,7 @@ A resource is written like `contextlib.asynccontextmanager`:
 
 ```python
 @resource
-async def attempt(ctx: Flow, w: WorkstreamStart) -> AsyncIterator[Attempt]:
+async def attempt(ctx: Flow, w: WorkstreamStart) -> AsyncGenerator[Attempt]:
     opened = await open_attempt(ctx, w)        # raises NotOpened if the workspace never opens
     try:
         yield opened
