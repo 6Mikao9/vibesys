@@ -29,7 +29,7 @@ from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.launch import EvolveLaunch
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
-from vibesys.orchestration.issue_queue import IssueQueueOptions
+from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
@@ -242,7 +242,7 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
     )
     registration = registry.resolve("plain")
     plain_options = registration.parse_options(plain)
-    assert isinstance(plain_options, IssueQueueOptions)
+    assert isinstance(plain_options, IssueQueueLaunch)
     assert plain.options["load_levels"] == [{"rate": 4, "duration": 20, "max_tokens": 64}]
     assert plain_options.max_rounds == plain.options["max_rounds"]
     assert registration.project_max_rounds is not None
@@ -319,7 +319,7 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
         assert isinstance(parsed, MultiOptions)
         observed = parsed.operator_constraints
     elif plugin_id == "plain":
-        assert isinstance(parsed, IssueQueueOptions)
+        assert isinstance(parsed, IssueQueueLaunch)
         assert parsed.load_levels is not None
         observed = tuple(level.rate for level in parsed.load_levels)
     else:

@@ -149,4 +149,3 @@ def test_a_final_accuracy_measurement_that_never_reports_ends_the_run_without_an
     assert final.result.outcome == "failure"
     assert final.result.selection is None
     assert final.result.reason.startswith("adoption-failed")
-

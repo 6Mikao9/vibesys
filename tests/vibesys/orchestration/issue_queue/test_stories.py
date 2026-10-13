@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from tests.vibesys.orchestration.issue_queue._host import (
     FACTS,
     IMPLEMENTER,
@@ -14,14 +13,21 @@ from tests.vibesys.orchestration.issue_queue._host import (
     begin,
     config,
 )
-from tests.vibesys.orchestration.issue_queue._replies import evaluated, generic_evaluated, implemented, judged
+from tests.vibesys.orchestration.issue_queue._replies import (
+    evaluated,
+    generic_evaluated,
+    implemented,
+    judged,
+)
 
-from vs_core.api import FailureReason, Measure, RejectionCode, Withdraw
+from vs_core.api import FailureReason, RejectionCode, Withdraw
 from vs_core.api.testing import Asked, FakeView
 
 SUSPENDING = FakeView(
     changes={
-        "capabilities": FakeView().current().capabilities.model_copy(update={"lifecycle": frozenset({"suspend"})})
+        "capabilities": FakeView()
+        .current()
+        .capabilities.model_copy(update={"lifecycle": frozenset({"suspend"})})
     }
 )
 """A host whose agents may end a turn waiting for their evaluations."""
@@ -35,7 +41,7 @@ def outcome(host: Host) -> str:
 
 
 @RESTARTING
-def test_one_issue_is_closed_and_adopted(restarting: bool) -> None:
+def test_one_issue_is_closed_and_adopted(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting)
     host.drain()
     assert_flow_closed(host)
@@ -46,7 +52,7 @@ def test_one_issue_is_closed_and_adopted(restarting: bool) -> None:
 
 
 @RESTARTING
-def test_a_task_without_accuracy_needs_no_proof(restarting: bool) -> None:
+def test_a_task_without_accuracy_needs_no_proof(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, facts=UNGATED)
     host.drain()
     assert_flow_closed(host)
@@ -55,7 +61,7 @@ def test_a_task_without_accuracy_needs_no_proof(restarting: bool) -> None:
 
 
 @RESTARTING
-def test_a_rejected_attempt_is_retried_with_the_judges_feedback(restarting: bool) -> None:
+def test_a_rejected_attempt_is_retried_with_the_judges_feedback(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, judge=[judged(passed=False), judged()])
     host.drain()
     assert_flow_closed(host)
@@ -64,7 +70,7 @@ def test_a_rejected_attempt_is_retried_with_the_judges_feedback(restarting: bool
 
 
 @RESTARTING
-def test_an_issue_out_of_attempts_is_blocked_and_the_input_stands(restarting: bool) -> None:
+def test_an_issue_out_of_attempts_is_blocked_and_the_input_stands(*, restarting: bool) -> None:
     host = begin(
         config(), restarting=restarting, judge=[judged(passed=False), judged(passed=False)]
     )
@@ -76,7 +82,7 @@ def test_an_issue_out_of_attempts_is_blocked_and_the_input_stands(restarting: bo
 
 
 @RESTARTING
-def test_a_bug_the_judge_files_is_worked_next(restarting: bool) -> None:
+def test_a_bug_the_judge_files_is_worked_next(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, judge=[judged(bugs=("crash on empty",))])
     host.drain()
     assert_flow_closed(host)
@@ -86,7 +92,7 @@ def test_a_bug_the_judge_files_is_worked_next(restarting: bool) -> None:
 
 
 @RESTARTING
-def test_issues_the_evaluator_files_are_worked_in_the_next_round(restarting: bool) -> None:
+def test_issues_the_evaluator_files_are_worked_in_the_next_round(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, perf=[evaluated("faster", "leaner")])
     host.drain()
     assert_flow_closed(host)
@@ -96,7 +102,7 @@ def test_issues_the_evaluator_files_are_worked_in_the_next_round(restarting: boo
 
 
 @RESTARTING
-def test_a_spent_round_budget_still_adopts_what_was_built(restarting: bool) -> None:
+def test_a_spent_round_budget_still_adopts_what_was_built(*, restarting: bool) -> None:
     host = begin(config(max_rounds=1), restarting=restarting, perf=[evaluated("more")])
     host.drain()
     assert_flow_closed(host)
@@ -106,7 +112,7 @@ def test_a_spent_round_budget_still_adopts_what_was_built(restarting: bool) -> N
 
 
 @RESTARTING
-def test_an_unchanged_candidate_adopts_nothing(restarting: bool) -> None:
+def test_an_unchanged_candidate_adopts_nothing(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, unchanged=True)
     host.drain()
     assert_flow_closed(host)
@@ -115,7 +121,7 @@ def test_an_unchanged_candidate_adopts_nothing(restarting: bool) -> None:
 
 
 @RESTARTING
-def test_a_stop_mid_job_settles_the_attempt_and_adopts_nothing(restarting: bool) -> None:
+def test_a_stop_mid_job_settles_the_attempt_and_adopts_nothing(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting)
     host.drain_until_turn(IMPLEMENTER)
     host.run.stop()
@@ -126,7 +132,7 @@ def test_a_stop_mid_job_settles_the_attempt_and_adopts_nothing(restarting: bool)
 
 
 @RESTARTING
-def test_a_reply_that_is_not_json_is_corrected(restarting: bool) -> None:
+def test_a_reply_that_is_not_json_is_corrected(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting)
     host.drain_until_turn(IMPLEMENTER)
     (turn,) = [item for item in host.run.open if item.label == IMPLEMENTER]
@@ -138,7 +144,7 @@ def test_a_reply_that_is_not_json_is_corrected(restarting: bool) -> None:
 
 
 @RESTARTING
-def test_a_lost_board_acknowledgement_is_sent_again_and_lands_once(restarting: bool) -> None:
+def test_a_lost_board_acknowledgement_is_sent_again_and_lands_once(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, lost_acknowledgements=frozenset({0, 1, 2}))
     host.drain()
     assert_flow_closed(host)
@@ -147,7 +153,7 @@ def test_a_lost_board_acknowledgement_is_sent_again_and_lands_once(restarting: b
 
 
 @RESTARTING
-def test_a_board_that_never_answers_ends_the_run(restarting: bool) -> None:
+def test_a_board_that_never_answers_ends_the_run(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, dropped_writes=frozenset(range(50)))
     host.drain()
     assert_flow_closed(host)
@@ -155,7 +161,7 @@ def test_a_board_that_never_answers_ends_the_run(restarting: bool) -> None:
 
 
 @RESTARTING
-def test_an_implementer_that_cannot_be_checkpointed_fails_the_job(restarting: bool) -> None:
+def test_an_implementer_that_cannot_be_checkpointed_fails_the_job(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting)
     host.drain_until_turn(IMPLEMENTER)
     (turn,) = [item for item in host.run.open if item.label == IMPLEMENTER]
@@ -188,7 +194,7 @@ def test_an_agent_that_waits_for_its_evaluations_is_resumed_and_the_issue_closes
 
 @RESTARTING
 def test_a_reply_that_stays_invalid_ends_the_run_in_failure_with_nothing_adopted(
-    restarting: bool,
+    *, restarting: bool
 ) -> None:
     host = begin(config(), restarting=restarting)
     host.drain_until_turn(JUDGE)
@@ -204,7 +210,7 @@ def test_a_reply_that_stays_invalid_ends_the_run_in_failure_with_nothing_adopted
 
 @RESTARTING
 def test_no_more_issues_than_the_round_cap_are_worked_before_the_evaluation(
-    restarting: bool,
+    *, restarting: bool
 ) -> None:
     host = begin(
         config(max_issues_per_round=1, max_rounds=1),
@@ -218,7 +224,7 @@ def test_no_more_issues_than_the_round_cap_are_worked_before_the_evaluation(
 
 @RESTARTING
 def test_a_task_without_an_objective_fails_the_run_instead_of_seeding_an_unrelated_issue(
-    restarting: bool,
+    *, restarting: bool
 ) -> None:
     blank = FACTS.model_copy(update={"objective": "  "})
     host = begin(config(), restarting=restarting, facts=blank)
@@ -243,7 +249,7 @@ def test_a_settlement_core_refuses_ends_the_job_instead_of_stranding_it(
 
 
 @RESTARTING
-def test_a_generic_domain_evaluation_is_accepted(restarting: bool) -> None:
+def test_a_generic_domain_evaluation_is_accepted(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, perf=[generic_evaluated()])
     host.drain()
     assert_flow_closed(host)

@@ -9,15 +9,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from tests.support.reply_variables import context_variables
 from tests.vibesys.golden.helpers import assert_exact_text
 
 from vibesys.core_wiring import domain_prompt_sections
 from vibesys.issue_queue_board import IssueQueueTexts
 from vibesys.issue_queue_core import CORE_ROLES
+from vibesys.metrics import MetricRow
 from vibesys.orchestration.issue_queue.core_policy.api import prompts
+from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult
 from vibesys.orchestration.issue_queue.search.api import (
     BOOTSTRAP_TEMPLATE,
     ImplementPrompt,
@@ -26,11 +31,12 @@ from vibesys.orchestration.issue_queue.search.api import (
     PerformancePrompt,
     PriorPerformance,
     PromptContext,
+    ReviewEvaluation,
     ReviewPrompt,
     issue_queue,
 )
-from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult
 from vibesys.prompts import CORE_PROTOCOL_DIR
+from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionRef
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import AgentRole, ProfileExecution, RunFacts
 
@@ -221,3 +227,53 @@ def test_performance_prompt_field_names_match_the_domain_reply_schema(
         assert field not in combined
     assert all(field in schema for field in (*expected, *foreign)), "one reply serves both"
 
+
+def test_the_judge_is_shown_every_trusted_evaluation_it_is_given() -> None:
+    """Regression: the review template read a variable the context never supplied."""
+    evaluations = tuple(
+        ReviewEvaluation(
+            evidence_id=EvidenceId(root=f"evidence-{index}"),
+            kind=EvidenceKind.LOCAL_VALIDATION,
+            revision=RevisionRef.of_git_commit(f"c{index}"),
+            status=ObservationStatus.SUCCEEDED,
+            passed=True,
+        )
+        for index in range(3)
+    )
+    text = _render(
+        ReviewPrompt(issue=_ISSUE, summary="Done.", evaluations=evaluations), _CONFIGURED
+    )
+
+    for index in range(3):
+        assert f"evidence-{index}" in text
+    assert "Trusted evaluation results" in text
+    assert "Trusted evaluation results" not in _render(
+        ReviewPrompt(issue=_ISSUE, summary="Done."), _CONFIGURED
+    )
+
+
+@settings(max_examples=30, deadline=None, derandomize=True, database=None)
+@given(
+    value=st.floats(0.1, 1e6, allow_nan=False).map(lambda x: round(x, 1)),
+    unit=st.sampled_from(["calls/s", "tokens/s", "ms", "req/min"]),
+    direction=st.sampled_from(["max", "min"]),
+    passed=st.booleans(),
+)
+def test_a_review_citing_trusted_evidence_states_value_unit_direction_and_verdict(
+    value: float, unit: str, direction: Literal["max", "min"], *, passed: bool
+) -> None:
+    evaluation = ReviewEvaluation(
+        evidence_id=EvidenceId(root="evidence-0"),
+        kind=EvidenceKind.BENCHMARK,
+        revision=RevisionRef.of_git_commit("c0"),
+        status=ObservationStatus.SUCCEEDED if passed else ObservationStatus.FAILED,
+        passed=passed,
+        metrics=(MetricRow(name="throughput", value=value, direction=direction, unit=unit),),
+    )
+    text = _render(
+        ReviewPrompt(issue=_ISSUE, summary="Done.", evaluations=(evaluation,)), _CONFIGURED
+    )
+
+    assert f"{value} {unit}" in text
+    assert f"better: {direction}" in text
+    assert ("PASS" if passed else "FAIL") in text

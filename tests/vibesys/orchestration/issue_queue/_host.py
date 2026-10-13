@@ -18,14 +18,8 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, implemented, judged
 
 from vibesys.metrics import EvidenceReading
-from vibesys.orchestration.issue_queue.models import (
-    IssueImplementerResult,
-    IssueJudgeResult,
-    IssuePerfEvalResult,
-)
 from vibesys.orchestration.issue_queue.search.api import (
     BOARD,
-    OPERATIONS,
     EvidenceReadings,
     InterpretEvidence,
     IssueQueueConfig,
@@ -63,7 +57,6 @@ from vs_core.api.testing import Asked, FakeView, FlowRun
 from vs_core.testing.builders import initial_state
 from vs_issue_tracker.api import (
     FakeIssueTracker,
-    IssueStatus,
     LogProgress,
     MemoryProgressLog,
 )
@@ -73,6 +66,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from pydantic import BaseModel
+
+    from vibesys.orchestration.issue_queue.models import (
+        IssueImplementerResult,
+        IssueJudgeResult,
+        IssuePerfEvalResult,
+    )
 
 TERMS = TaskTerms(
     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
@@ -147,7 +146,9 @@ class World(TypedDict, total=False):
     """Whether the trusted accuracy measurement passes."""
 
 
-def begin(cfg: IssueQueueConfig, *, restarting: bool, view: FakeView | None = None, **world: Unpack[World]) -> Host:
+def begin(
+    cfg: IssueQueueConfig, *, restarting: bool, view: FakeView | None = None, **world: Unpack[World]
+) -> Host:
     """Start the issue-queue search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
     facts = world.pop("facts", FACTS)
     view = view or FakeView(changes={"facts": facts})
@@ -238,7 +239,7 @@ class Host:
             case Measure():
                 self._measure(asked, request, variant)
             case Operation():
-                self._operation(asked, request, variant)
+                self._operation(asked, request)
             case _:
                 message = f"nothing to answer {type(request).__name__}"
                 raise TypeError(message)
@@ -300,15 +301,19 @@ class Host:
     def _reply(self, asked: Asked, variant: int) -> None:
         role = asked.label
         queue = self._replies[role]
-        reply = queue.popleft() if queue else {IMPLEMENTER: implemented, JUDGE: judged, PERF: evaluated}[role]()
+        reply = (
+            queue.popleft()
+            if queue
+            else {IMPLEMENTER: implemented, JUDGE: judged, PERF: evaluated}[role]()
+        )
         if role != IMPLEMENTER:
             self.run.reply(asked, reply)
         elif variant % 6 == 5:
             self.run.reply(asked, reply, checkpoint=Declined(reason=next(iter(CheckpointDecline))))
         else:
-            self.run.reply(asked, reply, checkpoint=self._retained(asked))
+            self.run.reply(asked, reply, checkpoint=self._retained())
 
-    def _retained(self, asked: Asked) -> Retained:
+    def _retained(self) -> Retained:
         if self.unchanged:
             return Retained(revision=self.baseline)
         self._commits += 1
@@ -358,9 +363,7 @@ class Host:
                 workload_digest=plan.workload_digest,
                 environment_digest=plan.environment_digest,
                 provenance="trusted",
-                status=ObservationStatus.SUCCEEDED
-                if self.accurate
-                else ObservationStatus.FAILED,
+                status=ObservationStatus.SUCCEEDED if self.accurate else ObservationStatus.FAILED,
             )
             for index, stage in enumerate(plan.stages)
         )
@@ -369,11 +372,13 @@ class Host:
         )
         self.run.answer(asked, MeasurementFinished(decision=asked.decision, result=result))
 
-    def _operation(self, asked: Asked, request: Operation, variant: int) -> None:
+    def _operation(self, asked: Asked, request: Operation) -> None:
         typed = request.request
         if isinstance(typed, InterpretEvidence):
             readings = tuple(self._reading_of(ref) for ref in typed.evidence)
-            self.run.finish_operation(asked, EvidenceReadings(status="succeeded", readings=readings))
+            self.run.finish_operation(
+                asked, EvidenceReadings(status="succeeded", readings=readings)
+            )
             return
         if typed.kind not in BOARD_KINDS:
             self.run.finish_operation(asked, ParentVerification(status="succeeded", verified=True))
@@ -394,7 +399,11 @@ class Host:
     def _reading_of(self, ref: EvidenceRef) -> EvidenceReading:
         passed = ref.status is ObservationStatus.SUCCEEDED
         return EvidenceReading(
-            evidence_id=ref.evidence_id, kind=ref.kind, passed=passed, stage=ref.kind.value, metrics=()
+            evidence_id=ref.evidence_id,
+            kind=ref.kind,
+            passed=passed,
+            stage=ref.kind.value,
+            metrics=(),
         )
 
 

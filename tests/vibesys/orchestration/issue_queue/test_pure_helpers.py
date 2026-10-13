@@ -14,6 +14,8 @@ from tests.vibesys.orchestration.issue_queue._replies import evaluated, implemen
 from vibesys.orchestration.issue_queue.search.api import (
     Assess,
     Closing,
+    Failure,
+    FailureKind,
     Finish,
     IssueJob,
     PerfJob,
@@ -34,7 +36,7 @@ from vibesys.orchestration.issue_queue.search.api import (
     remaining,
     verdict,
 )
-from vs_core.api import RevisionRef
+from vs_core.api import InvocationId, InvocationRef, RevisionRef, SessionId
 from vs_issue_tracker.api import IssueRow, IssueStatus, IssueType
 
 BASE = RevisionRef.of_git_commit("abc")
@@ -159,44 +161,47 @@ def _job(run_id: str, sequence: int, issue: IssueRow) -> IssueJob:
     )
 
 
+ISSUE = IssueRow(
+    id=1,
+    type=IssueType.FEATURE,
+    status=IssueStatus.OPEN,
+    title="t",
+    description="d",
+    attempts=0,
+    created_by="loop",
+    created_iter=0,
+)
+
+
+def written(run_id: str) -> list[str]:
+    """The key of every change and log entry a run's steps write, in order."""
+    job = _job(run_id, 1, ISSUE)
+    perf = PerfJob(
+        sequence=2, iteration=1, run_id=run_id, base=BASE, board=briefs((ISSUE,)), config=RULES
+    )
+    writes = [
+        bootstrap_writes(run_id, "title", 1),
+        claim(job),
+        record(job, 1, implemented()),
+        verdict(job, 1, judged(bugs=("a",))),
+        verdict(job, 2, judged()),
+        block(job),
+        filing(perf, evaluated("x", "y").new_issues, "{}"),
+    ]
+    return [item.key for write in writes for item in (*write.changes, *write.logs)]
+
+
 @SETTINGS
 @given(run_ids=st.lists(st.text(min_size=1, max_size=4), min_size=2, max_size=2, unique=True))
 def test_every_change_of_a_run_has_its_own_key_and_two_runs_share_none(
     run_ids: list[str],
 ) -> None:
-    issue = IssueRow(
-        id=1,
-        type=IssueType.FEATURE,
-        status=IssueStatus.OPEN,
-        title="t",
-        description="d",
-        attempts=0,
-        created_by="loop",
-        created_iter=0,
-    )
-    keys: list[set[str]] = []
-    for run_id in run_ids:
-        job = _job(run_id, 1, issue)
-        perf = PerfJob(
-            sequence=2, iteration=1, run_id=run_id, base=BASE, board=briefs((issue,)), config=RULES
-        )
-        def written() -> list[str]:
-            writes = [
-                bootstrap_writes(run_id, "title", 1),
-                claim(job),
-                record(job, 1, implemented()),
-                verdict(job, 1, judged(bugs=("a",))),
-                verdict(job, 2, judged()),
-                block(job),
-                filing(perf, evaluated("x", "y").new_issues, "{}"),
-            ]
-            return [item.key for write in writes for item in (*write.changes, *write.logs)]
+    first, second = (written(run_id) for run_id in run_ids)
 
-        found = written()
+    for found in (first, second):
         assert len(found) == len(set(found)), "a key repeats within one run"
-        assert found == written(), "keys are not a function of the job"
-        keys.append(set(found))
-    assert not keys[0] & keys[1]
+    assert not set(first) & set(second)
+    assert first == written(run_ids[0]), "keys are not a function of the job"
 
 
 @SETTINGS
@@ -204,8 +209,6 @@ def test_every_change_of_a_run_has_its_own_key_and_two_runs_share_none(
 def test_only_a_closed_changed_vouched_issue_keeps_its_candidate(
     *, closed: bool, changed: bool, vouched: bool, failed: bool
 ) -> None:
-    from vibesys.orchestration.issue_queue.search.api import Failure, FailureKind  # noqa: PLC0415
-    from vs_core.api import InvocationId, InvocationRef, SessionId  # noqa: PLC0415
 
     judge = (
         InvocationRef(
