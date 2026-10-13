@@ -97,6 +97,7 @@ from vs_core._turn_chain import (
     Charge,
     TurnChain,
 )
+from vs_core._values import EncodingMismatchError, encode_json, share_unchanged, verify_encoding
 from vs_core._waitable import (
     SuspendedTurn,
     Waitable,
@@ -661,6 +662,7 @@ __all__ = [
     "DispatchTurn",
     "Disposition",
     "Draft",
+    "EncodingMismatchError",
     "EnsureSession",
     "EnsureWorkspace",
     "EnvelopeMigration",
@@ -981,6 +983,7 @@ __all__ = [
     "decision_of_operation",
     "declared_operation",
     "dependency_status",
+    "encode_json",
     "evidence_view",
     "initial_state",
     "invocation_for",
@@ -1002,6 +1005,7 @@ __all__ = [
     "session_view",
     "settle",
     "settlement_view",
+    "share_unchanged",
     "step",
     "suspension_refusal",
     "trace_step",
@@ -1012,6 +1016,7 @@ __all__ = [
     "v2_to_v3_migration",
     "validate_startup",
     "validate_terminal_inputs",
+    "verify_encoding",
     "waits",
     "workspace_for",
     "write_turn_authority",
