@@ -158,7 +158,6 @@ def _evolve(
     )
 
 
-@st.composite
 def _serial(
     search: str,
     designs: int,

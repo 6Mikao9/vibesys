@@ -62,6 +62,12 @@ _ROUND: dict[str, JsonValue] = {
 }
 _ROUNDS: dict[str, JsonValue] = {**_ROUND, "max_rounds": 2, "official_eval_every": 1}
 _SINGLE: dict[str, JsonValue] = {k: v for k, v in _ROUNDS.items() if k != "judge_every"}
+_EVOLVE_PROFILER = {
+    "profiler_kind": "torch",
+    "profile_execution": "local",
+    "profiler_support_name": "torch_profiler",
+    "profiler_mcp_name": "vibesys-torch-profiler",
+}
 _EVOLVE: dict[str, JsonValue] = {
     "bootstrap_max_attempts": 1,
     "children_per_generation": 1,
@@ -184,13 +190,7 @@ _STRATEGIES = (
             (DomainRole.JUDGE, evolve_api.JudgePrompt(candidate=_REV)),
             (
                 DomainRole.PROFILER,
-                evolve_api.ProfilerPrompt(
-                    candidate=_REV,
-                    profiler_kind="torch",
-                    profile_execution="local",
-                    profiler_support_name="torch_profiler",
-                    profiler_mcp_name="vibesys-torch-profiler",
-                ),
+                evolve_api.ProfilerPrompt(candidate=_REV),
             ),
         ),
     ),
@@ -269,13 +269,16 @@ def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
         "plain": plan.search,
         "single": single_api.single,
         "multi": multi_api.multi,
+        "evolve": evolve_api.evolve,
     }
     schemas = (
         searches[strategy.name].reply_schemas if strategy.name in searches else plan.reply_schemas
     )
     fields = context_variables(context, schemas)
+    # The host supplies the run's profiler to every prompt of the evolve search (`evolve_core`).
+    host = _EVOLVE_PROFILER if strategy.name == "evolve" else {}
     return renderer.render_template(
-        f"{context.model_dump()['template']}.j2", **plan.prompt_variables, **fields
+        f"{context.model_dump()['template']}.j2", **host, **plan.prompt_variables, **fields
     )
 
 
