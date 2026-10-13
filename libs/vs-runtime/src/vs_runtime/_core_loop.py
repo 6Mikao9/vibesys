@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -68,6 +69,8 @@ from vs_runtime._core_requests import (
 from vs_runtime._evaluation_jobs import awaits_submissions
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from vs_core.api import OpenWait, Request
     from vs_project.api import Project
     from vs_runtime._core_requests import ExecutionOutcome
@@ -483,7 +486,10 @@ class CoreRuntime[S: StrategyState]:
         self._registry.validate_core(core)
         decisions: tuple[Decision, ...] = ()
         if self._record is None:
-            strategy_state, first = self._search.init(self._config, core.run.facts, run_view(core))
+            with _search_generators():
+                strategy_state, first = self._search.init(
+                    self._config, core.run.facts, run_view(core)
+                )
             decisions = check_decisions(first)
         else:
             strategy_state = self.record.envelope.strategy
@@ -763,13 +769,14 @@ class CoreRuntime[S: StrategyState]:
         envelope = record.envelope
         translated = translate(transition.state, transition.events)
         arrived = (*translated.events, *(TimeReached(time=wake) for wake in due))
-        advanced = advance(
-            self._search,
-            envelope.strategy,
-            transition.state,
-            self._host,
-            Inbox(arrived, record.pending_decisions, translated.discarded),
-        )
+        with _search_generators():
+            advanced = advance(
+                self._search,
+                envelope.strategy,
+                transition.state,
+                self._host,
+                Inbox(arrived, record.pending_decisions, translated.discarded),
+            )
         self._discarded.extend(advanced.discarded)
         events = (*transition.events, *advanced.published)
         publications = tuple(
@@ -1321,3 +1328,27 @@ class CoreRuntime[S: StrategyState]:
             if not self._flights:
                 return
             await self.wait_for_flight()
+
+
+def _drop(_generator: object) -> None:
+    """Finalize an abandoned search generator by running none of its code."""
+
+
+@contextlib.contextmanager
+def _search_generators() -> Iterator[None]:
+    """Keep the async generators a search starts (a flow's ``@resource`` bodies) from the loop.
+
+    The search runs inside this shell's event loop but is not driven by it. The loop registers
+    every async generator first iterated inside it, and closes the ones still alive at shutdown
+    (or dropped) by running their release as a loop task, where each ``ctx`` wait is an
+    awaitable the loop cannot run. A search's generator outlives its flow only with its run,
+    when this host died or was replaced, and a dead host's search must start no more work: the
+    next host settles what it held from the journal. So no loop hears of it, and it is
+    finalized by running nothing.
+    """
+    previous = sys.get_asyncgen_hooks()
+    sys.set_asyncgen_hooks(firstiter=None, finalizer=_drop)
+    try:
+        yield
+    finally:
+        sys.set_asyncgen_hooks(*previous)

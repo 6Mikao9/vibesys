@@ -184,11 +184,10 @@ class World:
     during_submit: Callable[[], Awaitable[None]] | None = None
     limits: Limits = field(default_factory=lambda: sample_limits(reconciliation_bound=300.0))
     """A reconciliation bound that outlasts the restart delay of the crash sweeps (one lease and a
-    little more). Known core gap (`vs_core._waits`, OWNED_JOB halts the run): an owned job whose
-    poll lapsed while the host was down is not re-polled, so a restart later than the bound is
-    not a property core keeps yet. Remove this override, and `core_gap` in
-    `tests/support/crash_harness.py`, when the separate core liveness fix for lapsed polls after a
-    late restart lands on main."""
+    little more). Core does not yet keep a restart later than its own bounds: a poll of an owned
+    job that lapsed while the host was down fails the measurement or orphans the job instead of
+    being polled anew (`vs_core._waits`, OWNED_JOB halts the run). Use the default limits once
+    core keeps that property."""
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
     commits: CommitObserver | None = None

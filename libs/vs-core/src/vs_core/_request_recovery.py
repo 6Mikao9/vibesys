@@ -751,19 +751,32 @@ def _finish(state: RecordsState, barrier: RecoveryBarrier) -> AreaChange[Records
     return AreaChange(state=state.model_copy(update={"recovery": barrier}), signals=signals)
 
 
-def _requeue_lost_inspection(state: RecordsState, record: RequestRecord) -> RecordsState:
-    """An earlier epoch's inspection that never reported is issued again, not left dispatched.
+def _requeue_lost_inspection(
+    state: RecordsState, context: RecordsContext, event: RecoveryStarted, record: RequestRecord
+) -> RecordsState:
+    """An earlier epoch's inspection that never reported is issued again, not left open.
 
     Its target is inspected afresh by this epoch, but the old request would stay in flight
     for good and hold the run open. An inspection only reads, so issuing it again is safe.
+    It goes out with a fresh reconciliation bound from the restart, as this epoch's own
+    inspections do, whether it was in flight or only prepared when the host died: no deadline
+    ever ends an inspection, so one issued with a bound that passed while the host was down
+    would be dropped by the shell unanswered and hold the run open just the same.
     """
     if not (
         isinstance(record.request, InspectRequest)
-        and record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+        and record.phase
+        in (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
         and record.observation is None
     ):
         return state
-    requeued = record.model_copy(update={"phase": RequestPhase.PREPARED})
+    bound = max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound
+    requeued = record.model_copy(
+        update={
+            "phase": RequestPhase.PREPARED,
+            "until": record.until.model_copy(update={"at": max(record.until.at, bound)}),
+        }
+    )
     return state.model_copy(
         update={
             "records": tuple(
@@ -801,7 +814,7 @@ def _start(
                 for child in updated.children
             )
         ):
-            updated = _requeue_lost_inspection(updated, record)
+            updated = _requeue_lost_inspection(updated, context, event, record)
             continue
         resolution = _aggregate_resolution(record, context, updated)
         inspection = (
