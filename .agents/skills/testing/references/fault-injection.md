@@ -28,7 +28,7 @@ dispatcher keyed by tool name), and `python -m vs_faults.connector PLAN STATE
 -- INNER...` (any Slurm connector command). `generated_replies(plan)` answers
 a Fake agent client from each turn's declared schema. The dynamic loop's
 sweep (`tests/vibesys/orchestration/dynamic/loop/test_chaos.py`,
-`scripts/chaos_dynamic_loop.sh N`) shows how to compose them.
+`scripts/chaos_loop.sh N`) shows how to compose them.
 
 ## Composed-system chaos
 
