@@ -62,7 +62,7 @@ from server.registry import (
 )
 from vibesys.api import CoreEvent, RunRequest, RunResult
 from vibesys.api.testing import FakeRuns
-from vibesys.orchestration.dynamic import DynamicOptions
+from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_sim.api.testing import (
@@ -289,13 +289,9 @@ def _project_with_run(root: Path) -> Path:
         orchestration=OrchestrationDescriptor(
             id="dynamic",
             config_version=1,
-            options=DynamicOptions(
-                interface="service",
-                max_rounds=2,
-                max_retries_per_round=2,
-                judge_every=2,
-                official_eval_every=2,
-            ).model_dump(mode="json"),
+            options=DynamicLaunch(interface="service", max_rounds=2, judge_every=2).model_dump(
+                mode="json"
+            ),
         ),
         trusted_input_baseline="0" * 40,
         now=datetime(2026, 10, 10, 12, tzinfo=UTC),

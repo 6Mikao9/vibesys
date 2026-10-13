@@ -46,6 +46,8 @@ def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
         recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest=DIGEST),
         stages=(("accuracy", 10.0), ("benchmark", 10.0)),
         queue_allowance=880.0,
+        accuracy_stage="accuracy",
+        accuracy_gated=(),
     )
     return AgentEvaluationBridge(
         tmp_path / "evaluation.sock",

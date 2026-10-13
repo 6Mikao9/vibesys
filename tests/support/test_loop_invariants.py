@@ -290,6 +290,15 @@ def test_a_core_run_that_completes_without_a_hypothesis_is_empty() -> None:
     }
 
 
+@given(hypotheses=st.integers(min_value=0, max_value=3))
+def test_a_flow_search_keeps_its_hypotheses_in_its_published_record(hypotheses: int) -> None:
+    envelope = _envelope()
+    published = {"hypotheses": [{"hypothesis_id": f"h{i}"} for i in range(hypotheses)]}
+    envelope["strategy"] = {"journal": [], "live": {"published": json.dumps(published)}}
+    expected = set() if hypotheses else {Invariant.EMPTY_COMPLETION}
+    assert _violations([_started(), _finished()], envelope) == expected
+
+
 @given(
     status=st.sampled_from(["completed", "failed"]),
     recorded=st.sampled_from(["running", "closing", "terminal"]),

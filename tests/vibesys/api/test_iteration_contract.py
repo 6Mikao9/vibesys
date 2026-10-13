@@ -16,12 +16,15 @@ from vibesys.api import (
     IterationTree,
     catalog,
 )
-from vibesys.orchestration.dynamic.core_policy.api import project_strategy_state
-from vibesys.orchestration.dynamic.strategy.api import (
-    AttemptRecord,
-    DynamicStrategyState,
+from vibesys.candidates.api import NotConfigured
+from vibesys.orchestration.dynamic.core_policy.api import project_run_snapshot
+from vibesys.orchestration.dynamic.search.api import (
+    FinishedWork,
+    HypothesisRecord,
+    RoundRecord,
+    Running,
+    RunSnapshot,
     WorkKind,
-    WorkPhase,
     WorkPlan,
 )
 from vibesys.orchestration.issue_queue.core_policy.api import (
@@ -160,48 +163,41 @@ def test_issue_queue_projects_board_items_in_stable_identity_order() -> None:
 
 def test_dynamic_iterations_group_attempts_under_stable_workstreams() -> None:
     parent = RevisionRef.of_git_commit("parent")
-    attempts = (
-        AttemptRecord(
-            plan=WorkPlan(kind=WorkKind.IMPLEMENT, work_id="cache", title="Cache lookups"),
-            sequence=3,
-            attempt=AttemptId(root="attempt:cache:2"),
-            parent=parent,
-            phase=WorkPhase.DONE,
+    cache = WorkPlan(kind=WorkKind.IMPLEMENT, work_id="cache", title="Cache lookups")
+    parser = WorkPlan(kind=WorkKind.IMPLEMENT, work_id="parser", title="Parser")
+    snapshot = RunSnapshot(
+        baseline=NotConfigured(),
+        hypotheses=(
+            HypothesisRecord(
+                hypothesis_id="cache",
+                title="Cache lookups",
+                hypothesis="caching helps",
+                first_sequence=1,
+                rounds=(RoundRecord(sequence=1, attempt=AttemptId(root="attempt:cache:1")),),
+            ),
         ),
-        AttemptRecord(
-            plan=WorkPlan(kind=WorkKind.IMPLEMENT, work_id="parser", title="Parser"),
-            sequence=2,
-            attempt=AttemptId(root="attempt:parser:1"),
-            parent=parent,
-            phase=WorkPhase.REVIEW,
-        ),
-        AttemptRecord(
-            plan=WorkPlan(kind=WorkKind.IMPLEMENT, work_id="cache", title="Cache lookups"),
-            sequence=1,
-            attempt=AttemptId(root="attempt:cache:1"),
-            parent=parent,
-            phase=WorkPhase.DONE,
-        ),
+        # Finished out of the order they were scheduled in; the tree keeps schedule order.
+        finished=(FinishedWork(sequence=1, plan=cache, parent=parent),),
+        running=(Running(sequence=2, plan=parser),),
     )
 
-    tree = project_strategy_state(
-        DynamicStrategyState(attempts=attempts), experiment_revision=9
-    ).iterations
+    tree = project_run_snapshot(snapshot, experiment_revision=9).iterations
 
     assert isinstance(tree, IterationTree)
-    roots = [node for node in tree.nodes if node.parent_id is None]
-    assert [(node.id, node.ordinal, node.child_count) for node in roots] == [
-        ("workstream:cache", 1, 2),
-        ("workstream:parser", 2, 1),
-    ]
     assert [
-        (node.id, node.parent_id, node.kind, node.ordinal)
+        (node.id, node.parent_id, node.kind, node.ordinal, node.status, node.child_count)
         for node in tree.nodes
-        if node.parent_id is not None
     ] == [
-        ("attempt:cache:1", "workstream:cache", IterationKind.ATTEMPT, 1),
-        ("attempt:cache:2", "workstream:cache", IterationKind.ATTEMPT, 3),
-        ("attempt:parser:1", "workstream:parser", IterationKind.ATTEMPT, 2),
+        ("workstream:cache", None, IterationKind.WORKSTREAM, 1, IterationStatus.COMPLETED, 1),
+        ("workstream:parser", None, IterationKind.WORKSTREAM, 2, IterationStatus.ACTIVE, 0),
+        (
+            "attempt:cache:1",
+            "workstream:cache",
+            IterationKind.ATTEMPT,
+            1,
+            IterationStatus.COMPLETED,
+            0,
+        ),
     ]
 
 

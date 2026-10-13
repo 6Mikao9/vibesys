@@ -7,16 +7,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
-from vibesys.orchestration.dynamic.core_policy.api import reply_schemas as dynamic_schemas
-from vibesys.orchestration.dynamic.strategy.api import (
-    IMPLEMENTER_REPLY as DYNAMIC_IMPLEMENTER_REPLY,
-)
-from vibesys.orchestration.dynamic.strategy.api import JUDGE_REPLY as DYNAMIC_JUDGE_REPLY
-from vibesys.orchestration.dynamic.strategy.api import (
-    PROFILER_REPLY as DYNAMIC_PROFILER_REPLY,
-)
-from vibesys.orchestration.dynamic.strategy.api import DynamicConfig
+from vibesys.hypothesis import HypothesisOutcome
+from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_schemas
 from vibesys.orchestration.evolve.strategy.api import JUDGE_REPLY as EVOLVE_JUDGE_REPLY
 from vibesys.orchestration.evolve.strategy.api import MUTATOR_REPLY as EVOLVE_MUTATOR_REPLY
@@ -39,19 +33,16 @@ from vibesys.orchestration.single.strategy.api import IMPLEMENTER_REPLY as SINGL
 from vibesys.prompts import render_template
 from vs_agent.api import AgentClient, native_schema_problems
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
-from vs_core.api import ArtifactId, ArtifactRef
+from vs_core.api import ArtifactId, ArtifactRef, WaitableReply
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vs_core.api.search import Role
 
-_DYNAMIC = dynamic_schemas(
-    DynamicConfig(
-        recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
-        max_rounds=1,
-    )
-)
+
+_DYNAMIC = {role.name: dynamic.reply_schemas[role.reply_schema] for role in dynamic.roles}
 _EVOLVE = evolve_schemas()
 _SINGLE = single_schemas()
 _MULTI = multi_schemas()
@@ -65,7 +56,7 @@ _ISSUE_QUEUE = issue_queue_schemas(
     )
 )
 
-_IMPLEMENTER = {"summary": "done", "outcome": "supported"}
+_IMPLEMENTER = {"summary": "done", "outcome": HypothesisOutcome.SUPPORTED}
 _JUDGE = {"passed": True, "analysis": "checked"}
 _SINGLE_RESULT = {
     "summary": "done",
@@ -93,9 +84,8 @@ _ISSUE_QUEUE_JUDGE = {
     "new_issues": (),
 }
 _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
-    ("dynamic-implementer", _DYNAMIC[DYNAMIC_IMPLEMENTER_REPLY], _IMPLEMENTER),
-    ("dynamic-profiler", _DYNAMIC[DYNAMIC_PROFILER_REPLY], _IMPLEMENTER),
-    ("dynamic-judge", _DYNAMIC[DYNAMIC_JUDGE_REPLY], _JUDGE),
+    ("dynamic-implementer", _DYNAMIC["implementer"], _IMPLEMENTER),
+    ("dynamic-judge", _DYNAMIC["judge"], _JUDGE),
     ("evolve-mutator", _EVOLVE[EVOLVE_MUTATOR_REPLY], _EVOLVE_MUTATOR),
     ("evolve-judge", _EVOLVE[EVOLVE_JUDGE_REPLY], _EVOLVE_JUDGE),
     ("single-implementer", _SINGLE[SINGLE_IMPLEMENTER_REPLY], _SINGLE_RESULT),
@@ -146,9 +136,8 @@ def test_pre_envelope_wait_replies_remain_compatible(
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        (_DYNAMIC[DYNAMIC_IMPLEMENTER_REPLY], []),
-        (_DYNAMIC[DYNAMIC_PROFILER_REPLY], []),
-        (_DYNAMIC[DYNAMIC_JUDGE_REPLY], []),
+        (_DYNAMIC["implementer"], []),
+        (_DYNAMIC["judge"], []),
         (
             _SINGLE[SINGLE_IMPLEMENTER_REPLY],
             [
@@ -175,12 +164,24 @@ def test_waitable_schemas_have_no_root_union_or_unresolved_reference(
     assert native_schema_problems(model, "codex") == expected
 
 
+@pytest.mark.parametrize("role", dynamic.roles, ids=lambda role: role.name)
+def test_a_dynamic_role_answers_with_a_waitable_reply_exactly_when_it_may_wait(role: Role) -> None:
+    """Only a role whose agent can request evaluations accepts the wait reply."""
+    model = _DYNAMIC[role.name]
+    wait = {"reply": {"kind": "waiting_for_evaluation", "handles": ["measurement"]}}
+
+    assert issubclass(model, WaitableReply) is role.may_wait_for_evaluations
+    assert native_schema_problems(model, "codex") == []
+    if not role.may_wait_for_evaluations:
+        with pytest.raises(ValidationError):
+            model.model_validate(wait)
+
+
 @pytest.mark.parametrize(
     ("model", "payload"),
     [
-        (_DYNAMIC[DYNAMIC_IMPLEMENTER_REPLY], {"reply": _IMPLEMENTER}),
-        (_DYNAMIC[DYNAMIC_PROFILER_REPLY], {"reply": _IMPLEMENTER}),
-        (_DYNAMIC[DYNAMIC_JUDGE_REPLY], {"reply": _JUDGE}),
+        (_DYNAMIC["implementer"], {"reply": _IMPLEMENTER}),
+        (_DYNAMIC["judge"], {"reply": _JUDGE}),
         (
             _ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY],
             {"reply": _ISSUE_QUEUE_IMPLEMENTER},

@@ -1,304 +1,283 @@
-"""Immutable receipt catalogs preserve chronology independently of fitness."""
+"""The catalog of parents keeps chronology and fitness apart, and trusts only what evidence proves.
+
+A snapshot enters the catalog only when the evidence core recorded for it proves its accuracy
+passed on exactly its revision. What the planner is offered is derived from that evidence alone:
+the latest verified revision of each hypothesis (chronology), and for each comparable context the
+best observed partial (fitness). A failed benchmark's partial may be offered as a parent; it is
+never a winner (adoption is the search's ranking, not this catalog's).
+"""
 
 from __future__ import annotations
 
-import hashlib
-from functools import cache
+from typing import TYPE_CHECKING, Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
-from pydantic import ValidationError
+from tests.vibesys.orchestration.dynamic._values import (
+    revision,
+    snapshot,
+    snapshots,
+)
 
-from vibesys.orchestration.dynamic.parents.api import (
-    ParentCatalog,
+from vibesys.orchestration.dynamic.search.api import (
+    ParentConflictError,
     ParentSnapshot,
     ingest,
     options,
     resolve,
 )
-from vs_evaluation.api import (
-    ContentDigest,
-    EvidenceFailureKind,
-    EvidenceFingerprints,
-    EvidenceKind,
-    EvidenceOutcome,
-    TrustedEvidence,
-)
-from vs_evaluator_protocol.api import PartialMeasurement, Progress
+from vs_core.api import ObservationStatus
+
+if TYPE_CHECKING:
+    from random import Random
+
+type Catalog = tuple[ParentSnapshot, ...]
+VALUES = st.floats(-1000, 1000, allow_nan=False, allow_infinity=False)
 
 
-def _digest(text: str) -> ContentDigest:
-    return ContentDigest.sha256(text.encode())
-
-
-def _evidence(
-    kind: EvidenceKind,
-    ordinal: int,
-    outcome: EvidenceOutcome,
-    partial: PartialMeasurement | None = None,
-) -> TrustedEvidence:
-    """One accepted stage receipt of the revision with this ordinal, in a fixed context."""
-    return TrustedEvidence(
-        evidence_id=hashlib.sha256(f"{kind.value}-{ordinal}".encode()).hexdigest(),
-        evaluation_id=f"handle-{ordinal}",
-        stage_name=kind.value,
-        kind=kind,
-        fingerprints=EvidenceFingerprints(
-            candidate=_digest(f"candidate-{ordinal}"),
-            evaluator=_digest("evaluator"),
-            workload=_digest("workload"),
-            environment=_digest("environment"),
-        ),
-        trusted_inputs=_digest("inputs"),
-        outcome=outcome,
-        partial_measurement=partial,
-        failure_kind=EvidenceFailureKind.WORKLOAD if partial is not None else None,
-        accepted_round=0,
-    )
-
-
-@cache
-def _snapshot(value: float, ordinal: int) -> ParentSnapshot:
-    partial = PartialMeasurement(
-        name="throughput",
-        value=value,
-        direction="max",
-        unit="tokens/s",
-        progress=Progress(completed=71 if ordinal == 1 else 65, required=72, unit="rounds"),
-    )
-    return ParentSnapshot(
-        hypothesis_id="source",
-        revision=f"revision-{ordinal}",
-        content_digest=_digest(f"candidate-{ordinal}").value,
-        handle_id=f"handle-{ordinal}",
-        submission_index=ordinal,
-        accuracy=_evidence(EvidenceKind.ACCURACY, ordinal, EvidenceOutcome.PASSED),
-        benchmark=_evidence(EvidenceKind.BENCHMARK, ordinal, EvidenceOutcome.FAILED, partial),
-        retained=True,
-    )
-
-
-def test_observed_regression_keeps_best_and_latest_exact_revisions() -> None:
-    first = _snapshot(79.835, 1)
-    second = _snapshot(72.564, 2)
-    catalog = ingest(ingest(ParentCatalog(), first), second)
-    offered = options(catalog)
-    assert len(offered) == 2
-    assert next(row.snapshot for row in offered if row.best_partial) == first
-    assert next(row.snapshot for row in offered if row.latest_verified) == second
-    assert resolve(catalog, "source", first.revision) == first
-    assert resolve(catalog, "source") == second
-    assert resolve(catalog, "foreign", first.revision) is None
-    assert resolve(catalog, "source", "missing") is None
-    assert ParentCatalog.model_validate_json(catalog.model_dump_json()) == catalog
-
-
-@given(st.permutations((0, 1, 2, 3)), st.lists(st.integers(min_value=0, max_value=3), max_size=10))
-def test_order_and_replay_preserve_catalog_and_indexes(order: list[int], replay: list[int]) -> None:
-    rows = tuple(
-        _snapshot(value, ordinal) for ordinal, value in enumerate((79.835, 72.564, 83.0, 77.0), 1)
-    )
-    expected = ParentCatalog()
+def build(*rows: ParentSnapshot) -> Catalog:
+    catalog: Catalog = ()
     for row in rows:
-        expected = ingest(expected, row)
-    actual = ParentCatalog()
-    for index in (*order, *replay):
-        actual = ingest(actual, rows[index])
-    assert actual == expected
-    assert options(actual) == options(expected)
+        catalog = ingest(catalog, row)
+    return catalog
 
 
-def test_ineligible_identity_and_unknown_chronology_supply_no_authority() -> None:
-    row = _snapshot(79.835, 1)
-    assert ingest(ParentCatalog(), row.model_copy(update={"retained": False})).snapshots == ()
-    assert (
-        ingest(ParentCatalog(), row.model_copy(update={"content_digest": "f" * 64})).snapshots == ()
-    )
-    unknown = ingest(ParentCatalog(), row.model_copy(update={"submission_index": 0}))
-    assert resolve(unknown, "source") is None
-    assert resolve(unknown, "source", row.revision) is not None
+def distinct(rows: list[ParentSnapshot]) -> list[ParentSnapshot]:
+    """The rows with one per receipt identity (hypothesis and revision)."""
+    return list({(row.hypothesis_id, row.revision): row for row in rows}.values())
 
 
 @given(
-    st.sampled_from(
-        (
+    rows=st.lists(snapshots(), min_size=1, max_size=8).map(distinct),
+    order=st.randoms(use_true_random=False),
+    replays=st.integers(0, 6),
+)
+def test_the_catalog_and_its_options_do_not_depend_on_arrival_order_or_replay(
+    rows: list[ParentSnapshot], order: Random, replays: int
+) -> None:
+    shuffled = list(rows)
+    order.shuffle(shuffled)
+    replayed = [*shuffled, *shuffled[:replays]]
+    assert build(*replayed) == build(*rows)
+    assert options(build(*replayed)) == options(build(*rows))
+    assert len(build(*rows)) == len(rows)
+
+
+@given(rows=st.lists(snapshots(), min_size=1, max_size=8).map(distinct))
+def test_each_hypothesis_has_one_latest_verified_revision_the_highest_submission(
+    rows: list[ParentSnapshot],
+) -> None:
+    offered = options(build(*rows))
+    for hypothesis in {row.hypothesis_id for row in rows}:
+        mine = [item for item in offered if item.snapshot.hypothesis_id == hypothesis]
+        latest = [item for item in mine if item.latest_verified]
+        assert len(latest) == 1
+        assert latest[0].snapshot.submission_index == max(
+            item.snapshot.submission_index for item in mine
+        )
+        assert resolve(build(*rows), hypothesis) == latest[0].snapshot
+
+
+@given(
+    values=st.lists(VALUES, min_size=1, max_size=10),
+    direction=st.sampled_from(["max", "min"]),
+)
+def test_the_best_observed_partial_is_the_extreme_one_in_the_declared_direction(
+    values: list[float], direction: Literal["max", "min"]
+) -> None:
+    rows = [
+        snapshot(f"h{index}", 1, value=value, direction=direction)
+        for index, value in enumerate(values)
+    ]
+    offered = options(build(*rows))
+    (best,) = [item for item in offered if item.best_partial]
+    assert best.snapshot.benchmark is not None
+    assert best.snapshot.benchmark.partial is not None
+    assert best.snapshot.benchmark.partial.value == (
+        max(values) if direction == "max" else min(values)
+    )
+
+
+def test_a_regression_keeps_the_best_and_the_latest_revision_as_different_parents() -> None:
+    first, second = snapshot("source", 1, value=79.835), snapshot("source", 2, value=72.564)
+    catalog = build(first, second)
+    offered = options(catalog)
+    assert next(row.snapshot for row in offered if row.best_partial) == first
+    assert next(row.snapshot for row in offered if row.latest_verified) == second
+    assert resolve(catalog, "source", first.revision.revision_id.root) == first
+    assert resolve(catalog, "source") == second
+
+
+@given(hypothesis=st.sampled_from("abc"), revision_id=st.text("xyz", min_size=1, max_size=3))
+def test_a_selector_the_catalog_does_not_hold_resolves_to_nothing_never_to_the_input(
+    hypothesis: str, revision_id: str
+) -> None:
+    catalog = build(snapshot("a", 1, value=1.0), snapshot("b", 1))
+    assert resolve(catalog, hypothesis, revision_id) is None
+    assert resolve(catalog, "foreign") is None
+    assert resolve((), hypothesis) is None
+
+
+def _unproven(row: ParentSnapshot, flaw: str) -> ParentSnapshot:
+    ledger = {ref.key: ref for ref in row.proof}
+    accuracy = ledger[row.accuracy.key]
+    match flaw:
+        case "no proof":
+            return row.model_copy(update={"proof": ()})
+        case "other revision":
+            bad = accuracy.model_copy(update={"candidate": revision("elsewhere")})
+        case "untrusted":
+            bad = accuracy.model_copy(update={"provenance": "self-report"})
+        case "failed observation":
+            bad = accuracy.model_copy(update={"status": ObservationStatus.FAILED})
+        case _:
+            return row.model_copy(
+                update={"accuracy": row.accuracy.model_copy(update={"passed": False})}
+            )
+    return row.model_copy(update={"proof": (bad, *(r for r in row.proof if r != accuracy))})
+
+
+@given(
+    flaw=st.sampled_from(
+        ["no proof", "other revision", "untrusted", "failed observation", "accuracy failed"]
+    ),
+    row=snapshots(),
+)
+def test_a_snapshot_the_recorded_evidence_does_not_prove_gives_no_authority(
+    flaw: str, row: ParentSnapshot
+) -> None:
+    unproven = _unproven(row, flaw)
+    assert ingest((), unproven) == ()
+    assert options((unproven,)) == ()
+    assert resolve((unproven,), row.hypothesis_id, row.revision.revision_id.root) is None
+
+
+@given(row=snapshots())
+def test_a_snapshot_of_unknown_chronology_is_buildable_but_never_the_latest(
+    row: ParentSnapshot,
+) -> None:
+    unknown = row.model_copy(update={"submission_index": 0})
+    catalog = build(unknown)
+    assert resolve(catalog, row.hypothesis_id) is None
+    assert resolve(catalog, row.hypothesis_id, row.revision.revision_id.root) == unknown
+    assert not any(item.latest_verified for item in options(catalog))
+
+
+def _with_partial_context(row: ParentSnapshot, changed: str) -> ParentSnapshot:
+    benchmark = row.benchmark
+    assert benchmark is not None
+    assert benchmark.partial is not None
+    if changed in {"evaluator", "workload", "environment"}:
+        digest = {f"{changed}_digest": f"different-{changed}"}
+        return row.model_copy(
+            update={"proof": tuple(r.model_copy(update=digest) for r in row.proof)}
+        )
+    if changed == "stage":
+        return row.model_copy(
+            update={"benchmark": benchmark.model_copy(update={"stage": "warmup"})}
+        )
+    if changed == "protocol":
+        return row.model_copy(update={"benchmark": benchmark.model_copy(update={"protocol": 2})})
+    changes = {
+        "unit": "requests/s",
+        "direction": "min",
+        "name": "latency",
+        "target": 100.0,
+        "progress_unit": "requests",
+        "required": 100,
+    }
+    partial = benchmark.partial.model_copy(update={changed: changes[changed]})
+    return row.model_copy(update={"benchmark": benchmark.model_copy(update={"partial": partial})})
+
+
+@given(
+    changed=st.sampled_from(
+        [
             "unit",
             "direction",
             "name",
             "target",
+            "progress_unit",
+            "required",
             "stage",
+            "protocol",
             "evaluator",
             "workload",
             "environment",
-            "progress",
-        )
-    )
+        ]
+    ),
+    values=st.tuples(VALUES, VALUES),
 )
-def test_changed_partial_context_is_never_ranked_with_original(field: str) -> None:
-    first = _snapshot(79.835, 1)
-    second = _snapshot(72.564, 2)
-    benchmark = second.benchmark
-    assert benchmark is not None
-    partial = benchmark.partial_measurement
-    assert partial is not None
-    if field in {"evaluator", "workload", "environment"}:
-        fingerprints = benchmark.fingerprints.model_copy(
-            update={field: ContentDigest.sha256(f"different-{field}".encode())}
-        )
-        second = second.model_copy(
-            update={
-                "accuracy": second.accuracy.model_copy(update={"fingerprints": fingerprints}),
-                "benchmark": benchmark.model_copy(update={"fingerprints": fingerprints}),
-            }
-        )
-    elif field == "stage":
-        second = second.model_copy(
-            update={"benchmark": benchmark.model_copy(update={"stage_name": "warmup"})}
-        )
-    else:
-        changes = {
-            "unit": "requests/s",
-            "direction": "min",
-            "name": "latency",
-            "target": 100.0,
-            "progress": Progress(completed=65, required=100, unit="requests"),
-        }
-        second = second.model_copy(
-            update={
-                "benchmark": benchmark.model_copy(
-                    update={
-                        "partial_measurement": partial.model_copy(update={field: changes[field]})
-                    }
-                )
-            }
-        )
-    rows = options(ingest(ingest(ParentCatalog(), first), second))
+def test_partials_measured_in_a_different_context_are_never_ranked_against_each_other(
+    changed: str, values: tuple[float, float]
+) -> None:
+    first = snapshot("a", 1, value=values[0])
+    second = _with_partial_context(snapshot("b", 2, value=values[1]), changed)
+    rows = options(build(first, second))
     assert len(rows) == 2
     assert all(row.best_partial for row in rows)
     assert rows[0].comparison_key != rows[1].comparison_key
 
 
-def test_unknown_unit_is_buildable_without_comparison_authority() -> None:
-    snapshot = _snapshot(79.835, 1)
-    benchmark = snapshot.benchmark
-    assert benchmark is not None
-    partial = benchmark.partial_measurement
-    assert partial is not None
-    unknown = snapshot.model_copy(
+def test_a_partial_without_a_unit_is_buildable_but_has_no_comparison_authority() -> None:
+    row = snapshot("a", 1, value=79.835)
+    assert row.benchmark is not None
+    assert row.benchmark.partial is not None
+    unitless = row.model_copy(
         update={
-            "benchmark": benchmark.model_copy(
-                update={"partial_measurement": partial.model_copy(update={"unit": None})}
+            "benchmark": row.benchmark.model_copy(
+                update={"partial": row.benchmark.partial.model_copy(update={"unit": None})}
             )
         }
     )
-    row = options(ingest(ParentCatalog(), unknown))[0]
-    assert row.comparison_key is None
-    assert not row.best_partial
-    assert resolve(ingest(ParentCatalog(), unknown), "source", snapshot.revision) == unknown
+    (offered,) = options(build(unitless))
+    assert offered.comparison_key is None
+    assert not offered.best_partial
+    assert resolve(build(unitless), "a", row.revision.revision_id.root) == unitless
+
+
+@given(row=snapshots())
+def test_a_later_benchmark_extends_the_accuracy_receipt_and_replaying_the_bare_one_never_downgrades(
+    row: ParentSnapshot,
+) -> None:
+    bare = row.model_copy(update={"benchmark": None})
+    catalog = build(bare, row)
+    assert catalog == (row,)
+    assert ingest(catalog, bare) == catalog
+
+
+@given(row=snapshots(), other=VALUES)
+def test_a_second_benchmark_for_one_receipt_is_a_conflict_not_an_overwrite(
+    row: ParentSnapshot, other: float
+) -> None:
+    changed = snapshot(row.hypothesis_id, row.submission_index, value=other, digest="x")
+    assume(row.benchmark is not None and changed != row)
+    assert changed.revision == row.revision
+    assert changed.accuracy == row.accuracy
+    with pytest.raises(ParentConflictError):
+        ingest(build(row), changed)
+
+
+def test_equal_partials_prefer_further_progress_then_the_stable_receipt() -> None:
+    near, far = snapshot("a", 1, value=10.0), snapshot("b", 2, value=10.0)
+    for order in ((near, far), (far, near)):
+        best = next(row.snapshot for row in options(build(*order)) if row.best_partial)
+        assert best == near  # ordinal 1 completed 71 of 72 rounds, ordinal 2 only 65
 
 
 @given(
-    st.lists(
-        st.floats(min_value=-1000, max_value=1000, allow_nan=False, allow_infinity=False),
-        min_size=1,
-        max_size=12,
-    ),
-    st.sampled_from(("max", "min")),
+    row=snapshots(),
+    changed=st.sampled_from(["evaluator_digest", "workload_digest", "environment_digest"]),
 )
-def test_best_observed_partial_is_monotone_in_declared_direction(
-    values: list[float], direction: str
+def test_a_benchmark_measured_in_another_context_than_the_accuracy_is_not_buildable(
+    row: ParentSnapshot, changed: str
 ) -> None:
-    first = _snapshot(79.835, 1)
-    second = _snapshot(72.564, 2)
-    catalog = ParentCatalog()
-    observed = []
-    for index, value in enumerate(values):
-        template = first if index % 2 == 0 else second
-        benchmark = template.benchmark
-        assert benchmark is not None
-        partial = benchmark.partial_measurement
-        assert partial is not None
-        handle = f"evaluation-{index}"
-        snapshot = template.model_copy(
-            update={
-                "handle_id": handle,
-                "revision": f"revision-{index}",
-                "submission_index": index + 1,
-                "accuracy": template.accuracy.model_copy(update={"evaluation_id": handle}),
-                "benchmark": benchmark.model_copy(
-                    update={
-                        "evaluation_id": handle,
-                        "partial_measurement": partial.model_copy(
-                            update={"value": value, "direction": direction}
-                        ),
-                    }
-                ),
-            }
-        )
-        catalog = ingest(catalog, snapshot)
-        observed.append(value)
-        best = next(row.snapshot for row in options(catalog) if row.best_partial)
-        assert best.benchmark is not None
-        assert best.benchmark.partial_measurement is not None
-        assert best.benchmark.partial_measurement.value == (
-            max(observed) if direction == "max" else min(observed)
-        )
-
-
-def test_failed_accuracy_never_builds_even_with_better_partial() -> None:
-    snapshot = _snapshot(79.835, 1)
-    failed = snapshot.model_copy(
-        update={
-            "accuracy": snapshot.accuracy.model_copy(update={"outcome": EvidenceOutcome.FAILED})
-        }
+    assume(row.benchmark is not None)
+    assert row.benchmark is not None
+    key = row.benchmark.key
+    other = tuple(
+        ref.model_copy(update={changed: "elsewhere"}) if ref.key == key else ref
+        for ref in row.proof
     )
-    assert options(ingest(ParentCatalog(), failed)) == ()
-
-
-def test_benchmark_settlement_extends_without_accuracy_replay_downgrade() -> None:
-    settled = _snapshot(79.835, 1)
-    accuracy_only = settled.model_copy(update={"benchmark": None})
-    catalog = ingest(ingest(ParentCatalog(), accuracy_only), settled)
-    assert ingest(catalog, accuracy_only) == catalog
-    assert options(catalog)[0].best_partial
-
-
-def test_parent_records_reject_unknown_feature_keys_and_mutation() -> None:
-    snapshot = _snapshot(79.835, 1)
-    with pytest.raises(ValidationError, match="unknown_features"):
-        ParentSnapshot.model_validate({**snapshot.model_dump(), "unknown_features": ["batching"]})
-    for field_name in ParentSnapshot.model_fields:
-        with pytest.raises(ValidationError, match="frozen"):
-            setattr(snapshot, field_name, getattr(snapshot, field_name))
-    catalog = ingest(ParentCatalog(), snapshot)
-    with pytest.raises(ValidationError, match="unexpected"):
-        ParentCatalog.model_validate({**catalog.model_dump(), "unexpected": True})
-
-
-def test_equal_observed_partials_choose_comparable_progress_then_stable_receipt() -> None:
-    first = _snapshot(10.0, 1)
-    second = _snapshot(10.0, 2)
-    catalog = ingest(ingest(ParentCatalog(), second), first)
-    assert next(row.snapshot for row in options(catalog) if row.best_partial) == first
-    benchmark = second.benchmark
-    assert benchmark is not None
-    partial = benchmark.partial_measurement
-    assert partial is not None
-    assert first.benchmark is not None
-    first_partial = first.benchmark.partial_measurement
-    assert first_partial is not None
-    tied = second.model_copy(
-        update={
-            "benchmark": benchmark.model_copy(
-                update={
-                    "partial_measurement": partial.model_copy(
-                        update={"progress": first_partial.progress}
-                    )
-                }
-            )
-        }
-    )
-    catalog = ingest(ingest(ParentCatalog(), tied), first)
-    expected = first if first.benchmark.evidence_id < benchmark.evidence_id else tied
-    assert next(row.snapshot for row in options(catalog) if row.best_partial) == expected
+    assert ingest((), row.model_copy(update={"proof": other})) == ()

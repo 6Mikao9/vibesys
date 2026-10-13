@@ -117,9 +117,12 @@ These restate `CLAUDE.md` and `software-design` for this work; the sections belo
 
 ## 2. What `dynamic` already does
 
-`dynamic` is the worked example: `strategy/` holds the pure strategy, `core_policy/` holds
-limits, reply schemas, projection and prompts, and `src/vibesys/dynamic_core.py` plus
-`dynamic_roles.py` do the thin wiring. One workstream is one attempt.
+`dynamic` is the worked example. (Update: `dynamic` has since been rewritten as a flow in
+`search/`, with its state machine deleted; the pieces listed below describe the state-machine
+form the other ports started from. See `docs/contributing/flows.md`.) At the time of this
+analysis `strategy/` held the pure strategy, `core_policy/` held limits, reply schemas,
+projection and prompts, and `src/vibesys/dynamic_core.py` plus `dynamic_roles.py` did the thin
+wiring. One workstream is one attempt.
 
 | Step of one workstream | Decision or request | Answering event |
 |---|---|---|

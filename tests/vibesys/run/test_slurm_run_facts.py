@@ -18,18 +18,15 @@ from tests.support.core_host_world import open_core_host
 from tests.support.core_plugins import capability_plugin
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
-    bounds_of,
-    options_of,
+    plan_of,
     resolved,
-    run_request,
+    write_project,
 )
 
 from vibesys.api.request import RunEnvironmentSpec
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
-from vibesys.dynamic_core import resolve_core_policy
 from vibesys.inputs import load_task
-from vibesys.orchestration.dynamic import DynamicOptions
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.contracts import RunRequest
 from vibesys.run.integration import LocalRunIntegration
@@ -124,11 +121,6 @@ def test_the_dynamic_loop_still_requires_correctness_on_slurm(tmp_path: Path) ->
     # ... and the task's gates are still configured, so the dynamic loop still requires them.
     assert facts.accuracy_configured
     dynamic_root = tmp_path / "dynamic"
-    dynamic = run_request(dynamic_root)
-    policy = resolve_core_policy(
-        DynamicOptions.model_validate(options_of(dynamic).model_dump()),
-        bounds_of(dynamic),
-        replace(resolved(dynamic_root), facts=facts),
-    )
-    required = policy.requirements.required_assessments
-    assert AssessmentKind.CORRECTNESS in required
+    write_project(dynamic_root)
+    plan = plan_of(replace(resolved(dynamic_root), facts=facts))
+    assert AssessmentKind.CORRECTNESS in plan.requirements.required_assessments

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BANNED_MODULES = frozenset(
     {"asyncio", "time", "random", "threading", "subprocess", "os", "socket", "vs_sim"}
 )
-FLOW_GLOBS = ("src/vibesys/orchestration/*/flow/**/*.py", "src/vibesys/candidates/flows.py")
+FLOW_GLOBS = ("src/vibesys/orchestration/*/search/**/*.py", "src/vibesys/candidates/flows.py")
 SEARCH_API = "vs_core.api.search"
 
 
