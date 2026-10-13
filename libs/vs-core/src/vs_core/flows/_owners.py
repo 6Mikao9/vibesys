@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
-
 from vs_core._registry import ContractError
 from vs_core.types.common import THIS_RUN, DecisionId
 from vs_core.types.search import OperationFinished
@@ -22,6 +20,8 @@ from vs_core.types.strategy import Operation, OperationRequest
 from vs_core.types.until import Failed, Within
 
 if TYPE_CHECKING:
+    from pydantic import BaseModel
+
     from vs_core.types.common import Seconds
 
     from ._kit import Kit
@@ -45,12 +45,13 @@ class Owners:
         if request.kind not in owned:
             message = f"{request.kind!r} is not an operation this search owns: list it in owned="
             raise ContractError(("owners", "perform"), message)
-        decision = Operation(
-            decision_id=DecisionId(root="owned"), scope=THIS_RUN, request=request
-        )
+        decision = Operation(decision_id=DecisionId(root="owned"), scope=THIS_RUN, request=request)
         bound = within if isinstance(within, Within) else Within(limit=within)
         match await self._kit.wait(decision, bound):
             case OperationFinished(result=finished):
+                if finished.outcome is None:
+                    message = f"the owner of {request.kind!r} finished without an outcome"
+                    raise ContractError(("owners", "perform"), message)
                 return finished.outcome
             case Failed() as failed:
                 return failed

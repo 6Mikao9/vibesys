@@ -7,12 +7,11 @@ outcome comes back typed, a wait that ends without one comes back as the ``Faile
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar, Literal
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pydantic import BaseModel
 
 import vs_core.api as core
 from vs_core.api.testing import FlowRun
@@ -20,6 +19,9 @@ from vs_core.flows import search
 from vs_core.testing.flows import FAKE_OPERATIONS, Verify
 
 from .flow_support import ROLES, Config
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 KIND = "notes.add"
 
