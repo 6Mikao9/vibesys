@@ -37,7 +37,7 @@ from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_SEALED
 from tests.support.skeleton_sim import Simulation, simulate
 
 from vs_faults.api import Boundary, Crossing, FaultGate, FaultPlan, HostCrashError
-from vs_sim.api.testing import VirtualClock, run_virtual, swept
+from vs_sim.api.testing import SweepBreadth, VirtualClock, run_virtual, sweep_breadth, swept
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -169,19 +169,26 @@ def recovery_window(first: Crossing) -> tuple[Crossing, ...]:
     return tuple(window[:-1]) if window and window[-1].boundary == Boundary.DURABLE_WRITE else ()
 
 
-def sampled_recoveries() -> list[Point]:
-    """Second deaths in the recovery of the reference crash of each lifecycle class.
+def sampled_recoveries(lifecycle: LifecycleClass, part: int = 0, parts: int = 1) -> list[Point]:
+    """Second deaths in the recovery of the reference crashes of one lifecycle class.
 
-    A pull request tries the first crossing of each window; the nightly job
-    tries every crossing. The reference crashes are those of ``sampled(OBSERVATION_LOST)``.
+    The reference crashes are those of ``sampled(OBSERVATION_LOST)`` of the class. A pull request
+    tries the first crossing of each window; the nightly job tries every crossing, in ``parts``
+    interleaved parts so that no test outlasts the hang bound. Computing the windows runs the
+    simulation, so it happens in the test and not at collection.
     """
-    found: dict[LifecycleClass | None, list[Point]] = defaultdict(list)
-    for reference in sampled(PointKind.OBSERVATION_LOST):
-        found[reference.lifecycle].extend(
-            Point(PointKind.RECOVERY, reference.lifecycle, second, reference.crossing)
-            for second in recovery_window(reference.crossing)
-        )
-    return [pairs[i] for pairs in found.values() for i in swept(len(pairs), 1)]
+    pairs = [
+        Point(PointKind.RECOVERY, lifecycle, second, reference.crossing)
+        for reference in sampled(PointKind.OBSERVATION_LOST)
+        if reference.lifecycle == lifecycle
+        for second in recovery_window(reference.crossing)
+    ]
+    return [pairs[i] for i in swept(len(pairs), 1)][part::parts]
+
+
+def recovery_parts() -> int:
+    """How many parts the exhaustive recovery sweep of a class is split into."""
+    return 4 if sweep_breadth() is SweepBreadth.ALL else 1
 
 
 def params(chosen: list[Point]) -> list[object]:

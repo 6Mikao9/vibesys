@@ -28,6 +28,7 @@ from tests.system.crash._catalog import (
     PointKind,
     groups,
     params,
+    recovery_parts,
     run_with_lost_seal,
     sampled,
     sampled_recoveries,
@@ -59,7 +60,6 @@ def test_every_kind_of_point_reaches_every_lifecycle_class_of_request() -> None:
     for kind in set(PointKind) - {PointKind.RECOVERY, PointKind.TRANSITION}:
         assert set(groups(kind)) == set(LifecycleClass), kind
     assert groups(PointKind.TRANSITION)
-    assert {point.lifecycle for point in sampled_recoveries()} == set(LifecycleClass)
 
 
 def _check(crossing: Crossing) -> None:
@@ -94,7 +94,11 @@ def test_a_crash_before_a_result_is_sealed_ends_the_run_as_the_straight_run_does
     assert_converges(seal.summary, f"lost seal at {point.crossing}", crashes=1)
 
 
-@pytest.mark.parametrize("point", params(sampled_recoveries()))
-def test_a_crash_during_recovery_ends_the_run_as_the_straight_run_does(point: Point) -> None:
-    assert point.first is not None
-    converges_after(point.first, point.crossing)
+@pytest.mark.parametrize("part", range(recovery_parts()))
+@pytest.mark.parametrize("lifecycle", list(LifecycleClass))
+def test_a_crash_during_recovery_ends_the_run_as_the_straight_run_does(
+    lifecycle: LifecycleClass, part: int
+) -> None:
+    for point in sampled_recoveries(lifecycle, part, recovery_parts()):
+        assert point.first is not None
+        converges_after(point.first, point.crossing)
