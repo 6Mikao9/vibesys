@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 class RunSetup:
     """Which search runs and what hosts it. Immutable, so a snapshot of a world shares it."""
 
-    new_launch: Callable[[], Launch[Any, Any]]
+    new_launch: Callable[[], Launch[Any]]
     """A fresh search with its config; every call builds an equal one."""
     harness: Harness
     """Registry, run facts, limits, envelope type and evidence requirements of the run."""

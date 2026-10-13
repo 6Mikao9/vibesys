@@ -25,7 +25,7 @@ from vs_evaluator_protocol.api import PartialMeasurement
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Search
+    from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, SearchDef
     from vs_core.api import RunFacts as CoreRunFacts
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
@@ -703,7 +703,7 @@ class CorePlan:
     starts; the host places it on the run clock's timeline.
     """
 
-    search: Search[Any, Any]
+    search: SearchDef[Any]
     config: object
     reply_schemas: Mapping[SchemaRef, type[BaseModel]]
     facts: CoreRunFacts

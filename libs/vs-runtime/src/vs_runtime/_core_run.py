@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from vs_core.api import (
@@ -150,16 +150,6 @@ class RunLoopConfig:
     max_dispatches: int = 100_000
     max_concurrent: int | None = None
     """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``."""
-    stop_result: RunResultProposal = field(
-        default_factory=lambda: RunResultProposal(
-            outcome="cancelled", reason="stop requested by the operator"
-        )
-    )
-    deadline_result: RunResultProposal = field(
-        default_factory=lambda: RunResultProposal(
-            outcome="cancelled", reason="run deadline reached"
-        )
-    )
 
     def __post_init__(self) -> None:
         """Reject intervals that would let the loop spin or lose its lease."""
@@ -191,21 +181,18 @@ class RunControlBridge:
     The channel is level-triggered (a pause flag, a stop flag, a queue of steer texts).
     Each ``poll`` emits one event per change since the last poll, with stable
     identities ``control-<n>`` that continue the count of controls core already holds,
-    so a resumed run never reuses an identity. Stop carries the configured result
-    proposal; core never invents one.
+    so a resumed run never reuses an identity. A stop carries no result: the search
+    adopts its last choice and ends the run itself.
     """
 
     def __init__(
         self,
         channel: RunControlChannel,
         steer: SteerArtifacts,
-        *,
-        stop_result: RunResultProposal,
     ) -> None:
-        """Bind the mailbox, the steer text store and the stop proposal."""
+        """Bind the mailbox and the steer text store."""
         self._channel = channel
         self._steer = steer
-        self._stop_result = stop_result
         self._count = 0
         self._consumption = SteerConsumption()
         self._started = False
@@ -241,7 +228,7 @@ class RunControlBridge:
             return tuple(events)
         if self._channel.stop_requested():
             self._stopped = True
-            events.append(self._event("stop", now_at, result=self._stop_result))
+            events.append(self._event("stop", now_at))
         elif self._channel.pause_requested() != self._paused:
             self._paused = not self._paused
             events.append(self._event("pause" if self._paused else "resume", now_at))
@@ -258,7 +245,6 @@ class RunControlBridge:
         now_at: float,
         *,
         text: str | None = None,
-        result: RunResultProposal | None = None,
     ) -> RunControlEvent:
         self._count += 1
         identity = ControlId(root=f"control-{self._count}")
@@ -270,7 +256,7 @@ class RunControlBridge:
             )
             self._steer.put(artifact, text)
         control = ControlInput(control_id=identity, action=action, artifact=artifact)
-        return RunControlEvent(control=control, now_at=now_at, result=result)
+        return RunControlEvent(control=control, now_at=now_at)
 
 
 @dataclass(frozen=True)
@@ -481,7 +467,6 @@ class _Loop:
                 RunControlEvent(
                     control=ControlInput(control_id=ControlId(root="deadline"), action="stop"),
                     now_at=now,
-                    result=self._config.deadline_result,
                 )
             )
         return tuple(events)

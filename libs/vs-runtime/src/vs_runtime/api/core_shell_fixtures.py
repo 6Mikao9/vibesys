@@ -10,11 +10,11 @@ from vs_core.api import (
     ContractError,
     CoreEvent,
     CoreState,
-    Decision,
     DecisionId,
     DispatchAuthorized,
     EnsureSession,
-    Event,
+    Flow,
+    FlowState,
     InputRecord,
     ProposalSubmitted,
     RecordsChange,
@@ -27,22 +27,21 @@ from vs_core.api import (
     RequestPhase,
     RoleId,
     RunControlEvent,
-    RunFacts,
-    RunView,
     SchedulingChange,
     Scope,
     SessionId,
     SessionInputReceived,
     SessionsChange,
     SessionSpec,
-    StrategyState,
     TraceFrame,
     Transition,
+    Value,
     initial_state,
     recover,
     trace_step,
     within,
 )
+from vs_core.flows import search
 from vs_project.api import Committed, FakeStateStore, Unknown
 from vs_runtime.api.core import CoreRuntime, CoreRuntimeBindings
 
@@ -50,27 +49,15 @@ if TYPE_CHECKING:
     from vs_project.api import CommitOutcome, StateStore, StoredEnvelope, StoreFence
 
 
-class CounterState(StrategyState):
-    callbacks: int = 0
+class CounterConfig(Value):
+    """The counter search has nothing to configure."""
 
 
-class CounterSearch:
-    """A search that only counts the events it receives and decides nothing."""
-
-    state_model = CounterState
-
-    def __init__(self) -> None:
-        self.declaration = initial_state().run.declaration
-
-    def init(self, config: object, facts: RunFacts) -> tuple[CounterState, list[Decision]]:
-        del config, facts
-        return CounterState(schema_version=1), []
-
-    def update(
-        self, state: CounterState, event: Event, view: RunView
-    ) -> tuple[CounterState, list[Decision]]:
-        del event, view
-        return state.model_copy(update={"callbacks": state.callbacks + 1}), []
+@search("sequential", config=CounterConfig)
+async def counter(ctx: Flow, config: CounterConfig) -> None:
+    """A search that decides nothing: it waits to be stopped."""
+    del config
+    await ctx.first(ctx.stopped)
 
 
 class ShellTraceTransitions:
@@ -205,12 +192,12 @@ class ShellTraceTransitions:
         )
 
 
-def runtime(store: StateStore) -> CoreRuntime[CounterState]:
+def runtime(store: StateStore) -> CoreRuntime[FlowState]:
     return CoreRuntime(
         store,
-        CounterSearch(),
+        counter.driver(CounterConfig()),
         initial_state(),
-        config=None,
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
     )
 

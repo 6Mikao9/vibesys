@@ -26,6 +26,7 @@ from vs_core.api import (
     EnsureSession,
     EnsureWorkspace,
     EventId,
+    FlowState,
     InvocationRef,
     JobObserved,
     LifecycleCapability,
@@ -38,7 +39,6 @@ from vs_core.api import (
     RequestObserved,
     RestoreRevision,
     ResumeSessionTurn,
-    RunResultProposal,
     SessionObserved,
     SubmitMeasurement,
     TurnObserved,
@@ -90,8 +90,9 @@ if TYPE_CHECKING:
         RunFacts,
         RunView,
         SchemaRef,
-        Search,
         SearchDeclaration,
+        SearchDef,
+        SearchDriver,
         StrategyState,
         Transition,
     )
@@ -374,17 +375,17 @@ class ScriptedExecutors:
 
 
 @dataclass(frozen=True)
-class Launch[S: StrategyState, C]:
+class Launch[C]:
     """A search and the config its run starts from."""
 
-    search: Search[S, C]
+    search: SearchDef[C]
     config: C
 
 
 class RecordingSearch[S: StrategyState, C]:
     """A search that keeps every decision it returned, in order, for the test to read."""
 
-    def __init__(self, inner: Search[S, C], decisions: list[Decision]) -> None:
+    def __init__(self, inner: SearchDriver[S, C], decisions: list[Decision]) -> None:
         """Wrap ``inner``."""
         self._inner = inner
         self._decisions = decisions
@@ -399,9 +400,9 @@ class RecordingSearch[S: StrategyState, C]:
         """The wrapped search's state class."""
         return self._inner.state_model
 
-    def init(self, config: C, facts: RunFacts) -> tuple[S, list[Decision]]:
+    def init(self, config: C, facts: RunFacts, view: RunView) -> tuple[S, list[Decision]]:
         """The wrapped search's first state and decisions, recorded."""
-        state, decisions = self._inner.init(config, facts)
+        state, decisions = self._inner.init(config, facts, view)
         self._decisions.extend(decisions)
         return state, decisions
 
@@ -465,10 +466,10 @@ class HostOptions:
 
 
 @dataclass
-class ScriptedHost[S: StrategyState]:
+class ScriptedHost:
     """One production host (shell, loop config, clock) over a store, ready to run."""
 
-    shell: CoreRuntime[S]
+    shell: CoreRuntime[FlowState]
     host: CoreRunHost
     config: RunLoopConfig
     clock: VirtualClock
@@ -502,9 +503,9 @@ class ScriptedHost[S: StrategyState]:
         )
 
 
-def scripted_host[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a restarted host inherits the dead one's store, delivery and start time beside the run's description.
+def scripted_host[C](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a restarted host inherits the dead one's store, delivery and start time beside the run's description.
     # > Bundling the three inherited values into one holder adds a type that only this signature uses, and splitting the function would repeat the shell wiring it exists to share.
-    launch: Launch[S, C],
+    launch: Launch[C],
     script: Script,
     harness: Harness,
     schemas: Mapping[SchemaRef, type[BaseModel]],
@@ -513,7 +514,7 @@ def scripted_host[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-9947
     store: FakeStateStore | None = None,
     delivery: FakePublicationDelivery | None = None,
     clock_at: float = 1.0,
-) -> ScriptedHost[S]:
+) -> ScriptedHost:
     """A production shell and loop over a search with every executor answered by ``script``.
 
     ``store`` and ``delivery`` default to new ones; pass the ones a dead host left to start its
@@ -522,13 +523,14 @@ def scripted_host[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-9947
     options = host_options or HostOptions()
     decisions: list[Decision] = []
     search = launch.search
-    recorded = RecordingSearch(search, decisions)
+    driver = search.driver(launch.config, harness.registry)
+    recorded = RecordingSearch(driver, decisions)
     store = FakeStateStore() if store is None else store
     journal = Journal()
-    shell: CoreRuntime[S] = CoreRuntime(
+    shell: CoreRuntime[FlowState] = CoreRuntime(
         store,
         recorded,
-        new_run(search, harness),
+        new_run(driver, harness),
         config=launch.config,
         bindings=CoreRuntimeBindings(
             registry=harness.registry,
@@ -548,7 +550,6 @@ def scripted_host[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-9947
         RunControlBridge(
             create_run_control_channel(_IgnoredTransitions()),
             _NoSteer(),
-            stop_result=RunResultProposal(outcome="cancelled", reason="stop"),
         )
         if options.controlled
         else None
@@ -565,8 +566,8 @@ def scripted_host[S: StrategyState, C](  # noqa: PLR0913  # lint-waiver: LW-9947
     return ScriptedHost(shell, host, config, clock, decisions, journal)
 
 
-def drive_shell[S: StrategyState, C](
-    launch: Launch[S, C],
+def drive_shell[C](
+    launch: Launch[C],
     script: Script,
     harness: Harness,
     schemas: Mapping[SchemaRef, type[BaseModel]],
