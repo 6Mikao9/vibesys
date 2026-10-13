@@ -379,3 +379,14 @@ def test_an_input_that_cannot_be_measured_is_told_to_the_planner_not_hidden(
         assert isinstance(context, PlannerPrompt)
         assert context.input_failure is not None
         assert context.baseline == ()
+
+
+@MODES
+def test_a_measured_input_is_shown_to_the_planner_as_its_baseline(*, restarting: bool) -> None:
+    host = begin(config(), restarting=restarting, baseline="measured")
+    host.drain_until_turn(PLANNER_LABEL)
+
+    context = host.run.expect_turn(role=PLANNER_LABEL).context
+    assert isinstance(context, PlannerPrompt)
+    assert context.input_failure is None
+    assert context.baseline != ()

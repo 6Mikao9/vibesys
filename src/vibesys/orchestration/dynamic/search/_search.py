@@ -3,8 +3,9 @@
 This is the whole search, top to bottom. Planning and the workstreams are tasks in two groups, so
 they run concurrently; the root decides only when to start one and when the search is over.
 `RunRecord` holds what the search knows, and the tasks' results are folded into it. An operator
-stop reaches the workstreams (they settle what they started) but not the planner; the root sees
-it as `StopRequested`, plans no more, and returns once nothing is in flight. The winner is named
+stop reaches both groups (workstreams settle what they started; a planning call is dropped, since
+nothing it planned would start); the root sees it as `StopRequested`, plans no more, and returns
+once nothing is in flight. The winner is named
 as the search goes (`ctx.choose`), so a stop or a deadline adopts what led at that moment.
 """
 
@@ -18,22 +19,15 @@ from vibesys.orchestration.dynamic.search._run_state import NoPlan, RunRecord, S
 from vibesys.orchestration.dynamic.search._workstream import workstream
 from vs_core.api.search import Flow, NoWinner, StopRequested, TaskStopped, search
 
-PROFILE_CAPTURE = "profile-capture"
-"""The lifecycle capability a run needs to capture a profile."""
-
-PROFILING_WITHOUT_CAPTURE = "profiling is on but the run offers no profile capture"
-
 
 @search("dynamic", config=DynamicConfig, operations=OPERATIONS, roles=ROLES)
 async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
     """Measure the input, run workstreams in the free slots within budget, name the best."""
     ctx.checkpoint(config)
-    if config.profiling and PROFILE_CAPTURE not in ctx.capabilities.lifecycle:
-        return NoWinner(reason=PROFILING_WITHOUT_CAPTURE)
     run = RunRecord(config, ctx.facts.baseline, await measure_input(ctx), ctx.task.terms)
     async with (
         ctx.group(limit=config.max_in_flight) as workstreams,
-        ctx.group(limit=1, stops=False) as planning,
+        ctx.group(limit=1) as planning,
     ):
         while not run.over(planning=not planning.free, stopping=ctx.stop_requested):
             for start in run.ready_to_start(workstreams.free):

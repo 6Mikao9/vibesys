@@ -302,8 +302,12 @@ class RunRecord:
             self.kept[settlement.settlement_id.root] = retained
 
     def stopped_before_start(self, key: str) -> None:
-        """A workstream the stop ended before it had a workspace."""
-        self.finished(WorkstreamDone.stopped(self.running[key]))
+        """A task the stop ended: a workstream before it had a workspace, or a planning call.
+
+        A planning call leaves nothing to record: after a stop nothing it planned would start.
+        """
+        if key in self.running:
+            self.finished(WorkstreamDone.stopped(self.running[key]))
 
     # -- the winner ----------------------------------------------------------------------------
 

@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-import pytest
 from tests.composition._loop.dynamic_world import DynamicWorld
 from tests.composition.dynamic._harness import (
     _AGENT_CONFIG,
@@ -27,7 +26,7 @@ from tests.composition.dynamic._harness import (
     simulated_clock,
     workstream,
 )
-from tests.support.dynamic_script import FACTS, TERMS, config, harness
+from tests.support.dynamic_script import FACTS, TERMS
 
 from vibesys.api import RunStatus
 from vibesys.dynamic_roles import ORCHESTRATOR
@@ -35,13 +34,12 @@ from vibesys.events import RunFailureKind
 from vibesys.orchestration.dynamic.core_policy.api import requirements_for
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vs_core.api import RetainedCandidate
-from vs_runtime.api.testing import Launch, drive_shell
+from vs_runtime.api.testing import drive_shell
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 # The search's reason for refusing a run it cannot give the capture it was told to use.
-_PROFILING_REFUSED = "no-winner: profiling is on but the run offers no profile capture"
 
 
 def _dispatched_turns(records: CoreRecords) -> list[dict[str, Any]]:
@@ -180,30 +178,3 @@ def test_the_deadline_ends_a_run_that_has_kept_nothing_through_the_framework(
     assert failure.reason.startswith("deadline")
     assert agents.prompts(ORCHESTRATOR.id) == []
     assert (failure.workstreams_started, failure.candidates_kept) == (0, 0)
-
-
-@pytest.mark.parametrize(
-    ("profiling", "capture"), [(False, False), (False, True), (True, False), (True, True)]
-)
-def test_profiling_without_a_profile_capture_fails_the_run_at_launch(
-    *, profiling: bool, capture: bool
-) -> None:
-    selected = config(profiling=profiling)
-    offered = frozenset({"profile-capture"}) if capture else frozenset()
-    world = DynamicWorld(profiling=profiling)
-
-    run = drive_shell(
-        Launch(dynamic, selected),
-        world,
-        harness(selected, lifecycle=offered),
-        dynamic.reply_schemas,
-    )
-
-    result = run.core.run.result
-    assert result is not None
-    refused = result.reason == _PROFILING_REFUSED
-    assert refused is (profiling and not capture)
-    if refused:
-        # Nothing was asked of the agents or the cluster before the run was refused.
-        issued = {item.request.kind for item in run.core.records.records}
-        assert not issued & {"dispatch_turn", "submit_measurement", "ensure_workspace"}
