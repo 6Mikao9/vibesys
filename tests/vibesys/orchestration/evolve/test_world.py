@@ -6,8 +6,8 @@ through the real core and shell, ends with what the story says.
 
 from __future__ import annotations
 
-from tests.composition._loop.evolve_world import EvolveWorld
 from tests.support.evolve_script import reviewed
+from tests.support.evolve_world import EvolveWorld
 
 from vs_core.api import Finish, Settle, StartAttempt, Wait, Withdraw
 from vs_dst.api import SimulatedRun, simulate

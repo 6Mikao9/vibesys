@@ -72,7 +72,7 @@ def clean_world(*, tracker_faults: Mapping[int, FaultPhase] | None = None) -> Is
     the crash, later than the operation's reconciliation bound, so its record is `BLOCKED`,
     `record_waits` does not count a blocked record as a wait, and `RESOLUTIONS` in
     `vs_core/_waits.py` has no way to end a blocked record the close is waiting for. The
-    conformance sweep (`tests/composition/_loop/test_conformance_crash.py`) skips exactly that
+    conformance sweep (`tests/system/crash/test_crash_convergence.py`) skips exactly that
     stall (`_lapsed_while_down`). A larger script here stalls the same way and takes minutes.
     """
     return IssueQueueWorld(

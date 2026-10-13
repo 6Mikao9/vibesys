@@ -6,7 +6,7 @@ check that the same search, through the real core and shell, ends with what the 
 
 from __future__ import annotations
 
-from tests.composition._loop.dynamic_world import DynamicWorld
+from tests.support.dynamic_world import DynamicWorld
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,

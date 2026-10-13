@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.composition._loop.dynamic_world import DynamicWorld
+from tests.support.dynamic_world import DynamicWorld
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,

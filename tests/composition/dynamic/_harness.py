@@ -31,9 +31,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
-from tests.composition._loop.spec import loop_spec
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import RunRecords, check, terminal_event
+from tests.support.loop_spec import loop_spec
 from tests.support.slurm_environment import with_fake_image_build
 from tests.support.task_project import write_task
 
@@ -450,7 +450,7 @@ class LoopInput:
     the local store does (both pass ``test_state_store_contract``), without an fsync per read.
     """
     plugin_id: str = "dynamic"
-    """The strategy under test, a key of `tests.composition._loop.spec.LOOPS`."""
+    """The strategy under test, a key of `tests.support.loop_spec.LOOPS`."""
 
     @classmethod
     def create(

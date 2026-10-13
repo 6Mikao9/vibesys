@@ -13,7 +13,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from tests.composition._loop.dynamic_world import DynamicWorld
 from tests.composition.dynamic._harness import (
     _AGENT_CONFIG,
     PASS,
@@ -27,6 +26,7 @@ from tests.composition.dynamic._harness import (
     workstream,
 )
 from tests.support.dynamic_script import FACTS, TERMS
+from tests.support.dynamic_world import DynamicWorld
 
 from vibesys.api import RunStatus
 from vibesys.dynamic_roles import ORCHESTRATOR

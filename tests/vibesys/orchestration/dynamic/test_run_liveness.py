@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, TypedDict
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.composition._loop.dynamic_world import DynamicWorld
+from tests.support.dynamic_world import DynamicWorld
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
@@ -407,7 +407,7 @@ def test_a_run_with_every_answer_conclusive_ends_live_and_executes_no_request_tw
     assert max(world.executed.values()) == 1
 
 
-# Pairs the conformance suite (`tests/composition/_loop/conformance.py`, CONCLUSIVE_AFTER_FAULT)
+# Pairs the conformance suite (`tests/system/delivery/test_request_kinds.py`, CONCLUSIVE_AFTER_FAULT)
 # does not run, though the dynamic search's run ends live: core retries a request answered
 # retryably once, and a registered operation nothing ever answers is ended at its bound.
 CONCLUSIVE_PAIRS = (

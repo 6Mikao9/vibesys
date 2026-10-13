@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.composition._loop.spec import LOOPS, UnknownLoopError, loop_spec
+from tests.support.loop_spec import LOOPS, UnknownLoopError, loop_spec
 
 
 def test_every_registered_strategy_resolves_to_its_own_spec() -> None:
