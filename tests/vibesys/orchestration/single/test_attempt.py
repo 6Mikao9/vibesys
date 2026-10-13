@@ -1,6 +1,6 @@
 """What each reply and gate result means for one single attempt, as plain data.
 
-`Attempt` is the pure bookkeeping of a round: it decides, from what the turns established, whether
+`SingleAttempt` is the pure bookkeeping of a round: it decides, from what the turns established, whether
 to ask the implementer again, to run the trusted gates or to settle. Its rules are stated over
 generated replies and gate results; the flow that awaits is told by the stories.
 """
@@ -16,7 +16,7 @@ from tests.vibesys.serial_search._replies import plan_reply
 from vibesys.candidates.api import NotConfigured
 from vibesys.hypothesis import OrchestratorPlan, rounds
 from vibesys.metrics import AcceptedReading
-from vibesys.orchestration.single.search.api import Attempt, Next
+from vibesys.orchestration.single.search.api import Next, SingleAttempt
 from vibesys.serial_search.api import Gated, NotMeasured, Unreadable
 from vs_core.api import EvidenceId, EvidenceKind, RequestId, RevisionRef
 
@@ -24,7 +24,7 @@ BASE = RevisionRef.of_git_commit("base")
 CANDIDATE = RevisionRef.of_git_commit("candidate")
 
 
-def attempt(**changes: object) -> Attempt:
+def attempt(**changes: object) -> SingleAttempt:
     hypotheses = config().hypotheses
     plan = OrchestratorPlan.model_validate_json(plan_reply("h1"))
     ledger, _ = rounds.start(
@@ -45,7 +45,7 @@ def attempt(**changes: object) -> Attempt:
         "ledger": ledger,
         **changes,
     }
-    return Attempt(**fields)  # ty: ignore[invalid-argument-type]
+    return SingleAttempt(**fields)  # ty: ignore[invalid-argument-type]
 
 
 def reading(kind: EvidenceKind, *, passed: bool) -> AcceptedReading:

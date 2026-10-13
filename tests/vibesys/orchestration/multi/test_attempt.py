@@ -1,6 +1,6 @@
 """What each reply, verdict, validation and gate result means for one multi attempt, as plain data.
 
-`Attempt` is the pure bookkeeping of a round: it decides, from what the turns established, whether
+`MultiAttempt` is the pure bookkeeping of a round: it decides, from what the turns established, whether
 to ask the implementer again, to review, to validate, to run the trusted gates or to settle. The
 rules are stated over generated replies and results; the flow that awaits is told by the stories.
 One rule is multi's own and is held here: a candidate is eligible only when an independent
@@ -20,9 +20,9 @@ from vibesys.hypothesis import JudgeReviewed, OrchestratorPlan, rounds
 from vibesys.metrics import AcceptedReading
 from vibesys.orchestration.multi.search.api import (
     ArchiveConflictView,
-    Attempt,
     ConflictMetric,
     Dominator,
+    MultiAttempt,
     Next,
 )
 from vibesys.serial_search.api import Gated, NotMeasured, Unreadable
@@ -44,7 +44,7 @@ JUDGE_TURN = InvocationRef(
 )
 
 
-def attempt(*, validation_offered: bool = False, **changes: object) -> Attempt:
+def attempt(*, validation_offered: bool = False, **changes: object) -> MultiAttempt:
     selected = changes.pop("config", None) or config()
     plan = OrchestratorPlan.model_validate_json(plan_reply("h1"))
     ledger, _ = rounds.start(
@@ -68,7 +68,7 @@ def attempt(*, validation_offered: bool = False, **changes: object) -> Attempt:
         "revalidation_required": False,
         **changes,
     }
-    return Attempt(**fields)  # ty: ignore[invalid-argument-type]
+    return MultiAttempt(**fields)  # ty: ignore[invalid-argument-type]
 
 
 def reading(kind: EvidenceKind, *, passed: bool) -> AcceptedReading:
@@ -93,7 +93,7 @@ PASSING_GATES = Gated(
 
 def reviewed_attempt(
     *, validation_offered: bool = False, recipe: str | None = None, rounds_allowed: int = 1
-) -> Attempt:
+) -> MultiAttempt:
     """An attempt whose implementer replied with a candidate and whose review is due."""
     taken = attempt(validation_offered=validation_offered, config=config(max_rounds=rounds_allowed))
     extra = {} if recipe is None else {"validation_recipe_artifact": recipe}

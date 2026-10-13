@@ -1,6 +1,6 @@
 """Public surface of the multi search: the flow, its config, roles and pure helpers."""
 
-from vibesys.orchestration.multi.search._attempt import UNSETTLED, Attempt, Next
+from vibesys.orchestration.multi.search._attempt import UNSETTLED, MultiAttempt, Next
 from vibesys.orchestration.multi.search._budget import budget
 from vibesys.orchestration.multi.search._config import MultiConfig
 from vibesys.orchestration.multi.search._operations import (
@@ -64,7 +64,6 @@ __all__ = [
     "VALIDATE_LOCAL_KIND",
     "VERIFY_KIND",
     "ArchiveConflictView",
-    "Attempt",
     "CaptureCommand",
     "CommandCapture",
     "ConflictMetric",
@@ -77,6 +76,7 @@ __all__ = [
     "InterpretEvidence",
     "JudgePrompt",
     "LocalValidationReport",
+    "MultiAttempt",
     "MultiConfig",
     "MultiRound",
     "Next",

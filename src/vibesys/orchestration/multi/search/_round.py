@@ -19,7 +19,7 @@ from typing import Self
 from vibesys.candidates.api import space_of, workspace_mode_for
 from vibesys.hypothesis import Continue, Finished, NewHypothesis, rounds
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
-from vibesys.orchestration.multi.search._attempt import Attempt, Next, planned_reason
+from vibesys.orchestration.multi.search._attempt import MultiAttempt, Next, planned_reason
 from vibesys.orchestration.multi.search._config import MultiConfig
 from vibesys.orchestration.multi.search._operations import VALIDATE_LOCAL_KIND
 from vibesys.orchestration.multi.search._prompts import PreRoundPrompt, ProfilerPrompt
@@ -101,7 +101,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
             )
             ctx.publish(ledger.search)
     active = ledger.search.active_hypothesis
-    attempt = Attempt(
+    attempt = MultiAttempt(
         config=config,
         terms=ctx.task.terms,
         baseline=start.baseline,
@@ -194,7 +194,7 @@ async def profile(profiler: Session, prompt: ProfilerPrompt) -> LastProfile | No
             raise TypeError(message)
 
 
-async def work(ctx: Flow, attempt: Attempt) -> Settlement | None:
+async def work(ctx: Flow, attempt: MultiAttempt) -> Settlement | None:
     """Open the round's workspace, let the implementer work in it, settle it; core's settlement."""
 
     async def turn(session: Session, ws: Workspace) -> str | None:
@@ -215,7 +215,7 @@ async def work(ctx: Flow, attempt: Attempt) -> Settlement | None:
     )
 
 
-async def take_turn(ctx: Flow, attempt: Attempt, session: Session, ws: Workspace) -> Next:
+async def take_turn(ctx: Flow, attempt: MultiAttempt, session: Session, ws: Workspace) -> Next:
     """One paid turn: the reply, then the review, the validation and the gates it leads to."""
     prompt = attempt.prompt()
     attempt.turns += 1
@@ -244,7 +244,7 @@ async def take_turn(ctx: Flow, attempt: Attempt, session: Session, ws: Workspace
             raise TypeError(message)
 
 
-async def _onward(ctx: Flow, attempt: Attempt, ws: Workspace, step: Next) -> Next:
+async def _onward(ctx: Flow, attempt: MultiAttempt, ws: Workspace, step: Next) -> Next:
     """Carry a reply through the review, the validation recipes and the trusted gates it owes."""
     if step is Next.REVIEW:
         step = await review(ctx, attempt, ws)
@@ -255,7 +255,7 @@ async def _onward(ctx: Flow, attempt: Attempt, ws: Workspace, step: Next) -> Nex
     return step
 
 
-async def review(ctx: Flow, attempt: Attempt, ws: Workspace) -> Next:
+async def review(ctx: Flow, attempt: MultiAttempt, ws: Workspace) -> Next:
     """Have a fresh judge read the exact retained candidate and the evaluations taken of it."""
     revision = attempt.candidate or attempt.base
     cited = () if attempt.candidate is None else ctx.evaluation.taken(ws, revision)
@@ -270,7 +270,7 @@ async def review(ctx: Flow, attempt: Attempt, ws: Workspace) -> Next:
             raise TypeError(message)
 
 
-async def validate(ctx: Flow, attempt: Attempt, ws: Workspace) -> Next:
+async def validate(ctx: Flow, attempt: MultiAttempt, ws: Workspace) -> Next:
     """Run the implementer's validation recipes against the candidate it retained."""
     recipe = attempt.recipe()
     if recipe is None or attempt.candidate is None:
