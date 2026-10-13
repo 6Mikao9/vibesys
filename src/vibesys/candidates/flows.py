@@ -74,9 +74,11 @@ async def measure_input(
         return NotConfigured()
     limit = config.max_input_measurement_attempts
     policy = RetryPolicy(max_tries=max(1, limit))
-    done: Submitted | Unmeasurable | GaveUp[Submitted] = await ctx.retry(
-        lambda tries: _submit(ctx, measuring, names, tries, limit), policy
-    )
+
+    async def submit(tries: Tries[Submitted]) -> Submitted | Unmeasurable | Again[Submitted]:
+        return await _submit(ctx, measuring, names, tries, limit)
+
+    done = await ctx.retry(submit, policy)
     if isinstance(done, Unmeasurable):
         return done
     return await _decode(ctx, measuring, done.reasons[-1] if isinstance(done, GaveUp) else done)

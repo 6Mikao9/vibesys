@@ -44,6 +44,7 @@ from vs_core.api.search import (
     Operation,
     OperationFinished,
     RevisionRef,
+    Tries,
     TurnFinished,
     UnexpectedEvent,
     Within,
@@ -58,7 +59,11 @@ async def implement_until_measurable(ctx: Flow, w: WorkstreamStart, attempt: Att
     A turn that ends without a measurable candidate is asked again while the workstream's retry
     policy and the progress policy allow it; the workstream ends otherwise.
     """
-    match await ctx.retry(lambda tries: take_turn(ctx, w, attempt, tries.reasons), w.retries):
+
+    async def turn(tries: Tries[Blocker]) -> Result | Again[Blocker]:
+        return await take_turn(ctx, w, attempt, tries.reasons)
+
+    match await ctx.retry(turn, w.retries):
         case Result() as result:
             return result
         case GaveUp(reasons=blockers):

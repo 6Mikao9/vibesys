@@ -60,9 +60,13 @@ async def measure(
 ) -> MeasurementResult:
     """Submit the measurement, again while the machinery (not the candidate) is to blame."""
     policy = RetryPolicy(max_tries=max(1, w.config.max_input_measurement_attempts))
-    found: MeasurementResult | GaveUp[MeasurementResult] = await ctx.retry(
-        lambda tries: _submit(ctx, w, attempt, revision, tries), policy
-    )
+
+    async def submit(
+        tries: Tries[MeasurementResult],
+    ) -> MeasurementResult | Again[MeasurementResult]:
+        return await _submit(ctx, w, attempt, revision, tries)
+
+    found = await ctx.retry(submit, policy)
     return found.reasons[-1] if isinstance(found, GaveUp) else found
 
 

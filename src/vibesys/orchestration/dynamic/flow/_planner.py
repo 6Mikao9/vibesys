@@ -37,6 +37,7 @@ from vs_core.api.search import (
     GaveUp,
     InvocationRef,
     RetryPolicy,
+    Tries,
     TurnFinished,
     UnexpectedEvent,
     Value,
@@ -78,10 +79,12 @@ def lost_turns(config: DynamicConfig) -> RetryPolicy:
 async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
     """Ask the planner for a portfolio for the free slots, until one can be scheduled."""
     call = Call(capacity=run.capacity(), problem=run.gate.last_error)
+
+    async def ask(tries: Tries[Failed]) -> Reply | NoPlan | Again[Failed]:
+        return await ask_planner(ctx, run, call, tries.reasons)
+
     while True:
-        match await ctx.retry(
-            lambda tries: ask_planner(ctx, run, call, tries.reasons), lost_turns(run.config)
-        ):
+        match await ctx.retry(ask, lost_turns(run.config)):
             case GaveUp(reasons=lost):
                 return _no_plan(_world(ctx, run), _no_reply(lost[-1]))
             case NoPlan() as outcome:

@@ -6,7 +6,6 @@ from vibesys.orchestration.dynamic.flow._ask import ask
 from vibesys.orchestration.dynamic.flow._implement import implement_until_measurable
 from vibesys.orchestration.dynamic.flow._measure import measure_and_interpret
 from vibesys.orchestration.dynamic.flow._outcomes import (
-    STOPPED,
     Attempt,
     Closing,
     WorkEndedError,
@@ -28,8 +27,6 @@ from vs_core.api.search import Failed, Flow, RunView
 
 async def do_work(ctx: Flow, w: WorkstreamStart, attempt: Attempt) -> Closing:
     """Let the role this workstream is for do its work in the attempt."""
-    if ctx.stop_requested:
-        raise WorkEndedError(STOPPED)  # a stop that came while the attempt was opening
     if w.plan.kind is WorkKind.PROFILE:
         return await profile(ctx, w, attempt)
     return await implement_and_measure(ctx, w, attempt)
