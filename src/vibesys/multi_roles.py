@@ -4,8 +4,8 @@ The search declares each role once (`orchestration/multi/search/_roles`, the des
 with single in `serial_search`): the template, the reply, the workspace, the time and the
 corrections. A role here is what only the host can add: the system prompt read from a template
 file, the capabilities the provider must have and the tools the agent is given. The designer
-and the router may write the roadmap artifacts of their run-scoped turns (the router writes
-none); the profiler writes bounded evidence below `profile/` and reads captures through the
+(which the router is, asked another question) may write the roadmap artifacts of its run-scoped
+turns; the profiler writes bounded evidence below `profile/` and reads captures through the
 stateless profiler tool; the implementer edits its candidate and, like the judge that reads it,
 carries the bridged evaluation tool. Each role's id comes from the search's id scheme, so the
 roles the search asks and the roles the host declares cannot drift apart.
@@ -44,20 +44,18 @@ PROFILER_KIND = RoleKind(
 )
 
 
-def _role(role: Role, kind: RoleKind, *, system: str | None = None) -> AgentRole:
+def _role(role: Role, kind: RoleKind) -> AgentRole:
     return core_role(
         _RENDERER,
         role_id=search.multi.ids.role_id(role.name).root,
-        system_template=f"{system or role.name}_system.j2",
+        system_template=f"{role.name}_system.j2",
         kind=kind,
     )
 
 
 DESIGNER = _role(search.PLANNER, DESIGNER_KIND)
-# The router is the designer asked a different question, so it reads under the same instructions.
-ROUTER = _role(search.ROUTER, DESIGNER_KIND, system=search.PLANNER.name)
 PROFILER = _role(search.PROFILER, PROFILER_KIND)
 IMPLEMENTER = _role(search.IMPLEMENTER, MEASURING_WRITER)
 JUDGE = _role(search.JUDGE, MEASURING_READER)
 
-CORE_ROLES = (DESIGNER, ROUTER, PROFILER, IMPLEMENTER, JUDGE)
+CORE_ROLES = (DESIGNER, PROFILER, IMPLEMENTER, JUDGE)

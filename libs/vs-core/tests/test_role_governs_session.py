@@ -422,3 +422,30 @@ def test_the_model_an_operator_chose_reaches_the_turn_and_only_that_role(
     run = FlowRun.start(chosen, Config())
 
     assert spec_of(turn(run)).session.model == model
+
+
+# -- a role that puts another question to an agent a role declares -----------------------------------------
+
+
+@given(model=st.text(alphabet="abcdefgh-", min_size=1, max_size=10))
+@_RESTARTING
+def test_a_role_asked_of_another_roles_agent_is_that_agents_id_and_model(
+    *, restarting: bool, model: str
+) -> None:
+    designer = role_of(name="designer")
+    router = role_of(name="router", agent="designer")
+
+    async def root(ctx: core.Flow, config: Config) -> None:
+        del config
+        await ctx.agents.session(router).turn(Prompt(text="go"))
+
+    definition = fake_search("govern", Config, (designer, router))(root)
+    chosen = definition.with_models({"designer": model})
+    run = FlowRun.start(chosen, Config(), restarting=restarting)
+
+    asked = turn(run)
+    assert spec_of(asked).session.role_id == chosen.ids.role_id("designer")
+    assert spec_of(asked).session.model == model
+    assert asked.decision.root.startswith("router")
+    with pytest.raises(core.UnknownRoleError):
+        definition.with_models({"router": model})

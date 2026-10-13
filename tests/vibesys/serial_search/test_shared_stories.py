@@ -27,6 +27,7 @@ from vs_core.api import (
     StartAttempt,
     Wait,
     Withdraw,
+    WorkspaceMode,
 )
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
@@ -309,4 +310,38 @@ def test_a_start_core_refuses_is_a_failed_round_not_a_stall(
     host.drain()
 
     assert host.refused_starts == 1
+    assert_flow_closed(host)
+
+
+@SEARCHES
+@MODES
+@pytest.mark.parametrize("isolated", [True, False], ids=["isolated", "exclusive-root"])
+def test_the_round_works_where_the_environment_lets_a_candidate_work(
+    *, search: str, restarting: bool, isolated: bool
+) -> None:
+    host = start(search, restarting=restarting, config={"exclusive_root": not isolated})
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain()
+
+    expected = WorkspaceMode.ISOLATED_CHILD if isolated else WorkspaceMode.EXCLUSIVE_ROOT
+    plans = [
+        item.request.workspace.mode
+        for item in host.run.decisions
+        if isinstance(item, Wait) and isinstance(item.request, StartAttempt)
+    ]
+    turns = [
+        item.request.turn.workspace.mode
+        for item in host.run.decisions
+        if isinstance(item, Wait)
+        and isinstance(item.request, RequestTurn)
+        and item.request.turn.session.role_id.root.endswith(IMPLEMENTER)
+        and hasattr(item.request.turn.workspace, "mode")
+    ]
+    assert plans == [expected]
+    assert turns
+    assert set(turns) == {expected}
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    assert finish.result.selection is not None
     assert_flow_closed(host)

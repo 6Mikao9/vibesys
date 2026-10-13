@@ -1320,7 +1320,7 @@ expose = ["api", "api\\..*"]
 # The options a single run is launched with: the search's config and the task's inputs.
 path = "vibesys.orchestration.single.launch"
 layer = "loops"
-depends_on = ["vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.single.search", "vibesys.serial_search"]
+depends_on = ["vs_core", "vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.single.search", "vibesys.serial_search"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.single.launch"]
@@ -1379,7 +1379,7 @@ expose = ["api", "api\\..*"]
 # The options a multi run is launched with: the search's config and the task's inputs.
 path = "vibesys.orchestration.multi.launch"
 layer = "loops"
-depends_on = ["vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.multi.search", "vibesys.serial_search"]
+depends_on = ["vs_core", "vibesys.inputs", "vibesys.orchestration.agent_options", "vibesys.orchestration.multi.search", "vibesys.serial_search"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.multi.launch"]

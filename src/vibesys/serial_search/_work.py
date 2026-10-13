@@ -9,6 +9,7 @@ made, with a failure, or as cancelled when the operator stops the run.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vs_core.api.search import (
@@ -54,8 +55,18 @@ type Turn = Callable[[Session, Workspace], Awaitable[str | None]]
 """One paid turn of the implementer: None when the attempt is over, else why to ask again."""
 
 
+@dataclass(frozen=True)
+class Room:
+    """Where and for how long the implementer works in a round."""
+
+    mode: WorkspaceMode
+    """How the workspace opens: its own copy, or the run's root on a host without sandboxes."""
+    paid_turns: int
+    """The paid implementer turns of the round, which is also the workspace's paid-turn limit."""
+
+
 async def work(
-    ctx: Flow, attempt: Attempting, *, implementer: Role, paid_turns: int, turn: Turn
+    ctx: Flow, attempt: Attempting, *, implementer: Role, room: Room, turn: Turn
 ) -> Settlement | None:
     """Open the round's workspace, ask the implementer in it, settle it; core's settlement.
 
@@ -65,8 +76,8 @@ async def work(
     async with ctx.workspaces.open(
         attempt=attempt_id(hypothesis, attempt.number),
         item=item_id(hypothesis, attempt.number),
-        plan=WorkspacePlan(mode=WorkspaceMode.ISOLATED_CHILD, base=attempt.base),
-        budget=AttemptBudget(admission_charge=1, paid_invocation_limit=paid_turns),
+        plan=WorkspacePlan(mode=room.mode, base=attempt.base),
+        budget=AttemptBudget(admission_charge=1, paid_invocation_limit=room.paid_turns),
     ) as opened:
         if isinstance(opened, NotOpened):
             attempt.failed(f"the workspace could not be opened ({opened.failed.reason.value})")
@@ -78,6 +89,6 @@ async def work(
             again = await turn(session, opened)
             return True if again is None else Again(reason=again)
 
-        await ctx.retry(ask, RetryPolicy(max_tries=paid_turns))
+        await ctx.retry(ask, RetryPolicy(max_tries=room.paid_turns))
         ctx.workspaces.keep(opened, *attempt.asserted())
     return opened.settlement if isinstance(opened, Workspace) else None

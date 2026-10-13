@@ -12,7 +12,14 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.candidates.api import Gates, Measuring, limits_for, run_deadline_at, terms_of
+from vibesys.candidates.api import (
+    Gates,
+    Measuring,
+    limits_for,
+    run_deadline_at,
+    terms_of,
+    workspace_mode_for,
+)
 from vibesys.core_wiring import (
     EvaluationInputs,
     ResolvedRun,
@@ -20,7 +27,6 @@ from vibesys.core_wiring import (
     domain_prompt_sections,
     evaluation_inputs,
     operation_catalog,
-    require_candidate_sandboxes,
 )
 from vibesys.hypothesis import HypothesisState
 from vibesys.multi_roles import CORE_ROLES
@@ -121,7 +127,6 @@ def _task_terms(
 
 def _plan_for(launch_type: type[MultiRunLaunch]) -> Callable[[CoreRunContext], CorePlan]:
     def plan(context: CoreRunContext) -> CorePlan:
-        require_candidate_sandboxes(context.environment, loop="multi")
         launch = launch_type.model_validate(context.options)
         commit = context.baseline.git_commit
         if commit is None:
@@ -147,8 +152,13 @@ def _plan_for(launch_type: type[MultiRunLaunch]) -> Callable[[CoreRunContext], C
         )
         profiler_id = context.facts.profiler_id
         profiler = None if profiler_id == "none" else profiler_definition(ProfilerKind(profiler_id))
-        config = launch.search_config(profiling=profiler_id != "none")
-        models = {multi.ids.role_id(role.name).root: role.name for role in multi.roles}
+        config = launch.search_config(
+            profiling=profiler_id != "none",
+            workspace_mode=workspace_mode_for(
+                isolated_candidates=context.environment.parallel_candidate_obstacle is None
+            ),
+        )
+        models = {multi.ids.role_id(role.identity).root: role.identity for role in multi.roles}
         chosen = {
             models[role]: model for role, model in context.role_models.items() if role in models
         }

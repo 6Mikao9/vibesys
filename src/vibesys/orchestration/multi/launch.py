@@ -15,6 +15,7 @@ from vibesys.inputs import ProfileGuidedInput
 from vibesys.orchestration.agent_options import TaskInputs
 from vibesys.orchestration.multi.search.api import MultiConfig
 from vibesys.serial_search.api import attribution_of
+from vs_core.api.search import WorkspaceMode
 
 INTERFACES = frozenset({"inprocess", "service"})
 
@@ -24,7 +25,7 @@ class _Launch(TaskInputs, MultiConfig):
 
     @model_validator(mode="after")
     def _derived_keys_are_not_options(self) -> Self:
-        for key in ("attribution", "profiling"):
+        for key in ("attribution", "profiling", "exclusive_root"):
             if key in self.model_fields_set:
                 message = f"{key!r} is not a launch option: it is derived from the run"
                 raise ValueError(message)
@@ -33,11 +34,17 @@ class _Launch(TaskInputs, MultiConfig):
             raise ValueError(message)
         return self
 
-    def search_config(self, *, profiling: bool) -> MultiConfig:
-        """The part the search reads, with the profiling the run's profiler allows."""
+    def search_config(
+        self, *, profiling: bool, workspace_mode: WorkspaceMode = WorkspaceMode.ISOLATED_CHILD
+    ) -> MultiConfig:
+        """The part the search reads, with the profiling the run's profiler allows.
+
+        A host that cannot open candidate sandboxes has the rounds work in its root.
+        """
         fields = {name: getattr(self, name) for name in MultiConfig.model_fields}
         fields["attribution"] = attribution_of(self.profile_guided)
         fields["profiling"] = profiling
+        fields["exclusive_root"] = workspace_mode is WorkspaceMode.EXCLUSIVE_ROOT
         return MultiConfig.model_validate(fields)
 
 

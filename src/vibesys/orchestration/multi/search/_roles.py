@@ -32,6 +32,7 @@ EXCHANGES = Exchanges(
 
 ROUTER = Role(
     name="router",
+    agent="orchestrator",
     prompt="pre_round.j2",
     reply=PreRoundDecision,
     workspace=None,
@@ -43,7 +44,11 @@ ROUTER = Role(
     charge=Charge.TURN,
     exchanges=Exchanges(correction="reply_correction.j2"),
 )
-"""Decides, before a new hypothesis, whether fresh profile evidence is wanted."""
+"""Decides, before a new hypothesis, whether fresh profile evidence is wanted.
+
+The designer is asked: the router is its agent (`multi-orchestrator`), so its model, system
+prompt and recorded runs are the designer's.
+"""
 
 PROFILER = Role(
     name="profiler",

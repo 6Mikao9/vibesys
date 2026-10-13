@@ -30,6 +30,9 @@ class SingleConfig(Value):
     """The trusted gates run after the implementer's self-review every this many rounds."""
     max_continuation_rounds: NonNegative = 2
     """Times one hypothesis may be continued after its first round."""
+    exclusive_root: bool = False
+    """Whether rounds work in the run's own root, for a host that cannot open isolated candidate
+    sandboxes. Follows the run environment; the operator does not choose it."""
     attribution: AttributionConfig | None = None
     """The profile-guided preset's attribution command and plateau policy; None otherwise."""
 
