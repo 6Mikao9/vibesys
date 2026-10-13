@@ -13,6 +13,8 @@ from ._sources import First, Pending, Signal, StopSource, Task
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
+    from vs_core.types.common import AttemptRef
+
     from ._flow import Group
 
 UNBOUNDED = 1_000_000
@@ -68,6 +70,8 @@ class _Task:
     snapshot: object | None = None
     """The latest snapshot of a registered flow: what a restart resumes it from."""
     checkpointed: bool = False
+    holds: list[AttemptRef] = field(default_factory=list)
+    """Workspaces this flow has open (acquired, not yet settled)."""
     shield: int = 0
     stop_pending: bool = False
     stopped: bool = False
