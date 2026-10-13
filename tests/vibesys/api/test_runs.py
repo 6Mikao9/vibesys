@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.core_plugins import capability_plugin, failing_plugin
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 
 from entrypoints.run import supervise
@@ -155,12 +155,9 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     request_template: RunRequest,
 ) -> None:
     registry = OrchestrationRegistry()
-    # A strategy that never proposes anything: only the operator's stop can end this run.
+    # A search that proposes nothing: only the operator's stop can end this run.
     registry.register_plugin(
-        capability_plugin(
-            "identity-test",
-            strategy=SkeletonStrategy(state=SkeletonState(schema_version=1, phase="done")),
-        )
+        capability_plugin("identity-test", strategy=SkeletonStrategy.cancelled())
     )
     runs = default_runs(
         LaunchSettings(

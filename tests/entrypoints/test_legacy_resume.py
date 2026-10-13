@@ -18,7 +18,7 @@ from entrypoints.run import run_headless
 from entrypoints.server import main as server_main
 from launch import default_runs
 from vibesys.api import ConfigurationError
-from vibesys.orchestration.dynamic import DynamicOptions
+from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 
@@ -55,13 +55,9 @@ def _legacy_run(root: Path, *, state: bytes | None) -> Path:
         orchestration=OrchestrationDescriptor(
             id="dynamic",
             config_version=1,
-            options=DynamicOptions(
-                interface="service",
-                max_rounds=2,
-                max_retries_per_round=2,
-                judge_every=2,
-                official_eval_every=2,
-            ).model_dump(mode="json"),
+            options=DynamicLaunch(interface="service", max_rounds=2, judge_every=2).model_dump(
+                mode="json"
+            ),
         ),
         trusted_input_baseline="0" * 40,
         now=_NOW,

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Concatenate, Literal, Self, TypeVar
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from vs_agent.cli_common import materialize_skills
 from vs_agent.contracts import (
@@ -37,7 +37,7 @@ from vs_agent.contracts import (
     session_spec_fingerprint,
 )
 from vs_agent.reply_limits import ReplyGuard, reply_breach
-from vs_agent.runner import validate_typed_response
+from vs_agent.runner import schema_error
 from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
@@ -830,7 +830,10 @@ class FakeAgentClient:
             # exactly as the equivalent agent reply would.
             value = value.model_dump(mode="json")
         _refuse_flood(json.dumps(value))
-        return validate_typed_response(value, response_cls)
+        try:
+            return response_cls.model_validate_json(json.dumps(value))
+        except ValidationError as error:
+            raise schema_error(error) from error
 
     def _resolve_text(self, kind: str, invocation: FakeInvocation) -> str:
         source = _pop(self._text_queues, kind)

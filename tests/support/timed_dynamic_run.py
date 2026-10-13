@@ -22,25 +22,19 @@ import asyncio
 import hashlib
 import tempfile
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from tests.vibesys.orchestration.dynamic.search._executors import Executors, _lease
-from tests.vibesys.orchestration.dynamic.search._replies import (
+from tests.support.dynamic_script import Executors, config, harness, lease
+from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
-from tests.vibesys.orchestration.dynamic.search._run import FACTS, LIMITS, config
 
-from vibesys.orchestration.dynamic.core_policy.api import (
-    build_search,
-    dynamic_operation_registry,
-    reply_schemas,
-    requirements_for,
-)
+from vibesys.orchestration.dynamic.search.api import dynamic
 from vs_core.api import (
     CancelTurn,
     DispatchTurn,
@@ -50,13 +44,12 @@ from vs_core.api import (
     ObserveOwnedJob,
     ResourceId,
     ResumeSessionTurn,
-    RunEnvelope,
     RunResultProposal,
     RunStatus,
     SubmitMeasurement,
     TurnObserved,
 )
-from vs_core.testing.drive import Answer, Harness, Running, Succeeded, new_run
+from vs_core.testing.drive import Answer, Running, Succeeded, new_run
 from vs_project.api import FakeStateStore, StoreFence
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS as LEASE_SECONDS
 from vs_runtime.api.core import (
@@ -268,7 +261,7 @@ class _TimedExecutors(ScriptedExecutors):
             if isinstance(request, CancelTurn)
             else request.turn.session.session_id
         )
-        observed = self._observed(request, Succeeded(resource_id=_lease(session)), context.now_at)
+        observed = self._observed(request, Succeeded(resource_id=lease(session)), context.now_at)
         view = observed.observation.model_copy(update={"status": ObservationStatus.CANCELLED})
         events = (
             (
@@ -412,31 +405,34 @@ def _run(
         submit=cluster.submit,
     )
     selected = config(max_in_flight=IMPLEMENTERS)
-    search = build_search(selected)
-    harness = Harness(
-        registry=dynamic_operation_registry(),
-        facts=FACTS,
-        limits=LIMITS.model_copy(update={"observe_interval": OBSERVE_INTERVAL_S}),
-        envelope_type=RunEnvelope[search.state_model],
-        requirements=requirements_for(selected),
+    hosting = harness(selected)
+    hosting = replace(
+        hosting,
+        limits=hosting.limits.model_copy(
+            update={
+                "observe_interval": OBSERVE_INTERVAL_S,
+                "observe_backoff_cap": OBSERVE_INTERVAL_S,
+            }
+        ),
     )
+    search = dynamic.driver(selected, hosting.registry)
     store = LeaseRecordingStore()
     paused: list[float] = []
     turns: list[TurnSpan] = []
     shell: CoreRuntime[Any] = CoreRuntime(
         store,
         search,
-        new_run(search, harness),
+        new_run(search, hosting),
         config=selected,
         bindings=CoreRuntimeBindings(
-            registry=harness.registry,
+            registry=hosting.registry,
             commits=_PauseClock(clock, paused),
             executors=request_executors(
                 _TimedExecutors(
                     _TimedScript(script, cluster),
                     lambda: shell.record.envelope.core,
-                    harness.registry,
-                    reply_schemas(selected),
+                    hosting.registry,
+                    dynamic.reply_schemas,
                     _World(clock, profile, turns, cluster),
                 )
             ),

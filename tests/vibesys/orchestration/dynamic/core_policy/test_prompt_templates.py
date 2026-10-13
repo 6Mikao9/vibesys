@@ -1,172 +1,69 @@
-"""Every prompt the strategy can request renders from the core policy's templates.
+"""Every prompt the dynamic search can request renders from the core policy's templates.
 
-The strategy sends a typed `PromptContext`; the render owner passes its fields (plus the
-run-level `objective`) to the template under strict undefined variables. A template that
-reads a name no context supplies fails the render, which the planner sees as "prompt
-render failed" and ends the run, so each template is exercised over its context space.
+The search sends a typed prompt context; the render owner passes its fields, the reply fields
+of the role's reply and the run-level variables to the template under strict undefined
+variables. A template that reads a name no context supplies fails the render, which the search
+sees as a failed render and ends the workstream, so each template is exercised over its
+context space and checked for the facts of its context.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.dynamic.prompt_variables import context_variables
-
-import vibesys.orchestration.dynamic.core_policy.prompts as templates
-from vibesys.orchestration.dynamic.core_policy.api import (
-    planner_reply_example,
-    run_prompt_variables,
+from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
+    CONTEXTS,
+    OBJECTIVE,
+    PLANNER_PROMPTS,
+    ROOT,
+    TEMPLATE_FILES,
+    render,
+    tokens,
 )
+
+from vibesys.orchestration.dynamic.core_policy.api import planner_reply_example
 from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, PortfolioPlan
-from vibesys.orchestration.dynamic.strategy.api import (
-    EvidenceCitation,
+from vibesys.orchestration.dynamic.search.api import (
     ImplementPrompt,
-    MetricRow,
-    PlannerCorrectionPrompt,
+    PlannerCorrection,
     PlannerPrompt,
+    ProfileHistoryRow,
     ProfilePrompt,
-    PromptContext,
     PromptTemplate,
-    ReplyCorrectionPrompt,
-    ResumePrompt,
     ReviewPrompt,
-    WaitUnrecordedPrompt,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
-from vs_core.api import RevisionId, RevisionRef
-from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import ProfileField
+from vs_core.api.search import ReplyCorrection, ResumeFacts, WaitUnrecorded
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-_ROOT = Path(templates.__file__).parent
-_OBJECTIVE = "Raise queue throughput."
-# Immutable once built; its compiled-template cache is shared by every example.
-_RENDERER = TemplateRenderer(_ROOT, fallback_roots=(CORE_PROTOCOL_DIR,))
+    from vibesys.prompts import CoreProtocolTemplate as CoreTemplate
+
+ALL_TEMPLATES = [*PromptTemplate, *CoreProtocolTemplate]
 
 
-def _revision(name: str) -> RevisionRef:
-    return RevisionRef(revision_id=RevisionId(root=name), digest=f"git-commit:{name}")
+def test_every_requestable_template_has_a_context_generator_and_a_template_file() -> None:
+    assert set(CONTEXTS) == set(TEMPLATE_FILES) == set(ALL_TEMPLATES)
+    for name in TEMPLATE_FILES.values():
+        assert (ROOT / name).is_file() or (CORE_PROTOCOL_DIR / name).is_file(), name
 
 
-_REVISIONS = st.sampled_from(("a1", "b2", "c3")).map(_revision)
-_TEXT = st.text(alphabet="abcdefg hij", min_size=1, max_size=12)
-_CITATIONS = st.lists(
-    st.builds(EvidenceCitation, location=_TEXT, revision=st.none() | _TEXT, purpose=_TEXT),
-    max_size=2,
-).map(tuple)
-_METRICS = st.lists(
-    st.builds(
-        MetricRow,
-        name=_TEXT,
-        value=st.floats(min_value=0, max_value=1e6),
-        direction=st.sampled_from(("max", "min")),
-        unit=st.none() | _TEXT,
-    ),
-    max_size=2,
-).map(tuple)
-_PLANNER = st.builds(
-    PlannerPrompt,
-    capacity=st.integers(0, 3),
-    in_flight=st.integers(0, 3),
-    remaining=st.integers(0, 9),
-    base_revision=_REVISIONS,
-    base_accuracy_passed=st.none() | st.booleans(),
-    offer_snapshot=_TEXT,
-    older_ids=st.lists(_TEXT, max_size=2).map(tuple),
-    baseline=_METRICS,
-    input_failure=st.none() | _TEXT,
-    profiling=st.booleans(),
-    profile_fields=st.lists(st.sampled_from(ProfileField), unique=True).map(tuple),
-)
-_CONTEXTS: dict[PromptTemplate | CoreProtocolTemplate, st.SearchStrategy[PromptContext]] = {
-    PromptTemplate.PORTFOLIO: _PLANNER,
-    PromptTemplate.PORTFOLIO_CORRECTION: st.builds(
-        PlannerCorrectionPrompt,
-        planner=_PLANNER,
-        error=st.none() | _TEXT,
-        scheduled=st.integers(0, 3),
-    ),
-    PromptTemplate.IMPLEMENT: st.builds(
-        ImplementPrompt,
-        hypothesis_id=_TEXT,
-        hypothesis=_TEXT,
-        task=_TEXT,
-        pass_criteria=_TEXT,
-        parent_revision=_REVISIONS,
-        evidence=_CITATIONS,
-        worktree_revision=st.none() | _REVISIONS,
-        prior_revision=st.none() | _REVISIONS,
-        feedback=st.none() | _TEXT,
-        blocker=st.none() | _TEXT,
-        narrowed_step=st.none() | _TEXT,
-        turns_without_candidate=st.integers(0, 3),
-    ),
-    PromptTemplate.REVIEW: st.builds(
-        ReviewPrompt,
-        hypothesis_id=_TEXT,
-        hypothesis=_TEXT,
-        pass_criteria=_TEXT,
-        candidate=_REVISIONS,
-        summary=_TEXT,
-        evidence=_CITATIONS,
-    ),
-    PromptTemplate.PROFILE_REQUEST: st.builds(
-        ProfilePrompt, question=_TEXT, required_fields=st.just(()), target=_REVISIONS
-    ),
-    CoreProtocolTemplate.RESUME: st.builds(
-        ResumePrompt,
-        role=st.sampled_from(("implementer", "judge", "profiler")),
-        retained_revision=st.none() | _REVISIONS,
-        timed_out=st.booleans(),
-        repeated_failure=st.none() | _TEXT,
-    ),
-    CoreProtocolTemplate.REPLY_CORRECTION: st.builds(
-        ReplyCorrectionPrompt,
-        role=st.sampled_from(("planner", "implementer", "judge", "profiler")),
-        error=_TEXT,
-    ),
-    CoreProtocolTemplate.WAIT_UNRECORDED: st.builds(WaitUnrecordedPrompt),
-}
-
-
-def _variables(context: BaseModel, *, agent_evaluation: bool = False) -> dict[str, object]:
-    variables = context_variables(context)
-    return {
-        **run_prompt_variables(
-            domain_sections=EMPTY_DOMAIN_SECTIONS,
-            objective=_OBJECTIVE,
-            environment_notes="",
-            agent_evaluation=agent_evaluation,
-        ),
-        **variables,
-    }
-
-
-def test_every_requestable_template_has_a_context_generator() -> None:
-    assert set(_CONTEXTS) == {*PromptTemplate, *CoreProtocolTemplate}
-
-
-@pytest.mark.parametrize(
-    "template", [*PromptTemplate, *CoreProtocolTemplate], ids=lambda item: item.value
-)
+@pytest.mark.parametrize("template", ALL_TEMPLATES, ids=lambda item: item.value)
 @given(data=st.data())
 def test_a_template_renders_for_every_context_of_its_kind(
-    template: PromptTemplate | CoreProtocolTemplate, data: st.DataObject
+    template: PromptTemplate | CoreTemplate, data: st.DataObject
 ) -> None:
-    context = data.draw(_CONTEXTS[template])
+    context = data.draw(CONTEXTS[template])
 
-    text = _RENDERER.render_template(f"{template.value}.j2", **_variables(context))
+    text = render(template, context)
 
     assert text.strip()
     if template in (PromptTemplate.PORTFOLIO, PromptTemplate.IMPLEMENT, PromptTemplate.REVIEW):
-        assert _OBJECTIVE in text
+        assert OBJECTIVE in text
 
 
 @pytest.mark.parametrize("template", [PromptTemplate.IMPLEMENT, PromptTemplate.REVIEW])
@@ -174,43 +71,112 @@ def test_a_template_renders_for_every_context_of_its_kind(
 def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
     template: PromptTemplate, data: st.DataObject, *, offered: bool
 ) -> None:
-    context = data.draw(_CONTEXTS[template])
+    context = data.draw(CONTEXTS[template])
 
-    text = _RENDERER.render_template(
-        f"{template.value}.j2", **_variables(context, agent_evaluation=offered)
-    )
+    text = render(template, context, agent_evaluation=offered)
 
     assert ("submit_evaluation" in text) is offered
     assert ("validate_evaluation_wait" in text) is offered
 
 
-def _planner_texts(context: PlannerPrompt) -> list[str]:
-    correction = PlannerCorrectionPrompt(planner=context, error=None, scheduled=0)
-    return [
-        _RENDERER.render_template("portfolio.j2", **_variables(context)),
-        _RENDERER.render_template("portfolio_correction.j2", **_variables(correction)),
-    ]
+# -- the planner ------------------------------------------------------------------------------
 
 
-@given(context=_PLANNER)
+@given(context=PLANNER_PROMPTS)
+def test_the_planner_prompt_states_the_run_it_plans_for(context: PlannerPrompt) -> None:
+    text = render(PromptTemplate.PORTFOLIO, context)
+
+    assert f"Schedule at most {context.capacity} new workstreams" in text
+    assert context.base_revision.revision_id.root in text
+    assert context.offer_snapshot in text
+    for row in context.history:
+        identity = row.profile_id if isinstance(row, ProfileHistoryRow) else row.hypothesis_id
+        assert identity in text
+    for option in context.buildable:
+        assert f"option `{option.option_id}`" in text
+        assert f"submission {option.submission_index}" in text
+    for identifier in context.older_ids:
+        assert identifier in text
+    assert ("Older hypothesis IDs" in text) is bool(context.older_ids)
+    assert ("Input baseline" in text) is bool(context.baseline)
+    for row in context.baseline:
+        assert row.name in text
+    assert ("Input not measurable" in text) is (context.input_failure is not None)
+    assert ("choose a profile workstream" in text) is context.profiling
+    assert ("none yet" in text) is not bool(context.history)
+    assert "Correction required" not in text
+
+
+@given(context=PLANNER_PROMPTS)
 def test_the_planner_prompt_shows_a_reply_its_own_schema_accepts(context: PlannerPrompt) -> None:
     # live-1: Haiku put the plan inside a `findings` field, then left a workstream without
     # its fields; each failed schema check cost a 30 to 40 s planner turn.
     example = planner_reply_example()
-    for text in _planner_texts(context):
-        assert example in text
+
+    assert example in render(PromptTemplate.PORTFOLIO, context)
     for reply_type in (PortfolioPlan, ImplementPortfolioPlan):
         reply_type.model_validate_json(example)
 
 
-@given(context=_PLANNER)
+@given(context=PLANNER_PROMPTS)
 def test_a_workstream_of_the_reply_is_never_offered_a_sibling_as_parent(
     context: PlannerPrompt,
 ) -> None:
     # live-1: the planner named its own h1, not yet built, as the parent of h2.
-    for text in _planner_texts(context):
-        assert "never another workstream of this reply" in text
-        assert ("leave `parent_hypothesis_id` null" in text) is True  # no buildable rows here
+    text = render(PromptTemplate.PORTFOLIO, context)
+
+    assert "never another workstream of this reply" in text
+    assert ("leave `parent_hypothesis_id` null" in text) is not bool(context.buildable)
+
+
+@given(context=CONTEXTS[PromptTemplate.PORTFOLIO_CORRECTION])
+def test_a_planner_correction_repeats_the_request_and_says_what_was_wrong(
+    context: BaseModel,
+) -> None:
+    assert isinstance(context, PlannerCorrection)
+    text = render(PromptTemplate.PORTFOLIO_CORRECTION, context)
+
+    assert f"Schedule at most {context.capacity} new workstreams" in text
+    assert planner_reply_example() in text
+    assert text.count("Correction required: ") == 1
+    assert context.problem is not None
+    match context.problem.kind.value:
+        case "underfilled":
+            assert f"schedules {context.problem.scheduled} of {context.capacity} free slots" in text
+        case "unparseable":
+            assert "the reply violated the plan schema" in text
+            for error in context.problem.errors:
+                assert error.code.value in text
+        case "violations":
+            for violation in context.problem.violations:
+                assert violation.subject in text
+        case _:
+            assert "planning turn" in text
+
+
+# -- the implementer --------------------------------------------------------------------------
+
+
+@given(context=CONTEXTS[PromptTemplate.IMPLEMENT])
+def test_the_implementer_is_given_its_hypothesis_and_what_the_last_turn_left(
+    context: BaseModel,
+) -> None:
+    assert isinstance(context, ImplementPrompt)
+    text = render(PromptTemplate.IMPLEMENT, context)
+
+    for fact in (context.hypothesis_id, context.hypothesis, context.task, context.pass_criteria):
+        assert fact in text
+    assert context.parent_revision.revision_id.root in text
+    for citation in context.evidence:
+        assert citation.location in text
+    assert ("This continues your earlier work" in text) is (context.worktree_revision is not None)
+    assert ("Feedback from the prior attempt" in text) is (context.rejection is not None)
+    if context.rejection is not None:
+        assert context.rejection in text
+    assert ("The trusted check of your earlier attempt failed" in text) is bool(
+        context.prior_failure_tail
+    )
+    assert ("ended without a candidate" in text) is (context.last_blocker is not None)
 
 
 @given(data=st.data(), offered=st.booleans())
@@ -218,11 +184,9 @@ def test_the_implementer_is_told_to_submit_early_and_not_to_repeat_a_passed_chec
     data: st.DataObject, *, offered: bool
 ) -> None:
     # live-1: implementer turns ran the local check 11 to 14 times and took 12 to 13 minutes.
-    context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT])
+    context = data.draw(CONTEXTS[PromptTemplate.IMPLEMENT])
 
-    text = _RENDERER.render_template(
-        "implement.j2", **_variables(context, agent_evaluation=offered)
-    )
+    text = render(PromptTemplate.IMPLEMENT, context, agent_evaluation=offered)
 
     assert "Once the candidate builds and one local check passes, stop checking" in text
     assert "Never\nrerun a local check on files that already passed it" in text
@@ -230,66 +194,145 @@ def test_the_implementer_is_told_to_submit_early_and_not_to_repeat_a_passed_chec
     assert ("nominate it" in text.split("stop checking and")[1][:60]) is not offered
 
 
-@given(data=st.data(), offered=st.booleans())
-def test_the_judge_reads_evidence_and_the_diff_before_running_anything(
-    data: st.DataObject, *, offered: bool
-) -> None:
-    # live-1: judges ran the local check 10 to 19 times in turns of 96 to 166 s.
-    context = data.draw(_CONTEXTS[PromptTemplate.REVIEW])
-
-    text = _RENDERER.render_template("review.j2", **_variables(context, agent_evaluation=offered))
-
-    assert "Start from the referenced evidence and the candidate's diff" in text
-    assert "do not run local checks, benchmarks" in text
-
-
-def test_strategy_prompts_name_no_domain_command() -> None:
-    # Domain commands live in the bundle's objective; the strategy's prompts stay generic.
-    for template in sorted(_ROOT.glob("*.j2")):
-        assert "cpu_check" not in template.read_text(), template.name
-
-
-@given(data=st.data(), blocker=_TEXT, step=st.none() | _TEXT)
+@given(data=st.data(), summary=tokens("blk"), step=st.just("") | tokens("nxt"))
 def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
-    data: st.DataObject, blocker: str, step: str | None
+    data: st.DataObject, summary: str, step: str
 ) -> None:
     # live-2: three turns in a row ended "not ready for trusted evaluation" on one workstream;
     # the retry received only the previous summary and no narrower step.
-    context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT]).model_copy(
-        update={"blocker": blocker, "narrowed_step": step, "turns_without_candidate": 1}
+    context = data.draw(CONTEXTS[PromptTemplate.IMPLEMENT])
+    assert isinstance(context, ImplementPrompt)
+    context = ImplementPrompt.model_validate(
+        {
+            **context.model_dump(),
+            "last_blocker": {"kind": "failed", "summary": summary, "next_step": step},
+            "turns_without_candidate": 1,
+        },
+        strict=False,
     )
 
-    text = _RENDERER.render_template("implement.j2", **_variables(context))
+    text = render(PromptTemplate.IMPLEMENT, context)
 
     assert "The blocker you stated:" in text
-    assert blocker in text
-    assert (step is not None and "The narrower step you named for this turn:" in text) or (
-        step is None and "The narrower step you named" not in text
-    )
-    if step is not None:
-        assert step in text
+    assert summary in text
+    assert ("The narrower step you named for this turn:" in text) is bool(step)
+    assert (step in text) if step else ("The narrower step you named" not in text)
 
 
 @given(data=st.data())
 def test_a_first_attempt_is_not_shown_a_blocker(data: st.DataObject) -> None:
-    context = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT]).model_copy(
-        update={"blocker": None, "narrowed_step": None, "turns_without_candidate": 0}
-    )
+    context = data.draw(CONTEXTS[PromptTemplate.IMPLEMENT])
+    assert isinstance(context, ImplementPrompt)
+    first = context.model_copy(update={"last_blocker": None, "turns_without_candidate": 0})
 
-    text = _RENDERER.render_template("implement.j2", **_variables(context))
-
-    assert "The blocker you stated:" not in text
+    assert "The blocker you stated:" not in render(PromptTemplate.IMPLEMENT, first)
 
 
 @given(data=st.data())
 def test_planner_and_implementer_share_one_first_measurable_step(data: st.DataObject) -> None:
     # live-2: the planner chose architecture-scale hypotheses that no single turn could finish.
-    planner = data.draw(_PLANNER)
-    implement = data.draw(_CONTEXTS[PromptTemplate.IMPLEMENT])
+    planner = data.draw(PLANNER_PROMPTS)
+    implement = data.draw(CONTEXTS[PromptTemplate.IMPLEMENT])
 
-    assert "first measurable step" in _RENDERER.render_template(
-        "portfolio.j2", **_variables(planner)
+    assert "first measurable step" in render(PromptTemplate.PORTFOLIO, planner)
+    assert "first measurable step" in render(PromptTemplate.IMPLEMENT, implement)
+
+
+# -- the judge and the profiler ------------------------------------------------------------------
+
+
+@given(context=CONTEXTS[PromptTemplate.REVIEW])
+def test_the_judge_is_given_the_candidate_and_every_trusted_evaluation_of_it(
+    context: BaseModel,
+) -> None:
+    assert isinstance(context, ReviewPrompt)
+    text = render(PromptTemplate.REVIEW, context)
+
+    for fact in (context.hypothesis_id, context.pass_criteria, context.summary):
+        assert fact in text
+    assert context.candidate.revision_id.root in text
+    assert ("no trusted evaluation of this candidate exists yet" in text) is not bool(
+        context.evaluations
     )
-    assert "first measurable step" in _RENDERER.render_template(
-        "implement.j2", **_variables(implement)
+    for item in context.evaluations:
+        assert f"evidence `{item.evidence_id.root}`" in text
+        assert item.feedback in text
+        for row in item.metrics:
+            assert row.name in text
+    assert text.count("PASS") == sum(item.passed is True for item in context.evaluations)
+    assert text.count("FAIL") == sum(item.passed is False for item in context.evaluations)
+    assert text.count("result not decoded") == sum(
+        item.passed is None for item in context.evaluations
     )
+
+
+@given(data=st.data(), offered=st.booleans())
+def test_the_judge_reads_evidence_and_the_diff_before_running_anything(
+    data: st.DataObject, *, offered: bool
+) -> None:
+    # live-1: judges ran the local check 10 to 19 times in turns of 96 to 166 s.
+    context = data.draw(CONTEXTS[PromptTemplate.REVIEW])
+
+    text = render(PromptTemplate.REVIEW, context, agent_evaluation=offered)
+
+    assert "Start from the referenced evidence and the candidate's diff" in text
+    assert "do not run local checks, benchmarks" in text
+
+
+@given(context=CONTEXTS[PromptTemplate.PROFILE_REQUEST])
+def test_the_profiler_is_asked_the_question_of_the_revision_with_the_fields_it_must_answer(
+    context: BaseModel,
+) -> None:
+    assert isinstance(context, ProfilePrompt)
+    text = render(PromptTemplate.PROFILE_REQUEST, context)
+
+    assert context.question in text
+    assert context.target.revision_id.root in text
+    assert OBJECTIVE in text
+    assert ("Required measurement fields" in text) is bool(context.required_fields)
+    for name in context.required_fields:
+        assert name in text
+
+
+# -- the exchanges core starts ------------------------------------------------------------------
+
+
+@given(context=CONTEXTS[CoreProtocolTemplate.RESUME])
+def test_a_resumed_turn_says_whether_its_wait_timed_out_and_what_was_retained(
+    context: BaseModel,
+) -> None:
+    assert isinstance(context, ResumeFacts)
+    text = render(CoreProtocolTemplate.RESUME, context)
+
+    assert f"suspended {context.agent} turn" in text
+    assert ("The suspension deadline expired" in text) is context.timed_out
+    assert ("Every evaluation you awaited is terminal" in text) is not context.timed_out
+    assert ("The retained workspace revision" in text) is (context.retained is not None)
+    if context.retained is not None:
+        assert context.retained.revision_id.root in text
+
+
+@given(context=CONTEXTS[CoreProtocolTemplate.REPLY_CORRECTION])
+def test_a_reply_correction_names_the_role_and_every_problem(context: BaseModel) -> None:
+    assert isinstance(context, ReplyCorrection)
+    text = render(CoreProtocolTemplate.REPLY_CORRECTION, context)
+
+    assert f"Your previous {context.role} reply violated its output schema" in text
+    assert text.count("\n- ") == len(context.errors)
+    for error in context.errors:
+        assert f"({error.code.value})" in text
+
+
+@given(context=CONTEXTS[CoreProtocolTemplate.WAIT_UNRECORDED])
+def test_an_unrecorded_wait_names_the_role_that_asked(context: BaseModel) -> None:
+    assert isinstance(context, WaitUnrecorded)
+
+    assert f"Your previous {context.role} reply" in render(
+        CoreProtocolTemplate.WAIT_UNRECORDED, context
+    )
+
+
+def test_search_prompts_name_no_domain_command() -> None:
+    # Domain commands live in the bundle's objective; the search's prompts stay generic.
+    for template in sorted(ROOT.glob("*.j2")):
+        assert "cpu_check" not in template.read_text(), template.name

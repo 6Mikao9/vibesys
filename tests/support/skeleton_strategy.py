@@ -98,6 +98,8 @@ class SkeletonConfig(core.Value):
     keeps_candidate: bool = True
     cancels_after_start: bool = False
     probe: bool = False
+    fails: bool = False
+    """End at once with no winner: a run that only has to start and finish."""
 
 
 def measurement(
@@ -198,6 +200,8 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
 )
 async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     """Play the scenario ``config`` names; the framework adopts the chosen winner."""
+    if config.fails:
+        return NoWinner(reason="scripted")
     if config.probe:
         if config.measured:
             await _probe(ctx, config)
@@ -254,6 +258,11 @@ class SkeletonStrategy(core.Value):
         then discarded by the stop, and the run ends with no adopted revision.
         """
         return cls(config=SkeletonConfig(measured=False, cancels_after_start=True))
+
+    @classmethod
+    def failing(cls) -> SkeletonStrategy:
+        """End at once with no winner, touching no agent, workspace or measurement."""
+        return cls(config=SkeletonConfig(fails=True))
 
     @classmethod
     def baseline_probe(cls) -> SkeletonStrategy:

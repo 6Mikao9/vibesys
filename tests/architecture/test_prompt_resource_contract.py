@@ -33,7 +33,7 @@ from vibesys.hypothesis import (
     TerminalWorkspaceEdits,
 )
 from vibesys.metrics import Objective
-from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, ReviewEvaluation
+from vibesys.orchestration.dynamic.search.api import PlannerPrompt, ReviewEvaluation
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.issue_queue.strategy.api import IssueBrief, PriorPerformance
 from vibesys.orchestration.multi.models import (

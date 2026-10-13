@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import host_container_backend
-from tests.support.skeleton_strategy import BaselineProbeStrategy
+from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
@@ -32,7 +32,7 @@ from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PLUGIN = capability_plugin("slurm-exit", strategy=BaselineProbeStrategy())
+_PLUGIN = capability_plugin("slurm-exit", strategy=SkeletonStrategy.baseline_probe())
 
 
 def _write_slurm_config(path: Path, state: Path, transport: str) -> None:

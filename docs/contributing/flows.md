@@ -32,6 +32,13 @@ role data). The id scheme derives from the search name.
 The root flow starts with the config and returns `None` or `NoWinner(reason)`. **A flow never
 finishes the run.** See "The winner" below.
 
+The worked example is the dynamic search, `src/vibesys/orchestration/dynamic/search/`: the root
+in `_search.py`, one flow per workstream, the roles in `_roles.py`, and the public surface in
+`api.py`. To add a search, copy that layout (a `search/` package with `api.py`, roles beside the
+root, a slim config model, prompt contexts as typed values), register it with `@search`, add its
+plugin as described in [orchestration-runtime.md](orchestration-runtime.md), and test it with
+`FlowRun` stories. `tests/architecture/test_search_packages.py` checks the package rules.
+
 ## The rule
 
 There are two kinds of code.

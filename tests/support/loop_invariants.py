@@ -216,6 +216,22 @@ def terminal_event(records: RunRecords) -> Record | None:
     return terminal[-1] if terminal else None
 
 
+def _hypotheses(strategy: object) -> list[object] | None:
+    """The hypotheses a search recorded, or None when its state does not keep any.
+
+    A flow search publishes its record beside its journal (``live.published``, JSON); other
+    states hold the hypotheses themselves.
+    """
+    if not isinstance(strategy, dict):
+        return None
+    live = strategy.get("live")
+    published = live.get("published") if isinstance(live, dict) else None
+    if isinstance(published, str):
+        record = json.loads(published)
+        return _list(record, "hypotheses") if "hypotheses" in record else None
+    return _list(strategy, "hypotheses") if "hypotheses" in strategy else None
+
+
 def terminal_status(records: RunRecords) -> list[Violation]:
     """The run ends in one typed terminal event; a completed run did work."""
     terminal = [event for event in records.events if _is_terminal(event)]
@@ -229,12 +245,8 @@ def terminal_status(records: RunRecords) -> list[Violation]:
         if scheduled == 0:
             return [Violation(Invariant.EMPTY_COMPLETION, "completed with zero workstreams")]
     if status == "completed" and records.envelope is not None:
-        strategy = records.envelope.get("strategy")
-        # The dynamic search wraps its state: the hypotheses live in the wrapper's inner state.
-        if isinstance(strategy, dict):
-            inner = strategy.get("inner")
-            strategy = inner if isinstance(inner, dict) else strategy
-        if isinstance(strategy, dict) and not _list(strategy, "hypotheses"):
+        hypotheses = _hypotheses(records.envelope.get("strategy"))
+        if hypotheses is not None and not hypotheses:
             return [Violation(Invariant.EMPTY_COMPLETION, "completed with zero hypotheses")]
     return record_agreement(records, str(status))
 

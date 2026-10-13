@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.prompt_context import profiler_reply
+from tests.support.reply_variables import profiler_reply
 
 import vibesys.orchestration.multi.core_policy.prompts as multi_templates
 from vibesys.prompts import render_template

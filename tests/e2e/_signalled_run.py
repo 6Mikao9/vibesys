@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from tests.support.docker_environment import host_container_backend
-from tests.support.skeleton_strategy import BaselineProbeStrategy
+from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from entrypoints.run import supervise
@@ -40,7 +40,7 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 def main(project_root: Path, slurm_config: Path) -> None:
     """Run until the job ends or a signal ends the run."""
     registry = OrchestrationRegistry()
-    registry.register_plugin(capability_plugin(PLUGIN_ID, strategy=BaselineProbeStrategy()))
+    registry.register_plugin(capability_plugin(PLUGIN_ID, strategy=SkeletonStrategy.baseline_probe()))
     request = RunRequest(
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id=PLUGIN_ID, config_version=1, options={}),

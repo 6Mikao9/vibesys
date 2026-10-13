@@ -13,12 +13,21 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import find
 from tests.support.prompt_context import context_variables
+from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
+    CONTEXTS,
+    RENDERER,
+    TEMPLATE_FILES,
+)
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     COMMIT,
-    bounds_of,
+    plan_of,
     resolved,
-    run_request,
+    write_project,
+)
+from tests.vibesys.orchestration.dynamic.prompt_variables import (
+    context_variables as dynamic_variables,
 )
 
 from vibesys.constants import DomainName
@@ -26,7 +35,7 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_sections
 from vibesys.orchestration import dynamic, evolve, issue_queue, multi, single
-from vibesys.orchestration.dynamic.strategy import api as dynamic_api
+from vibesys.orchestration.dynamic.search.api import PromptTemplate
 from vibesys.orchestration.evolve.strategy import api as evolve_api
 from vibesys.orchestration.issue_queue.strategy import api as plain_api
 from vibesys.orchestration.multi.strategy import api as multi_api
@@ -88,6 +97,11 @@ class _Strategy:
     @property
     def plugin(self) -> OrchestrationPlugin:
         return self.registration.plugin
+
+
+def _example(template: PromptTemplate) -> BaseModel:
+    """The simplest context the dynamic search generates for ``template``."""
+    return find(CONTEXTS[template], lambda _: True)
 
 
 _STRATEGIES = (
@@ -189,41 +203,10 @@ _STRATEGIES = (
         dynamic.REGISTRATION,
         _ROUNDS | {"max_in_flight": 2},
         (
-            (
-                DomainRole.ORCHESTRATOR,
-                dynamic_api.PlannerPrompt(
-                    capacity=1,
-                    in_flight=0,
-                    remaining=2,
-                    base_revision=_REV,
-                    base_accuracy_passed=None,
-                    offer_snapshot="offer",
-                ),
-            ),
-            (
-                DomainRole.IMPLEMENTER,
-                dynamic_api.ImplementPrompt(
-                    hypothesis_id="h1",
-                    hypothesis="claim",
-                    task="task",
-                    pass_criteria=_CRITERIA,
-                    parent_revision=_REV,
-                ),
-            ),
-            (
-                DomainRole.JUDGE,
-                dynamic_api.ReviewPrompt(
-                    hypothesis_id="h1",
-                    hypothesis="claim",
-                    pass_criteria=_CRITERIA,
-                    candidate=_REV,
-                    summary="s",
-                ),
-            ),
-            (
-                DomainRole.PROFILER,
-                dynamic_api.ProfilePrompt(question="where is the time going?", target=_REV),
-            ),
+            (DomainRole.ORCHESTRATOR, _example(PromptTemplate.PORTFOLIO)),
+            (DomainRole.IMPLEMENTER, _example(PromptTemplate.IMPLEMENT)),
+            (DomainRole.JUDGE, _example(PromptTemplate.REVIEW)),
+            (DomainRole.PROFILER, _example(PromptTemplate.PROFILE_REQUEST)),
         ),
     ),
     _Strategy(
@@ -259,7 +242,10 @@ def _sections(domain: DomainName) -> dict[DomainRole, str]:
 
 
 def _plan(strategy: _Strategy, domain: DomainName, root: Path) -> CorePlan:
-    request = run_request(root)
+    write_project(root)
+    if strategy.name == "dynamic":
+        run = resolved(root)
+        return plan_of(replace(run, facts=run.facts.model_copy(update={"domain_id": domain.value})))
     run = resolved(root)
     facts: RunFacts = run.facts.model_copy(update={"domain_id": domain.value})
     descriptor = OrchestrationDescriptor(
@@ -267,7 +253,6 @@ def _plan(strategy: _Strategy, domain: DomainName, root: Path) -> CorePlan:
         config_version=strategy.plugin.config_version,
         options=strategy.options,
     )
-    bounds = bounds_of(request)
     assert strategy.plugin.core is not None
     return strategy.plugin.core.plan(
         CoreRunContext(
@@ -284,15 +269,20 @@ def _plan(strategy: _Strategy, domain: DomainName, root: Path) -> CorePlan:
             ),
             artifacts=run.artifacts,
             evaluation_capacity=1,
-            queue_allowance_seconds=bounds.queue_allowance_seconds,
-            observe_interval_seconds=bounds.observe_interval_seconds,
-            observe_backoff_cap_seconds=bounds.observe_backoff_cap_seconds,
-            max_run_seconds=bounds.max_run_seconds,
+            queue_allowance_seconds=900,
+            observe_interval_seconds=10,
+            observe_backoff_cap_seconds=120,
+            max_run_seconds=None,
         )
     )
 
 
 def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
+    if strategy.name == "dynamic":
+        template = PromptTemplate(context.model_dump()["template"])
+        return RENDERER.render_template(
+            TEMPLATE_FILES[template], **plan.prompt_variables, **dynamic_variables(context)
+        )
     core = strategy.plugin.core
     assert core is not None
     renderer = TemplateRenderer(core.prompt_templates, fallback_roots=core.prompt_fallback_roots)

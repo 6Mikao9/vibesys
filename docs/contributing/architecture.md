@@ -31,6 +31,22 @@ composition and peer strategies cannot import such a shell. Its downward policy
 interfaces and library dependencies remain declared in Tach. Top-level orchestration modules remain
 shared policy helpers; they are not strategy packages.
 
+A strategy written as a flow (today `dynamic`) has this layout inside its folder:
+
+- `search/`: the `@search` root flow, its `Role` declarations beside it, its config, prompt
+  contexts and the pure helpers its flows share. `search/api.py` is the only public surface;
+  other modules start with an underscore and nothing outside the package imports them. Code here
+  reaches `vs_core` only through `vs_core.api.search`.
+- `core_policy/`: host-side policy that reads the wider `vs_core.api` (evidence requirements,
+  prompt variables, the projection of the published `RunSnapshot`), with the prompt templates.
+- `launch.py` and `models.py`: the options an operator writes (the search config plus the
+  task's inputs) and the reply models.
+
+What a task fixes (gates, metric space, stage limits) is `vs_core.api.TaskTerms` on the run's
+facts, not search config. The old `strategy/` state-machine package is gone for `dynamic`; the
+other strategies keep it until they are ported. See [orchestration-runtime.md](orchestration-runtime.md)
+and [flows.md](flows.md); `tests/architecture/test_search_packages.py` enforces the rules.
+
 `src/vibesys/` holds strategies, domain resources, prompts, and thin wiring.
 The generic pure lifecycle lives in `vs_core`, published only through
 `vs_core.api`: immutable state, events, requests, strategy contracts and projections.
