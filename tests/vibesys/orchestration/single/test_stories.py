@@ -11,6 +11,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Unpack
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 from tests.vibesys.orchestration.single._host import (
     IMPLEMENTER,
     PLANNER,
@@ -18,7 +20,12 @@ from tests.vibesys.orchestration.single._host import (
     config,
     implemented,
 )
-from tests.vibesys.serial_search._host import Baseline, World, assert_flow_closed
+from tests.vibesys.serial_search._host import (
+    INPUT_THROUGHPUT,
+    Baseline,
+    World,
+    assert_flow_closed,
+)
 from tests.vibesys.serial_search._replies import plan_reply
 
 from vs_core.api import (
@@ -197,4 +204,46 @@ def test_the_gates_are_skipped_on_rounds_the_cadence_does_not_audit(*, restartin
     host.drain()
 
     assert host.measured == ["c2"]
+    assert_flow_closed(host)
+
+
+@MODES
+@settings(max_examples=20, deadline=None, derandomize=True, database=None)
+@example(throughputs=(30, 40), reviewed=(True, True))
+@example(throughputs=(90, 60), reviewed=(True, True))
+@example(throughputs=(90, 60), reviewed=(False, True))
+@given(
+    throughputs=st.tuples(st.integers(20, 100), st.integers(20, 100)).filter(
+        lambda pair: pair[0] != pair[1]
+    ),
+    reviewed=st.tuples(st.booleans(), st.booleans()),
+)
+def test_the_best_eligible_candidate_of_the_rounds_is_adopted_not_the_last(
+    *, restarting: bool, throughputs: tuple[int, int], reviewed: tuple[bool, bool]
+) -> None:
+    """Over two rounds, the winner is the fastest candidate that passed review and beat the input."""
+    host = start(
+        config(max_rounds=2),
+        restarting=restarting,
+        throughputs={"c1": float(throughputs[0]), "c2": float(throughputs[1])},
+    )
+    design(host, "h1")
+    host.drain_until_turn(IMPLEMENTER)
+    implement(host, passed=reviewed[0], candidate="c1")
+    host.drain_until_turn(PLANNER if reviewed[0] else IMPLEMENTER)
+    if reviewed[0]:  # a round whose review failed goes on with the same hypothesis
+        design(host, "h2")
+        host.drain_until_turn(IMPLEMENTER)
+    implement(host, passed=reviewed[1], candidate="c2")
+    host.drain()
+
+    eligible = {
+        name: speed
+        for name, speed, passed in zip(("c1", "c2"), throughputs, reviewed, strict=True)
+        if passed and speed > INPUT_THROUGHPUT
+    }
+    if eligible:
+        assert selection_of(host) == ("retained_candidate", max(eligible, key=eligible.__getitem__))
+    else:
+        assert selection_of(host) == ("trusted_baseline", None)
     assert_flow_closed(host)
