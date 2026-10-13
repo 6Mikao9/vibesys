@@ -149,8 +149,13 @@ class ChildStart(Value):
 
     @property
     def workspace(self) -> WorkspacePlan:
-        """A child works in an isolated copy of its base."""
-        return WorkspacePlan(mode=WorkspaceMode.ISOLATED_CHILD, base=self.base)
+        """A child works in an isolated copy of its base, or in the run's root where there is none."""
+        mode = (
+            WorkspaceMode.EXCLUSIVE_ROOT
+            if self.config.exclusive_root
+            else WorkspaceMode.ISOLATED_CHILD
+        )
+        return WorkspacePlan(mode=mode, base=self.base)
 
     @property
     def budget(self) -> AttemptBudget:

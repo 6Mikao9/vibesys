@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vibesys.metrics import MetricSpace
 from vibesys.orchestration.evolve.search.api import EvolveConfig
+from vs_core.api.search import WorkspaceMode
 
 INTERFACE = "inprocess"
 """The interface an evolve run's prompts describe; the operator does not choose it."""
@@ -36,12 +37,22 @@ class EvolveLaunch(EvolveTask, EvolveConfig):
 
     @model_validator(mode="after")
     def _profiling_follows_the_plan(self) -> EvolveLaunch:
-        if "profiling" in self.model_fields_set:
-            msg = "'profiling' is not a launch option: it follows the run's evaluation plan"
-            raise ValueError(msg)
+        for name in ("profiling", "exclusive_root"):
+            if name in self.model_fields_set:
+                msg = f"{name!r} is not a launch option: it follows the run's environment and plan"
+                raise ValueError(msg)
         return self
 
-    def search_config(self, *, profiling: bool) -> EvolveConfig:
-        """The part the search reads, with the profiling the evaluation plan allows."""
+    def search_config(
+        self, *, profiling: bool, workspace_mode: WorkspaceMode = WorkspaceMode.ISOLATED_CHILD
+    ) -> EvolveConfig:
+        """The part the search reads, with the profiling the evaluation plan allows.
+
+        A host that cannot open candidate sandboxes runs the children one at a time in its root.
+        """
         fields = {name: getattr(self, name) for name in EvolveConfig.model_fields}
-        return EvolveConfig.model_validate({**fields, "profiling": profiling})
+        exclusive_root = workspace_mode is WorkspaceMode.EXCLUSIVE_ROOT
+        fields["max_parallelism"] = 1 if exclusive_root else fields["max_parallelism"]
+        return EvolveConfig.model_validate(
+            {**fields, "profiling": profiling, "exclusive_root": exclusive_root}
+        )

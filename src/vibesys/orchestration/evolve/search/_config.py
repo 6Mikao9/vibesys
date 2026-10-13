@@ -46,6 +46,16 @@ class EvolveConfig(Value):
     """Children of a generation that run at once."""
     profiling: bool = False
     """Whether a passing child gets a profiler turn. Follows the run's chosen profiler."""
+    exclusive_root: bool = False
+    """Whether children take turns in the run's own root, for a host that cannot open
+    isolated candidate sandboxes. Follows the run environment; it needs `max_parallelism` 1."""
+
+    @model_validator(mode="after")
+    def _validate_root(self) -> Self:
+        if self.exclusive_root and self.max_parallelism != 1:
+            message = "children that share the run's root cannot run in parallel"
+            raise ValueError(message)
+        return self
 
     @model_validator(mode="after")
     def _validate_selector(self) -> Self:

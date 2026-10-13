@@ -115,6 +115,11 @@ def _evolve_world(draw: st.DrawFn, settings: Mapping[str, Any]) -> Callable[[], 
     return lambda: _evolve(throughputs, passes, settings)
 
 
+def _children_lapsed(record: EvolveSnapshot) -> bool:
+    """Whether a child of the published record ended because a turn lapsed while no host was up."""
+    return any("timed-out" in item.feedback for item in record.population.individuals)
+
+
 def evolve_subject(name: str, settings: Mapping[str, Any], *, sweeps_crashes: bool) -> Subject:
     """The evolve search under the config ``settings``."""
     setup = EvolveWorld(**settings).setup
@@ -127,6 +132,7 @@ def evolve_subject(name: str, settings: Mapping[str, Any], *, sweeps_crashes: bo
         default_world=lambda: _evolve((120.0, 80.0), (True,), settings),
         smallest_world=lambda: _evolve((120.0,), (True,), settings),
         snapshot=EvolveSnapshot,
+        lapsed=_children_lapsed,
         sweeps_crashes=sweeps_crashes,
         issued=_ISSUED,
         start_budget=EvolveWorld(**settings).config.total_attempts,
@@ -139,12 +145,8 @@ SUBJECTS = {
         dynamic_subject("dynamic", {"max_in_flight": 2}, sweeps_crashes=False),
         dynamic_subject("dynamic-serial", {"max_in_flight": 1}, sweeps_crashes=True),
         evolve_subject(
-            "evolve", {"max_parallelism": 2, "children_per_generation": 2}, sweeps_crashes=False
+            "evolve", {"max_parallelism": 2, "children_per_generation": 2}, sweeps_crashes=True
         ),
-        # No crash sweep: a restart is a lease late, and a judge turn that lapsed while no host
-        # was up comes back timed out, which fails that child by design (a review is not retried
-        # by the search). Core cannot tell a lapse from silence there (`RESOLUTIONS` in
-        # `vs_core/_waits.py`); the flow stories restart after every step instead.
-        evolve_subject("evolve-serial", {"bootstrap_max_attempts": 1}, sweeps_crashes=False),
+        evolve_subject("evolve-serial", {"bootstrap_max_attempts": 1}, sweeps_crashes=True),
     )
 }

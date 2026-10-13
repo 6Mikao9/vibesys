@@ -1408,7 +1408,7 @@ expose = ["api", "api\\..*"]
 # The options an evolve run is launched with: the search's config and the task's inputs.
 path = "vibesys.orchestration.evolve.launch"
 layer = "loops"
-depends_on = ["vibesys.metrics", "vibesys.orchestration.evolve.search"]
+depends_on = ["vs_core", "vibesys.metrics", "vibesys.orchestration.evolve.search"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.evolve.launch"]
