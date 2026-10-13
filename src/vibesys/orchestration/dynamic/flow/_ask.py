@@ -7,7 +7,7 @@ from vibesys.orchestration.dynamic.search.api import Role
 from vs_core.api.search import AskAgent, DecisionId, Event, Flow, RevisionRef, Value, Within
 
 
-async def ask(  # noqa: PLR0913  # LW-220403 [PLR0913]; each argument is a distinct fact of the ask; bundling them in a throwaway record only renames the parameters.
+async def ask(  # noqa: PLR0913  # LW-220431 [PLR0913]; each argument is a distinct fact of the ask; bundling them in a throwaway record only renames the parameters.
     ctx: Flow,
     attempt: Attempt,
     role: Role,

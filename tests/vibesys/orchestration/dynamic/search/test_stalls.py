@@ -14,12 +14,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.vibesys.orchestration.dynamic.flow._host import assert_flow_closed, begin
 from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
+from tests.vibesys.orchestration.dynamic.search._run import config
 from tests.vibesys.orchestration.dynamic.search.world import DynamicWorld
 
 from vs_core.api import (
@@ -100,6 +102,30 @@ def test_a_run_ends_whichever_first_asks_core_refuses(
     assert_ended_closed(_refusing(RefuseFirst(names, code)))
 
 
+MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+
+
+@MODES
+@_BOUNDED
+@given(names=st.sets(st.sampled_from(FIRST_ASKS), min_size=1).map(frozenset), code=CODES)
+def test_a_flow_ends_whichever_first_asks_core_refuses(
+    *, restarting: bool, names: frozenset[str], code: RejectionCode
+) -> None:
+    """The flow-level form of the test above, on the flow alone with a fake core.
+
+    Core refuses the first ask of each named decision, up to its refund limit. The flow takes
+    a refused start as a refund, asks to settle plainly, and proposes the plain failure when its
+    result is refused.
+    """
+    host = begin(config(max_rounds=1, max_in_flight=WORKSTREAMS), restarting=restarting)
+    host.refusal_code = code
+    host.refusals = {name: 2 for name in names if name != "finish"}
+    host.drain()
+    if "finish" in names:
+        host.refuse_finish()
+    assert_flow_closed(host)
+
+
 @dataclass(frozen=True)
 class RefuseStartOf:
     """Core refuses the start of the workstreams whose hypotheses are named."""
@@ -127,6 +153,34 @@ def test_a_start_core_refuses_leaves_the_other_workstreams_to_finish(
     run = _refusing(RefuseStartOf(hypotheses, code))
     assert_ended_closed(run)
     result = run.core.run.result
+    assert result is not None
+    if len(hypotheses) < WORKSTREAMS:
+        assert result.outcome == "success", result.reason
+
+
+@MODES
+@_BOUNDED
+@given(
+    hypotheses=st.sets(st.sampled_from([f"h{n + 1}" for n in range(WORKSTREAMS)]), min_size=1).map(
+        frozenset
+    ),
+    code=CODES,
+)
+def test_a_start_core_refuses_leaves_the_other_workstreams_to_finish_in_the_flow(
+    *, restarting: bool, hypotheses: frozenset[str], code: RejectionCode
+) -> None:
+    """The flow-level form of the test above: the refused workstreams are refunded, the rest run.
+
+    The planner's first portfolio names two hypotheses; the starts of the chosen ones are
+    refused. A refused workstream gives its slot back, and the run ends in success when at
+    least one workstream was left to finish.
+    """
+    host = begin(config(max_rounds=1, max_in_flight=WORKSTREAMS), restarting=restarting)
+    host.refusal_code = code
+    host.refused_hypotheses = set(hypotheses)
+    host.drain()
+    assert_flow_closed(host)
+    result = host.run.finished.result if host.run.finished else None
     assert result is not None
     if len(hypotheses) < WORKSTREAMS:
         assert result.outcome == "success", result.reason

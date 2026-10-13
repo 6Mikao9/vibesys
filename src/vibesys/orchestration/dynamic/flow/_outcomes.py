@@ -271,7 +271,7 @@ class WorkstreamDone:
 # -- how a workstream ends ---------------------------------------------------------------------------
 
 
-def failure_of(event: Failed, role: Role | None) -> Failure:  # noqa: PLR0911  # LW-220402 [PLR0911]; one return per wait-failure reason keeps the mapping to the typed failure exhaustive and visible.
+def failure_of(event: Failed, role: Role | None) -> Failure:  # noqa: PLR0911  # LW-220432 [PLR0911]; one return per wait-failure reason keeps the mapping to the typed failure exhaustive and visible.
     """The typed account of a wait that ended without a result."""
     match event.reason:
         case FailureReason.REFUSED:

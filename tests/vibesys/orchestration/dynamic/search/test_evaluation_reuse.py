@@ -13,9 +13,11 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic.search._run import dynamic_state
+from tests.vibesys.orchestration.dynamic.flow._host import assert_flow_closed, begin, play
+from tests.vibesys.orchestration.dynamic.search._run import config, dynamic_state
 from tests.vibesys.orchestration.dynamic.search.test_judge_waits import (
     JUDGE_WAITS,
     waiting_world,
@@ -93,3 +95,31 @@ def test_judges_and_implementers_share_one_evaluation_whatever_runs_when(
 
     assert_one_evaluation_per_workstream(finished, world.hosting.asked)
     assert_every_review_passed_round_has_its_metric(finished)
+
+
+@pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+@given(
+    picks=st.lists(st.integers(0, 5), max_size=40),
+    rounds=st.integers(1, 2),
+    in_flight=st.integers(1, 2),
+)
+def test_a_round_whose_review_passed_has_its_metric_whatever_runs_when(
+    *, restarting: bool, picks: list[int], rounds: int, in_flight: int
+) -> None:
+    """The flow-level form of the test above, on the flow alone with a fake core.
+
+    Which wait core answers next is generated. Sharing one evaluation per candidate is core's
+    rule; the flow's part is that a passed review is never settled without its measurement.
+    """
+    host = begin(config(max_rounds=rounds, max_in_flight=in_flight), restarting=restarting)
+    play(host, [(pick, 0) for pick in picks])
+
+    assert_flow_closed(host)
+    assert host.record is not None
+    rounds_run = [row for item in host.record.hypotheses for row in item.rounds]
+    assert rounds_run
+    for row in rounds_run:
+        if row.review_passed:
+            assert row.failure is None, row.failure
+            assert row.metrics, "a passed review with no measured metric"

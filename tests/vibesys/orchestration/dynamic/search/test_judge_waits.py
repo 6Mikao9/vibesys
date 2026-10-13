@@ -12,9 +12,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.checkpoint_faults import CHECKPOINTS
+from tests.vibesys.orchestration.dynamic.flow._host import assert_flow_closed, begin, play
 from tests.vibesys.orchestration.dynamic.search._decisions import works
 from tests.vibesys.orchestration.dynamic.search._replies import (
     implement,
@@ -22,9 +24,10 @@ from tests.vibesys.orchestration.dynamic.search._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.orchestration.dynamic.search._run import config
 from tests.vibesys.orchestration.dynamic.search.world import ENDINGS, DynamicWorld, Ending
 
-from vs_core.api import AttemptPhase, Settle, Withdraw
+from vs_core.api import AskAgent, AttemptPhase, Settle, Withdraw
 from vs_dst.api import SimulatedRun, simulate
 
 
@@ -122,6 +125,30 @@ def test_a_run_ends_whatever_its_agents_wait_for(scenario: Scenario) -> None:
     assert_ended_closed(run_waiting(scenario))
 
 
+MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+
+
+@MODES
+@settings(max_examples=60, deadline=None, derandomize=True, database=None)
+@given(
+    steps=st.lists(st.tuples(st.integers(0, 5), st.integers(0, 11)), max_size=60),
+    rounds=st.integers(1, 2),
+    in_flight=st.integers(1, 2),
+)
+def test_a_run_ends_whatever_order_and_way_its_waits_are_answered(
+    *, restarting: bool, steps: list[tuple[int, int]], rounds: int, in_flight: int
+) -> None:
+    """The flow-level form of the test above: any order, and every way a wait can end.
+
+    The fake core picks which open wait to answer and how (a reply, a failure, a refusal); the
+    run must finish with every attempt settled and nothing left unanswered. Whether core
+    suspends and resumes a waiting turn is core's, not the flow's.
+    """
+    host = begin(config(max_rounds=rounds, max_in_flight=in_flight), restarting=restarting)
+    play(host, steps)
+    assert_flow_closed(host)
+
+
 JUDGE_WAITS = Scenario(
     rounds=1,
     in_flight=1,
@@ -217,6 +244,35 @@ def test_a_suspended_turn_is_a_wait_whatever_reply_it_ends_with(
         assert [type(item).__name__ for item in works(finished.decisions)] == [
             type(item).__name__ for item in works(run(("wait",)).decisions)
         ]
+
+
+@MODES
+@settings(max_examples=60, deadline=None, derandomize=True, database=None)
+@given(ends=st.lists(st.integers(0, 5), min_size=1, max_size=6))
+def test_a_turn_ends_the_workstream_whatever_reply_it_ends_with(
+    *, restarting: bool, ends: list[int]
+) -> None:
+    """The flow-level form of the test above: each agent turn ends one of several ways.
+
+    The implementer's and the judge's n-th turn ends as ``ends[n]`` says (a result, a blocked result, a
+    failed turn, a timeout, a declined checkpoint). The strategy never asks core for a turn it cannot have:
+    the run finishes, every attempt is settled and every workstream is recorded.
+    """
+    host = begin(config(max_rounds=1, max_in_flight=1), restarting=restarting)
+    turns = iter(ends * 4)
+    for _ in range(500):
+        waits = [item for item in host.run.open if item.until is not None]
+        if not waits:
+            if not host.step(0):
+                break
+            continue
+        asked = waits[0]
+        agent = isinstance(asked.request, AskAgent) and asked.label != "planner"
+        host.answer(asked, next(turns) if agent else 0)
+    assert_flow_closed(host)
+    assert host.record is not None
+    assert not host.record.running
+    assert len(host.record.finished) == len(host.opened) + host.refused_starts
 
 
 @settings(max_examples=10, deadline=None, derandomize=True, database=None)
