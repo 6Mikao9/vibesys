@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.issue_queue.models import IssueQueueOptions
+from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 
 if TYPE_CHECKING:
     from vibesys.orchestration.issue_queue.plugin import PLUGIN, REGISTRATION
@@ -22,4 +22,4 @@ def __getattr__(name: str) -> object:
     raise AttributeError(name)
 
 
-__all__ = ["PLUGIN", "REGISTRATION", "IssueQueueOptions"]
+__all__ = ["PLUGIN", "REGISTRATION", "IssueQueueLaunch"]

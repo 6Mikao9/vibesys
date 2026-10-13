@@ -13,7 +13,7 @@ import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.issue_queue.models import IssueQueueOptions
+from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vs_issue_tracker.api import (
     Issue,
     IssueStatus,
@@ -116,7 +116,7 @@ def board_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, .
     Markdown mirror of the board a person can read; the GitHub tracker keeps them in the
     repository the options name.
     """
-    options = IssueQueueOptions.model_validate(resources.options)
+    options = IssueQueueLaunch.model_validate(resources.options)
     namespace = resources.project.state.portable_namespace(resources.run_id, _BOARD_DIRECTORY)
     directory = namespace.external_directory("board")
 
