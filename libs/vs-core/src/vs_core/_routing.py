@@ -47,6 +47,7 @@ from .types.evaluation import (
     ObservationsDue,
     RegisteredJobObserved,
     RegisteredJobRequested,
+    RunJobsCancelRequested,
     TurnSuspended,
 )
 from .types.kernel import (
@@ -201,6 +202,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             RegisteredJobObserved()
             | JobTerminationRequested()
             | JobsDrainRequested()
+            | RunJobsCancelRequested()
             | MeasurementSubmissionObserved()
             | ContinuationJobsChanged()
             | ContinuationRetireRequested()

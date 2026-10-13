@@ -99,6 +99,7 @@ EXPECTED_TARGET = {
                 "observations_due",
                 "job_termination_requested",
                 "jobs_drain_requested",
+                "run_jobs_cancel_requested",
                 "measurement_submission_observed",
             ),
         ),

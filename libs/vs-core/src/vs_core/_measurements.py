@@ -20,6 +20,7 @@ from ._proofs import (
     Proven,
     Verdict,
     accepted_receipt_for,
+    committed_stop,
     current_admission,
     current_closure,
     fresh_observation,
@@ -76,6 +77,7 @@ from .types.evaluation import (
     RegisteredJobObserved,
     RegisteredJobRequested,
     RegisteredOwnedJob,
+    RunJobsCancelRequested,
     SnapshotResultRef,
     SubmissionBudget,
     SubmitMeasurement,
@@ -1630,6 +1632,71 @@ def _drain(
     return AreaChange(state=state, requests=requests)
 
 
+def _cancelling_scope(context: EvaluationContext) -> Scope | None:
+    """The scope whose jobs a committed cancel stop ends, while the run closes under it."""
+    match committed_stop(context.run):
+        case Proven(value=stop) if (
+            stop.mode == "cancel" and context.run.status == RunStatus.CLOSING
+        ):
+            return stop.scope
+        case _:
+            return None
+
+
+def _cancel_requested(context: EvaluationContext, resource: ResourceId) -> bool:
+    return any(
+        isinstance(row.request, CancelOwnedJob) and row.request.resource_id == resource
+        for row in context.records.records
+    )
+
+
+def _cancel_scope_jobs(
+    state: EvaluationState, context: EvaluationContext, scope: Scope
+) -> AreaChange[EvaluationState]:
+    """Cancel each live job *scope* owns that no cancellation addresses yet.
+
+    Attempt closure drains an attempt's jobs; the run's own jobs (its input baseline) have
+    no attempt to close, so a cancel stop ends them here. Applied when the stop commits and
+    again for a job first observed after it, at most one cancellation per job.
+    """
+    requests = tuple(
+        request
+        for job in (*state.jobs, *state.registered_jobs)
+        if job.scope == scope
+        and job.resource_id is not None
+        and not job.terminal
+        and not _cancel_requested(context, job.resource_id)
+        for request in _terminate(state, context, job.resource_id).requests
+    )
+    return AreaChange(state=state, requests=requests)
+
+
+def _run_jobs_cancel(
+    state: EvaluationState, context: EvaluationContext, event: RunJobsCancelRequested
+) -> AreaChange[EvaluationState]:
+    match committed_stop(context.run):
+        case Proven(value=stop) if stop.decision_id == event.authority:
+            pass
+        case _:
+            return AreaChange(state=state)
+    if _cancelling_scope(context) != event.scope:
+        return AreaChange(state=state)
+    return _cancel_scope_jobs(state, context, event.scope)
+
+
+def _cancelled_after_stop(
+    change: AreaChange[EvaluationState], context: EvaluationContext
+) -> AreaChange[EvaluationState]:
+    """Keep a committed cancel stop applying to run jobs that become known after it."""
+    scope = _cancelling_scope(context)
+    if scope is None:
+        return change
+    cancels = _cancel_scope_jobs(change.state, context, scope)
+    if not cancels.requests:
+        return change
+    return change.model_copy(update={"requests": (*change.requests, *cancels.requests)})
+
+
 def advance(
     state: EvaluationState, context: EvaluationContext, event: EvaluationEvent
 ) -> AreaChange[EvaluationState]:
@@ -1640,17 +1707,19 @@ def advance(
         case AgentMeasurementRequested():
             change = _agent_requested(state, context, event)
         case MeasurementSubmissionObserved():
-            change = _submission_observed(state, context, event)
+            change = _cancelled_after_stop(_submission_observed(state, context, event), context)
         case RegisteredJobRequested():
             change = _registered_requested(state, context, event)
         case JobObserved() | RegisteredJobObserved():
-            change = _job_observed(state, context, event)
+            change = _cancelled_after_stop(_job_observed(state, context, event), context)
         case ObservationsDue():
             change = _poll_due(state, context, event)
         case JobTerminationRequested():
             change = _terminate(state, context, event.resource_id)
         case JobsDrainRequested():
             change = _drain(state, context, event)
+        case RunJobsCancelRequested():
+            change = _run_jobs_cancel(state, context, event)
         case _:
             raise ContractError(("event", event.kind), "not a measurement event")
     return change
