@@ -24,7 +24,6 @@ from pydantic import BaseModel
 from vs_core.api import CoreState, RunEnvelope, StrategyState
 
 STRATEGY_STATE_MODULES = (
-    "vibesys.orchestration.dynamic.strategy._state",
     "vibesys.orchestration.evolve.strategy._state",
     "vibesys.orchestration.issue_queue.strategy._state",
     "vibesys.orchestration.multi.strategy._state",
