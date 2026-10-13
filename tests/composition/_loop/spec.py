@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.orchestration.dynamic.search.api import OPERATIONS
+from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vs_core.api import FlowState, RunEnvelope
 
 if TYPE_CHECKING:
@@ -34,8 +35,15 @@ def _dynamic_core(envelope: str) -> CoreState:
     return OPERATIONS.registry().decode_envelope(RunEnvelope[FlowState], envelope).core
 
 
+def _plain_core(envelope: str) -> CoreState:
+    registry = issue_queue.registry()
+    assert registry is not None
+    return registry.decode_envelope(RunEnvelope[FlowState], envelope).core
+
+
 LOOPS = {
     "dynamic": LoopSpec("dynamic", _dynamic_core),
+    "plain": LoopSpec("plain", _plain_core),
 }
 
 
