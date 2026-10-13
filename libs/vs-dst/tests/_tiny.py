@@ -1,7 +1,8 @@
 """A tiny search and its world, for exercising vs-dst without a concrete product search.
 
-The search works through its items one at a time: start an attempt (core asks the executors
-for a workspace), settle it once its workspace is ready, and finish after the last item. The
+The search works through its items one at a time: open a workspace (core asks the executors
+for one), let it settle on leaving the block, and return after the last item, so the framework
+adopts the input and ends the run. The
 world answers a workspace request with a resource named by how many workspaces it has handed
 out, so the position of the world shows in the state of the run.
 """
@@ -13,12 +14,9 @@ from typing import TYPE_CHECKING
 from vs_core.api import (
     AttemptBudget,
     AttemptId,
-    AttemptRef,
-    DecisionId,
     EnsureWorkspace,
-    EventKind,
-    Failed,
-    Finish,
+    Flow,
+    FlowState,
     ItemId,
     Limits,
     OperationRegistry,
@@ -26,29 +24,20 @@ from vs_core.api import (
     RevisionRef,
     RunEnvelope,
     RunFacts,
-    RunResultProposal,
-    Scope,
-    Settle,
-    StartAttempt,
-    StopRequested,
-    StrategyState,
+    Value,
     Wait,
     WakeAt,
-    Withdraw,
     Within,
-    WorkKind,
-    WorkspaceClosed,
     WorkspaceMode,
-    WorkspaceOpened,
     WorkspacePlan,
-    initial_state,
 )
 from vs_core.api.testing import Harness, Succeeded
+from vs_core.flows import search
 from vs_dst.api import RunSetup
 from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
-    from vs_core.api import CoreState, Decision, Event, Request, RunView
+    from vs_core.api import CoreState, Decision, Request
     from vs_core.api.testing import Answer
 
 BASELINE = RevisionRef.of_git_commit("abc123")
@@ -60,105 +49,39 @@ FACTS = RunFacts(
     environment_digest="environment",
 )
 
-
-class TinyState(StrategyState):
-    done: int = 0
-
-
-SCOPE = Scope(owner=initial_state().run.run_id, generation=0)
-"""The run's own scope: the harness and the scripted host both start from `initial_state`."""
 PATIENCE = Within(limit=1000)
 
 
-class TinySearch:
-    """Start and settle each item in turn, then finish. The items to settle are its constructor argument."""
+class TinyConfig(Value):
+    """How many items the tiny search settles."""
 
-    state_model = TinyState
-    declaration = initial_state().run.declaration.model_copy(
-        update={
-            "uses": frozenset({WorkKind.START_ATTEMPT, WorkKind.WITHDRAW}),
-            "handles": frozenset(
-                {
-                    EventKind.FAILED,
-                    EventKind.STOP_REQUESTED,
-                    EventKind.WORKSPACE_OPENED,
-                    EventKind.WORKSPACE_CLOSED,
-                }
-            ),
-        }
-    )
+    items: int
 
-    def __init__(self, items: tuple[ItemId, ...]) -> None:
-        self._items = items
 
-    def init(self, config: None, facts: RunFacts) -> tuple[TinyState, list[Decision]]:
-        del config
-        return TinyState(schema_version=1), self._next(0, facts.baseline)
-
-    def update(
-        self, state: TinyState, event: Event, view: RunView
-    ) -> tuple[TinyState, list[Decision]]:
-        match event:
-            case WorkspaceOpened(attempt=attempt):
-                index = state.done
-                return state, [self._settle(attempt, index)]
-            case WorkspaceClosed():
-                done = state.done + 1
-                return state.model_copy(update={"done": done}), self._next(
-                    done, view.facts.baseline
-                )
-            case StopRequested() | Failed():
-                # The run's own deadline stop, or a request the world never answered: the
-                # search has no other plan, and what the run reports then is under test.
-                return state, []
-            case _:
-                message = f"unexpected event {event.kind}"
-                raise ValueError(message)
-
-    def _next(self, index: int, baseline: RevisionRef) -> list[Decision]:
-        items = self._items
-        if index == len(items):
-            return [
-                Finish(
-                    decision_id=DecisionId(root="finish"),
-                    scope=SCOPE,
-                    mode="drain",
-                    result=RunResultProposal(outcome="success", reason="every item settled"),
-                )
-            ]
-        start = StartAttempt(
-            decision_id=DecisionId(root=f"start:{index}"),
-            scope=SCOPE,
-            attempt_id=AttemptId(root=f"attempt:{index}"),
-            item_id=items[index],
-            workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=baseline),
+@search("tiny", config=TinyConfig)
+async def tiny(ctx: Flow, config: TinyConfig) -> None:
+    """Open and settle a workspace for each item in turn; the run then ends on the input."""
+    for index in range(config.items):
+        plan = WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=ctx.facts.baseline)
+        async with ctx.workspaces.open(
+            attempt=AttemptId(root=f"attempt:{index}"),
+            item=ItemId(root=f"item:{index}"),
+            plan=plan,
             budget=AttemptBudget(),
-        )
-        return [Wait(request=start, until=PATIENCE)]
-
-    @staticmethod
-    def _settle(attempt: AttemptRef, index: int) -> Decision:
-        withdraw = Withdraw(
-            decision_id=DecisionId(root=f"settle:{index}"),
-            scope=SCOPE,
-            target=attempt,
-            disposition=Settle(
-                assessments=(), eligible=False, retention="discard", outcome="succeeded"
-            ),
-        )
-        return Wait(request=withdraw, until=PATIENCE)
+            within=PATIENCE,
+        ):
+            pass
 
 
 def tiny_setup(items: int, max_concurrent: int = 1) -> RunSetup:
     """The tiny search over ``items`` items, hosted with no operations."""
-    names = tuple(ItemId(root=f"item:{n}") for n in range(items))
     return RunSetup(
-        new_launch=lambda: Launch(TinySearch(names), None),
+        new_launch=lambda: Launch(tiny, TinyConfig(items=items)),
         harness=Harness(
             registry=OperationRegistry(()),
             facts=FACTS,
             limits=Limits(max_attempts=8, max_turns=8, max_parallel=1, max_retries=2),
-            envelope_type=RunEnvelope[TinyState],
+            envelope_type=RunEnvelope[FlowState],
         ),
         schemas={},
         max_concurrent=max_concurrent,
