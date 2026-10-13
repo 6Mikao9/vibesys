@@ -19,7 +19,7 @@ class IssueQueueLaunch(IssueQueueConfig):
     """Search config and host inputs of one issue-queue run."""
 
     modality: Annotated[str, Field(min_length=1, max_length=256)] | None = None
-    tracker: IssueTrackerConfig = Field(default_factory=IssueTrackerConfig.local)
+    tracker: IssueTrackerConfig = Field(default_factory=IssueTrackerConfig)
 
     def search_config(self) -> IssueQueueConfig:
         """The part the search reads."""

@@ -6,35 +6,22 @@ import ast
 from pathlib import Path
 
 import pytest
+from scripts.flow_code import async_allowed_paths
+from scripts.flow_code import flow_modules as shared_flow_modules
 
 ROOT = Path(__file__).resolve().parents[2]
 BANNED_MODULES = frozenset(
     {"asyncio", "time", "random", "threading", "subprocess", "os", "socket", "vs_sim"}
 )
-FLOW_GLOBS = ("src/vibesys/orchestration/*/search/**/*.py", "src/vibesys/candidates/flows.py")
-SEARCH_API = "vs_core.api.search"
 
 
 def _parsed(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
-def _imports_flow(tree: ast.Module) -> bool:
-    return any(
-        isinstance(node, ast.ImportFrom)
-        and node.module == SEARCH_API
-        and any(alias.name == "Flow" for alias in node.names)
-        for node in ast.walk(tree)
-    )
-
-
 def flow_modules() -> list[Path]:
     """Modules that import ``Flow`` plus the explicit flow packages."""
-    found = {path for pattern in FLOW_GLOBS for path in ROOT.glob(pattern)}
-    for path in (ROOT / "src").rglob("*.py"):
-        if _imports_flow(_parsed(path)):
-            found.add(path)
-    return sorted(found)
+    return shared_flow_modules(ROOT)
 
 
 def violations(tree: ast.Module) -> list[str]:
@@ -81,3 +68,8 @@ def test_the_scan_catches_what_it_bans(source: str) -> None:
 
 def test_the_scan_allows_typed_except() -> None:
     assert violations(ast.parse("try:\n  pass\nexcept ValueError:\n  pass")) == []
+
+
+def test_the_purity_ratchet_and_this_scan_share_one_definition_of_flow_code() -> None:
+    product = {path.relative_to(ROOT).as_posix() for path in flow_modules()}
+    assert product <= async_allowed_paths(ROOT)
