@@ -1585,16 +1585,25 @@ def _terminate(
         or job.observation.status == ObservationStatus.UNKNOWN
         or not job.observation.accepted
     ):
-        return AreaChange(
-            state=state, requests=(_job_outbound(InspectOwnedJob, job, context, "inspect"),)
-        )
+        return _termination(state, context, _job_outbound(InspectOwnedJob, job, context, "inspect"))
     if job.terminal:
-        return AreaChange(
-            state=state, requests=(_job_outbound(InspectOwnedJob, job, context, "release"),)
-        )
-    return AreaChange(
-        state=state, requests=(_job_outbound(CancelOwnedJob, job, context, "cancel"),)
-    )
+        return _termination(state, context, _job_outbound(InspectOwnedJob, job, context, "release"))
+    return _termination(state, context, _job_outbound(CancelOwnedJob, job, context, "cancel"))
+
+
+def _termination(
+    state: EvaluationState, context: EvaluationContext, outbound: Outbound
+) -> AreaChange[EvaluationState]:
+    """Ask for a termination step once: the request id names the job's step, not the asker.
+
+    The stop, a drain, a termination request and a late observation can all want the same
+    step at the same instant. Each would stamp it with its own decision, and one id may not
+    carry two payloads, so a step already on the ledger is the job's one outstanding intent.
+    """
+    request_id = outbound.request.request_id
+    if any(row.request_id == request_id for row in context.records.records):
+        return AreaChange(state=state)
+    return AreaChange(state=state, requests=(outbound,))
 
 
 def _drain(
@@ -1650,14 +1659,29 @@ def _cancel_requested(context: EvaluationContext, resource: ResourceId) -> bool:
     )
 
 
+def _known(job: OwnedJob | RegisteredOwnedJob) -> bool:
+    """Whether the executor has confirmed the job, so that the next step is a cancellation."""
+    return (
+        job.observation is not None
+        and job.observation.accepted
+        and job.observation.status != ObservationStatus.UNKNOWN
+    )
+
+
 def _cancel_scope_jobs(
-    state: EvaluationState, context: EvaluationContext, scope: Scope
+    state: EvaluationState,
+    context: EvaluationContext,
+    scope: Scope,
+    *,
+    inspect: bool = True,
 ) -> AreaChange[EvaluationState]:
     """Cancel each live job *scope* owns that no cancellation addresses yet.
 
     Attempt closure drains an attempt's jobs; the run's own jobs (its input baseline) have
     no attempt to close, so a cancel stop ends them here. Applied when the stop commits and
-    again for a job first observed after it, at most one cancellation per job.
+    again for a job first observed after it, at most one cancellation per job. A job the
+    executor does not yet confirm is inspected once, when *inspect* allows; the polls that
+    follow end its doubt, so an unconfirmed answer must not ask again, at once, for another.
     """
     requests = tuple(
         request
@@ -1666,6 +1690,7 @@ def _cancel_scope_jobs(
         and job.resource_id is not None
         and not job.terminal
         and not _cancel_requested(context, job.resource_id)
+        and (inspect or _known(job))
         for request in _terminate(state, context, job.resource_id).requests
     )
     return AreaChange(state=state, requests=requests)
@@ -1691,7 +1716,7 @@ def _cancelled_after_stop(
     scope = _cancelling_scope(context)
     if scope is None:
         return change
-    cancels = _cancel_scope_jobs(change.state, context, scope)
+    cancels = _cancel_scope_jobs(change.state, context, scope, inspect=False)
     if not cancels.requests:
         return change
     return change.model_copy(update={"requests": (*change.requests, *cancels.requests)})
