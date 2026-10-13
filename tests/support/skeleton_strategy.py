@@ -109,6 +109,8 @@ class SkeletonConfig(core.Value):
     """Ask for nothing until this run-clock time, then end with no winner."""
     baseline_only: bool = False
     """Measure the baseline, then end with no winner: no attempt is run."""
+    abandons: bool = False
+    """Open the one attempt, then end with no winner: the attempt budget is spent, nothing kept."""
     turns: int = 1
     """How many implementer turns the attempt asks in one session, one after another."""
     peers: int = 0
@@ -217,6 +219,8 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     ) as workspace:
         if isinstance(workspace, NotOpened):
             return NoWinner(reason="the attempt workspace did not open")
+        if config.abandons:
+            return NoWinner(reason="the attempt was abandoned")
         if config.cancels_after_start:
             # Wait for the stop; the timer is what keeps the shell from calling the wait a stall.
             await ctx.first(ctx.stopped, ctx.timer(_RUN_DEADLINE))
@@ -340,6 +344,11 @@ class SkeletonStrategy(core.Value):
         signal, an operator stop) and what the host then cancels.
         """
         return cls(config=SkeletonConfig(probe=True))
+
+    @classmethod
+    def abandoning(cls) -> SkeletonStrategy:
+        """Open the one attempt the budget allows, then end with no winner and nothing kept."""
+        return cls(config=SkeletonConfig(measured=False, abandons=True))
 
     @classmethod
     def idle(cls) -> SkeletonStrategy:

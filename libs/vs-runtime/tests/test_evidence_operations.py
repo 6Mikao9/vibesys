@@ -321,6 +321,44 @@ async def test_evaluation_evidence_is_read_back_after_a_restart() -> None:
         assert [r["evidence_id"] for r in readings] == [ref.evidence_id for ref in refs]  # type: ignore[index]
 
 
+# A benchmark killed with no result record: only the server's last words say why it died.
+_CRASH_TAIL = "HIP out of memory: tried to allocate 20.00 GiB (GPU 0)"
+_NO_RECORD = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n\n__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
+
+
+async def test_the_crash_text_of_a_benchmark_killed_with_no_record_survives_into_its_reading() -> (
+    None
+):
+    """The search shows an agent the reading's feedback; the server's last words must reach it."""
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 137
+    cluster.benchmark_output = f"{_CRASH_TAIL}\n{_NO_RECORD}"
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw)
+        stack = await build_stack(base / "stack", cluster)
+        try:
+            requests = MeasurementRequests(stack.executor, _store(base))
+            sub = submission("sub", candidate=stack.snapshot)
+            first = await requests.execute(sub, _eval_context(sub))
+            resource = first.observation.observation.resource_id
+            assert resource is not None
+            while resource.root not in cluster.submissions:
+                await stack.executor.wait_for_change(resource.root, 30.0)
+            inspect = _inspect(resource)
+            target = (await requests.execute(inspect, _eval_context(inspect))).observation.target
+            assert target is not None
+            refs = target.evidence
+        finally:
+            await stack.executor.close()
+        owner = InterpretEvidenceOwner(ReceiptEvidenceLedger(_store(base)))
+        outcome = await owner.execute(_Interpret(evidence=refs), _context())
+        readings = outcome["readings"]
+        assert isinstance(readings, tuple)
+        benchmark = next(r for r in readings if r["stage"] == "benchmark")  # type: ignore[index]
+        assert benchmark["passed"] is False  # type: ignore[index]
+        assert _CRASH_TAIL in benchmark["feedback"]  # type: ignore[index]
+
+
 def _stored(base: Path, refs: tuple[EvidenceRef, ...]) -> list[TrustedEvidence]:
     ledger = ReceiptEvidenceLedger(_store(base))
     found = [ledger.lookup(ref.key) for ref in refs]
