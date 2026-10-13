@@ -19,26 +19,25 @@ def canonical_source(
     request: core.Request,
     lifecycle: core.LifecycleClass = core.LifecycleClass.QUERY,
     observation: core.Observation | None = None,
-) -> core.Intent:
+) -> core.RequestRecord:
     """The recorded outbox row that certifies a release owner's request."""
     assert request.request_id is not None
-    return core.Intent(
+    return core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=value_digest(request),
         lifecycle=lifecycle,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=observation,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
 
 
-def inspect_source(request_id: core.RequestId, scope: core.Scope) -> core.Intent:
+def inspect_source(request_id: core.RequestId, scope: core.Scope) -> core.RequestRecord:
     return canonical_source(
         core.InspectRequest(
             request_id=request_id,
             scope=scope,
-            deadline_at=100.0,
             target=core.RequestId(root="target"),
         )
     )

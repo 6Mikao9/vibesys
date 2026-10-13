@@ -156,7 +156,10 @@ def test_settlement_forwards_exact_candidate_revision(digest: str) -> None:
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -178,12 +181,18 @@ def test_recovery_barrier_rejects_ordinary_decisions(phase: core.RecoveryPhase) 
     state = core.initial_state()
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"recovery": core.RecoveryBarrier(phase=phase)}
             )
         }
     )
-    result = core.step(state, core.DecisionSubmitted(decision=start(state), expected_revision=0))
+    result = core.step(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=start(state), until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
+    )
     assert isinstance(result.events[0], core.Rejected)
     assert result.events[0].code == core.RejectionCode.CLOSED_SCOPE
     assert result.events[0].path == ("recovery",)
@@ -209,7 +218,10 @@ def test_queued_registration_is_separate_from_slot_admission() -> None:
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -250,13 +262,15 @@ def test_acquisition_episode_reaches_prepared_requests() -> None:
     )
     workspace = core.EnsureWorkspace(
         scope=core.Scope(owner=decision.attempt_id, generation=0),
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=decision.attempt_id, generation=0),
         plan=decision.workspace,
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -267,13 +281,15 @@ def test_acquisition_episode_reaches_prepared_requests() -> None:
                 ),
                 core.TraceFrame(
                     signal=admitted,
-                    change=core.AttemptsChange(state=state.attempts, requests=(workspace,)),
+                    change=core.AttemptsChange(
+                        state=state.attempts, requests=(core.within(workspace, 60.0),)
+                    ),
                 ),
             )
         ),
     )
     assert result.requests[0].admission_id == decision.decision_id
-    assert result.state.intents.recovery == state.intents.recovery
+    assert result.state.records.recovery == state.records.recovery
 
 
 @pytest.mark.parametrize("inspection", [False, True])
@@ -285,14 +301,12 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
         core.InspectRequest(
             request_id=request_id,
             scope=decision.scope,
-            deadline_at=100.0,
             target=core.RequestId(root="target"),
         )
         if inspection
         else core.EnsureWorkspace(
             request_id=request_id,
             scope=decision.scope,
-            deadline_at=100.0,
             attempt=core.AttemptRef(attempt_id=decision.attempt_id, generation=0),
             plan=decision.workspace,
         )
@@ -305,14 +319,16 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
             frames=(
                 core.TraceFrame(
                     signal=preparation,
-                    change=core.SchedulingChange(state=state.scheduling, requests=(request,)),
+                    change=core.SchedulingChange(
+                        state=state.scheduling, requests=(core.within(request, 60.0),)
+                    ),
                 ),
             )
         ),
     ).state
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"recovery": core.RecoveryBarrier(phase=core.RecoveryPhase.BLOCKED)}
             )
         }
@@ -320,10 +336,10 @@ def test_recovery_dispatch_permits_only_inspection_and_retirement(*, inspection:
     event = core.DispatchAuthorized(request_id=request_id)
     if inspection:
         dispatched = core.step(state, event)
-        (intent,) = (
-            row for row in dispatched.state.intents.intents if row.request_id == request_id
+        (record,) = (
+            row for row in dispatched.state.records.records if row.request_id == request_id
         )
-        assert intent.phase == core.IntentPhase.DISPATCHED
+        assert record.phase == core.RequestPhase.DISPATCHED
     else:
         with pytest.raises(core.ContractError, match="recovery"):
             core.step(state, event)
@@ -335,7 +351,7 @@ def test_recovery_ready_wakes_scheduling_without_unpausing() -> None:
         update={"run": state.run.model_copy(update={"status": core.RunStatus.PAUSED})}
     )
     started = core.RecoveryStarted(now_at=5.0, epoch=2)
-    ready = state.intents.model_copy(
+    ready = state.records.model_copy(
         update={"recovery": core.RecoveryBarrier(epoch=2, phase=core.RecoveryPhase.READY)}
     )
     wake = core.ClockAdvanced(now_at=5.0)
@@ -346,14 +362,14 @@ def test_recovery_ready_wakes_scheduling_without_unpausing() -> None:
             frames=(
                 core.TraceFrame(
                     signal=started,
-                    change=core.IntentsChange(state=ready, signals=(core.RecoveryReady(epoch=2),)),
+                    change=core.RecordsChange(state=ready, signals=(core.RecoveryReady(epoch=2),)),
                 ),
                 core.TraceFrame(signal=wake, change=core.SchedulingChange(state=state.scheduling)),
             )
         ),
     )
     assert result.state.run.status == core.RunStatus.PAUSED
-    assert result.state.intents.recovery == ready.recovery
+    assert result.state.records.recovery == ready.recovery
 
 
 @given(terminal=st.booleans(), released=st.booleans(), complete=st.booleans())
@@ -393,10 +409,10 @@ def test_child_leases_fence_run_closure_until_exact_release_manifest(
                     "result": core.RunResultProposal(outcome="cancelled", reason="cleanup"),
                 }
             ),
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
                     "children": (child,),
-                    "intents": (inspect_source(observed.request_id, scope),),
+                    "records": (inspect_source(observed.request_id, scope),),
                 }
             ),
         }
@@ -465,7 +481,10 @@ def test_queued_retirement_binds_exact_registration_generation() -> None:
     )
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
@@ -491,4 +510,10 @@ def test_queued_retirement_without_registration_fails_with_typed_error() -> None
         disposition=core.Cancel(),
     )
     with pytest.raises(core.ContractError, match="canonical accepted registration"):
-        core.step(state, core.DecisionSubmitted(decision=decision, expected_revision=0))
+        core.step(
+            state,
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=0,
+            ),
+        )

@@ -37,7 +37,6 @@ def yield_state(
         workspace=owner_scope,
         prompts=(),
         output_schema=core.SchemaRef(name="worker", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
     ref = core.InvocationRef(
@@ -48,7 +47,6 @@ def yield_state(
         decision_id=core.DecisionId(root="yield-decision"),
         scope=owner_scope,
         admission_id=admission,
-        deadline_at=100.0,
         turn=spec,
     )
     if origin == "resume":
@@ -61,7 +59,6 @@ def yield_state(
             decision_id=request.decision_id,
             scope=owner_scope,
             admission_id=admission,
-            deadline_at=100.0,
             turn=spec,
             continuation_id=continuation_id,
         )
@@ -75,7 +72,7 @@ def yield_state(
         feedback=core.Accepted(decision_id=request.decision_id),
         request_ids=(request.request_id,),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=hashlib.sha256(
@@ -84,8 +81,8 @@ def yield_state(
             ).encode()
         ).hexdigest(),
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.DISPATCHED,
+        until=core.Until(at=100.0),
     )
     owner = core.AttemptView(
         attempt_id=attempt_id,
@@ -99,6 +96,7 @@ def yield_state(
         admission_id=admission,
     )
     invocation = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=ref,
         scope=owner_scope,
         turn=spec,
@@ -127,7 +125,7 @@ def yield_state(
                 "run": state.run.model_copy(update={"receipts": (receipt,)}),
                 "attempts": core.AttemptsState(attempts=(owner,)),
                 "sessions": core.SessionsState(sessions=(session,), invocations=(invocation,)),
-                "intents": core.IntentsState(intents=(intent,)),
+                "records": core.RecordsState(records=(record,)),
             }
         ),
         request,
@@ -330,7 +328,7 @@ def test_yielded_success_ignores_uncommitted_or_mismatched_checkpoint(mismatch: 
         core.ObservationStatus.CANCELLED,
     ],
 )
-def test_failed_yield_retention_keeps_decision_and_dependencies_pending(
+def test_failed_yield_retention_keeps_decision_pending(
     status: core.ObservationStatus,
 ) -> None:
     state, event, request = yielded_checkpoint()
@@ -351,10 +349,6 @@ def test_failed_yield_retention_keeps_decision_and_dependencies_pending(
     failed = core.step(state, failure, reducers=REDUCERS)
     assert failed.state.attempts.attempts[0].phase == core.AttemptPhase.BLOCKED
     assert failed.state.run.receipts[0].completion is None
-    dependent = request.model_copy(
-        update={"decision_dependencies": (failed.state.run.receipts[0].decision_id,)}
-    )
-    assert core.dependency_status(failed.state, dependent) == core.DependencyStatus.PENDING
     result = core.step(failed.state, event, reducers=REDUCERS)
     assert result.state.run.receipts[0].completion is None
     assert result.state.attempts.attempts[0].checkpoints == ()
@@ -384,12 +378,12 @@ def test_yield_checkpoint_completes_original_turn_not_checkpoint_request_origin(
         )
         if row.request_id == event.request_id
         else row
-        for row in state.intents.intents
+        for row in state.records.records
     )
     state = state.model_copy(
         update={
             "run": state.run.model_copy(update={"receipts": (*state.run.receipts, other)}),
-            "intents": state.intents.model_copy(update={"intents": records}),
+            "records": state.records.model_copy(update={"records": records}),
         }
     )
     state = commit_checkpoint(state, event)

@@ -29,30 +29,28 @@ def inspection_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestObser
         request_id=source_id,
         scope=scope,
         admission_id=episode,
-        deadline_at=100.0,
         spec=spec,
     )
     query = core.InspectRequest(
         request_id=query_id,
         scope=scope,
-        deadline_at=100.0,
         admission_id=core.DecisionId(root="query-episode"),
         target=source_id,
     )
     records = tuple(
-        core.Intent(
+        core.RequestRecord(
             request_id=identity,
             request=request,
             payload_digest="fixture",
             lifecycle=core.LifecycleClass.QUERY
             if request == query
             else core.LifecycleClass.IDEMPOTENT_WRITE,
-            phase=core.IntentPhase.DISPATCHED,
-            reconcile_deadline_at=100.0,
+            phase=core.RequestPhase.DISPATCHED,
+            until=core.Until(at=100.0),
         )
         for identity, request in ((source_id, source), (query_id, query))
     )
-    state = state.model_copy(update={"intents": core.IntentsState(intents=records)})
+    state = state.model_copy(update={"records": core.RecordsState(records=records)})
     observations = tuple(
         core.Observation(
             event_id=core.EventId(root=identity.root),
@@ -102,8 +100,8 @@ def test_ingress_requires_each_recorded_source_episode(
         )
     with pytest.raises(core.ContractError, match="episode"):
         core.step(state, event)
-    assert state.intents.intents[0].observation is None
-    assert state.intents.intents[1].observation is None
+    assert state.records.records[0].observation is None
+    assert state.records.records[1].observation is None
 
 
 @pytest.mark.parametrize(
@@ -120,16 +118,15 @@ def test_registered_turn_inspection_requires_accepted_declared_normalized_origin
     query = core.InspectTurn(
         request_id=query_id,
         scope=record.request.scope,
-        deadline_at=100.0,
         invocation=invocation.invocation,
     )
-    query_record = core.Intent(
+    query_record = core.RequestRecord(
         request_id=query_id,
         request=query,
         payload_digest=_digest(query),
         lifecycle=core.LifecycleClass.QUERY,
-        phase=core.IntentPhase.DISPATCHED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.DISPATCHED,
+        until=core.Until(at=100.0),
     )
     event = core.RequestObserved(
         observation=core.Observation(
@@ -167,7 +164,7 @@ def test_registered_turn_inspection_requires_accepted_declared_normalized_origin
             "run": state.run.model_copy(
                 update={"receipts": () if field == "absent_receipt" else (receipt,)}
             ),
-            "intents": state.intents.model_copy(update={"intents": (record, query_record)}),
+            "records": state.records.model_copy(update={"records": (record, query_record)}),
         }
     )
     if field == "exact":
@@ -175,11 +172,11 @@ def test_registered_turn_inspection_requires_accepted_declared_normalized_origin
         # fact repeats the accepted observation, so the original is unchanged.
         result = core.step(state, event)
         query_after, original_after = (
-            next(row for row in result.state.intents.intents if row.request_id == identity)
+            next(row for row in result.state.records.records if row.request_id == identity)
             for identity in (query_id, record.request_id)
         )
         assert query_after.observation == event.observation
-        assert query_after.phase == core.IntentPhase.RECONCILING
+        assert query_after.phase == core.RequestPhase.RECONCILING
         assert original_after == record
     else:
         with pytest.raises(core.ContractError, match="invocation"):
@@ -193,12 +190,12 @@ def test_inspection_rejects_ambiguous_canonical_source_identities(
     facts: tuple[core.CoreState, core.RequestObserved],
 ) -> None:
     state, event = facts
-    duplicate = state.intents.intents[1 if source == "query" else 0]
+    duplicate = state.records.records[1 if source == "query" else 0]
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
-                    "intents": (*state.intents.intents, duplicate),
+                    "records": (*state.records.records, duplicate),
                 }
             )
         }

@@ -1,7 +1,7 @@
 """Run-owned sessions are closed once a stop commits, however controls and answers interleave.
 
 A run-owned session (the planner's) belongs to no attempt, so attempt retirement never
-closes it. The first committed Stop is the authority that does, but every stop, cancel
+closes it. The first committed Finish is the authority that does, but every stop, cancel
 and deadline control reaches the same drain, and a session can become closable only
 after a drain already ran: its cancelled turn ends, or its creation is answered, later.
 A generator drives the public `step` with well-formed inputs in random orders (turn
@@ -47,7 +47,6 @@ def _turn(index: int, *, reuse: bool) -> core.TurnSpec:
         workspace=RUN_SCOPE,
         prompts=(),
         output_schema=core.SchemaRef(name="plan", version=1),
-        deadline_at=100.0,
         charge_class="free",
     )
 
@@ -70,16 +69,19 @@ class Executor:
         self.issued.extend(transition.requests)
 
     def pending(self) -> tuple[core.Request, ...]:
-        return core.pending_requests(self.state.intents)
+        return core.pending_requests(self.state.records)
 
     def request_turn(self, *, reuse: bool) -> None:
         self.turns += 1
         self.feed(
             core.DecisionSubmitted(
-                decision=core.RequestTurn(
-                    decision_id=core.DecisionId(root=f"turn-{self.turns}"),
-                    scope=RUN_SCOPE,
-                    turn=_turn(self.turns, reuse=reuse),
+                decision=core.Wait(
+                    request=core.RequestTurn(
+                        decision_id=core.DecisionId(root=f"turn-{self.turns}"),
+                        scope=RUN_SCOPE,
+                        turn=_turn(self.turns, reuse=reuse),
+                    ),
+                    until=core.Within(limit=100.0),
                 ),
                 expected_revision=self.state.revision,
             )
@@ -103,7 +105,7 @@ class Executor:
         self.stops += 1
         self.feed(
             core.DecisionSubmitted(
-                decision=core.Stop(
+                decision=core.Finish(
                     decision_id=core.DecisionId(root=f"stop-{self.stops}"),
                     scope=RUN_SCOPE,
                     mode=mode,

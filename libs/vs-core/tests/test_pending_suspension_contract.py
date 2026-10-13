@@ -1,7 +1,6 @@
 """Pending suspension identity and absence through the public persisted contract."""
 
 import json
-from pathlib import Path
 
 import pytest
 from hypothesis import given
@@ -19,6 +18,7 @@ def _invocation(generation: int, owner: core.RunId | core.AttemptId) -> core.Inv
     )
     scope = core.Scope(owner=owner, generation=generation)
     return core.Invocation(
+        until=core.Until(at=100.0),
         invocation=ref,
         scope=scope,
         turn=core.TurnSpec(
@@ -33,7 +33,6 @@ def _invocation(generation: int, owner: core.RunId | core.AttemptId) -> core.Inv
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="reply", version=1),
-            deadline_at=100.0,
             charge_class="free",
         ),
         phase=core.SessionPhase.SUSPENDED,
@@ -157,29 +156,3 @@ def test_pending_suspension_rejects_mismatched_correspondence_in_public_codec(
         core.OperationRegistry().decode_envelope(
             core.RunEnvelope[core.StrategyState], json.dumps(envelope)
         )
-
-
-@given(st.integers(min_value=0, max_value=1000))
-def test_version2_migration_preserves_pending_absence_and_rejects_injected_field(
-    generation: int,
-) -> None:
-    invocation = _invocation(generation, core.AttemptId(root="attempt"))
-    legacy = invocation.model_dump(mode="json")
-    legacy.pop("evaluation_prefix")
-    legacy.pop("pending_suspension", None)
-    old = json.loads((Path(__file__).parent / "fixtures" / "envelope-v2-main.json").read_text())
-    old["core"]["sessions"]["invocations"] = [legacy]
-    codec = core.OperationRegistry()
-    loaded = codec.migrate_envelope(
-        core.RunEnvelope[core.StrategyState], json.dumps(old), core.v2_to_v3_migration(codec)
-    )
-    assert loaded.core.sessions.invocations[0].pending_suspension is None
-    assert loaded.core.sessions.invocations[0].invocation == invocation.invocation
-    for injected in (None, _pending(invocation, ["job"], 10.0).model_dump(mode="json")):
-        legacy["pending_suspension"] = injected
-        with pytest.raises(core.ContractError, match="pending_suspension"):
-            codec.migrate_envelope(
-                core.RunEnvelope[core.StrategyState],
-                json.dumps(old),
-                core.v2_to_v3_migration(codec),
-            )

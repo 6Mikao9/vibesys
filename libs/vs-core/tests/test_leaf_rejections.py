@@ -30,19 +30,20 @@ def test_leaf_budget_rejection_preserves_no_charges_requests_or_acceptance() -> 
         path=("max_attempts",),
         detail="admission exhausted",
     )
-    request = core.InspectRequest(
-        scope=decision.scope, deadline_at=100.0, target=core.RequestId(root="target")
-    )
+    request = core.InspectRequest(scope=decision.scope, target=core.RequestId(root="target"))
     result = core.trace_step(
         state,
-        core.DecisionSubmitted(decision=decision, expected_revision=0),
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=0,
+        ),
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
                     signal=signal,
                     change=core.SchedulingChange(
                         state=state.scheduling.model_copy(update={"released_slot_seconds": 1.0}),
-                        requests=(request,),
+                        requests=(core.within(request, 10.0),),
                         events=(rejection,),
                     ),
                 ),
@@ -52,5 +53,5 @@ def test_leaf_budget_rejection_preserves_no_charges_requests_or_acceptance() -> 
     assert result.events == (rejection,)
     assert result.requests == ()
     assert result.state.scheduling == state.scheduling
-    assert result.state.intents == state.intents
+    assert result.state.records == state.records
     assert result.state.run.receipts[0].feedback == rejection

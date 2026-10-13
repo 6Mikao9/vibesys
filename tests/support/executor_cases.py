@@ -34,7 +34,7 @@ from vs_core.api import (
     AdoptRevision,
     AttemptId,
     AttemptRef,
-    BlockIntent,
+    BlockRequest,
     CancelOwnedJob,
     CancelOwnedResource,
     CancelTurn,
@@ -47,6 +47,7 @@ from vs_core.api import (
     EnsureSession,
     EnsureWorkspace,
     ExecuteRegisteredOperation,
+    FailureReason,
     InspectOwnedJob,
     InspectRequest,
     InspectTurn,
@@ -155,7 +156,6 @@ async def inspect_request_of(world: CaseWorld, target: RequestBase) -> Execution
         request_id=RequestId(root=f"inspect-of-{target_id.root}"),
         scope=target.scope,
         admission_id=target.admission_id,
-        deadline_at=100.0,
         target=target_id,
         resource_id=None,
     )
@@ -195,14 +195,12 @@ class _OperationsWorld(_World):
             return InspectRequest(
                 request_id=RequestId(root="req-inspect"),
                 scope=SCOPE,
-                deadline_at=100.0,
                 target=RequestId(root="req-seed"),
                 resource_id=None,
             )
         return CancelOwnedResource(
             request_id=RequestId(root="req-cancel"),
             scope=SCOPE,
-            deadline_at=100.0,
             resource_id=ResourceId(root="resource"),
             target=RequestId(root="req-seed"),
         )
@@ -252,12 +250,11 @@ class _OperationsCase:
 class _SemanticWorld(_World):
     async def prepare(self, scenario: Scenario) -> RequestBase:
         del scenario
-        return BlockIntent(
+        return BlockRequest(
             request_id=RequestId(root="block"),
             scope=SCOPE,
-            deadline_at=100.0,
             target=RequestId(root="target"),
-            diagnostic="stuck",
+            reason=FailureReason.LOST,
         )
 
     async def execute(
@@ -274,7 +271,7 @@ class _SemanticWorld(_World):
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
-            return await events.execute(cast("BlockIntent", request), context)
+            return await events.execute(cast("BlockRequest", request), context)
         finally:
             self._writes = faulting.writes
 
@@ -285,7 +282,7 @@ class _SemanticWorld(_World):
 
 class _SemanticEventsCase:
     name = "semantic_events"
-    scenarios = (Scenario("block", BlockIntent, effectful=True),)
+    scenarios = (Scenario("block", BlockRequest, effectful=True),)
 
     @asynccontextmanager
     async def world(self) -> AsyncIterator[_SemanticWorld]:
@@ -318,7 +315,6 @@ class _EvaluationWorld(_World):
                 request_id=RequestId(root="close"),
                 scope=EVALUATION_SCOPE,
                 admission_id=ADMISSION,
-                deadline_at=100.0,
                 attempt=AttemptRef(attempt_id=AttemptId(root="attempt"), generation=0),
             )
         kind = scenario.kind
@@ -330,7 +326,6 @@ class _EvaluationWorld(_World):
             request_id=RequestId(root=scenario.name),
             scope=EVALUATION_SCOPE,
             admission_id=ADMISSION,
-            deadline_at=100.0,
             resource_id=resource,
         )
 
@@ -392,7 +387,6 @@ def _attempt_request(name: str) -> dict[str, Any]:
         "request_id": RequestId(root=name),
         "scope": Scope(owner=_ATTEMPT.attempt_id, generation=_ATTEMPT.generation),
         "admission_id": DecisionId(root="admit"),
-        "deadline_at": 100.0,
         "attempt": _ATTEMPT,
     }
 
@@ -401,7 +395,6 @@ def _run_request(name: str) -> dict[str, Any]:
     return {
         "request_id": RequestId(root=name),
         "scope": Scope(owner=RunId(root="run-1"), generation=0),
-        "deadline_at": 100.0,
     }
 
 
@@ -434,7 +427,6 @@ class _WorkspacesWorld:
             return SnapshotAndRetainRun(
                 request_id=RequestId(root="run-snap"),
                 scope=Scope(owner=RunId(root="run-1"), generation=3),
-                deadline_at=100.0,
                 invocation=InvocationRef(
                     session_id=SessionId(root="s1"),
                     invocation_id=InvocationId(root="i1"),

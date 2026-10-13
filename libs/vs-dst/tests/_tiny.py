@@ -1,27 +1,27 @@
-"""A tiny strategy and its world, for exercising vs-dst without a concrete product strategy.
+"""A tiny search and its world, for exercising vs-dst without a concrete product search.
 
-The strategy works through its items one at a time: start an attempt (core asks the executors
-for a workspace), settle it once its workspace is ready, and stop after the last item. The
+The search works through its items one at a time: start an attempt (core asks the executors
+for a workspace), settle it once its workspace is ready, and finish after the last item. The
 world answers a workspace request with a resource named by how many workspaces it has handed
 out, so the position of the world shows in the state of the run.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from vs_core.api import (
     AttemptBudget,
     AttemptId,
-    AttemptReady,
     AttemptRef,
-    AttemptSettled,
     DecisionId,
     EnsureWorkspace,
+    EventKind,
+    Failed,
+    Finish,
     ItemId,
     Limits,
     OperationRegistry,
-    Proposal,
     ResourceId,
     RevisionRef,
     RunEnvelope,
@@ -30,20 +30,25 @@ from vs_core.api import (
     Scope,
     Settle,
     StartAttempt,
-    Stop,
-    StrategyDeclaration,
+    StopRequested,
     StrategyState,
-    Value,
+    Wait,
+    WakeAt,
     Withdraw,
+    Within,
+    WorkKind,
+    WorkspaceClosed,
     WorkspaceMode,
+    WorkspaceOpened,
     WorkspacePlan,
     initial_state,
 )
 from vs_core.api.testing import Harness, Succeeded
 from vs_dst.api import RunSetup
+from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
-    from vs_core.api import CoreState, Decision, Request, RunView, StrategyEvent
+    from vs_core.api import CoreState, Decision, Event, Request, RunView
     from vs_core.api.testing import Answer
 
 BASELINE = RevisionRef.of_git_commit("abc123")
@@ -58,79 +63,97 @@ FACTS = RunFacts(
 
 class TinyState(StrategyState):
     done: int = 0
-    phase: Literal["start", "settle"] = "start"
 
 
-class TinyStrategy(Value):
-    """Start and settle each item in turn, then stop."""
+SCOPE = Scope(owner=initial_state().run.run_id, generation=0)
+"""The run's own scope: the harness and the scripted host both start from `initial_state`."""
+PATIENCE = Within(limit=1000)
 
-    state: TinyState
-    declaration: StrategyDeclaration
-    items: tuple[ItemId, ...]
 
-    def bind(self, state: TinyState) -> TinyStrategy:
-        return self.model_copy(update={"state": state})
+class TinySearch:
+    """Start and settle each item in turn, then finish. The items to settle are its constructor argument."""
 
-    def decide(self, view: RunView) -> Proposal[TinyState]:
-        scope = Scope(owner=view.run.run_id, generation=view.run.generation)
-        index = self.state.done
-        decisions: tuple[Decision, ...]
-        if index == len(self.items):
-            decisions = (
-                Stop(
+    state_model = TinyState
+    declaration = initial_state().run.declaration.model_copy(
+        update={
+            "uses": frozenset({WorkKind.START_ATTEMPT, WorkKind.WITHDRAW}),
+            "handles": frozenset(
+                {
+                    EventKind.FAILED,
+                    EventKind.STOP_REQUESTED,
+                    EventKind.WORKSPACE_OPENED,
+                    EventKind.WORKSPACE_CLOSED,
+                }
+            ),
+        }
+    )
+
+    def __init__(self, items: tuple[ItemId, ...]) -> None:
+        self._items = items
+
+    def init(self, config: None, facts: RunFacts) -> tuple[TinyState, list[Decision]]:
+        del config
+        return TinyState(schema_version=1), self._next(0, facts.baseline)
+
+    def update(
+        self, state: TinyState, event: Event, view: RunView
+    ) -> tuple[TinyState, list[Decision]]:
+        match event:
+            case WorkspaceOpened(attempt=attempt):
+                index = state.done
+                return state, [self._settle(attempt, index)]
+            case WorkspaceClosed():
+                done = state.done + 1
+                return state.model_copy(update={"done": done}), self._next(
+                    done, view.facts.baseline
+                )
+            case StopRequested() | Failed():
+                # The run's own deadline stop, or a request the world never answered: the
+                # search has no other plan, and what the run reports then is under test.
+                return state, []
+            case _:
+                message = f"unexpected event {event.kind}"
+                raise ValueError(message)
+
+    def _next(self, index: int, baseline: RevisionRef) -> list[Decision]:
+        items = self._items
+        if index == len(items):
+            return [
+                Finish(
                     decision_id=DecisionId(root="finish"),
-                    scope=scope,
+                    scope=SCOPE,
                     mode="drain",
                     result=RunResultProposal(outcome="success", reason="every item settled"),
-                ),
-            )
-        else:
-            attempt = AttemptRef(attempt_id=AttemptId(root=f"attempt:{index}"), generation=0)
-            decisions = (
-                (self._start(view, scope, attempt, index),)
-                if self.state.phase == "start"
-                else (self._settle(scope, attempt, index),)
-            )
-        return Proposal(state=self.state, decisions=decisions)
-
-    def _start(self, view: RunView, scope: Scope, attempt: AttemptRef, index: int) -> Decision:
-        return StartAttempt(
+                )
+            ]
+        start = StartAttempt(
             decision_id=DecisionId(root=f"start:{index}"),
-            scope=scope,
-            attempt_id=attempt.attempt_id,
-            item_id=self.items[index],
-            workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=view.facts.baseline),
+            scope=SCOPE,
+            attempt_id=AttemptId(root=f"attempt:{index}"),
+            item_id=items[index],
+            workspace=WorkspacePlan(mode=WorkspaceMode.EXCLUSIVE_ROOT, base=baseline),
             budget=AttemptBudget(),
         )
+        return [Wait(request=start, until=PATIENCE)]
 
     @staticmethod
-    def _settle(scope: Scope, attempt: AttemptRef, index: int) -> Decision:
-        return Withdraw(
+    def _settle(attempt: AttemptRef, index: int) -> Decision:
+        withdraw = Withdraw(
             decision_id=DecisionId(root=f"settle:{index}"),
-            scope=scope,
+            scope=SCOPE,
             target=attempt,
             disposition=Settle(
                 assessments=(), eligible=False, retention="discard", outcome="succeeded"
             ),
         )
-
-    def on_event(self, view: RunView, event: StrategyEvent) -> TinyState:
-        del view
-        if isinstance(event, AttemptReady):
-            return self.state.model_copy(update={"phase": "settle"})
-        if isinstance(event, AttemptSettled):
-            return self.state.model_copy(update={"done": self.state.done + 1, "phase": "start"})
-        return self.state
+        return Wait(request=withdraw, until=PATIENCE)
 
 
 def tiny_setup(items: int, max_concurrent: int = 1) -> RunSetup:
-    """The tiny strategy over ``items`` items, hosted with no operations."""
-    declaration = initial_state().run.declaration
+    """The tiny search over ``items`` items, hosted with no operations."""
     names = tuple(ItemId(root=f"item:{n}") for n in range(items))
     return RunSetup(
-        new_strategy=lambda: TinyStrategy(
-            state=TinyState(schema_version=1), declaration=declaration, items=names
-        ),
+        new_launch=lambda: Launch(TinySearch(names), None),
         harness=Harness(
             registry=OperationRegistry(()),
             facts=FACTS,
@@ -160,3 +183,14 @@ class TinyWorld:
                 resource_id=ResourceId(root=f"workspace:{number}"), revision=request.plan.base
             )
         return Succeeded()
+
+
+def decision_key(decision: Decision) -> object:
+    """What identifies a decision across runs: the id of its work, or the time of a wake-up."""
+    match decision:
+        case Wait(request=request):
+            return request.decision_id
+        case WakeAt(time=time):
+            return ("wake", time)
+        case _:
+            return decision.decision_id

@@ -36,6 +36,7 @@ from .evaluation_history import (
     RepeatedFailureGuidance,
 )
 from .job_observations import JobProgress, MeasurementFailure, TimedOut
+from .until import Within
 
 
 class SnapshotResultRef(Value):
@@ -47,7 +48,7 @@ class SnapshotResultRef(Value):
 class StageRequirements(Value):
     """A stage value that may name the outputs its evidence must contain.
 
-    ``required_outputs`` joined stages after runs had already stored digests of plans, intents
+    ``required_outputs`` joined stages after runs had already stored digests of plans, records
     and receipts. A stage that requires nothing serializes exactly as it did before the field
     existed, so every stored digest, submission budget key and recipe digest still matches and
     a run started earlier resumes. Only a stage that requires something carries the field.
@@ -91,7 +92,6 @@ class MeasurementPlan(Value):
     recipe: ArtifactRef
     submitted_at: Seconds
     queue_allowance: Seconds
-    deadline_at: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
     submission_limit: int = Field(default=1, ge=1)
     accuracy_stage: str | None = Field(default=None, min_length=1)
@@ -122,14 +122,16 @@ class MeasurementPlan(Value):
                 for name, dependencies in remaining.items()
                 if name not in ready
             }
-        maximum = (
-            self.submitted_at
-            + self.queue_allowance
-            + sum(stage.execution_budget for stage in self.stages)
-        )
-        if not self.submitted_at <= self.deadline_at <= maximum:
-            raise MeasurementPlanError("deadline_at", "deadline exceeds declared stage bound")
         return self
+
+    @property
+    def time_bound(self) -> float:
+        """The most time the declared stages and queue allowance can take.
+
+        The plan states no deadline: how long a submission may take is the ``Within`` of the
+        wait that asks for it, capped at this bound for an agent's own submission.
+        """
+        return self.queue_allowance + sum(stage.execution_budget for stage in self.stages)
 
 
 class EvidenceAcceptanceReceipt(Value):
@@ -465,7 +467,7 @@ class SubmissionBudget(Value):
 
     The first limit cannot exceed the run ceiling. Workload rejection is durable;
     conclusive infrastructure failure may retry within this bound. Transport
-    reconciliation accounting remains Intent.retry_count, not this receipt list.
+    reconciliation accounting remains RequestRecord.retry_count, not this receipt list.
     """
 
     scope: Scope
@@ -550,6 +552,12 @@ class AgentMeasurementRequested(Value):
     kind: Literal["agent_measurement_requested"] = "agent_measurement_requested"
     scope: Scope
     plan: MeasurementPlan
+    within: Within
+    """How long the submission may take: the single time limit of this request.
+
+    Parsed from the agent's call at the boundary; core caps it at the plan's
+    ``time_bound`` and at the run deadline.
+    """
     call_id: str = Field(min_length=1)
 
 

@@ -63,8 +63,18 @@ class Session:
         self.requests.extend(transition.requests)
         self.results.extend(row for row in transition.events if isinstance(row, core.TurnResult))
 
-    def decide(self, decision: core.Decision) -> None:
-        self.feed(core.DecisionSubmitted(decision=decision, expected_revision=self.state.revision))
+    def decide(self, decision: core.Command) -> None:
+        submission = (
+            decision
+            if isinstance(decision, core.Finish)
+            else core.Wait(request=decision, until=core.Within(limit=100.0))
+        )
+        self.feed(
+            core.DecisionSubmitted(
+                decision=submission,
+                expected_revision=self.state.revision,
+            )
+        )
 
     def start(self, mode: core.WorkspaceMode) -> None:
         self.started += 1
@@ -106,7 +116,6 @@ class Session:
                     ),
                     prompts=(),
                     output_schema=core.SchemaRef(name="implementation", version=1),
-                    deadline_at=self.state.run.deadline_at,
                     charge_class="paid",
                 ),
             )
@@ -248,7 +257,7 @@ class Session:
 
     def stop(self, mode: Literal["drain", "cancel"]) -> None:
         self.decide(
-            core.Stop(
+            core.Finish(
                 decision_id=core.DecisionId(root="stop"),
                 scope=RUN_SCOPE,
                 mode=mode,
@@ -355,14 +364,14 @@ def _assert_owner_facts_reach_their_results(session: Session) -> None:
 
     Only the owner's event carries a turn's reply, so a published success without it
     means the observation pre-empted the owner event. A job that ended completes the
-    submit intent that created it.
+    submit record that created it.
     """
     for result in session.results:
         if result.observation.status == core.ObservationStatus.SUCCEEDED:
             assert result.output_json == REPLY
     for job in session.state.evaluation.jobs:
         if job.terminal and job.observation is not None:
-            intent = next(
-                row for row in session.state.intents.intents if row.request_id == job.submission_id
+            record = next(
+                row for row in session.state.records.records if row.request_id == job.submission_id
             )
-            assert intent.phase == core.IntentPhase.COMPLETED
+            assert record.phase == core.RequestPhase.COMPLETED

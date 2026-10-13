@@ -1,4 +1,4 @@
-"""Correlate inspection target facts with canonical intent and resource ownership."""
+"""Correlate inspection target facts with canonical record and resource ownership."""
 
 from __future__ import annotations
 
@@ -8,28 +8,28 @@ from ._proofs import Proven, descriptor_matches, invocation_for, observation_for
 from ._registry import ContractError
 from .types.common import LifecycleClass, OperationNormalizationKind
 from .types.evaluation import InspectOwnedJob
-from .types.intents import ExecuteRegisteredOperation, InspectRequest
+from .types.records import ExecuteRegisteredOperation, InspectRequest
 from .types.sessions import DispatchTurn, InspectTurn, ResumeSessionTurn
 
 if TYPE_CHECKING:
     from .types.common import RequestId, ResourceId
-    from .types.intents import Intent, RequestObserved, TargetObservation
     from .types.kernel import CoreState
+    from .types.records import RequestObserved, RequestRecord, TargetObservation
 
 
-def _canonical_intent(state: CoreState, identity: RequestId) -> Intent | None:
-    records = tuple(row for row in state.intents.intents if row.request_id == identity)
+def _canonical_record(state: CoreState, identity: RequestId) -> RequestRecord | None:
+    records = tuple(row for row in state.records.records if row.request_id == identity)
     if len(records) > 1:
         raise ContractError(("request_id",), "requires a unique canonical request")
     return records[0] if records else None
 
 
-def _owned_resource(state: CoreState, original: Intent, resource: ResourceId) -> bool:
+def _owned_resource(state: CoreState, original: RequestRecord, resource: ResourceId) -> bool:
     """Resource identity must already belong to this exact submission or manifest."""
     return resource in _root_resources(state, original) | _descendants(state, original)
 
 
-def _validate_invocation(state: CoreState, query: InspectTurn, original: Intent) -> None:
+def _validate_invocation(state: CoreState, query: InspectTurn, original: RequestRecord) -> None:
     """Session generation comes from durable invocation ownership, never inference."""
     request = original.request
     proof = invocation_for(state.sessions.invocations, query.invocation, original.request.scope)
@@ -60,7 +60,7 @@ def _validate_invocation(state: CoreState, query: InspectTurn, original: Intent)
         raise ContractError(("target", "invocation"), "does not match canonical invocation owner")
 
 
-def _root_resources(state: CoreState, original: Intent) -> set[ResourceId]:
+def _root_resources(state: CoreState, original: RequestRecord) -> set[ResourceId]:
     """Only canonical root identities can carry the original request's outcome."""
     resources = {
         job.resource_id
@@ -81,11 +81,11 @@ def _root_resources(state: CoreState, original: Intent) -> set[ResourceId]:
     return resources
 
 
-def _descendants(state: CoreState, original: Intent) -> set[ResourceId]:
+def _descendants(state: CoreState, original: RequestRecord) -> set[ResourceId]:
     """Provisional roots still own every discovered descendant manifest."""
     resources = {
         child.resource_id
-        for child in state.intents.children
+        for child in state.records.children
         if child.scope == original.request.scope and original.request_id in child.source_requests
     }
     resources.update(
@@ -119,7 +119,7 @@ def _descendants(state: CoreState, original: Intent) -> set[ResourceId]:
     return resources
 
 
-def _validate_child(state: CoreState, target: TargetObservation, original: Intent) -> None:
+def _validate_child(state: CoreState, target: TargetObservation, original: RequestRecord) -> None:
     resource = target.target_resource
     roots = _root_resources(state, original)
     observed = target.observation.resource_id
@@ -144,7 +144,7 @@ def validate_registered_owner(state: CoreState, event: RequestObserved) -> None:
     if event.target is not None:
         targets = (*targets, (event.target, ("target", "outcome")))
     for observed, path in targets:
-        original = _canonical_intent(state, observed.observation.request_id)
+        original = _canonical_record(state, observed.observation.request_id)
         if original is not None:
             proof = observation_for(original, observed.observation)
             if not isinstance(proof, Proven):
@@ -172,7 +172,7 @@ def _validate_query(
     state: CoreState,
     request: InspectRequest | InspectTurn | InspectOwnedJob,
     target: TargetObservation,
-    original: Intent,
+    original: RequestRecord,
 ) -> None:
     """Each inspection class names its canonical target identity."""
     if isinstance(request, InspectRequest):
@@ -195,8 +195,8 @@ def validate_inspection_target(state: CoreState, event: RequestObserved) -> None
     target = event.target
     if target is None:
         return
-    query = _canonical_intent(state, event.observation.request_id)
-    original = _canonical_intent(state, target.observation.request_id)
+    query = _canonical_record(state, event.observation.request_id)
+    original = _canonical_record(state, target.observation.request_id)
     if query is None or not isinstance(
         query.request, InspectRequest | InspectTurn | InspectOwnedJob
     ):

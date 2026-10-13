@@ -148,7 +148,7 @@ def test_expired_accepted_fifo_requests_retirement_and_can_drain(
     state = _queued_state(count + 1, charge, generation)
     held, *queued = state.scheduling.queue
     assert isinstance(held, core.AttemptRequest)
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="drain-stop"),
         scope=core.Scope(owner=state.run.run_id, generation=generation),
         mode="drain",
@@ -326,7 +326,7 @@ def test_closed_intake_keeps_pause_recovery_and_deadline_execution_guards(
                     "status": core.RunStatus.PAUSED if paused else core.RunStatus.RUNNING,
                 }
             ),
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"recovery": core.RecoveryBarrier(phase=phase)}
             ),
         }

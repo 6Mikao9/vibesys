@@ -380,6 +380,12 @@ root = [
     "sdk/vs-bench/src",
 ]
 
+[tool.ty.rules]
+# A `ty: ignore` that suppresses nothing is an error. Type-level negative tests
+# (libs/vs-core/tests/test_search_types.py) mark each line that must not type-check with
+# `ty: ignore[...]`; if the API loosens, the ignore becomes unused and this rule fails CI.
+unused-ignore-comment = "error"
+
 [tool.ty.src]
 # Same tree the previous checker covered: first-party sources plus their
 # tests. `examples/` and `resources/skills/` vendor code VibeSys does not own

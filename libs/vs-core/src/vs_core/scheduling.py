@@ -9,8 +9,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, assert_never
 
 from ._adoption import fences_root_mutation
-from ._intent_ledger import due_retries
-from ._intent_recovery import overdue_reconciliations
 from ._proofs import (
     Proven,
     accepted_receipt_for,
@@ -18,6 +16,8 @@ from ._proofs import (
     committed_stop,
     draining,
 )
+from ._request_ledger import due_retries
+from ._request_recovery import overdue_reconciliations
 from .types.attempts import AttemptPhase, RetireRequested
 from .types.common import (
     AttemptRef,
@@ -31,8 +31,8 @@ from .types.common import (
     WorkspaceMode,
 )
 from .types.evaluation import ObservationsDue
-from .types.intents import RecoveryPhase
 from .types.kernel import AreaChange
+from .types.records import RecoveryPhase
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
@@ -52,7 +52,7 @@ from .types.scheduling import (
     SlotReleased,
 )
 from .types.sessions import RunSessionsDrainRequested
-from .types.strategy import Accepted, Operation, Rejected, StartAttempt, Stop
+from .types.strategy import Accepted, Finish, Operation, Rejected, StartAttempt
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
@@ -124,13 +124,13 @@ def _reject(
     )
 
 
-def _committed_stops(context: SchedulingContext) -> tuple[Stop, ...]:
+def _committed_stops(context: SchedulingContext) -> tuple[Finish, ...]:
     # Restored contracts can carry a rejected payload or mismatched identities.
-    # Only the run's accepted, current-scope decision proves Stop authority.
+    # Only the run's accepted, current-scope decision proves Finish authority.
     return tuple(
         receipt.decision
         for receipt in context.run.receipts
-        if isinstance(receipt.decision, Stop)
+        if isinstance(receipt.decision, Finish)
         and isinstance(receipt.feedback, Accepted)
         and receipt.decision_id == receipt.decision.decision_id == receipt.feedback.decision_id
         and receipt.decision.scope.owner == context.run.run_id
@@ -138,11 +138,11 @@ def _committed_stops(context: SchedulingContext) -> tuple[Stop, ...]:
     )
 
 
-def _first_stop(context: SchedulingContext) -> Stop | None:
-    """The shared proof of the first committed Stop, bound to the run's result.
+def _first_stop(context: SchedulingContext) -> Finish | None:
+    """The shared proof of the first committed Finish, bound to the run's result.
 
     The shared predicate is stricter than a bare accepted-receipt scan: it also
-    checks the persisted digest and that a rejected first Stop denies authority
+    checks the persisted digest and that a rejected first Finish denies authority
     instead of letting a later one take over.
     """
     match committed_stop(context.run):
@@ -159,7 +159,7 @@ def _accepting(context: SchedulingContext) -> bool:
     return (
         (open_run or draining(context.run))
         and context.run.now_at < context.run.deadline_at
-        and context.intents.recovery.phase == RecoveryPhase.READY
+        and context.records.recovery.phase == RecoveryPhase.READY
     )
 
 
@@ -198,7 +198,7 @@ def _fits(state: SchedulingState, context: SchedulingContext, request: Admission
         return False
     if _mode(context, _target(request), request.decision_id) != WorkspaceMode.EXCLUSIVE_ROOT:
         return True
-    if fences_root_mutation(context.settlement, context.intents):
+    if fences_root_mutation(context.settlement, context.records):
         return False
     return not any(
         _mode(context, slot.attempt, slot.admission_id) == WorkspaceMode.EXCLUSIVE_ROOT
@@ -581,7 +581,7 @@ def _control(
 
 
 def _run_sessions_drain(context: SchedulingContext) -> tuple[Signal, ...]:
-    """Close the run-owned sessions under the first committed Stop's authority.
+    """Close the run-owned sessions under the first committed Finish's authority.
 
     Attempt retirement closes only attempt-owned sessions, so without this a run-scoped
     session (the planner's) is never released and the closing run cannot become terminal.
@@ -655,8 +655,8 @@ def schedule(
                     "signals": (
                         *filled.signals,
                         ObservationsDue(now_at=context.run.now_at),
-                        *due_retries(context.intents, context.run.now_at),
-                        *overdue_reconciliations(context.intents, context.run.now_at),
+                        *due_retries(context.records, context.run.now_at),
+                        *overdue_reconciliations(context.records, context.run.now_at),
                     )
                 }
             )

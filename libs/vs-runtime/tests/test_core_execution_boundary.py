@@ -22,12 +22,12 @@ from vs_core.api import (
     EnsureSession,
     EventId,
     InputId,
-    IntentPhase,
     Observation,
     ObservationStatus,
     Request,
     RequestId,
     RequestObserved,
+    RequestPhase,
     Scope,
     ScopeInputTarget,
     SessionId,
@@ -35,6 +35,7 @@ from vs_core.api import (
     SessionInputReceived,
     SessionObserved,
     Transition,
+    Until,
     initial_state,
 )
 from vs_project.api import FakeStateStore, StoredEnvelope
@@ -59,7 +60,7 @@ from vs_runtime.api.core import (
     RuntimeCommitError,
     RuntimeExecutionError,
 )
-from vs_runtime.api.core_shell_fixtures import CounterState, CounterStrategy, ShellTraceTransitions
+from vs_runtime.api.core_shell_fixtures import CounterSearch, CounterState, ShellTraceTransitions
 from vs_runtime.api.testing import FakePublicationDelivery, FakeRequestExecution
 
 if TYPE_CHECKING:
@@ -89,8 +90,9 @@ def make_shell(
 ) -> CoreRuntime[CounterState]:
     return CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(
             transitions=ShellTraceTransitions(with_requests=True),
             executors=RequestExecutors(
@@ -149,7 +151,7 @@ async def test_lease_is_renewable_while_an_executor_is_in_flight() -> None:
     assert await shell.dispatch_one(now_at=1) == DispatchProgress.DISPATCHED
     assert observed == [True, True]
     assert shell.advance()
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.RECONCILING
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.RECONCILING
 
 
 @pytest.mark.asyncio
@@ -213,7 +215,7 @@ def wrong_request_result(result: ExecutionResult) -> ExecutionResult:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", list(Failure))
-async def test_failed_execution_halts_and_restart_inspects_the_stranded_intent(
+async def test_failed_execution_halts_and_restart_inspects_the_stranded_record(
     failure: Failure,
 ) -> None:
     store = FakeStateStore()
@@ -238,8 +240,8 @@ async def test_failed_execution_halts_and_restart_inspects_the_stranded_intent(
     await prepared(shell, store)
     with pytest.raises((OSError, ContractError, RuntimeCommitError)):
         await shell.dispatch_one(now_at=1)
-    # The intent is DISPATCHED and the shell must not report idle or keep dispatching.
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED
+    # The record is DISPATCHED and the shell must not report idle or keep dispatching.
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
     with pytest.raises(RuntimeCommitError):
         await shell.dispatch_one(now_at=2)
     with pytest.raises(RuntimeCommitError):
@@ -247,8 +249,8 @@ async def test_failed_execution_halts_and_restart_inspects_the_stranded_intent(
 
     restarted = make_shell(store)
     restarted.start("second", now_at=100, lease_duration=100)
-    kinds = {row.request.kind: row.phase for row in restarted.record.envelope.core.intents.intents}
-    assert kinds["inspect_request"] == IntentPhase.PREPARED
+    kinds = {row.request.kind: row.phase for row in restarted.record.envelope.core.records.records}
+    assert kinds["inspect_request"] == RequestPhase.PREPARED
 
 
 @pytest.mark.asyncio
@@ -256,8 +258,9 @@ async def test_unbound_role_is_refused_before_authorization_is_committed() -> No
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions(with_requests=True)),
     )
     shell.start("host", now_at=0, lease_duration=100)
@@ -269,7 +272,7 @@ async def test_unbound_role_is_refused_before_authorization_is_committed() -> No
         assert isinstance(refusal, ExecutorRefusal)
         assert refusal.role == ExecutorRole.SESSIONS
     assert shell.storage_revision == revision
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.PREPARED
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.PREPARED
 
 
 # P2-2 ---------------------------------------------------------------------------------
@@ -353,7 +356,7 @@ async def test_owner_events_outside_the_executed_scope_or_admission_halt_the_she
     with pytest.raises(RuntimeCommitError):
         shell.advance()
     assert shell.record.pending_inputs == ()
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
 
 
 # P3-2 ---------------------------------------------------------------------------------
@@ -388,14 +391,16 @@ async def test_unrouted_request_type_is_a_typed_contract_error() -> None:
     store = FakeStateStore()
     shell = make_shell(store)
     await prepared(shell, store)
-    request = shell.record.envelope.core.intents.intents[0].request
+    request = shell.record.envelope.core.records.records[0].request
     assert isinstance(request, EnsureSession)
 
     class Unrouted(EnsureSession):
         pass
 
     clone = Unrouted(**{name: getattr(request, name) for name in type(request).model_fields})
-    context = ExecutionContext(fence=shell.record.envelope.fence, now_at=1, payload_digest="digest")
+    context = ExecutionContext(
+        fence=shell.record.envelope.fence, now_at=1, payload_digest="digest", until=Until(at=100.0)
+    )
     with pytest.raises(ContractError, match="no executor role"):
         await RequestExecutors().dispatch(clone, context)
 
@@ -467,8 +472,9 @@ async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() 
     sessions = ScriptedExecution()
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(
             transitions=RejectingObservations(with_requests=True),
             executors=RequestExecutors(
@@ -477,19 +483,19 @@ async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() 
         ),
     )
     await prepared(shell, store)
-    (intent,) = shell.record.envelope.core.intents.intents
+    (record,) = shell.record.envelope.core.records.records
     delivery = FakePublicationDelivery(store)
     with pytest.raises(RuntimeExecutionError) as raised:
         await shell.run_until_idle(delivery, now_at=1)
     assert isinstance(raised.value, ObservationRejectedError)
-    assert raised.value.request_id == intent.request_id
+    assert raised.value.request_id == record.request_id
     assert raised.value.path == ("observation", "sequence")
     assert "Mismatch(SEQUENCE)" in str(raised.value)
     # The effect ran once; the result is not dropped into an idle shell.
     assert len(sessions.inner.executions) == 1
     with pytest.raises(RuntimeCommitError):
         await shell.run_until_idle(delivery, now_at=2)
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
 
 
 class RejectingOwnerInputs(ShellTraceTransitions):
@@ -517,8 +523,9 @@ async def test_an_owner_event_core_rejects_halts_the_shell_instead_of_being_drop
 
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
+        CounterSearch(),
         initial_state(),
+        config=None,
         bindings=CoreRuntimeBindings(
             transitions=RejectingOwnerInputs(with_requests=True),
             executors=RequestExecutors(

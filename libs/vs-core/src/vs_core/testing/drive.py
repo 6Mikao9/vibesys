@@ -1,9 +1,10 @@
-"""Trace driver: run a pure `Strategy` on the real core against scripted executors.
+"""Trace driver: run a pure `Search` on the real core against scripted executors.
 
 The driver stands in for the host shell. It calls the real `vs_core.api.step` and
-`project`, asks the strategy for a proposal, authorizes every prepared request,
-asks the scripted executors what each one observed, feeds those observations back
-to core and folds every `StrategyEvent` through `Strategy.on_event`. Nothing here
+`project`, hands the search every event core publishes, authorizes every prepared
+request, asks the scripted executors what each one observed and feeds those
+observations back to core. When nothing else can happen it moves the clock to the next
+time that matters (a requested wake-up or a request's limit). Nothing here
 decides a lifecycle fact: a missing or wrong observation shows up as core
 rejecting it, never as the driver filling in the gap.
 
@@ -18,7 +19,7 @@ any script.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
@@ -27,33 +28,41 @@ from vs_core.api import (
     ContractError,
     CoreEvent,
     CoreState,
+    CoreView,
     Decision,
+    Discarded,
     DispatchAuthorized,
+    Event,
     EventCursor,
     EventId,
     EvidenceRequirements,
     HostFence,
     HostId,
-    IntentPhase,
+    Inbox,
     LifecycleCapability,
     Limits,
     MeasurementFailure,
     Observation,
     ObservationStatus,
     OperationRegistry,
-    ProposalSubmitted,
     Request,
     RequestObserved,
+    RequestPhase,
     ResourceId,
     RevisionRef,
     RunEnvelope,
     RunFacts,
-    RunView,
-    Strategy,
+    Search,
+    SearchHost,
     StrategyEvent,
     StrategyState,
+    Submission,
+    TimeReached,
+    advance,
+    begin,
     project,
     step,
+    translate,
     validate_startup,
 )
 from vs_core.testing.builders import initial_state
@@ -155,25 +164,28 @@ class Trace[S: StrategyState]:
     """Everything one drive saw, in order, and where it ended."""
 
     core: CoreState
-    strategy: Strategy[S]
-    decisions: list[Decision] = field(default_factory=list)
+    search: Search[S, Any]
+    state: S
+    decisions: list[Submission] = field(default_factory=list)
     events: list[StrategyEvent] = field(default_factory=list)
     requests: list[Request] = field(default_factory=list)
+    # What core kept from the search: failures of its own requests and late results.
+    discarded: list[Discarded] = field(default_factory=list)
     # Requests as dispatched and executor observations as delivered, interleaved in order.
     log: list[Request | RequestObserved] = field(default_factory=list)
     finished: bool = False
     steps: int = 0
 
     @property
-    def view(self) -> RunView:
-        """The run as the strategy sees it now."""
+    def view(self) -> CoreView:
+        """The run as core projects it now."""
         return project(self.core)
 
 
 class _Driver[S: StrategyState]:
     def __init__(
         self,
-        strategy: Strategy[S],
+        search: Search[S, Any],
         script: Script,
         harness: Harness,
         faults: Faults,
@@ -181,9 +193,13 @@ class _Driver[S: StrategyState]:
     ) -> None:
         self.script = script
         self.registry = harness.registry
+        self.host = SearchHost(step=step, registry=harness.registry)
         self.faults = faults
-        self.trace = Trace(core=core, strategy=strategy)
-        self.state: S = strategy.state
+        self.search = search
+        self.trace: Trace[S]
+        self.core = core
+        self.wakes: list[float] = []
+        self.held: tuple[Decision, ...] = ()
         self.clock = 1.0
         self.calls: dict[str, int] = {}
         self.envelope_type = harness.envelope_type
@@ -192,25 +208,71 @@ class _Driver[S: StrategyState]:
 
     def run(self, max_steps: int) -> None:
         while self.trace.steps < max_steps and not self.trace.finished:
-            progressed = self.decide()
-            progressed = self.dispatch_all() or progressed
+            progressed = self.dispatch_all()
+            if not progressed:
+                progressed = self.tick()
             if not progressed:
                 return
 
-    def decide(self) -> bool:
-        trace = self.trace
-        proposal = trace.strategy.bind(self.state).decide(project(trace.core))
-        decisions = tuple(self.registry.validate_decision(item) for item in proposal.decisions)
-        trace.decisions.extend(decisions)
-        changed = bool(decisions) or proposal.state != self.state
-        self.state = proposal.state
-        if not decisions:
-            return changed
-        self.consume(
-            ProposalSubmitted(decisions=decisions, expected_revision=trace.core.revision),
-            proposed=proposal.state,
+    def start(self, config: object, events: tuple[CoreEvent, ...]) -> None:
+        """Deliver the clock and the harness events, then begin the search's run."""
+        published: list[StrategyEvent] = []
+        incoming: list[Event] = []
+        discarded: list[Discarded] = []
+        core = self.core
+        for event in (ClockAdvanced(now_at=1.0), *events):
+            transition = step(core, event)
+            core = transition.state
+            published.extend(transition.events)
+            translated = translate(core, transition.events)
+            incoming.extend(translated.events)
+            discarded.extend(translated.discarded)
+        arrived = Inbox(tuple(incoming), (), tuple(discarded))
+        advanced = begin(self.search, config, core, self.host, arrived)
+        self.trace = Trace(core=core, search=self.search, state=advanced.state)
+        self.trace.discarded.extend(advanced.discarded)
+        self.trace.steps = 1 + len(events)
+        self.take(
+            advanced.state,
+            advanced.core,
+            (*published, *advanced.published),
+            advanced.submitted,
         )
-        return True
+        self.wakes.extend(advanced.wakes)
+        self.held = advanced.held
+
+    def take(
+        self,
+        state: S,
+        core: CoreState,
+        published: tuple[StrategyEvent, ...],
+        submitted: tuple[Submission, ...],
+    ) -> None:
+        trace = self.trace
+        trace.state = state
+        trace.core = core
+        self.core = core
+        trace.decisions.extend(submitted)
+        trace.events.extend(published)
+        trace.steps += 1 + len(submitted)
+        if core.run.status.value == "terminal":
+            trace.finished = True
+
+    def tick(self) -> bool:
+        """Move the clock to the next wake-up or request limit; deliver what that causes."""
+        trace = self.trace
+        due = [*self.wakes]
+        asked = project(trace.core).next_observe_at
+        if asked is not None:
+            due.append(asked)
+        if not due:
+            return False
+        moment = max(min(due), trace.core.run.now_at)
+        before = trace.core
+        reached = tuple(TimeReached(time=wake) for wake in sorted(self.wakes) if wake <= moment)
+        self.wakes = [wake for wake in self.wakes if wake > moment]
+        self.consume(ClockAdvanced(now_at=moment), extra=reached)
+        return trace.core != before or bool(reached)
 
     def dispatch_all(self) -> bool:
         any_dispatched = False
@@ -230,16 +292,16 @@ class _Driver[S: StrategyState]:
     def authorize_round(self) -> list[Request]:
         """Authorize every prepared request core lets go now, in ledger order."""
         batch: list[Request] = []
-        for intent in self.trace.core.intents.intents:
-            if intent.phase is not IntentPhase.PREPARED:
+        for record in self.trace.core.records.records:
+            if record.phase is not RequestPhase.PREPARED:
                 continue
             try:
-                self.consume(DispatchAuthorized(request_id=intent.request_id))
+                self.consume(DispatchAuthorized(request_id=record.request_id))
             except ContractError as error:
                 if error.path in (("dependency",), ("recovery",)):
                     continue
                 raise
-            batch.append(intent.request)
+            batch.append(record.request)
         return batch
 
     # -- executors --------------------------------------------------------
@@ -318,22 +380,29 @@ class _Driver[S: StrategyState]:
 
     # -- core -------------------------------------------------------------
 
-    def consume(self, event: CoreEvent, *, proposed: S | None = None) -> None:
+    def consume(self, event: CoreEvent, *, extra: tuple[Event, ...] = ()) -> None:
         trace = self.trace
         if isinstance(event, RequestObserved):
             trace.log.append(event)
         transition = step(trace.core, event)
-        trace.steps += 1
-        trace.core = transition.state
-        view = project(transition.state)
-        state = self.state if proposed is None else proposed
-        for item in transition.events:
-            trace.events.append(item)
-            state = trace.strategy.bind(state).on_event(view, item)
-        self.state = state
-        trace.strategy = trace.strategy.bind(state)
-        if transition.state.run.status.value == "terminal":
-            trace.finished = True
+        translated = translate(transition.state, transition.events)
+        incoming = (*translated.events, *extra)
+        advanced = advance(
+            trace.search,
+            trace.state,
+            transition.state,
+            self.host,
+            Inbox(incoming, self.held, translated.discarded),
+        )
+        trace.discarded.extend(advanced.discarded)
+        self.take(
+            advanced.state,
+            advanced.core,
+            (*transition.events, *advanced.published),
+            advanced.submitted,
+        )
+        self.wakes.extend(advanced.wakes)
+        self.held = advanced.held
         if self.faults.reload:
             self.reload()
 
@@ -348,15 +417,14 @@ class _Driver[S: StrategyState]:
             strategy_id=trace.core.run.declaration.strategy_id,
             state_schema=trace.core.run.declaration.state_schema,
             core=trace.core,
-            strategy=self.state,
+            strategy=trace.state,
             event_cursor=EventCursor(sequence=0),
         )
         loaded = self.registry.decode_envelope(
             self.envelope_type, self.registry.encode_envelope(envelope)
         )
         trace.core = loaded.core
-        self.state = cast("S", loaded.strategy)
-        trace.strategy = trace.strategy.bind(self.state)
+        trace.state = cast("S", loaded.strategy)
 
 
 @dataclass(frozen=True)
@@ -379,10 +447,10 @@ class Harness:
     requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
 
 
-def new_run[S: StrategyState](strategy: Strategy[S], harness: Harness) -> CoreState:
+def new_run[S: StrategyState](search: Search[S, Any], harness: Harness) -> CoreState:
     """A run that has started: declaration validated against what the host offers."""
     base = initial_state()
-    declaration = strategy.declaration
+    declaration = search.declaration
     registry = harness.registry
     offered = Capabilities(lifecycle=harness.lifecycle, operations=registry.descriptors)
     capabilities = validate_startup(declaration, offered)
@@ -403,19 +471,21 @@ def new_run[S: StrategyState](strategy: Strategy[S], harness: Harness) -> CoreSt
     )
 
 
-def drive[S: StrategyState](
-    strategy: Strategy[S], script: Script, harness: Harness, faults: Faults | None = None
+def drive[S: StrategyState, C](
+    search: Search[S, C],
+    config: C,
+    script: Script,
+    harness: Harness,
+    faults: Faults | None = None,
 ) -> Trace[S]:
-    """Run ``strategy`` on the real core until the run ends or nothing more happens.
+    """Run ``search`` on the real core until the run ends or nothing more happens.
 
     Core rejects an executor observation by raising, as the shell would halt; a
-    rejected proposal is a `Rejected` strategy event in the trace. The trace holds
-    every decision, request and strategy event, and the final core state.
+    rejected decision reaches the search as ``Failed(REFUSED)``. The trace holds
+    every decision, request and published event, and the final core state.
     """
-    core = new_run(strategy, harness)
-    driver = _Driver(strategy, script, harness, faults or Faults(), core)
-    driver.consume(ClockAdvanced(now_at=1.0))
-    for event in harness.events:
-        driver.consume(event)
+    core = new_run(search, harness)
+    driver = _Driver(search, script, harness, faults or Faults(), core)
+    driver.start(config, harness.events)
     driver.run(harness.max_steps)
     return driver.trace

@@ -263,14 +263,14 @@ def _envelope(
     hypotheses: int = 1,
     submitted_at: list[float] | None = None,
 ) -> dict[str, object]:
-    intents = [
+    records = [
         {"request": {"kind": "submit_measurement", "plan": {"submitted_at": at}}}
         for at in submitted_at or []
     ]
     return {
         "core": {
             "run": {"status": status, "result": {"outcome": outcome} if outcome else None},
-            "intents": {"intents": intents},
+            "records": {"records": records},
         },
         "strategy": {"hypotheses": [{"hypothesis_id": f"h{i}"} for i in range(hypotheses)]},
     }

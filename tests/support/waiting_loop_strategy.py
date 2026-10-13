@@ -27,7 +27,7 @@ from vs_core.api import (
 )
 
 if TYPE_CHECKING:
-    from vs_core.api import RunView, StrategyEvent
+    from vs_core.api import CoreView, StrategyEvent
 
 
 class LoopState(SkeletonState):
@@ -46,7 +46,7 @@ class LoopStrategy(SkeletonStrategy):
     state: LoopState = LoopState(schema_version=1)  # type: ignore[assignment]
     total: int = 1
 
-    def decide(self, view: RunView) -> Proposal[SkeletonState]:
+    def decide(self, view: CoreView) -> Proposal[SkeletonState]:
         """Resume the authorized turn, hold while suspended, else dispatch the next turn."""
         state = self.state
         if state.phase == "start":
@@ -84,13 +84,13 @@ class LoopStrategy(SkeletonStrategy):
         )
         return Proposal(state=state, decisions=(decision,))
 
-    def _spec(self, view: RunView, invocation: str) -> TurnSpec:
+    def _spec(self, view: CoreView, invocation: str) -> TurnSpec:
         proposal = SkeletonStrategy.decide(self, view)
         (decision,) = proposal.decisions
         assert isinstance(decision, RequestTurn)
         return decision.turn.model_copy(update={"invocation_id": InvocationId(root=invocation)})
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
         """Count suspensions and resumes; each finished turn schedules the next or measures."""
         state = self.state
         if (folded := self._fold(event)) is not None:

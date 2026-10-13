@@ -31,8 +31,8 @@ from .types.common import (
     RequestId,
 )
 from .types.evaluation import TurnSuspended
-from .types.intents import ExecuteRegisteredOperation, IntentPhase
 from .types.kernel import AreaChange, DecisionCompleted
+from .types.records import ExecuteRegisteredOperation, RequestPhase, within
 from .types.sessions import (
     CheckpointFailure,
     CheckpointStalled,
@@ -51,8 +51,8 @@ from .types.sessions import (
 
 if TYPE_CHECKING:
     from .types.common import InvocationRef, Observation, SessionId
-    from .types.intents import Intent
     from .types.kernel import SessionsContext, Signal
+    from .types.records import RequestRecord
     from .types.sessions import Invocation, SessionsEvent, SessionsState, SessionView
 
 
@@ -82,8 +82,8 @@ def _replace_invocation(state: SessionsState, invocation: Invocation) -> Session
     )
 
 
-def _intent(context: SessionsContext, identity: RequestId | None) -> Intent | None:
-    return next((row for row in context.intents.intents if row.request_id == identity), None)
+def _record(context: SessionsContext, identity: RequestId | None) -> RequestRecord | None:
+    return next((row for row in context.records.records if row.request_id == identity), None)
 
 
 def _terminal(invocation: Invocation) -> bool:
@@ -98,18 +98,18 @@ def _terminal(invocation: Invocation) -> bool:
 def turn_source_matches(
     context: SessionsContext, invocation: Invocation, observation: Observation
 ) -> bool:
-    intent = _intent(context, observation.request_id)
+    record = _record(context, observation.request_id)
     if (
-        intent is None
-        or intent.request.scope != invocation.scope
+        record is None
+        or record.request.scope != invocation.scope
         or not isinstance(
             invocation_for((invocation,), invocation.invocation, invocation.scope), Proven
         )
-        or not isinstance(request_matches(intent, intent.request), Proven)
-        or not isinstance(observation_for(intent, observation), Proven)
+        or not isinstance(request_matches(record, record.request), Proven)
+        or not isinstance(observation_for(record, observation), Proven)
     ):
         return False
-    request = intent.request
+    request = record.request
     if isinstance(request, InspectTurn):
         matches = request.invocation == invocation.invocation
     elif isinstance(request, DispatchTurn | ResumeSessionTurn):
@@ -117,7 +117,7 @@ def turn_source_matches(
     else:
         matches = (
             isinstance(request, ExecuteRegisteredOperation)
-            and intent.lifecycle == LifecycleClass.SESSION_TURN
+            and record.lifecycle == LifecycleClass.SESSION_TURN
             and request.operation_id == invocation.registered_operation
             and invocation.registered_operation is not None
         )
@@ -152,10 +152,10 @@ def _yield_checkpoint_completion(
         or not turn_source_matches(context, invocation, observation)
     ):
         return ()
-    intent = _intent(context, observation.request_id)
-    if intent is None or intent.request.decision_id is None:
+    record = _record(context, observation.request_id)
+    if record is None or record.request.decision_id is None:
         return ()
-    decision_id = intent.request.decision_id
+    decision_id = record.request.decision_id
     receipt = next((row for row in context.run.receipts if row.decision_id == decision_id), None)
     if receipt is None or receipt.completion is not None:
         return ()
@@ -167,19 +167,19 @@ def checkpoint_matches(
 ) -> bool:
     """Prove one retained receipt with canonical snapshot payload and terminal source."""
     invocation = proven_invocation(state, event.invocation)
-    intent = _intent(context, event.request_id)
+    record = _record(context, event.request_id)
     if (
         invocation is None
         or not _terminal(invocation)
         or invocation.observation is None
         or not turn_source_matches(context, invocation, invocation.observation)
-        or intent is None
-        or not isinstance(request_matches(intent, intent.request), Proven)
-        or intent.request.scope != invocation.scope
+        or record is None
+        or not isinstance(request_matches(record, record.request), Proven)
+        or record.request.scope != invocation.scope
     ):
         return False
     owner = attempt_for(context, invocation.scope)
-    request = intent.request
+    request = record.request
     if owner is None:
         if not isinstance(request, SnapshotAndRetainRun) or request.invocation != event.invocation:
             return False
@@ -288,11 +288,8 @@ def _run_checkpoint_request(
         scope=event.scope,
         invocation=event.invocation,
         retention=event.retention,
-        deadline_at=min(
-            context.run.deadline_at, context.run.now_at + context.run.limits.reconciliation_bound
-        ),
     )
-    if request.request_id in session.pending_intents or any(
+    if request.request_id in session.pending_records or any(
         row.invocation == event.invocation and row.retention == event.retention
         for row in state.run_checkpoints
     ):
@@ -302,11 +299,11 @@ def _run_checkpoint_request(
             state,
             session.model_copy(
                 update={
-                    "pending_intents": (*session.pending_intents, request.request_id),
+                    "pending_records": (*session.pending_records, request.request_id),
                 }
             ),
         ),
-        requests=(request,),
+        requests=(within(request, context.run.limits.reconciliation_bound),),
     )
 
 
@@ -314,19 +311,19 @@ def _run_checkpoint_observed(
     state: SessionsState, context: SessionsContext, event: RunInvocationCheckpointObserved
 ) -> AreaChange[SessionsState]:
     invocation = proven_invocation(state, event.invocation)
-    intent = _intent(context, event.checkpoint_request)
+    record = _record(context, event.checkpoint_request)
     if (
         invocation is None
         or not _terminal(invocation)
-        or intent is None
-        or not isinstance(intent.request, SnapshotAndRetainRun)
-        or intent.request.invocation != event.invocation
-        or intent.request.scope != invocation.scope
-        or not isinstance(request_matches(intent, intent.request), Proven)
-        or not isinstance(observation_for(intent, event.observation), Proven)
+        or record is None
+        or not isinstance(record.request, SnapshotAndRetainRun)
+        or record.request.invocation != event.invocation
+        or record.request.scope != invocation.scope
+        or not isinstance(request_matches(record, record.request), Proven)
+        or not isinstance(observation_for(record, event.observation), Proven)
         or not isinstance(
             fresh_observation(
-                () if intent.observation is None else (intent.observation,),
+                () if record.observation is None else (record.observation,),
                 event.observation,
                 complete=True,
             ),
@@ -348,7 +345,7 @@ def _run_checkpoint_observed(
         scope=invocation.scope,
         request_id=event.checkpoint_request,
         revision=event.revision,
-        retention=intent.request.retention,
+        retention=record.request.retention,
     )
     previous = tuple(
         row
@@ -384,8 +381,8 @@ def _stall_reason(
         failed = any(
             isinstance(row.request, SnapshotAndRetainRun)
             and row.request.invocation == ref
-            and row.phase == IntentPhase.COMPLETED
-            for row in context.intents.intents
+            and row.phase == RequestPhase.COMPLETED
+            for row in context.records.records
         )
         declines = (CheckpointDecline.SNAPSHOT_FAILED,) if failed else ()
     else:
@@ -417,8 +414,8 @@ def _end_yield(
         state = _replace_session(state, session.model_copy(update={"phase": SessionPhase.IDLE}))
     signals: tuple[Signal, ...] = ()
     observation = invocation.observation
-    intent = _intent(context, observation.request_id) if observation is not None else None
-    decision_id = intent.request.decision_id if intent is not None else None
+    record = _record(context, observation.request_id) if observation is not None else None
+    decision_id = record.request.decision_id if record is not None else None
     receipt = (
         next((row for row in context.run.receipts if row.decision_id == decision_id), None)
         if decision_id is not None
@@ -467,7 +464,7 @@ def end_stalled_checkpoint_waits(
         (row for row in state.invocations if row.invocation == event.invocation), None
     )
     if (
-        event.invocation not in stalled_checkpoint_waits(state, context.intents.intents)
+        event.invocation not in stalled_checkpoint_waits(state, context.records.records)
         or invocation is None
     ):
         # The step raises a stall only for an invocation `stalled_checkpoint_waits` names, so

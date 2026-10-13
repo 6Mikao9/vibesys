@@ -106,7 +106,9 @@ def test_interruption_fence_covers_all_successor_variants(
             and variant != "resume"
         )
         if boundary == "admission":
-            event: core.CoreEvent = core.TurnRequested(scope=owner_scope, turn=spec)
+            event: core.CoreEvent = core.TurnRequested(
+                until=core.Until(at=100.0), scope=owner_scope, turn=spec
+            )
             if allowed:
                 # Attempts A now admits the successor: it records one TURN charge
                 # and the successor invocation starts acquiring.
@@ -121,7 +123,11 @@ def test_interruption_fence_covers_all_successor_variants(
         else:
             ref = invocation(spec)
             candidate = core.Invocation(
-                invocation=ref, scope=owner_scope, turn=spec, phase=core.SessionPhase.ACQUIRING
+                until=core.Until(at=100.0),
+                invocation=ref,
+                scope=owner_scope,
+                turn=spec,
+                phase=core.SessionPhase.ACQUIRING,
             )
             logical = core.ChargeReceipt(
                 charge_id=core.ChargeId(root="successor-turn"),

@@ -164,7 +164,6 @@ def test_terminal_finalization_rejects_invalid_outputs(flaw: str, now_at: float)
                 "requests": (
                     core.InspectRequest(
                         scope=core.Scope(owner=core.RunId(root="run"), generation=0),
-                        deadline_at=100.0,
                         target=core.RequestId(root="query"),
                     ),
                 )

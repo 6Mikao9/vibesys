@@ -72,7 +72,6 @@ def registered_state(
         operation_id=operation_id,
         scope=invocation.scope,
         admission_id=core.DecisionId(root="current"),
-        deadline_at=1000,
         operation=codec.encode(payload),
         retry_limit=0,
     )
@@ -89,7 +88,6 @@ def registered_state(
         core.Operation(
             decision_id=decision_id,
             scope=invocation.scope,
-            deadline_at=1000,
             request=canonical_payload,
         )
     )
@@ -115,19 +113,19 @@ def registered_state(
         ),
         request_ids=(request_id,),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest="registered-turn",
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.DISPATCHED,
-        reconcile_deadline_at=1000,
+        phase=core.RequestPhase.DISPATCHED,
+        until=core.Until(at=1000),
     )
     if receipt_kind == "no-membership":
         receipt = receipt.model_copy(update={"request_ids": ()})
     elif receipt_kind == "foreign-decision":
         request = request.model_copy(update={"decision_id": core.DecisionId(root="foreign")})
-        intent = intent.model_copy(update={"request": request})
+        record = record.model_copy(update={"request": request})
     invocation = invocation.model_copy(update={"registered_operation": operation_id})
     state = state.model_copy(
         update={
@@ -138,7 +136,7 @@ def registered_state(
                     "capabilities": core.Capabilities(operations=codec.descriptors),
                 }
             ),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
             "sessions": state.sessions.model_copy(update={"invocations": (invocation,)}),
         }
     )
@@ -259,7 +257,9 @@ def test_registered_turn_requires_exact_canonical_operation_authority(
         assert sum(row.charged for row in result.state.attempts[0].charges) == 2 * int(proven)
     elif action == "checkpoint":
         assert (
-            any(isinstance(request, core.SnapshotAndRetain) for request in result.requests)
+            any(
+                isinstance(outbound.request, core.SnapshotAndRetain) for outbound in result.requests
+            )
             == proven
         )
     else:

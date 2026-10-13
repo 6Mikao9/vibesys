@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._acquisition_stall import is_stalled_acquisition
+from ._deadlines import cleanup
 from .types.attempts import (
     AttemptCheckpoint,
     AttemptClosure,
@@ -50,8 +51,8 @@ from .types.evaluation import (
     JobsDrainRequested,
     RegisteredOwnedJob,
 )
-from .types.intents import InspectRequest
 from .types.kernel import AreaChange, DecisionCompleted
+from .types.records import InspectRequest, Outbound, inherit
 from .types.scheduling import (
     AttemptReopenRequest,
     AttemptReopenRequested,
@@ -75,8 +76,8 @@ if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent, AttemptsState, AttemptView
     from .types.common import ContinuationId, Observation, RevisionRef
     from .types.evaluation import OwnedJob
-    from .types.intents import ChildLease, Intent, Request
     from .types.kernel import AttemptsContext, Signal
+    from .types.records import ChildLease, Request, RequestRecord
     from .types.sessions import Invocation, SessionSpec, SessionView
     from .types.settlement import Settlement
 
@@ -95,11 +96,11 @@ def _identity(owner: AttemptView, suffix: str) -> RequestId:
     return RequestId(root=f"{owner.closure.authority.root}:{suffix}")
 
 
-def _intent(context: AttemptsContext, identity: RequestId) -> Intent | None:
+def _record(context: AttemptsContext, identity: RequestId) -> RequestRecord | None:
     # Compare the id strings: a `RequestId` differs from another only by its root, and the ledger
-    # holds every intent of the run, so a model comparison per row dominated each step.
+    # holds every record of the run, so a model comparison per row dominated each step.
     root = identity.root
-    rows = tuple(row for row in context.intents.intents if row.request_id.root == root)
+    rows = tuple(row for row in context.records.records if row.request_id.root == root)
     return rows[0] if len(rows) == 1 and rows[0].request.request_id == identity else None
 
 
@@ -119,7 +120,7 @@ def _released(observation: Observation | None) -> bool:
     )
 
 
-def _vacant_workspace_request(intent: Intent | None) -> bool:
+def _vacant_workspace_request(record: RequestRecord | None) -> bool:
     """A workspace request that was answered terminal without taking anything.
 
     A request the executor rejected, failed, or cancelled before accepting it created no
@@ -127,9 +128,9 @@ def _vacant_workspace_request(intent: Intent | None) -> bool:
     The executor marks such an answer neither ``released`` nor ``children_complete`` (there is
     nothing to release and no manifest), so ``_released`` can never hold for it.
     """
-    if intent is None or not isinstance(intent.request, EnsureWorkspace | RestoreRevision):
+    if record is None or not isinstance(record.request, EnsureWorkspace | RestoreRevision):
         return False
-    observation = intent.observation
+    observation = record.observation
     return bool(
         observation is not None
         and observation.terminal
@@ -163,12 +164,12 @@ def _child_released(context: AttemptsContext, child: ChildLease) -> bool:
 def _child_source_proved(
     context: AttemptsContext, source: RequestId, observation: Observation
 ) -> bool:
-    intent = _intent(context, source)
+    record = _record(context, source)
     return bool(
-        intent is not None
-        and intent.request.scope == observation.scope
-        and intent.request.admission_id is not None
-        and intent.request.admission_id == observation.admission_id
+        record is not None
+        and record.request.scope == observation.scope
+        and record.request.admission_id is not None
+        and record.request.admission_id == observation.admission_id
     )
 
 
@@ -200,7 +201,7 @@ def _typed_job_released(context: AttemptsContext, job: OwnedJob | RegisteredOwne
 def _resource_released(context: AttemptsContext, scope: Scope, resource: ResourceId) -> bool:
     children = tuple(
         child
-        for child in context.intents.children
+        for child in context.records.children
         if child.resource_id == resource and child.scope == scope
     )
     if children:
@@ -224,7 +225,7 @@ def _session_released(owner: AttemptView, context: AttemptsContext, identity: Se
     if _session_nonowned(owner, context, session):
         return True
     return any(
-        _intent(context, row.request_id) == row
+        _record(context, row.request_id) == row
         and isinstance(row.request, CloseSession)
         and row.request.session_id == identity
         and row.request.scope == _scope(owner)
@@ -239,7 +240,7 @@ def _session_released(owner: AttemptView, context: AttemptsContext, identity: Se
             or (session.resource_id is None and _nonownership(row.observation))
         )
         and _released(row.observation)
-        for row in context.intents.intents
+        for row in context.records.records
     )
 
 
@@ -249,18 +250,18 @@ def _session_nonowned(owner: AttemptView, context: AttemptsContext, session: Ses
         or session.phase != SessionPhase.TERMINAL
         or session.accepted
         or session.resource_id is not None
-        or session.pending_intents
+        or session.pending_records
         or session.scope != _scope(owner)
     ):
         return False
     acquisitions = tuple(
         row
-        for row in context.intents.intents
+        for row in context.records.records
         if isinstance(row.request, EnsureSession)
         and row.request.spec.session_id == session.spec.session_id
     )
     return bool(acquisitions) and all(
-        _intent(context, row.request_id) == row
+        _record(context, row.request_id) == row
         and isinstance(row.request, EnsureSession)
         and row.request.scope == session.scope
         and row.request.spec == session.spec
@@ -286,19 +287,19 @@ def _reusable_session(context: AttemptsContext, session: SessionView) -> bool:
 
 
 def _invocation_source(context: AttemptsContext, invocation: Invocation) -> RequestId | None:
-    for intent in context.intents.intents:
-        request = intent.request
+    for record in context.records.records:
+        request = record.request
         if request.scope != invocation.scope:
             continue
         if (
             isinstance(request, DispatchTurn | ResumeSessionTurn)
             and request.turn == invocation.turn
         ):
-            return intent.request_id
+            return record.request_id
         if isinstance(request, ExecuteRegisteredOperation) and _registered_invocation_proved(
             context, invocation, request
         ):
-            return intent.request_id
+            return record.request_id
     return None
 
 
@@ -366,7 +367,7 @@ def _child_dependencies(
 ) -> tuple[ReleaseDependency, ...]:
     scope = _scope(owner)
     edges = list(previous)
-    for child in context.intents.children:
+    for child in context.records.children:
         edge = ReleaseDependency(kind="job", identity=child.resource_id)
         if child.scope == scope:
             if not _child_released(context, child) and edge not in edges:
@@ -407,9 +408,9 @@ def _discover(owner: AttemptView, context: AttemptsContext) -> AttemptView:
         )
         if edge not in edges:
             edges.append(edge)
-    for intent in context.intents.intents:
-        observation = intent.observation
-        if intent.request.scope != scope or observation is None:
+    for record in context.records.records:
+        observation = record.observation
+        if record.request.scope != scope or observation is None:
             continue
         for resource in observation.children:
             edge = ReleaseDependency(kind="job", identity=resource)
@@ -458,16 +459,16 @@ def _dispatched_invocation_drained(
         or not _session_scope_owned(owner, context, session.scope, session.spec)
     ):
         return False
-    intent = _intent(context, observation.request_id)
+    record = _record(context, observation.request_id)
     if (
-        intent is None
-        or intent.observation != observation
-        or intent.request.request_id != intent.request_id
-        or intent.request.scope != invocation.scope
-        or intent.request.admission_id != observation.admission_id
+        record is None
+        or record.observation != observation
+        or record.request.request_id != record.request_id
+        or record.request.scope != invocation.scope
+        or record.request.admission_id != observation.admission_id
     ):
         return False
-    request = intent.request
+    request = record.request
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
         return request.turn == invocation.turn and invocation.registered_operation is None
     if isinstance(request, ExecuteRegisteredOperation):
@@ -498,7 +499,7 @@ def _registered_invocation_proved(
 def _writers_drained(owner: AttemptView, context: AttemptsContext) -> bool:
     if owner.closure is None:
         return False
-    fence = _intent(context, owner.closure.authority)
+    fence = _record(context, owner.closure.authority)
     if (
         fence is None
         or not isinstance(fence.request, CloseAttemptScope)
@@ -554,7 +555,6 @@ def _retention_request(
             scope=_scope(owner),
             attempt=_ref(owner),
             admission_id=owner.closure.admission_id,
-            deadline_at=context.run.deadline_at,
         )
     if revision is not None:
         return RetainRevision(
@@ -563,7 +563,6 @@ def _retention_request(
             scope=_scope(owner),
             attempt=_ref(owner),
             admission_id=owner.closure.admission_id,
-            deadline_at=context.run.deadline_at,
             retention=retention,
             revision=revision,
         )
@@ -573,7 +572,6 @@ def _retention_request(
         scope=_scope(owner),
         attempt=_ref(owner),
         admission_id=owner.closure.admission_id,
-        deadline_at=context.run.deadline_at,
         retention=retention,
     )
 
@@ -589,7 +587,6 @@ def _discard_request(owner: AttemptView, context: AttemptsContext) -> DiscardWor
         attempt=_ref(owner),
         scope=_scope(owner),
         admission_id=owner.closure.admission_id,
-        deadline_at=context.run.deadline_at,
         depends_on=(owner.closure.authority, _identity(owner, "retention")),
     )
 
@@ -598,16 +595,16 @@ def _disposal_done(owner: AttemptView, context: AttemptsContext) -> bool:
     expected = _discard_request(owner, context)
     if expected is None or expected.request_id is None:
         return False
-    intent = _intent(context, expected.request_id)
+    record = _record(context, expected.request_id)
     if (
-        intent is None
-        or intent.observation is None
-        or not _request_payload_matches(expected, intent.request)
+        record is None
+        or record.observation is None
+        or not _request_payload_matches(expected, record.request)
     ):
         return False
-    observation = intent.observation
+    observation = record.observation
     return (
-        observation.request_id == intent.request_id
+        observation.request_id == record.request_id
         and observation.scope == expected.scope
         and observation.admission_id == expected.admission_id
         and observation.status == ObservationStatus.SUCCEEDED
@@ -621,7 +618,7 @@ def _prepare_workspace_request(
     if request is None or request.request_id is None:
         return owner, ()
     edge = ReleaseDependency(kind="workspace", identity=request.request_id)
-    existing = _intent(context, request.request_id)
+    existing = _record(context, request.request_id)
     if existing is not None and not _request_payload_matches(request, existing.request):
         raise ContractValidationError(
             "request_id", "retention identity conflicts with recorded disposition"
@@ -634,15 +631,7 @@ def _prepare_workspace_request(
 
 
 def _request_payload_matches(expected: Request, recorded: Request) -> bool:
-    return (
-        expected.model_copy(
-            update={
-                "decision_id": recorded.decision_id,
-                "decision_dependencies": recorded.decision_dependencies,
-            }
-        )
-        == recorded
-    )
+    return expected.model_copy(update={"decision_id": recorded.decision_id}) == recorded
 
 
 def _retention_done(owner: AttemptView, context: AttemptsContext) -> bool:
@@ -651,27 +640,27 @@ def _retention_done(owner: AttemptView, context: AttemptsContext) -> bool:
     expected = _retention_request(owner, context, None)
     if expected is None or expected.request_id is None:
         return False
-    intent = _intent(context, expected.request_id)
-    if intent is None or intent.observation is None:
+    record = _record(context, expected.request_id)
+    if record is None or record.observation is None:
         return False
-    if not _request_payload_matches(expected, intent.request):
+    if not _request_payload_matches(expected, record.request):
         return False
-    return _retention_observed(owner, intent)
+    return _retention_observed(owner, record)
 
 
-def _retention_observed(owner: AttemptView, intent: Intent) -> bool:
-    if owner.closure is None or intent.observation is None:
+def _retention_observed(owner: AttemptView, record: RequestRecord) -> bool:
+    if owner.closure is None or record.observation is None:
         return False
-    observation = intent.observation
+    observation = record.observation
     if (
-        observation.request_id != intent.request_id
-        or intent.request.scope != _scope(owner)
-        or intent.request.admission_id != owner.closure.admission_id
+        observation.request_id != record.request_id
+        or record.request.scope != _scope(owner)
+        or record.request.admission_id != owner.closure.admission_id
         or observation.scope != _scope(owner)
         or observation.admission_id != owner.closure.admission_id
     ):
         return False
-    if isinstance(intent.request, DiscardWorkspace):
+    if isinstance(record.request, DiscardWorkspace):
         return observation.status == ObservationStatus.SUCCEEDED and _released(observation)
     if (
         observation.status != ObservationStatus.SUCCEEDED
@@ -680,14 +669,14 @@ def _retention_observed(owner: AttemptView, intent: Intent) -> bool:
         or (observation.resource_id is not None and not observation.released)
     ):
         return False
-    if not isinstance(intent.request, RetainRevision | SnapshotAndRetain):
+    if not isinstance(record.request, RetainRevision | SnapshotAndRetain):
         return False
     return any(
-        row.request_id == intent.request_id
-        and row.retention == intent.request.retention
+        row.request_id == record.request_id
+        and row.retention == record.request.retention
         and (
-            not isinstance(intent.request, RetainRevision)
-            or row.revision == intent.request.revision
+            not isinstance(record.request, RetainRevision)
+            or row.revision == record.request.revision
         )
         for row in owner.checkpoints
     )
@@ -924,8 +913,8 @@ def _start_closure(
     )
     edges.extend(
         ReleaseDependency(kind="request", identity=value)
-        for value in owner.pending_intents
-        if not _vacant_workspace_request(_intent(context, value))
+        for value in owner.pending_records
+        if not _vacant_workspace_request(_record(context, value))
     )
     edges.append(ReleaseDependency(kind="request", identity=event.authority))
     closure = AttemptClosure(
@@ -978,7 +967,6 @@ def _start_closure(
         scope=scope,
         attempt=event.attempt,
         admission_id=event.admission_id,
-        deadline_at=context.run.deadline_at,
     )
     owner, more, requests = _progress(owner, context)
     return owner, (*signals, *more), (request, *requests)
@@ -990,7 +978,7 @@ def _job_proof(
     observation = event.observation
     if event.dependency.identity != observation.resource_id or not _released(observation):
         return False
-    for child in context.intents.children:
+    for child in context.records.children:
         if child.resource_id == observation.resource_id:
             return (
                 child.scope == _scope(owner)
@@ -1021,21 +1009,24 @@ def _proof_matches(
         return _job_proof(owner, context, event)
     if observation.admission_id != owner.closure.admission_id:
         return False
-    intent = _intent(context, observation.request_id)
-    if intent is None or intent.request.admission_id != owner.closure.admission_id:
+    record = _record(context, observation.request_id)
+    if record is None or record.request.admission_id != owner.closure.admission_id:
         return False
-    return _intent_proof(owner, context, event, intent)
+    return _record_proof(owner, context, event, record)
 
 
-def _intent_proof(
-    owner: AttemptView, context: AttemptsContext, event: ReleaseDependencyObserved, intent: Intent
+def _record_proof(
+    owner: AttemptView,
+    context: AttemptsContext,
+    event: ReleaseDependencyObserved,
+    record: RequestRecord,
 ) -> bool:
     edge, observation = event.dependency, event.observation
     if (
-        intent.request.scope != observation.scope
-        or intent.observation != observation
+        record.request.scope != observation.scope
+        or record.observation != observation
         or (
-            intent.lifecycle == LifecycleClass.OWNED_JOB
+            record.lifecycle == LifecycleClass.OWNED_JOB
             and observation.resource_id is None
             and not _nonownership(observation)
         )
@@ -1043,26 +1034,29 @@ def _intent_proof(
         return False
     if edge.kind in ("request", "workspace") and edge.identity != observation.request_id:
         return False
-    return _request_release_proof(owner, context, event, intent)
+    return _request_release_proof(owner, context, event, record)
 
 
 def _request_release_proof(
-    owner: AttemptView, context: AttemptsContext, event: ReleaseDependencyObserved, intent: Intent
+    owner: AttemptView,
+    context: AttemptsContext,
+    event: ReleaseDependencyObserved,
+    record: RequestRecord,
 ) -> bool:
     edge, observation = event.dependency, event.observation
     if edge.kind == "session":
-        return getattr(intent.request, "session_id", None) == edge.identity and _released(
+        return getattr(record.request, "session_id", None) == edge.identity and _released(
             observation
         )
-    if isinstance(intent.request, CloseAttemptScope):
+    if isinstance(record.request, CloseAttemptScope):
         return (
             observation.status == ObservationStatus.SUCCEEDED
             and observation.terminal
             and observation.children_complete
         )
-    if isinstance(intent.request, DiscardWorkspace):
+    if isinstance(record.request, DiscardWorkspace):
         return _disposal_done(owner, context)
-    if isinstance(intent.request, SnapshotAndRetain) and intent.request.invocation is not None:
+    if isinstance(record.request, SnapshotAndRetain) and record.request.invocation is not None:
         # An invocation's own checkpoint, not the closure's retention: any conclusive
         # answer ends the wait. A failed snapshot retains nothing, and closure still
         # retains the workspace itself, so the attempt must not wait on it forever.
@@ -1070,17 +1064,17 @@ def _request_release_proof(
             ObservationStatus.UNKNOWN,
             ObservationStatus.PENDING,
         )
-    if isinstance(intent.request, RetainRevision | SnapshotAndRetain):
+    if isinstance(record.request, RetainRevision | SnapshotAndRetain):
         return (
             observation.status == ObservationStatus.SUCCEEDED
             and observation.terminal
             and _retention_done(owner, context)
         )
-    return _vacant_workspace_request(intent) or (
+    return _vacant_workspace_request(record) or (
         _released(observation)
         and (
             edge.kind != "operation"
-            or getattr(intent.request, "operation_id", None) == edge.identity
+            or getattr(record.request, "operation_id", None) == edge.identity
         )
     )
 
@@ -1169,17 +1163,7 @@ def _original_request_matches(
 ) -> bool:
     if request.decision_id not in (None, canonical.decision_id):
         return False
-    if request.decision_dependencies not in ((), canonical.decision_dependencies):
-        return False
-    return (
-        canonical.model_copy(
-            update={
-                "decision_id": request.decision_id,
-                "decision_dependencies": request.decision_dependencies,
-            }
-        )
-        == request
-    )
+    return canonical.model_copy(update={"decision_id": request.decision_id}) == request
 
 
 def _reopen_request(
@@ -1211,9 +1195,7 @@ def _reopen_request(
             request_id=identity,
             operation_id=OperationId(root=identity.root),
             scope=decision.scope,
-            deadline_at=decision.deadline_at,
             decision_id=receipt.decision_id,
-            decision_dependencies=decision.depends_on,
             operation=decision.registered_wire,
             retry_limit=context.run.limits.max_retries,
         )
@@ -1301,22 +1283,22 @@ def _session_reattached(owner: AttemptView, context: AttemptsContext, identity: 
         or not _session_scope_owned(owner, context, session.scope, session.spec)
         or session.phase
         not in (SessionPhase.IDLE, SessionPhase.CHECKPOINTED, SessionPhase.SUSPENDED)
-        or session.pending_intents
+        or session.pending_records
         or session.resource_id is None
         or not session.accepted
     ):
         return False
-    for intent in context.intents.intents:
-        request, observation = intent.request, intent.observation
+    for record in context.records.records:
+        request, observation = record.request, record.observation
         if (
             not isinstance(request, EnsureSession)
-            or _intent(context, intent.request_id) != intent
+            or _record(context, record.request_id) != record
             or request.spec != session.spec
             or request.scope != session.scope
             or request.admission_id != owner.admission_id
             or request.required_resource != session.resource_id
             or observation is None
-            or observation.request_id != intent.request_id
+            or observation.request_id != record.request_id
             or observation.scope != session.scope
             or observation.admission_id != owner.admission_id
             or observation.resource_id != request.required_resource
@@ -1326,7 +1308,7 @@ def _session_reattached(owner: AttemptView, context: AttemptsContext, identity: 
         ):
             continue
         return any(
-            _intent(context, old.request_id) == old
+            _record(context, old.request_id) == old
             and isinstance(old.request, EnsureSession)
             and old.request.spec.session_id == identity
             and old.request.scope == session.scope
@@ -1341,7 +1323,7 @@ def _session_reattached(owner: AttemptView, context: AttemptsContext, identity: 
             and old.observation.resource_id == request.required_resource
             and old.observation.accepted
             and old.observation.status == ObservationStatus.SUCCEEDED
-            for old in context.intents.intents
+            for old in context.records.records
         )
     return False
 
@@ -1361,14 +1343,14 @@ def _request_continuation(context: AttemptsContext, identity: RequestId) -> Cont
 
 def _reacquired(owner: AttemptView, context: AttemptsContext, identity: RequestId) -> bool:
     if any(
-        row.request_id in owner.pending_intents
+        row.request_id in owner.pending_records
         and isinstance(row.request, EnsureWorkspace | RestoreRevision)
         and row.request.admission_id == owner.admission_id
-        for row in context.intents.intents
+        for row in context.records.records
     ):
         return False
     workspace = any(
-        _intent(context, row.request_id) == row
+        _record(context, row.request_id) == row
         and isinstance(row.request, RestoreRevision)
         and row.request.revision == _park_revision(owner)
         and row.request.attempt == _ref(owner)
@@ -1382,7 +1364,7 @@ def _reacquired(owner: AttemptView, context: AttemptsContext, identity: RequestI
         and row.observation.status == ObservationStatus.SUCCEEDED
         and row.observation.accepted
         and row.observation.terminal
-        for row in context.intents.intents
+        for row in context.records.records
     )
     sessions = any(
         row.attempt == _ref(owner)
@@ -1441,14 +1423,17 @@ def _ready(
 
 
 def _reopen_observation_proved(
-    owner: AttemptView, context: AttemptsContext, event: ScopeAdmissionReopened, intent: Intent
+    owner: AttemptView,
+    context: AttemptsContext,
+    event: ScopeAdmissionReopened,
+    record: RequestRecord,
 ) -> bool:
     canonical = _reopen_request(owner, context, event.observation.request_id, cleanup=True)
-    if canonical is None or intent.request != canonical.model_copy(
+    if canonical is None or record.request != canonical.model_copy(
         update={"admission_id": owner.admission_id}
     ):
         return False
-    if intent.observation != event.observation:
+    if record.observation != event.observation:
         return False
     if event.admission == "unknown" or event.observation.status == ObservationStatus.UNKNOWN:
         return True
@@ -1460,13 +1445,13 @@ def _reopen_observation_proved(
         ObservationStatus.CANCELLED,
     ):
         return True
-    outcome = intent.outcome
+    outcome = record.outcome
     return (
-        intent.observation == event.observation
+        record.observation == event.observation
         and isinstance(outcome, ScopedAdmissionReopenOutcome)
         and outcome.scope == _scope(owner)
         and outcome.admission == event.admission
-        and intent.outcome_is_registered
+        and record.outcome_is_registered
         and (
             _reopen_receipt_failed(context, owner.admission_id)
             or _reacquired(owner, context, event.observation.request_id)
@@ -1493,10 +1478,10 @@ def _reopened(
         ),
         None,
     )
-    intent = next(
+    record = next(
         (
             row
-            for row in context.intents.intents
+            for row in context.records.records
             if isinstance(row.request, ExecuteRegisteredOperation)
             and row.request.operation_id == event.operation_id
         ),
@@ -1511,25 +1496,24 @@ def _reopened(
         != _request_continuation(context, event.observation.request_id)
         or continuation.park_authority != event.park_authority
         or continuation.reopen_authority != event.observation.request_id
-        or intent is None
-        or intent.request_id != event.observation.request_id
-        or intent.request.decision_id != owner.admission_id
-        or event.observation.scope != intent.request.scope
+        or record is None
+        or record.request_id != event.observation.request_id
+        or record.request.decision_id != owner.admission_id
+        or event.observation.scope != record.request.scope
         or event.observation.admission_id != owner.admission_id
         or continuation.phase != ContinuationPhase.REOPENING
         or not _continuation_owned(owner, context, continuation.invocation)
-        or not _reopen_observation_proved(owner, context, event, intent)
+        or not _reopen_observation_proved(owner, context, event, record)
     ):
         return owner, (), ()
     if event.admission == "unknown" or event.observation.status == ObservationStatus.UNKNOWN:
         request = InspectRequest(
-            request_id=_inspection_identity(intent.request_id, None, event.observation.sequence),
-            scope=intent.request.scope,
-            target=intent.request_id,
+            request_id=_inspection_identity(record.request_id, None, event.observation.sequence),
+            scope=record.request.scope,
+            target=record.request_id,
             admission_id=owner.admission_id,
-            deadline_at=context.run.deadline_at,
         )
-        existing = _intent(context, request.request_id) if request.request_id is not None else None
+        existing = _record(context, request.request_id) if request.request_id is not None else None
         return owner, (), (request,) if existing is None else ()
     admission = owner.admission_id
     if admission is None:
@@ -1546,7 +1530,7 @@ def _reopened(
             RetireRequested(
                 attempt=_ref(owner),
                 disposition="cancel",
-                authority=RequestId(root=f"reopen-failed:{intent.request_id.root}"),
+                authority=RequestId(root=f"reopen-failed:{record.request_id.root}"),
                 admission_id=admission,
                 requested_at=context.run.now_at,
             ),
@@ -1629,7 +1613,7 @@ def _known_child_observation(
                 for mark in child.observation_watermarks
             )
         )
-        for child in context.intents.children
+        for child in context.records.children
     )
 
 
@@ -1665,7 +1649,7 @@ def _inspect_unknown(
     owner: AttemptView, context: AttemptsContext, event: ReleaseDependencyObserved
 ) -> tuple[Request, ...]:
     observation = event.observation
-    intent = _intent(context, observation.request_id)
+    record = _record(context, observation.request_id)
     if (
         owner.closure is None
         or event.dependency not in owner.release_dependencies
@@ -1674,13 +1658,13 @@ def _inspect_unknown(
             observation.admission_id != owner.closure.admission_id
             and not _historical_child_owned(owner, context, event)
         )
-        or intent is None
-        or intent.request.scope != observation.scope
-        or intent.request.admission_id != observation.admission_id
+        or record is None
+        or record.request.scope != observation.scope
+        or record.request.admission_id != observation.admission_id
     ):
         return ()
     if (
-        intent.observation != observation
+        record.observation != observation
         and not _known_child_observation(owner, context, observation)
         and not _known_job_observation(owner, context, observation)
     ):
@@ -1693,17 +1677,15 @@ def _inspect_unknown(
         resource_id=observation.resource_id,
         scope=observation.scope,
         admission_id=observation.admission_id,
-        deadline_at=context.run.deadline_at,
     )
     identity = request.request_id
     if identity is None:
         return ()
-    existing = _intent(context, identity)
+    existing = _record(context, identity)
     if existing is not None:
         if existing.request != request.model_copy(
             update={
                 "decision_id": existing.request.decision_id,
-                "decision_dependencies": existing.request.decision_dependencies,
                 "depends_on": existing.request.depends_on,
             }
         ):
@@ -1716,11 +1698,11 @@ def _inspect_unknown(
 
 def is_retention_acknowledgement(context: AttemptsContext, event: WorkspaceObserved) -> bool:
     """Whether a workspace observation answers a closure's retention request."""
-    intent = _intent(context, event.observation.request_id)
+    record = _record(context, event.observation.request_id)
     return (
-        intent is not None
-        and isinstance(intent.request, RetainRevision | SnapshotAndRetain)
-        and getattr(intent.request, "invocation", None) is None
+        record is not None
+        and isinstance(record.request, RetainRevision | SnapshotAndRetain)
+        and getattr(record.request, "invocation", None) is None
     )
 
 
@@ -1762,15 +1744,15 @@ def _record_retention(
     complete, and name the retained revision.
     """
     expected = _retention_request(owner, context, None)
-    intent = _intent(context, observation.request_id)
+    record = _record(context, observation.request_id)
     if (
         owner.closure is None
         or expected is None
         or expected.request_id != observation.request_id
         or not isinstance(expected, RetainRevision | SnapshotAndRetain)
-        or intent is None
-        or not _request_payload_matches(expected, intent.request)
-        or intent.observation != observation
+        or record is None
+        or not _request_payload_matches(expected, record.request)
+        or record.observation != observation
         or observation.scope != _scope(owner)
         or observation.admission_id != owner.closure.admission_id
         or observation.status != ObservationStatus.SUCCEEDED
@@ -1829,6 +1811,13 @@ def _closure_event(
     return owner, signals, requests
 
 
+def _outbound(context: AttemptsContext, request: Request) -> Outbound:
+    """A reopened operation ends with its decision; every other retirement request is cleanup."""
+    if isinstance(request, ExecuteRegisteredOperation):
+        return inherit(request)
+    return cleanup(context.run, request)
+
+
 def advance(
     state: AttemptsState, context: AttemptsContext, event: AttemptsEvent
 ) -> AreaChange[AttemptsState]:
@@ -1866,5 +1855,5 @@ def advance(
             }
         ),
         signals=signals,
-        requests=requests,
+        requests=tuple(_outbound(context, request) for request in requests),
     )

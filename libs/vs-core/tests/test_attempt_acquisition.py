@@ -55,8 +55,6 @@ from vs_core.api import (
     InitialSessionsFailed,
     InitialSessionsReady,
     InspectRequest,
-    Intent,
-    IntentPhase,
     InterruptClaim,
     InterruptFailed,
     Invocation,
@@ -81,6 +79,8 @@ from vs_core.api import (
     PoolId,
     ReleaseDependency,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     RequestTurn,
     ResourceId,
     RestoreRevision,
@@ -107,6 +107,7 @@ from vs_core.api import (
     TrustedBaseline,
     TurnRequested,
     TurnSpec,
+    Until,
     Value,
     WorkspaceMode,
     WorkspaceObserved,
@@ -261,7 +262,7 @@ def owner_ref() -> AttemptRef:
 
 def canonical_turns(state: CoreState) -> CoreState:
     """Seed exact canonical invocation requests for synthetic lifecycle fixtures."""
-    intents = list(state.intents.intents)
+    records = list(state.records.records)
     sessions = list(state.sessions.sessions)
     receipts = list(state.run.receipts)
     for invocation in state.sessions.invocations:
@@ -303,27 +304,26 @@ def canonical_turns(state: CoreState) -> CoreState:
             request_id=identity,
             scope=invocation.scope,
             admission_id=state.attempts.attempts[0].admission_id,
-            deadline_at=invocation.turn.deadline_at,
             turn=invocation.turn,
         )
-        intent = Intent(
+        record = RequestRecord(
             request_id=identity,
             request=request,
             payload_digest="turn-proof",
             lifecycle=LifecycleClass.SESSION_TURN,
-            phase=IntentPhase.DISPATCHED,
-            reconcile_deadline_at=1000.0,
+            phase=RequestPhase.DISPATCHED,
+            until=Until(at=1000.0),
         )
-        intents = [
+        records = [
             row
-            for row in intents
+            for row in records
             if row.request_id != identity
             and not (
                 isinstance(row.request, DispatchTurn)
                 and row.request.turn.invocation_id == invocation.turn.invocation_id
             )
         ]
-        intents.append(intent)
+        records.append(record)
         if not any(row.spec.session_id == invocation.invocation.session_id for row in sessions):
             sessions.append(
                 SessionView(
@@ -338,7 +338,7 @@ def canonical_turns(state: CoreState) -> CoreState:
     return state.model_copy(
         update={
             "run": state.run.model_copy(update={"receipts": tuple(receipts)}),
-            "intents": state.intents.model_copy(update={"intents": tuple(intents)}),
+            "records": state.records.model_copy(update={"records": tuple(records)}),
             "sessions": state.sessions.model_copy(update={"sessions": tuple(sessions)}),
         }
     )
@@ -404,24 +404,23 @@ def acquiring_state() -> CoreState:
         request_id=identity,
         scope=Scope(owner=owner.attempt_id, generation=owner.generation),
         admission_id=owner.admission_id,
-        deadline_at=1000.0,
         attempt=owner_ref(),
         plan=owner.workspace,
     )
 
-    intent = Intent(
+    record = RequestRecord(
         request_id=identity,
         request=request,
         payload_digest="workspace-proof",
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-        phase=IntentPhase.DISPATCHED,
-        reconcile_deadline_at=1000.0,
+        phase=RequestPhase.DISPATCHED,
+        until=Until(at=1000.0),
     )
-    owner = owner.model_copy(update={"pending_intents": (identity,)})
+    owner = owner.model_copy(update={"pending_records": (identity,)})
     state = state.model_copy(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     # A real acquiring attempt holds its Scheduling slot and its accepted start,
@@ -444,6 +443,7 @@ def invocation_state(
         access=Access.WRITE_CANDIDATE,
     )
     invocation = Invocation(
+        until=Until(at=100.0),
         invocation=InvocationRef(
             session_id=spec.session_id, invocation_id=InvocationId(root="invocation"), generation=0
         ),
@@ -454,7 +454,6 @@ def invocation_state(
             workspace=scope,
             prompts=(),
             output_schema=SchemaRef(name="output", version=1),
-            deadline_at=1000.0,
             charge_class=charge_class,
             predecessor=predecessor,
         ),
@@ -944,7 +943,7 @@ def test_checkpoint_waits_for_every_competing_writer_to_terminate(
 
 
 def test_checkpoint_signal_requires_committed_retention_not_its_request() -> None:
-    """K4 interruption boundary: writer proof, durable WIP intent, durable retain proof."""
+    """K4 interruption boundary: writer proof, durable WIP record, durable retain proof."""
     state = checkpoint_state()
     invocation = state.sessions.invocations[0].invocation
     requested = InvocationCheckpointRequested(
@@ -971,24 +970,24 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
     premature = step(state, event)
     assert premature.state.attempts.attempts[0].checkpoints == ()
     assert premature.requests == ()
-    intent = next(
-        row for row in state.intents.intents if row.request_id == event.checkpoint_request
+    record = next(
+        row for row in state.records.records if row.request_id == event.checkpoint_request
     )
-    intent = intent.model_copy(
+    record = record.model_copy(
         update={
-            "phase": IntentPhase.COMPLETED,
-            "observation": observation(intent.request_id).model_copy(
+            "phase": RequestPhase.COMPLETED,
+            "observation": observation(record.request_id).model_copy(
                 update={"revision": event.revision}
             ),
         }
     )
     committed = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
-                    "intents": tuple(
-                        intent if row.request_id == intent.request_id else row
-                        for row in state.intents.intents
+                    "records": tuple(
+                        record if row.request_id == record.request_id else row
+                        for row in state.records.records
                     )
                 }
             )
@@ -1014,7 +1013,7 @@ def test_checkpoint_signal_requires_committed_retention_not_its_request() -> Non
                 retention="wip",
             ),
         )
-        assert event.checkpoint_request not in owner.pending_intents
+        assert event.checkpoint_request not in owner.pending_records
         repeated = step(reload_state(completed.state), event)
         assert repeated.state.attempts == completed.state.attempts
         assert repeated.requests == ()
@@ -1047,11 +1046,11 @@ def test_checkpoint_receipt_requires_a_request_bound_to_its_invocation(bound: st
     forged = request.model_copy(
         update={"invocation": {"none": None, "other": other}.get(bound, invocation)}
     )
-    intent = next(row for row in state.intents.intents if row.request_id == request.request_id)
-    intent = intent.model_copy(
+    record = next(row for row in state.records.records if row.request_id == request.request_id)
+    record = record.model_copy(
         update={
             "request": forged,
-            "phase": IntentPhase.COMPLETED,
+            "phase": RequestPhase.COMPLETED,
             "observation": observation(request.request_id).model_copy(
                 update={"revision": None if bound == "unobserved-revision" else baseline}
             ),
@@ -1059,11 +1058,11 @@ def test_checkpoint_receipt_requires_a_request_bound_to_its_invocation(bound: st
     )
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
-                    "intents": tuple(
-                        intent if row.request_id == request.request_id else row
-                        for row in state.intents.intents
+                    "records": tuple(
+                        record if row.request_id == request.request_id else row
+                        for row in state.records.records
                     )
                 }
             )
@@ -1109,23 +1108,22 @@ def test_unknown_invocation_acceptance_always_inspects(
         request_id=observed.request_id,
         scope=target.scope,
         admission_id=observed.admission_id,
-        deadline_at=1000.0,
         turn=target.turn,
     )
     assert request.request_id is not None
-    source = Intent(
+    source = RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest="turn-proof",
         lifecycle=LifecycleClass.SESSION_TURN,
-        phase=IntentPhase.RECONCILING,
+        phase=RequestPhase.RECONCILING,
         observation=observed,
-        reconcile_deadline_at=1000.0,
+        until=Until(at=1000.0),
     )
     state = state.model_copy(
         update={
             "sessions": state.sessions.model_copy(update={"invocations": (target,)}),
-            "intents": state.intents.model_copy(update={"intents": (source,)}),
+            "records": state.records.model_copy(update={"records": (source,)}),
         }
     )
     events = {
@@ -1212,7 +1210,7 @@ def test_a_refund_authority_can_credit_only_one_recorded_receipt(
 
 
 @given(st.integers(min_value=0, max_value=5), st.integers(min_value=0, max_value=3))
-def test_slot_admission_records_workspace_intent_without_a_second_admission_charge(
+def test_slot_admission_records_workspace_record_without_a_second_admission_charge(
     charge: int, duplicate_count: int
 ) -> None:
     event = registration("owner", charge)
@@ -1231,9 +1229,9 @@ def test_slot_admission_records_workspace_intent_without_a_second_admission_char
     owner = project(result.state).attempts[0]
     assert owner.phase == AttemptPhase.ACQUIRING
     assert sum(receipt.charged for receipt in owner.charges) == charge
-    assert request.request_id in owner.pending_intents
+    assert request.request_id in owner.pending_records
     assert request.admission_id == owner.admission_id
-    assert any(intent.request_id == request.request_id for intent in result.state.intents.intents)
+    assert any(record.request_id == request.request_id for record in result.state.records.records)
     for _ in range(duplicate_count):
         repeated = step(reload_state(result.state), admitted)
         assert repeated.requests == ()
@@ -1531,11 +1529,11 @@ def test_stale_workspace_observations_cannot_replace_canonical_ready_proof(
 ) -> None:
     state = acquiring_state()
     proof = observation(RequestId(root="workspace")).model_copy(update={"sequence": 2})
-    intent = state.intents.intents[0].model_copy(
-        update={"phase": IntentPhase.COMPLETED, "sequence": 2, "observation": proof}
+    record = state.records.records[0].model_copy(
+        update={"phase": RequestPhase.COMPLETED, "sequence": 2, "observation": proof}
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
     for sequence, status in order:
         observed = proof.model_copy(update={"sequence": sequence, "status": status})
@@ -1565,17 +1563,17 @@ def test_initial_group_readiness_requires_workspace_commit_and_never_revives_fai
         session_ids=(session_id,),
         phase=group_phase,
     )
-    intent = state.intents.intents[0]
+    record = state.records.records[0]
     if proof_committed:
-        intent = intent.model_copy(
-            update={"phase": IntentPhase.COMPLETED, "observation": observation(intent.request_id)}
+        record = record.model_copy(
+            update={"phase": RequestPhase.COMPLETED, "observation": observation(record.request_id)}
         )
-        owner = owner.model_copy(update={"pending_intents": ()})
+        owner = owner.model_copy(update={"pending_records": ()})
     state = state.model_copy(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
             "sessions": state.sessions.model_copy(update={"acquisition_groups": (group,)}),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     event = InitialSessionsReady(
@@ -1600,18 +1598,17 @@ def failed_group_state() -> CoreState:
     request = EnsureSession(
         request_id=RequestId(root="member"),
         scope=Scope(owner=owner.attempt_id, generation=0),
-        deadline_at=1000.0,
         admission_id=DecisionId(root="owner"),
         spec=state.sessions.sessions[0].spec,
     )
     assert request.request_id is not None
-    intent = Intent(
+    record = RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest="member-proof",
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-        phase=IntentPhase.COMPLETED,
-        reconcile_deadline_at=1000.0,
+        phase=RequestPhase.COMPLETED,
+        until=Until(at=1000.0),
         observation=observation(request.request_id, ObservationStatus.FAILED),
     )
     group = state.sessions.acquisition_groups[0].model_copy(
@@ -1621,7 +1618,7 @@ def failed_group_state() -> CoreState:
         update={
             "attempts": AttemptsState(attempts=(owner,)),
             "sessions": state.sessions.model_copy(update={"acquisition_groups": (group,)}),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     event = registration("owner")
@@ -1635,12 +1632,12 @@ def test_initial_session_failure_is_bound_to_exact_group_member_and_episode(
     failure: SetupFailureKind, member: str, episode: str
 ) -> None:
     state = failed_group_state()
-    assert state.intents.intents[0].observation is not None
+    assert state.records.records[0].observation is not None
     event = InitialSessionsFailed(
         attempt=owner_ref(),
         admission_id=DecisionId(root=episode),
         session_id=SessionId(root=member),
-        observation=state.intents.intents[0].observation,
+        observation=state.records.records[0].observation,
         failure=failure,
     )
     if member == "session" and episode == "owner":
@@ -1845,7 +1842,7 @@ def test_opaque_identity_delimiters_cannot_collide_workspace_request_ids(
         request_ids.append(acquired.requests[0].request_id)
         state = reload_state(acquired.state)
     assert len(set(request_ids)) == 2
-    assert len(state.intents.intents) == 2
+    assert len(state.records.records) == 2
     assert len(project(state).attempts) == 2
 
 
@@ -1895,7 +1892,6 @@ def revision_operation_state() -> tuple[CoreState, OperationRegistry, RevisionOp
         request_id=RequestId(root="revision"),
         scope=Scope(owner=AttemptId(root="owner"), generation=0),
         admission_id=DecisionId(root="owner"),
-        deadline_at=1000.0,
         operation_id=OperationId(root="operation:operation"),
         operation=wire,
         retry_limit=0,
@@ -1904,7 +1900,6 @@ def revision_operation_state() -> tuple[CoreState, OperationRegistry, RevisionOp
         {
             "decision_id": DecisionId(root="operation"),
             "scope": request.scope,
-            "deadline_at": request.deadline_at,
             "request": RetentionExtensionRequest(digest=state.run.facts.baseline.digest),
         },
         context={"operation_registry": codec},
@@ -1928,7 +1923,9 @@ def revision_operation_state() -> tuple[CoreState, OperationRegistry, RevisionOp
     return (
         state,
         codec,
-        RevisionOperationRequested(request=request, authority=RevisionAuthority.RETAIN),
+        RevisionOperationRequested(
+            until=Until(at=100.0), request=request, authority=RevisionAuthority.RETAIN
+        ),
     )
 
 
@@ -1937,19 +1934,19 @@ def test_registered_revision_dispatch_and_acknowledgement_use_exact_public_codec
     prepared = step(state, event)
     assert prepared == step(reload_state(state, codec), event)
     assert prepared.requests == (event.request,)
-    assert event.request.request_id in prepared.state.attempts.attempts[0].pending_intents
+    assert event.request.request_id in prepared.state.attempts.attempts[0].pending_records
     state = reload_state(prepared.state, codec)
-    intent = state.intents.intents[0]
-    observed = observation(intent.request_id)
-    intent = intent.model_copy(
+    record = state.records.records[0]
+    observed = observation(record.request_id)
+    record = record.model_copy(
         update={
-            "phase": IntentPhase.COMPLETED,
+            "phase": RequestPhase.COMPLETED,
             "sequence": observed.sequence,
             "observation": observed,
         }
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
     completion = RevisionOperationObserved(
         operation_id=event.request.operation_id,
@@ -1958,7 +1955,7 @@ def test_registered_revision_dispatch_and_acknowledgement_use_exact_public_codec
     )
     result = step(state, completion)
     assert result == step(reload_state(state, codec), completion)
-    assert result.state.attempts.attempts[0].pending_intents == ()
+    assert result.state.attempts.attempts[0].pending_records == ()
     assert result.state.attempts.attempts[0].checkpoints == ()
     assert result.requests == ()
     duplicate = step(reload_state(result.state, codec), completion)
@@ -1985,11 +1982,11 @@ def test_revision_observation_cannot_clear_another_request_or_newer_observation(
         assert request.request.request_id is not None
         observed = observation(request.request.request_id)
         latest = observed.model_copy(update={"sequence": 2})
-        intent = state.intents.intents[0].model_copy(
-            update={"phase": IntentPhase.COMPLETED, "sequence": 2, "observation": latest}
+        record = state.records.records[0].model_copy(
+            update={"phase": RequestPhase.COMPLETED, "sequence": 2, "observation": latest}
         )
         state = state.model_copy(
-            update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+            update={"records": state.records.model_copy(update={"records": (record,)})}
         )
         event = RevisionOperationObserved(
             operation_id=OperationId(root="unrelated")
@@ -2016,13 +2013,13 @@ def test_unresolved_old_root_ownership_fences_acquisition_even_if_logically_reti
             "workspace": WorkspacePlan(
                 mode=WorkspaceMode.EXCLUSIVE_ROOT, base=state.run.facts.baseline
             ),
-            "pending_intents": (RequestId(root="unfinished"),),
+            "pending_records": (RequestId(root="unfinished"),),
         }
     )
     if unresolved == "dependency":
         owner = owner.model_copy(
             update={
-                "pending_intents": (),
+                "pending_records": (),
                 "release_dependencies": (
                     ReleaseDependency(kind="session", identity=SessionId(root="live")),
                 ),
@@ -2062,11 +2059,11 @@ def test_unresolved_old_root_ownership_fences_acquisition_even_if_logically_reti
 )
 def test_workspace_ready_rejects_misattributed_durable_workspace_proof(wrong_proof: str) -> None:
     state = acquiring_state()
-    owner = state.attempts.attempts[0].model_copy(update={"pending_intents": ()})
-    intent = state.intents.intents[0]
-    request = intent.request
+    owner = state.attempts.attempts[0].model_copy(update={"pending_records": ()})
+    record = state.records.records[0]
+    request = record.request
     assert isinstance(request, EnsureWorkspace)
-    observed = observation(intent.request_id)
+    observed = observation(record.request_id)
     if wrong_proof == "attempt":
         request = request.model_copy(
             update={"attempt": AttemptRef(attempt_id=AttemptId(root="foreign"), generation=0)}
@@ -2099,13 +2096,13 @@ def test_workspace_ready_rejects_misattributed_durable_workspace_proof(wrong_pro
         observed = observed.model_copy(update={"admission_id": DecisionId(root="old")})
     else:
         observed = observed.model_copy(update={"request_id": RequestId(root="foreign")})
-    intent = intent.model_copy(
-        update={"request": request, "phase": IntentPhase.COMPLETED, "observation": observed}
+    record = record.model_copy(
+        update={"request": request, "phase": RequestPhase.COMPLETED, "observation": observed}
     )
     state = state.model_copy(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     result = step(
@@ -2264,7 +2261,7 @@ def test_registered_revision_dispatch_requires_declared_authority_and_current_ep
     if authority == RevisionAuthority.RETAIN and episode == "owner":
         assert len(result.requests) == 1
         assert result.requests[0].admission_id == DecisionId(root="owner")
-        assert event.request.request_id in result.state.attempts.attempts[0].pending_intents
+        assert event.request.request_id in result.state.attempts.attempts[0].pending_records
     else:
         assert result.state.attempts == state.attempts
         assert result.requests == ()
@@ -2512,7 +2509,7 @@ def test_attempt_turn_charges_before_session_acquisition_but_cannot_dispatch(
         feedback=Accepted(decision_id=decision.decision_id),
     )
     state = state.model_copy(update={"run": state.run.model_copy(update={"receipts": (receipt,)})})
-    event = TurnRequested(scope=turn.workspace, turn=turn)
+    event = TurnRequested(until=Until(at=100.0), scope=turn.workspace, turn=turn)
     prepared = step(state, event)
     assert prepared == step(reload_state(state), event)
     assert len(prepared.requests) == 1
@@ -2529,7 +2526,7 @@ def test_attempt_turn_charges_before_session_acquisition_but_cannot_dispatch(
         assert repeated.requests == ()
         prepared = repeated
     pending = observation(
-        prepared.state.sessions.sessions[0].pending_intents[0], ObservationStatus.PENDING
+        prepared.state.sessions.sessions[0].pending_records[0], ObservationStatus.PENDING
     ).model_copy(update={"terminal": False})
     observed = step(
         prepared.state, SessionObserved(session_id=turn.session.session_id, observation=pending)
@@ -2800,15 +2797,15 @@ def test_checkpoint_completion_rejects_mismatched_canonical_observation_request(
             authority=RequestId(root="checkpoint"),
         ),
     )
-    intent = requested.state.intents.intents[0]
-    intent = intent.model_copy(
+    record = requested.state.records.records[0]
+    record = record.model_copy(
         update={
-            "phase": IntentPhase.COMPLETED,
+            "phase": RequestPhase.COMPLETED,
             "observation": observation(RequestId(root="foreign")),
         }
     )
     state = requested.state.model_copy(
-        update={"intents": requested.state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": requested.state.records.model_copy(update={"records": (record,)})}
     )
     event = InvocationCheckpointed(
         attempt=owner_ref(),
@@ -2835,11 +2832,11 @@ def test_registered_revision_unknown_acceptance_inspects_and_preserves_pending_p
     observed = observation(request.request.request_id, status).model_copy(
         update={"accepted": False, "terminal": terminal}
     )
-    intent = state.intents.intents[0].model_copy(
-        update={"phase": IntentPhase.RECONCILING, "observation": observed}
+    record = state.records.records[0].model_copy(
+        update={"phase": RequestPhase.RECONCILING, "observation": observed}
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
     event = RevisionOperationObserved(
         operation_id=request.request.operation_id,

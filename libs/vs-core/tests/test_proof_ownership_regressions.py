@@ -18,7 +18,7 @@ def digest(value: core.Value) -> str:
 
 def stopped(state: core.CoreState) -> core.CoreState:
     proposal = core.RunResultProposal(outcome="cancelled", reason="cleanup")
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         result=proposal,
@@ -76,7 +76,7 @@ def drain(state: core.CoreState) -> core.Transition:
     return result
 
 
-def released_job(identity: int) -> tuple[core.CoreState, core.OwnedJob, core.Intent]:
+def released_job(identity: int) -> tuple[core.CoreState, core.OwnedJob, core.RequestRecord]:
     state = stopped(core.initial_state())
     scope = core.Scope(owner=core.AttemptId(root=f"attempt:{identity}"), generation=identity)
     plan = core.MeasurementPlan(
@@ -90,13 +90,11 @@ def released_job(identity: int) -> tuple[core.CoreState, core.OwnedJob, core.Int
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
-        deadline_at=1.0,
     )
     request = core.SubmitMeasurement(
         request_id=core.RequestId(root=f"submission:{identity}"),
         scope=scope,
         admission_id=core.DecisionId(root=f"episode:{identity}"),
-        deadline_at=1.0,
         plan=plan,
     )
     assert request.request_id is not None
@@ -125,14 +123,14 @@ def released_job(identity: int) -> tuple[core.CoreState, core.OwnedJob, core.Int
         terminal=True,
         released=True,
     )
-    source = core.Intent(
+    source = core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=digest(request),
         lifecycle=core.LifecycleClass.OWNED_JOB,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=observation,
-        reconcile_deadline_at=1.0,
+        until=core.Until(at=1.0),
     )
     return state, job, source
 
@@ -160,7 +158,7 @@ def test_run_finality_requires_job_source_episode_and_status(variant: str, ident
     state = state.model_copy(
         update={
             "evaluation": core.EvaluationState(jobs=(job,)),
-            "intents": state.intents.model_copy(update={"intents": (source,)}),
+            "records": state.records.model_copy(update={"records": (source,)}),
         }
     )
     result = drain(state)
@@ -195,14 +193,12 @@ def test_accepted_session_turn_without_resource_keeps_run_closing(
         request_id=source.request_id,
         scope=source.request.scope,
         admission_id=source.request.admission_id,
-        deadline_at=100.0,
         turn=core.TurnSpec(
             session=session,
             invocation_id=core.InvocationId(root="invocation"),
             workspace=source.request.scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="free",
         ),
     )
@@ -214,7 +210,7 @@ def test_accepted_session_turn_without_resource_keeps_run_closing(
             "accepted": status == core.ObservationStatus.SUCCEEDED,
         }
     )
-    intent = source.model_copy(
+    record = source.model_copy(
         update={
             "request": request,
             "payload_digest": digest(request),
@@ -223,7 +219,7 @@ def test_accepted_session_turn_without_resource_keeps_run_closing(
         }
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
     result = drain(state)
     negative = status != core.ObservationStatus.SUCCEEDED
@@ -244,7 +240,7 @@ def test_complete_empty_cleanup_debt_can_end_run(identity: int) -> None:
     assert isinstance(result.events[-1], core.RunEnded)
 
 
-@pytest.mark.parametrize("kind", ["intent", "child"])
+@pytest.mark.parametrize("kind", ["record", "child"])
 @pytest.mark.parametrize("variant", ["exact", "missing_episode", "old_episode"])
 @given(identity=st.integers(min_value=0, max_value=10000))
 def test_every_ownership_source_keeps_its_recorded_episode(
@@ -261,9 +257,9 @@ def test_every_ownership_source_keeps_its_recorded_episode(
                 else core.DecisionId(root="old")
             }
         )
-    if kind == "intent":
+    if kind == "record":
         source = source.model_copy(update={"observation": observation})
-        intents = state.intents.model_copy(update={"intents": (source,)})
+        records = state.records.model_copy(update={"records": (source,)})
     else:
         assert observation.resource_id is not None
         child = core.ChildLease(
@@ -278,8 +274,8 @@ def test_every_ownership_source_keeps_its_recorded_episode(
             ),
             watermark_history_complete=True,
         )
-        intents = state.intents.model_copy(update={"intents": (source,), "children": (child,)})
-    state = state.model_copy(update={"intents": intents})
+        records = state.records.model_copy(update={"records": (source,), "children": (child,)})
+    state = state.model_copy(update={"records": records})
     result = drain(state)
     assert result.state.run.status == (
         core.RunStatus.TERMINAL if variant == "exact" else core.RunStatus.CLOSING

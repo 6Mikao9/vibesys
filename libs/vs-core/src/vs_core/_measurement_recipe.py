@@ -108,7 +108,13 @@ class MeasurementRecipe(Value):
             submission_limit=submission_limit,
             submitted_at=now_at,
             queue_allowance=self.queue_allowance,
-            deadline_at=now_at
-            + sum(item.execution_budget for item in ordered)
-            + self.queue_allowance,
         )
+
+    def budget(self, stages: tuple[str, ...] | None = None) -> float:
+        """The most time measuring ``stages`` (default: all) can take, queue allowance included.
+
+        What a wait for the plan states as its limit: ``Within(recipe.budget())``.
+        """
+        seconds = {item.stage_id: item.execution_seconds for item in self.stages}
+        names = tuple(seconds) if stages is None else stages
+        return self.queue_allowance + sum(seconds[name] for name in names)

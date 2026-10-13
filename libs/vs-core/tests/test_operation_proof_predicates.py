@@ -20,7 +20,7 @@ from .test_recovery_proof_regressions import Cleanup, Outcome, _digest, _registe
 
 
 @st.composite
-def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.Intent]:
+def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestRecord]:
     return _registered_turn(draw(st.text(alphabet="abc123", min_size=1, max_size=12)))
 
 
@@ -44,7 +44,6 @@ def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.Intent]:
         "scope",
         "generation",
         "payload",
-        "deadline",
         "normalization",
         "codec",
     ],
@@ -52,7 +51,7 @@ def operation_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.Intent]:
 @given(facts=operation_facts())
 def test_operation_proof_checks_every_origin_field(
     field: str,
-    facts: tuple[core.CoreState, core.Intent],
+    facts: tuple[core.CoreState, core.RequestRecord],
 ) -> None:
     state, record = facts
     request = record.request
@@ -93,7 +92,7 @@ def test_operation_proof_checks_every_origin_field(
         "feedback_membership",
     ):
         receipt, expected_verdict = _wrong_receipt(receipt, decision, field)
-    elif field in ("operation_id", "scope", "generation", "payload", "deadline"):
+    elif field in ("operation_id", "scope", "generation", "payload"):
         expected, expected_verdict = _wrong_request(request, field)
     elif field in ("normalization", "codec"):
         decision = (
@@ -103,7 +102,6 @@ def test_operation_proof_checks_every_origin_field(
                 decision_id=decision.decision_id,
                 scope=decision.scope,
                 request=decision.request,
-                deadline_at=decision.deadline_at,
             )
         )
         receipt = receipt.model_copy(
@@ -188,7 +186,6 @@ def _wrong_request(
             request.operation.model_copy(update={"payload_json": "{}"}),
             ProofField.PAYLOAD,
         ),
-        "deadline": ("deadline_at", 99.0, ProofField.PAYLOAD),
     }
     name, wrong, verdict_field = fields[field]
     return request.model_copy(update={name: wrong}), Mismatch(verdict_field)
@@ -410,7 +407,7 @@ def _wrong_invocation(row: core.Invocation, field: str) -> tuple[core.Invocation
             }
         ), ProofField.GENERATION
     return row.model_copy(
-        update={"turn": row.turn.model_copy(update={"deadline_at": 99.0})}
+        update={"turn": row.turn.model_copy(update={"max_turns": row.turn.max_turns + 1})}
     ), ProofField.PAYLOAD
 
 
@@ -427,7 +424,7 @@ def _wrong_invocation(row: core.Invocation, field: str) -> tuple[core.Invocation
 @given(facts=operation_facts())
 def test_proposals_and_ingress_do_not_substitute_origin_or_normalization(
     field: str,
-    facts: tuple[core.CoreState, core.Intent],
+    facts: tuple[core.CoreState, core.RequestRecord],
 ) -> None:
     state, record = facts
     receipt = state.run.receipts[0]
@@ -437,7 +434,6 @@ def test_proposals_and_ingress_do_not_substitute_origin_or_normalization(
             decision_id=receipt.decision.decision_id,
             scope=receipt.decision.scope,
             request=receipt.decision.request,
-            deadline_at=receipt.decision.deadline_at,
             normalized_turn=state.sessions.invocations[0].turn
             if field == "absent_ingress_codec"
             else None,
@@ -445,6 +441,7 @@ def test_proposals_and_ingress_do_not_substitute_origin_or_normalization(
         verdict = Missing(ProofReason.ABSENT_DECLARATION)
     else:
         expected = core.RequestPrepared(
+            until=core.Until(at=100.0),
             request=record.request,
             lifecycle=core.LifecycleClass.SESSION_TURN,
             normalized_turn=state.sessions.invocations[0].turn,
@@ -562,7 +559,6 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
         core.Operation(
             decision_id=core.DecisionId(root="deferred"),
             scope=scope,
-            deadline_at=100.0,
             request=Cleanup(),
         )
     )
@@ -576,7 +572,6 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
     request = core.ExecuteRegisteredOperation(
         request_id=core.RequestId(root="deferred-write"),
         scope=scope,
-        deadline_at=100.0,
         decision_id=decision.decision_id,
         operation_id=core.OperationId(root="operation:deferred"),
         operation=codec.encode(decision.request),
@@ -593,7 +588,9 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
             ),
         }
     )
-    event = core.RequestPrepared(request=request, lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE)
+    event = core.RequestPrepared(
+        until=core.Until(at=100.0), request=request, lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE
+    )
     result = core.trace_step(
         state,
         event,
@@ -601,7 +598,9 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
             frames=(
                 core.TraceFrame(
                     signal=event,
-                    change=core.IntentsChange(state=state.intents, requests=(request,)),
+                    change=core.RecordsChange(
+                        state=state.records, requests=(core.within(request, 60.0),)
+                    ),
                 ),
             )
         ),
@@ -610,6 +609,6 @@ def test_deferred_outbox_registration_keeps_feedback_immutable_and_origin_provab
     assert committed.request_ids == (request.request_id,)
     assert committed.feedback == feedback
     assert feedback.request_ids == ()
-    committed_request = result.state.intents.intents[0].request
+    committed_request = result.state.records.records[0].request
     assert isinstance(committed_request, core.ExecuteRegisteredOperation)
     assert operation_for(result.state.run.receipts, committed_request) == Proven(decision)

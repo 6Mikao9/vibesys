@@ -1,7 +1,7 @@
 """A request's completion is decided by every event that knows more, not the first to arrive.
 
 An executor answers a plain turn with two events: the request's observation, which
-the intent ledger commits and forwards, and the owner's `TurnObserved`, the only
+the record ledger commits and forwards, and the owner's `TurnObserved`, the only
 carrier of the reply. The result the strategy sees must carry the reply for every
 interleaving of the two, including duplicates and a restart between them.
 """
@@ -21,7 +21,7 @@ from .test_session_turns import (
     reload_step,
     turn,
     waiting_turn_state,
-    with_intent,
+    with_record,
 )
 
 REPLY = '{"candidate": "rev-1"}'
@@ -34,12 +34,12 @@ def dispatched() -> tuple[core.CoreState, core.DispatchTurn]:
         waiting_turn_state(spec), core.InputReservationRequested(invocation=invocation(spec))
     )
     request = next(row for row in reserved.requests if isinstance(row, core.DispatchTurn))
-    state = with_intent(reserved.state, request)
-    intents = tuple(
+    state = with_record(reserved.state, request)
+    records = tuple(
         row.model_copy(update={"lifecycle": core.LifecycleClass.SESSION_TURN})
-        for row in state.intents.intents
+        for row in state.records.records
     )
-    update = {"intents": state.intents.model_copy(update={"intents": intents})}
+    update = {"records": state.records.model_copy(update={"records": records})}
     return state.model_copy(update=update), request
 
 
@@ -144,8 +144,8 @@ def job_observation(
     return observation_of(submit, sequence, status=status, terminal=terminal, released=terminal)
 
 
-def submit_phase(state: core.CoreState, submit: core.SubmitMeasurement) -> core.IntentPhase:
-    return next(row.phase for row in state.intents.intents if row.request_id == submit.request_id)
+def submit_phase(state: core.CoreState, submit: core.SubmitMeasurement) -> core.RequestPhase:
+    return next(row.phase for row in state.records.records if row.request_id == submit.request_id)
 
 
 conclusive = st.sampled_from(
@@ -158,23 +158,23 @@ conclusive = st.sampled_from(
 
 
 @given(running=st.integers(0, 4), ending=conclusive, replays=st.integers(0, 2))
-def test_a_submit_intent_completes_exactly_when_its_job_is_terminal(
+def test_a_submit_record_completes_exactly_when_its_job_is_terminal(
     running: int, ending: core.ObservationStatus, replays: int
 ) -> None:
     """The job's own observations, whichever event carries them, decide the submit's state."""
     state, submit = submitted_job()
-    assert submit_phase(state, submit) == core.IntentPhase.DISPATCHED
+    assert submit_phase(state, submit) == core.RequestPhase.DISPATCHED
     resource = core.ResourceId(root="job")
     sequence = 1
     for _ in range(running):
         sequence += 1
         view = job_observation(submit, sequence)
         state = reload_step(state, core.JobObserved(resource_id=resource, observation=view)).state
-        assert submit_phase(state, submit) == core.IntentPhase.DISPATCHED
+        assert submit_phase(state, submit) == core.RequestPhase.DISPATCHED
     sequence += 1
     view = job_observation(submit, sequence, ending)
     for _ in range(1 + replays):
         state = reload_step(state, core.JobObserved(resource_id=resource, observation=view)).state
-    assert submit_phase(state, submit) == core.IntentPhase.COMPLETED
-    held = next(row for row in state.intents.intents if row.request_id == submit.request_id)
+    assert submit_phase(state, submit) == core.RequestPhase.COMPLETED
+    held = next(row for row in state.records.records if row.request_id == submit.request_id)
     assert held.observation == view

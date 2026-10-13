@@ -17,7 +17,7 @@ from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
 
 from vs_agent.api import NULL_SKILL_SELECTION
-from vs_core.api import HostFence, HostId
+from vs_core.api import HostFence, HostId, Until
 from vs_project.api import (
     GitError,
     NullGitTrackerEvents,
@@ -508,7 +508,10 @@ def test_parent_verification_over_real_git_accepts_only_retained_commits() -> No
         async with _workspaces("git") as workspaces:
             owner = VerifyRevisionOwner(workspaces, _ledger(workspaces), commit_of)
             context = ExecutionContext(
-                fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=5.0, payload_digest="d"
+                fence=HostFence(host_id=HostId(root="h"), epoch=1),
+                now_at=5.0,
+                payload_digest="d",
+                until=Until(at=100.0),
             )
 
             async def verified(commit: str) -> object:
@@ -536,7 +539,10 @@ def test_retention_over_real_git_keeps_a_proven_commit_and_refuses_the_rest() ->
             ledger = _ledger(workspaces)
             owner = RetainRevisionOwner(workspaces, ledger, commit_of, "verified")
             context = ExecutionContext(
-                fence=HostFence(host_id=HostId(root="h"), epoch=1), now_at=5.0, payload_digest="d"
+                fence=HostFence(host_id=HostId(root="h"), epoch=1),
+                now_at=5.0,
+                payload_digest="d",
+                until=Until(at=100.0),
             )
             dangling = _dangling_revision(workspaces, 0)
             other = _dangling_revision(workspaces, 1)

@@ -50,7 +50,11 @@ def measure_scope(
         decision_id=core.DecisionId(root="scoped-measure"), scope=scope, plan=measurement
     )
     return transition(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
 
 
@@ -116,7 +120,6 @@ def test_snapshot_result_requires_exact_committed_checkpoint(
         admission_id=owner.admission_id if request_episode else None,
         attempt=ref,
         retention="candidate",
-        deadline_at=100.0,
     )
     observed = core.Observation(
         event_id=core.EventId(root="snapshot-done"),
@@ -129,14 +132,14 @@ def test_snapshot_result_requires_exact_committed_checkpoint(
         terminal=terminal,
         status=status,
     )
-    source = core.Intent(
+    source = core.RequestRecord(
         request_id=request_id,
         request=request,
         observation=observed,
         payload_digest=value_digest(request),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.COMPLETED,
+        until=core.Until(at=100.0),
     )
     owner = owner.model_copy(
         update={
@@ -152,7 +155,7 @@ def test_snapshot_result_requires_exact_committed_checkpoint(
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(update={"intents": (source,)}),
+            "records": state.records.model_copy(update={"records": (source,)}),
         }
     )
     measurement = plan(candidate=core.SnapshotResultRef(request_id=request_id))
@@ -242,7 +245,6 @@ def test_r23_late_profile_reuses_only_exact_capture_identity(
     }
     updates = {
         "submitted_at": 3.0,
-        "deadline_at": 103.0,
         "reusable_evidence": (capture.evidence_id,) if hints else (),
     }
     if field is not None:
@@ -303,7 +305,7 @@ def test_capture_without_final_trusted_source_never_grants_reuse(
     result = requested(
         state,
         identity="reuse",
-        measurement=source.plan.model_copy(update={"submitted_at": 3.0, "deadline_at": 103.0}),
+        measurement=source.plan.model_copy(update={"submitted_at": 3.0}),
     )
     reused = (
         receipt
@@ -381,11 +383,11 @@ def test_ingress_requires_independent_canonical_submission_proof(fault: str) -> 
             update={"run": state.run.model_copy(update={"receipts": (receipt,)})}
         )
     elif fault == "payload":
-        row = state.intents.intents[0].model_copy(update={"payload_digest": "wrong"})
+        row = state.records.records[0].model_copy(update={"payload_digest": "wrong"})
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
-                    update={"intents": (row, *state.intents.intents[1:])}
+                "records": state.records.model_copy(
+                    update={"records": (row, *state.records.records[1:])}
                 )
             }
         )
@@ -484,7 +486,6 @@ def registered_state(
             decision_id=core.DecisionId(root="registered"),
             scope=scope,
             request=RegisteredMeasurement(identity=identity),
-            deadline_at=100.0,
         )
     )
     wire = decision.registered_wire
@@ -495,7 +496,6 @@ def registered_state(
         decision_id=decision.decision_id,
         operation_id=core.OperationId(root="operation:registered"),
         scope=scope,
-        deadline_at=100.0,
         operation=wire,
         retry_limit=0,
     )
@@ -505,6 +505,7 @@ def registered_state(
         payload_digest=value_digest(decision),
         feedback=core.Accepted(decision_id=decision.decision_id),
         request_ids=(request_id,),
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={
@@ -549,7 +550,7 @@ def test_registered_jobs_cannot_infer_expected_identity_from_evidence(
         terminal=True,
         released=True,
     )
-    source = next(r for r in result.state.intents.intents if r.request_id == request.request_id)
+    source = next(r for r in result.state.records.records if r.request_id == request.request_id)
     facts = (
         core.EvaluationTerminalFacts(
             stages=(
@@ -564,9 +565,9 @@ def test_registered_jobs_cannot_infer_expected_identity_from_evidence(
     )
     state = result.state.model_copy(
         update={
-            "intents": result.state.intents.model_copy(
+            "records": result.state.records.model_copy(
                 update={
-                    "intents": (
+                    "records": (
                         source.model_copy(
                             update={"observation": observed, "evaluation_result": facts}
                         ),
@@ -808,7 +809,7 @@ def test_retry_waits_for_root_and_every_discovered_child_release(
     )
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"children": (child,) if child_present else ()}
             )
         }
@@ -816,7 +817,7 @@ def test_retry_waits_for_root_and_every_discovered_child_release(
     result = requested(
         state,
         identity="after-release",
-        measurement=request.plan.model_copy(update={"submitted_at": 3.0, "deadline_at": 103.0}),
+        measurement=request.plan.model_copy(update={"submitted_at": 3.0}),
     )
     assert bool(result.requests) == (
         root_released

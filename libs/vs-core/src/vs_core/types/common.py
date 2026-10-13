@@ -43,6 +43,17 @@ class CheckpointDecline(StrEnum):
     still retains the workspace, so the attempt can release."""
 
 
+class TurnFailureKind(StrEnum):
+    """Why a turn ended without a usable reply, as a closed set strategies match on."""
+
+    PROVIDER_FAILED = "provider_failed"
+    """The executor ended the turn: the provider refused it, or its reply broke the schema."""
+    TRANSPORT_LOST = "transport_lost"
+    """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
+    CANCELLED = "cancelled"
+    """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
+
+
 class Value(BaseModel):
     """Persistable data, never live interfaces or mutable containers."""
 
@@ -306,6 +317,10 @@ class Scope(Value):
     generation: Generation
 
 
+THIS_RUN = Scope(owner=RunId(root="this-run"), generation=0)
+"""The scope a search names for work the run itself owns. Core replaces it with the run's own."""
+
+
 class AttemptRef(Value):
     """Attempt ref lifecycle contract."""
 
@@ -416,7 +431,7 @@ class Area(StrEnum):
     SESSIONS = "sessions"
     EVALUATION = "evaluation"
     SETTLEMENT = "settlement"
-    INTENTS = "intents"
+    RECORDS = "records"
 
 
 class KernelNotImplementedError(Exception):
@@ -582,6 +597,9 @@ class Limits(Value):
     max_measurement_submissions: Count = DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
     queue_allowance: Seconds = 900.0
     cancellation_bound: Seconds = 60.0
+    # The least time core gives its own cleanup and inspection requests, even once the run
+    # deadline has passed (see `cleanup` in `_deadlines`).
+    cleanup_bound: Seconds = Field(default=60.0, gt=0)
     reconciliation_bound: Seconds = 60.0
     # Poll cadence for a submitted measurement job, and the cap of the doubling
     # delay before re-polling a job whose last poll was unknown.
@@ -649,7 +667,7 @@ class DependencyStatus(StrEnum):
 
 
 class RequestBase(Value):
-    """Canonical I/O intent correlation, including the current occupancy episode.
+    """Canonical I/O record correlation, including the current occupancy episode.
 
     Attempt mutations carry admission_id. Canonical registration derives a
     missing attempt episode from the exact owner and generation. Explicit older
@@ -663,8 +681,6 @@ class RequestBase(Value):
     depends_on: tuple[RequestId, ...] = ()
     decision_id: DecisionId | None = None
     admission_id: DecisionId | None = None
-    decision_dependencies: tuple[DecisionId, ...] = ()
-    deadline_at: Seconds
 
 
 class ChildManifest(Value):
@@ -891,7 +907,7 @@ class ExecuteRegisteredOperation(RequestBase):
     """Execute a canonical registered wire with separately reserved input payload.
 
     Sessions A resolves the accepted Operation origin and reserves its inputs
-    before Intents A registers this final executable payload. Dispatch uses that
+    before Records A registers this final executable payload. Dispatch uses that
     sole canonical manifest; changing it under the same request ID is a conflict.
     """
 

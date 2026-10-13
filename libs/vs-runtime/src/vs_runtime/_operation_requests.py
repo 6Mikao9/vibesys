@@ -1,8 +1,8 @@
 """Generic, crash-safe executor for registered operations, inspection and cancellation.
 
-``execute`` is idempotent by request identity. It records an intent receipt, runs
+``execute`` is idempotent by request identity. It records a record receipt, runs
 the owner, validates the outcome against the declared schema and records a result
-receipt. A restarted host that finds an intent without a result asks the owner to
+receipt. A restarted host that finds a record without a result asks the owner to
 inspect: it only repeats the effect when the owner proves it never happened, and
 otherwise reports a typed Unknown. Nothing here performs an effect twice.
 
@@ -43,7 +43,7 @@ from vs_runtime._operation_catalog import (
     OperationCatalog,
     OperationEntry,
 )
-from vs_runtime._operation_receipts import IntentReceipt, ResultReceipt
+from vs_runtime._operation_receipts import RecordReceipt, ResultReceipt
 from vs_runtime._receipt_store import (
     BegunUnsealed,
     Conflict,
@@ -213,8 +213,8 @@ class RegisteredOperationRequests:
                 )
             )
         request_id = _identity(request)
-        self._receipts.record_intent(
-            IntentReceipt(
+        self._receipts.record_record(
+            RecordReceipt(
                 request_id=request_id.root,
                 payload_digest=context.payload_digest,
                 operation=request.operation,
@@ -343,30 +343,30 @@ class RegisteredOperationRequests:
         del history  # the receipts below are the same records, decoded as operation receipts
         target_id = request.target
         sealed = self._receipts.result(target_id.root)
-        intent = self._receipts.intent(target_id.root)
+        record = self._receipts.record(target_id.root)
         schema = (
             sealed.schema_ref
             if sealed is not None
-            else intent.operation.schema_ref
-            if intent is not None
+            else record.operation.schema_ref
+            if record is not None
             else None
         )
         entry = None if schema is None else self._catalog.find(schema)
         if schema is None or entry is None:
             return self._unknown(request, context, "no operation receipt for the target")
         if sealed is None:
-            if entry.owner is None or intent is None:
+            if entry.owner is None or record is None:
                 return self._unknown(
                     request, context, "target declared but refused, no result recorded"
                 )
-            decoded = self._catalog.registry.decode(intent.operation)
+            decoded = self._catalog.registry.decode(record.operation)
             match await _inspect(entry.owner, decoded, context):
                 case Applied(outcome):
-                    sealed = self._seal_inspected(target_id, intent, entry, outcome)
+                    sealed = self._seal_inspected(target_id, record, entry, outcome)
                 case NotApplied():
                     sealed = ResultReceipt(
                         request_id=target_id.root,
-                        payload_digest=intent.payload_digest,
+                        payload_digest=record.payload_digest,
                         schema_ref=entry.schema,
                         status=ObservationStatus.REJECTED,
                         detail="owner proved the effect did not happen",
@@ -390,7 +390,7 @@ class RegisteredOperationRequests:
         )
 
     def _seal_inspected(
-        self, target_id: RequestId, intent: IntentReceipt, entry: OperationEntry, outcome: object
+        self, target_id: RequestId, record: RecordReceipt, entry: OperationEntry, outcome: object
     ) -> ResultReceipt:
         try:
             model = (
@@ -400,7 +400,7 @@ class RegisteredOperationRequests:
             )
             receipt = ResultReceipt(
                 request_id=target_id.root,
-                payload_digest=intent.payload_digest,
+                payload_digest=record.payload_digest,
                 schema_ref=entry.schema,
                 status=ObservationStatus.SUCCEEDED,
                 outcome_json=self._catalog.registry.encode_outcome(entry.schema, model),
@@ -408,7 +408,7 @@ class RegisteredOperationRequests:
         except (ValidationError, ContractError, TypeError) as error:
             receipt = ResultReceipt(
                 request_id=target_id.root,
-                payload_digest=intent.payload_digest,
+                payload_digest=record.payload_digest,
                 schema_ref=entry.schema,
                 status=ObservationStatus.FAILED,
                 detail=f"outcome violates declared schema: {error}",
@@ -436,16 +436,16 @@ class RegisteredOperationRequests:
         self, request: CancelOwnedResource, context: ExecutionContext
     ) -> ExecutionResult:
         request_id = _identity(request)
-        intent = self._receipts.intent(request.target.root)
-        entry = None if intent is None else self._catalog.find(intent.operation.schema_ref)
-        if intent is None or entry is None:
+        record = self._receipts.record(request.target.root)
+        entry = None if record is None else self._catalog.find(record.operation.schema_ref)
+        if record is None or entry is None:
             return self._result(
                 request,
                 context,
                 ObservationStatus.UNKNOWN,
                 "no operation receipt for the cancel target",
             )
-        target_entry, operation = entry, intent.operation
+        target_entry, operation = entry, record.operation
 
         async def perform(*, resumed: bool) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
             del resumed  # cancellation is idempotent by contract, so a resume repeats it

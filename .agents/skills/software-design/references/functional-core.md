@@ -165,16 +165,31 @@ The core imports no I/O library or interface. Shared pure value contracts may
 live in pure libraries; do not import mixed I/O APIs for their types. Preserve
 one-way dependencies and the [placement rule](../../../../docs/contributing/architecture.md).
 
-## Worked example: DynamicStrategy
+## Worked example: DynamicSearch
 
-Read [DynamicStrategy](../../../../src/vibesys/orchestration/dynamic/strategy/_strategy.py)
-and its [scenario tests](../../../../tests/vibesys/orchestration/dynamic/strategy/test_scenarios.py).
-`decide` is a pure function of the strategy state, the `RunView` and the static
-config. It returns requests (start an attempt, plan, judge, stop) and never
-starts anything. `on_event` folds one typed feedback into the next state. The
-shell executes each request through its interface and feeds the observation
-back. Slot and budget decisions need no async execution, and restart replays
-the committed intent against the same identities.
+Read [DynamicSearch](../../../../src/vibesys/orchestration/dynamic/search/_search.py),
+its [state](../../../../src/vibesys/orchestration/dynamic/search/_state.py) and one
+[workstream machine](../../../../src/vibesys/orchestration/dynamic/search/_workstream.py).
+Then read the
+[story test](../../../../tests/vibesys/orchestration/dynamic/search/test_story_and_machine.py),
+which drives one hypothesis from baseline to adoption by feeding events to `update`
+and asserting on the decisions that come back.
+
+- `update(state, event, view)` is a pure function of the search state, one event and
+  the read-only `RunView`. It returns the next state and decisions and never starts
+  anything.
+- Each part of the run (baseline, each workstream) is a machine with a phase per kind
+  of wait: `Opening`, `Implementing`, `Judging`, `Measuring`, `Settling`. A phase says
+  what the machine is waiting for, so an event that does not fit the phase is an
+  error, not a guess.
+- A decision that asks for work is a `Wait` carrying the request and its `Within`
+  limit. The limit is stated by whoever asks; the shell enforces it and reports
+  expiry as a typed `Failed` event the phase must handle.
+- `Children` gives every machine its own decision identities and routes an event to the
+  machine whose decision it answers, so machines never read each other's state.
+- The shell executes each request through its interface and feeds the result back as
+  the next event. Slot and budget decisions need no async execution, and restart
+  replays the committed decisions against the same identities.
 
 ## When not to use it
 

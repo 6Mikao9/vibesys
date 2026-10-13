@@ -26,11 +26,12 @@ from .types.common import (
     ScopeReopenNormalization,
 )
 from .types.evaluation import MeasurementIdentity
-from .types.intents import OperationResult, RequestObserved
+from .types.kinds import ALWAYS, OPT_IN, PRODUCES
+from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
-from .types.strategy import Decision, Operation, StrategyState
+from .types.strategy import Command, Operation, StrategyState, Wait
 
-ENVELOPE_SCHEMA_VERSION = 3
+ENVELOPE_SCHEMA_VERSION = 4
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from .types.kernel import CoreState, RunEnvelope
-    from .types.strategy import OperationRequest, StrategyDeclaration
+    from .types.strategy import OperationRequest, SearchDeclaration, Submission
 
 
 class ContractError(ValueError):
@@ -48,6 +49,19 @@ class ContractError(ValueError):
         self.path = path
         self.detail = detail
         super().__init__(f"{'.'.join(map(str, path))}: {detail}")
+
+
+class UnexpectedEvent(ContractError):  # noqa: N818  # LW-220423 [N818]; the name states the situation it reports, as the search API reads `raise UnexpectedEvent(phase, event)`.
+    """A search machine received an event its phase has no transition for.
+
+    Every machine ends its ``match`` with this, so a pair nobody planned for stops the run
+    with the phase and the event named instead of being ignored.
+    """
+
+    def __init__(self, phase: object, event: object) -> None:
+        self.phase = type(phase).__name__
+        self.event = str(getattr(event, "kind", type(event).__name__))
+        super().__init__(("update", self.phase), f"no transition for the event {self.event}")
 
 
 @dataclass(frozen=True)
@@ -84,7 +98,7 @@ class OperationRegistry:
     """Closed registered codec; changed schemas require explicit migration."""
 
     def __init__(self, registrations: tuple[OperationRegistration, ...] = ()) -> None:
-        self._checked_intents: InstanceMemo[bool] = InstanceMemo()
+        self._checked_records: InstanceMemo[bool] = InstanceMemo()
         self._registrations = registrations
         seen: set[str] = set()
         for index, registration in enumerate(registrations):
@@ -272,9 +286,9 @@ class OperationRegistry:
     def validate_decision(self, decision: Operation) -> Operation: ...
 
     @overload
-    def validate_decision(self, decision: Decision) -> Decision: ...
+    def validate_decision(self, decision: Command) -> Command: ...
 
-    def validate_decision(self, decision: Decision) -> Decision:
+    def validate_decision(self, decision: Command) -> Command:
         """The shell validates operation proposals before calling step."""
         if not isinstance(decision, Operation):
             return decision
@@ -282,6 +296,13 @@ class OperationRegistry:
         return Operation.model_validate_json(
             decision.model_dump_json(), context={"operation_registry": self}
         )
+
+    def validate_submission(self, decision: Submission) -> Submission:
+        """Validate the operation a ``Wait`` carries; any other decision passes through."""
+        if not isinstance(decision, Wait):
+            return decision
+        validated = self.validate_decision(decision.request)
+        return decision.model_copy(update={"request": validated})
 
     def validate_envelope(self, envelope: RunEnvelope) -> None:
         """Check what writing the envelope requires, without serializing it.
@@ -332,21 +353,21 @@ class OperationRegistry:
             )
             if self._find(schema).descriptor != descriptor:
                 raise ContractError(("registry", descriptor.kind), "descriptor migration required")
-        for intent in state.intents.intents:
-            if self._checked_intents.get(intent):
+        for record in state.records.records:
+            if self._checked_records.get(record):
                 continue
-            if isinstance(intent.request, ExecuteRegisteredOperation):
-                self.decode(intent.request.operation)
-                if intent.outcome_json is not None:
-                    self.decode_outcome(intent.request.operation.schema_ref, intent.outcome_json)
-            if intent.model_config.get("frozen"):
-                # An intent is checked against this registry's codecs, and a frozen one never
-                # changes, so each durable write re-proves only the intents it adds.
-                self._checked_intents.put(intent, fact=True)
+            if isinstance(record.request, ExecuteRegisteredOperation):
+                self.decode(record.request.operation)
+                if record.outcome_json is not None:
+                    self.decode_outcome(record.request.operation.schema_ref, record.outcome_json)
+            if record.model_config.get("frozen"):
+                # A record is checked against this registry's codecs, and a frozen one never
+                # changes, so each durable write re-proves only the records it adds.
+                self._checked_records.put(record, fact=True)
 
 
 def operation_result(operation_id: OperationId, event: RequestObserved) -> OperationResult:
-    """Let intents forward a codec-validated owner payload to Strategy.on_event."""
+    """Let records forward a codec-validated owner payload to Strategy.on_event."""
     if not event.outcome_is_registered or event.operation_schema is None or event.outcome is None:
         raise ContractError(("outcome",), "registered observation outcome required")
     result = OperationResult(
@@ -373,7 +394,10 @@ def _read_envelope_version(source: str, path: tuple[str | int, ...]) -> int:
 
 def _validate_envelope_version(version: object) -> None:
     if type(version) is not int or version != ENVELOPE_SCHEMA_VERSION:
-        raise ContractError(("schema_version",), "explicit envelope migration required")
+        raise ContractError(
+            ("schema_version",),
+            f"envelope version {version!r} is not supported; version {ENVELOPE_SCHEMA_VERSION} required",
+        )
 
 
 def _normalize[M: BaseModel](
@@ -446,8 +470,30 @@ def _validate_operation(descriptor: OperationDescriptor, path: tuple[str | int, 
         raise ContractError((*path, "cancel/watch"), "owned lifecycle requires cancel and watch")
 
 
-def validate_startup(declaration: StrategyDeclaration, available: Capabilities) -> Capabilities:
+def validate_search_declaration(declaration: SearchDeclaration) -> None:
+    """Refuse a declaration whose event kinds do not match the work it uses.
+
+    Every result event of the work the search uses must be declared (otherwise a result
+    would arrive that the search never agreed to handle), and every declared kind must be
+    one that work, or the always-delivered and opt-in kinds, can produce (otherwise the
+    declaration is dead and hides a typo).
+    """
+    needed = ALWAYS.union(*(PRODUCES[kind] for kind in declaration.uses))
+    for kind in sorted(needed - declaration.handles):
+        raise ContractError(
+            ("declaration", "handles", kind.value),
+            "event kind is produced by the declared work but the search does not declare it",
+        )
+    for kind in sorted(declaration.handles - needed - OPT_IN):
+        raise ContractError(
+            ("declaration", "handles", kind.value),
+            "event kind is declared but no declared work can produce it",
+        )
+
+
+def validate_startup(declaration: SearchDeclaration, available: Capabilities) -> Capabilities:
     """Reject required absence; expose only the declared validated intersection."""
+    validate_search_declaration(declaration)
     if declaration.required & declaration.optional:
         raise ContractError(("declaration", "optional"), "capability also required")
     missing = declaration.required - available.lifecycle
@@ -461,7 +507,7 @@ def validate_startup(declaration: StrategyDeclaration, available: Capabilities) 
 
 
 def _select_operations(
-    declaration: StrategyDeclaration, available: Capabilities
+    declaration: SearchDeclaration, available: Capabilities
 ) -> tuple[OperationDescriptor, ...]:
     offered: dict[str, OperationDescriptor] = {}
     for index, descriptor in enumerate(available.operations):

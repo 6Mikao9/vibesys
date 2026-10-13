@@ -33,9 +33,9 @@ from .common import (
     RunId,
     SchemaRef,
     Scope,
-    Seconds,
     SessionId,
     SetupFailureKind,
+    TurnFailureKind,
     Value,
     WorkspaceRef,
     validate_setup_failure,
@@ -43,6 +43,7 @@ from .common import (
 from .evaluation import Continuation, ResumeAuthorizationReceipt
 from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
+from .until import ReplyError, Until
 
 
 class Access(StrEnum):
@@ -85,7 +86,6 @@ class TurnSpec(Value):
     output_schema: SchemaRef
     tool_policy: ArtifactRef | None = None
     artifact_dependencies: tuple[ArtifactRef, ...] = ()
-    deadline_at: Seconds
     charge_class: Literal["paid", "correction", "resume", "free"]
     max_turns: int = Field(default=1, ge=1)
     predecessor: InvocationRef | None = None
@@ -123,7 +123,7 @@ class SessionView(Value):
     invocation: InvocationId | None = None
     accepted: bool = False
     resource_id: ResourceId | None = None
-    pending_intents: tuple[RequestId, ...] = ()
+    pending_records: tuple[RequestId, ...] = ()
     acceptance_sequence: int | None = Field(default=None, ge=0)
     continuation_id: ContinuationId | None = None
 
@@ -170,6 +170,8 @@ class Invocation(Value):
     input_ids: tuple[InputId, ...] = ()
     evaluation_prefix: EvaluationHistoryCursor | None = None
     pending_suspension: Continuation | None = None
+    until: Until
+    """When core ends this turn, from the ``Within`` its decision was accepted with."""
 
     @model_validator(mode="after")
     def pending_suspension_identity(self) -> Invocation:
@@ -307,6 +309,7 @@ class TurnRequested(Value):
     kind: Literal["turn_requested"] = "turn_requested"
     scope: Scope
     turn: TurnSpec
+    until: Until
 
 
 class RegisteredTurnRequested(Value):
@@ -315,6 +318,7 @@ class RegisteredTurnRequested(Value):
     kind: Literal["registered_turn_requested"] = "registered_turn_requested"
     request: ExecuteRegisteredOperation
     turn: TurnSpec
+    until: Until
 
 
 class TurnObserved(Value):
@@ -326,6 +330,8 @@ class TurnObserved(Value):
     observation: Observation
     output_schema: SchemaRef | None = None
     output_json: str | None = None
+    reply_errors: tuple[ReplyError, ...] = ()
+    """The executor's schema check of a reply it rejected, by field."""
 
 
 class SessionObserved(Value):
@@ -386,17 +392,6 @@ TURN_FAILURE_DETAIL_LIMIT = 4000
 """Longest failure text a TurnResult carries, in characters."""
 
 
-class TurnFailureKind(StrEnum):
-    """Why a turn ended without a usable reply, as a closed set strategies match on."""
-
-    PROVIDER_FAILED = "provider_failed"
-    """The executor ended the turn: the provider refused it, or its reply broke the schema."""
-    TRANSPORT_LOST = "transport_lost"
-    """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
-    CANCELLED = "cancelled"
-    """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
-
-
 class TurnResult(Value):
     """Terminal result of one turn, with the failure text when it did not succeed.
 
@@ -412,6 +407,8 @@ class TurnResult(Value):
     output_json: str | None = None
     failure: TurnFailureKind | None = None
     detail: str = Field(default="", max_length=TURN_FAILURE_DETAIL_LIMIT)
+    reply_errors: tuple[ReplyError, ...] = ()
+    """The executor's schema check of a reply it rejected, by field; empty for any other end."""
     suspending: bool = False
     """Core recorded the turn's wait, so a ``TurnSuspended`` follows when it checkpoints.
 
@@ -426,7 +423,7 @@ class TurnResult(Value):
     def failure_matches_status(self) -> TurnResult:
         """A failure kind and its text belong to a turn that did not succeed."""
         if self.observation.status == ObservationStatus.SUCCEEDED and (
-            self.failure is not None or self.detail
+            self.failure is not None or self.detail or self.reply_errors
         ):
             raise ContractValidationError("failure", "a succeeded turn carries no failure")
         return self
@@ -776,7 +773,7 @@ class SnapshotAndRetainRun(RequestBase):
 
     Sessions A requires terminal invocation proof before preparation. Success is
     separately observed with a retained RevisionRef; missing revision is unknown.
-    The shell persists intent before I/O and replays the same request identity.
+    The shell persists record before I/O and replays the same request identity.
     """
 
     kind: Literal["snapshot_and_retain_run"] = "snapshot_and_retain_run"

@@ -13,13 +13,13 @@ from vs_core.api import (
     AttemptView,
     CheckpointDecline,
     CheckpointDeclined,
+    CoreView,
     InvocationId,
     InvocationRef,
     ItemId,
     RequestId,
     RevisionId,
     RevisionRef,
-    RunView,
     SessionId,
     TurnCandidateFailed,
     TurnCandidatePending,
@@ -67,7 +67,7 @@ def _view(
     *,
     checkpoints: tuple[AttemptCheckpoint, ...] = (),
     declines: tuple[CheckpointDeclined, ...] = (),
-) -> RunView:
+) -> CoreView:
     attempt = AttemptView(
         attempt_id=ATTEMPT,
         item_id=ItemId(root="item"),

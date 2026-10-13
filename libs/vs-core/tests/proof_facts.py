@@ -10,9 +10,9 @@ from vs_core.api.proofs import Mismatch, Missing, ProofField, ProofReason, Prove
 
 
 @st.composite
-def receipt_facts(draw: st.DrawFn) -> tuple[core.Stop, core.DecisionReceipt]:
+def receipt_facts(draw: st.DrawFn) -> tuple[core.Finish, core.DecisionReceipt]:
     suffix = draw(st.integers(min_value=0, max_value=10_000))
-    decision = core.Stop(
+    decision = core.Finish(
         decision_id=core.DecisionId(root=f"stop-{suffix}"),
         scope=core.Scope(
             owner=core.RunId(root=f"run-{suffix}"), generation=draw(st.integers(0, 20))
@@ -36,7 +36,7 @@ def fact_digest(value: core.Value) -> str:
 
 
 @st.composite
-def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.Intent]:
+def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.RequestRecord]:
     suffix = draw(st.integers(0, 10_000))
     scope = core.Scope(
         owner=core.AttemptId(root=f"attempt-{suffix}"), generation=draw(st.integers(0, 20))
@@ -46,22 +46,21 @@ def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.Intent]:
         scope=scope,
         target=core.RequestId(root=f"target-{suffix}"),
         admission_id=core.DecisionId(root=f"episode-{suffix}"),
-        deadline_at=100.0,
     )
     assert request.request_id is not None
-    return request, core.Intent(
+    return request, core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=fact_digest(request),
         lifecycle=core.LifecycleClass.QUERY,
-        phase=core.IntentPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.COMPLETED,
+        until=core.Until(at=100.0),
     )
 
 
 @st.composite
-def observation_facts(draw: st.DrawFn) -> tuple[core.Intent, core.Observation]:
-    request, intent = draw(request_facts())
+def observation_facts(draw: st.DrawFn) -> tuple[core.RequestRecord, core.Observation]:
+    request, record = draw(request_facts())
     assert request.request_id is not None
     observation = core.Observation(
         event_id=core.EventId(root=f"event-{request.request_id.root}"),
@@ -77,7 +76,7 @@ def observation_facts(draw: st.DrawFn) -> tuple[core.Intent, core.Observation]:
         released=True,
         children_complete=True,
     )
-    return intent, observation
+    return record, observation
 
 
 @st.composite
@@ -101,24 +100,24 @@ def admission_facts(draw: st.DrawFn) -> tuple[core.AttemptView, core.Scope, core
 
 
 @st.composite
-def dependency_facts(draw: st.DrawFn) -> tuple[core.RequestBase, core.DecisionReceipt, core.Intent]:
+def dependency_facts(
+    draw: st.DrawFn,
+) -> tuple[core.RequestBase, core.DecisionReceipt, core.RequestRecord]:
     decision, receipt = draw(receipt_facts())
-    intent, observation = draw(observation_facts())
-    intent = intent.model_copy(
+    record, observation = draw(observation_facts())
+    record = record.model_copy(
         update={"observation": observation, "sequence": observation.sequence}
     )
     request = core.RequestBase(
         scope=decision.scope,
-        deadline_at=100.0,
-        decision_dependencies=(decision.decision_id,),
-        depends_on=(intent.request_id,),
+        depends_on=(record.request_id,),
     )
     receipt = receipt.model_copy(update={"completion": core.CompletionStatus.SUCCEEDED})
-    return request, receipt, intent
+    return request, receipt, record
 
 
 @st.composite
-def stop_facts(draw: st.DrawFn) -> tuple[core.RunState, core.Stop]:
+def stop_facts(draw: st.DrawFn) -> tuple[core.RunState, core.Finish]:
     canonical, receipt = draw(receipt_facts())
     run = core.initial_state().run.model_copy(
         update={

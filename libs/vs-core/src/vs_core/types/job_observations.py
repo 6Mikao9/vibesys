@@ -1,4 +1,4 @@
-"""Evaluation facts shared with intents without importing lifecycle state."""
+"""Evaluation facts shared with records without importing lifecycle state."""
 
 from __future__ import annotations
 

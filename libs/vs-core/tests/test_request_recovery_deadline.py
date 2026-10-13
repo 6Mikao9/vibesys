@@ -5,15 +5,14 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
+    BlockRequest,
     CancelOwnedResource,
     ChildLease,
     CoreState,
     DispatchTurn,
     EnsureSession,
     EventId,
-    Intent,
-    IntentPhase,
-    IntentsState,
+    FailureReason,
     Invocation,
     InvocationId,
     InvocationRef,
@@ -21,10 +20,13 @@ from vs_core.api import (
     Observation,
     ObservationStatus,
     ReconciliationDeadline,
+    RecordsState,
     RecoveryBarrier,
     RecoveryPhase,
     RecoveryStarted,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     ResourceId,
     RoleId,
     RunStatus,
@@ -36,18 +38,22 @@ from vs_core.api import (
     SessionsState,
     SessionView,
     TurnSpec,
+    Until,
     initial_state,
     step,
 )
 
+OWED = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 
-def pending_intent(identity: str = "setup", phase: IntentPhase = IntentPhase.DISPATCHED) -> Intent:
+
+def pending_record(
+    identity: str = "setup", phase: RequestPhase = RequestPhase.DISPATCHED
+) -> RequestRecord:
     """Persist an exact setup request with an expired reconciliation bound."""
     request_id = RequestId(root=identity)
     request = EnsureSession(
         request_id=request_id,
         scope=Scope(owner=initial_state().run.run_id, generation=0),
-        deadline_at=100.0,
         spec=SessionSpec(
             session_id=SessionId(root=identity),
             role_id=RoleId(root="worker"),
@@ -56,17 +62,17 @@ def pending_intent(identity: str = "setup", phase: IntentPhase = IntentPhase.DIS
             access=Access.WRITE_ARTIFACTS,
         ),
     )
-    return Intent(
+    return RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=f"persisted-{identity}",
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
-        reconcile_deadline_at=100.0,
+        until=Until(at=100.0),
     )
 
 
-def observed(record: Intent, **facts: object) -> Observation:
+def observed(record: RequestRecord, **facts: object) -> Observation:
     """Supply canonical identity before varying public observation facts."""
     return Observation.model_validate(
         {
@@ -81,12 +87,12 @@ def observed(record: Intent, **facts: object) -> Observation:
     )
 
 
-def recovering_state(*records: Intent) -> CoreState:
+def recovering_state(*records: RequestRecord) -> CoreState:
     """Recovery owns its barrier while preserving the persisted request ledger."""
     state = initial_state()
     return state.model_copy(
         update={
-            "intents": IntentsState(intents=records, recovery=RecoveryBarrier()),
+            "records": RecordsState(records=records, recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
     )
@@ -98,29 +104,36 @@ def reload(state: CoreState) -> CoreState:
 
 
 @example(
-    phase=IntentPhase.COMPLETED,
+    phase=RequestPhase.COMPLETED,
+    ready=True,
+    successor=True,
+    child_pending=False,
+    elapsed=0,
+)
+@example(
+    phase=RequestPhase.DISPATCHED,
     ready=True,
     successor=True,
     child_pending=False,
     elapsed=0,
 )
 @given(
-    phase=st.sampled_from([IntentPhase.DISPATCHED, IntentPhase.COMPLETED]),
+    phase=st.sampled_from([RequestPhase.DISPATCHED, RequestPhase.COMPLETED]),
     ready=st.booleans(),
     successor=st.booleans(),
     child_pending=st.booleans(),
     elapsed=st.integers(min_value=0, max_value=10_000),
 )
-def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
-    phase: IntentPhase,
+def test_a_passed_limit_ends_an_owed_root_even_when_reattached_and_cleans_its_children(
+    phase: RequestPhase,
     *,
     ready: bool,
     successor: bool,
     child_pending: bool,
     elapsed: int,
 ) -> None:
-    """Across barriers and live successors, setup expiry has no root authority."""
-    original = pending_intent(phase=phase)
+    """Across barriers and live successors, a passed limit ends the record that owes a result."""
+    original = pending_record(phase=phase)
     assert isinstance(original.request, EnsureSession)
     resource = ResourceId(root="conversation")
     original = original.model_copy(
@@ -144,19 +157,17 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
         workspace=request.scope,
         prompts=(),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=20_000.0,
         charge_class="paid",
     )
-    live = pending_intent(identity="successor").model_copy(
+    live = pending_record(identity="successor").model_copy(
         update={
             "request": DispatchTurn(
-                request_id=pending_intent(identity="successor").request_id,
+                request_id=pending_record(identity="successor").request_id,
                 scope=request.scope,
-                deadline_at=20_000.0,
                 turn=turn,
             ),
             "lifecycle": LifecycleClass.SESSION_TURN,
-            "reconcile_deadline_at": 20_000.0,
+            "until": Until(at=20_000.0),
         }
     )
     live = live.model_copy(
@@ -179,6 +190,7 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
         resource_id=resource,
     )
     invocation = Invocation(
+        until=Until(at=100.0),
         invocation=InvocationRef(
             session_id=request.spec.session_id,
             invocation_id=turn.invocation_id,
@@ -189,7 +201,7 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
         phase=SessionPhase.EXECUTING,
         observation=live.observation,
     )
-    anchor = pending_intent(identity="independent-anchor")
+    anchor = pending_record(identity="independent-anchor")
     state = (
         recovering_state(original, live, anchor)
         if successor
@@ -210,7 +222,7 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
     )
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"children": (child,) if child_pending else ()}
             )
         }
@@ -218,7 +230,7 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
     if ready:
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
+                "records": state.records.model_copy(
                     update={"recovery": RecoveryBarrier(epoch=1, phase=RecoveryPhase.READY)}
                 )
             }
@@ -234,12 +246,32 @@ def test_reattached_setup_deadline_preserves_live_root_and_child_cleanup(
     }
     assert cancellations == ({child.resource_id} if child_pending else set())
     assert result.state.sessions == state.sessions
-    retained = {intent.request_id: intent for intent in result.state.intents.intents}
-    assert all(retained[intent.request_id] == intent for intent in state.intents.intents)
-    assert result.state.intents.children == state.intents.children
+    retained = {record.request_id: record for record in result.state.records.records}
+    for record in state.records.records:
+        after = retained[record.request_id]
+        if record.request_id == original.request_id and record.phase in OWED:
+            # The limit ends a record whose result is still owed, reattached or not.
+            assert after.failure is not None
+            assert after.failure.reason == FailureReason.TIMED_OUT
+            record_after = record.model_copy(
+                update={"phase": RequestPhase.BLOCKED, "failure": after.failure}
+            )
+        else:
+            # A record that already concluded keeps its result; only its child is cleaned up.
+            record_after = record
+        assert after == record_after
+    assert result.state.records.children == state.records.children
     if not child_pending:
-        assert result.requests == ()
-        assert result.state.intents.recovery == state.intents.recovery
+        assert all(isinstance(value, BlockRequest) for value in result.requests)
+        assert bool(result.requests) == (phase in OWED)
+        assert result.state.records.recovery == state.records.recovery
+    # No spin: a second deadline for the same record changes nothing and publishes nothing.
+    again = step(
+        reload(result.state),
+        ReconciliationDeadline(request_id=original.request_id, now_at=100.0 + elapsed + 1.0),
+    )
+    assert again.state.records.records == result.state.records.records
+    assert again.events == ()
 
 
 @example(missing=False, elapsed=0)
@@ -251,7 +283,7 @@ def test_setup_deadline_without_exact_resource_proof_only_blocks_and_inspects(
     *, missing: bool, elapsed: int
 ) -> None:
     """Missing or conflicting identity does not authorize resource cancellation."""
-    original = pending_intent()
+    original = pending_record()
     original = original.model_copy(
         update={
             "request": original.request.model_copy(
@@ -270,5 +302,5 @@ def test_setup_deadline_without_exact_resource_proof_only_blocks_and_inspects(
         ReconciliationDeadline(request_id=original.request_id, now_at=100.0 + elapsed),
     )
     assert all(not isinstance(value, CancelOwnedResource) for value in result.requests)
-    assert {value.kind for value in result.requests} == {"block_intent", "inspect_request"}
-    assert result.state.intents.recovery.phase == RecoveryPhase.BLOCKED
+    assert {value.kind for value in result.requests} == {"block_request", "inspect_request"}
+    assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED

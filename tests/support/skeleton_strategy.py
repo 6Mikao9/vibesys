@@ -23,8 +23,10 @@ from vs_core.api import (
     AttemptReady,
     AttemptRef,
     AttemptSettled,
-    Decision,
+    Command,
+    CoreView,
     DecisionId,
+    Finish,
     InvocationId,
     ItemId,
     Measure,
@@ -38,16 +40,14 @@ from vs_core.api import (
     RevisionRef,
     RoleId,
     RunResultProposal,
-    RunView,
     SchemaRef,
     Scope,
+    SearchDeclaration,
     SessionId,
     SessionSpec,
     Settle,
     SettlementId,
     StartAttempt,
-    Stop,
-    StrategyDeclaration,
     StrategyEvent,
     StrategyId,
     StrategyState,
@@ -63,7 +63,7 @@ from vs_core.api import (
 
 ATTEMPT = AttemptRef(attempt_id=AttemptId(root="attempt-0"), generation=0)
 DIGEST = "ab" * 32
-DECLARATION = StrategyDeclaration(
+DECLARATION = SearchDeclaration(
     strategy_id=StrategyId(root="skeleton"), state_schema=SchemaRef(name="skeleton", version=1)
 )
 
@@ -98,7 +98,6 @@ def measurement(
         submitted_at=now_at,
         queue_allowance=880.0,
         # Absolute run-clock time, past any restart the scenarios make (the run ends at 1000 s).
-        deadline_at=now_at + 900.0,
         accuracy_stage="accuracy",
     )
 
@@ -113,12 +112,12 @@ class SkeletonStrategy(Value):
     """
 
     state: SkeletonState = SkeletonState(schema_version=1)
-    declaration: StrategyDeclaration = DECLARATION
+    declaration: SearchDeclaration = DECLARATION
     measured: bool = True
     keeps_candidate: bool = True
     cancels_after_start: bool = False
 
-    def _origin(self, view: RunView) -> float:
+    def _origin(self, view: CoreView) -> float:
         """The clock time the plans' deadlines count from.
 
         Zero, so a plan is a pure function of the run's state: a plan that changed with the
@@ -153,7 +152,7 @@ class SkeletonStrategy(Value):
             cancels_after_start=True,
         )
 
-    def _selection(self, view: RunView) -> RetainedCandidate | TrustedBaseline:
+    def _selection(self, view: CoreView) -> RetainedCandidate | TrustedBaseline:
         state = self.state
         settlement = next(
             (row for row in view.settlements if row.settlement_id == state.settlement), None
@@ -171,7 +170,7 @@ class SkeletonStrategy(Value):
     def bind(self, state: SkeletonState) -> SkeletonStrategy:
         return self.model_copy(update={"state": state})
 
-    def decide(self, view: RunView) -> Proposal[SkeletonState]:
+    def decide(self, view: CoreView) -> Proposal[SkeletonState]:
         run = Scope(owner=view.run.run_id, generation=view.run.generation)
         state = self.state
         match state.phase:
@@ -199,7 +198,7 @@ class SkeletonStrategy(Value):
                     selection=self._selection(view),
                 )
             case "stop":
-                decision = Stop(
+                decision = Finish(
                     decision_id=DecisionId(root="stop"),
                     scope=run,
                     mode="drain",
@@ -210,14 +209,14 @@ class SkeletonStrategy(Value):
                     ),
                 )
             case "cancel":
-                decision = Stop(
+                decision = Finish(
                     decision_id=DecisionId(root="stop-cancel"),
                     scope=run,
                     mode="cancel",
                     result=RunResultProposal(outcome="cancelled", reason="attempt cancelled"),
                 )
             case "failed":
-                decision = Stop(
+                decision = Finish(
                     decision_id=DecisionId(root="stop-failed"),
                     scope=run,
                     mode="cancel",
@@ -229,7 +228,7 @@ class SkeletonStrategy(Value):
                 decision = self._attempt_decision(view)
         return Proposal(state=state, decisions=(decision,))
 
-    def _attempt_decision(self, view: RunView) -> Decision:
+    def _attempt_decision(self, view: CoreView) -> Command:
         """The decision of a phase that acts on the attempt (turn, measure, settle)."""
         run = Scope(owner=view.run.run_id, generation=view.run.generation)
         attempt = Scope(owner=ATTEMPT.attempt_id, generation=0)
@@ -282,7 +281,7 @@ class SkeletonStrategy(Value):
             case _:
                 raise AssertionError(state.phase)
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
         del view
         return self.state.model_copy(update=self._advance(event))
 
@@ -315,11 +314,11 @@ class BaselineProbeStrategy(SkeletonStrategy):
     an operator stop) and what the host then cancels.
     """
 
-    def _origin(self, view: RunView) -> float:
+    def _origin(self, view: CoreView) -> float:
         """Count deadlines from now: this run is driven on a real clock, far from zero."""
         return view.run.now_at
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
+    def on_event(self, view: CoreView, event: StrategyEvent) -> SkeletonState:
         state = super().on_event(view, event)
         if isinstance(event, Accepted) and state.phase == "baseline":
             return state.model_copy(update={"phase": "done"})

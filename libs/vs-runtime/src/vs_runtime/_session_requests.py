@@ -45,6 +45,7 @@ from vs_agent.api import (
     InvalidResponse,
     InvocationConflictError,
     Pending,
+    SchemaViolation,
     SessionConfigurationError,
     SessionPersistenceError,
     SessionResumeError,
@@ -52,12 +53,15 @@ from vs_agent.api import (
     parse_typed_response,
 )
 from vs_core.api import (
+    REPLY_ERROR_MESSAGE_LIMIT,
     DispatchTurn,
     EnsureSession,
     InspectTurn,
     InvocationRef,
     ObservationStatus,
     ReissueProof,
+    ReplyError,
+    ReplyErrorCode,
     RequestId,
     RequestObserved,
     ResourceId,
@@ -267,6 +271,19 @@ class _Facts:
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
     output_schema: SchemaRef | None = None
     output_json: str | None = None
+    reply_errors: tuple[ReplyError, ...] = ()
+
+
+def _reply_errors(violations: tuple[SchemaViolation, ...]) -> tuple[ReplyError, ...]:
+    """What a validator reported about a rejected reply, as core's typed errors."""
+    return tuple(
+        ReplyError(
+            path=item.path,
+            code=ReplyErrorCode.INVALID_VALUE,
+            message=item.message[:REPLY_ERROR_MESSAGE_LIMIT],
+        )
+        for item in violations
+    )
 
 
 def _same_session(bound: SessionSpec, asked: SessionSpec) -> bool:
@@ -489,6 +506,7 @@ class RuntimeSessionRequests:
             observation=RequestObserved(
                 observation=observation,
                 setup_failure=facts.setup_failure,
+                reply_errors=facts.reply_errors,
             ),
             owner_events=events,
         )
@@ -506,6 +524,7 @@ class RuntimeSessionRequests:
             observation=observation,
             output_schema=facts.output_schema,
             output_json=facts.output_json,
+            reply_errors=facts.reply_errors,
         )
 
     # EnsureSession and DispatchTurn
@@ -690,8 +709,21 @@ class RuntimeSessionRequests:
             ) as error:
                 message = f"invocation evidence is unreadable: {error}"
                 raise AccessSettlementError(message) from error
-            if isinstance(outcome, (Completed, InvalidResponse)):
+            if isinstance(outcome, (Completed, InvalidResponse)) or (
+                isinstance(outcome, Unknown)
+                and await asyncio.to_thread(self._never_journaled, peer.invocation)
+            ):
                 await self.settlement.settle(peer)
+
+    def _never_journaled(self, invocation_id: str) -> bool:
+        """Whether the invocation has no journal row.
+
+        Dispatch intent is journaled before any provider call, so a turn with no row never
+        began (a refused resume, or a host that died before it dispatched): it wrote nothing.
+        """
+        with self._sessions.invocation_transaction() as slot:
+            state = slot.load_optional()
+        return state is None or invocation_id not in state.invocations
 
     async def _run_turn(
         self, request: DispatchTurn, bkey: str, binding: SessionBinding, dispatch: _Dispatch
@@ -801,7 +833,7 @@ class RuntimeSessionRequests:
         recorded = self._store.load(_DISPATCHES, "dispatch", record_key, DispatchRecord)
         if recorded is not None and recorded != link:
             return _rejected("invocation is dispatched by another request", binding.resource_id)
-        if turn.deadline_at <= call.context.now_at:
+        if call.context.until.at <= call.context.now_at:
             if recorded is None:
                 # No dispatch record proves no provider call began.
                 return _rejected("the turn deadline passed before dispatch", binding.resource_id)
@@ -866,6 +898,7 @@ class RuntimeSessionRequests:
                         accepted=True,
                         resource_id=resource,
                         diagnostic=f"reply fails its schema: {error.detail}",
+                        reply_errors=_reply_errors(error.violations),
                     )
                 return _Facts(
                     ObservationStatus.SUCCEEDED,
@@ -880,6 +913,7 @@ class RuntimeSessionRequests:
                     accepted=True,
                     resource_id=resource,
                     diagnostic=outcome.detail,
+                    reply_errors=_reply_errors(outcome.violations),
                 )
             case Pending():
                 return _unknown("the turn is in flight", resource)
@@ -1003,6 +1037,7 @@ class RuntimeSessionRequests:
                 target=TargetObservation(
                     observation=seen,
                     setup_failure=target.setup_failure,
+                    reply_errors=target.reply_errors,
                 ),
             ),
             owner_events=(self._turn_event(request.invocation, seen, target),),
