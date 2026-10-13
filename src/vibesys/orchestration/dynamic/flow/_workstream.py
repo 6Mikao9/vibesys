@@ -7,7 +7,7 @@ failure), and after an operator stop, which interrupts the work wherever it awai
 settling are never interrupted.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from pydantic import BaseModel
 
@@ -71,7 +71,7 @@ async def workstream(ctx: Flow, w: WorkstreamStart) -> WorkstreamDone:
 
 
 @resource
-async def attempt(ctx: Flow, w: WorkstreamStart) -> AsyncIterator[Attempt]:
+async def attempt(ctx: Flow, w: WorkstreamStart) -> AsyncGenerator[Attempt]:
     """An open attempt that is always settled, however the work inside it ends."""
     opened = await open_attempt(ctx, w)
     try:
