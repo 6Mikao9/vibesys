@@ -59,7 +59,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
-    from vs_core.api import CoreState, LifecycleCapability, RequestRetries, Strategy
+    from vs_core.api import CoreState, LifecycleCapability, RequestRetries, SearchDef
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
@@ -140,6 +140,8 @@ class CoreResources:
     """The evaluation executor, chosen by the wiring code for the run environment."""
     environment: CoreEnvironment
     roles: tuple[AgentRole, ...]
+    role_models: Mapping[str, str]
+    """The model the operator chose per role id where it differs from the run's default."""
     agent_client: AgentClientProtocol
     invocation_slot: AgentInvocationStore
     configuration: AgentConfigurationResolver
@@ -172,7 +174,9 @@ class CoreServices:
     """
 
     run_id: str
-    strategy: Strategy[Any]
+    search: SearchDef[Any]
+    config: object
+    """The config the search runs on."""
     state: CoreState
     bindings: CoreRuntimeBindings
     catalog: OperationCatalog
@@ -210,11 +214,11 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         evidence = ReceiptEvidenceLedger(receipt_store)
         bridge = _agent_bridge(plan, resources, receipt_store, evidence)
         catalog = _catalog(policy, plan, resources, artifacts, evidence)
-        catalog.require_owned(plan.strategy.declaration)
+        catalog.require_owned(plan.search.declaration)
         resolver = ProductionSessionResolver(
             ResolverInputs(
                 roles=resources.roles,
-                schemas=plan.reply_schemas,
+                schemas=plan.search.reply_schemas,
                 workspaces=resources.workspaces,
                 workspace_receipts=StoreWorkspaceReceipts(receipt_store),
                 artifacts=artifacts,
@@ -236,7 +240,8 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     )
     return CoreServices(
         run_id=run_id,
-        strategy=plan.strategy,
+        search=plan.search,
+        config=plan.config,
         state=state,
         bindings=replace(bindings, commits=resources.commit_observer),
         catalog=catalog,
@@ -276,17 +281,20 @@ def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunConte
         cancellation_bound_seconds=environment.cancellation_bound_seconds,
         cleanup_bound_seconds=environment.cleanup_bound_seconds,
         reconciliation_bound_seconds=environment.reconciliation_bound_seconds,
+        role_models=resources.role_models,
     )
 
 
 def _validate_plan(plan: CorePlan) -> None:
     """Reject a malformed plan naming the key; dataclass annotations are not enforced."""
-    for schema, model in plan.reply_schemas.items():
+    for schema, model in plan.search.reply_schemas.items():
         if not isinstance(schema, SchemaRef):
-            raise CoreCompositionError("plan.reply_schemas", f"key {schema!r} must be a SchemaRef")
+            raise CoreCompositionError(
+                "plan.search.reply_schemas", f"key {schema!r} must be a SchemaRef"
+            )
         if not (isinstance(model, type) and issubclass(model, BaseModel)):
             raise CoreCompositionError(
-                f"plan.reply_schemas[{schema.name}]", "must be a BaseModel class"
+                f"plan.search.reply_schemas[{schema.name}]", "must be a BaseModel class"
             )
     if not plan.deadline_seconds > 0:
         raise CoreCompositionError(
@@ -306,7 +314,7 @@ def _initial_state(
     return new_core_state(
         resources.run_id,
         plan.facts,
-        plan.strategy.declaration,
+        plan.search.declaration,
         offered=catalog,
         startup=CoreStartup(
             deadline_at=resources.clock.now() + plan.deadline_seconds,
@@ -391,7 +399,7 @@ def _catalog(
         retention_label=policy.retention_label,
         variables=plan.prompt_variables,
         commands=resources.commands,
-        replies=plan.reply_schemas,
+        replies=plan.search.reply_schemas,
     )
     owned = (
         ()

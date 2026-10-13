@@ -1,10 +1,11 @@
-"""Parent options projected from core evidence and retained-revision receipts.
+"""Parent options projected from the evidence of retained candidates.
 
-The catalog stores only strategy labels and choices: which hypothesis produced a
-revision, which accepted evidence IDs prove it, the decoded readings and a
-chronology ordinal. Whether a revision is *buildable* is always re-derived from
-`RunView`: the exact revision must be retained by core and its accepted accuracy
-evidence must name exactly that revision. No second evidence ledger exists.
+The catalog stores which hypothesis produced a revision, the evidence core recorded for it (the
+measurement's own `EvidenceRef`s), the decoded readings and a chronology ordinal. A snapshot
+enters the catalog only from a workstream whose workspace core closed with the candidate retained
+(see `snapshot_of`). Whether a revision is *buildable* is re-derived here from that evidence: the
+accepted accuracy evidence must name exactly that revision, be trusted and have succeeded. No
+second evidence ledger exists.
 
 Observed partials are compared only within a matching quantity, unit, direction,
 stage, evaluator, workload, environment, protocol, target and progress contract.
@@ -15,13 +16,12 @@ as a parent but is never winner-eligible.
 from typing import TYPE_CHECKING, Literal
 
 from vibesys.metrics import AcceptedReading
-from vs_core.api import (
+from vs_core.api.search import (
     EvidenceKey,
     EvidenceKind,
     EvidenceRef,
     ObservationStatus,
     RevisionRef,
-    RunView,
     Value,
 )
 
@@ -57,6 +57,8 @@ class ParentSnapshot(Value):
     revision: RevisionRef
     accuracy: AcceptedReading
     benchmark: AcceptedReading | None = None
+    proof: tuple[EvidenceRef, ...] = ()
+    """The evidence core recorded for the readings above, as the measurement returned it."""
     # Chronology of the producing evaluation; zero means unknown, never "latest".
     submission_index: int = 0
     change_summary: str | None = None
@@ -72,39 +74,20 @@ class ParentOption(Value):
     comparison_key: ComparisonKey | None = None
 
 
-def _evidence(view: RunView) -> dict[EvidenceKey, EvidenceRef]:
-    return {item.key: item for item in view.measurements}
-
-
-def retained_revisions(view: RunView) -> frozenset[RevisionRef]:
-    """Every revision the run itself retained: candidate settlements that kept their candidate.
-
-    An attempt's checkpoint is not enough. It is owned by the attempt that took it, and the
-    executor only lets a *different* attempt build on a revision once the run owns it, which
-    happens when the producing attempt's closure retains the candidate. Core records the
-    settlement only after that closure released, so the settlement is the one signal that
-    the revision is a revision of this run. Offering a checkpoint earlier let a planner name
-    a parent whose run-ownership was still being written, and the child's workspace request
-    was then rejected as permanent.
-    """
-    return frozenset(
-        item.candidate
-        for item in view.settlements
-        if item.candidate is not None and item.retention != "discard"
-    )
+def _evidence(snapshot: ParentSnapshot) -> dict[EvidenceKey, EvidenceRef]:
+    return {item.key: item for item in snapshot.proof}
 
 
 def _names_revision(evidence: EvidenceRef | None, revision: RevisionRef) -> bool:
     return evidence is not None and evidence.candidate == revision
 
 
-def eligible(snapshot: ParentSnapshot, view: RunView) -> bool:
-    """Whether core proves this snapshot is retained and its accuracy passed exactly."""
-    ledger = _evidence(view)
+def eligible(snapshot: ParentSnapshot) -> bool:
+    """Whether the recorded evidence proves this snapshot's accuracy passed on exactly its revision."""
+    ledger = _evidence(snapshot)
     accuracy = ledger.get(snapshot.accuracy.key)
     if (
-        snapshot.revision not in retained_revisions(view)
-        or snapshot.accuracy.kind is not EvidenceKind.CORRECTNESS
+        snapshot.accuracy.kind is not EvidenceKind.CORRECTNESS
         or not snapshot.accuracy.passed
         or not _names_revision(accuracy, snapshot.revision)
         or accuracy is None
@@ -140,14 +123,14 @@ def _identity(snapshot: ParentSnapshot) -> tuple[str, str, str]:
 
 
 def ingest(
-    catalog: tuple[ParentSnapshot, ...], snapshot: ParentSnapshot, view: RunView
+    catalog: tuple[ParentSnapshot, ...], snapshot: ParentSnapshot
 ) -> tuple[ParentSnapshot, ...]:
     """Publish an eligible snapshot idempotently; conflicting receipts raise.
 
     A later benchmark reading may extend the same accuracy publication, never
     rewrite its retained identity. Input order and replay never change the result.
     """
-    if not eligible(snapshot, view):
+    if not eligible(snapshot):
         return catalog
     existing = next((item for item in catalog if _identity(item) == _identity(snapshot)), None)
     if existing is not None:
@@ -166,12 +149,12 @@ def ingest(
     return tuple(sorted((*rows, snapshot), key=_identity))
 
 
-def comparison_key(snapshot: ParentSnapshot, view: RunView) -> ComparisonKey | None:
+def comparison_key(snapshot: ParentSnapshot) -> ComparisonKey | None:
     """The comparison context of a snapshot's partial, or None without authority."""
     benchmark = snapshot.benchmark
     if benchmark is None or benchmark.partial is None or benchmark.partial.unit is None:
         return None
-    proof = _evidence(view).get(benchmark.key)
+    proof = _evidence(snapshot).get(benchmark.key)
     if proof is None:
         return None
     partial = benchmark.partial
@@ -213,10 +196,10 @@ def _presentation(
     return key.model_dump_json(), _partial_rank(snapshot), _identity(snapshot)
 
 
-def options(catalog: "Iterable[ParentSnapshot]", view: RunView) -> tuple[ParentOption, ...]:
+def options(catalog: "Iterable[ParentSnapshot]") -> tuple[ParentOption, ...]:
     """Offer every buildable snapshot, labeling latest and each comparable best."""
-    rows = tuple(item for item in catalog if eligible(item, view))
-    keys = {_identity(item): comparison_key(item, view) for item in rows}
+    rows = tuple(item for item in catalog if eligible(item))
+    keys = {_identity(item): comparison_key(item) for item in rows}
     latest: dict[str, ParentSnapshot] = {}
     best: dict[ComparisonKey, ParentSnapshot] = {}
     for item in rows:
@@ -246,7 +229,6 @@ def options(catalog: "Iterable[ParentSnapshot]", view: RunView) -> tuple[ParentO
 
 def resolve(
     catalog: "Iterable[ParentSnapshot]",
-    view: RunView,
     hypothesis_id: str,
     revision_id: str | None = None,
 ) -> ParentSnapshot | None:
@@ -254,9 +236,7 @@ def resolve(
 
     Unknown or mismatched selectors return None, never the baseline.
     """
-    matches = tuple(
-        row for row in options(catalog, view) if row.snapshot.hypothesis_id == hypothesis_id
-    )
+    matches = tuple(row for row in options(catalog) if row.snapshot.hypothesis_id == hypothesis_id)
     if revision_id is None:
         return next((row.snapshot for row in matches if row.latest_verified), None)
     return next(

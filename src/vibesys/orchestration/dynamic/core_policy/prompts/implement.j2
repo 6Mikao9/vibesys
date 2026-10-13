@@ -25,19 +25,22 @@ Your earlier attempt ended at `{{ rev(prior_revision) }}`;
 That is the revision your earlier attempt ended at.
 {% endif %}
 {% endif %}
-{% if feedback %}
+{% if rejection %}
 
 Feedback from the prior attempt:
-{{ feedback }}
+{{ rejection }}
 {% endif %}
-{% if blocker %}
+{% if last_blocker %}
 
 Your earlier turn on this hypothesis ended without a candidate ({{ turns_without_candidate }} such
-turn{{ 's' if turns_without_candidate != 1 }} so far). The blocker you stated:
-{{ blocker }}
-{% if narrowed_step %}
+turn{{ 's' if turns_without_candidate != 1 }} so far).{% if last_blocker.kind.value == 'no_reply' %} That turn ended without a reply.{% endif %}{{ "" }}
+{% if last_blocker.summary %}
+The blocker you stated:
+{{ last_blocker.summary }}
+{% endif %}
+{% if last_blocker.next_step %}
 The narrower step you named for this turn:
-{{ narrowed_step }}
+{{ last_blocker.next_step }}
 Do that step and {% if agent_evaluation %}send it for trusted evaluation{% else %}nominate it{% endif %}. Do not retry the whole task.
 {% endif %}
 Another turn that ends without a candidate settles this workstream as failed.

@@ -394,6 +394,11 @@ class _ProductHostFactory:
                 ),
                 environment=self._core_environment(resources),
                 roles=self._offered_roles(resources),
+                role_models={
+                    role: spec.model
+                    for role, spec in specs.items()
+                    if spec.model and spec.model != base.model
+                },
                 agent_client=client,
                 invocation_slot=invocations,
                 configuration=configuration,

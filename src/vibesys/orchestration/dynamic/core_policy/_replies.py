@@ -1,52 +1,13 @@
-"""Reply types the agent roles answer with, keyed by the schema the strategy declares."""
+"""The run-level prompt variables and the planner example every dynamic template can read."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.models import (
-    ImplementerResult,
-    ImplementPortfolioPlan,
-    ReviewResult,
-    planner_reply_type,
-)
-from vibesys.orchestration.dynamic.strategy.api import (
-    IMPLEMENTER_REPLY,
-    JUDGE_REPLY,
-    PLANNER_REPLY,
-    PROFILER_REPLY,
-)
-from vs_core.api import WaitableReply
+from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-    from pydantic import BaseModel
-
-    from vibesys.orchestration.dynamic.strategy.api import DynamicConfig
-    from vs_core.api import SchemaRef
-
-
-class ImplementerReplyModel(WaitableReply[ImplementerResult]):
-    """An implementer or profiler turn ends with a result or a wait for evaluations."""
-
-
-class JudgeReplyModel(WaitableReply[ReviewResult]):
-    """A judge turn ends with a verdict or a wait for evaluations."""
-
-
-def reply_schemas(config: DynamicConfig) -> Mapping[SchemaRef, type[BaseModel]]:
-    """The reply type of every schema the strategy asks a role to answer with.
-
-    The planner's schema does not list the revisions it may select; the strategy
-    rejects an unknown revision with a correction naming the alternatives.
-    """
-    return {
-        PLANNER_REPLY: planner_reply_type(config.profile_offer),
-        IMPLEMENTER_REPLY: ImplementerReplyModel,
-        PROFILER_REPLY: ImplementerReplyModel,
-        JUDGE_REPLY: JudgeReplyModel,
-    }
 
 
 def run_prompt_variables(

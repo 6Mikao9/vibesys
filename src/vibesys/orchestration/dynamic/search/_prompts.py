@@ -1,8 +1,9 @@
-"""Typed data the strategy hands to the declared prompt-rendering operation.
+"""Typed data the search hands to the prompt renderer.
 
-The strategy never builds prompt text. It sends a `PromptContext`; the operation's
-executor renders the named template with `vs_prompts` and stores the artifacts.
-Each context mirrors the variables of one existing dynamic template.
+The search never builds prompt text. It sends a `PromptContext`; the render operation renders the
+role's template with `vs_prompts` and stores the artifacts. Each context mirrors the variables of
+one dynamic template. The contexts of the exchanges core starts (a reply that broke its schema, a
+resumed turn, a wait nobody recorded) are core's, rendered by the role's `EXCHANGES` templates.
 """
 
 from enum import StrEnum
@@ -10,10 +11,12 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import Field
 
+from vibesys.candidates.api import InputFailure
 from vibesys.metrics import MetricRow, PartialRow
-from vibesys.orchestration.dynamic.models import ProfileField
-from vibesys.prompts import ReplyCorrectionPrompt, ResumePrompt, WaitUnrecordedPrompt
-from vs_core.api import (
+from vibesys.orchestration.dynamic.search import _roles as roles
+from vibesys.orchestration.dynamic.search._values import Blocker, Failure, PlanProblem
+from vs_core.api.search import (
+    Correction,
     EvidenceId,
     EvidenceKind,
     ObservationStatus,
@@ -23,11 +26,9 @@ from vs_core.api import (
     Value,
 )
 
-from ._schemas import IMPLEMENTER_REPLY, JUDGE_REPLY, PLANNER_REPLY, PROFILER_REPLY
-
 
 class PromptTemplate(StrEnum):
-    """Closed set of templates the strategy can request."""
+    """Closed set of templates the search can request."""
 
     PORTFOLIO = "portfolio"
     PORTFOLIO_CORRECTION = "portfolio_correction"
@@ -76,10 +77,10 @@ class HistoryRow(Value):
     metrics: tuple[MetricRow, ...] = ()
     partial: PartialRow | None = None
     failure_tail: str = ""
-    # Why the workstream ended when no trusted check explains it.
-    failure: str = ""
-    # The Markdown fence that holds the tail: longer than any backtick run inside it.
+    failure: Failure | None = None
+    """Why the workstream ended, unless a trusted check's output already says it."""
     failure_fence: str = "```"
+    """The Markdown fence that holds the tail: longer than any backtick run inside it."""
 
 
 class ProfileHistoryStatus(StrEnum):
@@ -102,28 +103,29 @@ class ProfileHistoryRow(Value):
     decision_impact: str
     status: ProfileHistoryStatus
     evidence_ids: tuple[EvidenceId, ...] = ()
-    # What an observed profile established, as typed values: the fields it measured,
-    # its decoded statistics (GPU-active fraction, top HIP API calls by time) and the
-    # artifacts it kept. None of it is cut; only the raw `diagnosis` text is.
     captured_fields: tuple[str, ...] = ()
+    """What an observed profile established, as typed values: the fields it measured,"""
     metrics: tuple[MetricRow, ...] = ()
+    """its decoded statistics (GPU-active fraction, top HIP API calls by time),"""
     artifacts: tuple[str, ...] = ()
-    # The tail of the capture's printed output, where its attribution tables end.
+    """and the artifacts it kept. None of it is cut; only the raw ``diagnosis`` text is."""
     diagnosis: str = ""
-    # Why a profile failed; empty unless `status` is failed.
-    failure: str = ""
+    """The tail of the capture's printed output, where its attribution tables end."""
+    failure: Failure | None = None
+    """Why a profile failed; None unless ``status`` is failed."""
+    failure_output: str = ""
+    """What the failed profile's evidence printed, when it printed any."""
     detail_fence: str = "```"
 
 
 type WorkstreamHistoryRow = HistoryRow | ProfileHistoryRow
 
 
-class PlannerPrompt(RolePromptContext):
-    """Free-slot planning request."""
+class _Planning(RolePromptContext):
+    """What a planning request says; the request and its correction share it."""
 
-    reply_schema: ClassVar[SchemaRef | None] = PLANNER_REPLY
+    reply_schema: ClassVar[SchemaRef | None] = roles.PLANNER.reply_schema
 
-    template: Literal[PromptTemplate.PORTFOLIO] = PromptTemplate.PORTFOLIO
     capacity: int = Field(ge=0)
     in_flight: int = Field(ge=0)
     remaining: int = Field(ge=0)
@@ -134,27 +136,34 @@ class PlannerPrompt(RolePromptContext):
     history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
-    input_failure: str | None = None
+    input_failure: InputFailure | None = None
     profiling: bool = False
-    # The measurement fields a profile workstream may require: what the capture supplies.
-    profile_fields: tuple[ProfileField, ...] = ()
+    profile_fields: tuple[str, ...] = ()
+    """The measurement fields a profile workstream may require: what the capture supplies."""
+    problem: PlanProblem | None = None
+    """Why the earlier reply, or the earlier planning call, was not accepted; None if it was lost."""
 
 
-class PlannerCorrectionPrompt(RolePromptContext):
-    """The planning request again, with why the previous plan was not accepted."""
+class PlannerPrompt(_Planning):
+    """Free-slot planning request, in a new turn."""
 
-    reply_schema: ClassVar[SchemaRef | None] = PLANNER_REPLY
+    template: Literal[PromptTemplate.PORTFOLIO] = PromptTemplate.PORTFOLIO
+
+
+class PlannerCorrection(_Planning, Correction):
+    """The planning request again, as the correction of the earlier turn that failed.
+
+    ``problem`` says why that reply was not accepted; None when the turn was lost and the same
+    question is simply asked again.
+    """
 
     template: Literal[PromptTemplate.PORTFOLIO_CORRECTION] = PromptTemplate.PORTFOLIO_CORRECTION
-    planner: PlannerPrompt
-    error: str | None
-    scheduled: int = Field(ge=0)
 
 
 class ImplementPrompt(RolePromptContext):
     """One isolated hypothesis implementation request."""
 
-    reply_schema: ClassVar[SchemaRef | None] = IMPLEMENTER_REPLY
+    reply_schema: ClassVar[SchemaRef | None] = roles.IMPLEMENTER.reply_schema
 
     template: Literal[PromptTemplate.IMPLEMENT] = PromptTemplate.IMPLEMENT
     hypothesis_id: str
@@ -165,14 +174,13 @@ class ImplementPrompt(RolePromptContext):
     evidence: tuple[EvidenceCitation, ...] = ()
     worktree_revision: RevisionRef | None = None
     prior_revision: RevisionRef | None = None
-    feedback: str | None = None
+    rejection: str | None = None
+    """The reviewer's feedback on the candidate the previous turn produced."""
     prior_failure_tail: str = ""
-    # The implementer's own account of its latest turn that ended without a candidate, and
-    # the narrower step it named for this one; `turns_without_candidate` counts those turns.
-    blocker: str | None = None
-    narrowed_step: str | None = None
-    turns_without_candidate: int = Field(default=0, ge=0)
     prior_failure_fence: str = "```"
+    last_blocker: Blocker | None = None
+    """The latest turn of this workstream that ended without a candidate."""
+    turns_without_candidate: int = Field(default=0, ge=0)
 
 
 class ReviewEvaluation(Value):
@@ -197,7 +205,7 @@ class ReviewEvaluation(Value):
 class ReviewPrompt(RolePromptContext):
     """Independent review of one exact candidate snapshot."""
 
-    reply_schema: ClassVar[SchemaRef | None] = JUDGE_REPLY
+    reply_schema: ClassVar[SchemaRef | None] = roles.JUDGE.reply_schema
 
     template: Literal[PromptTemplate.REVIEW] = PromptTemplate.REVIEW
     hypothesis_id: str
@@ -213,7 +221,7 @@ class ReviewPrompt(RolePromptContext):
 class ProfilePrompt(RolePromptContext):
     """Measurement-only request to the profiler of one existing revision."""
 
-    reply_schema: ClassVar[SchemaRef | None] = PROFILER_REPLY
+    reply_schema: ClassVar[SchemaRef | None] = roles.PROFILER.reply_schema
 
     template: Literal[PromptTemplate.PROFILE_REQUEST] = PromptTemplate.PROFILE_REQUEST
     question: str
@@ -222,13 +230,7 @@ class ProfilePrompt(RolePromptContext):
 
 
 type PromptContext = Annotated[
-    PlannerPrompt
-    | PlannerCorrectionPrompt
-    | ImplementPrompt
-    | ReviewPrompt
-    | ProfilePrompt
-    | ResumePrompt
-    | ReplyCorrectionPrompt
-    | WaitUnrecordedPrompt,
+    PlannerPrompt | PlannerCorrection | ImplementPrompt | ReviewPrompt | ProfilePrompt,
     Field(discriminator="template"),
 ]
+"""The union the render operation carries; the exchanges core starts are core's own contexts."""
