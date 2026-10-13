@@ -111,8 +111,8 @@ class _Run:
         self._issued = {(i.path, i.label): i.count for i in base.issued}
         self._restorable = {live.path: live for live in base.flows if live.path}
         root = next(live for live in base.flows if not live.path)
-        if root.name != self._root.name:
-            raise FlowCodeChanged(0)
+        if root.name != self._root.name or not root.checkpointed:
+            raise FlowCodeChanged(0)  # the root resumes only from a snapshot it recorded
         if base.stop is not None:
             self._tasks[0].stop.set(base.stop)
         self._launch(self._tasks[0], self._root, self._snapshot_of(self._root, root))
@@ -163,7 +163,10 @@ class _Run:
             )
             flows.append(
                 LiveFlow(
-                    path=task.path, name=definition.name if definition else None, snapshot_json=text
+                    path=task.path,
+                    name=definition.name if definition else None,
+                    snapshot_json=text,
+                    checkpointed=task.checkpointed,
                 )
             )
         issued = tuple(Issued(path=p, label=lb, count=n) for (p, lb), n in self._issued.items())

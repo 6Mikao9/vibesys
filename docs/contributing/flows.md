@@ -217,7 +217,9 @@ its latest snapshot with the new code: the restart resolves each flow through `g
 fn, ...)`, which resumes the flow that had that key from its snapshot if the new code starts a
 flow of the same name there (otherwise `FlowCodeChanged`). Work since the last checkpoint is
 redone, and the results of requests in flight at the change are dropped when they arrive. The root
-is registered as `"root"` and its snapshot is the config.
+follows the same rule: its snapshot type is the config, it resumes from its latest
+`ctx.checkpoint(config)`, and a root that never recorded one raises `FlowCodeChanged` rather than
+silently redoing (and paying for) its work.
 
 ## The winner
 

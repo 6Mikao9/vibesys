@@ -134,6 +134,7 @@ class Flow:
                 ("checkpoint",), f"{definition.name} snapshots are {definition.snapshot.__name__}"
             )
         task.snapshot = snapshot
+        task.checkpointed = True
 
     # the run
 
