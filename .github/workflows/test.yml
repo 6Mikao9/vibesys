@@ -1096,7 +1096,12 @@ jobs:
       contents: read
 
     steps:
+      # Last job of the run, so its own duration is added to the critical path. It
+      # needs one stdlib-only script, so it checks out only that file instead of the tree.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci_wall_time.py
+          sparse-checkout-cone-mode: false
 
       - name: Report execution time against the budget
         env:
