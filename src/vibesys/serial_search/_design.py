@@ -94,7 +94,7 @@ async def capture_attribution(  # noqa: PLR0913  # LW-641202 [PLR0913]; the capt
             return NoDesign(reason=folded) if isinstance(folded, str) else LedgerJson.of(folded)
 
 
-async def ask_plan(  # LW-641203 [PLR0913]; the ask needs the conversation, the request, the ledger the plan is checked against and the round.
+async def ask_plan(
     planner: Session,
     prompt: PlanPrompt,
     *,
@@ -127,7 +127,7 @@ type Advise = Callable[[rounds.Ledger], Awaitable[LastProfile | None]]
 """What a search does between attribution and the plan; the profile it learned, if any."""
 
 
-async def design(  # LW-641204 [PLR0913]; the design needs the round, the preset and the cadence the ledger is read under.
+async def design(
     ctx: Flow,
     start: RoundStart,
     *,

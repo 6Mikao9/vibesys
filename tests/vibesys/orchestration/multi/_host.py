@@ -87,7 +87,13 @@ class MultiHost(SerialHost):
 
     @classmethod
     def start(
-        cls, selected: MultiConfig, *, restarting: bool, validating: bool = False, suspending: bool = False, **world: object
+        cls,
+        selected: MultiConfig,
+        *,
+        restarting: bool,
+        validating: bool = False,
+        suspending: bool = False,
+        **world: object,
     ) -> MultiHost:
         """Start the multi search of ``selected`` under a host.
 

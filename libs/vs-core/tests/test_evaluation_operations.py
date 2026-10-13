@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING, ClassVar, Literal
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from pydantic import BaseModel  # noqa: TC002 - a ClassVar annotation evaluated by pydantic
+from pydantic import (
+    BaseModel,  # noqa: TC002  # LW-641209 [TC002]; pydantic evaluates the ClassVar annotation at runtime, so the import cannot move under TYPE_CHECKING.
+)
 
 import vs_core.api as core
 from vs_core.api.testing import FlowRun
@@ -77,40 +79,32 @@ COMMAND = core.CaptureSpec(
 )
 
 
-def capture_root(ctx: core.Flow, _config: Config):  # noqa: ANN201
+async def capture_root(ctx: core.Flow, _config: Config) -> None:
     """Run the attribution command and publish what it printed."""
+    found = await ctx.evaluation.capture(COMMAND, within=30.0)
+    match found:
+        case core.CommandCapture(output=output, exit_code=code):
+            ctx.publish(Seen(printed=output, exit_code=code))
+        case core.Failed(reason=reason):
+            ctx.publish(Seen(failed=reason.value))
+        case None:
+            ctx.publish(Seen())
 
-    async def run() -> None:
-        found = await ctx.evaluation.capture(COMMAND, within=30.0)
+
+async def validate_root(ctx: core.Flow, _config: Config) -> None:
+    """Validate a recipe in an opened workspace and publish the verdict."""
+    async with open_workspace(ctx, "w") as workspace:
+        assert isinstance(workspace, core.Workspace)
+        found = await ctx.evaluation.validate_local(
+            REVISION, "recipes.json", workspace=workspace, within=30.0
+        )
         match found:
-            case core.CommandCapture(output=output, exit_code=code):
-                ctx.publish(Seen(printed=output, exit_code=code))
+            case core.LocalValidationReport(passed=passed):
+                ctx.publish(Seen(passed=passed))
             case core.Failed(reason=reason):
                 ctx.publish(Seen(failed=reason.value))
             case None:
                 ctx.publish(Seen())
-
-    return run()
-
-
-def validate_root(ctx: core.Flow, _config: Config):  # noqa: ANN201
-    """Validate a recipe in an opened workspace and publish the verdict."""
-
-    async def run() -> None:
-        async with open_workspace(ctx, "w") as workspace:
-            assert isinstance(workspace, core.Workspace)
-            found = await ctx.evaluation.validate_local(
-                REVISION, "recipes.json", workspace=workspace, within=30.0
-            )
-            match found:
-                case core.LocalValidationReport(passed=passed):
-                    ctx.publish(Seen(passed=passed))
-                case core.Failed(reason=reason):
-                    ctx.publish(Seen(failed=reason.value))
-                case None:
-                    ctx.publish(Seen())
-
-    return run()
 
 
 def start(
