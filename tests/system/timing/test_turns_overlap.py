@@ -17,7 +17,9 @@ Past bugs these guard, and the commits before which they fail:
 
 from __future__ import annotations
 
-from hypothesis import example, given, settings
+import os
+
+from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
 from tests.support.skeleton_timing import (
     Plan,
@@ -38,6 +40,17 @@ _DURATIONS = st.lists(
     st.integers(min_value=20, max_value=250).map(float), min_size=2, max_size=3, unique=True
 )
 
+# A run costs seconds of host time, so a pull request replays the pinned examples only; the
+# scheduled workflow (VIBESYS_FULL_PROPERTIES=1) also draws generated ones.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+_SETTINGS = settings(
+    max_examples=8 if _FULL else 1,
+    phases=(Phase.explicit, Phase.generate) if _FULL else (Phase.explicit,),
+    deadline=None,
+    derandomize=True,
+    database=None,
+)
+
 
 def _run(durations: list[float], cap: int) -> Timed:
     workers = len(durations)
@@ -53,7 +66,7 @@ def _run(durations: list[float], cap: int) -> Timed:
     )
 
 
-@settings(max_examples=1, deadline=None, derandomize=True, database=None)
+@_SETTINGS
 @example(durations=[30.0, 70.0])
 @example(durations=[LEASE + 5, LEASE + 8, 30.0])
 @given(durations=_DURATIONS)
@@ -77,7 +90,7 @@ def test_turns_run_at_once_and_each_is_followed_up_when_it_ends(durations: list[
     assert timed.holds_lease
 
 
-@settings(max_examples=1, deadline=None, derandomize=True, database=None)
+@_SETTINGS
 @example(durations=[30.0, 70.0, 50.0], width=2)
 @given(durations=_DURATIONS, width=st.integers(min_value=1, max_value=3))
 def test_turns_in_flight_never_exceed_the_runs_parallelism(

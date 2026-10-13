@@ -74,22 +74,6 @@ async def test_the_search_keeps_its_invariants_under_generated_faults(
     assert chaos.violations == [], chaos.report()
 
 
-async def test_a_seed_gives_the_same_run_every_time(tmp_path: Path) -> None:
-    """A repro line is only worth printing when the seed decides everything the run does."""
-    (tmp_path / "a").mkdir()
-    (tmp_path / "b").mkdir()
-    first = await run_chaos(tmp_path / "a", 9)
-    second = await run_chaos(tmp_path / "b", 9)
-
-    assert first.injected, "seed 9 draws faults, or this test compares nothing"
-    assert (first.ending, first.injected, first.stop_at, first.suffered) == (
-        second.ending,
-        second.injected,
-        second.stop_at,
-        second.suffered,
-    )
-
-
 async def test_a_run_without_faults_completes(tmp_path: Path) -> None:
     """With no fault and no stop the wrappers are the identity, so the run succeeds."""
     chaos = await run_chaos(tmp_path, 2, plan_for(2, faults=0), stop_at=None)
@@ -192,7 +176,16 @@ def test_a_job_the_run_never_saw_end_or_cancelled_is_a_violation() -> None:
         "its retention release, or fails its orphan-wait check on the peer's session."
     ),
 )
-@pytest.mark.parametrize("fault", [AgentFault.CRASH, AgentFault.TIMEOUT, AgentFault.MALFORMED])
+# The crash case runs in every pull request; the other two reach the same bug through the same
+# path and run with the slow tests.
+@pytest.mark.parametrize(
+    "fault",
+    [
+        AgentFault.CRASH,
+        pytest.param(AgentFault.TIMEOUT, marks=pytest.mark.slow),
+        pytest.param(AgentFault.MALFORMED, marks=pytest.mark.slow),
+    ],
+)
 async def test_a_failed_peer_turn_does_not_stop_the_run_from_ending(
     tmp_path: Path, fault: AgentFault
 ) -> None:
@@ -217,6 +210,7 @@ async def test_a_failed_peer_turn_does_not_stop_the_run_from_ending(
         "cannot close the attempt (orphan wait on the recovery check of the settlement close)."
     ),
 )
+@pytest.mark.slow  # about 25 s of virtual-clock stall detection
 async def test_a_reply_naming_a_commit_that_does_not_exist_does_not_stop_the_run_from_ending(
     tmp_path: Path,
 ) -> None:

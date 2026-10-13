@@ -16,10 +16,11 @@ bound (#1370): the obeyed-cancel bound below.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import example, given, settings
+from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_timing import (
@@ -38,11 +39,20 @@ from vs_core.api import RunStatus, StopMode
 STOP_BOUND_S = 5.0
 
 _MODES = st.sampled_from(StopMode)
-# A run costs seconds of host time, so the explicit examples pin the cases and one draw explores.
-_SETTINGS = settings(max_examples=1, deadline=None, derandomize=True, database=None)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+# A run costs seconds of host time, so a pull request replays the pinned examples only; the
+# scheduled workflow (VIBESYS_FULL_PROPERTIES=1) also draws generated ones.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+_SETTINGS = settings(
+    max_examples=8 if _FULL else 1,
+    phases=(Phase.explicit, Phase.generate) if _FULL else (Phase.explicit,),
+    deadline=None,
+    derandomize=True,
+    database=None,
+)
 
 
 def _one_worker() -> StaggeredStrategy:

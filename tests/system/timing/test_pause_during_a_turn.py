@@ -6,9 +6,10 @@ after the operator asked. The pause is acted on within one control poll and the 
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
-from hypothesis import example, given, settings
+from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
 from tests.support.skeleton_timing import (
     Plan,
@@ -23,6 +24,17 @@ _TURN_S = 100.0
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+# A run costs seconds of host time, so a pull request replays the pinned examples only; the
+# scheduled workflow (VIBESYS_FULL_PROPERTIES=1) also draws generated ones.
+_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+_SETTINGS = settings(
+    max_examples=8 if _FULL else 1,
+    phases=(Phase.explicit, Phase.generate) if _FULL else (Phase.explicit,),
+    deadline=None,
+    derandomize=True,
+    database=None,
+)
+
 
 def _into_the_turn(seconds: float) -> Callable[[TurnTimeline, object], bool]:
     def reached(timeline: TurnTimeline, _cluster: object) -> bool:
@@ -31,7 +43,7 @@ def _into_the_turn(seconds: float) -> Callable[[TurnTimeline, object], bool]:
     return reached
 
 
-@settings(max_examples=1, deadline=None, derandomize=True, database=None)
+@_SETTINGS
 @example(poll=7.0, seconds=20.0)
 @given(poll=st.sampled_from([1.0, 7.0, 30.0]), seconds=st.floats(min_value=1.0, max_value=90.0))
 def test_a_pause_during_a_long_turn_is_acted_on_within_one_control_poll(
