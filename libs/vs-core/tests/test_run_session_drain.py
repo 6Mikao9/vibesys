@@ -94,7 +94,9 @@ class Executor:
         self.feed(
             core.RunControlEvent(
                 control=core.ControlInput(
-                    control_id=core.ControlId(root=f"control-{self.stops}"), action="stop"
+                    control_id=core.ControlId(root=f"control-{self.stops}"),
+                    action="stop",
+                    mode=core.StopMode.DRAIN,
                 ),
                 now_at=self.now,
                 result=core.RunResultProposal(outcome="cancelled", reason=f"stop {variant}"),

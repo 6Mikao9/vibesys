@@ -8,6 +8,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 from .test_measurements import committed, observation, requested
 
@@ -20,7 +21,7 @@ caps = st.integers(min_value=0, max_value=60).map(lambda quarters: quarters * QU
 
 def limits(interval: float, extra: float) -> core.Limits:
     """Run limits whose backoff cap is never below the cadence."""
-    return core.Limits(observe_interval=interval, observe_backoff_cap=interval + extra)
+    return sample_limits(observe_interval=interval, observe_backoff_cap=interval + extra)
 
 
 class World:
@@ -255,4 +256,4 @@ def test_a_backoff_cap_below_the_interval_is_refused(interval: float, shortfall:
     if cap <= 0:
         return
     with pytest.raises(ValueError, match="observe_backoff_cap"):
-        core.Limits(observe_interval=interval, observe_backoff_cap=cap)
+        sample_limits(observe_interval=interval, observe_backoff_cap=cap)

@@ -67,7 +67,6 @@ from vs_core.api import (
     ItemId,
     KernelNotImplementedError,
     LifecycleClass,
-    Limits,
     Observation,
     ObservationStatus,
     Operation,
@@ -117,6 +116,7 @@ from vs_core.api import (
     project,
     step,
 )
+from vs_core.api.testing import sample_limits
 
 
 def reload_state(state: CoreState, codec: OperationRegistry | None = None) -> CoreState:
@@ -485,7 +485,7 @@ def invocation_state(
                 }
             ),
             "run": state.run.model_copy(
-                update={"limits": Limits(max_turns=10, max_attempts=10, max_retries=5)}
+                update={"limits": sample_limits(max_turns=10, max_attempts=10, max_reask_chain=5)}
             ),
         }
     )
@@ -525,7 +525,7 @@ def test_dispatch_guards_cover_every_charge_class_and_optional_predecessor(
         state = state.model_copy(update={"attempts": AttemptsState(attempts=(owner,))})
     else:
         state = state.model_copy(
-            update={"run": state.run.model_copy(update={"limits": Limits(max_turns=0)})}
+            update={"run": state.run.model_copy(update={"limits": sample_limits(max_turns=0)})}
         )
     event = InvocationChargeRequested(
         attempt=owner_ref(), invocation=state.sessions.invocations[0].invocation
@@ -1191,7 +1191,9 @@ def test_a_refund_authority_can_credit_only_one_recorded_receipt(
         update={
             "attempts": AttemptsState(attempts=(owner,)),
             "sessions": state.sessions.model_copy(update={"interrupts": (claim,)}),
-            "run": state.run.model_copy(update={"limits": Limits(max_turns=10, max_refunds=2)}),
+            "run": state.run.model_copy(
+                update={"limits": sample_limits(max_turns=10, max_refunds=2)}
+            ),
         }
     )
     event = AttemptChargeRefundRequested(
@@ -2740,7 +2742,7 @@ def test_invalid_refund_cannot_emit_exhaustion_feedback(capacity: int, bad_proof
             "attempts": AttemptsState(attempts=(owner,)),
             "sessions": state.sessions.model_copy(update={"interrupts": (claim,)}),
             "run": state.run.model_copy(
-                update={"limits": Limits(max_turns=10, max_refunds=capacity)}
+                update={"limits": sample_limits(max_turns=10, max_refunds=capacity)}
             ),
         }
     )

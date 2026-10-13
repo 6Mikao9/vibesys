@@ -10,6 +10,14 @@ from vibesys.candidates._baseline import (
     propose,
     stages,
 )
+from vibesys.candidates._budget import (
+    UNBOUNDED_DEADLINE_AT,
+    Bounds,
+    RunBudget,
+    limits_for,
+    run_deadline_at,
+    turn_chain,
+)
 from vibesys.candidates._config import CandidateConfig
 from vibesys.candidates._run import (
     EligibleRound,
@@ -26,29 +34,37 @@ from vibesys.candidates._run import (
 from vibesys.candidates._settlement import (
     STOPPED,
     FinishedAttempt,
+    Gates,
     assessment,
-    beats_baseline,
     measurement,
     outcome_of,
     settle_for,
 )
+from vibesys.candidates._winner import Unranked, best_by, improves_on
 
 __all__ = [
     "STOPPED",
+    "UNBOUNDED_DEADLINE_AT",
     "BaselineStage",
     "BaselineState",
+    "Bounds",
     "CandidateConfig",
     "EligibleRound",
     "FinishedAttempt",
+    "Gates",
     "InputMeasurement",
+    "RunBudget",
     "RunPhase",
+    "Unranked",
     "Winner",
     "after_adoption",
     "after_failed_adoption",
     "assessment",
-    "beats_baseline",
+    "best_by",
     "choose_winner",
     "ending_reason",
+    "improves_on",
+    "limits_for",
     "measurement",
     "on_measurement",
     "on_readings",
@@ -56,8 +72,10 @@ __all__ = [
     "outcome_of",
     "proposal",
     "propose",
+    "run_deadline_at",
     "selection_of",
     "settle_for",
     "stages",
     "stop",
+    "turn_chain",
 ]

@@ -186,7 +186,7 @@ def _validate_correction(
         if previous is None or depth > len(state.invocations):
             raise ContractValidationError("turn.predecessor", "invalid correction chain")
         chain = previous
-    if depth > context.run.limits.max_retries:
+    if depth > context.run.limits.max_reask_chain:
         raise ContractValidationError("turn.predecessor", "correction retry bound exhausted")
 
 

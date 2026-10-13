@@ -86,7 +86,7 @@ from vs_core.api import (
 )
 from vs_core.flows import search
 from vs_core.testing.builders import initial_state
-from vs_core.types.common import Observation
+from vs_core.types.common import Observation, StopMode
 from vs_core.types.sessions import TurnFailureKind
 
 if TYPE_CHECKING:
@@ -423,11 +423,13 @@ class FlowRun[C]:
         self._timeline.append(f"{asked.decision.root}:{event.kind}")
         self.send(event)
 
-    def stop(self, control: str = "stop") -> None:
-        """The operator (or the host, at the deadline) asks the run to stop."""
+    def stop(self, control: str = "stop", mode: StopMode = StopMode.DRAIN) -> None:
+        """The operator (or the host, at the deadline) asks the run to stop, draining or not."""
         self._timeline.append(control)
         self.send(
-            StopRequested(control=ControlInput(control_id=ControlId(root=control), action="stop"))
+            StopRequested(
+                control=ControlInput(control_id=ControlId(root=control), action="stop", mode=mode)
+            )
         )
 
     def advance_to(self, time: Seconds) -> None:

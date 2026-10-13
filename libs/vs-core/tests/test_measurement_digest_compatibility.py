@@ -4,13 +4,16 @@ The digests below were computed by the code on main before ``required_outputs`` 
 the plan's and the request's, which also drop ``deadline_at`` (a plan states no deadline). A
 stage that requires nothing must serialize byte-identically to that code, or every stored
 intent, receipt, submission budget key and recipe digest stops matching and a run started
-earlier cannot resume.
+earlier cannot resume. The digests were last re-pinned when the task's ``accuracy_gated``
+trust declaration became part of the recipe, plan and identity: runs stored before that
+declaration existed are refused rather than resumed.
 """
 
 from hypothesis import given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api import EvidenceKind
 
 from .proof_digest import value_digest as digest
 
@@ -30,6 +33,7 @@ def _recipe() -> core.MeasurementRecipe:
         ),
         queue_allowance=5.0,
         accuracy_stage="accuracy",
+        accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
     )
 
 
@@ -40,11 +44,11 @@ def test_stages_that_require_nothing_keep_the_digests_stored_by_main() -> None:
     scope = core.Scope(owner=core.initial_state().run.run_id, generation=0)
     decision = core.Measure(decision_id=core.DecisionId(root="d"), scope=scope, plan=plan)
     request = core.MeasurementRequested(scope=scope, plan=plan)
-    assert digest(recipe) == "a5af68801ca8c2ec7dae9e831874844b8c3be0611aaf0bc20083f1e2a5366564"
-    assert digest(plan) == "beb7e2685085d18839c235f03878bda736220b69d38de7f92a6e613a2f236d57"
-    assert digest(identity) == "90a714606a5a0ab0984d11502d70b1d75616bae4d5fd4e4f9b54ec8d50d8604f"
-    assert digest(identity)[:24] == "90a714606a5a0ab0984d1150"  # the submission budget key
-    assert digest(request) == "748b5f5349a1cee91684d3b117b685d6569685758153861c500f1facbfbf494d"
+    assert digest(recipe) == "508ccb3ff4dfe8a94b18c9584ca1e14bade087e56e45e9562f549da48f8edf4a"
+    assert digest(plan) == "075c507fffa830d744b1cc5b937c275ab2a86d0022fd75d66bd8d085a2204b88"
+    assert digest(identity) == "7ebd450cf7c5c10f8192b234b561e1acafe7afbd6cb50fcdf30858ea156bbeea"
+    assert digest(identity)[:24] == "7ebd450cf7c5c10f8192b234"  # the submission budget key
+    assert digest(request) == "6a527dd89174808ce79325f7db627d3f0576ac60f4791e45578294345a40046c"
     # A decision's own digest is not pinned: decisions no longer carry deadlines or
     # dependencies, so envelopes stored by main are refused rather than resumed (version 4).
     assert "required_outputs" not in decision.model_dump_json()

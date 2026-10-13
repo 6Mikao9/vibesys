@@ -5,6 +5,7 @@ A fake world answers core's requests (`Answer`), a `Harness` fixes the run's fac
 strategy's tests and the runtime's shell tests answer requests the same way.
 """
 
+from vs_core.testing.builders import sample_limits, sample_retries
 from vs_core.testing.drive import (
     Answer,
     Failed,
@@ -34,4 +35,6 @@ __all__ = [
     "Violation",
     "liveness",
     "new_run",
+    "sample_limits",
+    "sample_retries",
 ]

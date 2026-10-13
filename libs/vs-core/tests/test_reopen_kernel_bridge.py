@@ -72,7 +72,7 @@ def test_reopened_admission_uses_canonical_target_request_and_capacity(
         scope=decision.scope,
         operation_id=core.OperationId(root="operation:reopen"),
         operation=codec.encode(decision.request),
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
     )
     assert original.request_id is not None
     continuation_guard = core.ContinuationReopenRequested(

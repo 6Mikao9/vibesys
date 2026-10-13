@@ -195,7 +195,7 @@ depends_on = ["server.host_api", "server.host_helper_requests", "vs_project", "v
 [[modules]]
 path = "vibesys"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_identity"]
+depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_identity", "vs_core"]
 
 [[modules]]
 # Typed product configuration failures shared by public transports. No
@@ -238,7 +238,7 @@ depends_on = ["vibesys.api._session", "vibesys.api.auxiliary", "vibesys.api.cont
 
 [[modules]]
 path = "vibesys.api._session"
-depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.core_run", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.orchestration.agent_options", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_sim.api"]
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.core_run", "vibesys.run.host", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.orchestration.agent_options", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_sim.api", "vs_core"]
 
 [[modules]]
 path = "vibesys.api.auxiliary"
@@ -385,7 +385,7 @@ depends_on = ["vibesys", "vibesys.errors", "vibesys.run.evaluation", "vibesys.ru
 [[modules]]
 path = "vibesys.run.evaluation"
 layer = "orchestration_host"
-depends_on = ["vs_evaluation.api", "vibesys", "vibesys.inputs", "vibesys.run.contracts", "vs_runtime", "vs_sim.api"]
+depends_on = ["vs_evaluation.api", "vibesys", "vibesys.inputs", "vibesys.run.contracts", "vs_runtime", "vs_sim.api", "vs_core"]
 
 [[modules]]
 path = "vibesys.run.profilers"
@@ -1227,7 +1227,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.run.contracts"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.strategy", "vibesys.run.contracts", "vibesys.candidates"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]
@@ -1297,7 +1297,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.single.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.single.models", "vibesys.orchestration.single.strategy", "vibesys.run.contracts"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.single.models", "vibesys.orchestration.single.strategy", "vibesys.run.contracts", "vibesys.candidates"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.single.core_policy"]
@@ -1346,7 +1346,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.multi.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.multi.models", "vibesys.orchestration.multi.strategy", "vibesys.orchestration.profilers", "vibesys.run.contracts"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.metrics", "vibesys.orchestration.multi.models", "vibesys.orchestration.multi.strategy", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vibesys.candidates"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.multi.core_policy"]
@@ -1395,7 +1395,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.evolve.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.strategy", "vibesys.orchestration.profilers", "vibesys.run.contracts"]
+depends_on = ["vs_core", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.strategy", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vibesys.candidates"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.evolve.core_policy"]

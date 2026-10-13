@@ -260,6 +260,10 @@ class BenchmarkCommand(InputCommand):
 
     result: BenchmarkResult | None = None
     result_protocol: Literal[2] | None = None
+    #: The task's trust rule: a benchmark counts as evidence only if its accuracy stage
+    #: passed. A task whose benchmark is meaningful without a passing accuracy check
+    #: declares ``requires_accuracy = false``.
+    requires_accuracy: StrictBool = True
 
     @model_validator(mode="after")
     def _one_result_contract(self) -> BenchmarkCommand:
@@ -511,6 +515,8 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
         lines.append(f"timeout_seconds = {manifest.benchmark.timeout_seconds}")
     if manifest.benchmark.result_protocol is not None:
         lines.append(f"result_protocol = {manifest.benchmark.result_protocol}")
+    if not manifest.benchmark.requires_accuracy:
+        lines.append("requires_accuracy = false")
     if manifest.benchmark.result is not None:
         lines.extend(
             [

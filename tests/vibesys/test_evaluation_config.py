@@ -33,3 +33,45 @@ def test_evaluation_rejects_unknown_settings() -> None:
         Config.model_validate(
             {"model": {"name": "test"}, "evaluation": {"queue_allowance_second": 900}}
         )
+
+
+def _evaluation(**settings: object) -> Config:
+    return Config.model_validate({"model": {"name": "test"}, "evaluation": settings})
+
+
+@given(
+    infrastructure=st.integers(min_value=1, max_value=5),
+    ambiguous=st.integers(min_value=1, max_value=5),
+    limit=st.integers(min_value=0, max_value=10),
+)
+def test_the_backend_retry_declarations_reach_the_run_exactly_as_configured(
+    infrastructure: int, ambiguous: int, limit: int
+) -> None:
+    if ambiguous > infrastructure:
+        with pytest.raises(ValidationError, match="ambiguous_attempts"):
+            _evaluation(infrastructure_attempts=infrastructure, ambiguous_attempts=ambiguous)
+        return
+    evaluation = _evaluation(
+        infrastructure_attempts=infrastructure,
+        ambiguous_attempts=ambiguous,
+        request_retry_limit=limit,
+    ).evaluation
+    assert evaluation.evaluation_retries().infrastructure_attempts == infrastructure
+    assert evaluation.evaluation_retries().ambiguous_attempts == ambiguous
+    assert evaluation.request_retries().limit == limit
+
+
+@pytest.mark.parametrize(
+    ("setting", "value"),
+    [
+        ("infrastructure_attempts", 6),
+        ("infrastructure_attempts", 0),
+        ("request_retry_limit", 11),
+        ("request_backoff_seconds", 0),
+    ],
+)
+def test_a_retry_bound_beyond_what_core_allows_is_refused_at_load(
+    setting: str, value: object
+) -> None:
+    with pytest.raises(ValidationError):
+        _evaluation(**{setting: value})

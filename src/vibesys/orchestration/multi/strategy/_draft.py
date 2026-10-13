@@ -100,5 +100,4 @@ def measurement_plan(
         purpose=purpose,
         now_at=draft.view.run.now_at,
         stages=stages,
-        submission_limit=draft.config.max_input_measurement_attempts,
     )

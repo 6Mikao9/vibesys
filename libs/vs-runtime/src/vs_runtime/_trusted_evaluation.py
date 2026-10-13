@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
 
+from vs_core.api import EvidenceKind
 from vs_evaluator_protocol.api import (
     ErrorRecord,
     Hello,
@@ -192,6 +193,13 @@ class TrustedEvaluationPlan(BaseModel):
     _check_startup_causes = field_validator("candidate_startup_causes")(
         check_startup_cause_patterns
     )
+
+    accuracy_gated: tuple[EvidenceKind, ...] = ()
+    """The task's trust rule: kinds of evidence that count only if the accuracy stage passed.
+
+    Declared by the task's evaluation definition and carried into every measurement plan;
+    core holds no such rule of its own.
+    """
 
     def execution_budget_seconds(
         self, stages: tuple[Literal["accuracy", "benchmark", "profile", "framework_setup"], ...]

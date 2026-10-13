@@ -87,7 +87,7 @@ def test_an_interruption_whose_checkpoint_keeps_answering_retryably_is_retried_t
     """
     state, snapshot = _interrupted_until_checkpoint()
     assert snapshot.request_id is not None
-    limit = state.run.limits.max_retries
+    limit = state.run.limits.request_retries.limit
     clock = 10.0
     asks = 0
     events: list[core.StrategyEvent] = []

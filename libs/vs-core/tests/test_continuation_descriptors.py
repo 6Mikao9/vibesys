@@ -53,7 +53,7 @@ def registered_yield() -> tuple[core.CoreState, core.Continuation]:
         scope=invocation.scope,
         admission_id=record.request.admission_id,
         operation=codec.encode(payload),
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
     )
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,

@@ -35,5 +35,4 @@ def verification_plan(
         purpose="official",
         now_at=now_at,
         stages=("accuracy",),
-        submission_limit=config.max_measurement_submissions,
     )

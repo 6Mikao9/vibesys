@@ -121,12 +121,13 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
             environment_digest=job.plan.environment_digest,
             recipe_digest=job.plan.recipe.digest,
             stages=(core.MeasurementStageIdentity(stage_id="measure"),),
+            accuracy_gated=(),
         )
         budgets.append(
             core.SubmissionBudget(
                 scope=job.scope,
                 identity=identity,
-                limit=job.plan.submission_limit,
+                limit=core.MAX_SUBMISSIONS_PER_MEASUREMENT,
                 receipts=(core.PreparedSubmissionReceipt(request_id=job.submission_id, ordinal=1),),
             )
         )
@@ -522,7 +523,7 @@ def test_registered_history_requires_declared_codec_bound_measurement_identity(
             decision_id=decision.decision_id,
             operation_id=core.OperationId(root=f"operation:{decision.decision_id.root}"),
             operation=codec.encode(decision.request),
-            retry_limit=state.run.limits.max_retries,
+            retry_limit=state.run.limits.request_retries.limit,
         )
         source = state.records.records[position + 1]
         sources.append(

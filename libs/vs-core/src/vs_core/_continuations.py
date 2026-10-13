@@ -1216,7 +1216,7 @@ def _reopen_decision(
             and request.scope == Scope(owner=context.run.run_id, generation=context.run.generation)
             and request.operation_id == OperationId(root=identity)
             and request.request_id == RequestId(root=identity)
-            and request.retry_limit == context.run.limits.max_retries
+            and request.retry_limit == context.run.limits.request_retries.limit
             and request.decision_id in (None, decision.decision_id)
         ):
             return decision

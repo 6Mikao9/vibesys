@@ -134,7 +134,7 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
         ),
         WaitKind.RETRY: Resolution(
             outcome=Outcome.RETRIES_THEN_FAILS,
-            reason="after Limits.max_retries retries the request ends failed, not accepted",
+            reason="after Limits.request_retries retries the request ends failed, not accepted",
         ),
         WaitKind.TURN_ACQUISITION: Resolution(
             outcome=Outcome.FAILS_WITH_REASON,

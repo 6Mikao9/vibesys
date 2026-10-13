@@ -22,7 +22,7 @@ Adoption stores its progress in ``SettlementState.adoption``:
   and the fence is released.
 
 Rounds are bounded in one place, ``_may_start_round``: the ledger holds at most
-``Limits.max_retries + 1`` AdoptRevision rounds per selection, whether they came
+``Limits.max_adoption_rounds`` AdoptRevision rounds per selection, whether they came
 from an automatic retry or from the strategy proposing the winner again.
 """
 
@@ -100,8 +100,8 @@ def _rounds(records: RecordsState, selection: Selection) -> int:
 
 
 def _may_start_round(context: SettlementContext, selection: Selection) -> bool:
-    """The one bound on rounds: the first round plus ``max_retries`` more."""
-    return _rounds(context.records, selection) <= context.run.limits.max_retries
+    """The one bound on rounds: ``max_adoption_rounds``, the first included."""
+    return _rounds(context.records, selection) < context.run.limits.max_adoption_rounds
 
 
 def _ledger_has(records: RecordsState, request_id: RequestId, selection: Selection) -> bool:

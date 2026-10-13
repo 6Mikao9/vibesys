@@ -261,6 +261,7 @@ def fixture(
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
+        accuracy_gated=(),
     )
     jobs = tuple(
         core.OwnedJob(
@@ -643,7 +644,7 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
         decision_id=decision.decision_id,
         scope=decision.scope,
         operation=codec.encode(payload),
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
         admission_id=owner.admission_id,
     )
     assert request.request_id is not None
@@ -1125,7 +1126,7 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
             scope=invocation.scope,
             admission_id=record.request.admission_id,
             operation=codec.encode(payload),
-            retry_limit=state.run.limits.max_retries,
+            retry_limit=state.run.limits.request_retries.limit,
         )
         invocation = invocation.model_copy(update={"registered_operation": request.operation_id})
         receipt = core.DecisionReceipt(

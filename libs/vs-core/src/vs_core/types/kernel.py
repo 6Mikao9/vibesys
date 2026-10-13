@@ -116,7 +116,7 @@ class RunState(Value):
     deadline_at: Seconds
     facts: RunFacts
     capabilities: Capabilities = Capabilities()
-    limits: Limits = Limits()
+    limits: Limits
     requirements: EvidenceRequirements = EvidenceRequirements()
     declaration: SearchDeclaration
     controls: tuple[ControlInput, ...] = ()

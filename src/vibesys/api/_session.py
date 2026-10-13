@@ -23,6 +23,7 @@ from vibesys.run.profilers import (
     validate_attribution_command,
     validate_run_request,
 )
+from vs_core.api import StopMode
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunStopped
 from vs_sim.api import OsThreads
@@ -386,9 +387,12 @@ class _LocalRunSession:
         """Resume the run and switch a quota-paused run to its configured fallback."""
         self._integration.control.resume_with_fallback()
 
-    def stop(self) -> None:
-        """Request the run terminate."""
-        self._integration.control.request_stop()
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        """Request the run terminate; the operator chooses to drain or cancel work in flight.
+
+        Draining is the default at this edge; core and the runtime take the mode explicitly.
+        """
+        self._integration.control.request_stop(mode)
 
     def close(self) -> None:
         """Close the run-owned auxiliary scope, preserving transferred scopes."""

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits, sample_retries
 from vs_core.flows import search
 from vs_core.testing.drive import (
     Answer,
@@ -202,7 +203,8 @@ def toy_search(
                     group.start(f"w{started}", workstream, f"w{started}", started, roles)
                     started += 1
                 ended = await ctx.first(group)
-                assert isinstance(ended, Done)
+                if not isinstance(ended, Done):
+                    break  # the run was stopped: the group wound its workstreams down
                 done.append(ended)
         ctx.publish(Summary(done=tuple(done)))
 
@@ -221,7 +223,14 @@ FACTS = core.RunFacts(
     workload_digest="workload",
     environment_digest="environment",
 )
-LIMITS = core.Limits(max_attempts=8, max_turns=60, max_parallel=4, max_retries=2, max_refunds=2)
+LIMITS = sample_limits(
+    max_attempts=8,
+    max_turns=60,
+    max_parallel=4,
+    max_reask_chain=2,
+    request_retries=sample_retries(2),
+    max_refunds=2,
+)
 
 
 def revision_of(attempt: str) -> core.RevisionRef:
@@ -452,6 +461,7 @@ def run_toy(
     limits: core.Limits = LIMITS,
     faults: Faults | None = None,
     definition: core.SearchDef[Config] = toy,
+    events: tuple[core.CoreEvent, ...] = (),
 ) -> Trace:
     """Drive the toy search on the real core against ``host`` until nothing more happens."""
     chosen = config or Config()
@@ -464,6 +474,7 @@ def run_toy(
         shell_events=True,
         schemas=definition.reply_schemas,
         envelope_type=core.RunEnvelope[core.FlowState],
+        events=events,
     )
     return drive(definition.driver(chosen, OPERATIONS.registry()), chosen, host, harness, faults)
 

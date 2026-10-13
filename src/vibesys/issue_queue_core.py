@@ -165,6 +165,10 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         queue_allowance_seconds=context.queue_allowance_seconds,
         observe_interval_seconds=context.observe_interval_seconds,
         observe_backoff_cap_seconds=context.observe_backoff_cap_seconds,
+        request_retries=context.request_retries,
+        cancellation_bound_seconds=context.cancellation_bound_seconds,
+        cleanup_bound_seconds=context.cleanup_bound_seconds,
+        reconciliation_bound_seconds=context.reconciliation_bound_seconds,
         max_run_seconds=context.max_run_seconds,
     )
     policy = resolve_core_policy(

@@ -45,6 +45,7 @@ from vs_core.api import (
     RunResultProposal,
     RunStatus,
     SessionPhase,
+    StopMode,
     orphan_waits,
     project,
 )
@@ -228,7 +229,7 @@ class RunControlBridge:
             return tuple(events)
         if self._channel.stop_requested():
             self._stopped = True
-            events.append(self._event("stop", now_at))
+            events.append(self._event("stop", now_at, mode=self._channel.stop_mode()))
         elif self._channel.pause_requested() != self._paused:
             self._paused = not self._paused
             events.append(self._event("pause" if self._paused else "resume", now_at))
@@ -245,6 +246,7 @@ class RunControlBridge:
         now_at: float,
         *,
         text: str | None = None,
+        mode: StopMode | None = None,
     ) -> RunControlEvent:
         self._count += 1
         identity = ControlId(root=f"control-{self._count}")
@@ -255,7 +257,7 @@ class RunControlBridge:
                 digest=hashlib.sha256(text.encode()).hexdigest(),
             )
             self._steer.put(artifact, text)
-        control = ControlInput(control_id=identity, action=action, artifact=artifact)
+        control = ControlInput(control_id=identity, action=action, mode=mode, artifact=artifact)
         return RunControlEvent(control=control, now_at=now_at)
 
 
@@ -465,7 +467,9 @@ class _Loop:
             self._deadline_stop = True
             events.append(
                 RunControlEvent(
-                    control=ControlInput(control_id=ControlId(root="deadline"), action="stop"),
+                    control=ControlInput(
+                        control_id=ControlId(root="deadline"), action="stop", mode=StopMode.DRAIN
+                    ),
                     now_at=now,
                 )
             )

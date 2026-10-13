@@ -140,7 +140,7 @@ class SimulatedRun:
         The run's journal is checked against its final core state with the retry budget of the
         world's limits, expecting the run to end in its terminal state.
         """
-        budget = Budget(retries=self._outside.world.setup.harness.limits.max_retries)
+        budget = Budget(retries=self._outside.world.setup.harness.limits.request_retries.limit)
         return tuple(liveness(self._run.journal, self._run.core, budget))
 
     @property

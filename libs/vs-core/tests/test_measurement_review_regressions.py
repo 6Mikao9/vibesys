@@ -242,7 +242,8 @@ def test_successful_evidence_requires_accuracy_and_required_stages(
         else accuracy == passed and benchmark == passed
     )
     retained = core.project(result.state).measurements
-    assert bool(retained) == (accuracy_passed and required)
+    gated = marked  # the task declares the gate, and a gate needs an accuracy stage to name
+    assert bool(retained) == ((accuracy_passed or not gated) and required)
 
 
 def test_accuracy_gate_is_the_declared_stage_not_a_dependency_inference() -> None:

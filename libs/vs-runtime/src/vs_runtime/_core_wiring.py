@@ -89,7 +89,7 @@ class CoreStartup:
     """
 
     deadline_at: float
-    limits: Limits = dataclasses.field(default_factory=Limits)
+    limits: Limits
     lifecycle: frozenset[LifecycleCapability] = frozenset()
     requirements: EvidenceRequirements = dataclasses.field(default_factory=EvidenceRequirements)
 

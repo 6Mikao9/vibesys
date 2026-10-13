@@ -251,7 +251,8 @@ from vs_core.types.attempts import (
     WorkspaceRequest,
 )
 from vs_core.types.common import (
-    DEFAULT_MAX_MEASUREMENT_SUBMISSIONS,
+    MAX_REQUEST_RETRIES,
+    MAX_SUBMISSIONS_PER_MEASUREMENT,
     THIS_RUN,
     Area,
     ArtifactId,
@@ -307,6 +308,7 @@ from vs_core.types.common import (
     ReleaseDependency,
     RequestBase,
     RequestId,
+    RequestRetries,
     ReservedInputOccurrence,
     ResourceId,
     RevisionAuthority,
@@ -325,6 +327,7 @@ from vs_core.types.common import (
     SettlementId,
     SetupFailureKind,
     SignalCycleError,
+    StopMode,
     StrategyId,
     Value,
     WorkspaceMode,
@@ -394,12 +397,10 @@ from vs_core.types.evaluation_history import (
     RepeatedFailureGuidance,
 )
 from vs_core.types.job_observations import (
-    AMBIGUOUS_SUBMISSION_LIMIT,
     JobProgress,
     JobTimeout,
     MeasurementFailure,
     TimedOut,
-    may_resubmit,
 )
 from vs_core.types.kernel import (
     AreaChange,
@@ -641,9 +642,7 @@ from vs_core.types.until import (
 )
 
 __all__ = [
-    "AMBIGUOUS_SUBMISSION_LIMIT",
     "CAPTURE_SUFFIX",
-    "DEFAULT_MAX_MEASUREMENT_SUBMISSIONS",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
     "EXPORT_PATCH_SUFFIX",
@@ -653,6 +652,8 @@ __all__ = [
     "MAX_LOST_TURNS",
     "MAX_RENDER_SECONDS",
     "MAX_TURN_SECONDS",
+    "MAX_REQUEST_RETRIES",
+    "MAX_SUBMISSIONS_PER_MEASUREMENT",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "RENDER_SUFFIX",
     "REPLY_ERROR_MESSAGE_LIMIT",
@@ -989,6 +990,7 @@ __all__ = [
     "RequestPhase",
     "RequestPrepared",
     "RequestRecord",
+    "RequestRetries",
     "RequestTurn",
     "RequestUndispatchable",
     "ReservedInputOccurrence",
@@ -1093,6 +1095,7 @@ __all__ = [
     "StartAttempt",
     "SteerReceived",
     "Step",
+    "StopMode",
     "StopRequested",
     "StopSource",
     "Stopped",
@@ -1195,7 +1198,6 @@ __all__ = [
     "invocation_for",
     "item_id",
     "ledger_refs",
-    "may_resubmit",
     "minutes",
     "operation_result",
     "operation_trace",

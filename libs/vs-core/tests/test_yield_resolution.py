@@ -503,7 +503,7 @@ def test_a_checkpoint_answered_retryably_every_time_is_retried_then_fails_with_a
             break
         asks += 1
         run.wait_out_retries(limit=1)
-    assert asks == run.state.run.limits.max_retries + 1
+    assert asks == run.state.run.limits.request_retries.limit + 1
     assert core.orphan_waits(run.state) == ()
     assert run.invocation.pending_suspension is None
     [failure] = run.failures()

@@ -119,5 +119,4 @@ def measurement_plan(
         stages=stages,
         # Core retries a submission only after an infrastructure failure, and only within
         # this bound, which core's own run limit repeats (`limits_for`).
-        submission_limit=draft.config.max_input_measurement_attempts,
     )

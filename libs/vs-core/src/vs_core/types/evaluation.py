@@ -93,12 +93,18 @@ class MeasurementPlan(Value):
     submitted_at: Seconds
     queue_allowance: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
-    submission_limit: int = Field(default=1, ge=1)
     accuracy_stage: str | None = Field(default=None, min_length=1)
     """The stage whose pass is the correctness (accuracy) gate, named explicitly.
 
     None declares no accuracy stage: correctness evidence then requires every
     stage to pass instead of inferring a gate from stage dependencies.
+    """
+    accuracy_gated: tuple[EvidenceKind, ...]
+    """Evidence kinds that count only when the accuracy stage passed. Declared by the task.
+
+    Core holds no such rule of its own: a task that wants "a benchmark counts only if
+    accuracy passed" lists ``BENCHMARK`` here, a task that does not leaves it out. Naming a
+    kind requires ``accuracy_stage``.
     """
 
     @model_validator(mode="after")
@@ -109,6 +115,8 @@ class MeasurementPlan(Value):
             raise MeasurementPlanError("stages", "duplicate stage ID")
         if self.accuracy_stage is not None and self.accuracy_stage not in graph:
             raise MeasurementPlanError("accuracy_stage", "unknown stage")
+        if self.accuracy_gated and self.accuracy_stage is None:
+            raise MeasurementPlanError("accuracy_gated", "requires an accuracy_stage")
         for stage in self.stages:
             if set(stage.depends_on) - graph.keys():
                 raise MeasurementPlanError(stage.stage_id, "unknown dependency")
@@ -382,6 +390,7 @@ class MeasurementIdentity(Value):
     recipe_digest: str = Field(min_length=1)
     stages: tuple[MeasurementStageIdentity, ...]
     accuracy_stage: str | None = Field(default=None, min_length=1)
+    accuracy_gated: tuple[EvidenceKind, ...]
 
     @classmethod
     def from_plan(cls, plan: MeasurementPlan, candidate: RevisionRef) -> MeasurementIdentity:
@@ -402,6 +411,7 @@ class MeasurementIdentity(Value):
                 for stage in plan.stages
             ),
             accuracy_stage=plan.accuracy_stage,
+            accuracy_gated=tuple(sorted(set(plan.accuracy_gated))),
         )
 
     @model_validator(mode="after")
@@ -412,6 +422,8 @@ class MeasurementIdentity(Value):
             raise MeasurementPlanError("stages", "duplicate stage ID")
         if self.accuracy_stage is not None and self.accuracy_stage not in graph:
             raise MeasurementPlanError("accuracy_stage", "unknown stage")
+        if self.accuracy_gated and self.accuracy_stage is None:
+            raise MeasurementPlanError("accuracy_gated", "requires an accuracy_stage")
         for stage in self.stages:
             if len(set(stage.depends_on)) != len(stage.depends_on):
                 raise MeasurementPlanError(stage.stage_id, "duplicate dependency")

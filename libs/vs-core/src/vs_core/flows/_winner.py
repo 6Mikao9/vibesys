@@ -9,7 +9,7 @@ for all three; a flow never finishes the run itself. Nothing chosen means the in
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from vs_core._registry import ContractError
 from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value
@@ -138,6 +138,14 @@ def _stop_ending(kit: Kit) -> EndReason | None:
     return EndReason.DEADLINE if stop.control.control_id.root == "deadline" else EndReason.STOPPED
 
 
+def _finish_mode(kit: Kit) -> Literal["drain", "cancel"]:
+    """What the stop asked for; a run that ends by itself has nothing in flight to cancel."""
+    stop = kit.run.stop
+    if stop is None or stop.control.mode is None:
+        return "drain"
+    return stop.control.mode.value
+
+
 def _selection_name(selection: Selection) -> str:
     if isinstance(selection, RetainedCandidate):
         return selection.settlement_id.root
@@ -152,8 +160,9 @@ async def conclude(kit: Kit, returned: NoWinner | None) -> None:
     """
     stopped = _stop_ending(kit)
     result = await _result(kit, returned, stopped)
+    mode = _finish_mode(kit)
     refused = await kit.finish(
-        Finish(decision_id=DecisionId(root="finish"), scope=THIS_RUN, mode="drain", result=result)
+        Finish(decision_id=DecisionId(root="finish"), scope=THIS_RUN, mode=mode, result=result)
     )
     # Core refused the result. A run that nobody ends would hang, so the plain failure is
     # proposed once.
@@ -161,7 +170,7 @@ async def conclude(kit: Kit, returned: NoWinner | None) -> None:
         outcome="failure", reason=reason_text(EndReason.FINISH_REFUSED, refused.reason.value)
     )
     again = await kit.finish(
-        Finish(decision_id=DecisionId(root="finish"), scope=THIS_RUN, mode="drain", result=plain)
+        Finish(decision_id=DecisionId(root="finish"), scope=THIS_RUN, mode=mode, result=plain)
     )
     message = f"core refused the plain failure of the run: {again.reason.value}"
     raise ContractError(("finish",), message)

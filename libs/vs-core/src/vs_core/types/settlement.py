@@ -123,7 +123,7 @@ class AdoptionFailureReason(StrEnum):
     CONTENT_MISMATCH = "content-mismatch"
     """A verification succeeded but named another revision, or none."""
     RETRIES_EXHAUSTED = "retries-exhausted"
-    """Every allowed round ended unproven (``Limits.max_retries`` + 1 rounds)."""
+    """Every allowed round ended unproven (``Limits.max_adoption_rounds`` rounds)."""
 
 
 class Adoption(Value):
@@ -209,8 +209,8 @@ class AdoptionObserved(Value):
 class AdoptionFailed(Value):
     """An adoption ended for good without a verified result; emitted once.
 
-    The strategy may propose the winner again only while ``rounds`` is at most
-    ``Limits.max_retries``; core refuses a proposal past that bound.
+    The strategy may propose the winner again only while ``rounds`` is below
+    ``Limits.max_adoption_rounds``; core refuses a proposal past that bound.
     """
 
     kind: Literal["adoption_failed"] = "adoption_failed"

@@ -145,6 +145,7 @@ def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
+        accuracy_gated=(),
     )
     job = core.OwnedJob(
         resource_id=root,

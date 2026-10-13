@@ -7,12 +7,11 @@ failure and beats the input baseline is winner-eligible. Eligibility is decided 
 only.
 """
 
+from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from vibesys.candidates._baseline import BaselineStage, BaselineState
-from vibesys.candidates._config import CandidateConfig
 from vibesys.hypothesis import HypothesisOutcome
-from vibesys.metrics import AcceptedReading, Measurement, MetricComparison, MetricRow, reading_of
+from vibesys.metrics import AcceptedReading, Measurement, MetricRow, reading_of
 from vs_core.api import (
     AssessmentKind,
     AssessmentProposal,
@@ -23,7 +22,6 @@ from vs_core.api import (
 )
 
 STOPPED = "stopped by the operator"
-_UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 
 
 class FinishedAttempt(Protocol):
@@ -63,23 +61,6 @@ class FinishedAttempt(Protocol):
 def measurement(row: MetricRow | None) -> Measurement | None:
     """A metric row as the comparable value `MetricSpace` orders."""
     return None if row is None else Measurement(row.name, row.value, row.direction)
-
-
-def beats_baseline(
-    baseline: BaselineState, config: CandidateConfig, reading: AcceptedReading | None
-) -> bool:
-    """Whether the candidate's headline improves on the baseline beyond noise.
-
-    An input that was not measured leaves nothing to beat, so candidates compete
-    on their own readings.
-    """
-    if baseline.stage is not BaselineStage.MEASURED or not baseline.metrics:
-        return True
-    comparison = config.metric_space.compare(
-        measurement(None if reading is None else reading.headline()),
-        measurement(baseline.metrics[0]),
-    )
-    return comparison is MetricComparison.BETTER
 
 
 def _gate(reading: AcceptedReading | None, *, configured: bool) -> bool:
@@ -127,19 +108,37 @@ def outcome_of(record: FinishedAttempt) -> Literal["succeeded", "failed", "cance
     return "succeeded" if record.failure is None else "failed"
 
 
-def settle_for(record: FinishedAttempt, baseline: BaselineState, config: CandidateConfig) -> Settle:
-    """The assessments, eligibility and retention to propose for a finished attempt."""
+@dataclass(frozen=True)
+class Gates:
+    """Which gates a candidate must pass to be winner-eligible; the task's evaluation says."""
+
+    accuracy: bool
+    benchmark: bool
+
+
+def settle_for(
+    record: FinishedAttempt,
+    *,
+    gates: Gates,
+    beats_input: bool,
+    unsettled: frozenset[HypothesisOutcome],
+) -> Settle:
+    """The assessments, eligibility and retention to propose for a finished attempt.
+
+    ``beats_input`` is the search's own verdict (see `improves_on`); ``unsettled`` are the
+    implementer outcomes that make a candidate ineligible.
+    """
     accuracy = reading_of(record.readings, EvidenceKind.CORRECTNESS)
     benchmark = reading_of(record.readings, EvidenceKind.BENCHMARK)
     measured = bool(record.readings) and record.candidate is not None
-    buildable = measured and _gate(accuracy, configured=config.accuracy_configured)
+    buildable = measured and _gate(accuracy, configured=gates.accuracy)
     eligible = (
         buildable
-        and _gate(benchmark, configured=config.benchmark_configured)
+        and _gate(benchmark, configured=gates.benchmark)
         and record.review_passed is not False
-        and record.outcome not in _UNSETTLED
+        and record.outcome not in unsettled
         and record.failure is None
-        and beats_baseline(baseline, config, benchmark)
+        and beats_input
     )
     return Settle(
         assessments=(

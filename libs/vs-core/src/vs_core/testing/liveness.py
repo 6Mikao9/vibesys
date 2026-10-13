@@ -70,7 +70,7 @@ class Violation:
 class Budget:
     """What bounds a run's work: the scenario's own limits.
 
-    ``retries`` is core's per-request retry limit (``Limits.max_retries``); each unit of
+    ``retries`` is core's per-request retry limit (``Limits.request_retries``); each unit of
     work may be asked again that many times.
     """
 
