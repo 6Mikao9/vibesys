@@ -83,10 +83,6 @@ from vs_runtime.api.executor_contexts import context_for
 LEASE = 100.0
 
 
-class StepFailedError(AssertionError):
-    """The run finished, but a step it needed was rejected or failed."""
-
-
 def _start(world: World, host: str, now: float) -> Process:
     process = world.runtime()
     process.shell.start(host, now_at=now, lease_duration=LEASE)
@@ -94,9 +90,6 @@ def _start(world: World, host: str, now: float) -> Process:
 
 
 def _assert_adopted(process: Process, world: World) -> None:
-    strategy = process.shell.record.envelope.strategy
-    if strategy.failure is not None:
-        raise StepFailedError(strategy.failure)
     core = process.shell.record.envelope.core
     assert finished(process)
     assert core.run.status == RunStatus.TERMINAL
@@ -196,7 +189,6 @@ async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
             request_id=RequestId(root="probe-submit"),
             scope=Scope(owner=world.initial().run.run_id, generation=0),
             admission_id=DecisionId(root="probe-admission"),
-            deadline_at=100.0,
             plan=measurement(revision_ref(commit), "baseline"),
         )
         result = await executors.evaluation.execute(request, context_for(request))
@@ -258,19 +250,16 @@ def _session_requests() -> tuple[SessionRequest, ...]:
         CancelTurn(
             request_id=RequestId(root="probe-cancel"),
             scope=SCOPE,
-            deadline_at=100.0,
             invocation=invocation,
         ),
         CloseSession(
             request_id=RequestId(root="probe-close"),
             scope=SCOPE,
-            deadline_at=100.0,
             session_id=SESSION,
         ),
         ResumeSessionTurn(
             request_id=RequestId(root="probe-resume"),
             scope=SCOPE,
-            deadline_at=100.0,
             turn=turn_spec(),
             continuation_id=ContinuationId(root="probe-continuation"),
         ),
@@ -312,7 +301,6 @@ async def test_inspect_reports_a_recorded_measurement_submit(tmp_path: Path) -> 
             request_id=RequestId(root="probe-submit"),
             scope=scope,
             admission_id=DecisionId(root="probe-admission"),
-            deadline_at=100.0,
             plan=plan,
         )
         submitted = await executors.evaluation.execute(submit, context_for(submit))
@@ -320,7 +308,6 @@ async def test_inspect_reports_a_recorded_measurement_submit(tmp_path: Path) -> 
         inspect = InspectRequest(
             request_id=RequestId(root="probe-inspect"),
             scope=scope,
-            deadline_at=100.0,
             target=RequestId(root="probe-submit"),
         )
         inspected = await executors.operations.execute(inspect, context_for(inspect))

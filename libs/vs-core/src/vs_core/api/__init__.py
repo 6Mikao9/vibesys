@@ -1031,7 +1031,6 @@ __all__ = [
     "ScopeReopenRequested",
     "ScopedAdmissionReopen",
     "ScopedAdmissionReopenOutcome",
-    "Search",
     "SearchDeclaration",
     "SearchDef",
     "SearchDriver",
