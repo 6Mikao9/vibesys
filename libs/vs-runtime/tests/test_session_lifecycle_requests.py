@@ -450,7 +450,8 @@ async def test_a_turn_queued_behind_an_interrupted_one_proceeds_only_after_cance
         )
         w.host.faults.down = False
         blocked = await w.execute(dispatch_request("req-2", "inv-2"))
-        assert status(blocked) is ObservationStatus.UNKNOWN
+        assert status(blocked) is ObservationStatus.FAILED  # not run, so core asks again
+        assert blocked.observation.observation.retryable
         turns = len(w.host.turns)
         assert status(await w.execute(cancel_request())) is ObservationStatus.CANCELLED
         released = await w.execute(dispatch_request("req-2", "inv-2"))
