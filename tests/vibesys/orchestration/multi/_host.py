@@ -87,16 +87,23 @@ class MultiHost(SerialHost):
 
     @classmethod
     def start(
-        cls, selected: MultiConfig, *, restarting: bool, validating: bool = False, **world: object
+        cls, selected: MultiConfig, *, restarting: bool, validating: bool = False, suspending: bool = False, **world: object
     ) -> MultiHost:
         """Start the multi search of ``selected`` under a host.
 
-        ``validating`` offers the trusted run of validation recipes, which a core may not offer.
+        ``validating`` offers the trusted run of validation recipes, which a core may not offer;
+        ``suspending`` offers suspending a turn that waits for an evaluation.
         """
         view = None
-        if validating:
-            assert multi.operations is not None
-            offered = Capabilities(operations=multi.operations.registry().descriptors)
+        if validating or suspending:
+            operations: tuple[object, ...] = ()
+            if validating:
+                assert multi.operations is not None
+                operations = multi.operations.registry().descriptors
+            offered = Capabilities(
+                operations=operations,  # ty: ignore[invalid-argument-type]
+                lifecycle=frozenset({"suspend"}) if suspending else frozenset(),
+            )
             view = FakeView(changes={"capabilities": offered})
         return cls.begin(multi, selected, restarting=restarting, view=view, **world)  # ty: ignore[invalid-return-type]
 
@@ -136,9 +143,9 @@ class MultiHost(SerialHost):
                 self.run.lose(asked)
 
     def _implementer(self, asked: Asked, variant: int) -> None:
-        match variant % 6:
+        match variant % 7:
             case 0 | 1:
-                outcome = "nominated" if variant % 6 == 0 else "continue"
+                outcome = "nominated" if variant % 7 == 0 else "continue"
                 reply = implemented(outcome, next_step="more" if outcome == "continue" else "")
                 self.run.reply(asked, reply, checkpoint=Retained(revision=self.retained()))
             case 2:
@@ -147,9 +154,12 @@ class MultiHost(SerialHost):
                 self.run.fail(asked, FailureReason.TIMED_OUT)
             case 4:
                 self.run.reply(asked, implemented("blocked"))
-            case _:
+            case 5:
                 declined = Declined(reason=next(iter(CheckpointDecline)))
                 self.run.reply(asked, implemented(), checkpoint=declined)
+            case _:
+                # Waiting for an evaluation: core records the wait, then resumes the turn.
+                self.run.resume_ready(self.run.suspend(asked))
 
     def _judge(self, asked: Asked, variant: int) -> None:
         if variant % 3 == 2:

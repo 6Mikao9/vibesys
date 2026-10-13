@@ -75,11 +75,11 @@ class SingleHost(SerialHost):
                 self.run.lose(asked)
 
     def _implementer(self, asked: Asked, variant: int) -> None:
-        match variant % 6:
+        match variant % 7:
             case 0 | 1:
                 self.run.reply(
                     asked,
-                    implemented(passed=variant % 6 == 0),
+                    implemented(passed=variant % 7 == 0),
                     checkpoint=Retained(revision=self.retained()),
                 )
             case 2:
@@ -88,6 +88,9 @@ class SingleHost(SerialHost):
                 self.run.fail(asked, FailureReason.TIMED_OUT)
             case 4:
                 self.run.reply_raw(asked, "not json")
-            case _:
+            case 5:
                 declined = Declined(reason=next(iter(CheckpointDecline)))
                 self.run.reply(asked, implemented(), checkpoint=declined)
+            case _:
+                # Waiting for an evaluation: core records the wait, then resumes the turn.
+                self.run.resume_ready(self.run.suspend(asked))

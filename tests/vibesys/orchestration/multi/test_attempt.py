@@ -18,7 +18,13 @@ from tests.vibesys.serial_search._replies import plan_reply
 from vibesys.candidates.api import NotConfigured
 from vibesys.hypothesis import JudgeReviewed, OrchestratorPlan, rounds
 from vibesys.metrics import AcceptedReading
-from vibesys.orchestration.multi.search.api import Attempt, Next
+from vibesys.orchestration.multi.search.api import (
+    ArchiveConflictView,
+    Attempt,
+    ConflictMetric,
+    Dominator,
+    Next,
+)
 from vibesys.serial_search.api import Gated, NotMeasured, Unreadable
 from vs_core.api import (
     EvidenceId,
@@ -39,7 +45,7 @@ JUDGE_TURN = InvocationRef(
 
 
 def attempt(*, validation_offered: bool = False, **changes: object) -> Attempt:
-    selected = config()
+    selected = changes.pop("config", None) or config()
     plan = OrchestratorPlan.model_validate_json(plan_reply("h1"))
     ledger, _ = rounds.start(
         selected.hypotheses,
@@ -85,9 +91,11 @@ PASSING_GATES = Gated(
 )
 
 
-def reviewed_attempt(*, validation_offered: bool = False, recipe: str | None = None) -> Attempt:
+def reviewed_attempt(
+    *, validation_offered: bool = False, recipe: str | None = None, rounds_allowed: int = 1
+) -> Attempt:
     """An attempt whose implementer replied with a candidate and whose review is due."""
-    taken = attempt(validation_offered=validation_offered)
+    taken = attempt(validation_offered=validation_offered, config=config(max_rounds=rounds_allowed))
     extra = {} if recipe is None else {"validation_recipe_artifact": recipe}
     assert taken.replied(implemented(**extra), CANDIDATE) is Next.REVIEW
     return taken
@@ -235,3 +243,42 @@ def test_a_failed_attempt_is_never_eligible() -> None:
     taken.failed("the workspace broke")
     _, assessment = taken.asserted()
     assert not assessment.eligible
+
+
+# -- when a review is asked ------------------------------------------------------------------
+
+
+def test_a_continuation_after_a_failed_review_is_not_reviewed_again() -> None:
+    taken = reviewed_attempt(rounds_allowed=3)
+    taken.judged(reviewed(passed=False), JUDGE_TURN)
+    assert taken.replied(implemented("continue", next_step="more"), CANDIDATE) is Next.SETTLE
+    assert taken.review_skipped
+
+
+def test_a_failed_official_gate_forces_the_next_review_even_for_a_continuation() -> None:
+    taken = reviewed_attempt(rounds_allowed=3)
+    taken.judged(reviewed(), JUDGE_TURN)
+    taken.gated(Gated(readings=(reading(EvidenceKind.CORRECTNESS, passed=False),)))
+    assert taken.replied(implemented("continue", next_step="more"), CANDIDATE) is Next.REVIEW
+
+
+def test_a_pareto_claim_the_live_archive_dominates_never_passes_review() -> None:
+    taken = reviewed_attempt()
+    taken.conflict = ArchiveConflictView(
+        dominators=(
+            Dominator(
+                round_number=1, metrics=(ConflictMetric(name="x", value=1.0, direction="max"),)
+            ),
+        )
+    )
+    assert taken.judged(reviewed(passed=True), JUDGE_TURN) is Next.AGAIN
+    assert taken.judge_pass is False
+    assert taken.feedback is None  # the dominating rows are told, not the judge's praise
+    assert taken.conflict is not None
+    assert not taken.passed
+
+
+def test_a_continuation_in_the_final_round_is_reviewed_again() -> None:
+    taken = reviewed_attempt(rounds_allowed=1)
+    taken.judged(reviewed(passed=False), JUDGE_TURN)
+    assert taken.replied(implemented("continue", next_step="more"), CANDIDATE) is Next.REVIEW
