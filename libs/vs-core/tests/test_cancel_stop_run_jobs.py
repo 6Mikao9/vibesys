@@ -14,6 +14,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_measurements import committed, observation, plan, requested
 
@@ -373,7 +374,7 @@ class _Run:
         )
 
 
-@settings(max_examples=200, deadline=None, database=None)
+@settings(max_examples=examples(pr=25, nightly=500), deadline=None, database=None)
 @given(count=st.integers(1, 3), ops=st.lists(_OPS, max_size=16))
 def test_polls_stops_and_observations_at_shared_instants_never_conflict(
     count: int, ops: list[tuple[object, ...]]

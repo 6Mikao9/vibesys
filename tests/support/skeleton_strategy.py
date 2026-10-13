@@ -164,6 +164,11 @@ async def _measure(
             return NoWinner(reason=f"measurement {failed.reason}")
         case core.MeasurementResult(failure=failure) if failure is not None:
             return NoWinner(reason=f"measurement {failure.value}")
+        case core.MeasurementResult(status=status) if (
+            status is not core.ObservationStatus.SUCCEEDED
+        ):
+            # A rejected or cancelled result may carry no typed failure; it is still no evidence.
+            return NoWinner(reason=f"measurement {status.value}")
     return None
 
 
