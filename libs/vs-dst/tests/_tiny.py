@@ -48,13 +48,15 @@ FACTS = RunFacts(
     environment_digest="environment",
 )
 
-PATIENCE = Within(limit=1000)
+PATIENCE = 1000.0
+"""How long the tiny search waits for a workspace unless told otherwise."""
 
 
 class TinyConfig(Value):
     """How many items the tiny search settles."""
 
     items: int
+    patience: float = PATIENCE
 
 
 @search("tiny", config=TinyConfig)
@@ -67,15 +69,15 @@ async def tiny(ctx: Flow, config: TinyConfig) -> None:
             item=ItemId(root=f"item:{index}"),
             plan=plan,
             budget=AttemptBudget(),
-            within=PATIENCE,
+            within=Within(limit=config.patience),
         ):
             pass
 
 
-def tiny_setup(items: int, max_concurrent: int = 1) -> RunSetup:
+def tiny_setup(items: int, max_concurrent: int = 1, patience: float = PATIENCE) -> RunSetup:
     """The tiny search over ``items`` items, hosted with no operations."""
     return RunSetup(
-        new_launch=lambda: Launch(tiny, TinyConfig(items=items)),
+        new_launch=lambda: Launch(tiny, TinyConfig(items=items, patience=patience)),
         harness=Harness(
             registry=OperationRegistry(()),
             facts=FACTS,
@@ -95,8 +97,8 @@ def tiny_setup(items: int, max_concurrent: int = 1) -> RunSetup:
 class TinyWorld:
     """Executors that hand out workspaces, one numbered resource after another."""
 
-    def __init__(self, items: int = 2, max_concurrent: int = 1) -> None:
-        self.setup = tiny_setup(items, max_concurrent)
+    def __init__(self, items: int = 2, max_concurrent: int = 1, patience: float = PATIENCE) -> None:
+        self.setup = tiny_setup(items, max_concurrent, patience)
         self.workspaces_handed_out = 0
         self.seen: list[str] = []
 

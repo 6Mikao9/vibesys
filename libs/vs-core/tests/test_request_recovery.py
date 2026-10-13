@@ -573,8 +573,23 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
         )
         result = step(state, event)
         assert result == step(reload(state), event)
-        # Only a deadline event past the limit ends the record; startup alone never does.
-        ended = ended or (kind == "deadline" and result.state.run.now_at >= original.until.at)
+        # Only a deadline event past the limit ends the record, and not while the executor is
+        # still being asked about it (the inspection already out has neither answered nor run
+        # out its bound); startup alone never does.
+        asked = {
+            check.inspection
+            for check in state.records.recovery.checks
+            if check.target == original.request_id and check.resolution == "pending"
+        }
+        inspection = next((row for row in state.records.records if row.request_id in asked), None)
+        asking = (
+            inspection is not None
+            and inspection.observation is None
+            and result.state.run.now_at < inspection.until.at
+        )
+        ended = ended or (
+            kind == "deadline" and result.state.run.now_at >= original.until.at and not asking
+        )
         assert result.state.records.records[0] == (timed_out(original) if ended else original)
         assert result.state.records.recovery.phase != RecoveryPhase.READY
         assert result.state.run.status == RunStatus.PAUSED
@@ -1277,8 +1292,17 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
         for request in result.requests
     )
     assert result.state.records.records[0].until.at == original.until.at
-    blocked = step(
+    # The original limit is long past, but the executor is still being asked: the deadline
+    # waits for the inspection's bound, and a reordered, older time does not end that wait.
+    early = step(
         reload(result.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
+    )
+    assert early.state.records.records[0] == original
+    assert early.state.records.recovery.phase == RecoveryPhase.RECOVERING
+    waited = float(logical_now) + state.run.limits.reconciliation_bound
+    blocked = step(
+        reload(result.state),
+        ReconciliationDeadline(request_id=original.request_id, now_at=waited),
     )
     assert blocked.state.records.recovery.phase == RecoveryPhase.BLOCKED
     for request in blocked.requests:
@@ -1287,7 +1311,7 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
             if isinstance(request, CancelOwnedResource)
             else state.run.limits.reconciliation_bound
         )
-        assert request_until(blocked.state, request) == logical_now + bound
+        assert request_until(blocked.state, request) == waited + bound
     assert any(isinstance(request, CancelOwnedResource) for request in blocked.requests)
     assert blocked.state.records.records[0] == timed_out(original)
 
@@ -2116,6 +2140,61 @@ def test_a_second_inspection_of_a_request_already_reissued_changes_nothing() -> 
     once = step(dispatched.state, event)
     again = step(once.state, event)
     assert again.state.records.records == once.state.records.records
+
+
+def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_report() -> None:
+    """The far side may have finished in time: the restarted host asks before it times out.
+
+    The host restarts after the request's limit, so the limit has passed when the first
+    deadline event arrives. While the inspection of this epoch is out, that event ends
+    nothing; the executor's report that the request finished completes it without a failure.
+    """
+    original = pending_record(phase=RequestPhase.DISPATCHED)
+    late = original.until.at + 900.0
+    started = step(reload(recovering_state(original)), RecoveryStarted(epoch=1, now_at=late))
+    inspection = started.requests[0]
+    assert isinstance(inspection, InspectRequest)
+    assert inspection.request_id is not None
+    deadline = ReconciliationDeadline(request_id=original.request_id, now_at=late)
+
+    waiting = step(reload(started.state), deadline)
+
+    assert waiting.state.records.records[0] == original
+    assert not waiting.events
+    assert not [r for r in waiting.requests if isinstance(r, BlockRequest)]
+    dispatched = step(waiting.state, DispatchAuthorized(request_id=inspection.request_id))
+    finished = observed(
+        original,
+        status=ObservationStatus.SUCCEEDED,
+        accepted=True,
+        terminal=True,
+        released=True,
+        children_complete=True,
+    )
+    answer = Observation.model_validate(
+        {
+            "event_id": EventId(root="inspection-answer"),
+            "request_id": inspection.request_id,
+            "scope": inspection.scope,
+            "sequence": 1,
+            "observed_at": late,
+            "status": ObservationStatus.SUCCEEDED,
+            "accepted": True,
+            "terminal": True,
+            "released": True,
+            "children_complete": True,
+        }
+    )
+    reported = step(
+        dispatched.state,
+        RequestObserved(observation=answer, target=TargetObservation(observation=finished)),
+    )
+    after = step(reload(reported.state), deadline)
+
+    record = after.state.records.records[0]
+    assert record.phase == RequestPhase.COMPLETED
+    assert record.failure is None
+    assert not after.events
 
 
 def test_a_turns_own_inspection_resolves_its_recovery_check() -> None:

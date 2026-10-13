@@ -1248,6 +1248,25 @@ def _deadline_target(state: RecordsState, request_id: RequestId) -> RequestRecor
         request_id = request.target
 
 
+def _awaiting_report(state: RecordsState, record: RequestRecord) -> float | None:
+    """When the executor's report on ``record`` stops being waited for, or ``None``.
+
+    A record that was in flight when its host died waits for the inspection this epoch sent
+    for it: the executor may have finished it while the host was down, and a limit that passed
+    meanwhile says how long the far side was waited for, not that it failed. The wait is the
+    inspection's own bound, so an executor that stays silent still ends the record at its limit.
+    """
+    if state.recovery.phase == RecoveryPhase.READY:
+        return None
+    check = next((row for row in state.recovery.checks if row.target == record.request_id), None)
+    if check is None or check.inspection is None or check.resolution != "pending":
+        return None
+    inspection = next((row for row in state.records if row.request_id == check.inspection), None)
+    if inspection is None or inspection.observation is not None:
+        return None
+    return inspection.until.at
+
+
 def _deadline(
     state: RecordsState, context: RecordsContext, event: ReconciliationDeadline
 ) -> AreaChange[RecordsState]:
@@ -1263,11 +1282,16 @@ def _deadline(
     # doing (a reattached live one included): the shell cancels its flight at the same
     # instant. A record already proven terminal, or one that already concluded and has no
     # children to release, keeps its result. Ending moves the record to BLOCKED, which is
-    # not open, so the deadline cannot be raised for it again.
+    # not open, so the deadline cannot be raised for it again. One exception: a record the
+    # restarted host is still asking the executor about (see ``_awaiting_report``) waits for
+    # the answer or the inspection's bound, because the limit may have passed while the host
+    # was down and the far side may have finished in time.
     timed = event.reason == FailureReason.TIMED_OUT
     concluded = not is_open(record) and not unresolved_children
+    asked_until = _awaiting_report(state, record)
     if (
         (timed and now_at < record.until.at)
+        or (timed and asked_until is not None and now_at < asked_until)
         or (resolution == "terminal" and not unresolved_children)
         or (timed and concluded and resolution == "reattached")
     ):
@@ -1442,7 +1466,14 @@ def overdue_reconciliations(
 
 def next_reconciliation_at(state: RecordsState) -> float | None:
     """The earliest time a ``ClockAdvanced`` would end an open record at its limit."""
-    return min((record.until.at for record in state.records if is_open(record)), default=None)
+    return min(
+        (
+            max(record.until.at, _awaiting_report(state, record) or record.until.at)
+            for record in state.records
+            if is_open(record)
+        ),
+        default=None,
+    )
 
 
 def advance(
