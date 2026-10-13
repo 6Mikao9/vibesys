@@ -207,8 +207,8 @@
 {"path": "tests/composition/dynamic/_harness.py", "rule": "threading", "count": 5}
 {"path": "tests/composition/dynamic/test_loop.py", "rule": "subprocess", "count": 1}
 {"path": "tests/composition/dynamic/test_stop.py", "rule": "threading", "count": 1}
-{"path": "tests/composition/test_container_servers.py", "rule": "process", "count": 1}
-{"path": "tests/composition/test_container_servers.py", "rule": "subprocess", "count": 1}
+{"path": "tests/vibesys/agents/test_container_servers.py", "rule": "process", "count": 1}
+{"path": "tests/vibesys/agents/test_container_servers.py", "rule": "subprocess", "count": 1}
 {"path": "tests/conformance/test_server_transports.py", "rule": "socket", "count": 3}
 {"path": "tests/conformance/test_server_transports.py", "rule": "socket_io", "count": 1}
 {"path": "tests/conformance/test_server_transports.py", "rule": "threading", "count": 4}

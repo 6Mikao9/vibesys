@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.composition.test_skeleton import _assert_adopted, _started
+from tests.system.skeleton.test_skeleton import _assert_adopted, _started
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_world import (
     IMPLEMENTATION,
