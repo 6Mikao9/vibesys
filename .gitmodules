@@ -54,4 +54,5 @@
 [submodule "examples/microservices/repositories/rpcstack"]
 	path = examples/microservices/repositories/rpcstack
 	url = https://github.com/vibesys-playground/rpcstack.git
-	branch = examples/hotel-runner
+	branch = vibesys
+	shallow = true
