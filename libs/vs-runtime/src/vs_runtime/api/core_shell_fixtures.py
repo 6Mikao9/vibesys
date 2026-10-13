@@ -192,11 +192,20 @@ class ShellTraceTransitions:
         )
 
 
+def _counting_state() -> CoreState:
+    """The initial run, declared as the counter search declares itself."""
+    state = initial_state()
+    declaration = counter.declaration
+    return state.model_copy(
+        update={"run": state.run.model_copy(update={"declaration": declaration})}
+    )
+
+
 def runtime(store: StateStore) -> CoreRuntime[FlowState]:
     return CoreRuntime(
         store,
         counter.driver(CounterConfig()),
-        initial_state(),
+        _counting_state(),
         config=CounterConfig(),
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
     )
