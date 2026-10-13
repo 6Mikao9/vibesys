@@ -1,64 +1,51 @@
-"""``Flow`` (the ``ctx`` of a flow), ``Group``, and the role protocols helpers can take."""
+"""``Flow`` (the ``ctx`` of a flow) and ``Group``."""
 
 from __future__ import annotations
 
 from collections import deque
-from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Protocol, Self, overload
-
-from pydantic import BaseModel, TypeAdapter
+from typing import TYPE_CHECKING, Any, Self, overload
 
 from vs_core._registry import ContractError
-from vs_core.types.strategy import Finish, Wait, Work
-from vs_core.types.until import Failed, Within
+from vs_core.types.common import Capabilities, Limits, RevisionRef, Seconds, Value
+from vs_core.types.settlement import RetainedCandidate, TrustedBaseline
 
+from ._agents import Agents
 from ._defs import UNBOUNDED, _Task
 from ._errors import Stopped, TaskStopped
+from ._evaluation import Evaluation
+from ._kit import Kit
 from ._retry import Again, GaveUp, RetryPolicy, Tries
-from ._sources import First, Pending, Source, StopSource, Task, Timer
+from ._sources import First, Source, StopSource, Task, Timer
+from ._winner import INPUT, Input, Kept
+from ._workspaces import Workspaces
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine, Iterator
+    from collections.abc import Awaitable, Callable, Coroutine
 
-    from vs_core.types.common import RunFacts, Seconds
-    from vs_core.types.search import Event, RunView
+    from pydantic import BaseModel
 
     from ._run import _Run
 
 
-class Waits(Protocol):
-    """The part of ``Flow`` that waits: for a helper that only issues requests."""
+class Clock:
+    """The run clock, read through the journal."""
 
-    async def wait(
-        self, request: Work, until: Within, *, reply: type[BaseModel] = BaseModel
-    ) -> Event:
-        """Start a request and return its outcome."""
-        ...
-
-    def start(self, request: Work, until: Within, *, reply: type[BaseModel] = BaseModel) -> Pending:
-        """Start a request; wait for it later."""
-        ...
-
-    async def first[T](self, *sources: Source[T]) -> T:
-        """The next value of whichever source is ready first."""
-        ...
-
-
-class Reads(Protocol):
-    """The part of ``Flow`` that reads the run: for a helper that only needs the view."""
-
-    facts: RunFacts
-
-    def read[T](self, fn: Callable[[RunView], T], as_: type[T] | TypeAdapter[T]) -> T:
-        """Read the view (journaled)."""
-        ...
+    def __init__(self, kit: Kit) -> None:
+        """Bind the clock to its flow."""
+        self._kit = kit
 
     def now(self) -> Seconds:
-        """The run clock."""
-        ...
+        """Seconds on the run clock."""
+        return self._kit.now()
 
 
-# -- the author's handles ----------------------------------------------------------------------
+class RunTask(Value):
+    """What the run is for and how much of it is left: the task as the flow reads it."""
+
+    objective: str
+    baseline: RevisionRef
+    deadline_at: Seconds
+    limits: Limits
 
 
 class Flow:
@@ -67,37 +54,18 @@ class Flow:
     def __init__(self, run: _Run, task: _Task) -> None:
         """Bind the handle to its run and its own task."""
         self._run = run
-        self._task = task
-        self.facts: RunFacts = run.facts
+        self._kit = Kit(run, task)
+        self.facts = run.facts
         """The run's facts, constant for the run."""
+        self.agents = Agents(self._kit)
+        """Sessions with agents: ``ctx.agents.session(role)`` and ``await session.turn(...)``."""
+        self.workspaces = Workspaces(self._kit)
+        """Workspaces: ``open`` as a resource, ``keep``, ``verify`` and ``kept``."""
+        self.evaluation = Evaluation(self._kit)
+        """Evaluation: ``measure`` a revision, read what the agents measured themselves."""
+        self.clock = Clock(self._kit)
 
-    def checkpoint(self) -> None:
-        """Raise a pending stop before anything is issued, awaited or acquired (unless shielded)."""
-        task = self._task
-        if task.stop_pending and task.shield == 0:
-            task.stop_pending, task.stopped = False, True
-            raise Stopped
-
-    # requests and waiting
-
-    def start(self, request: Work, until: Within, *, reply: type[BaseModel] = BaseModel) -> Pending:
-        """Start ``request`` now, bounded by ``until``; its outcome is the ``Pending``'s value."""
-        self.checkpoint()
-        stamped = self._run.stamp(self._task, request)
-        return self._run.issue(
-            self._task, Pending(stamped, reply), Wait(request=stamped, until=until)
-        )
-
-    async def wait(
-        self, request: Work, until: Within, *, reply: type[BaseModel] = BaseModel
-    ) -> Event:
-        """Start ``request`` and return its outcome: the result event, or ``Failed``."""
-        pending = self.start(request, until, reply=reply)
-        try:
-            return await pending
-        except Stopped:
-            self._run.forget(pending)  # the outcome, if it still comes, is dropped
-            raise
+    # control flow
 
     @overload
     async def first[A](self, a: Source[A], /) -> A: ...
@@ -115,50 +83,31 @@ class Flow:
 
     async def first(self, *sources: Source[object]) -> object:
         """The next value of whichever source is ready first; ties go to the earliest."""
-        self.checkpoint()
+        self._kit.stop_point()
         return await First(sources)
 
     def timer(self, at: Seconds) -> Timer:
         """A source that fires once, when the run clock reaches ``at``."""
-        return self._run.timer(at)
+        return self._kit.timer(at)
 
     @property
     def path(self) -> str:
         """Where this flow sits: empty for the root, ``"a/b/"`` for task ``b`` of task ``a``."""
-        return self._task.path
+        return self._kit.path
 
     @property
     def stopped(self) -> StopSource:
         """The operator's stop as a source: yields the ``StopRequested`` event, once."""
-        return self._task.stop
+        return self._kit.task.stop
 
     @property
     def stop_requested(self) -> bool:
         """Whether a stop has arrived."""
         return self._run.stop is not None
 
-    async def finish(self, finish: Finish) -> Failed:
-        """End the run. Returns only if core refuses the ``Finish``; otherwise never resumes."""
-        stamped = self._run.stamp(self._task, finish)
-        refused = await self._run.issue(self._task, Pending(stamped, BaseModel), stamped)
-        if not isinstance(refused, Failed):
-            raise ContractError(("finish",), "a finish is answered only by a failure")
-        return refused
-
-    # structure
-
     def group[T](self, *, limit: int | None = None, stops: bool = True) -> Group[T]:
         """A scope for concurrent tasks; leaving it waits for all of them."""
-        return Group(self._run, self, limit, stops=stops)
-
-    @contextmanager
-    def shielded(self) -> Iterator[None]:
-        """A region a stop cannot interrupt: it is delivered at the first await after it."""
-        self._task.shield += 1
-        try:
-            yield
-        finally:
-            self._task.shield -= 1
+        return Group(self._run, self._kit, limit, stops=stops)
 
     async def retry[R, V](
         self, attempt: Callable[[Tries[R]], Awaitable[V | Again[R]]], policy: RetryPolicy
@@ -171,43 +120,70 @@ class Flow:
                 return outcome
             reasons.append(outcome.reason)
             if policy.backoff is not None and number < policy.max_tries:
-                await self.timer(self.now() + policy.backoff.delay(number - 1))
+                await self.timer(self._kit.now() + policy.backoff.delay(number - 1))
         return GaveUp(reasons=tuple(reasons))
 
-    # reading and publishing
+    def checkpoint(self, snapshot: object) -> None:
+        """Record ``snapshot``: where a code change may resume this flow (see ``flow``)."""
+        task = self._kit.task
+        definition = task.flow
+        if definition is None:
+            raise ContractError(("checkpoint",), "only a registered flow has checkpoints")
+        if not isinstance(snapshot, definition.snapshot):
+            raise ContractError(
+                ("checkpoint",), f"{definition.name} snapshots are {definition.snapshot.__name__}"
+            )
+        task.snapshot = snapshot
 
-    def read[T](self, fn: Callable[[RunView], T], as_: type[T] | TypeAdapter[T]) -> T:
-        """Read the view. The value is journaled, so live and replay see the same value."""
-        return self._run.read(fn, as_)
+    # the run
 
-    def now(self) -> Seconds:
-        """The run clock (a journaled read)."""
-        return self.read(lambda view: view.now_at, float)
+    def choose(self, candidate: Kept | Input) -> None:
+        """Name the current winner: a kept candidate, or ``INPUT``. The last choice stands.
+
+        The framework adopts the last choice when the run ends, however it ends.
+        """
+        if candidate is INPUT:
+            self._run.choice = TrustedBaseline(revision=self.facts.baseline)
+        elif isinstance(candidate, Kept):
+            self._run.choice = RetainedCandidate(
+                settlement_id=candidate.settlement.settlement_id, revision=candidate.revision
+            )
+        else:
+            raise ContractError(("choose",), "choose a kept candidate or INPUT")
 
     def publish(self, record: BaseModel) -> None:
         """Replace the flow's published record: what status views and tests read of a run."""
         self._run.published = record.model_dump_json()
 
-    async def safe_point(self, snapshot: object) -> None:
-        """Record ``snapshot``: where a code change may resume this flow (see ``flow``)."""
-        definition = self._task.flow
-        if definition is None:
-            raise ContractError(("safe_point",), "only a registered flow has safe points")
-        if not isinstance(snapshot, definition.snapshot):
-            raise ContractError(
-                ("safe_point",), f"{definition.name} snapshots are {definition.snapshot.__name__}"
-            )
-        self._task.snapshot = snapshot
+    # journaled reads
+
+    @property
+    def capabilities(self) -> Capabilities:
+        """What the host offers this run (a journaled read)."""
+        return self._kit.read(lambda view: view.capabilities, Capabilities)
+
+    @property
+    def task(self) -> RunTask:
+        """The task of the run: objective, input, deadline and limits (a journaled read)."""
+        return self._kit.read(
+            lambda view: RunTask(
+                objective=view.facts.objective,
+                baseline=view.facts.baseline,
+                deadline_at=view.deadline_at,
+                limits=view.limits,
+            ),
+            RunTask,
+        )
 
 
 class Group[T](Source[T | TaskStopped]):
     """A scope for concurrent tasks and the source of their results, one each, as they finish.
 
     Leaving the ``async with`` waits for every task still running. When the operator stops the
-    run, tasks of a group with ``stops=True`` get ``Stopped`` at their next unshielded await.
+    run, tasks of a group with ``stops=True`` get ``Stopped`` at their next await.
     """
 
-    def __init__(self, run: _Run, owner: Flow, limit: int | None, *, stops: bool) -> None:
+    def __init__(self, run: _Run, owner: Kit, limit: int | None, *, stops: bool) -> None:
         """Make the group; ``Flow.group`` is the way in."""
         self._run = run
         self._owner = owner
@@ -230,7 +206,7 @@ class Group[T](Source[T | TaskStopped]):
         """
         if self.free <= 0:
             raise ContractError(("group", "start"), "the group is full: read `free` first")
-        return self._run.begin_task(self._owner, self, key, (fn, args))
+        return self._run.begin_task(self._owner.path, self, key, (fn, args))
 
     async def __aenter__(self) -> Self:
         """Enter the scope."""

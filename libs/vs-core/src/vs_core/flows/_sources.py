@@ -14,9 +14,7 @@ from vs_core.types.search import Event, StopRequested
 from ._errors import TaskStopped, TimeUp
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
-    from pydantic import BaseModel
+    from collections.abc import Callable, Generator
 
     from vs_core.types.common import DecisionId, Seconds
     from vs_core.types.strategy import Finish, Work
@@ -83,10 +81,9 @@ class _Once[T](Source[T]):
 class Pending(_Once[Event]):
     """The outcome of a request started with ``ctx.start``."""
 
-    def __init__(self, work: Work | Finish, reply: type[BaseModel]) -> None:
+    def __init__(self, work: Work | Finish) -> None:
         super().__init__()
         self.work = work
-        self.reply = reply
         self.abandoned = False
 
     @property
@@ -128,3 +125,36 @@ class Task[T](_Once[T | TaskStopped]):
 
     def describe(self) -> str:
         return f"task {self.key}"
+
+
+class Signal(Source[Event]):
+    """Events of one kind that core reports about a turn, matched by a key (core's own plumbing).
+
+    Unlike a Pending it may yield several values, and it never expires on its own: the
+    code that opened it closes it.
+    """
+
+    def __init__(self, label: str, wanted: Callable[[Event], bool]) -> None:
+        self.label = label
+        self.wanted = wanted
+        self._values: list[Event] = []
+        self.closed = False
+
+    def offer(self, event: Event) -> bool:
+        """Take event if it is the one this signal waits for."""
+        if self.closed or not self.wanted(event):
+            return False
+        self._values.append(event)
+        return True
+
+    def ready(self) -> bool:
+        return bool(self._values)
+
+    def take(self) -> Event:
+        return self._values.pop(0)
+
+    def alive(self) -> bool:
+        return not self.closed
+
+    def describe(self) -> str:
+        return self.label

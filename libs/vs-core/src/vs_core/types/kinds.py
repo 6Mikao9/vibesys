@@ -1,9 +1,7 @@
-"""The closed sets a search declares: the work it uses and the event kinds it handles.
+"""The closed sets of work a run can start and of events core reports, named once.
 
-A search lists the kinds of work it starts (``uses``) and the kinds of event it handles
-(``handles``). Core knows which events each kind of work produces, so a search that starts
-work and does not handle its result, or declares an event nothing it uses can produce, is
-refused at startup instead of failing in the middle of a run.
+``WorkKind`` is what a request can ask core for, plus the clock wake-up; ``EventKind`` is the
+kinds of event a run's flows receive, past tense, one per thing that happened.
 """
 
 from __future__ import annotations
@@ -14,8 +12,6 @@ from enum import StrEnum
 class WorkKind(StrEnum):
     """What a ``Wait`` can ask for, plus the clock wake-up."""
 
-    ASK_AGENT = "ask_agent"
-    """Ask an agent for a reply; core runs render, turn, validation, corrections and resumes."""
     REQUEST_TURN = "request_turn"
     START_ATTEMPT = "start_attempt"
     WITHDRAW = "withdraw"
@@ -50,36 +46,3 @@ class EventKind(StrEnum):
     """Plumbing of the agent pipeline: core authorized the resume of a suspended turn."""
     CHECKPOINT_KNOWN = "checkpoint_known"
     """Plumbing of the agent pipeline: core recorded or declined a turn's checkpoint."""
-
-
-ALWAYS: frozenset[EventKind] = frozenset({EventKind.FAILED, EventKind.STOP_REQUESTED})
-"""Delivered to every search: any wait can fail, and an operator can ask to stop."""
-
-PIPELINE: frozenset[EventKind] = frozenset(
-    {
-        EventKind.TURN_ENDED,
-        EventKind.TURN_YIELDED,
-        EventKind.YIELD_FAILED,
-        EventKind.RESUME_READY,
-        EventKind.CHECKPOINT_KNOWN,
-    }
-)
-"""The events of one provider turn. Only core's agent pipeline declares and handles them."""
-
-OPT_IN: frozenset[EventKind] = (
-    frozenset({EventKind.MESSAGE_DELIVERED, EventKind.MESSAGE_DROPPED, EventKind.INTERRUPTED})
-    | PIPELINE
-)
-"""Delivered only to a search that declares it; core handles them itself otherwise."""
-
-PRODUCES: dict[WorkKind, frozenset[EventKind]] = {
-    WorkKind.ASK_AGENT: frozenset({EventKind.TURN_FINISHED}),
-    WorkKind.REQUEST_TURN: PIPELINE,
-    WorkKind.START_ATTEMPT: frozenset({EventKind.WORKSPACE_OPENED}),
-    WorkKind.WITHDRAW: frozenset({EventKind.WORKSPACE_CLOSED}),
-    WorkKind.MEASURE: frozenset({EventKind.MEASUREMENT_FINISHED}),
-    WorkKind.PROPOSE_WINNER: frozenset({EventKind.ADOPTION_FINISHED}),
-    WorkKind.OPERATION: frozenset({EventKind.OPERATION_FINISHED}),
-    WorkKind.WAKE_AT: frozenset({EventKind.TIME_REACHED}),
-}
-"""The result event each kind of work ends with (``FAILED`` is always possible as well)."""

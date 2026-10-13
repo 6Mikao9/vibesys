@@ -1,4 +1,4 @@
-"""The persisted state of a flow search: the journal replay needs, and what a restart needs."""
+"""The persisted state of a search: the journal replay needs, and what a restart needs."""
 
 from __future__ import annotations
 
@@ -8,12 +8,8 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import Field, TypeAdapter
 
 from vs_core._registry import ContractError
-
-# lint-waiver: LW-994803 [TC001]; pydantic reads the annotation of FlowState.dropped at runtime.
-# > Importing Dropped under TYPE_CHECKING breaks model construction; a local copy would fork a core type.
-from vs_core.children import Dropped  # noqa: TC001
-from vs_core.types.agents import Checkpoint
-from vs_core.types.common import DecisionId, InvocationRef, RunFacts, Value
+from vs_core.types.common import DecisionId, RunFacts, Value
+from vs_core.types.kinds import EventKind
 from vs_core.types.search import (
     AdoptionFinished,
     CheckpointKnown,
@@ -27,27 +23,17 @@ from vs_core.types.search import (
     StopRequested,
     TimeReached,
     TurnEnded,
-    TurnFinished,
     TurnYielded,
     WorkspaceClosed,
     WorkspaceOpened,
     YieldFailed,
 )
+from vs_core.types.settlement import Selection
 from vs_core.types.strategy import Decision, StrategyState
 from vs_core.types.until import Failed
 
 if TYPE_CHECKING:
     from vs_core._registry import OperationRegistry
-
-
-class RecordedTurn(Value):
-    """A ``TurnFinished`` as the journal keeps it: the reply as JSON, rebuilt by the waiter's model."""
-
-    kind: Literal["recorded_turn"] = "recorded_turn"
-    decision: DecisionId
-    invocation: InvocationRef
-    reply_json: str
-    checkpoint: Checkpoint | None = None
 
 
 class RecordedOperation(Value):
@@ -62,7 +48,7 @@ class RecordedOperation(Value):
     result_json: str
 
 
-type Recorded = Annotated[RecordedTurn | RecordedOperation, Field(discriminator="kind")]
+type Recorded = RecordedOperation
 
 type JournaledEvent = Annotated[
     WorkspaceOpened
@@ -82,7 +68,14 @@ type JournaledEvent = Annotated[
     | Failed,
     Field(discriminator="kind"),
 ]
-"""Every ``Event`` that is journaled as it is: not a ``TurnFinished`` or ``OperationFinished``."""
+"""Every ``Event`` that is journaled as it is: all but an ``OperationFinished``."""
+
+
+class Dropped(Value):
+    """A result that reached no waiting flow (its wait was abandoned), and was dropped."""
+
+    event: EventKind
+    decision: DecisionId | None
 
 
 class Step(Value):
@@ -125,6 +118,8 @@ class LiveFlows(Value):
     """The stop that arrived, if any: restarted flows are stopped again."""
     published: str | None
     """The flow's published record as JSON (``ctx.publish``), kept beside the journal."""
+    choice: Selection | None = None
+    """The winner named so far (``ctx.choose``): restarted flows keep it."""
 
 
 class Waiting(Value):
@@ -169,25 +164,15 @@ def digest(
 def recorded(
     event: Event, registry: OperationRegistry | None
 ) -> tuple[JournaledEvent | None, Recorded | None]:
-    """The journal's form of an event: a turn or operation result is kept as JSON."""
-    match event:
-        case TurnFinished():
-            turn = RecordedTurn(
-                decision=event.decision,
-                invocation=event.invocation,
-                reply_json=event.reply.model_dump_json(),
-                checkpoint=event.checkpoint,
-            )
-            return None, turn
-        case OperationFinished():
-            if registry is None:
-                message = "a flow that waits on operations needs the operation registry"
-                raise ContractError(("registry",), message)
-            return None, RecordedOperation(
-                decision=event.decision, result_json=event.result.model_dump_json()
-            )
-        case _:
-            return event, None
+    """The journal's form of an event: an operation result is kept as JSON."""
+    if isinstance(event, OperationFinished):
+        if registry is None:
+            message = "a search that waits on operations needs the operation registry"
+            raise ContractError(("registry",), message)
+        return None, RecordedOperation(
+            decision=event.decision, result_json=event.result.model_dump_json()
+        )
+    return event, None
 
 
 def key(state: FlowState) -> tuple[int, str]:

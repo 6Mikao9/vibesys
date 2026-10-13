@@ -1,4 +1,4 @@
-"""Trace driver: run a pure `Search` on the real core against scripted executors.
+"""Trace driver: run a search driver on the real core against scripted executors.
 
 The driver stands in for the host shell. It calls the real `vs_core.api.step` and
 `project`, hands the search every event core publishes, authorizes every prepared
@@ -52,7 +52,7 @@ from vs_core.api import (
     RevisionRef,
     RunEnvelope,
     RunFacts,
-    Search,
+    SearchDriver,
     SearchHost,
     StrategyEvent,
     StrategyState,
@@ -164,7 +164,7 @@ class Trace[S: StrategyState]:
     """Everything one drive saw, in order, and where it ended."""
 
     core: CoreState
-    search: Search[S, Any]
+    search: SearchDriver[S, Any]
     state: S
     decisions: list[Submission] = field(default_factory=list)
     events: list[StrategyEvent] = field(default_factory=list)
@@ -185,7 +185,7 @@ class Trace[S: StrategyState]:
 class _Driver[S: StrategyState]:
     def __init__(
         self,
-        search: Search[S, Any],
+        search: SearchDriver[S, Any],
         script: Script,
         harness: Harness,
         faults: Faults,
@@ -447,7 +447,7 @@ class Harness:
     requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
 
 
-def new_run[S: StrategyState](search: Search[S, Any], harness: Harness) -> CoreState:
+def new_run[S: StrategyState](search: SearchDriver[S, Any], harness: Harness) -> CoreState:
     """A run that has started: declaration validated against what the host offers."""
     base = initial_state()
     declaration = search.declaration
@@ -472,7 +472,7 @@ def new_run[S: StrategyState](search: Search[S, Any], harness: Harness) -> CoreS
 
 
 def drive[S: StrategyState, C](
-    search: Search[S, C],
+    search: SearchDriver[S, C],
     config: C,
     script: Script,
     harness: Harness,

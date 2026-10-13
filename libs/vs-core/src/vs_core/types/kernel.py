@@ -205,9 +205,11 @@ class DecisionCompleted(Value):
 class RunControlEvent(Value):
     """Operator control with explicit stop publication, never an invented result.
 
-    Stop requires its typed proposal. Other actions cannot supply one. The kernel
-    records the first committed stop result and preserves it through draining;
-    replay of one control identity with another proposal is a conflict.
+    A stop either carries its typed proposal, which the kernel turns into a draining ``Finish``
+    (and preserves through draining; replay of one control identity with another proposal is a
+    conflict), or carries none. A stop without a result only records the request and tells the
+    search: it changes no status, and the search ends the run itself. Other actions cannot
+    supply a result.
     """
 
     kind: Literal["run_control"] = "run_control"
@@ -217,9 +219,9 @@ class RunControlEvent(Value):
 
     @model_validator(mode="after")
     def stop_result_correspondence(self) -> RunControlEvent:
-        """Only an explicit stop proposal may authorize final run publication."""
-        if (self.control.action == "stop") != (self.result is not None):
-            raise ContractValidationError("result", "required exactly for stop control")
+        """Only an explicit stop proposal may authorize final run publication by the kernel."""
+        if self.result is not None and self.control.action != "stop":
+            raise ContractValidationError("result", "allowed only for stop control")
         return self
 
 

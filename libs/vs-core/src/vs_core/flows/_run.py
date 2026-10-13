@@ -4,39 +4,57 @@ from __future__ import annotations
 
 from collections import deque
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
 from vs_core._registry import ContractError
-from vs_core.children import Dropped
-from vs_core.types.common import AttemptRef, DecisionId, RunFacts, Seconds
+from vs_core.types.common import AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
 from vs_core.types.kinds import EventKind
 from vs_core.types.records import OperationResult
 from vs_core.types.search import (
     AdoptionFinished,
+    CheckpointKnown,
     Event,
     OperationFinished,
+    ResumeReady,
     StopRequested,
     TimeReached,
-    TurnFinished,
+    TurnYielded,
     WorkspaceClosed,
+    YieldFailed,
 )
 from vs_core.types.strategy import Decision, Finish, ProposeWinner, WakeAt, Withdraw, Work
 
 from ._defs import FlowDef, _adapter, _Task, definition_of
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
 from ._flow import Flow
-from ._sources import First, Pending, Task, Timer
-from ._state import Issued, LiveFlow, LiveFlows, Recorded, RecordedOperation, RecordedTurn
+from ._sources import First, Pending, Signal, Task, Timer
+from ._state import Dropped, Issued, LiveFlow, LiveFlows, Recorded, RecordedOperation
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
 
+    from vs_core._ids import IdScheme
     from vs_core._registry import OperationRegistry
+    from vs_core._strategy_operations import StrategyOperations
+    from vs_core.types.agents import Checkpoint
     from vs_core.types.search import RunView
+    from vs_core.types.settlement import Selection
 
     from ._flow import Group
+    from ._roles import AgentProtocol
+
+
+@dataclass(frozen=True)
+class Wiring:
+    """What the host and the registration lend a run: its codec and its namespace's shapes."""
+
+    registry: OperationRegistry | None = None
+    operations: StrategyOperations | None = None
+    ids: IdScheme | None = None
+    protocol: AgentProtocol | None = None
 
 
 class _Run:
@@ -44,22 +62,25 @@ class _Run:
 
     def __init__(
         self,
-        defs: tuple[FlowDef, ...],
+        root: FlowDef,
         config: object,
         facts: RunFacts,
-        registry: OperationRegistry | None,
+        wiring: Wiring,
     ) -> None:
         self.facts = facts
+        self.wiring = wiring
         self.stop: StopRequested | None = None
         self.closed = False
         self.published: str | None = None
+        self.choice: Selection | None = None
         self.out: list[Decision] = []
         self.dropped: list[Dropped] = []
-        self._registry = registry
-        self._defs = defs  # the root first
+        self.checkpoints: dict[InvocationRef, Checkpoint] = {}
+        self._root = root
         self._config = config
         self._tasks: list[_Task] = [_Task(path="")]  # live flows, the root first
         self._pendings: dict[DecisionId, Pending] = {}
+        self._signals: list[Signal] = []
         self._timers: list[Timer] = []
         self._restorable: dict[str, LiveFlow] = {}
         self._issued: dict[tuple[str, str], int] = {}
@@ -69,10 +90,12 @@ class _Run:
 
     # -- one step: init, restore or one event ------------------------------------------------
 
-    def start(self) -> list[Decision]:
+    def start(
+        self, view: RunView | None, recorded: tuple[str, ...] | None = None
+    ) -> list[Decision]:
         """Run the root flow until it first suspends."""
-        self._begin(None, None)
-        self._launch(self._tasks[0], self._defs[0], self._config)
+        self._begin(view, recorded)
+        self._launch(self._tasks[0], self._root, self._config)
         return self._end()
 
     def restore(
@@ -84,14 +107,15 @@ class _Run:
         latest snapshot of the flow that had that key, with its decision numbering kept.
         """
         self._begin(view, recorded)
-        self.stop, self.published = base.stop, base.published
+        self.stop, self.published, self.choice = base.stop, base.published, base.choice
         self._issued = {(i.path, i.label): i.count for i in base.issued}
         self._restorable = {live.path: live for live in base.flows if live.path}
         root = next(live for live in base.flows if not live.path)
-        definition = self._defined(root.name)
+        if root.name != self._root.name:
+            raise FlowCodeChanged(0)
         if base.stop is not None:
             self._tasks[0].stop.set(base.stop)
-        self._launch(self._tasks[0], definition, self._snapshot_of(definition, root))
+        self._launch(self._tasks[0], self._root, self._snapshot_of(self._root, root))
         return self._end()
 
     def feed(
@@ -144,7 +168,11 @@ class _Run:
             )
         issued = tuple(Issued(path=p, label=lb, count=n) for (p, lb), n in self._issued.items())
         return LiveFlows(
-            flows=tuple(flows), issued=issued, stop=self.stop, published=self.published
+            flows=tuple(flows),
+            issued=issued,
+            stop=self.stop,
+            published=self.published,
+            choice=self.choice,
         )
 
     def waiting(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -158,6 +186,7 @@ class _Run:
     # -- reading and naming ------------------------------------------------------------------
 
     def read[T](self, fn: Callable[[RunView], T], as_: type[T] | TypeAdapter[T]) -> T:
+        """A value of the run's view, journaled: live and replay both decode the same text."""
         adapter = as_ if isinstance(as_, TypeAdapter) else _adapter(as_)
         if self._recorded is not None:
             if not self._recorded:
@@ -170,15 +199,20 @@ class _Run:
         self._reads.append(text)
         return adapter.validate_json(text)
 
+    def count(self, task: _Task, label: str) -> int:
+        """The next number under ``label`` in ``task``'s flow (1, 2, ...); ids never repeat."""
+        number = self._issued.get((task.path, label), 0) + 1
+        self._issued[task.path, label] = number
+        return number
+
     def stamp[W: Work | Finish](self, task: _Task, work: W) -> W:
         """``work`` with its decision id root turned into ``<path><root>.<n>``."""
         if self.closed:
             raise ContractError(("run",), "the run is closed")
         root = work.decision_id.root
-        count = self._issued.get((task.path, root), 0) + 1
-        self._issued[task.path, root] = count
+        number = self.count(task, root)
         return work.model_copy(
-            update={"decision_id": DecisionId(root=f"{task.path}{root}.{count}")}
+            update={"decision_id": DecisionId(root=f"{task.path}{root}.{number}")}
         )
 
     def issue(self, task: _Task, pending: Pending, decision: Decision) -> Pending:
@@ -206,11 +240,24 @@ class _Run:
         self.out.append(WakeAt(time=at))
         return timer
 
+    def signal(self, task: _Task, label: str, wanted: Callable[[Event], bool]) -> Signal:
+        """A source of the turn-plumbing events ``wanted`` accepts, closed with ``task``."""
+        found = Signal(label, wanted)
+        self._signals.append(found)
+        task.signals.append(found)
+        return found
+
+    def release(self, found: Signal) -> None:
+        """Stop offering events to ``found``."""
+        found.closed = True
+        if found in self._signals:
+            self._signals.remove(found)
+
     # -- tasks -------------------------------------------------------------------------------
 
     def begin_task[R](
         self,
-        owner: Flow,
+        owner_path: str,
         group: Group[Any],
         key: str,
         start: tuple[Callable[..., Coroutine[Any, Any, R]], tuple[object, ...]],
@@ -218,7 +265,7 @@ class _Run:
         fn, args = start
         if not key or "/" in key:
             raise ContractError(("group", "key"), "a task key must be non-empty and contain no '/'")
-        path = f"{owner.path}{key}/"
+        path = f"{owner_path}{key}/"
         if any(live.path == path for live in self._tasks):
             raise ContractError(("group", "key"), f"a task {path} is already running")
         task = _Task(path=path, group=group, handle=Task(key))
@@ -230,7 +277,8 @@ class _Run:
         restored = self._restorable.pop(path, None)
         definition = definition_of(fn)
         if restored is not None:  # after a code change: resume from the flow's own snapshot
-            definition = self._defined(restored.name)
+            if definition is None or definition.name != restored.name:
+                raise FlowCodeChanged(0)  # the new code starts something else under this key
             self._launch(task, definition, self._snapshot_of(definition, restored))
         elif definition is not None:
             if len(args) != 1 or not isinstance(args[0], definition.snapshot):
@@ -241,12 +289,6 @@ class _Run:
             task.coro = fn(Flow(self, task), *args)
             self._resume(task, None, None)
         return task.handle
-
-    def _defined(self, name: str | None) -> FlowDef:
-        found = next((d for d in self._defs if d.name == name), None)
-        if found is None:
-            raise FlowCodeChanged(0)  # the new code has no flow of that name to restart
-        return found
 
     @staticmethod
     def _snapshot_of(definition: FlowDef, live: LiveFlow) -> object:
@@ -284,9 +326,10 @@ class _Run:
     def _ended(self, task: _Task, result: object) -> None:
         self._tasks.remove(task)
         for pending in task.started:
-            if not pending.alive():
-                continue
-            self.forget(pending)
+            if pending.alive():
+                self.forget(pending)
+        for found in task.signals:
+            self.release(found)
         task.handle.set(result)
         if task.group is not None:
             task.group.running -= 1
@@ -304,8 +347,17 @@ class _Run:
             case StopRequested(control=control):
                 if control.action == "stop" and self.stop is None:
                     self._stop(item)
+            case CheckpointKnown(invocation=invocation, checkpoint=checkpoint):
+                self.checkpoints[invocation] = checkpoint
+                self._offer(item)
+            case TurnYielded() | YieldFailed() | ResumeReady():
+                self._offer(item)
             case _:
                 self._answer(item)
+
+    def _offer(self, event: Event) -> None:
+        for found in tuple(self._signals):
+            found.offer(event)
 
     def _answer(self, item: Event | Recorded) -> None:
         decision = self._answered_decision(item)
@@ -315,7 +367,7 @@ class _Run:
         if pending is None:
             self.dropped.append(Dropped(event=_kind_of(item), decision=decision))
         else:
-            pending.set(self._rebuilt(item, pending))
+            pending.set(self._rebuilt(item))
 
     def _answered_decision(self, item: Event | Recorded) -> DecisionId | None:
         """The request this event answers, by the table ``_ANSWER_RULES``.
@@ -330,22 +382,13 @@ class _Run:
                 return found
         return None
 
-    def _rebuilt(self, item: Event | Recorded, pending: Pending) -> Event:
+    def _rebuilt(self, item: Event | Recorded) -> Event:
         """The event a recorded item stands for: live and replay both go through here."""
-        match item:
-            case RecordedTurn():
-                return TurnFinished(
-                    decision=item.decision,
-                    invocation=item.invocation,
-                    reply=pending.reply.model_validate_json(item.reply_json),
-                    checkpoint=item.checkpoint,
-                )
-            case RecordedOperation():
-                context = {"operation_registry": self._registry, "persisted_operation": True}
-                result = OperationResult.model_validate_json(item.result_json, context=context)
-                return OperationFinished(decision=item.decision, result=result)
-            case _:
-                return item
+        if isinstance(item, RecordedOperation):
+            context = {"operation_registry": self.wiring.registry, "persisted_operation": True}
+            result = OperationResult.model_validate_json(item.result_json, context=context)
+            return OperationFinished(decision=item.decision, result=result)
+        return item
 
     def _stop(self, item: StopRequested) -> None:
         self.stop = item
@@ -379,8 +422,6 @@ class _Run:
 
 
 def _kind_of(item: Event | Recorded) -> EventKind:
-    if isinstance(item, RecordedTurn):
-        return EventKind.TURN_FINISHED
     if isinstance(item, RecordedOperation):
         return EventKind.OPERATION_FINISHED
     return EventKind(item.kind)
