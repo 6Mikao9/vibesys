@@ -1,12 +1,12 @@
-"""The issue queue's world: what its roles reply, and the issue board they work on.
+"""The issue queue's world on the production shell: what its roles reply, and the board they work on.
 
-`IssueQueueWorld` is a vs-dst `World`. A test builds one from plain data, simulates it and
-asserts on the run and on the board::
+`IssueQueueWorld` is a vs-dst `World`: the search, its config and the scripted far side of its
+run. A test builds one from plain data, simulates it and asserts on the run and on the board::
 
-    world = IssueQueueWorld(implementer=[implemented()], judge=[judged()], perf=[evaluated()])
+    world = IssueQueueWorld(judge=[judged(passed=False), judged()])
     run = simulate(world)
 
-Keyword arguments that name no world option configure the strategy (`IssueQueueConfig`), so a
+Keyword arguments that name no world option configure the search (`IssueQueueConfig`), so a
 misspelling is refused by name. An executor reports what it saw (a reply, a write that landed)
 and never core's conclusions. The board is a real `IssueBoardOwner` over a `FakeIssueTracker`,
 so a crash copies it with the rest of the world and a scripted fault can lose an acknowledgement
@@ -16,24 +16,24 @@ after a write landed.
 from __future__ import annotations
 
 import hashlib
-import json
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
+from pydantic import BaseModel
 from tests.support.checkpoint_faults import FaultyCheckpoints
-from tests.vibesys.orchestration.issue_queue.strategy._waiting import WAITING, WaitingTurns
+from tests.support.dynamic_script import FACTS, TERMS, lease
+from tests.vibesys.orchestration.issue_queue._replies import evaluated, implemented, judged
 
-from vibesys.orchestration.issue_queue.core_policy.api import (
-    limits_for,
-    reply_schemas,
-    requirements_for,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
+from vibesys.candidates.api import limits_for
+from vibesys.orchestration.issue_queue.core_policy.api import requirements_for
+from vibesys.orchestration.issue_queue.search.api import (
+    EvidenceReadings,
+    InterpretEvidence,
     IssueQueueConfig,
-    IssueQueueStrategy,
-    IssueQueueStrategyState,
+    RenderedArtifacts,
     RenderRoleArtifacts,
-    plain_operation_registry,
+    budget,
+    issue_queue,
 )
 from vs_core.api import (
     AdoptRevision,
@@ -50,44 +50,32 @@ from vs_core.api import (
     EvidenceKind,
     EvidenceRef,
     ExecuteRegisteredOperation,
-    LifecycleCapability,
-    Limits,
+    FlowState,
     ObservationStatus,
     ObserveOwnedJob,
     OwnedJob,
-    RenderedArtifacts,
     ResourceId,
     ResumeSessionTurn,
     RetainRevision,
     RevisionRef,
     RunEnvelope,
-    RunFacts,
-    SessionId,
     SnapshotAndRetain,
     SubmitMeasurement,
     VerifyAdoption,
 )
+from vs_core.testing.builders import sample_retries
 from vs_core.testing.drive import Answer, Harness, Running, Succeeded, Unknown
 from vs_dst.api import RunSetup
 from vs_issue_tracker.api import FakeIssueTracker, LogProgress, MemoryProgressLog
 from vs_runtime.api.core import IssueBoardOwner, handle_for
+from vs_runtime.api.testing import Launch
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from vs_core.api import CoreState, Request
-    from vs_dst.api import Enact
     from vs_issue_tracker.api import FaultPhase
-    from vs_runtime.api.core import CoreRuntime
-    from vs_sim.api.testing import VirtualClock
 
-FACTS = RunFacts(
-    objective="serve the model",
-    baseline=RevisionRef.of_git_commit("abc123"),
-    evaluator_digest="evaluator",
-    workload_digest="workload",
-    environment_digest="environment",
-)
 _KINDS = {
     "accuracy": EvidenceKind.CORRECTNESS,
     "benchmark": EvidenceKind.BENCHMARK,
@@ -96,100 +84,21 @@ _KINDS = {
 _ROLES = {"implementer": "implementer", "judge": "judge", "perf-evaluator": "perf"}
 
 
-# -- the replies the roles are asked to produce -------------------------------------------
+class _Bounds:
+    """The declarations of a backend whose requests are retried twice and polled quickly."""
 
-
-def implemented(summary: str = "done", **extra: object) -> str:
-    """An implementer result reply."""
-    return json.dumps({"summary": summary, "files_touched": ["a.py"], "self_check": "ok", **extra})
-
-
-def judged(*, passed: bool = True, bugs: tuple[str, ...] = (), **extra: object) -> str:
-    """A judge result reply, optionally filing bugs."""
-    return json.dumps(
-        {
-            "analysis": "analysis",
-            "feedback": "" if passed else "fix it",
-            "verdict": "pass" if passed else "fail",
-            "new_issues": [
-                {"type": "bug", "title": title, "description": f"## Background\n{title}"}
-                for title in bugs
-            ],
-            **extra,
-        }
-    )
-
-
-def evaluated(*titles: str, kinds: tuple[str, ...] = (), **extra: object) -> str:
-    """A performance evaluator reply filing one issue per title."""
-    return json.dumps(
-        {
-            "analysis": "analysis",
-            "metrics": {
-                "load_levels": [
-                    {
-                        "target_rate": 1.0,
-                        "actual_rate": 1.0,
-                        "num_requests": 4,
-                        "num_completed": 4,
-                        "num_failed": 0,
-                        "duration": 1.0,
-                        "throughput": {
-                            "request_throughput": 4.0,
-                            "token_throughput": 40.0,
-                        },
-                    }
-                ],
-                "extra": {},
-            },
-            "evaluator_feedback": ["measure more"],
-            "new_issues": [
-                {
-                    "type": kinds[index] if index < len(kinds) else "perf",
-                    "title": title,
-                    "description": f"## Background\n{title}",
-                }
-                for index, title in enumerate(titles)
-            ],
-            "throughput_trend": "improved",
-            "latency_trend": "mixed",
-            **extra,
-        }
-    )
-
-
-def generic_evaluated() -> str:
-    """A domain-neutral performance evaluator reply."""
-    return json.dumps(
-        {
-            "analysis": "The candidate processes more work per second.",
-            "metrics": {
-                "measurements": [
-                    {
-                        "name": "operations_per_second",
-                        "value": 4.0,
-                        "unit": "ops/s",
-                        "workload": "default",
-                    }
-                ],
-                "extra": {},
-            },
-            "evaluator_feedback": ["measure more"],
-            "new_issues": [],
-            "primary_metric_trend": "improved",
-            "secondary_metric_trend": None,
-        }
-    )
-
-
-# -- the strategy's setup -------------------------------------------------------------------
+    request_retries = sample_retries(2)
+    observe_interval_seconds = 1.0
+    observe_backoff_cap_seconds = 1.0
+    cancellation_bound_seconds = 60.0
+    cleanup_bound_seconds = 60.0
+    reconciliation_bound_seconds = 5000.0
 
 
 def issue_queue_config(**settings: object) -> IssueQueueConfig:
-    """The strategy's config: two rounds and two attempts per issue unless ``settings`` say."""
+    """The search's config: two rounds and two attempts per issue unless ``settings`` say."""
     return IssueQueueConfig.model_validate(
         {
-            "recipe": ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
             "max_rounds": 2,
             "max_attempts_per_issue": 2,
             "max_issues_per_perf_eval": 2,
@@ -199,31 +108,17 @@ def issue_queue_config(**settings: object) -> IssueQueueConfig:
     )
 
 
-def issue_queue_limits(settings: IssueQueueConfig) -> Limits:
-    """The run limits derived from ``settings``."""
-    return limits_for(
-        settings, queue_allowance=900.0, observe_interval=10.0, observe_backoff_cap=120.0
-    )
-
-
-def issue_queue_harness(
-    settings: IssueQueueConfig,
-    *,
-    facts: RunFacts = FACTS,
-    lifecycle: frozenset[LifecycleCapability] = frozenset(),
-) -> Harness:
-    """What hosts the strategy: its codec, the run's facts, limits and evidence requirements."""
-    return Harness(
-        registry=plain_operation_registry(),
-        facts=facts,
-        limits=issue_queue_limits(settings),
-        envelope_type=RunEnvelope[IssueQueueStrategyState],
+def issue_queue_harness(settings: IssueQueueConfig, **overrides: object) -> Harness:
+    """What hosts the search: its codec, the run's facts, limits and evidence requirements."""
+    hosting = Harness(
+        registry=issue_queue.registry(),
+        facts=FACTS,
+        limits=limits_for(budget(settings), _Bounds()),
+        envelope_type=RunEnvelope[FlowState],
         requirements=requirements_for(),
-        lifecycle=lifecycle,
+        schemas=issue_queue.reply_schemas,
     )
-
-
-# -- the board ------------------------------------------------------------------------------
+    return replace(hosting, **overrides)
 
 
 class _Texts:
@@ -262,11 +157,6 @@ class ScheduledFaults:
             raise ConnectionError(message)
 
 
-def _lease(session_id: SessionId) -> ResourceId:
-    """The lease an executor holds for a session: the same name from ensure through close."""
-    return ResourceId(root=f"lease:{session_id.root}")
-
-
 def revision_of(attempt: str) -> RevisionRef:
     """The commit the workspace executor retains for an attempt: fixed by the attempt."""
     return RevisionRef.of_git_commit(hashlib.sha256(attempt.encode()).hexdigest()[:40])
@@ -276,61 +166,46 @@ class IssueQueueWorld:
     """The roles of one issue-queue run and the board they work on, answering from plain data.
 
     A reply is handed out once, in the order requests are authorized, so a copy of the world
-    taken mid-run continues from where the run stood. A role with no reply left reports
-    nothing (an unknown effect).
+    taken mid-run continues from where the run stood. A role with no reply left answers with a
+    reply that is no valid JSON.
     """
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-994710 [PLR0913]; each option is one independent fact of the scripted world, and a test names the ones it varies.
         # > Grouping them in a holder would make every test build the holder before the world.
         self,
         *,
-        implementer: Sequence[str | Answer] = (),
-        judge: Sequence[str | Answer] = (),
-        perf: Sequence[str | Answer] = (),
+        implementer: Sequence[BaseModel | str | Answer] | None = None,
+        judge: Sequence[BaseModel | str | Answer] | None = None,
+        perf: Sequence[BaseModel | str | Answer] | None = None,
         accurate: bool = True,
         silent_official: bool = False,
         unchanged: Sequence[str] = (),
         tracker_faults: Mapping[int, FaultPhase] | None = None,
         record_requests: bool = False,
-        waits: Sequence[bool] = (),
-        ends: Sequence[str] = ("wait",),
-        roles: Sequence[str] = ("implementer", "judge"),
-        delays: Sequence[int] = (0,),
         polls: int = 0,
         checkpoints: Sequence[str] = (),
         **settings: object,
     ) -> None:
         """Script a run.
 
-        ``implementer``, ``judge`` and ``perf`` are the replies each role gives, in order: the
-        agent's JSON, or an `Answer` for a turn that ends another way. ``accurate`` is whether
-        the trusted accuracy gate passes; ``silent_official`` makes the final (official)
-        measurement never report. ``unchanged`` names the attempts whose turns change nothing:
-        the workspace executor retains the revision the attempt started from, as a snapshot of
-        an unchanged tree is. ``tracker_faults`` maps the n-th call of the tracker's fault hook
-        to the phase it fails in (see `ScheduledFaults`). ``record_requests`` keeps every
-        request the executors received in ``requests``.
-
-        ``waits`` makes the n-th fresh turn of a role in ``roles`` (cycling) submit an
-        evaluation through the production bridge and wait for it; ``ends`` is how the n-th
-        waiting turn ends once it validated its wait (``"wait"``: the waiting reply, ``"result"``:
-        the role's final result, ``"invalid"``: a reply that is not JSON); ``delays`` is how many
-        event-loop yields the n-th turn takes; ``polls`` is how many polls each evaluation job
-        reports running; ``checkpoints`` answers the n-th checkpoint request ``succeeded``,
-        ``failed`` or ``retryable`` (cycling). Any other option is an `IssueQueueConfig` field.
+        ``implementer``, ``judge`` and ``perf`` are the replies each role gives, in order: a
+        reply model or its JSON, or an `Answer` for a turn that ends another way; by default
+        each role gives one ordinary reply (implemented, approved, no issues filed). ``accurate``
+        is whether the trusted accuracy gate passes; ``silent_official`` makes the final
+        (official) measurement never report. ``unchanged`` names the attempts whose turns change
+        nothing: the workspace executor retains the revision the attempt started from.
+        ``tracker_faults`` maps the n-th call of the tracker's fault hook to the phase it fails
+        in (see `ScheduledFaults`). ``record_requests`` keeps every request the executors
+        received in ``requests``. ``polls`` is how many polls each evaluation job reports
+        running; ``checkpoints`` answers the n-th checkpoint request ``succeeded``, ``failed``
+        or ``retryable`` (cycling). Any other option is an `IssueQueueConfig` field.
         """
         self.config = issue_queue_config(**settings)
         config = self.config
         self.setup = RunSetup(
-            new_strategy=lambda: IssueQueueStrategy(config=config),
-            harness=issue_queue_harness(
-                config, lifecycle=frozenset({"suspend"}) if waits else frozenset()
-            ),
-            schemas=reply_schemas(config),
-            # A turn that waits is resumed while another request runs, and the evaluation it
-            # waits for is admitted to the shell by the loop's control poll.
-            max_concurrent=2 if waits else 1,
-            controlled=bool(waits),
+            new_launch=lambda: Launch(issue_queue, config),
+            harness=issue_queue_harness(config),
+            schemas=issue_queue.reply_schemas,
         )
         self.tracker = FakeIssueTracker(
             faults=None if tracker_faults is None else ScheduledFaults(dict(tracker_faults))
@@ -338,22 +213,16 @@ class IssueQueueWorld:
         self.progress = MemoryProgressLog()
         self.requests: list[Request] = []
         self._record = record_requests
-        self._replies = {
-            "implementer": list(implementer),
-            "judge": list(judge),
-            "perf": list(perf),
+        self._replies: dict[str, list[BaseModel | str | Answer]] = {
+            "implementer": list([implemented()] if implementer is None else implementer),
+            "judge": list([judged()] if judge is None else judge),
+            "perf": list([evaluated()] if perf is None else perf),
         }
         self._accurate = accurate
         self._silent_official = silent_official
         self._unchanged = frozenset(unchanged)
-        self._waits = tuple(waits)
-        self._ends = tuple(ends)
-        self._roles = tuple(roles)
-        self._delays = tuple(delays)
         self._polls = polls
         self._checkpoints = FaultyCheckpoints(self._answer, tuple(checkpoints))
-        self._started = 0
-        self._waiting: set[str] = set()
         self._running: dict[str, int] = {}
         self._bases: dict[str, RevisionRef] = {}
         self._ranks: dict[str, int] = {}
@@ -376,11 +245,7 @@ class IssueQueueWorld:
         ]
 
     def headline(self, commit: str) -> float | None:
-        """The throughput of a candidate in this world: its rank among the revisions retained.
-
-        A later revision was built on the earlier ones, so it is the better candidate (the
-        issue queue adopts its last tip).
-        """
+        """The throughput of a candidate in this world: its rank among the revisions retained."""
         rank = self._ranks.get(commit)
         return None if rank is None else float(rank + 1)
 
@@ -391,12 +256,6 @@ class IssueQueueWorld:
         if self._record:
             self.requests.append(request)
         return self._checkpoints(request, core)
-
-    def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> Enact | None:
-        """Serve the evaluation tool to this host's turns that wait (a host without waits has none)."""
-        if not self._waits:
-            return None
-        return WaitingTurns(shell, clock, self.config, FACTS, self._waiting, self._delays)
 
     def _answer(self, request: Request, core: CoreState) -> Answer:
         """What an executor that needs no view beyond ``core`` reports for ``request``."""
@@ -416,7 +275,7 @@ class IssueQueueWorld:
 
     def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
         """An operation answered in process: a board operation is performed by the real owner."""
-        typed = plain_operation_registry().decode(request.operation)
+        typed = issue_queue.registry().decode(request.operation)
         if isinstance(typed, RenderRoleArtifacts):
             return Succeeded(
                 outcome=RenderedArtifacts(
@@ -429,6 +288,8 @@ class IssueQueueWorld:
                     ),
                 )
             )
+        if isinstance(typed, InterpretEvidence):
+            return Succeeded(outcome=EvidenceReadings(status="succeeded", readings=()))
         owner = IssueBoardOwner(self.tracker, self.progress, _Texts())
         try:
             return Succeeded(outcome=owner.perform(typed))
@@ -456,9 +317,9 @@ class IssueQueueWorld:
                     revision=request.plan.base,
                 )
             case EnsureSession():
-                answer = Succeeded(resource_id=_lease(request.spec.session_id))
+                answer = Succeeded(resource_id=lease(request.spec.session_id))
             case CloseSession():
-                answer = Succeeded(resource_id=_lease(request.session_id))
+                answer = Succeeded(resource_id=lease(request.session_id))
             case SnapshotAndRetain():
                 attempt = request.attempt.attempt_id.root
                 kept = self._bases[attempt] if attempt in self._unchanged else None
@@ -475,38 +336,15 @@ class IssueQueueWorld:
 
     def _turn(self, request: DispatchTurn | ResumeSessionTurn) -> Answer:
         role = _ROLES[request.turn.session.role_id.root.removeprefix("plain-")]
-        lease = _lease(request.turn.session.session_id)
-        if isinstance(request, DispatchTurn) and role in self._roles and self._waits:
-            ordinal = self._started
-            self._started += 1
-            if self._waits[ordinal % len(self._waits)]:
-                assert request.request_id is not None
-                self._waiting.add(request.request_id.root)
-                return Succeeded(output_json=self._ending(ordinal, role), resource_id=lease)
-        return self._reply(role, lease)
-
-    def _reply(self, role: str, lease: ResourceId) -> Answer:
-        """The next reply of ``role``; nothing is reported once the script has run out."""
         queue = self._replies[role]
-        if not queue:
-            return Unknown()
-        reply = queue.pop(0)
-        if not isinstance(reply, str):
-            return reply
-        return Succeeded(output_json=reply, resource_id=lease)
-
-    def _ending(self, ordinal: int, role: str) -> str:
-        """The reply the waiting turn ends with."""
-        match self._ends[ordinal % len(self._ends)]:
-            case "result":
-                answer = self._reply(role, ResourceId(root="unused"))
-                assert isinstance(answer, Succeeded)
-                assert answer.output_json is not None
-                return answer.output_json
-            case "invalid":
-                return "not json"
-            case _:
-                return WAITING
+        # A turn past the script gets a reply that is no valid JSON, never silence: a silent
+        # turn is lost only after its time limit, and a host that dies meanwhile leaves a
+        # recovery check core cannot end (the gap named in `vs_core/_waits.py`).
+        reply = queue.pop(0) if queue else "not json"
+        if isinstance(reply, str | BaseModel):
+            text = reply if isinstance(reply, str) else reply.model_dump_json()
+            return Succeeded(output_json=text, resource_id=lease(request.turn.session.session_id))
+        return reply
 
     def _observe(self, request: ObserveOwnedJob, core: CoreState) -> Answer:
         """A trusted measurement job that ends with the verdict the world was set to."""
@@ -558,14 +396,10 @@ class IssueQueueWorld:
 
 __all__ = [
     "FACTS",
+    "TERMS",
     "IssueQueueWorld",
     "ScheduledFaults",
-    "evaluated",
-    "generic_evaluated",
-    "implemented",
     "issue_queue_config",
     "issue_queue_harness",
-    "issue_queue_limits",
-    "judged",
     "revision_of",
 ]
