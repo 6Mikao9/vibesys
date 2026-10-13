@@ -37,6 +37,7 @@ from .types.attempts import (
     InvocationChargeRequested,
 )
 from .types.common import (
+    MAX_REASK_CHAIN,
     AttemptRef,
     ChargeId,
     ChargeKind,
@@ -162,7 +163,6 @@ def _validate_resume(
 
 def _validate_correction(
     state: SessionsState,
-    context: SessionsContext,
     predecessor: Invocation | None,
     turn: TurnSpec,
     scope: Scope,
@@ -186,7 +186,7 @@ def _validate_correction(
         if previous is None or depth > len(state.invocations):
             raise ContractValidationError("turn.predecessor", "invalid correction chain")
         chain = previous
-    if depth > context.run.limits.max_reask_chain:
+    if depth > MAX_REASK_CHAIN:
         raise ContractValidationError("turn.predecessor", "correction retry bound exhausted")
 
 
@@ -234,7 +234,7 @@ def _validate_successor(
     if turn.continuation_id is not None:
         raise ContractValidationError("turn.continuation_id", "only resume may name a continuation")
     if turn.charge_class == "correction":
-        _validate_correction(state, context, predecessor, turn, scope)
+        _validate_correction(state, predecessor, turn, scope)
     elif turn.predecessor is not None:
         if (
             predecessor is None

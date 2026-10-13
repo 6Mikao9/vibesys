@@ -61,6 +61,7 @@ from .types.attempts import (
     WorkspaceObserved,
 )
 from .types.common import (
+    MAX_REASK_CHAIN,
     AttemptRef,
     ChargeId,
     ChargeKind,
@@ -922,9 +923,7 @@ def _correction_allowed(
             depth += 1
         child = previous
         predecessor = previous.turn.predecessor if previous.turn.charge_class != "resume" else None
-    return depth > 0 and depth <= min(
-        attempt.budget.retry_limit, context.run.limits.max_reask_chain
-    )
+    return depth > 0 and depth <= MAX_REASK_CHAIN
 
 
 def _initial_session_acquisition(

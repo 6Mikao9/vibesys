@@ -68,6 +68,7 @@ from vs_core.api import (
     Scope,
     SubmitMeasurement,
 )
+from vs_core.api.testing import sample_limits
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     CoreStartup,
@@ -343,7 +344,7 @@ def test_a_declaration_requiring_an_unoffered_operation_is_refused_by_name() -> 
             facts,
             declaration,
             offered=empty_catalog(),
-            startup=CoreStartup(deadline_at=10.0),
+            startup=CoreStartup(deadline_at=10.0, limits=sample_limits()),
         )
     assert "needs-this-operation" in str(refused.value)
 

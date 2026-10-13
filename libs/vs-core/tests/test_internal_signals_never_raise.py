@@ -299,9 +299,7 @@ def test_the_generator_reaches_a_queued_exclusive_root_behind_an_adoption() -> N
 def seeded(mode: core.WorkspaceMode | None, parallel: int) -> core.CoreState:
     """The adoption world, optionally with a workspace-mode head queued behind a closing slot."""
     state = world(max_retries=1)
-    limits = sample_limits(
-        max_attempts=6, max_parallel=parallel, max_reask_chain=1, request_retries=sample_retries(1)
-    )
+    limits = sample_limits(max_attempts=6, max_parallel=parallel, request_retries=sample_retries(1))
     if mode is not None:
         queued, _ = queued_root_behind_full_slot(mode)
         state = queued.model_copy(

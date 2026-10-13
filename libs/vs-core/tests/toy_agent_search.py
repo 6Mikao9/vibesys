@@ -161,7 +161,7 @@ async def workstream(ctx: core.Flow, key: str, number: int, roles: tuple[core.Ro
         attempt=core.AttemptId(root=key),
         item=core.ItemId(root=key),
         plan=core.WorkspacePlan(mode=core.WorkspaceMode.ISOLATED_CHILD, base=ctx.facts.baseline),
-        budget=core.AttemptBudget(admission_charge=1, paid_invocation_limit=6, retry_limit=3),
+        budget=core.AttemptBudget(admission_charge=1, paid_invocation_limit=6),
     ) as workspace:
         if isinstance(workspace, core.NotOpened):
             return Done(key=key, opened=False)
@@ -227,7 +227,6 @@ LIMITS = sample_limits(
     max_attempts=8,
     max_turns=60,
     max_parallel=4,
-    max_reask_chain=2,
     request_retries=sample_retries(2),
     max_refunds=2,
 )
@@ -269,6 +268,8 @@ class ToyHost:
     submit_only: Sequence[str] = ()
     junk: Sequence[str] = ()
     """Roles whose turns end with a reply that does not parse."""
+    events: tuple[core.CoreEvent, ...] = ()
+    """Operator controls delivered before the first decision."""
     shares: bool = True
     calls: list[tuple[str, str, str]] = field(default_factory=list)
     """(attempt, role, call id) of every evaluation a turn asked for."""
@@ -461,7 +462,6 @@ def run_toy(
     limits: core.Limits = LIMITS,
     faults: Faults | None = None,
     definition: core.SearchDef[Config] = toy,
-    events: tuple[core.CoreEvent, ...] = (),
 ) -> Trace:
     """Drive the toy search on the real core against ``host`` until nothing more happens."""
     chosen = config or Config()
@@ -474,7 +474,7 @@ def run_toy(
         shell_events=True,
         schemas=definition.reply_schemas,
         envelope_type=core.RunEnvelope[core.FlowState],
-        events=events,
+        events=host.events,
     )
     return drive(definition.driver(chosen, OPERATIONS.registry()), chosen, host, harness, faults)
 

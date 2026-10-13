@@ -39,8 +39,6 @@ class RunBudget(Value):
     """Attempts core never admitted, which return their charge."""
     adoption_rounds: int = Field(ge=1)
     """AdoptRevision rounds per winner, the first included."""
-    reask_chain: Count
-    """The longest chain of corrections and asks after a lost turn (moves to the role)."""
 
 
 class Bounds(Protocol):
@@ -86,7 +84,6 @@ def limits_for(budget: RunBudget, bounds: Bounds) -> Limits:
         pool_capacities=(),
         max_refunds=budget.refunds,
         max_adoption_rounds=budget.adoption_rounds,
-        max_reask_chain=budget.reask_chain,
         request_retries=bounds.request_retries,
         cancellation_bound=float(bounds.cancellation_bound_seconds),
         cleanup_bound=float(bounds.cleanup_bound_seconds),

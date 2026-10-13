@@ -234,7 +234,7 @@ def owned_state(phase: AttemptPhase = AttemptPhase.ACQUIRING) -> CoreState:
         generation=0,
         phase=phase,
         workspace=event.workspace,
-        budget=AttemptBudget(paid_invocation_limit=2, retry_limit=1, refund_limit=2),
+        budget=AttemptBudget(paid_invocation_limit=2, refund_limit=2),
         admission_id=event.request.decision_id,
     )
     return initial_state().model_copy(update={"attempts": AttemptsState(attempts=(owner,))})
@@ -485,7 +485,7 @@ def invocation_state(
                 }
             ),
             "run": state.run.model_copy(
-                update={"limits": sample_limits(max_turns=10, max_attempts=10, max_reask_chain=5)}
+                update={"limits": sample_limits(max_turns=10, max_attempts=10)}
             ),
         }
     )
@@ -580,7 +580,7 @@ def test_retry_authority_is_required_for_all_predecessor_variants(
     # Free without a predecessor has no retry requirement; verify its valid
     # charge reaches sessions rather than mistaking the stub for an A failure.
     state = invocation_state(charge_class, predecessor)
-    owner = state.attempts.attempts[0].model_copy(update={"budget": AttemptBudget(retry_limit=0)})
+    owner = state.attempts.attempts[0].model_copy(update={"budget": AttemptBudget()})
     state = state.model_copy(update={"attempts": AttemptsState(attempts=(owner,))})
     event = InvocationChargeRequested(
         attempt=owner_ref(), invocation=state.sessions.invocations[0].invocation
@@ -631,7 +631,7 @@ def test_mixed_predecessor_chain_cannot_reset_the_retry_bound(
         update={"turn": target.turn.model_copy(update={"predecessor": previous})}
     )
     owner = state.attempts.attempts[0].model_copy(
-        update={"budget": AttemptBudget(paid_invocation_limit=10, retry_limit=len(chain_classes))}
+        update={"budget": AttemptBudget(paid_invocation_limit=10)}
     )
     state = state.model_copy(
         update={
@@ -1779,7 +1779,7 @@ def test_authorized_resume_does_not_consume_correction_retry_authority(
         phase=ContinuationPhase.AUTHORIZED,
     )
     owner = state.attempts.attempts[0].model_copy(
-        update={"budget": AttemptBudget(paid_invocation_limit=0, retry_limit=0)}
+        update={"budget": AttemptBudget(paid_invocation_limit=0)}
     )
     source = invocation.model_copy(
         update={

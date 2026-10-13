@@ -35,6 +35,5 @@ def limits_for(config: DynamicConfig, bounds: Bounds) -> Limits:
         parallel=config.max_in_flight,
         refunds=starts,
         adoption_rounds=reask + 1,
-        reask_chain=reask,
     )
     return limits_from(budget, bounds)

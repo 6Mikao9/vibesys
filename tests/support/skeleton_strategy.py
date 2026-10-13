@@ -120,6 +120,7 @@ def measurement(
         queue_allowance=880.0,
         # Absolute run-clock time, past any restart the scenarios make (the run ends at 1000 s).
         accuracy_stage="accuracy",
+        accuracy_gated=(core.EvidenceKind.CORRECTNESS, core.EvidenceKind.BENCHMARK),
     )
 
 

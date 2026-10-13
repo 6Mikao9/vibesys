@@ -25,7 +25,6 @@ _BUDGET_FIELDS = (
     "max_parallel",
     "max_refunds",
     "max_adoption_rounds",
-    "max_reask_chain",
 )
 
 

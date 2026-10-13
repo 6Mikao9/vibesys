@@ -83,7 +83,6 @@ def tiny_setup(items: int, max_concurrent: int = 1) -> RunSetup:
                 max_attempts=8,
                 max_turns=8,
                 max_parallel=1,
-                max_reask_chain=2,
                 request_retries=sample_retries(2),
             ),
             envelope_type=RunEnvelope[FlowState],

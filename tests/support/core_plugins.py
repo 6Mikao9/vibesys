@@ -18,7 +18,6 @@ from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_core.api import (
     LifecycleClass,
-    Limits,
     OperationDescriptor,
     OperationRegistration,
     OperationRequest,
@@ -26,6 +25,7 @@ from vs_core.api import (
     SchemaRef,
     Value,
 )
+from vs_core.api.testing import sample_limits
 from vs_runtime.api import (
     AgentRole,
     CoreOperation,
@@ -96,7 +96,7 @@ def core_policy(
                 workload_digest=identity.workload.value,
                 environment_digest=identity.environment.value,
             ),
-            limits=Limits(),
+            limits=sample_limits(),
             deadline_seconds=deadline_seconds,
         )
 
