@@ -6,7 +6,17 @@ from tests.support import run_test_command
 IMAGE = Path("examples/model-serving/images/rocm-mi30x-engine-free")
 BASE_TAG = "lmsysorg/sglang:v0.5.18-rocm700-mi30x"
 ENGINE_PACKAGES = ("sglang", "sgl-kernel", "sglang-router", "sgl-router", "vllm", "tensorrt_llm")
-KEPT_PACKAGES = ("torch", "triton", "aiter", "transformers", "safetensors", "aiohttp", "fastapi", "uvicorn", "numpy")
+KEPT_PACKAGES = (
+    "torch",
+    "triton",
+    "aiter",
+    "transformers",
+    "safetensors",
+    "aiohttp",
+    "fastapi",
+    "uvicorn",
+    "numpy",
+)
 SITE_STRINGS = ("cscs", "beverin", "capstor", "viclsh")
 
 
