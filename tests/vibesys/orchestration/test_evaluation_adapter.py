@@ -37,6 +37,7 @@ from vs_runtime.api import (
     BenchmarkObjective,
     MetricDirection,
     RuntimeContractError,
+    Workspace,
 )
 from vs_runtime.api.testing import FakeWorkspace
 from vs_sandbox.api import CommandResult, SandboxKind
@@ -254,106 +255,139 @@ def _gate_events(integration: LocalRunIntegration) -> list[CoreEvent]:
     ]
 
 
+class _Gates:
+    """The gate events a run has emitted since they were last taken."""
+
+    def __init__(self, integration: LocalRunIntegration) -> None:
+        self._integration = integration
+        self._seen: list[CoreEvent] = []
+
+    def new(self) -> list[CoreEvent]:
+        events = _gate_events(self._integration)
+        fresh, self._seen = events[len(self._seen) :], events
+        return fresh
+
+
+async def _accuracy_and_benchmark(
+    ctx: CoreHost, root: Workspace, gates: _Gates
+) -> AccuracyEvaluation:
+    # Accuracy and a benchmark with a declared objective: results and a started/finished pair each.
+    accuracy = await ctx.evaluation.accuracy(root)
+    benchmark = await ctx.evaluation.benchmark(
+        root,
+        objectives=(BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),),
+    )
+    assert accuracy.passed
+    assert accuracy.receipt is not None
+    assert benchmark.passed
+    assert (benchmark.metric_name, benchmark.metric_value) == ("throughput", 42.0)
+    assert benchmark.metric_direction is MetricDirection.MAXIMIZE
+    assert [type(event.data) for event in gates.new()] == [
+        GateStartedData,
+        GateFinishedData,
+        GateStartedData,
+        GateFinishedData,
+    ]
+    return accuracy
+
+
+async def _receipt_reuse(
+    ctx: CoreHost, root: Workspace, gates: _Gates, accuracy: AccuracyEvaluation
+) -> None:
+    # A receipt survives a JSON round trip and an incidental framework snapshot.
+    restored = AccuracyReceipt.model_validate_json(accuracy.receipt.model_dump_json())
+    note = root.path / ".vibesys" / "receipt-test.json"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("{}\n")
+    await root.snapshot("incidental framework metadata")
+    reused = await ctx.evaluation.accuracy(root, reuse=restored)
+    assert accuracy.executed
+    assert not reused.executed
+    assert reused.receipt == accuracy.receipt
+    gates.new()
+
+
+async def _scalar_benchmark(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # A single metric without objectives takes the scalar contract's direction.
+    scalar = await ctx.evaluation.benchmark(root)
+    assert scalar.passed
+    assert (scalar.metric_name, scalar.metric_value) == ("throughput", 42.0)
+    assert scalar.metric_direction is MetricDirection.MAXIMIZE
+    gates.new()
+
+
+async def _local_validation(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # Local validation maps the runtime result and reports one gate.
+    validated = await ctx.evaluation.validate_local(
+        root,
+        recipe_artifact="validation/recipes.json",
+        report_location="validation/report.json",
+    )
+    assert validated.passed
+    assert validated.report_location == "validation/report.json"
+    started, finished = gates.new()
+    assert isinstance(started.data, GateStartedData)
+    assert isinstance(finished.data, GateFinishedData)
+    assert started.data.recipe == finished.data.recipe == "queue-contract"
+    assert finished.status is EventStatus.COMPLETED
+
+
+async def _unusable_recipes(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # A recipe reference that is no recipe is the agent's input error, never the framework's.
+    for artifact in _UNUSABLE_RECIPES:
+        unusable = await ctx.evaluation.validate_local(
+            root, recipe_artifact=artifact, report_location="validation/report.json"
+        )
+        assert not unusable.passed
+        assert unusable.recipe_unusable
+        assert unusable.feedback is not None
+        assert "input error in your reply" in unusable.feedback
+        assert "Framework local validation" not in unusable.feedback
+    gates.new()
+
+
+async def _duplicate_objectives(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # Two objectives of one name are refused before anything runs.
+    objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
+    with pytest.raises(ValueError, match="objective names must be unique"):
+        await ctx.evaluation.benchmark(root, objectives=(objective, objective))
+    assert gates.new() == []
+
+
+async def _refused_requests(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
+    # A foreign handle is refused before a gate opens; a foreign receipt opens one and fails it.
+    with pytest.raises(TypeError, match="live handle"):
+        await ctx.evaluation.accuracy(FakeWorkspace(path=root.path))
+    with pytest.raises(RuntimeContractError, match="another run"):
+        await ctx.evaluation.accuracy(
+            root,
+            reuse=AccuracyReceipt(run_id="foreign", workspace_id=None, revision="revision"),
+        )
+    refused_start, refused_end = gates.new()
+    assert isinstance(refused_start.data, GateStartedData)
+    assert refused_start.status is EventStatus.ACTIVE
+    assert refused_end.status is EventStatus.FAILED
+    assert isinstance(refused_end.data, GateFinishedData)
+    assert refused_end.data.output_tail is not None
+    assert "RuntimeContractError" in refused_end.data.output_tail
+    assert "another run" in refused_end.data.output_tail
+
+
 def test_the_adapter_evaluates_a_task_and_reports_each_gate_as_events(tmp_path: Path) -> None:
     """One host, every operation of the adapter over a passing task, each checked as it ends.
 
     Budget: one product host over a real Git project (the adapter needs the whole run).
     """
-    seen: list[CoreEvent] = []
 
     async def body(ctx: CoreHost, integration: LocalRunIntegration) -> None:
-        root = ctx.workspaces.root
-
-        def new_events() -> list[CoreEvent]:
-            events = _gate_events(integration)
-            fresh, seen[:] = events[len(seen) :], events
-            return fresh
-
-        # Accuracy and a benchmark with a declared objective: results and a started/finished pair each.
-        accuracy = await ctx.evaluation.accuracy(root)
-        benchmark = await ctx.evaluation.benchmark(
-            root,
-            objectives=(BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),),
-        )
-        assert accuracy.passed
-        assert accuracy.receipt is not None
-        assert benchmark.passed
-        assert (benchmark.metric_name, benchmark.metric_value) == ("throughput", 42.0)
-        assert benchmark.metric_direction is MetricDirection.MAXIMIZE
-        assert [type(event.data) for event in new_events()] == [
-            GateStartedData,
-            GateFinishedData,
-            GateStartedData,
-            GateFinishedData,
-        ]
-
-        # A receipt survives a JSON round trip and an incidental framework snapshot.
-        restored = AccuracyReceipt.model_validate_json(accuracy.receipt.model_dump_json())
-        note = root.path / ".vibesys" / "receipt-test.json"
-        note.parent.mkdir(parents=True, exist_ok=True)
-        note.write_text("{}\n")
-        await root.snapshot("incidental framework metadata")
-        reused = await ctx.evaluation.accuracy(root, reuse=restored)
-        assert accuracy.executed
-        assert not reused.executed
-        assert reused.receipt == accuracy.receipt
-        new_events()
-
-        # A single metric without objectives takes the scalar contract's direction.
-        scalar = await ctx.evaluation.benchmark(root)
-        assert scalar.passed
-        assert (scalar.metric_name, scalar.metric_value) == ("throughput", 42.0)
-        assert scalar.metric_direction is MetricDirection.MAXIMIZE
-        new_events()
-
-        # Local validation maps the runtime result and reports one gate.
-        validated = await ctx.evaluation.validate_local(
-            root,
-            recipe_artifact="validation/recipes.json",
-            report_location="validation/report.json",
-        )
-        assert validated.passed
-        assert validated.report_location == "validation/report.json"
-        started, finished = new_events()
-        assert isinstance(started.data, GateStartedData)
-        assert isinstance(finished.data, GateFinishedData)
-        assert started.data.recipe == finished.data.recipe == "queue-contract"
-        assert finished.status is EventStatus.COMPLETED
-
-        # A recipe reference that is no recipe is the agent's input error, never the framework's.
-        for artifact in _UNUSABLE_RECIPES:
-            unusable = await ctx.evaluation.validate_local(
-                root, recipe_artifact=artifact, report_location="validation/report.json"
-            )
-            assert not unusable.passed
-            assert unusable.recipe_unusable
-            assert unusable.feedback is not None
-            assert "input error in your reply" in unusable.feedback
-            assert "Framework local validation" not in unusable.feedback
-        new_events()
-
-        # Two objectives of one name are refused before anything runs.
-        objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
-        with pytest.raises(ValueError, match="objective names must be unique"):
-            await ctx.evaluation.benchmark(root, objectives=(objective, objective))
-        assert new_events() == []
-
-        # A foreign handle is refused before a gate opens; a foreign receipt opens one and fails it.
-        with pytest.raises(TypeError, match="live handle"):
-            await ctx.evaluation.accuracy(FakeWorkspace(path=root.path))
-        with pytest.raises(RuntimeContractError, match="another run"):
-            await ctx.evaluation.accuracy(
-                root,
-                reuse=AccuracyReceipt(run_id="foreign", workspace_id=None, revision="revision"),
-            )
-        refused_start, refused_end = new_events()
-        assert isinstance(refused_start.data, GateStartedData)
-        assert refused_start.status is EventStatus.ACTIVE
-        assert refused_end.status is EventStatus.FAILED
-        assert isinstance(refused_end.data, GateFinishedData)
-        assert refused_end.data.output_tail is not None
-        assert "RuntimeContractError" in refused_end.data.output_tail
-        assert "another run" in refused_end.data.output_tail
+        root, gates = ctx.workspaces.root, _Gates(integration)
+        accuracy = await _accuracy_and_benchmark(ctx, root, gates)
+        await _receipt_reuse(ctx, root, gates, accuracy)
+        await _scalar_benchmark(ctx, root, gates)
+        await _local_validation(ctx, root, gates)
+        await _unusable_recipes(ctx, root, gates)
+        await _duplicate_objectives(ctx, root, gates)
+        await _refused_requests(ctx, root, gates)
 
     integration = LocalRunIntegration()
 
