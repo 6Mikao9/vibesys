@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from tests.support.child_pytest import child_pythonpath
+from tests.support.child_pytest import BARE_PYTEST, child_pythonpath, root_conftest_plugins
 
 pytest_plugins = ["pytester"]
 
@@ -18,6 +18,19 @@ _VARIABLES = (
     "XDG_STATE_HOME",
     "XDG_RUNTIME_DIR",
 )
+
+
+def test_the_root_conftest_loads_every_support_plugin() -> None:
+    """The child runs below load one plugin each, which is the suite's wiring only if declared."""
+    declared = set(root_conftest_plugins(Path(__file__).parents[2]))
+
+    assert {
+        "tests.support.isolated_environment",
+        "tests.support.cwd_hygiene",
+        "tests.support.tree_hygiene",
+        "tests.support.path_hygiene",
+        "tests.support.sharding",
+    } <= declared
 
 
 @pytest.mark.parametrize(
@@ -32,8 +45,7 @@ def test_duration_order_respects_the_distribution_mode(
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
     pytester.makeconftest(
-        (repository / "conftest.py").read_text(encoding="utf-8")
-        + """
+        """
 import json
 import os
 from pathlib import Path
@@ -48,11 +60,13 @@ def pytest_collection_finish(session):
     durations = pytester.path / "durations.json"
     durations.write_text(json.dumps({"test_fast.py": 1.0, "test_slow.py": 100.0}))
 
-    result = pytester.runpytest_subprocess(
-        "-n",
-        str(workers),
-        "--dist",
-        distribution,
+    # No worker means no xdist, so that case runs in this process.
+    run = pytester.runpytest_subprocess if workers else pytester.runpytest
+    result = run(
+        *BARE_PYTEST,
+        "-p",
+        "tests.support.sharding",
+        *(("-n", str(workers), "--dist", distribution) if workers else ()),
         "--maxschedchunk=1",
         "--shard-durations",
         str(durations),
@@ -84,7 +98,6 @@ def test_collection_workers_and_children_have_private_state(
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     # The nested suite checks both workers even when its parent is a CI shard.
     monkeypatch.delenv("VIBESYS_TEST_SHARD", raising=False)
-    pytester.makeconftest((repository / "conftest.py").read_text(encoding="utf-8"))
     pytester.makepyfile(
         test_environment="""
 import json
@@ -133,7 +146,14 @@ def test_another_item(tmp_path_factory):
     )
 
     result = pytester.runpytest_subprocess(
-        "-n", "2", "-q", "--basetemp", str(pytester.path / "tmp")
+        *BARE_PYTEST,
+        "-p",
+        "tests.support.isolated_environment",
+        "-n",
+        "2",
+        "-q",
+        "--basetemp",
+        str(pytester.path / "tmp"),
     )
     result.assert_outcomes(passed=2)
 

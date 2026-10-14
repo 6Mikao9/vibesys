@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from tests.support.distribution_build import (
+    BuiltDistributions,
     BuiltWheel,
     build_distribution,
     copy_private_packaging_source,
@@ -64,13 +65,27 @@ def repo_root() -> Path:
 
 
 @pytest.fixture(scope="session")
-def built_wheel(tmp_path_factory: pytest.TempPathFactory, repo_root: Path) -> BuiltWheel:
-    """One wheel of the current checkout, built in private scratch, for every packaging check.
+def built_distributions(
+    tmp_path_factory: pytest.TempPathFactory, repo_root: Path
+) -> BuiltDistributions:
+    """One sdist and one wheel of the current checkout, built once in private scratch.
 
-    A build takes tens of seconds; the checks that read it only inspect its contents. Tests
-    using it carry ``xdist_group("built_wheel")`` so one worker builds it once.
+    A build takes tens of seconds, and every packaging check only inspects the result, so
+    they all share this one. Tests using it carry ``xdist_group("built_wheel")`` so one
+    worker builds it once.
     """
-    scratch = tmp_path_factory.mktemp("built-wheel")
+    scratch = tmp_path_factory.mktemp("built-distributions")
     source = copy_private_packaging_source(repo_root, scratch / "checkout")
-    build_distribution(source, scratch / "dist", artifact="wheel")
-    return BuiltWheel(source=source, wheel=next((scratch / "dist").glob("vibesys-*.whl")))
+    build_distribution(source, scratch / "dist", artifact="all")
+    dist = scratch / "dist"
+    return BuiltDistributions(
+        source=source,
+        sdist=next(dist.glob("vibesys-*.tar.gz")),
+        wheel=next(dist.glob("vibesys-*.whl")),
+    )
+
+
+@pytest.fixture(scope="session")
+def built_wheel(built_distributions: BuiltDistributions) -> BuiltWheel:
+    """The shared build's wheel, with the snapshot it came from."""
+    return BuiltWheel(source=built_distributions.source, wheel=built_distributions.wheel)

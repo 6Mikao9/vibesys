@@ -81,6 +81,15 @@ class BuiltWheel:
     wheel: Path
 
 
+@dataclass(frozen=True)
+class BuiltDistributions:
+    """One ``uv build`` of a private snapshot: its sdist, and the wheel built from that sdist."""
+
+    source: PrivatePackagingSource
+    sdist: Path
+    wheel: Path
+
+
 def copy_private_packaging_source(source_root: Path, destination: Path) -> PrivatePackagingSource:
     """Copy current source bytes into a private packaging tree.
 
@@ -111,15 +120,24 @@ def build_distribution(
     source: PrivatePackagingSource,
     output: Path,
     *,
-    artifact: Literal["wheel", "sdist"],
+    artifact: Literal["wheel", "sdist", "all"],
     environment: Mapping[str, str] | None = None,
     check: bool = True,
 ) -> _TextCommandResult:
-    """Build one distribution artifact inside its private source snapshot."""
+    """Build distribution artifacts inside the private source snapshot.
+
+    ``"all"`` is a bare ``uv build``: the sdist, then the wheel built from it.
+    """
     if _PRIVATE_SOURCE_ROOTS.get(source) != source.root:
         raise PrivatePackagingSourceError.not_owned()
     return run_test_command(
-        ["uv", "build", f"--{artifact}", "--out-dir", str(output)],
+        [
+            "uv",
+            "build",
+            *([] if artifact == "all" else [f"--{artifact}"]),
+            "--out-dir",
+            str(output),
+        ],
         cwd=source.root,
         env=environment,
         check=check,
