@@ -12,6 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vibesys.orchestration.dynamic.search.api import (
     INTERPRET_KIND,
     OPERATIONS,
@@ -22,6 +23,7 @@ from vibesys.orchestration.dynamic.search.api import (
 from vs_sim.api.testing import examples
 
 VALID = {"max_rounds": 3}
+LAUNCH = {**VALID, "interface": "an HTTP endpoint"}
 BOUNDS = {
     "max_rounds": (1, 1000),
     "max_in_flight": (1, 32),
@@ -79,3 +81,16 @@ def test_the_search_declares_exactly_the_operations_its_executors_serve() -> Non
         "dynamic.verify_parent_revision",
         "dynamic.interpret_evidence",
     }
+
+
+@settings(max_examples=examples(pr=4, nightly=20))
+@given(profiling=st.booleans(), allowed=st.booleans())
+def test_profiling_is_never_a_launch_option_but_follows_the_plan(
+    *, profiling: bool, allowed: bool
+) -> None:
+    with pytest.raises(ValidationError, match="profiling"):
+        DynamicLaunch.model_validate({**LAUNCH, "profiling": profiling})
+
+    launch = DynamicLaunch.model_validate(LAUNCH)
+
+    assert launch.search_config(profiling=allowed).profiling is allowed
