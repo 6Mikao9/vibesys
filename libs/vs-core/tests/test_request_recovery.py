@@ -433,6 +433,22 @@ def test_reconciliation_before_deadline_never_authorizes_cleanup(now_at: int) ->
     assert result.state.run.status == RunStatus.PAUSED
 
 
+def test_an_observation_that_resolves_nothing_leaves_a_blocked_recovery_blocked() -> None:
+    original = pending_record()
+    started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=0.0))
+    blocked = step(
+        reload(started.state),
+        ReconciliationDeadline(request_id=original.request_id, now_at=1000.0),
+    )
+    assert blocked.state.records.recovery.phase == RecoveryPhase.BLOCKED
+    later = step(
+        reload(blocked.state),
+        RequestObserved(observation=observed(blocked.state.records.records[0], sequence=2)),
+    )
+    assert later.state.records.recovery.phase == RecoveryPhase.BLOCKED
+    assert later.state.records.recovery.checks[0].resolution == "blocked"
+
+
 @pytest.mark.parametrize("now_at", [100.0, 101.0, 1000.0])
 def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_at: float) -> None:
     original = pending_record()

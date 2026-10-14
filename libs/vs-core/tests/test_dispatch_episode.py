@@ -73,3 +73,32 @@ def test_a_prepared_mutation_of_a_live_episode_is_left_for_dispatch(
     result = step(state, ClockAdvanced(now_at=2.0))
     row = next(r for r in result.state.records.records if r.request_id == identity)
     assert row.phase == RequestPhase.PREPARED
+
+
+@pytest.mark.parametrize("phase", ENDED)
+def test_a_prepared_turn_cancel_of_an_ended_episode_is_still_dispatched(
+    phase: core.AttemptPhase,
+) -> None:
+    """Retirement keeps its authority: cancelling a turn is how an ended episode is cleaned up."""
+    state, ref = closing_fixture()
+    owner = state.attempts.attempts[0]
+    request = core.CancelTurn(
+        request_id=core.RequestId(root="late:cancel-turn"),
+        scope=core.Scope(owner=ref.attempt_id, generation=ref.generation),
+        admission_id=core.DecisionId(root="earlier"),
+        invocation=core.InvocationRef(
+            session_id=core.SessionId(root="s"),
+            invocation_id=core.InvocationId(root="i"),
+            generation=ref.generation,
+        ),
+    )
+    record = proof_record(request, state.run.deadline_at, lifecycle=core.LifecycleClass.OWNED_JOB)
+    state = with_owner(
+        state,
+        changed(owner, phase=phase),
+        records=changed(state.records, records=(*state.records.records, record)),
+    )
+    assert request.request_id is not None
+    result = step(state, ClockAdvanced(now_at=2.0))
+    row = next(r for r in result.state.records.records if r.request_id == request.request_id)
+    assert row.phase == RequestPhase.PREPARED
