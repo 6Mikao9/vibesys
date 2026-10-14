@@ -319,6 +319,22 @@ _EXAMPLES = examples(pr=2, nightly=12)
     # status lines but one path in ``uncommitted_paths``.
     operations=[_Op(kind="delete"), _Op(kind="stage"), _Op(kind="write")]
 )
+@example(
+    # Regression (#2309): a staged addition whose file is then deleted, or replaced by a
+    # directory, is not a change since HEAD: Git has nothing to compare it with.
+    operations=[
+        _Op(kind="write", path="keep.log"),
+        _Op(kind="stage"),
+        _Op(kind="delete", path="keep.log"),
+    ]
+)
+@example(
+    operations=[
+        _Op(kind="write", path="keep.log"),
+        _Op(kind="stage"),
+        _Op(kind="file_over_dir", path="keep.log"),
+    ]
+)
 @given(operations=st.lists(_OPS, min_size=1, max_size=12))
 def test_wide_sequences_agree_with_the_oracle(
     factory: RepositoryFactory, oracle_factory: RepositoryFactory, operations: list[_Op]
