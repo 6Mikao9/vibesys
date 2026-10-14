@@ -22,8 +22,9 @@ from tests.support.crash_harness import (
 
 from vs_faults.api import Boundary, Crossing
 
-HOLDING = "durable_write:commit#27"
-"""A crash while the skeleton's search holds a workspace."""
+HOLDING = "executor_request:close_session#1"
+"""A crash while the skeleton's search is still alive: its flow's resources are open, the run
+is closing. Named by request, not by a commit's ordinal, which moves when the run's writes do."""
 
 
 def test_a_dead_host_leaves_no_search_generator_to_the_event_loop(
