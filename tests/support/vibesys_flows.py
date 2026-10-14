@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
+from vs_core.api import StopRequested
 from vs_core.api.testing import FlowRun
 from vs_sim.api.testing import Depth, depth
 
@@ -27,8 +28,8 @@ if TYPE_CHECKING:
     from vs_core.api.testing import FakeView
     from vs_core.testing.flows import SearchDef
 
-PINNED = (3, 10)
-"""Steps every pull request restarts after: an early one and one with several waits open."""
+PINNED = (0, 1, 2, 5)
+"""Steps every pull request restarts after: the first few, where a restart is cheap and a stop or a late task meets a fresh driver."""
 DRAW_UP_TO = 60
 """A drawn restart step is in ``[0, DRAW_UP_TO)``; a story with fewer steps never reaches it."""
 
@@ -39,21 +40,23 @@ class Restarts:
 
     steps: frozenset[int] = frozenset()
     every: bool = False
+    after_stop: bool = False
+    """Also restart after every step once the run was told to stop (a drain is short)."""
 
     def __bool__(self) -> bool:
         """Whether this restarts at all."""
-        return self.every or bool(self.steps)
+        return self.every or self.after_stop or bool(self.steps)
 
     @classmethod
     def sampled(cls, drawn: int) -> Restarts:
         """The restarts of a session: every step nightly; ``PINNED`` and ``drawn`` otherwise."""
         if depth() is Depth.NIGHTLY:
             return cls(every=True)
-        return cls(steps=frozenset({*PINNED, drawn}))
+        return cls(steps=frozenset({*PINNED, drawn}), after_stop=True)
 
-    def after(self, step: int) -> bool:
-        """Whether the run restarts after its ``step``-th event."""
-        return self.every or step in self.steps
+    def after(self, step: int, *, stopped: bool) -> bool:
+        """Whether the run restarts after its ``step``-th event, once told to stop or not."""
+        return self.every or step in self.steps or (self.after_stop and stopped)
 
 
 class _SampledFlowRun[C](FlowRun[C]):
@@ -67,7 +70,8 @@ class _SampledFlowRun[C](FlowRun[C]):
             self.state, issued = self.driver.update(self.state, event, self.view.current())
             self._take(issued)
             self._steps = getattr(self, "_steps", -1) + 1
-            if self.plan.after(self._steps):
+            self._stopped = getattr(self, "_stopped", False) or isinstance(event, StopRequested)
+            if self.plan.after(self._steps, stopped=self._stopped):
                 self.restart()
 
 
@@ -109,7 +113,9 @@ def across_restarts[F: Callable[..., None]](story: F) -> F:
         try:
             story(*args, **kwargs)
         except BaseException as error:
-            error.add_note(f"restarted after steps {'all' if plan.every else sorted(plan.steps)}")
+            error.add_note(
+                f"restarted after steps {'all' if plan.every else sorted(plan.steps)} and after a stop"
+            )
             raise
 
     if depth() is Depth.NIGHTLY:
