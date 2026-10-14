@@ -17,8 +17,10 @@ Past bugs these guard, and the commits before which they fail:
 
 from __future__ import annotations
 
-from hypothesis import Phase, example, given, settings
+import pytest
+from hypothesis import Phase, assume, example, given, settings
 from hypothesis import strategies as st
+from tests.support.skeleton_strategy import IMPLEMENTER_ROLE
 from tests.support.skeleton_timing import (
     Plan,
     StaggeredConfig,
@@ -28,11 +30,31 @@ from tests.support.skeleton_timing import (
 )
 from tests.support.skeleton_world import LEASE
 
+from vs_runtime.api.core import OrphanWaitError
 from vs_sim.api.testing import Depth, depth, examples
 
 #: The loop wakes at most one observe interval after the last job ends (``Plan.observe_s``),
 #: plus the cost of the cluster's own polls.
 _SLACK_S = 6.0
+
+#: The limit core stamps on a turn when the search starts it, in seconds from that instant.
+_TURN_TIME_S = IMPLEMENTER_ROLE.turn_time
+#: What a turn's start and its follow-up add to the instant its slot frees (see ``_SLACK_S``).
+_START_S = 10.0
+
+
+def _last_end(durations: list[float], cap: int) -> float:
+    """When the last turn ends, seconds after the search starts them all, under a cap of ``cap``.
+
+    The search starts every turn at once and the shell runs ``cap`` of them at a time in order,
+    each in the first slot to free; a turn that waits for a slot already spends its limit.
+    """
+    free = [0.0] * cap
+    for duration in durations:
+        free.sort()
+        free[0] += duration
+    return max(free)
+
 
 # Whole seconds, all different: the scripted agent keeps one reply for all its turns, so two turns
 # that end at the same instant would name the same commit.
@@ -98,8 +120,28 @@ def test_turns_in_flight_never_exceed_the_runs_parallelism(
 ) -> None:
     """The shell's cap is the run's ``max_parallel``: a smaller cap holds turns back."""
     cap = min(width, len(durations))
+    # A turn the cap holds back is already counted against its limit (``_TURN_TIME_S``), so
+    # a cap that serializes turns past that limit times a running turn out: a different
+    # property, held by the test below.
+    assume(_last_end(durations, cap) + _START_S <= _TURN_TIME_S)
     timed = _run(durations, cap=cap)
 
     assert timed.outcome is not None
     assert timed.timeline.peak_overlap() == cap
     assert len(timed.timeline.spans) == len(durations)
+
+
+def test_a_turn_held_back_past_its_limit_is_the_known_core_gap() -> None:
+    """With a cap of one, the second turn's limit runs out while it is still running.
+
+    The limit is stamped when the search starts the turn, not when the shell dispatches it, so
+    ``[247, 160]`` seconds under a limit of 400 ends the second turn at 407 s, while it runs.
+    Core blocks that record, and nothing routes the block to the turn's session: ``vs_core._waits``
+    lists ``WaitKind.SESSION`` as ``HALTS_THE_RUN`` (a known gap, issue #2303: a failed peer
+    agent turn leaves the run unable to end). This fails the day core fixes the gap; then delete
+    it and the ``assume`` above, and the property covers every duration.
+    """
+    durations = [247.0, 160.0]
+    assert _last_end(durations, 1) + _START_S > _TURN_TIME_S
+    with pytest.raises(OrphanWaitError):
+        _run(durations, cap=1)

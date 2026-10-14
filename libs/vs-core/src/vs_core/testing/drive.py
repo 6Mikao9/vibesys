@@ -284,6 +284,7 @@ class _Driver[S: StrategyState]:
         self.commits = 0
         self.epoch = 1
         self.recovering = False
+        self.ticked: CoreState | None = None
         self.in_turn = 0
         self.envelope_type = harness.envelope_type
         self.during_turn = harness.during_turn
@@ -384,13 +385,17 @@ class _Driver[S: StrategyState]:
         asked = project(trace.core).next_observe_at
         if asked is not None:
             due.append(asked)
-        if not due:
+        if not due and trace.core == self.ticked:
             return False
-        moment = max(min(due), trace.core.run.now_at)
+        # The shell's loop delivers the clock after every pass that changed state, even with
+        # nothing due: a closing run whose last cleanup was a late observation drains on that
+        # tick (``scheduling._fill`` re-checks the drain there), not on the observation.
+        moment = max(min(due, default=0.0), trace.core.run.now_at)
         before = trace.core
         reached = tuple(TimeReached(time=wake) for wake in sorted(self.wakes) if wake <= moment)
         self.wakes = [wake for wake in self.wakes if wake > moment]
         self.consume(ClockAdvanced(now_at=moment), extra=reached)
+        self.ticked = trace.core
         self.commit()
         return trace.core != before or bool(reached)
 

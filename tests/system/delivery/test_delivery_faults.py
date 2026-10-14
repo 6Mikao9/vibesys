@@ -10,9 +10,10 @@ result, and it must be live.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.system.delivery._skeleton_subject import (
     Faulted,
@@ -95,3 +96,35 @@ def test_c4_delivery_faults_never_change_the_decisions_or_the_liveness(
     assert _decisions(faulty) == _decisions(plain)
     assert faulty.finished == plain.finished
     assert faulty.core.run.result == plain.core.run.result
+
+
+_FAULT_FLAGS = sorted(DELIVERY_FAULTS.keys() - {"all"})
+
+
+def _combined(chosen: frozenset[str]) -> Faults:
+    """The faults named in ``chosen`` at once."""
+    found = Faults(
+        duplicate="duplicate" in chosen, reorder="reorder" in chosen, reload="reload" in chosen
+    )
+    if "unknown_first" in chosen:
+        found = replace(found, unknown_first=_NOT_VERIFICATION["unknown_first"])
+    if "retry_first" in chosen:
+        found = replace(found, retry_first=lambda _request: True)
+    return found
+
+
+# A reordered late observation can be the last thing a closing run waits for. The shell delivers
+# the clock after every pass that changed state, and core drains the run on that tick, so the
+# drive must too: before, it stopped with the run `closing` and nothing left to wait for.
+@PURE
+@example(chosen=Outcomes(turns=("unparsable",)), flags=frozenset({"retry_first", "reorder"}))
+@example(chosen=Outcomes(turns=("unparsable",)), flags=frozenset(_FAULT_FLAGS))
+@given(chosen=outcomes, flags=st.sets(st.sampled_from(_FAULT_FLAGS)).map(frozenset))
+def test_c4_any_combination_of_delivery_faults_ends_the_run_as_the_plain_run_does(
+    chosen: Outcomes, flags: frozenset[str]
+) -> None:
+    plain = _run(chosen, Faults())
+    faulty = _run(chosen, _combined(flags))
+    assert faulty.finished == plain.finished
+    assert faulty.core.run.result == plain.core.run.result
+    assert _decisions(faulty) == _decisions(plain)
