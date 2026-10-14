@@ -37,3 +37,17 @@ def parse_file(path: Path) -> ast.Module:
 def python_files(root: Path) -> tuple[Path, ...]:
     """Every ``*.py`` under ``root``, sorted; the directory walk is shared too."""
     return tuple(sorted(root.rglob("*.py")))
+
+
+@cache
+def _nodes(tree: ast.AST) -> tuple[ast.AST, ...]:
+    return tuple(ast.walk(tree))
+
+
+def walk_nodes(tree: ast.AST) -> tuple[ast.AST, ...]:
+    """``ast.walk(tree)`` as a tuple, computed once per node.
+
+    A scan walks a tree in Python, which is the traced, slow part under coverage; the rules
+    that share a parsed file also share its walk.
+    """
+    return _nodes(tree)

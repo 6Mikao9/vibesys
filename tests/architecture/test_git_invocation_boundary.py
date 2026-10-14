@@ -21,7 +21,7 @@ import ast
 from pathlib import Path
 
 import pytest
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -70,7 +70,7 @@ def git_invocation_sites(source: str) -> list[int]:
     tree = parse_source(source)
     tracker_argv: set[int] = set()
     lines: set[int] = set()
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if not isinstance(node, ast.Call):
             continue
         if isinstance(node.func, ast.Attribute) and node.func.attr == "run" and node.args:
@@ -82,9 +82,9 @@ def git_invocation_sites(source: str) -> list[int]:
         and node.module is not None
         and node.module.startswith("vs_project")
         and any(alias.name in _HELPER_NAMES for alias in node.names)
-        for node in ast.walk(tree)
+        for node in walk_nodes(tree)
     )
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if (
             not uses_helper
             and isinstance(node, ast.List | ast.Tuple)

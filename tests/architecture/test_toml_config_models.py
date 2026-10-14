@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -71,7 +71,7 @@ def _toml_reader_names(tree: ast.Module) -> tuple[frozenset[str], frozenset[str]
     """Return (names bound to the tomllib module, names bound to its readers)."""
     modules: set[str] = set()
     readers: set[str] = set()
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if isinstance(node, ast.Import):
             modules.update(
                 alias.asname or alias.name for alias in node.names if alias.name == "tomllib"
@@ -101,7 +101,7 @@ def _validated_models(function: ast.AST) -> list[ast.expr]:
     """Return the receivers of every ``model_validate`` call in *function*."""
     return [
         node.func.value
-        for node in ast.walk(function)
+        for node in walk_nodes(function)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "model_validate"
@@ -115,10 +115,10 @@ def _toml_readers() -> dict[tuple[str, str], list[ast.expr]]:
         tree = parse_source(path.read_text(encoding="utf-8"))
         modules, readers = _toml_reader_names(tree)
         relative = path.relative_to(_ROOT).as_posix()
-        for function in ast.walk(tree):
+        for function in walk_nodes(tree):
             if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
-            if any(_is_toml_read(node, modules, readers) for node in ast.walk(function)):
+            if any(_is_toml_read(node, modules, readers) for node in walk_nodes(function)):
                 found[(relative, function.name)] = _validated_models(function)
     return found
 

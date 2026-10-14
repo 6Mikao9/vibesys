@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -29,7 +29,7 @@ def test_core_and_frontends_do_not_import_launch() -> None:
     violations = []
     for package in _FORBIDDEN:
         for path in (_REPOSITORY_ROOT / "src" / package).rglob("*.py"):
-            for node in ast.walk(parse_source(path.read_text(), filename=str(path))):
+            for node in walk_nodes(parse_source(path.read_text(), filename=str(path))):
                 if isinstance(node, ast.Import):
                     imported = (alias.name for alias in node.names)
                 elif isinstance(node, ast.ImportFrom):

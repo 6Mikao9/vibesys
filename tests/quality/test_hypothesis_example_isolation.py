@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 
 import pytest
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -55,7 +55,7 @@ def _is_given(decorator: ast.expr) -> bool:
 def _bound_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     """Names created per call: parameters (also of nested defs) and assignments."""
     names: set[str] = set()
-    for node in ast.walk(function):
+    for node in walk_nodes(function):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
             args = node.args
             names |= {arg.arg for arg in args.posonlyargs + args.args + args.kwonlyargs}
@@ -67,7 +67,7 @@ def _bound_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
 
 def _imported_names(tree: ast.Module) -> set[str]:
     names: set[str] = set()
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if isinstance(node, ast.Import | ast.ImportFrom):
             names |= {(alias.asname or alias.name).split(".")[0] for alias in node.names}
     return names
@@ -103,13 +103,13 @@ def shared_state_mutations(source: str) -> list[tuple[int, str]]:
     tree = parse_source(source)
     imported = _imported_names(tree)
     sites: set[tuple[int, str]] = set()
-    for function in ast.walk(tree):
+    for function in walk_nodes(tree):
         if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
         if not any(_is_given(decorator) for decorator in function.decorator_list):
             continue
         bound = _bound_names(function)
-        for node in ast.walk(function):
+        for node in walk_nodes(function):
             if not isinstance(node, ast.Call | ast.stmt):
                 continue
             for target in _mutated_targets(node):

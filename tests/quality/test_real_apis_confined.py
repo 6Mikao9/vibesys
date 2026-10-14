@@ -58,7 +58,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -363,7 +363,7 @@ def violations(source: str, rules: Iterable[str]) -> Counter[str]:
     """Count, per rule in *rules*, the uses of a real API in *source*."""
     if not _MAYBE.search(source):
         return Counter()
-    nodes = list(ast.walk(parse_source(source)))
+    nodes = list(walk_nodes(parse_source(source)))
     wanted = set(rules)
     aliases = _aliases(nodes)
     safe = _parked_calls(nodes) if "bare_wait" in wanted else set()

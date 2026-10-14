@@ -9,7 +9,7 @@ import ast
 from pathlib import Path
 
 import pytest
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -24,7 +24,7 @@ def reads_reply_text(call: ast.Call) -> bool:
     return any(
         isinstance(node, ast.Attribute) and node.attr == "text"
         for argument in arguments
-        for node in ast.walk(argument)
+        for node in walk_nodes(argument)
     )
 
 
@@ -32,7 +32,7 @@ def validates_reply_text(source: str) -> list[int]:
     """Line numbers of JSON validation calls whose arguments read a ``.text``."""
     return [
         node.lineno
-        for node in ast.walk(parse_source(source))
+        for node in walk_nodes(parse_source(source))
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr in JSON_VALIDATORS

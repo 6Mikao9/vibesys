@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from scripts.flow_code import async_allowed_paths
 from scripts.flow_code import flow_modules as shared_flow_modules
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -30,7 +30,7 @@ def flow_modules() -> list[Path]:
 def violations(tree: ast.Module) -> list[str]:
     """What a flow module does that flow code may not: banned imports and blind ``except``."""
     found: list[str] = []
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             names = (
                 [alias.name for alias in node.names]

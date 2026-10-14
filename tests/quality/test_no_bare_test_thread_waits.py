@@ -14,7 +14,7 @@ import ast
 from pathlib import Path
 
 import pytest
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -67,7 +67,7 @@ def bare_test_thread_waits(source: str) -> list[int]:
     """Line numbers of zero-argument ``.wait()`` calls made directly by a test function."""
     return sorted(
         call.lineno
-        for node in ast.walk(parse_source(source))
+        for node in walk_nodes(parse_source(source))
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         and node.name.startswith("test_")
         for call in _own_calls(node)

@@ -5,7 +5,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -21,7 +21,7 @@ def test_old_nested_server_package_is_absent() -> None:
 def _dynamic_import_aliases(tree: ast.AST) -> tuple[dict[str, str], set[str]]:
     module_aliases: dict[str, str] = {}
     loader_aliases = {"__import__"}
-    for imported in ast.walk(tree):
+    for imported in walk_nodes(tree):
         if isinstance(imported, ast.Import):
             for alias in imported.names:
                 if alias.name in {"importlib", "importlib.util"}:
@@ -52,7 +52,7 @@ def _qualified_name(expression: ast.expr, module_aliases: dict[str, str]) -> str
 
 def _dynamically_loads_vibesys(tree: ast.AST) -> bool:
     module_aliases, loader_aliases = _dynamic_import_aliases(tree)
-    for node in ast.walk(tree):
+    for node in walk_nodes(tree):
         if not isinstance(node, ast.Call):
             continue
         target = _qualified_name(node.func, module_aliases)

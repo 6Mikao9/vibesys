@@ -15,7 +15,7 @@ import ast
 from pathlib import Path
 
 import pytest
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -53,7 +53,7 @@ def bare_arrival_awaits(source: str) -> list[int]:
     """Line numbers of bare ``await x.wait()`` / ``await x.get()`` in async test bodies."""
     return sorted(
         node.lineno
-        for function in ast.walk(parse_source(source))
+        for function in walk_nodes(parse_source(source))
         if isinstance(function, ast.AsyncFunctionDef) and function.name.startswith("test_")
         for node in _own_nodes(function)
         if isinstance(node, ast.Await)

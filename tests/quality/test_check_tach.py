@@ -72,7 +72,7 @@ def build_repository(root: Path) -> None:
     (root / "tach.toml").write_text(config + "]\n\n" + modules, encoding="utf-8")
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def report(tmp_path_factory: pytest.TempPathFactory) -> tuple[int, str]:
     """The wrapper's one run over every case: its exit code and its output."""
     root = tmp_path_factory.mktemp("tach-cases")
@@ -90,18 +90,22 @@ def _lines_of(output: str, library: str) -> list[str]:
     return [line for line in output.splitlines() if library in line]
 
 
-@pytest.mark.parametrize(("behaviour", "packaged"), CASES)
 def test_the_wrapper_enforces_edges_and_interfaces_whether_or_not_a_library_is_packaged(
-    report: tuple[int, str], behaviour: str, packaged: tuple[bool, bool]
+    report: tuple[int, str],
 ) -> None:
     returncode, output = report
-    importer, exporter = _names(behaviour, packaged)
-    lines = _lines_of(output, f"{importer}/use.py") + _lines_of(output, f"/{importer}/")
+    wrong: list[str] = []
+    for behaviour, packaged in CASES:
+        importer, exporter = _names(behaviour, packaged)
+        lines = _lines_of(output, f"/{importer}/")
+        if behaviour == "declared":
+            reported = bool(lines)
+        elif behaviour == "undeclared":
+            reported = any(importer in line and exporter in line for line in lines)
+        else:
+            reported = any(f"{exporter}.internal" in line for line in lines)
+        if reported != (behaviour != "declared"):
+            wrong.append(f"{behaviour} {importer}: {lines}")
 
     assert returncode != 0
-    if behaviour == "declared":
-        assert not lines, lines
-    elif behaviour == "undeclared":
-        assert any(importer in line and exporter in line for line in lines), lines
-    else:
-        assert any(f"{exporter}.internal" in line for line in lines), lines
+    assert not wrong, "\n".join(wrong)

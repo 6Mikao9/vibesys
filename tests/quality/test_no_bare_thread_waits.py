@@ -15,7 +15,7 @@ import ast
 from pathlib import Path
 
 import pytest
-from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
 
 pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
@@ -31,7 +31,7 @@ def bare_thread_waits(source: str) -> list[int]:
     """Line numbers of ``to_thread(<name>.wait)`` and ``to_thread(<name>.get)`` calls."""
     return [
         node.lineno
-        for node in ast.walk(parse_source(source))
+        for node in walk_nodes(parse_source(source))
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "to_thread"
