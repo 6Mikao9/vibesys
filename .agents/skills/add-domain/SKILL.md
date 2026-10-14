@@ -68,7 +68,9 @@ choices and skill-metadata validation derive from the enum.
 - Render a role file's run-dependent branches both ways (a gate present only
   with a benchmark command), as `test_render_database_judge_omits_commands_when_absent`
   does for the database domain.
-- Run the domain test directory and the profiler tests before `./scripts/check_ci.sh`.
+- Run the domain test directory and the profiler tests. Run only the checks
+  the change can affect; CI runs the rest. Unenforced: which checks a change
+  can affect is judgment.
 
 ## Known failure modes
 
