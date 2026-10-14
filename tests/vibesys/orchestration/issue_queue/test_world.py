@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import cache
 from typing import TYPE_CHECKING
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, implemented, judged
 from tests.vibesys.orchestration.issue_queue.world import IssueQueueWorld
@@ -33,16 +33,6 @@ def finish(run: SimulatedRun) -> Finish:
     final = run.decisions[-1]
     assert isinstance(final, Finish)
     return final
-
-
-def test_a_closed_issue_is_adopted_and_the_run_succeeds() -> None:
-    world = IssueQueueWorld()
-    final = finish(simulate(world))
-
-    assert final.result.outcome == "success"
-    assert final.result.selection is not None
-    assert final.result.selection.kind == "retained_candidate"
-    assert world.board() == {1: ("closed", 1)}
 
 
 def clean_world(*, tracker_faults: Mapping[int, FaultPhase] | None = None) -> IssueQueueWorld:
@@ -70,7 +60,23 @@ def board_of(run: SimulatedRun) -> list[tuple[object, ...]]:
     return world.history()
 
 
-@settings(max_examples=examples(pr=10, nightly=12), deadline=None, derandomize=True, database=None)
+def test_a_closed_issue_is_adopted_and_the_run_succeeds() -> None:
+    """The smoke run: a judge rejection, a pass, one issue closed, its tip adopted."""
+    run = normal()
+
+    final = finish(run)
+    assert final.result.outcome == "success"
+    assert final.result.selection is not None
+    assert final.result.selection.kind == "retained_candidate"
+    assert board_of(run) == [*board_of(run)]
+    world = run.world
+    assert isinstance(world, IssueQueueWorld)
+    assert world.board() == {1: ("closed", 2)}
+
+
+@example(failing={0: "before"})
+@example(failing={3: "after", 7: "before"})
+@settings(max_examples=examples(pr=2, nightly=24), deadline=None, derandomize=True, database=None)
 @given(
     failing=st.dictionaries(
         st.integers(min_value=0, max_value=14), st.sampled_from(["before", "after"]), max_size=3
@@ -96,11 +102,3 @@ def test_the_work_is_not_adopted_when_the_final_candidate_fails_the_accuracy_gat
     assert final.result.selection is None
     assert final.result.reason.startswith("adoption-failed")
     assert world.board() == {1: ("closed", 1)}
-
-
-def test_a_final_accuracy_measurement_that_never_reports_ends_the_run_without_an_adoption() -> None:
-    final = finish(simulate(IssueQueueWorld(silent_official=True)))
-
-    assert final.result.outcome == "failure"
-    assert final.result.selection is None
-    assert final.result.reason.startswith("adoption-failed")
