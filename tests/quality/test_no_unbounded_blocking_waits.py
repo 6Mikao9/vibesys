@@ -25,6 +25,7 @@ pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "tests", *sorted((REPO / "libs").glob("*/tests")))
+_MAY_WAIT = re.compile(r"\.\s*(?:join|communicate|wait|accept)\s*\(\s*(?:#[^\n]*\n\s*)*\)|socket")
 SOCKET_NAME = re.compile(r"(server|listener|sock|socket)\w*", re.IGNORECASE)
 
 # Files whose subject is this check, or that hold none of it as test code.
@@ -113,6 +114,9 @@ def _unbounded(function: ast.AST) -> list[tuple[int, str]]:
 
 def unbounded_waits(source: str) -> list[tuple[int, str]]:
     """``(line, what)`` for each unbounded blocking wait in *source*."""
+    # A wait is a zero-argument call of one of four methods, and a socket is spelled by name.
+    if not _MAY_WAIT.search(source):
+        return []
     tree = parse_source(source)
     functions = [
         node

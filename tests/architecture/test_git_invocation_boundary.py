@@ -67,6 +67,9 @@ def _is_subprocess_call(node: ast.Call) -> bool:
 
 def git_invocation_sites(source: str) -> list[int]:
     """Return line numbers where ``source`` starts Git outside the helper."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if "git" not in source:
+        return []
     tree = parse_source(source)
     tracker_argv: set[int] = set()
     lines: set[int] = set()

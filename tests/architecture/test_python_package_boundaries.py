@@ -87,7 +87,10 @@ def test_lower_libraries_do_not_discover_the_vibesys_product_dynamically() -> No
     violations: list[str] = []
     libraries = _REPOSITORY_ROOT / "libs"
     for path in libraries.glob("*/src/**/*.py"):
-        tree = parse_source(path.read_text(), filename=str(path))
+        text = path.read_text()
+        if "vibesys" not in text:
+            continue
+        tree = parse_source(text, filename=str(path))
         if _dynamically_loads_vibesys(tree):
             violations.append(str(path.relative_to(_REPOSITORY_ROOT)))
 

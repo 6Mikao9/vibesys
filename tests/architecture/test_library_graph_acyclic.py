@@ -37,7 +37,10 @@ def library_import_graph(libs_root: Path) -> dict[str, set[str]]:
     graph: dict[str, set[str]] = {name: set() for name in sources}
     for name, package in sources.items():
         for path in sorted(package.rglob("*.py")):
-            for node in walk_nodes(parse_source(path.read_text(encoding="utf-8"))):
+            text = path.read_text(encoding="utf-8")
+            if LIBRARY_PACKAGE_PREFIX not in text:
+                continue
+            for node in walk_nodes(parse_source(text)):
                 if isinstance(node, ast.Import):
                     imported = [alias.name for alias in node.names]
                 elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:

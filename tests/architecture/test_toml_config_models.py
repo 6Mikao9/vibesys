@@ -112,7 +112,10 @@ def _toml_readers() -> dict[tuple[str, str], list[ast.expr]]:
     """Map each function that reads TOML to the models it validates against."""
     found: dict[tuple[str, str], list[ast.expr]] = {}
     for path in _source_files():
-        tree = parse_source(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        if "tomllib" not in text:
+            continue
+        tree = parse_source(text)
         modules, readers = _toml_reader_names(tree)
         relative = path.relative_to(_ROOT).as_posix()
         for function in walk_nodes(tree):

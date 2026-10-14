@@ -46,6 +46,8 @@ ALLOWED: dict[str, str] = {
 def sandbox_type_names(source: str) -> set[str]:
     """Return the names of classes and type aliases in *source* containing "Sandbox"."""
     names: set[str] = set()
+    if "Sandbox" not in source:
+        return names
     for node in walk_nodes(parse_source(source)):
         if isinstance(node, ast.ClassDef):
             names.add(node.name)

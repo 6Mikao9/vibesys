@@ -56,6 +56,8 @@ def outside_api(imports: list[str]) -> list[str]:
 def private_imports(source: str, package: str, current: str | None = None) -> list[str]:
     """The private modules (``package._x``) that ``source`` imports from ``package``."""
     found: list[str] = []
+    if package.rpartition(".")[2] not in source:
+        return found
     for node in walk_nodes(parse_source(source)):
         if isinstance(node, ast.Import):
             found.extend(alias.name for alias in node.names)

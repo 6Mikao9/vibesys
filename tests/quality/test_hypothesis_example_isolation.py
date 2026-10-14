@@ -100,6 +100,9 @@ def _mutated_targets(node: ast.Call | ast.stmt) -> list[ast.expr]:
 
 def shared_state_mutations(source: str) -> list[tuple[int, str]]:
     """Return ``(line, target)`` for each outer-state mutation inside a ``given`` body."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if "given" not in source:
+        return []
     tree = parse_source(source)
     imported = _imported_names(tree)
     sites: set[tuple[int, str]] = set()

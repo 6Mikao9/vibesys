@@ -30,6 +30,9 @@ def reads_reply_text(call: ast.Call) -> bool:
 
 def validates_reply_text(source: str) -> list[int]:
     """Line numbers of JSON validation calls whose arguments read a ``.text``."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if not any(name in source for name in JSON_VALIDATORS):
+        return []
     return [
         node.lineno
         for node in walk_nodes(parse_source(source))

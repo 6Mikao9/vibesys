@@ -29,6 +29,9 @@ ALLOWED: dict[str, tuple[int, str]] = {}
 
 def bare_thread_waits(source: str) -> list[int]:
     """Line numbers of ``to_thread(<name>.wait)`` and ``to_thread(<name>.get)`` calls."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if "to_thread" not in source:
+        return []
     return [
         node.lineno
         for node in walk_nodes(parse_source(source))

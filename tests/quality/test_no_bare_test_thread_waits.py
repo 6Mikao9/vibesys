@@ -65,6 +65,9 @@ def _own_calls(function: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.Cal
 
 def bare_test_thread_waits(source: str) -> list[int]:
     """Line numbers of zero-argument ``.wait()`` calls made directly by a test function."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if "wait" not in source:
+        return []
     return sorted(
         call.lineno
         for node in walk_nodes(parse_source(source))

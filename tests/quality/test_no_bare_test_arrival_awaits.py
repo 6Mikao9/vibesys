@@ -51,6 +51,9 @@ def _own_nodes(function: ast.AsyncFunctionDef) -> list[ast.AST]:
 
 def bare_arrival_awaits(source: str) -> list[int]:
     """Line numbers of bare ``await x.wait()`` / ``await x.get()`` in async test bodies."""
+    # A rule names what it looks for, so a source that never spells it cannot violate it.
+    if "await" not in source:
+        return []
     return sorted(
         node.lineno
         for function in walk_nodes(parse_source(source))
