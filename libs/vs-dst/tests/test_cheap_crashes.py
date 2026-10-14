@@ -10,13 +10,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 import pytest
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 from vs_core.api import EnsureWorkspace
 from vs_core.api.testing import Unknown
 from vs_dst.api import NondeterministicWorldError, simulate
-from vs_sim.api.testing import Depth, using_depth
 
 from ._scratch import run_with_crash
 from ._tiny import TinyWorld
@@ -26,15 +23,19 @@ if TYPE_CHECKING:
     from vs_core.api.testing import Answer
 
 
-@settings(deadline=None, max_examples=3)
-@given(items=st.integers(min_value=1, max_value=2), concurrent=st.sampled_from([1, 2]))
+@pytest.mark.parametrize("items", [1, 2])
+@pytest.mark.parametrize("concurrent", [1, 2])
 def test_a_cheap_crash_equals_rerunning_from_the_start_at_every_crash_point(
     items: int, concurrent: int
 ) -> None:
+    """The whole input space (both sizes of run, either concurrency) is tried, not a draw of it.
+
+    The crash points are the session's policy: a sample on a pull request, every boundary
+    under ``--depth=nightly`` (`test_crash_points.py` pins what each offers).
+    """
     normal = simulate(TinyWorld(items, concurrent))
-    with using_depth(Depth.NIGHTLY):
-        points = normal.crash_points()
-    assert len(points) == 2 * normal.commits
+    points = normal.crash_points()
+    assert points
 
     for crash in points:
         cheap = normal.rerun_with_crash(crash)
