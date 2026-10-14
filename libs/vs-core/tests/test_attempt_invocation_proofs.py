@@ -60,6 +60,30 @@ from vs_core.api import (
 )
 from vs_core.api.testing import sample_limits
 
+from .guard_rows import guard_rows
+
+STATUSES = [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED]
+CORRELATIONS = ["exact", "unrelated", "unregistered"]
+EPISODES = ["absent", "old", "current"]
+RECEIPTS = [
+    "absent",
+    "rejected",
+    "mismatched",
+    "exact",
+    "foreign-request-decision",
+    "missing-request-membership",
+    "foreign-session-scope",
+]
+LIFECYCLES = [
+    (phase, status)
+    for phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN, SessionPhase.TERMINAL)
+    for status in (
+        ObservationStatus.PENDING,
+        ObservationStatus.UNKNOWN,
+        ObservationStatus.SUCCEEDED,
+    )
+]
+
 
 def invocation_fixture(
     admission: str = "current",
@@ -253,21 +277,16 @@ def checkpoint_event(state: CoreState) -> InvocationCheckpointRequested:
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
+    ("status", "correlation", "admission", "observed_episode", "receipt_kind"),
+    guard_rows(
+        STATUSES,
+        CORRELATIONS,
+        ["absent", "current"],
+        EPISODES,
+        RECEIPTS,
+        positive=(ObservationStatus.SUCCEEDED, "exact", "current", "current", "exact"),
+    ),
 )
-@pytest.mark.parametrize("status", [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize("admission", ["absent", "current"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
 def test_checkpoint_requires_exact_current_terminal_invocation_proof(
     status: ObservationStatus,
     correlation: str,
@@ -310,20 +329,15 @@ def test_checkpoint_requires_exact_current_terminal_invocation_proof(
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
+    ("status", "correlation", "observed_episode", "receipt_kind"),
+    guard_rows(
+        STATUSES,
+        CORRELATIONS,
+        EPISODES,
+        RECEIPTS,
+        positive=(ObservationStatus.SUCCEEDED, "exact", "current", "exact"),
+    ),
 )
-@pytest.mark.parametrize("status", [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
 def test_refund_requires_exact_current_terminal_invocation_proof(
     status: ObservationStatus,
     correlation: str,
@@ -382,31 +396,23 @@ def test_refund_requires_exact_current_terminal_invocation_proof(
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
-)
-@pytest.mark.parametrize("admission", ["absent", "current"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize(
-    "lifecycle",
-    [
-        (phase, status)
-        for phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN, SessionPhase.TERMINAL)
-        for status in (
-            ObservationStatus.PENDING,
-            ObservationStatus.UNKNOWN,
-            ObservationStatus.SUCCEEDED,
-        )
-    ],
+    ("receipt_kind", "admission", "observed_episode", "correlation", "lifecycle"),
+    # The rule reads the episode, the correlation and the status together.
+    guard_rows(
+        RECEIPTS,
+        ["absent", "current"],
+        EPISODES,
+        CORRELATIONS,
+        LIFECYCLES,
+        positive=(
+            "exact",
+            "current",
+            "current",
+            "exact",
+            (SessionPhase.EXECUTING, ObservationStatus.SUCCEEDED),
+        ),
+        joint=(2, 3, 4),
+    ),
 )
 def test_billing_requires_current_unambiguous_invocation_evidence(
     admission: str,

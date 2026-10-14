@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 RUN_SCOPE = core.Scope(owner=core.RunId(root="run"), generation=0)
 ATTEMPT_SCOPE = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
@@ -689,7 +690,7 @@ actions = st.one_of(
 )
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=8, nightly=60), deadline=None)
 @given(
     plan=st.lists(actions, min_size=1, max_size=30),
     retries=st.integers(0, 2),
