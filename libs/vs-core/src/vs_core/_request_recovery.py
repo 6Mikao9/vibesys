@@ -898,20 +898,23 @@ def _finish(
     return AreaChange(state=state.model_copy(update={"recovery": barrier}), signals=signals)
 
 
-def _requeue_lost_inspection(
+def _requeue_lost_reconciliation(
     state: RecordsState, context: RecordsContext, event: RecoveryStarted, record: RequestRecord
 ) -> RecordsState:
-    """An earlier epoch's inspection that never reported is issued again, not left open.
+    """An earlier epoch's reconciliation request that never reported is issued again.
 
     Its target is inspected afresh by this epoch, but the old request would stay in flight
-    for good and hold the run open. An inspection only reads, so issuing it again is safe.
+    for good and hold the run open. Issuing it again under the same identity is safe: an
+    inspection only reads, and a block or a cancellation runs at most once per identity, so
+    the executor answers with what the dead host's attempt did, or does it now if that never
+    began.
     It goes out with a fresh reconciliation bound from the restart, as this epoch's own
     inspections do, whether it was in flight or only prepared when the host died: no deadline
     ever ends an inspection, so one issued with a bound that passed while the host was down
     would be dropped by the shell unanswered and hold the run open just the same.
     """
     if not (
-        isinstance(record.request, InspectRequest)
+        isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
         and record.phase
         in (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
         and record.observation is None
@@ -1007,7 +1010,7 @@ def _start(
                 for child in updated.children
             )
         ):
-            updated = _requeue_lost_inspection(updated, context, event, record)
+            updated = _requeue_lost_reconciliation(updated, context, event, record)
             continue
         resolution = _aggregate_resolution(record, context, updated)
         inspection = (

@@ -1,4 +1,4 @@
-"""An inspection that never reported before a crash is issued again by the next recovery."""
+"""A reconciliation request that never reported before a crash is issued again by the next recovery."""
 
 import json
 from hashlib import sha256
@@ -8,7 +8,10 @@ from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
+    BlockRequest,
+    CancelOwnedResource,
     EnsureSession,
+    FailureReason,
     InspectRequest,
     LifecycleClass,
     RecordsState,
@@ -17,6 +20,7 @@ from vs_core.api import (
     RequestId,
     RequestPhase,
     RequestRecord,
+    ResourceId,
     RoleId,
     RunStatus,
     Scope,
@@ -60,18 +64,35 @@ def _session_record() -> RequestRecord:
     )
 
 
-def _lost_inspection(target: RequestRecord, phase: RequestPhase) -> RequestRecord:
-    request_id = RequestId(root="inspection")
-    request = InspectRequest(
-        request_id=request_id,
-        scope=target.request.scope,
-        target=target.request_id,
-    )
+def _lost_request(target: RequestRecord, kind: str, phase: RequestPhase) -> RequestRecord:
+    request_id = RequestId(root=f"lost-{kind}")
+    scope = target.request.scope
+    request: InspectRequest | CancelOwnedResource | BlockRequest
+    match kind:
+        case "inspect":
+            request = InspectRequest(request_id=request_id, scope=scope, target=target.request_id)
+            lifecycle = LifecycleClass.QUERY
+        case "cancel":
+            request = CancelOwnedResource(
+                request_id=request_id,
+                scope=scope,
+                target=target.request_id,
+                resource_id=ResourceId(root="target-resource"),
+            )
+            lifecycle = LifecycleClass.IDEMPOTENT_WRITE
+        case _:
+            request = BlockRequest(
+                request_id=request_id,
+                scope=scope,
+                target=target.request_id,
+                reason=FailureReason.TIMED_OUT,
+            )
+            lifecycle = LifecycleClass.IDEMPOTENT_WRITE
     return RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=_digest(request),
-        lifecycle=LifecycleClass.QUERY,
+        lifecycle=lifecycle,
         phase=phase,
         until=Until(at=100.0),
         addressed_by=(),
@@ -79,21 +100,24 @@ def _lost_inspection(target: RequestRecord, phase: RequestPhase) -> RequestRecor
 
 
 @given(
+    kind=st.sampled_from(["inspect", "cancel", "block"]),
     phase=st.sampled_from(
         [RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING]
     ),
     restart_at=st.floats(min_value=0.0, max_value=10_000.0, allow_nan=False),
 )
-def test_an_inspection_that_never_reported_goes_out_again_with_a_bound_from_the_restart(
-    phase: RequestPhase, restart_at: float
+def test_a_reconciliation_request_that_never_reported_goes_out_again_with_a_bound_from_the_restart(
+    kind: str, phase: RequestPhase, restart_at: float
 ) -> None:
-    """Whether it was in flight or only prepared, and however long the host was down.
+    """An inspection, a cancellation or a block; in flight or only prepared; any downtime.
 
     Nothing ends an inspection at its bound, so one sent out with a bound that passed while
-    the host was down would be dropped unanswered and hold the run open for good.
+    the host was down would be dropped unanswered and hold the run open for good. A block or
+    a cancellation the dead host sent was neither checked nor sent again, so it stayed in
+    flight for good: a run that ended blocked and died once more never closed (#2529).
     """
     target = _session_record()
-    lost = _lost_inspection(target, phase)
+    lost = _lost_request(target, kind, phase)
     state = initial_state()
     state = state.model_copy(
         update={
