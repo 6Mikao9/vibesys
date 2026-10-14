@@ -81,7 +81,11 @@ def start_flow[C](
 
 
 def across_restarts[F: Callable[..., None]](story: F) -> F:
-    """Run a story twice: live, and restarting as the session's depth says.
+    """Run a story restarting as the session's depth says (nightly: live as well).
+
+    A restarting run shows everything a live run does (restart equivalence is vs-core's), so a
+    pull request runs the story once, restarted at a few steps; the nightly job also runs it
+    live, to tell a broken search from a broken restart, and restarts after every step.
 
     The story takes ``restarting`` (False, or a ``Restarts``) and passes it on to its host. A
     failure names the steps the restarting run restarted after, so it can be replayed.
@@ -99,7 +103,11 @@ def across_restarts[F: Callable[..., None]](story: F) -> F:
             error.add_note(f"restarted after steps {'all' if plan.every else sorted(plan.steps)}")
             raise
 
-    return pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])(run)  # ty: ignore[invalid-return-type]
+    if depth() is Depth.NIGHTLY:
+        modes, ids = [False, True], ["live", "restarting"]
+    else:
+        modes, ids = [True], ["restarting"]
+    return pytest.mark.parametrize("restarting", modes, ids=ids)(run)  # ty: ignore[invalid-return-type]
 
 
 def _draw() -> int:
