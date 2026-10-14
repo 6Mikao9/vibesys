@@ -286,7 +286,7 @@ SCENARIOS = st.builds(
 )
 
 
-@settings(max_examples=examples(pr=6, nightly=300), deadline=None)
+@settings(max_examples=examples(pr=5, nightly=300), deadline=None)
 @example(
     scenario=Scenario(
         access=core.Access.READ_ONLY,

@@ -694,7 +694,7 @@ actions = st.one_of(
 )
 
 
-@settings(max_examples=examples(pr=8, nightly=60), deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 @given(
     plan=st.lists(actions, min_size=1, max_size=30),
     retries=st.integers(0, 2),

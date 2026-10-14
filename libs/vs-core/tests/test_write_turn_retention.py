@@ -152,7 +152,7 @@ def test_a_failed_snapshot_releases_the_attempt_and_records_why(
     ] == [core.Declined(reason=core.CheckpointDecline.SNAPSHOT_FAILED)]
 
 
-@settings(max_examples=examples(pr=6, nightly=60), deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 @given(
     access=st.sampled_from(list(core.Access)),
     status=st.sampled_from(
@@ -215,7 +215,7 @@ REVISIONS = (
 )
 
 
-@settings(max_examples=examples(pr=6, nightly=150), deadline=None)
+@settings(max_examples=examples(pr=5, nightly=150), deadline=None)
 @given(plan=st.lists(STEPS, min_size=1, max_size=12))
 def test_write_turns_never_fail_the_step_or_strand_a_closing_attempt(plan: list[Step]) -> None:
     """Write turns end with or without changes, the workspace answers any way, retire anywhere.

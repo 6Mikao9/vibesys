@@ -164,7 +164,7 @@ def counting_reducers() -> tuple[core.CoreReducers, list[core.AttemptChargeRefun
 
 
 # P2: the refund request is idempotent per claim, however often the event repeats.
-@settings(deadline=None, max_examples=examples(pr=6, nightly=15))
+@settings(deadline=None, max_examples=examples(pr=5, nightly=15))
 @given(repeats=st.integers(1, 5), charged=st.integers(1, 4))
 def test_repeated_checkpoint_event_emits_one_refund_request(repeats: int, charged: int) -> None:
     state, event = refund_state(charged, refund_limit=5)

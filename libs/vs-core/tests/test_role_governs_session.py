@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from vs_core.api.testing import Asked
 
 _SETTINGS = settings(
-    max_examples=examples(pr=6, nightly=25), deadline=None, derandomize=True, database=None
+    max_examples=examples(pr=5, nightly=25), deadline=None, derandomize=True, database=None
 )
 _RESTARTING = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart"])
 

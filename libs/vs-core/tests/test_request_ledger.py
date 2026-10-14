@@ -156,7 +156,7 @@ actions = st.lists(
 )
 
 
-@settings(max_examples=examples(pr=8, nightly=150), deadline=None)
+@settings(max_examples=examples(pr=5, nightly=150), deadline=None)
 @given(actions)
 def test_ledger_interleavings_are_safe_and_reload_transparent(trace: list[Action]) -> None:
     plain = reloaded = _ready()
@@ -191,7 +191,7 @@ def test_ledger_interleavings_are_safe_and_reload_transparent(trace: list[Action
     assert plain == reloaded
 
 
-@settings(max_examples=examples(pr=8, nightly=60), deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 @given(st.integers(min_value=1, max_value=4))
 def test_duplicate_and_stale_observations_are_inert(sequence: int) -> None:
     state = step(_ready(), DispatchAuthorized(request_id=REQUEST)).state
