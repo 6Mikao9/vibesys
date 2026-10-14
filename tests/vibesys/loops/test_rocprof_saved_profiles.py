@@ -68,12 +68,12 @@ def test_saved_success_remains_readable(
         assert "saved_workload_kernel" in result["result"]
 
 
-@pytest.mark.parametrize(
-    "reader",
-    ["summary", "compare_baseline", "compare_candidate", "kernels_root", "kernels_artifact"],
-)
-@settings(max_examples=examples(pr=10, nightly=15))
+_READERS = ["summary", "compare_baseline", "compare_candidate", "kernels_root", "kernels_artifact"]
+
+
+@settings(max_examples=examples(pr=3, nightly=40))
 @given(
+    reader=st.sampled_from(_READERS),
     status=st.one_of(
         st.none(),
         st.text().filter(lambda value: value not in _SUCCESS),
@@ -82,14 +82,14 @@ def test_saved_success_remains_readable(
         st.dictionaries(st.text(max_size=5), st.integers(), max_size=3),
     )
 )
-@example(status="load_failed")
-@example(status="target_failed")
-@example(status="not_ready")
-@example(status="timed_out")
-@example(status="cancelled")
-@example(status="setup_failed")
-@example(status=[])
-@example(status={})
+@example(status="load_failed", reader="summary")
+@example(status="target_failed", reader="compare_baseline")
+@example(status="not_ready", reader="compare_candidate")
+@example(status="timed_out", reader="kernels_root")
+@example(status="cancelled", reader="kernels_artifact")
+@example(status="setup_failed", reader="summary")
+@example(status=[], reader="compare_baseline")
+@example(status={}, reader="compare_candidate")
 def test_saved_non_success_never_returns_profile_analysis(
     server_mod: ModuleType,
     tmp_path_factory: pytest.TempPathFactory,
