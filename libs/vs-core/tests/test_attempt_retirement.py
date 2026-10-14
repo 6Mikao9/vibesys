@@ -1,12 +1,13 @@
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ValidationError
 
 import vs_core.api as core
 from vs_core.api import ObservationStatus, SessionPhase
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 from .reopen_facts import released_job
@@ -106,8 +107,9 @@ def checked_step(
     assert state.model_dump_json() == before
     assert result.state.scheduling == state.scheduling
     assert result.state.settlement == state.settlement
-    assert reload_state(result.state, codec) == result.state
-    assert core.project(result.state) == core.project(reload_state(result.state, codec))
+    reloaded = reload_state(result.state, codec)
+    assert reloaded == result.state
+    assert core.project(result.state) == core.project(reloaded)
     return result
 
 
@@ -572,6 +574,7 @@ def writer_invocation(
 @pytest.mark.parametrize("predecessor", [False, True])
 @pytest.mark.parametrize("reuse", [False, True])
 @pytest.mark.parametrize("registered", [False, True])
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     proof=st.tuples(
         st.sampled_from(list(ObservationStatus)),
@@ -583,6 +586,18 @@ def writer_invocation(
     )
 )
 @example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "accepted"))
+# The release is positive only when every part of the proof is: each of these fails exactly one,
+# in every kind of writer, so a pull request needs few drawn proofs beside them.
+@example(proof=(ObservationStatus.UNKNOWN, True, True, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.PENDING, True, True, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, False, True, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, False, True, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, False, "admission", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, None, "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "stale", "accepted"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "rejected"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "wrong-id"))
+@example(proof=(ObservationStatus.SUCCEEDED, True, True, True, "admission", "mutated"))
 def test_every_writer_variant_requires_exact_complete_lease_release_before_disposal(
     charge: Literal["paid", "correction", "resume", "free"],
     proof: tuple[ObservationStatus, bool, bool, bool, str | None, str],
@@ -1274,10 +1289,8 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
 @pytest.mark.parametrize(
     "checkpoint_source", ["exact", "foreign", "duplicate", "latest", "wrong-retention"]
 )
-@given(phase=st.sampled_from(list(SessionPhase)), pending=st.booleans())
-@example(phase=SessionPhase.EXECUTING, pending=False)
-@example(phase=SessionPhase.IDLE, pending=True)
-@example(phase=SessionPhase.IDLE, pending=False)
+@pytest.mark.parametrize("phase", list(SessionPhase))
+@pytest.mark.parametrize("pending", [False, True])
 def test_reopen_dispatch_requires_quiescent_reacquired_session(
     phase: SessionPhase, *, pending: bool, canonical: bool, checkpoint_source: str
 ) -> None:
@@ -1508,10 +1521,12 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
 
 @pytest.mark.parametrize("historical", [False, True])
 @pytest.mark.parametrize("aggregate", [False, True])
+@settings(max_examples=examples(pr=5, nightly=100))
 @given(
     prefix=st.text(alphabet="abc", min_size=1, max_size=8),
     suffix=st.text(alphabet="xyz", min_size=1, max_size=8),
 )
+@example(prefix="a", suffix="x")
 def test_opaque_inspection_identities_are_injective_across_sources_and_children(
     prefix: str, suffix: str, *, historical: bool, aggregate: bool
 ) -> None:

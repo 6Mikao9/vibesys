@@ -4,11 +4,12 @@ from itertools import product
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import assume, example, given
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 
 class TurnOutcome(core.Value):
@@ -374,6 +375,10 @@ def test_already_settled_wait_authorizes_exact_successor_once(
 
 
 @pytest.mark.parametrize("registered", [False, True])
+@settings(max_examples=examples(pr=3, nightly=100))
+@example(order=(0, 1, 2), duplicates=[])
+@example(order=(2, 1, 0), duplicates=[0, 2, 1, 1])
+@example(order=(1, 2, 0), duplicates=[2, 0])
 @given(order=st.permutations((0, 1, 2)), duplicates=st.lists(st.integers(0, 2), max_size=10))
 def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
     *, registered: bool, order: tuple[int, ...], duplicates: list[int]
