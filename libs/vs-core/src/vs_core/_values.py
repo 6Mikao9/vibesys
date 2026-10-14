@@ -8,7 +8,7 @@ import weakref
 from enum import Enum
 from functools import cache
 from hashlib import sha256
-from types import UnionType
+from types import MemberDescriptorType, UnionType
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -158,14 +158,36 @@ class InstanceMemo[Fact]:
         entries[key] = (weakref.ref(model, evict), fact)
 
 
-_IMMUTABILITY_VERDICTS: InstanceMemo[bool] = InstanceMemo()
+_read_slot = object.__getattribute__
+_write_slot = object.__setattr__
+_MEMO_SLOTS = frozenset({"_text", "_immutable", "_canonical"})
+
+
+def recall[Fact](model: BaseModel, slot: str) -> Fact | None:
+    """The fact kept in ``slot`` of this very instance, or None.
+
+    A value model owns slots for the facts derived from its fields (see `Value`), so a lookup is
+    an attribute read: no side table, no weak reference. A slot is empty on a fresh object,
+    and `object.__getattribute__` reports that without pydantic's slower `__getattr__`. A model
+    that has no such slot (any other pydantic model) simply remembers nothing.
+    """
+    try:
+        return _read_slot(model, slot)
+    except AttributeError:
+        return None
+
+
+def keep(model: BaseModel, slot: str, fact: object) -> None:
+    """Remember ``fact`` in ``slot`` of this instance, if its class has the slot."""
+    if slot in _MEMO_SLOTS and isinstance(getattr(type(model), slot, None), MemberDescriptorType):
+        _write_slot(model, slot, fact)
 
 
 def _frozen_model_is_deeply_immutable(model: BaseModel) -> bool:
-    known = _IMMUTABILITY_VERDICTS.get(model)
+    known = recall(model, "_immutable")
     if known is None:
         known = _walk_immutable(getattr(model, name) for name in _field_names(type(model)))
-        _IMMUTABILITY_VERDICTS.put(model, known)
+        keep(model, "_immutable", known)
     return known
 
 
@@ -180,7 +202,6 @@ def _walk_immutable(values: Iterable[object]) -> bool:
     # match a model, tuple, frozenset or Enum, so it only skips checks that
     # would fail.
     pending = list(values)
-    recall = _IMMUTABILITY_VERDICTS.get
     while pending:
         node = pending.pop()
         if type(node) in _IMMUTABLE_LEAF_TYPES:
@@ -188,8 +209,9 @@ def _walk_immutable(values: Iterable[object]) -> bool:
         if isinstance(node, BaseModel):
             if not node.model_config.get("frozen"):
                 return False
-            known = recall(node)  # inlined: this is the hottest loop of every durable write
-            if known is None:
+            try:
+                known = _read_slot(node, "_immutable")  # inlined: the hottest loop of a write
+            except AttributeError:
                 known = _frozen_model_is_deeply_immutable(node)
             if not known:
                 return False
@@ -200,9 +222,6 @@ def _walk_immutable(values: Iterable[object]) -> bool:
     return True
 
 
-_CANONICAL_TEXTS: InstanceMemo[str] = InstanceMemo()
-
-
 def canonical_json(value: BaseModel) -> str:
     """Keep ordered sequences and canonically sort every unordered collection.
 
@@ -211,10 +230,10 @@ def canonical_json(value: BaseModel) -> str:
     """
     if not value.model_config.get("frozen"):
         return _canonical_json(value)
-    text = _CANONICAL_TEXTS.get(value)
+    text: str | None = recall(value, "_canonical")
     if text is None:
         text = _canonical_json(value)
-        _CANONICAL_TEXTS.put(value, text)
+        keep(value, "_canonical", text)
     return text
 
 
@@ -257,7 +276,6 @@ def digest(value: BaseModel) -> str:
     return sha256(canonical_json(value).encode()).hexdigest()
 
 
-_FRAGMENT_TEXTS: InstanceMemo[str] = InstanceMemo()
 _FRAGMENT_TOKEN = re.compile(r'"\\u0000F([0-9]+)\\u0000"')
 _FRAGMENT_DATA: TypeAdapter[object] = TypeAdapter(
     object, config=ConfigDict(ser_json_inf_nan="null")
@@ -282,7 +300,7 @@ class _Fragments:
 
     def emit(self, model: BaseModel, handler: Callable[[BaseModel], object]) -> str:
         self.seen.append(model)
-        text = _FRAGMENT_TEXTS.get(model)
+        text: str | None = recall(model, "_text")
         if text is None:
             data = handler(model)  # children are tokens, so they were all emitted before this
             self.pending.append((len(self.texts), model, data))
@@ -319,7 +337,7 @@ class _Fragments:
         """Keep the text of every value this call serialized, for the next call."""
         for index, model, _ in self.pending:
             if _frozen_model_is_deeply_immutable(model):
-                _FRAGMENT_TEXTS.put(model, self.texts[index])
+                keep(model, "_text", self.texts[index])
 
 
 @cache
@@ -384,7 +402,7 @@ def _mismatch(fragments: _Fragments, model: BaseModel) -> EncodingMismatchError:
     culprits = {
         type(seen).__name__
         for seen in fragments.seen
-        if (text := _FRAGMENT_TEXTS.get(seen)) is not None and text != seen.model_dump_json()
+        if (text := recall(seen, "_text")) is not None and text != seen.model_dump_json()
     }
     return EncodingMismatchError(tuple(sorted(culprits)) or (type(model).__name__,))
 
