@@ -63,9 +63,6 @@ validation and platform pruning derive from it.
    bundled skill that has a `platforms` directory. An agent sees only its own
    backend's; `tests/vibesys/test_compute_backend_wiring.py` fails for a missing
    directory or one named after no backend, which pruning would never hide.
-8. **Update the prose list** of backends in
-   [skill-metadata.md](../../../docs/contributing/skill-metadata.md).
-   Unenforced: a prose restatement of `ComputeBackend` that no check compares.
 
 ## Testing
 

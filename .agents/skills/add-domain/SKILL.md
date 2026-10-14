@@ -55,14 +55,12 @@ package's `prompts/`. The CLI choices and skill-metadata validation derive from
 5. **Fence distinctive vocabulary** out of neutral packs with a `DomainLeakCheck`
    in `tests/vibesys/orchestration/domains/test_prompt_contracts.py:DOMAIN_LEAK_CHECKS`.
 6. **Scope domain-only product skills** with a `domains` rule in their
-   `.vibesys.toml` ([skill-metadata.md](../../../docs/contributing/skill-metadata.md),
-   the `add-bundled-skill` skill);
+   `.vibesys.toml` (the `add-bundled-skill` skill);
    `tests/entrypoints/test_skills_wiring.py:test_all_repository_skill_metadata_is_valid`
    validates every sidecar.
-7. **Update the prose lists** of domains in
-   [domains.md](../../../docs/contributing/domains.md) and
-   [skill-metadata.md](../../../docs/contributing/skill-metadata.md).
-   Unenforced: prose restatements of `DomainName` that no check compares.
+7. **Update the prose list** of domains in
+   [domains.md](../../../docs/contributing/domains.md).
+   Unenforced: a prose restatement of `DomainName` that no check compares.
 
 ## Testing
 
