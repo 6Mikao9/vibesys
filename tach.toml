@@ -424,7 +424,7 @@ depends_on = ["vibesys", "vs_prompts", "vs_core"]
 [[modules]]
 path = "vs_sandbox"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode", "vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "vs_sandbox.slurm_wiring", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "vs_sandbox.slurm_wiring", "vs_sim.api"]
 
 [[modules]]
 path = "vs_runtime"
@@ -439,7 +439,7 @@ depends_on = ["vs_sandbox", "vs_project", "vs_prompts", "vs_mcp", "vs_faults", "
 [[modules]]
 path = "vs_project"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_sim.api"]
 
 [[modules]]
 path = "vs_issue_tracker"
@@ -453,6 +453,16 @@ depends_on = []
 
 [[modules]]
 path = "vs_decode"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_decode.api"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_decode._decode"]
+
+[[modules]]
+path = "vs_decode._decode"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
