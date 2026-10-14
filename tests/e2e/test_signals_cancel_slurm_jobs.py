@@ -26,7 +26,7 @@ import pytest
 from tests.e2e._signalled_run import main as signalled_run
 from tests.support.task_project import write_task
 
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api.testing import HANG_GUARD_S, Depth, depth
 from vs_slurm.fake_connector import JOB_ID, POLLED_FILE, SUBMITTED_FILE, recorded_commands
 
 pytestmark = pytest.mark.usefixtures("isolated_github_auth")
@@ -179,7 +179,17 @@ def _signal_the_run(
     assert returncode != 0
 
 
-@pytest.mark.parametrize(("signals", "transport", "closed_stdout"), _CASES)
+# A forked run costs about 3 CPU-seconds (the Fake cluster's connector starts once per request).
+# The real process below takes SIGTERM, so a pull request signals the forked run with each of the
+# other two sequences, over the two transports and both states of the terminal's pipe; the
+# nightly job crosses all six.
+_PULL_REQUEST = {"sighup-closed-stdout-connector", "sigint-then-sigterm-stdout-ssh"}
+
+
+@pytest.mark.parametrize(
+    ("signals", "transport", "closed_stdout"),
+    [case for case in _CASES if depth() is Depth.NIGHTLY or case.id in _PULL_REQUEST],
+)
 def test_a_signal_that_ends_the_run_cancels_its_slurm_job(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
