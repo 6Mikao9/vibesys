@@ -1304,7 +1304,14 @@ def _job_observed(
                     diagnostic=observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
                 ),
             )
-        if observation.accepted and not updated.evidence:
+        # A cancel stop discards its run's jobs, so it collects nothing from them: a job the
+        # executor holds no record of cannot be collected from, and asking would hold the
+        # run closing for good.
+        if (
+            observation.accepted
+            and not updated.evidence
+            and _cancelling_scope(context) != job.scope
+        ):
             collect = _job_request(CollectEvidence, updated, context, "evidence")
             # One collection per job. A collection that yields nothing (a job that failed
             # before producing evidence) is itself observed as a job event, and asking
@@ -1536,9 +1543,13 @@ def _job_request(
     # Evidence is collected once per job, so its id does not name an observation.
     suffix = "" if model is CollectEvidence else f":{sequence}"
     canonical = next((r for r in context.records.records if r.request_id == source), None)
-    # A poll raised by the clock has no triggering observation to inherit the
-    # submission's decision from, so it names the decision itself.
-    inherited = canonical.request if canonical is not None and model is ObserveOwnedJob else None
+    # A step on a job is the job's own, whoever asks for it: a poll raised by the clock, a
+    # stop, a drain and a late observation all name the submission's decision. Left to the
+    # asker, two events asking for one step at one instant stamp it differently and the one
+    # request id would carry two payloads.
+    inherited = (
+        canonical.request if canonical is not None and model is not CollectEvidence else None
+    )
     return model(
         request_id=RequestId(root=f"measurement:{source.root}:{action}{suffix}"),
         scope=job.scope,
@@ -1564,7 +1575,11 @@ def _job_outbound(
 
 
 def _terminate(
-    state: EvaluationState, context: EvaluationContext, resource: ResourceId
+    state: EvaluationState,
+    context: EvaluationContext,
+    resource: ResourceId,
+    *,
+    cancel_unconfirmed: bool = False,
 ) -> AreaChange[EvaluationState]:
     rows = tuple(j for j in (*state.jobs, *state.registered_jobs) if j.resource_id == resource)
     if len(rows) != 1:
@@ -1580,15 +1595,25 @@ def _terminate(
         or not isinstance(_job_source(state, context, job, source), Proven)
     ):
         return AreaChange(state=state)
-    if (
+    return _termination(
+        state, context, _next_step(job, context, cancel_unconfirmed=cancel_unconfirmed)
+    )
+
+
+def _next_step(
+    job: OwnedJob | RegisteredOwnedJob, context: EvaluationContext, *, cancel_unconfirmed: bool
+) -> Outbound:
+    """The one step that moves *job* toward its end, given what the executor has confirmed."""
+    unconfirmed = (
         job.observation is None
         or job.observation.status == ObservationStatus.UNKNOWN
         or not job.observation.accepted
-    ):
-        return _termination(state, context, _job_outbound(InspectOwnedJob, job, context, "inspect"))
+    )
+    if unconfirmed and not (cancel_unconfirmed and job.observation is not None):
+        return _job_outbound(InspectOwnedJob, job, context, "inspect")
     if job.terminal:
-        return _termination(state, context, _job_outbound(InspectOwnedJob, job, context, "release"))
-    return _termination(state, context, _job_outbound(CancelOwnedJob, job, context, "cancel"))
+        return _job_outbound(InspectOwnedJob, job, context, "release")
+    return _job_outbound(CancelOwnedJob, job, context, "cancel")
 
 
 def _termination(
@@ -1668,20 +1693,31 @@ def _known(job: OwnedJob | RegisteredOwnedJob) -> bool:
     )
 
 
+def _inspected(context: EvaluationContext, resource: ResourceId) -> bool:
+    return any(
+        isinstance(row.request, InspectOwnedJob) and row.request.resource_id == resource
+        for row in context.records.records
+    )
+
+
 def _cancel_scope_jobs(
     state: EvaluationState,
     context: EvaluationContext,
     scope: Scope,
     *,
-    inspect: bool = True,
+    first_ask: bool = True,
 ) -> AreaChange[EvaluationState]:
     """Cancel each live job *scope* owns that no cancellation addresses yet.
 
     Attempt closure drains an attempt's jobs; the run's own jobs (its input baseline) have
-    no attempt to close, so a cancel stop ends them here. Applied when the stop commits and
-    again for a job first observed after it, at most one cancellation per job. A job the
-    executor does not yet confirm is inspected once, when *inspect* allows; the polls that
-    follow end its doubt, so an unconfirmed answer must not ask again, at once, for another.
+    no attempt to close, so a cancel stop ends them here. Applied when the stop commits
+    (*first_ask*) and again as each job is observed after it, at most one cancellation per job.
+
+    A job the executor does not confirm cannot be cancelled by name, so the stop inspects it
+    once. If it is still unconfirmed at its next observation, whether the executor holds no
+    record of it or cannot say, the stop cancels it anyway: a cancellation is idempotent, and
+    the executor answers it for a job that never began exactly as for one it ended. Waiting
+    for a confirmation that may never come would hold the run closing until the host gives up.
     """
     requests = tuple(
         request
@@ -1690,8 +1726,10 @@ def _cancel_scope_jobs(
         and job.resource_id is not None
         and not job.terminal
         and not _cancel_requested(context, job.resource_id)
-        and (inspect or _known(job))
-        for request in _terminate(state, context, job.resource_id).requests
+        and (first_ask or _known(job) or _inspected(context, job.resource_id))
+        for request in _terminate(
+            state, context, job.resource_id, cancel_unconfirmed=not first_ask
+        ).requests
     )
     return AreaChange(state=state, requests=requests)
 
@@ -1716,7 +1754,7 @@ def _cancelled_after_stop(
     scope = _cancelling_scope(context)
     if scope is None:
         return change
-    cancels = _cancel_scope_jobs(change.state, context, scope, inspect=False)
+    cancels = _cancel_scope_jobs(change.state, context, scope, first_ask=False)
     if not cancels.requests:
         return change
     return change.model_copy(update={"requests": (*change.requests, *cancels.requests)})

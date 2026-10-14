@@ -94,13 +94,6 @@ def test_a_stop_during_the_baseline_measurement_cancels_its_job_and_starts_no_wo
     _nothing_started_after_the_stop(timed)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="vic/fix-cancel-stop-inspect removes the identity conflict, but the run then stays "
-    "closing until its cancellation bound: the cancel stop's one inspect of the queued job "
-    "is answered 'executor holds no record of the job' (UNKNOWN, unaccepted), and nothing "
-    "cancels the job before the host exits",
-)
 def test_a_cancel_stop_landing_on_a_poll_of_a_queued_job_cancels_its_job_and_starts_no_work() -> (
     None
 ):

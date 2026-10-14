@@ -46,8 +46,10 @@ from vs_core.api import (
 )
 from vs_evaluation.api import (
     EvaluationRequest,
+    EvaluationState,
     ExecutorCancellationUnconfirmedError,
     ExecutorCancellationUnknownError,
+    ExecutorObservation,
     ExecutorPoll,
     ExecutorRejectedError,
     PollPhase,
@@ -281,12 +283,25 @@ class MeasurementRequests:
             update={"terminal": terminal.model_copy(update={"stage_results": tuple(steps)})}
         )
 
-    async def _view(self, record: JobRecord, context: ExecutionContext) -> tuple[JobView, bool]:
-        """Poll the job as the next numbered observation. True when the job ended."""
+    async def _view(
+        self, record: JobRecord, context: ExecutionContext, *, cancelled: bool = False
+    ) -> tuple[JobView, bool]:
+        """Poll the job as the next numbered observation. True when the job ended.
+
+        *cancelled*: the executor has just accepted this job's cancellation. A job it then
+        holds no record of did not begin (a submission is answered only once it is made), so
+        the cancellation ended it; leaving it unknown would hold its owner open for good.
+        """
         subject = ObservationSubject(
             core_named(RequestId(root=record.request_id)), record.scope, record.admission_id
         )
-        polled = self._with_ledgered_evidence(await self._poll(record.handle_id), record, subject)
+        polled = await self._poll(record.handle_id)
+        if cancelled and polled.phase is PollPhase.UNSUBMITTED:
+            polled = ExecutorPoll(
+                phase=PollPhase.ENDED,
+                terminal=ExecutorObservation(state=EvaluationState.CANCELED),
+            )
+        polled = self._with_ledgered_evidence(polled, record, subject)
         self._progress.report(record.handle_id, record.plan.purpose, polled)
         # The job's observations carry the submission's request id, so they share one
         # sequence with the submission's own (possibly Unknown) observations.
@@ -583,7 +598,7 @@ class MeasurementRequests:
             return self._unknown(request, context, f"cancellation outcome unknown: {error}")
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-940009 [BLE001]; a failed cancel leaves the job owned and running, so it is reported unproven and retried rather than halting the run.
             return self._unknown(request, context, f"cancel raised {type(error).__name__}: {error}")
-        view, ended = await self._view(record, context)
+        view, ended = await self._view(record, context, cancelled=True)
         own = self._own(
             request,
             context,
