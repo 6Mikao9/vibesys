@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import TextIO
 
+    from vs_agent.auth_policy import CredentialKind
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
     from vs_mcp.api import ToolServerDescriptor
@@ -198,6 +199,8 @@ class ReadinessProblem(StrEnum):
 
     BINARY_MISSING = "binary_missing"
     AUTH_FAILED = "auth_failed"
+    #: The CLI reports a credential kind the run's ``[agent.auth]`` policy does not allow.
+    CREDENTIAL_NOT_ALLOWED = "credential_not_allowed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,7 +208,9 @@ class ProviderReadiness:
     """What a readiness probe found about one provider CLI, before any turn.
 
     ``detail`` explains ``auth`` in words fit for an error message, including
-    the fix when it failed, or says the binary was not found.
+    the fix when it failed, or says the binary was not found. ``credential`` is
+    the kind the CLI reports it is logged in with (``None`` when it does not
+    say); ``allowed_credentials`` is the run's policy, or ``None`` without one.
     """
 
     provider: str
@@ -214,6 +219,8 @@ class ProviderReadiness:
     version: str | None
     auth: AuthStatus
     detail: str
+    credential: CredentialKind | None = None
+    allowed_credentials: frozenset[CredentialKind] | None = None
 
     @property
     def problem(self) -> ReadinessProblem | None:
@@ -222,6 +229,12 @@ class ProviderReadiness:
             return ReadinessProblem.BINARY_MISSING
         if self.auth is AuthStatus.FAILED:
             return ReadinessProblem.AUTH_FAILED
+        if (
+            self.allowed_credentials is not None
+            and self.credential is not None
+            and self.credential not in self.allowed_credentials
+        ):
+            return ReadinessProblem.CREDENTIAL_NOT_ALLOWED
         return None
 
 
@@ -230,6 +243,10 @@ _READINESS_FIXES = {
         "install the CLI where the agent runs (the sandbox image under --docker) or put it on PATH"
     ),
     ReadinessProblem.AUTH_FAILED: "log in to the CLI as the agent would run it",
+    ReadinessProblem.CREDENTIAL_NOT_ALLOWED: (
+        "the agent's CLI is using a credential [agent.auth] does not allow; "
+        "provide an allowed one or change the policy"
+    ),
 }
 
 

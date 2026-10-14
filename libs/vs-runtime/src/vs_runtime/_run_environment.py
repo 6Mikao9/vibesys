@@ -42,16 +42,14 @@ from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 from vs_agent.api import (
     CONTAINER_FRAMEWORK_ROOT,
-    AgentBackend,
-    auth_bind_mounts,
-    auth_copy_paths,
+    AgentAuthPolicy,
     reap_orphaned_agents,
 )
 
 # lint-waiver: LW-014514 [TC001]; Pydantic resolves this dataclass field annotation at runtime
 from vs_project.api import RunResourceRequest  # noqa: TC001
 from vs_runtime import _boot_trace as boot_trace
-from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_and_auth_files
+from vs_runtime._cli_container_env import CliContainerAuth, cli_container_auth
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
     attaches_accelerator,
@@ -413,6 +411,10 @@ class RunEnvironmentRequest:
     #: Where a container environment reports its startup stages and image
     #: build progress while it opens; ``None`` reports nothing.
     startup: EnvironmentStartupSink | None = None
+    #: The run's ``[agent.auth]`` policy: the CLI agent gets exactly the one
+    #: credential it plans, and only a container environment can enforce
+    #: that. ``None`` forwards every credential the host has.
+    agent_auth: AgentAuthPolicy | None = None
 
 
 class _AgentPathSandbox(Protocol):
@@ -695,6 +697,13 @@ class HostEnvironment(_NoopWorkspaceRecovery):
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Fail with ``SandboxUnavailableError`` when host confinement is unavailable."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="host")
+        if request.agent_auth is not None:
+            message = (
+                "agent.auth is enforced only when the agent runs in a container: the host "
+                "environment shows the agent the operator's own CLI state, logins included. "
+                "Remove [agent.auth] or choose a container run environment."
+            )
+            raise ValueError(message)
         self._build_sandbox(request.workspace, env={}, require_enforcement=True)
         return _PreparedRunEnvironment(HostEnvironmentFacts(), partial(self._open, request))
 
@@ -949,8 +958,9 @@ class DockerEnvironment:
             clock=request.clock,
         )
         workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
+        cli_auth = _cli_container_auth(request)
         resources, docker_symlinks = _container_mount_plan(
-            request, same_path=extras.same_path_workspace
+            request, cli_auth, same_path=extras.same_path_workspace
         )
         resources += list(extras.resources)
         resources += list(
@@ -962,12 +972,7 @@ class DockerEnvironment:
                 container_image=container_image,
             )
         )
-        resolved_cli = _cli_container_env(request)
-        cli_provider_env: dict[str, str] = {}
-        auth_files: list[tuple[str, str]] = []
-        if resolved_cli is not None:
-            provider, cli_provider_env = resolved_cli
-            auth_files = auth_copy_paths(provider)
+        cli_provider_env, auth_files = _cli_env_and_auth_files(cli_auth)
         cli_provider_env.setdefault("UV_CACHE_DIR", f"{workspace_root}/.cache/uv")
         # The agent image's baked toolchain root is read-only (the vibesys-rust
         # Feature chmods /opt/cargo a+rX, deliberately: an agent cannot apt/cargo
@@ -1224,8 +1229,9 @@ class SkyPilotEnvironment(DockerEnvironment):
                 backend_label="SkyPilot",
             )
 
-            resources, docker_symlinks = _container_mount_plan(request)
-            cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
+            cli_auth = _cli_container_auth(request)
+            resources, docker_symlinks = _container_mount_plan(request, cli_auth)
+            cli_provider_env, auth_files = _cli_env_and_auth_files(cli_auth)
             cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
             helper_source = evaluator_helpers.SKYPILOT_EVALUATOR_HELPER
             helper_path = "/opt/vibesys-skypilot-evaluator.py"
@@ -1402,8 +1408,9 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             backend_label="Modal",
         )
 
-        resources, docker_symlinks = _container_mount_plan(request)
-        cli_provider_env, auth_files = _cli_provider_env_and_auth_files(request)
+        cli_auth = _cli_container_auth(request)
+        resources, docker_symlinks = _container_mount_plan(request, cli_auth)
+        cli_provider_env, auth_files = _cli_env_and_auth_files(cli_auth)
         cli_provider_env.setdefault("UV_CACHE_DIR", "/workspace/.cache/uv")
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
@@ -1701,6 +1708,7 @@ def _prepare_evaluation_plan(
 
 def _container_mount_plan(
     request: RunEnvironmentRequest,
+    cli_auth: CliContainerAuth | None,
     *,
     include_cli_provider_mounts: bool = True,
     same_path: bool = False,
@@ -1712,6 +1720,9 @@ def _container_mount_plan(
     read-write mapping aside, which the sandbox itself always provides),
     and the setup symlinks a lifecycle hook must create once the container is
     up.
+
+    *cli_auth* is the CLI agent's auth from :func:`_cli_container_auth`, whose
+    mounts are added; ``None`` for a run with no CLI agent.
 
     ``include_cli_provider_mounts`` controls whether CLI auth state and the
     full project tree are added under ``/opt/vibesys-auth`` and
@@ -1808,14 +1819,10 @@ def _container_mount_plan(
         for path in linked_worktree_git_paths(request.workspace)
     )
 
-    if (
-        include_cli_provider_mounts
-        and (request.agent_backend or AgentBackend.CLI) == AgentBackend.CLI
-        and request.cli_provider
-    ):
+    if include_cli_provider_mounts and cli_auth is not None:
         resources.extend(
             host_resource_for_mount(host, container, read_only=read_only)
-            for host, container, read_only in auth_bind_mounts(request.cli_provider)
+            for host, container, read_only in cli_auth.delivery.bind_mounts
         )
         resources.append(
             host_resource_for_mount(
@@ -1851,16 +1858,21 @@ def _reference_container_path(request: RunEnvironmentRequest, *, same_path: bool
     return f"{root}/{relative.as_posix()}"
 
 
-def _cli_container_env(request: RunEnvironmentRequest) -> tuple[str, dict[str, str]] | None:
-    """Return ``(provider, container env)`` when a CLI provider needs a container."""
-    return cli_container_env(request.agent_backend, request.cli_provider)
+def _cli_container_auth(request: RunEnvironmentRequest) -> CliContainerAuth | None:
+    """Return the CLI agent's container auth, logging the plan when a policy chose it."""
+    cli_auth = cli_container_auth(request.agent_backend, request.cli_provider, request.agent_auth)
+    if cli_auth is not None and cli_auth.delivery.plan is not None and request.log is not None:
+        request.log(f"[agent-auth] {cli_auth.delivery.plan.describe()}")
+    return cli_auth
 
 
-def _cli_provider_env_and_auth_files(
-    request: RunEnvironmentRequest,
+def _cli_env_and_auth_files(
+    cli_auth: CliContainerAuth | None,
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """Return the container env and staged auth copies for a CLI provider, if any."""
-    return cli_provider_env_and_auth_files(request.agent_backend, request.cli_provider)
+    """Return the container env and staged auth copies for *cli_auth*, empty without one."""
+    if cli_auth is None:
+        return {}, []
+    return dict(cli_auth.env), list(cli_auth.delivery.copy_paths)
 
 
 def _ensure_pushed_for_remote_backend(

@@ -12,13 +12,23 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from vs_agent.auth_policy import (
+    AgentAuthError,
+    AgentAuthPolicy,
+    CliAuthPlan,
+    CredentialKind,
+    PlannedCredentialFile,
+    plan_cli_auth,
+)
 from vs_agent.cli_docker import (
     DOCKER_PROVIDER_ENV,
+    CliAuthDelivery,
     auth_bind_mounts,
     auth_copy_paths,
     auth_env_passthrough,
     auth_env_vars,
     auth_paths,
+    cli_auth_delivery,
 )
 from vs_agent.container_python import (
     CONTAINER_FRAMEWORK_ROOT,
@@ -172,6 +182,8 @@ __all__ = [
     "NULL_SKILL_SELECTION",
     "SHIPPED_PROVIDERS",
     "STOP_POLL_S",
+    "AgentAuthError",
+    "AgentAuthPolicy",
     "AgentBackend",
     "AgentCapabilities",
     "AgentClient",
@@ -208,9 +220,12 @@ __all__ = [
     "CandidateProgress",
     "CapacityGate",
     "CapacityGated",
+    "CliAuthDelivery",
+    "CliAuthPlan",
     "ClientAgentSessions",
     "CommandResultPayload",
     "Completed",
+    "CredentialKind",
     "DurableSessionStore",
     "InvalidResponse",
     "InvocationConflictError",
@@ -221,6 +236,7 @@ __all__ = [
     "NullSessionStore",
     "OrphanReapError",
     "Pending",
+    "PlannedCredentialFile",
     "ProviderNotReadyError",
     "ProviderReadiness",
     "ProviderSwitch",
@@ -253,6 +269,7 @@ __all__ = [
     "auth_env_vars",
     "auth_paths",
     "build_agent_client",
+    "cli_auth_delivery",
     "cli_mcp_config_files",
     "cli_skill_dirs",
     "container_import_roots",
@@ -265,6 +282,7 @@ __all__ = [
     "native_schema",
     "native_schema_problems",
     "parse_typed_response",
+    "plan_cli_auth",
     "reap_orphaned_agents",
     "reply_breach",
     "session_env_allowlist",

@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
+from vibesys.api import agent_spec_from_config
 from vibesys.config import _load_dotenv_file, load_config
+from vs_agent.api import AgentAuthPolicy, CredentialKind
 
 
 class TestLoadConfigValid:
@@ -269,6 +271,49 @@ cli_timeout = 1800
         assert config.agent.backend is None
         assert config.agent.cli_provider is None
         assert config.agent.cli_timeout is None
+
+    def test_agent_auth_reaches_the_agent_spec_as_written(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("""\
+[model]
+name = "claude-sonnet-4-6"
+
+[agent.auth]
+credentials = ["api_key"]
+endpoint = "https://gateway.invalid/claude"
+""")
+
+        spec = agent_spec_from_config(load_config(cfg_file))
+
+        assert spec.auth == AgentAuthPolicy(
+            frozenset({CredentialKind.API_KEY}), "https://gateway.invalid/claude"
+        )
+
+    def test_no_agent_auth_table_forwards_host_credentials(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text('[model]\nname = "claude-sonnet-4-6"\n')
+
+        assert agent_spec_from_config(load_config(cfg_file)).auth is None
+
+    @pytest.mark.parametrize(
+        ("table", "offender"),
+        [
+            ("credentials = []", r"agent\.auth\.credentials"),
+            ('credentials = ["password"]', r"agent\.auth\.credentials\.0"),
+            ('credentials = ["api_key"]\nendpoint = "ftp://gateway"', r"agent\.auth\.endpoint"),
+            ('credentials = ["api_key"]\nendpoint = "gateway"', r"agent\.auth\.endpoint"),
+            ('credentials = ["api_key"]\nbase_url = "https://x"', r"agent\.auth\.base_url"),
+            ('endpoint = "https://gateway.invalid"', r"agent\.auth\.credentials"),
+        ],
+    )
+    def test_a_bad_agent_auth_table_names_the_offending_key(
+        self, tmp_path: Path, table: str, offender: str
+    ) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text(f'[model]\nname = "m"\n\n[agent.auth]\n{table}\n')
+
+        with pytest.raises(ValueError, match=offender):
+            load_config(cfg_file)
 
     @pytest.mark.parametrize("driver", ["omnigent", "agentshim", "unknown"])
     def test_removed_agent_driver_key_is_rejected_naming_the_key(

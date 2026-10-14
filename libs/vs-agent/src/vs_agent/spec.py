@@ -21,6 +21,8 @@ from vs_agent.session_environment import validate_env_names
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from vs_agent.auth_policy import AgentAuthPolicy
+
 
 class AgentBackend(StrEnum):
     """Agent runner backend ``build_agent_client`` can build a client for."""
@@ -51,6 +53,9 @@ class AgentSpec:
     #: Launcher environment variables a session inherits beyond VibeSys's
     #: allowlist (see ``vs_agent.session_environment``).
     env_passthrough: tuple[str, ...] = ()
+    #: The run's ``[agent.auth]``: which credential kinds the CLI may log in
+    #: with. ``None`` forwards whatever credentials the host has.
+    auth: AgentAuthPolicy | None = None
 
     def __post_init__(self) -> None:
         """Reject a provider AgentShim does not support, or a bad env name."""

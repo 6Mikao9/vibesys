@@ -98,6 +98,7 @@ def agent_spec_from_config(
         reasoning_effort=config.thinking.level,
         cli_timeout=agent_cfg.cli_timeout,
         env_passthrough=agent_cfg.env_passthrough,
+        auth=None if agent_cfg.auth is None else agent_cfg.auth.to_policy(),
     )
 
 

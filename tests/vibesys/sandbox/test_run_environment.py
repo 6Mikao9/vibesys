@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -19,12 +20,12 @@ from vibesys.inputs import (
 )
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.environment import open_run_environment
+from vs_agent.api import AgentAuthError, AgentAuthPolicy, CredentialKind, plan_cli_auth
 from vs_agent.api.images import ImagePushError
 from vs_agent.api.testing import FakeDockerBuildRunner, fake_profiles
 from vs_project.api import Project, RunEnvironmentRecord, RunResourceRequest
+from vs_runtime._cli_container_env import cli_container_auth
 from vs_runtime._run_environment import (
-    _cli_container_env,
-    _cli_provider_env_and_auth_files,
     _container_mount_plan,
     _ensure_pushed_for_remote_backend,
     _SkyPilotRunEnvironmentSession,
@@ -50,6 +51,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api import (
+    AGENT_HOME,
     EnvironmentBindMount,
     HostResource,
     HostResourceAccess,
@@ -275,8 +277,16 @@ _CLI_PROFILES = {
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_CUSTOM_HEADERS",
+            "CLAUDE_CODE_OAUTH_TOKEN",
         ),
         container_install=("install-claude",),
+        credential_sources=(
+            fake_profiles.env_credential("ANTHROPIC_AUTH_TOKEN", CredentialKind.API_KEY),
+            fake_profiles.env_credential("ANTHROPIC_API_KEY", CredentialKind.API_KEY),
+            fake_profiles.env_credential("CLAUDE_CODE_OAUTH_TOKEN", CredentialKind.SUBSCRIPTION),
+            fake_profiles.file_credential(".claude/.credentials.json", CredentialKind.SUBSCRIPTION),
+        ),
+        endpoint=fake_profiles.endpoint("ANTHROPIC_BASE_URL", "ANTHROPIC_CUSTOM_HEADERS"),
     ),
     "codex": fake_profiles.profile(
         "codex",
@@ -1294,7 +1304,8 @@ def test_container_mount_plan_declares_named_resources_with_agent_paths(tmp_path
         cli_provider="codex",
     )
 
-    resources, _symlinks = _container_mount_plan(request)
+    cli_auth = cli_container_auth(request.agent_backend, request.cli_provider, None)
+    resources, _symlinks = _container_mount_plan(request, cli_auth)
 
     assert all(isinstance(resource, HostResource) for resource in resources)
     by_agent_path = {resource.agent_path: resource for resource in resources}
@@ -1363,38 +1374,97 @@ def test_isolated_environment_enforces_project_path_policy(
     assert hidden_mounts["/workspace/agent.toml"].is_relative_to(tmp_path / "logs")
 
 
-def test_cli_container_env_and_setup_agree_on_the_container_environment(
+_CLAUDE_AUTH_ENV = frozenset(_CLI_PROFILES["claude"].auth_env_vars)
+
+
+def _plant_every_claude_credential(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the host every Claude credential at once, plus settings and a stale gateway."""
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / ".credentials.json").write_text('{"synthetic": "subscription"}\n')
+    (home / ".claude.json").write_text('{"synthetic": "settings"}\n')
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-api-key")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth-token")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://stale.invalid")
+
+
+@pytest.mark.parametrize("environment_name", ["docker", "modal"])
+@pytest.mark.parametrize(
+    "policy",
+    [
+        AgentAuthPolicy(frozenset({CredentialKind.API_KEY})),
+        AgentAuthPolicy(frozenset({CredentialKind.API_KEY}), "https://gateway.invalid/claude"),
+        AgentAuthPolicy(frozenset({CredentialKind.SUBSCRIPTION})),
+        AgentAuthPolicy(frozenset(CredentialKind)),
+    ],
+)
+def test_a_container_gets_exactly_the_planned_credential(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    policy: AgentAuthPolicy,
+) -> None:
+    """Every container environment delivers the plan's variables and files, and no other auth."""
+    home = tmp_path / "synthetic-home"
+    _plant_every_claude_credential(home, monkeypatch)
+    plan = plan_cli_auth("claude", policy, env=os.environ, home=home)
+    backend = FakeBackend()
+    request = _request(
+        tmp_path, backend, agent_backend="cli", cli_provider="claude", agent_auth=policy
+    )
+
+    _open(build_run_environment(RunEnvironmentSpec(environment_name)), request)
+
+    kwargs = backend.calls[0][1]
+    delivered_env = {
+        name: value for name, value in kwargs["extra_env"].items() if name in _CLAUDE_AUTH_ENV
+    }
+    assert delivered_env == dict(plan.env)
+    home_mounts = [
+        (Path(host), container)
+        for host, container, _ in _as_mount_tuples(kwargs["resources"])
+        if Path(host).is_relative_to(home)
+    ]
+    copies = dict(kwargs.get("auth_files") or [])
+    delivered_files = {
+        host: copies.get(container, container).removeprefix(f"{AGENT_HOME}/")
+        for host, container in home_mounts
+    }
+    assert delivered_files == {staged.host_path: staged.home_path for staged in plan.files}
+
+
+def test_the_host_environment_refuses_an_auth_policy(tmp_path: Path) -> None:
+    """The host environment shows the agent the operator's own logins, so it cannot enforce one."""
+    request = _request(
+        tmp_path,
+        FakeBackend(),
+        agent_backend="cli",
+        cli_provider="claude",
+        agent_auth=AgentAuthPolicy(frozenset({CredentialKind.API_KEY})),
+    )
+
+    with pytest.raises(ValueError, match=r"agent\.auth"):
+        _open(unconfined_host_environment(), request)
+
+
+def test_an_unmet_auth_policy_fails_before_any_container_starts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``_cli_provider_env_and_auth_files`` (Modal/SkyPilot) agrees with
-    ``_cli_container_env`` (the plain Docker path) on the container
-    environment, and additionally returns the staged auth copy pairs a
-    prebuilt-image container needs instead of a shell install recipe.
-    """
-    backend = FakeBackend()
     home = tmp_path / "synthetic-home"
-    auth_file = home / ".codex" / "auth.json"
-    auth_file.parent.mkdir(parents=True)
-    auth_file.write_text('{"synthetic": true}\n')
+    home.mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
-    request = _request(tmp_path, backend, agent_backend="cli", cli_provider="codex")
-
-    resolved = _cli_container_env(request)
-    env, auth_files = _cli_provider_env_and_auth_files(request)
-
-    assert resolved is not None
-    provider, resolved_env = resolved
-    assert provider == "codex"
-    assert env == resolved_env
-    # A credential file is mounted writable at its final path, not copied.
-    assert auth_files == []
-
-
-def test_cli_container_env_is_none_for_a_non_cli_agent_backend(tmp_path: Path) -> None:
     backend = FakeBackend()
-    request = _request(tmp_path, backend, agent_backend="stub", cli_provider="codex")
+    request = _request(
+        tmp_path,
+        backend,
+        agent_backend="cli",
+        cli_provider="claude",
+        agent_auth=AgentAuthPolicy(frozenset({CredentialKind.API_KEY})),
+    )
 
-    assert _cli_container_env(request) is None
+    with pytest.raises(AgentAuthError, match=r"agent\.auth cannot be met"):
+        _open(build_run_environment(RunEnvironmentSpec("docker")), request)
+    assert backend.calls == []
 
 
 def test_docker_environment_shares_credentials_writable_and_copies_settings(

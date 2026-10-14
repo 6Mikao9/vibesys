@@ -17,11 +17,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
-from vs_agent.api import SHIPPED_PROVIDERS, validate_env_names
+from vs_agent.api import SHIPPED_PROVIDERS, AgentAuthPolicy, CredentialKind, validate_env_names
 from vs_core.api import MAX_REQUEST_RETRIES, MAX_SUBMISSIONS_PER_MEASUREMENT, RequestRetries
 from vs_runtime.api import AgentRoleId, EvaluationRetries
 from vs_runtime.api.infrastructure import (
@@ -193,6 +202,54 @@ class QuotaCfg(_Strict):
         )
 
 
+_HTTP_URL = TypeAdapter(HttpUrl)
+
+
+class AgentAuthCfg(_Strict):
+    """Which credential the CLI agent may log in with, and where it sends requests.
+
+    ``credentials`` lists the kinds the run may bill, in no order: the agent's
+    container gets exactly one credential of an allowed kind (agentshim knows
+    which the CLI would prefer) and none of the others the host has. A run
+    whose host has no allowed credential fails before it starts, and the
+    readiness probe stops it if the CLI reports a kind not listed. Enforced
+    only in a container run environment.
+    """
+
+    credentials: tuple[CredentialKind, ...] = Field(
+        min_length=1,
+        description=(
+            "Credential kinds the agent may use: 'api_key' (a vendor API key or a "
+            "gateway token) and/or 'subscription' (a Claude.ai, ChatGPT, Google or "
+            "GitHub login)."
+        ),
+    )
+    endpoint: str | None = Field(
+        default=None,
+        description=(
+            "API base URL the CLI sends requests to, for a gateway. Omitted means the "
+            "vendor's endpoint: a base URL set in the launching shell is not forwarded."
+        ),
+    )
+
+    @field_validator("endpoint")
+    @classmethod
+    def _endpoint_is_a_url(cls, endpoint: str | None) -> str | None:
+        # Validated, but kept as written: a normalized URL gains a trailing
+        # slash some CLIs then double in request paths.
+        if endpoint is not None:
+            try:
+                _HTTP_URL.validate_python(endpoint)
+            except ValidationError as exc:
+                message = f"agent.auth.endpoint: {endpoint!r} is not an http(s) URL"
+                raise ValueError(message) from exc
+        return endpoint
+
+    def to_policy(self) -> AgentAuthPolicy:
+        """Return the policy ``vs_agent`` enforces."""
+        return AgentAuthPolicy(frozenset(self.credentials), self.endpoint)
+
+
 class AgentCfg(_Strict):
     """Agent backend, provider, and role-specific model controls."""
 
@@ -239,6 +296,13 @@ class AgentCfg(_Strict):
         ),
     )
 
+    auth: AgentAuthCfg | None = Field(
+        default=None,
+        description=(
+            "[agent.auth] — the credential kinds and endpoint the CLI agent may use. "
+            "Omitted forwards every credential the host has."
+        ),
+    )
     quota: QuotaCfg = Field(
         default_factory=QuotaCfg,
         description="[agent.quota] — unattended policy for a provider quota or rate-limit stop.",

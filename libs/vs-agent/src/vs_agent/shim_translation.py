@@ -18,6 +18,13 @@ from typing import TYPE_CHECKING
 
 import agentshim
 
+from vs_agent.auth_policy import (
+    AgentAuthError,
+    AgentAuthPolicy,
+    CliAuthPlan,
+    CredentialKind,
+    PlannedCredentialFile,
+)
 from vs_agent.container_python import containerize_server
 from vs_agent.contracts import (
     AgentEvent,
@@ -41,6 +48,12 @@ if TYPE_CHECKING:
 
 _PYTHON_MCP_COMMANDS = frozenset({"python", "python3"})
 _DIAGNOSTIC_PAYLOAD: Mapping[str, object] = {"channel": "diagnostic"}
+
+_CREDENTIAL_KIND = {
+    agentshim.CredentialKind.API_KEY: CredentialKind.API_KEY,
+    agentshim.CredentialKind.SUBSCRIPTION: CredentialKind.SUBSCRIPTION,
+}
+_SHIM_CREDENTIAL_KIND = {ours: theirs for theirs, ours in _CREDENTIAL_KIND.items()}
 
 _AUTH_STATUS = {
     agentshim.AuthState.KNOWN_OK: AuthStatus.OK,
@@ -149,6 +162,47 @@ def readiness_from(status: agentshim.ProviderStatus) -> ProviderReadiness:
         version=status.version,
         auth=_AUTH_STATUS[status.auth],
         detail=status.auth_detail,
+        credential=None if status.credential is None else _CREDENTIAL_KIND[status.credential],
+    )
+
+
+def shim_credential_kind(kind: CredentialKind) -> agentshim.CredentialKind:
+    """Return agentshim's name for *kind*."""
+    return _SHIM_CREDENTIAL_KIND[kind]
+
+
+def plan_auth(
+    profile: agentshim.ProviderProfile,
+    policy: AgentAuthPolicy,
+    *,
+    env: Mapping[str, str],
+    home: Path,
+) -> CliAuthPlan:
+    """Ask agentshim for the one credential *profile*'s CLI may use under *policy*."""
+    try:
+        plan = agentshim.plan_auth(
+            profile,
+            agentshim.AuthPolicy(
+                frozenset(_SHIM_CREDENTIAL_KIND[kind] for kind in policy.credentials),
+                policy.endpoint,
+            ),
+            env=env,
+            home=home,
+        )
+    except (agentshim.AuthUnavailableError, ValueError) as error:
+        message = f"agent.auth cannot be met: {error}"
+        raise AgentAuthError(message) from error
+    return CliAuthPlan(
+        provider=plan.provider,
+        credential=_CREDENTIAL_KIND[plan.credential],
+        source=plan.source,
+        endpoint=plan.endpoint,
+        env=dict(plan.env),
+        files=tuple(
+            PlannedCredentialFile(staged.host_path, staged.home_path, staged.refreshable)
+            for staged in plan.files
+        ),
+        withheld=plan.withheld,
     )
 
 

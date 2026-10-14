@@ -28,7 +28,7 @@ from weakref import WeakSet
 import agentshim
 
 from vs_agent import shim_translation
-from vs_agent.contracts import AgentCapabilities, AgentSpawnError
+from vs_agent.contracts import AgentCapabilities, AgentSpawnError, ReadinessProblem
 from vs_agent.docker_confinement import DockerContainerConfinement
 from vs_agent.host_resource_declarations import (
     declare_agent_host_resources,
@@ -47,6 +47,7 @@ from vs_sim.api import OsThreads
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from vs_agent.auth_policy import AgentAuthPolicy
     from vs_agent.contracts import AgentSessionSpec, ProviderReadiness
     from vs_sandbox.api import DockerSandbox, WorkspaceSandbox
     from vs_sim.api import Threads
@@ -303,6 +304,7 @@ class ConfinedSessionLauncher:
         transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
         agent_homes: Path | None = None,
         env_passthrough: Sequence[str] = (),
+        auth_policy: AgentAuthPolicy | None = None,
         launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
         transport: agentshim.TransportKind | None = None,
         clock: agentshim.Clock,
@@ -353,6 +355,12 @@ class ConfinedSessionLauncher:
         turn ids so a test names turns reproducibly; production leaves it
         ``None``.
 
+        ``auth_policy`` is the run's ``[agent.auth]``: the run environment
+        delivered only its planned credential to the container, and the
+        readiness probe stops the run if the CLI reports another kind. It
+        requires ``docker_sandboxes``, since a host session sees the operator's
+        own logins.
+
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see
         :data:`TRANSIENT_RETRY_DELAYS_S`.
@@ -362,6 +370,13 @@ class ConfinedSessionLauncher:
                 f"unknown AgentShim provider {provider!r}; expected one of: {supported_providers()}"
             )
             raise ValueError(message)
+        if auth_policy is not None and docker_sandboxes is None:
+            message = (
+                "agent.auth is enforced only for container sessions; a host session "
+                "sees the operator's own CLI logins"
+            )
+            raise ValueError(message)
+        self._auth_policy = auth_policy
         self._provider = provider
         self._timeout = timeout
         self._docker_sandboxes = docker_sandboxes
@@ -441,7 +456,18 @@ class ConfinedSessionLauncher:
             env=None if launch.confinement is not None else launch.env,
             timeout=self._check_timeout,
         )
-        return shim_translation.readiness_from(status)
+        readiness = shim_translation.readiness_from(status)
+        if self._auth_policy is None:
+            return readiness
+        readiness = replace(readiness, allowed_credentials=self._auth_policy.credentials)
+        if readiness.problem is not ReadinessProblem.CREDENTIAL_NOT_ALLOWED:
+            return readiness
+        allowed = ", ".join(sorted(kind.value for kind in self._auth_policy.credentials))
+        reported = readiness.credential.value if readiness.credential is not None else "none"
+        detail = (
+            f"it reports {reported}, but [agent.auth] allows only {allowed} ({readiness.detail})"
+        )
+        return replace(readiness, detail=detail)
 
     def _launch_for(self, spec: AgentSessionSpec) -> _Launch:
         """Validate *spec* and build the executor, environment and sandbox it runs with.

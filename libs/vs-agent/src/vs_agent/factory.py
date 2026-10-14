@@ -98,6 +98,12 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     if workspace_sandboxes is not None and not use_docker:
         message = "workspace_sandboxes routes container turns, but this client does not use Docker"
         raise ValueError(message)
+    if spec.auth is not None and not use_docker:
+        message = (
+            "[agent.auth] is enforced only when the agent runs in a container; "
+            "choose a container run environment or remove [agent.auth]"
+        )
+        raise ValueError(message)
     docker_sandboxes = None
     if use_docker:
         if backends is None:
@@ -127,6 +133,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         log=diagnostic_log,
         agent_homes=agent_homes_dir,
         env_passthrough=spec.env_passthrough,
+        auth_policy=spec.auth,
         clock=ThreadsClock(OsThreads()),
     )
 

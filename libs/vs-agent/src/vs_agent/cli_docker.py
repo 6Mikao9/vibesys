@@ -23,8 +23,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vs_agent import provider_profiles
+from vs_agent.auth_policy import plan_cli_auth
 from vs_agent.provider_policy import DOCKER_PROVIDER_ENV
 from vs_sandbox.api import AGENT_HOME
 
@@ -33,6 +35,11 @@ from vs_sandbox.api import AGENT_HOME
 # ``cli_docker.DOCKER_PROVIDER_ENV``); the value itself lives in
 # ``provider_policy`` now.
 __all__ = ["DOCKER_PROVIDER_ENV"]
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from vs_agent.auth_policy import AgentAuthPolicy, CliAuthPlan
 
 
 @dataclass(frozen=True)
@@ -153,3 +160,66 @@ def auth_copy_paths(provider: str) -> list[tuple[str, str]]:
         for index, spec in enumerate(auth_paths(provider))
         if spec.host_path.exists() and not spec.credential
     ]
+
+
+@dataclass(frozen=True)
+class CliAuthDelivery:
+    """Everything a container is given to log its CLI in.
+
+    ``env`` is set with ``docker run -e``; ``bind_mounts`` are
+    ``(host, container, read_only)``; ``copy_paths`` are the staged copies made
+    at container start (see :func:`auth_copy_paths`). ``plan`` is the auth
+    policy's plan, or ``None`` when the run has no policy and forwards whatever
+    credentials the host has.
+    """
+
+    env: Mapping[str, str]
+    bind_mounts: tuple[tuple[str, str, bool], ...]
+    copy_paths: tuple[tuple[str, str], ...]
+    plan: CliAuthPlan | None
+
+
+def cli_auth_delivery(provider: str, policy: AgentAuthPolicy | None) -> CliAuthDelivery:
+    """Return the credentials a container for *provider* gets, under *policy*.
+
+    Without a policy every credential the host has is forwarded: each set
+    auth variable and each existing auth file (see :func:`auth_paths`). With
+    one, the container gets exactly the plan's variables and files and nothing
+    else of the provider's auth state, settings files included.
+
+    Raises:
+        ValueError: without a policy, when the host has no credential at all.
+        vs_agent.auth_policy.AgentAuthError: with one, when it cannot be met.
+    """
+    if policy is not None:
+        return _planned_delivery(plan_cli_auth(provider, policy, env=os.environ, home=Path.home()))
+    env = auth_env_passthrough(provider)
+    mounts = tuple(auth_bind_mounts(provider))
+    if not mounts and not env:
+        checked_files = (
+            ", ".join(str(spec.host_path) for spec in auth_paths(provider)) or "<none registered>"
+        )
+        checked_env = ", ".join(auth_env_vars(provider)) or "<none registered>"
+        message = (
+            f"no {provider!r} CLI authentication is available for the container: "
+            f"none of the host files exist ({checked_files}) and none of the "
+            f"environment variables are set ({checked_env}). Authenticate the "
+            f"{provider} CLI on this host, or export one of those variables, "
+            "before running in an isolated environment."
+        )
+        raise ValueError(message)
+    return CliAuthDelivery(env, mounts, tuple(auth_copy_paths(provider)), plan=None)
+
+
+def _planned_delivery(plan: CliAuthPlan) -> CliAuthDelivery:
+    mounts: list[tuple[str, str, bool]] = []
+    copies: list[tuple[str, str]] = []
+    for index, staged in enumerate(plan.files):
+        destination = f"{AGENT_HOME}/{staged.home_path}"
+        if staged.refreshable:
+            mounts.append((str(staged.host_path), destination, False))
+        else:
+            source = f"/opt/vibesys-auth/plan-{index}"
+            mounts.append((str(staged.host_path), source, True))
+            copies.append((source, destination))
+    return CliAuthDelivery(dict(plan.env), tuple(mounts), tuple(copies), plan=plan)

@@ -26,6 +26,7 @@ from vs_agent.contracts import (
     AuthStatus,
     MCPServerSpec,
     ProviderNotReadyError,
+    ProviderReadiness,
     ReadinessProbe,
     SteerOutcome,
     session_spec_fingerprint,
@@ -976,6 +977,8 @@ class AgentClient:
                 self._diagnostic_log(
                     f"[readiness] {readiness.provider} {version} found and logged in"
                 )
+            if readiness.allowed_credentials is not None:
+                self._diagnostic_log(f"[agent-auth] {_credential_line(readiness)}")
 
     def _ensure_open(self) -> None:
         if self._closed or self._cancelled:
@@ -991,3 +994,14 @@ class AgentClient:
     def __exit__(self, *_exc_info: object) -> None:
         """Close the client when leaving its context."""
         self.close()
+
+
+def _credential_line(readiness: ProviderReadiness) -> str:
+    """Say whether the probe confirmed the credential kind ``[agent.auth]`` allows."""
+    if readiness.credential is None:
+        # The container got only the planned credential; the CLI just does not report its kind.
+        return (
+            f"{readiness.provider} does not report its credential kind; "
+            "relying on the delivered plan"
+        )
+    return f"{readiness.provider} confirmed logged in with {readiness.credential.value}"

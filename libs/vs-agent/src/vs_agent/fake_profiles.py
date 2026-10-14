@@ -12,12 +12,23 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, TypedDict, Unpack
 
-from agentshim import McpMechanism, OutputSchemaStyle, ProviderProfile, SchemaDialect
+from agentshim import (
+    CredentialSource,
+    EndpointSpec,
+    EnvCredential,
+    FileCredential,
+    McpMechanism,
+    OutputSchemaStyle,
+    ProviderProfile,
+    SchemaDialect,
+)
 
-from vs_agent import provider_profiles
+from vs_agent import provider_profiles, shim_translation
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from vs_agent.auth_policy import CredentialKind
 
 
 class _Patcher(Protocol):
@@ -44,6 +55,8 @@ class _ProfileOptions(TypedDict, total=False):
     credential_files: tuple[str, ...]
     resume_state_paths: tuple[str, ...]
     mcp_config_file: str | None
+    credential_sources: tuple[CredentialSource, ...]
+    endpoint: EndpointSpec | None
 
 
 def profile(name: str, **options: Unpack[_ProfileOptions]) -> ProviderProfile:
@@ -74,7 +87,24 @@ def profile(name: str, **options: Unpack[_ProfileOptions]) -> ProviderProfile:
         credential_files=options.get("credential_files", ()),
         resume_state_paths=options.get("resume_state_paths", ()),
         mcp_config_file=options.get("mcp_config_file"),
+        credential_sources=options.get("credential_sources", ()),
+        endpoint=options.get("endpoint"),
     )
+
+
+def env_credential(name: str, kind: CredentialKind) -> CredentialSource:
+    """A credential carried by the environment variable *name*, for ``credential_sources``."""
+    return EnvCredential(name, shim_translation.shim_credential_kind(kind))
+
+
+def file_credential(home_path: str, kind: CredentialKind) -> CredentialSource:
+    """A credential file at *home_path* under the home, for ``credential_sources``."""
+    return FileCredential(home_path, shim_translation.shim_credential_kind(kind))
+
+
+def endpoint(base_url_env: str, *companion_env: str) -> EndpointSpec:
+    """An API key endpoint set through *base_url_env*, for the ``endpoint`` option."""
+    return EndpointSpec(base_url_env, companion_env=companion_env)
 
 
 def install(
