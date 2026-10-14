@@ -50,9 +50,3 @@
 	url = https://github.com/vibesys-playground/sglang.git
 	branch = vibesys
 	shallow = true
-
-[submodule "examples/microservices/repositories/rpcstack"]
-	path = examples/microservices/repositories/rpcstack
-	url = https://github.com/vibesys-playground/rpcstack.git
-	branch = vibesys
-	shallow = true
