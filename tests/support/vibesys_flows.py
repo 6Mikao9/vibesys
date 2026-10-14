@@ -13,17 +13,18 @@ from __future__ import annotations
 import functools
 import secrets
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
-from vs_core.api import Event
 from vs_core.api.testing import FlowRun
 from vs_sim.api.testing import Depth, depth
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_core.api import Event, RunFacts
+    from vs_core.api.testing import FakeView
     from vs_core.testing.flows import SearchDef
 
 PINNED = (3, 10)
@@ -70,8 +71,16 @@ class _SampledFlowRun[C](FlowRun[C]):
                 self.restart()
 
 
+class FlowOptions(TypedDict, total=False):
+    """What a story may set when it starts a run, besides how it restarts."""
+
+    view: FakeView | None
+    adopting: bool
+    facts: RunFacts
+
+
 def start_flow[C](
-    search: SearchDef[C], config: C, *, restarting: bool | Restarts, **options: Any
+    search: SearchDef[C], config: C, *, restarting: bool | Restarts, **options: Unpack[FlowOptions]
 ) -> FlowRun[C]:
     """Start ``search`` under a ``FlowRun`` that restarts as ``restarting`` says."""
     if isinstance(restarting, Restarts):
@@ -92,7 +101,7 @@ def across_restarts[F: Callable[..., None]](story: F) -> F:
     """
 
     @functools.wraps(story)
-    def run(*args: Any, **kwargs: Any) -> None:
+    def run(*args: object, **kwargs: object) -> None:
         if not kwargs["restarting"]:
             story(*args, **kwargs)
             return

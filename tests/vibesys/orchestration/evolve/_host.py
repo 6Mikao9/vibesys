@@ -54,13 +54,14 @@ from vs_core.api import (
     Withdraw,
 )
 from vs_core.api.search import TaskObjective, TaskStage, TaskTerms
-from vs_core.api.testing import Asked, FakeView, FlowRun
 from vs_core.testing.builders import initial_state
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from pydantic import BaseModel
+
+    from vs_core.api.testing import Asked, FakeView, FlowRun
 
 TERMS = TaskTerms(
     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),

@@ -45,7 +45,9 @@ _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
 # Real subprocesses + signal round-trips: keep example counts small, same
 # rationale as test_torch_inject.py's PROC_SETTINGS.
 PROC_SETTINGS = settings(
-    max_examples=examples(pr=2, nightly=5), deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=2, nightly=5),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 
 

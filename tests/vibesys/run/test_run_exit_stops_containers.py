@@ -264,8 +264,7 @@ def test_an_exiting_run_leaves_no_container_and_every_container_carries_the_runs
         assert observed.run_id
         assert observed.containers
         assert all(
-            container.labels == {RUN_ID_LABEL: observed.run_id}
-            for container in observed.containers
+            container.labels == {RUN_ID_LABEL: observed.run_id} for container in observed.containers
         )
 
 

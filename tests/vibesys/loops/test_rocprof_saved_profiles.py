@@ -80,7 +80,7 @@ _READERS = ["summary", "compare_baseline", "compare_candidate", "kernels_root", 
         st.integers(),
         st.lists(st.integers(), max_size=3),
         st.dictionaries(st.text(max_size=5), st.integers(), max_size=3),
-    )
+    ),
 )
 @example(status="load_failed", reader="summary")
 @example(status="target_failed", reader="compare_baseline")
