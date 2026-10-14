@@ -808,9 +808,7 @@ class _Driver[S: StrategyState]:
             strategy=trace.state,
             event_cursor=EventCursor(sequence=0),
         )
-        loaded = self.registry.decode_envelope(
-            self.envelope_type, self.registry.encode_envelope(envelope)
-        )
+        loaded = self.registry.reload_envelope(self.envelope_type, envelope)
         trace.core = loaded.core
         trace.state = cast("S", loaded.strategy)
 

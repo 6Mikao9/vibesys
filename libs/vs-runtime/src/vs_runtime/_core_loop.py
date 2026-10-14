@@ -485,9 +485,7 @@ class CoreRuntime[S: StrategyState]:
 
     def _validate_provisional(self, provisional: RunEnvelope[S], host_id: str) -> None:
         """The envelope a start would commit round-trips through the registry."""
-        self._registry.decode_envelope(
-            self._envelope_model, self._registry.encode_envelope(provisional)
-        )
+        self._registry.reload_envelope(self._envelope_model, provisional)
         if self._record is not None:
             self._start_checked = (self._record, host_id)
 
