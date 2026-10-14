@@ -53,6 +53,6 @@
 
 [submodule "examples/microservices/repositories/rpcstack"]
 	path = examples/microservices/repositories/rpcstack
-	url = https://github.com/vibesys-playground/rpcstack.git
+	url = https://github.com/vibesys-playground/rpcstack-hotel-goodput-vibesys-20261013b.git
 	branch = vibesys
 	shallow = true
