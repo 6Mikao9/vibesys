@@ -83,6 +83,7 @@ from vs_core.api import (
     Work,
     WorkspaceClosed,
     WorkspaceOpened,
+    encode_json,
     run_view,
 )
 from vs_core.flows import search
@@ -485,7 +486,7 @@ class FlowRun[C]:
     def restart(self) -> None:
         """Round-trip the state through JSON and continue with a new driver."""
         self.restarts += 1
-        self.state = FlowState.model_validate_json(self.state.model_dump_json())
+        self.state = FlowState.model_validate_json(encode_json(self.state))
         self.driver = self.driver.fresh()
 
     def swap(self, search: SearchDef[C]) -> None:
