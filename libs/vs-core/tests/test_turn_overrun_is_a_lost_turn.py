@@ -76,8 +76,11 @@ class UnstoppableHost(OverrunningHost):
     """A host whose cancellation of the overrunning turn fails: it may still be running."""
 
     def __call__(self, request: core.Request, state: core.CoreState) -> Answer:
-        if isinstance(request, core.CancelTurn) and request.request_id is not None
-            and not request.request_id.root.endswith("close"):
+        if (
+            isinstance(request, core.CancelTurn)
+            and request.request_id is not None
+            and not request.request_id.root.endswith("close")
+        ):
             return Failed()
         return super().__call__(request, state)
 
