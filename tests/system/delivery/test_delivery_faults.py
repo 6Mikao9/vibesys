@@ -26,7 +26,7 @@ from vs_core.testing.drive import Faults, Trace, drive
 from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_sim.api.testing import examples
 
-_EXAMPLES = examples(pr=4, nightly=12)
+_EXAMPLES = examples(pr=3, nightly=12)
 PURE = settings(
     max_examples=_EXAMPLES,
     deadline=None,

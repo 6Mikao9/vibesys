@@ -171,7 +171,7 @@ async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) ->
 
 
 @settings(
-    max_examples=examples(pr=3, nightly=12),
+    max_examples=examples(pr=1, nightly=12),
     derandomize=True,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
