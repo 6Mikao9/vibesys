@@ -48,6 +48,7 @@ from vs_core.api import (
     StartAttempt,
 )
 from vs_core.api.testing import Asked, FakeView
+from vs_sim.api.testing import examples
 
 MODES = across_restarts
 
@@ -134,7 +135,7 @@ def planner_context(host: Host) -> PlannerPrompt | PlannerCorrection:
 
 
 @MODES
-@settings(max_examples=25, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None, derandomize=True, database=None)
 @example(throughputs=[30], judged=[True, True, True], finishing=[0, 1, 2])
 @example(throughputs=[90, 60, 120], judged=[True, True, False], finishing=[2, 0, 1])
 @example(throughputs=[40, 30], judged=[True, True, True], finishing=[0, 1, 2])

@@ -53,6 +53,7 @@ from vs_core.api import (
     StartAttempt,
 )
 from vs_core.api.search import ReplyError, ReplyErrorCode
+from vs_sim.api.testing import examples
 
 MODES = across_restarts
 LOST_PLANNER_TURNS = 3
@@ -341,7 +342,7 @@ _TITLES = st.text(st.characters(exclude_categories=("Cs",)), min_size=1, max_siz
 
 
 @MODES
-@settings(max_examples=25, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=25), deadline=None, derandomize=True, database=None)
 @given(identifier=_IDS, title=_TITLES)
 @example(identifier="0", title="T" * 80)
 @example(identifier="KV.Cache_v2 / ../Ünïcode", title="title")

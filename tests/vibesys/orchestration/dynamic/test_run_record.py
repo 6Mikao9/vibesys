@@ -50,6 +50,7 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkstreamStart,
 )
 from vs_core.api import INPUT, Kept, NoWinner, ObservationStatus
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -284,7 +285,7 @@ def play(cfg: DynamicConfig, steps: list[Step]) -> tuple[RunRecord, Trace]:
     return run, trace
 
 
-@settings(max_examples=200, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=200), deadline=None, derandomize=True, database=None)
 @given(
     steps=STEPS,
     rounds=st.integers(1, 3),

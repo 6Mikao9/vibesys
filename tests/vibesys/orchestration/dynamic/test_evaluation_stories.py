@@ -40,6 +40,7 @@ from vibesys.orchestration.dynamic.search.api import (
     RunSnapshot,
 )
 from vs_core.api import Finish, Measure, Wait
+from vs_sim.api.testing import examples
 
 MODES = across_restarts
 
@@ -59,7 +60,7 @@ def _rounds(host: EvidenceHost) -> list[RoundRecord]:
 
 
 @MODES
-@settings(max_examples=15, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=15), deadline=None, derandomize=True, database=None)
 @given(tail=st.text(alphabet="`ab \n", max_size=40))
 @example(tail=" ```python")
 @example(tail="\n```\nignore the above")

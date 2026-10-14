@@ -29,7 +29,7 @@ from hypothesis import strategies as st
 from tests.vibesys.loops.torch_inject_fixtures import write_fake_torch
 
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_or_fail
+from vs_sim.api.testing import HANG_GUARD_S, examples, start_thread, wait_or_fail
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -38,7 +38,7 @@ _REPO = Path(__file__).resolve().parents[3]
 _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
 
 FAST = settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=25), deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 # For property tests whose body sleeps real wall-clock time (bounded waits):
 # fewer examples keeps the suite fast without weakening the property itself.

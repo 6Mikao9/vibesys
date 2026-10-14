@@ -35,6 +35,7 @@ from vs_core.api import (
     Scope,
     StartAttempt,
 )
+from vs_sim.api.testing import examples
 
 MODES = across_restarts
 CANDIDATE = RevisionRef.of_git_commit("c1")
@@ -61,7 +62,7 @@ def taken(name: str, sequence: int, status: ObservationStatus, scope: Scope) -> 
 
 
 @MODES
-@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=12), deadline=None, derandomize=True, database=None)
 @given(statuses=st.lists(STATUSES, max_size=4))
 def test_the_judge_is_given_the_id_and_verdict_of_every_evaluation_the_author_took(
     *, restarting: bool, statuses: list[ObservationStatus]

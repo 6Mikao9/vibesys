@@ -23,6 +23,8 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.loops.torch_inject_fixtures import INJECT_DIR
 
+from vs_sim.api.testing import examples
+
 if TYPE_CHECKING:
     import signal
     from collections.abc import Callable
@@ -133,7 +135,7 @@ class _Harness:
             self.model.exported += 1
 
 
-@settings(max_examples=200, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=200), deadline=None)
 @given(ops=st.lists(st.sampled_from(_OPS), max_size=25))
 # A stop that lands before ready cancels the queued start, so a later explicit
 # window starts (pinned from the real-signal test, which orders its signals).
@@ -171,7 +173,7 @@ def test_capture_matches_reference_model(inject_module: types.ModuleType, ops: l
         assert not (root / "default").exists(), "a named window fell back to the default dir"
 
 
-@settings(max_examples=200, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=200), deadline=None)
 @given(
     delay_s=st.floats(0.0, 10.0, allow_nan=False, allow_infinity=False),
     duration_s=st.one_of(st.none(), st.floats(0.0, 10.0, allow_nan=False, allow_infinity=False)),

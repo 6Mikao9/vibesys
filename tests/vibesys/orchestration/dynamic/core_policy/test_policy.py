@@ -45,6 +45,7 @@ from vs_sandbox.api.slurm import (
     load_slurm_operator_settings,
     trusted_profile_command,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,7 +54,7 @@ if TYPE_CHECKING:
     from vs_runtime.api import CorePlan
 
 _SETTINGS = settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=25), deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 _SEARCH_KEYS = {
     "max_rounds": st.integers(1, 6),

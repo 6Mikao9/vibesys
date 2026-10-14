@@ -22,6 +22,7 @@ from tests.vibesys.orchestration.single._host import config as single_config
 from tests.vibesys.serial_search._host import assert_flow_closed
 
 from vs_core.api import Finish, RequestTurn, StartAttempt, Wait
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from tests.vibesys.serial_search._host import SerialHost
@@ -54,7 +55,7 @@ def _check_always(host: SerialHost, rounds: int) -> None:
 
 @SEARCHES
 @MODES
-@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None, derandomize=True, database=None)
 @given(
     steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 13)), max_size=50),
     stop_before=st.none() | st.integers(0, 50),

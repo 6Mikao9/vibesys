@@ -12,6 +12,8 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from mcp.server.fastmcp.exceptions import ToolError
 
+from vs_sim.api.testing import examples
+
 _REPO = Path(__file__).resolve().parents[3]
 _SUCCESS = {"ok", "killed_after_grace"}
 
@@ -70,7 +72,7 @@ def test_saved_success_remains_readable(
     "reader",
     ["summary", "compare_baseline", "compare_candidate", "kernels_root", "kernels_artifact"],
 )
-@settings(max_examples=15)
+@settings(max_examples=examples(pr=10, nightly=15))
 @given(
     status=st.one_of(
         st.none(),

@@ -22,6 +22,7 @@ from tests.vibesys.orchestration.issue_queue._host import (
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, judged
 
 from vs_core.api import Finish, StartAttempt, Wait
+from vs_sim.api.testing import examples
 
 MODES = across_restarts
 
@@ -47,7 +48,7 @@ def _check_always(host: Host) -> None:
 
 
 @MODES
-@settings(max_examples=30, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=30), deadline=None, derandomize=True, database=None)
 @given(
     steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 13)), max_size=60),
     stop_before=st.none() | st.integers(0, 60),

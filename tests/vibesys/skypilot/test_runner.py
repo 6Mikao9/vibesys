@@ -30,7 +30,7 @@ from vs_sandbox.api.skypilot import (
     stable_cluster_name,
 )
 from vs_sim.api import ProcessTimeoutError, Threads
-from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -523,7 +523,7 @@ def test_subprocess_result_bounds_multiline_and_unterminated_output_while_sink_g
     stderr=st.text(alphabet=("x", "y", "\n", "🙂"), max_size=100),
     cap=st.integers(min_value=0, max_value=32),
 )
-@settings(max_examples=50)
+@settings(max_examples=examples(pr=10, nightly=50))
 def test_subprocess_result_is_the_exact_bounded_suffix(stdout: str, stderr: str, cap: int) -> None:
     threads = _RecordingThreads()
     process = _ExitedSkyPilotProcess(stdout, stderr)
@@ -709,7 +709,7 @@ def test_ensure_waits_for_init_to_become_up() -> None:
     assert len(fake.calls) == 3
 
 
-@settings(deadline=None, max_examples=40)
+@settings(deadline=None, max_examples=examples(pr=10, nightly=40))
 @given(inits=st.integers(0, 12), seed=st.one_of(st.none(), st.integers(0, 2**32)))
 def test_ensure_polls_through_any_number_of_init_reports(inits: int, seed: int | None) -> None:
     def status(name: str) -> ProcessResult:

@@ -266,7 +266,7 @@ def test_an_implementer_that_asks_to_continue_is_given_its_own_next_step_without
 
 
 @MODES
-@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=12), deadline=None, derandomize=True, database=None)
 @given(
     judge_every=st.integers(1, 3),
     outcomes=st.lists(

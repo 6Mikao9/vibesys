@@ -41,6 +41,7 @@ from vs_core.api import (
     Scope,
     StartAttempt,
 )
+from vs_sim.api.testing import examples
 
 MODES = across_restarts
 CANDIDATE = RevisionRef.of_git_commit("abc123")
@@ -55,7 +56,7 @@ def judge_prompt(host: Host) -> ReviewPrompt:
 
 @MODES
 @example(records=[(True, True, "local-validation", "trusted")] * 2)
-@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=40), deadline=None, derandomize=True, database=None)
 @given(
     records=st.lists(
         st.tuples(
@@ -111,7 +112,7 @@ def test_the_judge_is_shown_each_trusted_evaluation_of_the_candidate_taken_in_it
 
 
 @MODES
-@settings(max_examples=30, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=30), deadline=None, derandomize=True, database=None)
 @given(
     passes=st.lists(st.booleans(), min_size=1, max_size=3),
     hypotheses=st.integers(1, 2),

@@ -18,6 +18,7 @@ from tests.vibesys.orchestration.issue_queue.world import IssueQueueWorld
 
 from vs_core.api import Finish
 from vs_dst.api import SimulatedRun, simulate
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -69,7 +70,7 @@ def board_of(run: SimulatedRun) -> list[tuple[object, ...]]:
     return world.history()
 
 
-@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=12), deadline=None, derandomize=True, database=None)
 @given(
     failing=st.dictionaries(
         st.integers(min_value=0, max_value=14), st.sampled_from(["before", "after"]), max_size=3
