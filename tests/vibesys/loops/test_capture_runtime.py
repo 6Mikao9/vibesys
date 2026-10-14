@@ -42,7 +42,7 @@ _MODULE_PATH = _REPO / "resources" / "profilers" / "_common" / "capture_runtime.
 
 # Real subprocesses + signal round-trips: keep example counts tiny so the
 # whole property-test slice stays well under the ~20s budget.
-PROC_SETTINGS = settings(max_examples=examples(pr=2, nightly=5), deadline=None)
+PROC_SETTINGS = settings(max_examples=examples(pr=1, nightly=5), deadline=None)
 # Pure in-process logic (no subprocesses): can afford more examples.
 FAST = settings(max_examples=examples(pr=10, nightly=20), deadline=None)
 

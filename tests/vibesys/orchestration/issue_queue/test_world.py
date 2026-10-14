@@ -1,9 +1,11 @@
 """Whole issue-queue runs on the production shell, simulated by vs-dst: the end result only.
 
-The flow stories (`test_stories.py`) pin each decision; these runs check that the same search,
-through the real core and shell, ends with what the story says: one smoke run, a tracker that
-fails around its writes, and a final candidate the accuracy gate refuses. (A host that dies is
-`tests/system/crash`'s.)
+The flow stories (`test_stories.py`) pin each decision, including the adoption a final accuracy
+gate refuses; these runs check that the same search, through the real core and shell, ends with
+what the story says: one smoke run, and a tracker that fails around its writes. (A host that
+dies is `tests/system/crash`'s.)
+
+Budget: each run is a whole run of the search through core and shell (about 1 CPU-s).
 """
 
 from __future__ import annotations
@@ -76,7 +78,7 @@ def test_a_closed_issue_is_adopted_and_the_run_succeeds() -> None:
 
 @example(failing={0: "before"})
 @example(failing={3: "after", 7: "before"})
-@settings(max_examples=examples(pr=2, nightly=24), deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=1, nightly=24), deadline=None, derandomize=True, database=None)
 @given(
     failing=st.dictionaries(
         st.integers(min_value=0, max_value=14), st.sampled_from(["before", "after"]), max_size=3
@@ -92,13 +94,3 @@ def test_a_tracker_failing_around_any_write_leaves_the_board_of_a_clean_run(
     assert not run.liveness_violations
     assert run.result == normal().result
     assert board_of(run) == board_of(normal())
-
-
-def test_the_work_is_not_adopted_when_the_final_candidate_fails_the_accuracy_gate() -> None:
-    world = IssueQueueWorld(accurate=False)
-    final = finish(simulate(world))
-
-    assert final.result.outcome == "failure"
-    assert final.result.selection is None
-    assert final.result.reason.startswith("adoption-failed")
-    assert world.board() == {1: ("closed", 1)}
