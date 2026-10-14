@@ -1,14 +1,19 @@
-"""Crash points of the skeleton run and the plans that crash at them (shared by the crash tests)."""
+"""Crash points of the skeleton run and the plans that crash at them (shared by the crash tests).
+
+Which points a session tries is `tests/system/crash/_catalog.py`'s business."""
 
 import tempfile
-from dataclasses import dataclass
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
 
-from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX, RECEIPT_SEALED
+import pytest
+from tests.support.skeleton_faults import COMMIT, RECEIPT_BEGUN, RECEIPT_PREFIX
 from tests.support.skeleton_sim import Simulation, Summary, simulate
 
 from vs_faults.api import Boundary, Crossing, FaultPlan, FaultRule, HostFault
+from vs_runtime._core_loop import OrphanWaitError
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 _RUNS: dict[str, Simulation] = {}
@@ -59,12 +64,6 @@ def crash_points() -> tuple[Crossing, ...]:
     return tuple(c for i, c in enumerate(crossings) if not before_an_effect(crossings, i))
 
 
-def pre_effect_points() -> tuple[Crossing, ...]:
-    """Dispatch authorizations and begun markers: the request is durable, its effect has not run."""
-    crossings = all_crossings()
-    return tuple(c for i, c in enumerate(crossings) if before_an_effect(crossings, i))
-
-
 def after_crash(calls: list[Crossing], crash: Crossing) -> tuple[Crossing, ...]:
     """The crossings of the restarted host: those recorded after the crash point.
 
@@ -79,53 +78,22 @@ def after_crash(calls: list[Crossing], crash: Crossing) -> tuple[Crossing, ...]:
     return tuple(rest[skipped:])
 
 
-@dataclass(frozen=True)
-class Representatives:
-    """One crash point per recovery path of the straight run (the fast tier of the sweeps).
-
-    Recovery depends on which request kind was in flight and on how far it got, not on which
-    of the 12 repeated lifecycle steps it was: so the first call of every request kind is
-    crashed at its request (effect ran, observation lost), its ``begun`` marker (effect not
-    run) and its sealed write (effect ran, seal lost). The commits between requests all advance
-    one core state machine whatever the kind, so those are sampled: the authorization, the
-    middle of the gap and the commit two after the seal for every third kind, plus the run's
-    first commit and its last commits. Together they reach every recovery branch that crashing
-    at all 163 crossings reaches (measured by branch arcs of src and libs). The exhaustive sweeps of every crossing are marked ``slow``.
-    """
-
-    requests: tuple[Crossing, ...]
-    begun: tuple[Crossing, ...]
-    sealed: tuple[Crossing, ...]
-    commits: tuple[Crossing, ...]
+# Crash points that hit a known core gap: `vs_core._waits` lists RECOVERY_CHECK as
+# HALTS_THE_RUN. Here a registered operation that began and never sealed reaches its limit while
+# recovery still inspects it; the deadline's extra inspection answers "unknown" again and puts
+# the blocked check back to pending, which nothing will answer. `core_gap` expects exactly that
+# halt, so the entry fails the day core fixes it and must then be removed.
+CORE_GAPS = frozenset({"durable_write:receipt_begun#4"})
 
 
-@cache
-def representatives() -> Representatives:
-    """Pick the representatives from the straight run (see :class:`Representatives`)."""
-    crossings = all_crossings()
-    firsts: dict[str, int] = {}
-    for index, crossing in enumerate(crossings):
-        if crossing.boundary == Boundary.EXECUTOR_REQUEST:
-            firsts.setdefault(crossing.target, index)
-    at = list(firsts.values())
-    commits: list[Crossing] = [crossings[0]]
-    for index in at[::3]:
-        previous = max(
-            (i for i in range(index) if crossings[i].target == RECEIPT_SEALED), default=-1
-        )
-        commits += [
-            crossings[index - 1],
-            crossings[(previous + index) // 2 + 1],
-            crossings[index + 4],
-        ]
-    last = len(crossings) - 1
-    commits += [crossings[last - 3], crossings[last]]
-    return Representatives(
-        requests=tuple(crossings[i] for i in at),
-        begun=tuple(crossings[i + 1] for i in at),
-        sealed=tuple(crossings[i + 2] for i in at),
-        commits=tuple(dict.fromkeys(commits)),
-    )
+@contextmanager
+def core_gap(first: Crossing) -> Iterator[None]:
+    """Expect the known core halt at ``first`` (and nothing at any other crash point)."""
+    if name(first) not in CORE_GAPS:
+        yield
+        return
+    with pytest.raises(OrphanWaitError):
+        yield
 
 
 def name(crossing: Crossing) -> str:

@@ -39,9 +39,9 @@ from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
-from vibesys.orchestration.evolve.models import EvolveOptions
+from vibesys.orchestration.evolve.launch import EvolveLaunch
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
-from vibesys.orchestration.issue_queue import IssueQueueOptions
+from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.core_run import RunEnd
 from vs_project.api import (
@@ -68,12 +68,16 @@ _LOOP_RUN_TARGETS = {
 def agent_descriptor(
     options: AgentOrchestrationOptions, *, orchestration_id: str
 ) -> OrchestrationDescriptor:
-    """Build the persisted descriptor at the product composition boundary."""
-    return OrchestrationDescriptor(
-        id=orchestration_id,
-        config_version=1,
-        options=options.model_dump(mode="json"),
-    )
+    """Build the persisted descriptor at the product composition boundary.
+
+    The serial searches read only their own knobs: only the multi search has a judge to ask
+    every so often, and neither retries a dropped turn (the roles' policies do).
+    """
+    recorded = options.model_dump(mode="json")
+    recorded.pop("turn_drop_backoff_seconds")
+    if "multi" not in orchestration_id:
+        recorded.pop("judge_every")
+    return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=recorded)
 
 
 def _write_input_project(parent: Path, name: str = "queue-spsc") -> Path:
@@ -303,12 +307,11 @@ def _agent_configuration(
 
 
 def _plain_configuration(*, max_rounds: int = 6) -> _RecordedRun:
-    options = IssueQueueOptions(
+    options = IssueQueueLaunch(
         max_rounds=max_rounds,
         max_attempts_per_issue=4,
         max_issues_per_perf_eval=2,
         max_issues_per_round=3,
-        turn_drop_backoff_seconds=7.0,
     )
     return _RecordedRun(
         OrchestrationDescriptor(
@@ -320,7 +323,7 @@ def _plain_configuration(*, max_rounds: int = 6) -> _RecordedRun:
 
 
 def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
-    options = EvolveOptions(
+    options = EvolveLaunch(
         max_generations=max_generations,
         children_per_generation=3,
         k_top_inspirations=4,
@@ -335,7 +338,6 @@ def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
         openevolve_migration_rate=0.25,
         frontier_bias=0.6,
         bootstrap_max_attempts=7,
-        keep_deployments=False,
         max_parallelism=2,
         metric_space=MetricSpace(
             objectives=(
@@ -348,7 +350,8 @@ def _evolve_configuration(*, max_generations: int = 5) -> _RecordedRun:
         OrchestrationDescriptor(
             id=EVOLVE_PLUGIN.id,
             config_version=EVOLVE_PLUGIN.config_version,
-            options=options.model_dump(mode="json"),
+            # What the host decides is not a launch option (it follows the environment and plan).
+            options=options.model_dump(mode="json", exclude={"profiling", "exclusive_root"}),
         )
     )
 
@@ -1479,7 +1482,6 @@ def test_agent_resume_restores_its_configuration(
 
     assert args.max_rounds == 7
     assert args.max_retries_per_round == 4
-    assert args.judge_every == 2
     assert args.official_eval_every == 5
     assert args.inner_loop == "single-agent"
     assert args.interface == "service"
@@ -1571,7 +1573,6 @@ def test_plain_resume_restores_its_configuration(
     assert args.max_attempts_per_issue == 4
     assert args.max_issues_per_perf_eval == 2
     assert args.max_issues_per_round == 3
-    assert args.turn_drop_backoff_seconds == 7.0
     assert args.agent_backend == "cli"
     assert args.cli_provider == "claude"
     assert args.backend is ComputeBackend.CPU
@@ -1775,9 +1776,9 @@ def test_resume_rejects_changes_to_immutable_configuration(
     monkeypatch.chdir(project)
 
     with pytest.raises(ConfigurationError) as exc:
-        parse_cli_invocation(["--resume", run_id, "--judge-every", "3"])
+        parse_cli_invocation(["--resume", run_id, "--official-eval-every", "3"])
     assert exc.value.diagnostic.code == "project_resume_configuration_mismatch"
-    assert "judge_every" in exc.value.diagnostic.message
+    assert "official_eval_every" in exc.value.diagnostic.message
 
 
 def _write_unsupported_schema_run(project: Path, run_id: str) -> None:

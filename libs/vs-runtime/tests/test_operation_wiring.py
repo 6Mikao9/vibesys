@@ -14,8 +14,7 @@ from vs_core.api import (
     Capabilities,
     ContractError,
     OperationRegistry,
-    SchemaRef,
-    StrategyDeclaration,
+    SearchDeclaration,
     StrategyId,
     validate_startup,
 )
@@ -28,6 +27,7 @@ from vs_runtime.api.core import (
     build_operation_catalog,
 )
 from vs_runtime.api.operation_fixtures import SCENARIO_NAMES, OperationScenario, scenarios
+from vs_sim.api.testing import examples
 
 _STRATEGY_NAMES = tuple(name for name in SCENARIO_NAMES if name != "echo")
 
@@ -44,16 +44,19 @@ def _catalog_and_namespace(
 
 def _declaration(
     items: tuple[OperationScenario, ...], required: tuple[str, ...]
-) -> StrategyDeclaration:
+) -> SearchDeclaration:
     by_name = {item.name: item for item in items}
-    return StrategyDeclaration(
+    return SearchDeclaration(
         strategy_id=StrategyId(root="s"),
-        state_schema=SchemaRef(name="state", version=1),
         required_operations=tuple(by_name[name].entry.schema for name in required),
     )
 
 
-@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
 @given(required=st.lists(st.sampled_from(_STRATEGY_NAMES), unique=True, max_size=4))
 def test_startup_fails_exactly_when_a_required_operation_is_refused(required: list[str]) -> None:
     with tempfile.TemporaryDirectory() as raw:
@@ -81,7 +84,11 @@ def test_a_refused_operation_is_registered_but_never_offered() -> None:
             assert (kind in offered) is (not item.refused)
 
 
-@settings(max_examples=25, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@settings(
+    max_examples=examples(pr=5, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
 @given(required=st.lists(st.sampled_from(_STRATEGY_NAMES), unique=True, max_size=4))
 def test_core_startup_agrees_with_the_catalog_on_what_may_be_required(required: list[str]) -> None:
     with tempfile.TemporaryDirectory() as raw:

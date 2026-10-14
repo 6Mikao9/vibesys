@@ -1,16 +1,19 @@
-"""Committed Stop proof properties through the public, reloadable kernel."""
+"""Committed Finish proof properties through the public, reloadable kernel."""
 
 from __future__ import annotations
 
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
+from .restart import restarts
 
 
 def _occupied_state(held: int, queued: int) -> core.CoreState:
@@ -70,7 +73,7 @@ def _occupied_state(held: int, queued: int) -> core.CoreState:
                 update={
                     "now_at": 5.0,
                     "deadline_at": 100.0,
-                    "limits": core.Limits(max_attempts=20, max_parallel=max(held, 1)),
+                    "limits": sample_limits(max_attempts=20, max_parallel=max(held, 1)),
                     "receipts": tuple(receipts),
                 }
             ),
@@ -93,8 +96,8 @@ def _occupied_state(held: int, queued: int) -> core.CoreState:
     )
 
 
-def _stop(state: core.CoreState, mode: Literal["drain", "cancel"], identity: str) -> core.Stop:
-    return core.Stop(
+def _stop(state: core.CoreState, mode: Literal["drain", "cancel"], identity: str) -> core.Finish:
+    return core.Finish(
         decision_id=core.DecisionId(root=identity),
         scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
         mode=mode,
@@ -102,7 +105,7 @@ def _stop(state: core.CoreState, mode: Literal["drain", "cancel"], identity: str
     )
 
 
-def _receipt(stop: core.Stop, proof: str = "accepted") -> core.DecisionReceipt:
+def _receipt(stop: core.Finish, proof: str = "accepted") -> core.DecisionReceipt:
     decision = stop
     receipt_id = stop.decision_id
     feedback_id = stop.decision_id
@@ -124,7 +127,7 @@ def _receipt(stop: core.Stop, proof: str = "accepted") -> core.DecisionReceipt:
             decision_id=feedback_id,
             code=core.RejectionCode.CLOSED_SCOPE,
             path=("run",),
-            detail="Stop did not commit",
+            detail="Finish did not commit",
         )
     return core.DecisionReceipt(
         decision_id=receipt_id,
@@ -136,7 +139,7 @@ def _receipt(stop: core.Stop, proof: str = "accepted") -> core.DecisionReceipt:
 
 def _closing(
     state: core.CoreState,
-    stop: core.Stop,
+    stop: core.Finish,
     receipts: tuple[core.DecisionReceipt, ...],
     status: core.RunStatus = core.RunStatus.CLOSING,
 ) -> core.CoreState:
@@ -154,6 +157,8 @@ def _closing(
 
 
 def _step(state: core.CoreState, event: core.CoreEvent) -> core.Transition:
+    if not restarts():
+        return core.step(state, event)
     before = state.model_dump_json()
     restored = core.CoreState.model_validate_json(before)
     transition = core.step(state, event)
@@ -204,6 +209,7 @@ def _assert_attempts_boundary(state: core.CoreState, event: core.CoreEvent, kind
     "proof",
     ["rejected", "receipt-id", "feedback-id", "owner", "generation", "missing-decision", "absent"],
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(held=st.integers(1, 3), queued=st.integers(1, 4))
 def test_cancel_never_retires_episodes_without_committed_stop_proof(
     proof: str, held: int, queued: int
@@ -221,6 +227,7 @@ def test_cancel_never_retires_episodes_without_committed_stop_proof(
 @pytest.mark.parametrize(
     "status", [status for status in core.RunStatus if status != core.RunStatus.CLOSING]
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(held=st.integers(1, 3), queued=st.integers(1, 4))
 def test_cancel_authority_cannot_retire_outside_closing_run(
     status: core.RunStatus, held: int, queued: int
@@ -278,13 +285,14 @@ def test_rejected_stop_cannot_block_first_valid_cancel(held: int, queued: int) -
 
 
 @pytest.mark.parametrize("proof", ["receipt-id", "feedback-id", "owner", "generation"])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(held=st.integers(1, 3), queued=st.integers(1, 4))
 def test_malformed_first_stop_denies_cancellation_authority(
     proof: str, held: int, queued: int
 ) -> None:
-    """The shared proof selects the first accepted Stop and never skips a malformed one.
+    """The shared proof selects the first accepted Finish and never skips a malformed one.
 
-    A later valid Stop must not inherit authority from a corrupted first commitment.
+    A later valid Finish must not inherit authority from a corrupted first commitment.
     """
     state = _occupied_state(held, queued)
     invalid = _stop(state, "drain", "invalid")
@@ -299,6 +307,7 @@ def test_malformed_first_stop_denies_cancellation_authority(
     "proof",
     ["rejected", "receipt-id", "feedback-id", "owner", "generation", "missing-decision", "absent"],
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     status=st.sampled_from(tuple(core.RunStatus)),
     increments=st.lists(st.integers(0, 10), min_size=1, max_size=10),

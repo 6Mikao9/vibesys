@@ -23,7 +23,7 @@ from tests.support.skeleton_world import (
     open_skeleton_world,
 )
 
-from vs_core.api import IntentPhase, RunStatus
+from vs_core.api import RequestPhase, RunStatus
 from vs_faults.api import FaultGate, FaultPlan, HostCrashError
 from vs_project.api.testing import GitKind
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
@@ -139,25 +139,25 @@ def _summary(
 def _waiting(process: Process) -> str:
     """What the stalled run still waits for: unresolved recovery checks and unended requests."""
     core = process.shell.record.envelope.core
-    recovery = core.intents.recovery
-    rows = {intent.request_id: intent for intent in core.intents.intents}
+    recovery = core.records.recovery
+    rows = {record.request_id: record for record in core.records.records}
 
     def show(request_id: RequestId | None) -> str:
-        intent = None if request_id is None else rows.get(request_id)
-        if intent is None:
+        record = None if request_id is None else rows.get(request_id)
+        if record is None:
             return "none"
-        seen = intent.observation
+        seen = record.observation
         facts = (
             "no observation" if seen is None else f"{seen.status.value} terminal={seen.terminal}"
         )
-        return f"{intent.request.kind} {intent.phase.value} ({facts})"
+        return f"{record.request.kind} {record.phase.value} ({facts})"
 
     pending = [
         f"{show(c.target)} inspected by {show(c.inspection)}"
         for c in recovery.checks
         if c.resolution in ("pending", "blocked")
     ]
-    unended = [show(i.request_id) for i in rows.values() if i.phase != IntentPhase.COMPLETED]
+    unended = [show(i.request_id) for i in rows.values() if i.phase != RequestPhase.COMPLETED]
     return (
         f"recovery {recovery.phase.value} epoch {recovery.epoch}; pending checks {pending}; "
         f"unended requests {unended}"

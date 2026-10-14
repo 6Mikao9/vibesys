@@ -4,10 +4,11 @@ from itertools import product
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 Episode = Literal["missing", "matching", "different"]
 
@@ -58,6 +59,7 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         access=core.Access.READ_ONLY,
     )
     record = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=invocation,
         scope=scope,
         phase=core.SessionPhase.SUSPENDED,
@@ -67,7 +69,6 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="paid",
         ),
     )
@@ -110,7 +111,6 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         core.Operation(
             decision_id=core.DecisionId(root="reopen"),
             scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
-            deadline_at=100.0,
             request=core.ScopedAdmissionReopen(
                 attempt=attempt,
                 continuation_id=continuation.continuation_id,
@@ -124,25 +124,23 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         operation_id=core.OperationId(root="operation:reopen"),
         operation=codec.encode(decision.request),
         scope=decision.scope,
-        deadline_at=decision.deadline_at,
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
     )
     assert request.request_id is not None
     close = core.CloseAttemptScope(
         request_id=park,
         scope=scope,
-        deadline_at=100.0,
         attempt=attempt,
         admission_id=admission,
     )
     assert job.observation is not None
-    close_intent = core.Intent(
+    close_record = core.RequestRecord(
         request_id=park,
         request=close,
         payload_digest="close",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.COMPLETED,
+        until=core.Until(at=100.0),
         observation=job.observation.model_copy(
             update={"request_id": park, "resource_id": None, "admission_id": admission}
         ),
@@ -183,7 +181,7 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
             "evaluation": core.EvaluationState(
                 registered_jobs=(job,), continuations=(continuation,)
             ),
-            "intents": state.intents.model_copy(update={"intents": (close_intent,)}),
+            "records": state.records.model_copy(update={"records": (close_record,)}),
         }
     )
     assert decision.normalized_scope_reopen is not None
@@ -202,6 +200,7 @@ def admission_identity(kind: Episode, episode: str) -> core.DecisionId | None:
     ("owner_episode", "request_episode"), product(("missing", "matching", "different"), repeat=2)
 )
 @pytest.mark.parametrize("action", ["park", "reopen"])
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(episode=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=32))
 def test_cleanup_requires_owner_closure_and_request_in_same_present_episode(
     owner_episode: Episode, request_episode: Episode, action: str, episode: str
@@ -211,13 +210,13 @@ def test_cleanup_requires_owner_closure_and_request_in_same_present_episode(
     owner = state.attempts.attempts[0].model_copy(
         update={"admission_id": admission_identity(owner_episode, episode)}
     )
-    intent = state.intents.intents[0]
-    assert intent.observation is not None
+    record = state.records.records[0]
+    assert record.observation is not None
     request_admission = admission_identity(request_episode, episode)
-    intent = intent.model_copy(
+    record = record.model_copy(
         update={
-            "request": intent.request.model_copy(update={"admission_id": request_admission}),
-            "observation": intent.observation.model_copy(
+            "request": record.request.model_copy(update={"admission_id": request_admission}),
+            "observation": record.observation.model_copy(
                 update={"admission_id": request_admission}
             ),
         }
@@ -225,7 +224,7 @@ def test_cleanup_requires_owner_closure_and_request_in_same_present_episode(
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     if action == "park":

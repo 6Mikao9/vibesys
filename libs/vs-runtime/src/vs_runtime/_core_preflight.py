@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
-from vs_core.api import ContractError, OperationRegistry, Strategy, StrategyState, validate_startup
+from vs_core.api import (
+    ContractError,
+    OperationRegistry,
+    SearchDriver,
+    StrategyState,
+    validate_startup,
+)
 from vs_project.api import (
     Project,
     ProjectStateError,
@@ -135,7 +141,7 @@ def reject_legacy_resume(project: Project, run_id: str) -> None:
 
 def resolve_core_resume[S: StrategyState](
     project: Project,
-    strategy: Strategy[S],
+    search: SearchDriver[S, Any],
     *,
     run_id: str | None = None,
     registry: OperationRegistry | None = None,
@@ -172,7 +178,7 @@ def resolve_core_resume[S: StrategyState](
         raise _missing_envelope(project, selected.run_id)
     registry = registry or OperationRegistry()
     record_model = cast(
-        "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(type(strategy.state))
+        "type[RuntimeRecord[S]]", RuntimeRecord.__class_getitem__(search.state_model)
     )
     try:
         if not isinstance(stored, StoredEnvelope):
@@ -181,11 +187,11 @@ def resolve_core_resume[S: StrategyState](
         envelope = record.envelope
         if envelope.core.run.run_id.root != selected.run_id:
             raise ContractError(("run_id",), "core envelope differs from selected run")
-        if envelope.core.run.declaration != strategy.declaration:
+        if envelope.core.run.declaration != search.declaration:
             raise ContractError(
                 ("declaration",), "offered strategy differs from durable declaration"
             )
-        capabilities = validate_startup(strategy.declaration, envelope.core.run.capabilities)
+        capabilities = validate_startup(search.declaration, envelope.core.run.capabilities)
         if capabilities.operations != envelope.core.registry:
             raise ContractError(("registry",), "offered operations differ from durable registry")
     except ValueError as error:

@@ -12,7 +12,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict
 
-from vs_core.api import BlockIntent, RequestId
+from vs_core.api import BlockRequest, FailureReason, RequestId
 from vs_project.api import Project, ProjectStateError
 from vs_runtime.api.core import (
     Conflict,
@@ -26,7 +26,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
 from vs_runtime.api.operation_fixtures import SCOPE
-from vs_sim.api.testing import Gate
+from vs_sim.api.testing import Gate, examples
 
 if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionContext
@@ -41,13 +41,12 @@ class Done(BaseModel):
     value: int
 
 
-def request(name: str = "r1") -> BlockIntent:
-    return BlockIntent(
+def request(name: str = "r1") -> BlockRequest:
+    return BlockRequest(
         request_id=RequestId(root=name),
         scope=SCOPE,
-        deadline_at=100.0,
         target=RequestId(root="t"),
-        diagnostic="d",
+        reason=FailureReason.LOST,
     )
 
 
@@ -149,7 +148,9 @@ def store_at(root: Path) -> ReceiptStore:
 
 
 @settings(
-    suppress_health_check=[HealthCheck.function_scoped_fixture], deadline=None, max_examples=25
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    deadline=None,
+    max_examples=examples(pr=5, nightly=25),
 )
 @given(repeats=st.integers(min_value=1, max_value=5))
 async def test_a_settled_effect_runs_once_however_often_the_request_is_replayed(
@@ -186,7 +187,7 @@ async def test_a_live_duplicate_waits_for_and_replays_the_in_flight_result() -> 
         assert await run(store, Performer(), context) == Replayed(Done(value=1))
 
 
-@settings(deadline=None, max_examples=20)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=20))
 @given(duplicates=st.integers(min_value=1, max_value=5))
 async def test_any_number_of_live_duplicates_share_one_performer(duplicates: int) -> None:
     with tempfile.TemporaryDirectory() as raw:
@@ -238,7 +239,7 @@ async def test_a_conflicting_live_duplicate_never_enters_the_performer() -> None
         store = store_at(Path(raw))
         effect = HeldPerformer()
         first_context = context_for(request())
-        conflicting = context_for(request().model_copy(update={"diagnostic": "other"}))
+        conflicting = context_for(request().model_copy(update={"reason": FailureReason.OWNER_GONE}))
         first = asyncio.create_task(run(store, effect, first_context))
         await effect.started.wait(first)
         scheduled = Gate()
@@ -358,7 +359,7 @@ async def test_another_payload_under_the_same_identity_conflicts_without_an_effe
         effect = Performer()
         store = store_at(Path(raw))
         await run(store, effect, context_for(request()))
-        other = context_for(request().model_copy(update={"diagnostic": "other"}))
+        other = context_for(request().model_copy(update={"reason": FailureReason.OWNER_GONE}))
         assert await run(store, effect, other) == Conflict()
         assert effect.calls == 1
 

@@ -6,6 +6,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 from .test_session_inputs import occurrence
@@ -39,7 +41,7 @@ def completed_events(*results: core.Transition) -> list[core.InterruptCompleted]
 
 
 # P1: interrupting an invocation whose checkpoint already committed must complete.
-@settings(deadline=None, max_examples=15)
+@settings(deadline=None, max_examples=examples(pr=4, nightly=15))
 @given(before=st.integers(0, 2), after=st.integers(0, 2))
 def test_interrupt_after_committed_checkpoint_completes_exactly_once(
     before: int, after: int
@@ -83,7 +85,6 @@ def refund_state(
         request_id=inv.observation.request_id,
         scope=owner_scope,
         admission_id=admission,
-        deadline_at=100.0,
         turn=inv.turn,
     )
     snap_id = core.RequestId(root="wip-checkpoint")
@@ -91,31 +92,30 @@ def refund_state(
         request_id=snap_id,
         scope=owner_scope,
         admission_id=admission,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
         retention="wip",
         invocation=ref,
     )
 
-    def intent(
+    def record(
         req: core.DispatchTurn | core.SnapshotAndRetain,
         lifecycle: core.LifecycleClass,
         obs: core.Observation | None = None,
-    ) -> core.Intent:
+    ) -> core.RequestRecord:
         assert req.request_id is not None
-        return core.Intent(
+        return core.RequestRecord(
             request_id=req.request_id,
             request=req,
             payload_digest=value_digest(req),
             lifecycle=lifecycle,
-            phase=core.IntentPhase.COMPLETED,
-            reconcile_deadline_at=100.0,
+            phase=core.RequestPhase.COMPLETED,
+            until=core.Until(at=100.0),
             observation=obs,
         )
 
-    intents = (
-        intent(dispatch, core.LifecycleClass.SESSION_TURN, inv.observation),
-        intent(snap, core.LifecycleClass.IDEMPOTENT_WRITE),
+    records = (
+        record(dispatch, core.LifecycleClass.SESSION_TURN, inv.observation),
+        record(snap, core.LifecycleClass.IDEMPOTENT_WRITE),
     )
     charges = tuple(
         c.model_copy(update={"charged": charged}) if c.kind == core.ChargeKind.ATTEMPT else c
@@ -137,9 +137,9 @@ def refund_state(
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": core.IntentsState(intents=intents),
+            "records": core.RecordsState(records=records),
             "run": state.run.model_copy(
-                update={"limits": core.Limits(max_turns=10, max_refunds=5)}
+                update={"limits": sample_limits(max_turns=10, max_refunds=5)}
             ),
         }
     )
@@ -164,7 +164,7 @@ def counting_reducers() -> tuple[core.CoreReducers, list[core.AttemptChargeRefun
 
 
 # P2: the refund request is idempotent per claim, however often the event repeats.
-@settings(deadline=None, max_examples=15)
+@settings(deadline=None, max_examples=examples(pr=5, nightly=15))
 @given(repeats=st.integers(1, 5), charged=st.integers(1, 4))
 def test_repeated_checkpoint_event_emits_one_refund_request(repeats: int, charged: int) -> None:
     state, event = refund_state(charged, refund_limit=5)
@@ -204,7 +204,6 @@ def release_after_closure(
         request_id=core.RequestId(root="old-dispatch"),
         scope=owner_scope,
         admission_id=adm,
-        deadline_at=100.0,
         turn=inv.turn,
         inputs=(item,),
     )
@@ -213,13 +212,13 @@ def release_after_closure(
     ).model_copy(update={"admission_id": adm})
     inv = inv.model_copy(update={"observation": obs, "input_ids": (item.input_id,)})
     assert req.request_id is not None
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=req.request_id,
         request=req,
         payload_digest=value_digest(req),
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.COMPLETED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.COMPLETED,
+        until=core.Until(at=100.0),
         observation=obs,
     )
     closure = core.AttemptClosure(
@@ -232,7 +231,7 @@ def release_after_closure(
     seeded = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": core.IntentsState(intents=(intent,)),
+            "records": core.RecordsState(records=(record,)),
             "sessions": state.sessions.model_copy(
                 update={
                     "invocations": (inv,),
@@ -281,8 +280,8 @@ def test_snapshot_request_of_another_invocation_never_completes_the_yield() -> N
                 "invocation": bound,
             }
         )
-        intent = next(i for i in state.intents.intents if i.request_id == request.request_id)
-        forged_intent = intent.model_copy(
+        record = next(i for i in state.records.records if i.request_id == request.request_id)
+        forged_record = record.model_copy(
             update={
                 "request_id": forged.request_id,
                 "request": forged,
@@ -291,8 +290,8 @@ def test_snapshot_request_of_another_invocation_never_completes_the_yield() -> N
         )
         seeded = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
-                    update={"intents": (*state.intents.intents, forged_intent)}
+                "records": state.records.model_copy(
+                    update={"records": (*state.records.records, forged_record)}
                 )
             }
         )

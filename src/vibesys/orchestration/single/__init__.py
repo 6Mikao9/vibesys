@@ -2,11 +2,8 @@
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.single.models import (
-    ProfileGuidedSingleOptions,
-    SingleAgentRoundResponse,
-    SingleOptions,
-)
+from vibesys.orchestration.single.launch import ProfileGuidedSingleLaunch, SingleLaunch
+from vibesys.orchestration.single.models import SingleAgentRoundResponse
 
 if TYPE_CHECKING:
     from vibesys.orchestration.single.plugin import (
@@ -45,7 +42,7 @@ __all__ = [
     "PROFILE_GUIDED_PLUGIN",
     "PROFILE_GUIDED_REGISTRATION",
     "REGISTRATION",
-    "ProfileGuidedSingleOptions",
+    "ProfileGuidedSingleLaunch",
     "SingleAgentRoundResponse",
-    "SingleOptions",
+    "SingleLaunch",
 ]

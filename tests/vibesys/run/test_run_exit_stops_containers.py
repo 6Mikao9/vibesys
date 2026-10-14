@@ -11,12 +11,18 @@ import asyncio
 import signal
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from tests.support.core_plugins import capability_plugin
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.skeleton_strategy import Phase, SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import (
+    ATTEMPT,
+    IMPLEMENTER_ROLE,
+    OPERATIONS,
+    SkeletonConfig,
+    SkeletonStrategy,
+)
 from tests.support.task_project import write_task
 
 from entrypoints.run import supervise
@@ -30,7 +36,8 @@ from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import ResumeRef, RunRequest
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
-from vs_core.api import AttemptReady, RunView, StrategyEvent
+from vs_core.api import AttemptBudget, ItemId, WorkspaceMode, WorkspacePlan
+from vs_core.api.search import Flow, NotOpened, NoWinner, search
 from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
@@ -98,34 +105,49 @@ class _Observed:
     containers: tuple[FakeContainer, ...] = ()
 
 
-# A count of checkpoints, not time: far above what an unwind needs.
-_MAX_CHECKPOINTS = 100_000
+_RUN_DEADLINE = 1000.0
 
 
-class _ProbeStrategy(SkeletonStrategy):
-    """Start one attempt, so the run owns a container, then act on the exit path once it is live.
+@search(
+    "container-exit",
+    config=SkeletonConfig,
+    operations=OPERATIONS,
+    roles=(IMPLEMENTER_ROLE,),
+)
+async def _probe(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
+    """Open one attempt, so the run owns a container, then act on the exit path once it is live.
 
-    Core strategies are pure, so the probe's side effects (reading the daemon, delivering the
-    signals) reach the test through a module-level hook the test installs for one run.
+    Flows are pure, so the probe's side effects (reading the daemon, delivering the signals)
+    reach the test through a module-level hook the test installs for one run.
     """
+    del config
+    async with ctx.workspaces.open(
+        attempt=ATTEMPT.attempt_id,
+        item=ItemId(root="item-0"),
+        plan=WorkspacePlan(mode=WorkspaceMode.ISOLATED_CHILD, base=ctx.facts.baseline),
+        budget=AttemptBudget(),
+    ) as workspace:
+        if isinstance(workspace, NotOpened):
+            return NoWinner(reason="the attempt workspace did not open")
+        if _LIVE_HOOK is None or _LIVE_HOOK() == "failed":
+            return NoWinner(reason="scripted")
+        # Signals were delivered: wait for the stop they cause; the timer keeps the shell from
+        # calling the wait a stall.
+        await ctx.first(ctx.stopped, ctx.timer(_RUN_DEADLINE))
+    return None
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> SkeletonState:
-        state = super().on_event(view, event)
-        if isinstance(event, AttemptReady) and _LIVE_HOOK is not None:
-            return state.model_copy(update={"phase": _LIVE_HOOK(str(view.run.run_id.root))})
-        return state
 
-
-_LIVE_HOOK: Callable[[str], Phase] | None = None
+_LIVE_HOOK: Callable[[], Literal["failed", "settle"]] | None = None
+_RUN_ID = "container-exit-run"
 
 
 def _live_hook(
     engine: FakeDockerEngine, observed: _Observed, signals: FakeSignalSource, exit_path: str
-) -> Callable[[str], Phase]:
+) -> Callable[[], Literal["failed", "settle"]]:
     """What happens once the run's container exists: note the daemon, then fail or signal."""
 
-    def live(run_id: str) -> Phase:
-        observed.run_id = run_id
+    def live() -> Literal["failed", "settle"]:
+        observed.run_id = _RUN_ID
         observed.containers = engine.containers()
         if exit_path == "failure":
             return "failed"
@@ -165,11 +187,8 @@ def _execute(
     _LIVE_HOOK = None if resumed is not None else _live_hook(engine, observed, signals, exit_path)
     plugin = capability_plugin(
         _PLUGIN_ID,
-        strategy=_ProbeStrategy(
-            state=SkeletonState(schema_version=1, phase="start"),
-            measured=False,
-            keeps_candidate=False,
-        ),
+        strategy=SkeletonStrategy.unmeasured(keeps_candidate=False),
+        search=_probe,
     )
     registry = OrchestrationRegistry()
     registry.register_plugin(plugin)
@@ -192,6 +211,7 @@ def _execute(
         input_bundle=load_task(root),
         objective="Improve the queue.",
         exp_name=_PLUGIN_ID,
+        run_id=_RUN_ID,
         agent_backend="cli",
         cli_provider="claude",
         profiler_kind=ProfilerKind.NONE,
@@ -222,68 +242,42 @@ def _execute(
 
 
 # Each exit path ends the run its own typed way: a stop and a failure return normally, a
-# terminating signal exits 128 + n.
+# terminating signal exits 128 + n. (Which signal maps to which code is `supervise`'s own rule,
+# tested where it lives; the stop in the resume test shows a signalled exit removes containers.)
+# Budget: each case is a whole run over a fake Docker daemon, the point of the regression (#1521).
 @pytest.mark.parametrize(
     ("exit_path", "ends_with"),
-    [
-        ("failure", None),
-        ("SIGINT", None),
-        ("SIGTERM", SystemExit),
-        ("SIGHUP", SystemExit),
-        ("SIGINT+SIGTERM", SystemExit),
-        ("start-lost", RuntimeError),
-    ],
+    [("failure", None), ("start-lost", RuntimeError)],
 )
-def test_an_exiting_run_leaves_no_container(
+def test_an_exiting_run_leaves_no_container_and_every_container_carries_the_runs_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     exit_path: str,
     ends_with: type[BaseException] | None,
 ) -> None:
-    engine, _observed = _execute(tmp_path, monkeypatch, exit_path=exit_path, ends_with=ends_with)
+    engine, observed = _execute(tmp_path, monkeypatch, exit_path=exit_path, ends_with=ends_with)
 
     assert engine.containers() == ()
     # The daemon saw the run start its container.
     assert any(call[1] == "run" for call in engine.calls)
+    if exit_path != "start-lost":
+        assert observed.run_id
+        assert observed.containers
+        assert all(
+            container.labels == {RUN_ID_LABEL: observed.run_id} for container in observed.containers
+        )
 
 
-def test_every_container_of_a_run_carries_the_runs_id(
+def test_resuming_a_run_ends_only_the_containers_its_dead_host_left_behind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _engine, observed = _execute(tmp_path, monkeypatch, exit_path="failure")
-
-    assert observed.run_id
-    assert observed.containers
-    assert all(
-        container.labels == {RUN_ID_LABEL: observed.run_id} for container in observed.containers
-    )
-
-
-def test_resuming_a_run_ends_the_containers_its_dead_host_left_behind(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
+    """A stop ends its containers; a resume refused for a live host recovers nothing; a resume
+    that is accepted removes the run's own orphans and leaves other runs' containers."""
+    engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
+    assert engine.containers() == ()
     host_docker = FakeDockerEngine()
     own = _plant_container(host_docker, first.run_id)
     other = _plant_container(host_docker, "some-other-run")
-
-    _execute(
-        tmp_path,
-        monkeypatch,
-        exit_path="SIGINT",
-        resumed=_Resumed(first.run_id, host_docker),
-    )
-
-    assert [c.container_id for c in host_docker.containers()] == [other]
-    assert ("docker", "rm", "-f", own) in host_docker.calls
-
-
-def test_a_rejected_concurrent_resume_does_not_begin_orphan_recovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
-    host_docker = FakeDockerEngine()
-    orphan = _plant_container(host_docker, first.run_id)
     calls_before_resume = tuple(host_docker.calls)
     project = Project.open(tmp_path / "project")
 
@@ -295,9 +289,18 @@ def test_a_rejected_concurrent_resume_does_not_begin_orphan_recovery(
             ends_with=ProjectStateError,
             resumed=_Resumed(first.run_id, host_docker),
         )
-
-    assert [container.container_id for container in host_docker.containers()] == [orphan]
+    assert {c.container_id for c in host_docker.containers()} == {own, other}
     assert tuple(host_docker.calls) == calls_before_resume
+
+    _execute(
+        tmp_path,
+        monkeypatch,
+        exit_path="SIGINT",
+        resumed=_Resumed(first.run_id, host_docker),
+    )
+
+    assert [c.container_id for c in host_docker.containers()] == [other]
+    assert ("docker", "rm", "-f", own) in host_docker.calls
 
 
 def _plant_container(engine: FakeDockerEngine, run_id: str) -> str:

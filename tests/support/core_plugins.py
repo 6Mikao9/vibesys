@@ -10,22 +10,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict
-from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import OPERATIONS, SkeletonConfig, SkeletonStrategy, skeleton
 
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
-from vs_core.api import (
-    LifecycleClass,
-    Limits,
-    OperationDescriptor,
-    OperationRegistration,
-    OperationRequest,
-    RunFacts,
-    SchemaRef,
-    Value,
-)
+from vs_core.api import RunFacts, SearchDef
+from vs_core.api.testing import sample_limits
 from vs_runtime.api import (
     AgentRole,
     CoreOperation,
@@ -34,10 +25,7 @@ from vs_runtime.api import (
     CoreRunContext,
     OrchestrationPlugin,
 )
-from vs_runtime.api.core import OperationRole
-
-if TYPE_CHECKING:
-    from vs_core.api import Strategy
+from vs_runtime.api.core import operation_roles
 
 _TEMPLATES = Path(__file__).parent / "data"
 
@@ -48,47 +36,26 @@ class EmptyOptions(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class _Rendered(Value):
-    status: Literal["succeeded", "failed"] = "succeeded"
-
-
-class _Render(OperationRequest):
-    kind: Literal["test.render"] = "test.render"
-    lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
-    outcome_model: ClassVar[type[Value]] = _Rendered
-    subject: str
-
-
-def render_registration() -> OperationRegistration:
-    """The one operation every test core policy registers."""
-    return OperationRegistration(
-        descriptor=OperationDescriptor(
-            kind="test.render",
-            request_schema=SchemaRef(name="test-render", version=1),
-            outcome_schema=SchemaRef(name="test-render-outcome", version=1),
-            lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-            inspect=True,
-            cancel=False,
-        ),
-        request_model=_Render,
-        outcome_model=_Rendered,
-    )
-
-
 def core_policy(
     templates: Path = _TEMPLATES,
-    strategy: Strategy[Any] | None = None,
+    strategy: SkeletonStrategy | None = None,
     deadline_seconds: float = 1000.0,
+    search: SearchDef[SkeletonConfig] = skeleton,
 ) -> CorePolicy:
-    """A core policy that plays ``strategy`` (the scripted skeleton by default)."""
+    """A core policy that plays ``strategy`` (the scripted skeleton by default).
+
+    ``search`` replaces the skeleton's flow for a test that scripts its own, over the same
+    operations and config.
+    """
+    scenario = SkeletonStrategy() if strategy is None else strategy
 
     def plan(context: CoreRunContext) -> CorePlan:
         identity = semantic_evaluation_identity(
             context.evaluation_plan, context.facts, context.environment
         )
         return CorePlan(
-            strategy=SkeletonStrategy() if strategy is None else strategy,
-            reply_schemas={},
+            search=search,
+            config=scenario.config,
             facts=RunFacts(
                 objective=context.facts.objective,
                 baseline=context.baseline,
@@ -96,13 +63,16 @@ def core_policy(
                 workload_digest=identity.workload.value,
                 environment_digest=identity.environment.value,
             ),
-            limits=Limits(),
+            limits=sample_limits(),
             deadline_seconds=deadline_seconds,
         )
 
     return CorePolicy(
         plan=plan,
-        operations=(CoreOperation(OperationRole.RENDER_ARTIFACTS, render_registration()),),
+        operations=tuple(
+            CoreOperation(role, registration)
+            for role, registration in operation_roles(OPERATIONS).items()
+        ),
         retention_label="selected",
         prompt_templates=templates,
     )
@@ -115,10 +85,11 @@ def capability_plugin(  # noqa: PLR0913  # lint-waiver: LW-950002 [PLR0913]; eac
     options: type[BaseModel] = EmptyOptions,
     config_version: int = 1,
     artifact_directories: tuple[str, ...] = (),
-    strategy: Strategy[Any] | None = None,
+    strategy: SkeletonStrategy | None = None,
+    search: SearchDef[SkeletonConfig] = skeleton,
 ) -> OrchestrationPlugin:
     """A core plugin for a test that composes the host and drives the strategy it is given."""
-    policy = core_policy(strategy=strategy)
+    policy = core_policy(strategy=strategy, search=search)
     if artifact_directories:
         policy = replace(policy, artifact_directories=artifact_directories)
     return OrchestrationPlugin(
@@ -135,14 +106,13 @@ def failing_plugin(
     artifact_directories: tuple[str, ...] = (),
 ) -> OrchestrationPlugin:
     """A core plugin whose run stops at once with a scripted failure, touching no agent."""
-    state = SkeletonState(schema_version=1, phase="failed", failure="scripted")
     return capability_plugin(
         plugin_id,
         agents=agents,
         options=options,
         config_version=config_version,
         artifact_directories=artifact_directories,
-        strategy=SkeletonStrategy(state=state, measured=False, keeps_candidate=False),
+        strategy=SkeletonStrategy.failing(),
     )
 
 
@@ -151,5 +121,4 @@ __all__ = [
     "capability_plugin",
     "core_policy",
     "failing_plugin",
-    "render_registration",
 ]

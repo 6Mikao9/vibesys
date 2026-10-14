@@ -243,23 +243,10 @@ def _agent_policy_descriptor(
                 "objectives": (*metrics.objectives, Objective(benchmark.metric, "max")),
             }
         )
-    options = {
+    task = {
         "interface": args.interface,
         "modality": args.modality
         or ("text_generation" if bundle.domain is DomainName.LLM_SERVING else None),
-        "max_rounds": args.max_rounds,
-        "max_retries_per_round": args.max_retries_per_round,
-        "judge_every": args.judge_every,
-        "official_eval_every": args.official_eval_every,
-        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
-        **(
-            {
-                "max_in_flight": args.max_in_flight,
-                "max_unmeasured_turns": args.max_unmeasured_turns,
-            }
-            if args.outer_loop == "dynamic"
-            else {}
-        ),
         "operator_constraints": [item.strip() for item in args.constraint if item.strip()],
         "metric_space": metrics.model_dump(mode="json"),
         "profile_guided": bundle.manifest.profile_guided.model_dump(mode="json")
@@ -267,6 +254,25 @@ def _agent_policy_descriptor(
         and bundle.manifest.profile_guided is not None
         else None,
     }
+    if args.outer_loop == "dynamic":
+        # The dynamic search reads only its own knobs; its agents' retries are the roles'.
+        options = {
+            **task,
+            "max_rounds": args.max_rounds,
+            "max_in_flight": args.max_in_flight,
+            "judge_every": args.judge_every,
+            "max_unmeasured_turns": args.max_unmeasured_turns,
+        }
+    else:
+        # The serial searches read only their own knobs; their agents' retries and timeouts are
+        # the roles'. Only the multi search has a judge to ask every so often.
+        options = {
+            **task,
+            "max_rounds": args.max_rounds,
+            "max_retries_per_round": args.max_retries_per_round,
+            "official_eval_every": args.official_eval_every,
+            **({"judge_every": args.judge_every} if args.inner_loop == "multi-agent" else {}),
+        }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
 
 
@@ -277,7 +283,6 @@ def _plain_policy_descriptor(args: argparse.Namespace) -> OrchestrationDescripto
         "max_attempts_per_issue": args.max_attempts_per_issue,
         "max_issues_per_perf_eval": args.max_issues_per_perf_eval,
         "max_issues_per_round": args.max_issues_per_round,
-        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
         "tracker": IssueTrackerConfig.from_backend(
             args.tracker_backend,
             repository=args.tracker_repository,
@@ -306,9 +311,7 @@ def _evolve_policy_descriptor(
         **openevolve,
         "frontier_bias": args.frontier_bias,
         "bootstrap_max_attempts": args.bootstrap_max_attempts,
-        "keep_deployments": args.keep_deployments,
         "max_parallelism": args.max_parallelism,
-        "turn_drop_backoff_seconds": args.turn_drop_backoff_seconds,
         "metric_space": space.model_dump(mode="json"),
     }
     return OrchestrationDescriptor(id="evolve", config_version=1, options=options)

@@ -63,12 +63,12 @@ def test_current_admission(
     ("variant", "denial"),
     [
         ("exact", None),
-        ("intent", Missing(ProofReason.ABSENT_REQUEST)),
+        ("record", Missing(ProofReason.ABSENT_REQUEST)),
         ("request", Missing(ProofReason.ABSENT_REQUEST)),
         ("id", Missing(ProofReason.ABSENT_REQUEST)),
         ("recorded_id", Missing(ProofReason.ABSENT_REQUEST)),
         ("recorded_episode", Missing(ProofReason.ABSENT_EPISODE)),
-        ("intent_identity", Mismatch(ProofField.REQUEST_ID)),
+        ("record_identity", Mismatch(ProofField.REQUEST_ID)),
         ("episode", Missing(ProofReason.ABSENT_EPISODE)),
         ("request_id", Mismatch(ProofField.REQUEST_ID)),
         ("scope", Mismatch(ProofField.SCOPE)),
@@ -81,22 +81,24 @@ def test_current_admission(
 )
 @given(request_facts())
 def test_request_requires_canonical_facts(
-    variant: str, denial: Missing | Mismatch | None, facts: tuple[core.InspectRequest, core.Intent]
+    variant: str,
+    denial: Missing | Mismatch | None,
+    facts: tuple[core.InspectRequest, core.RequestRecord],
 ) -> None:
-    request, intent = facts
+    request, record = facts
     expected = request
-    intent, expected = _request_variant(variant, intent, expected)
-    assert request_matches(intent, expected) == (Proven(intent) if denial is None else denial)
+    record, expected = _request_variant(variant, record, expected)
+    assert request_matches(record, expected) == (Proven(record) if denial is None else denial)
 
 
 def _request_variant(
-    variant: str, intent: core.Intent, expected: core.InspectRequest
-) -> tuple[core.Intent | None, core.InspectRequest | None]:
+    variant: str, record: core.RequestRecord, expected: core.InspectRequest
+) -> tuple[core.RequestRecord | None, core.InspectRequest | None]:
     match variant:
-        case "intent":
+        case "record":
             return None, expected
         case "request":
-            return intent, None
+            return record, None
         case "id":
             expected = expected.model_copy(update={"request_id": None})
         case "episode":
@@ -104,32 +106,32 @@ def _request_variant(
         case "request_id":
             expected = expected.model_copy(update={"request_id": core.RequestId(root="other")})
         case "digest":
-            intent = intent.model_copy(update={"payload_digest": "other"})
+            record = record.model_copy(update={"payload_digest": "other"})
         case "lifecycle":
-            intent = intent.model_copy(update={"lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE})
+            record = record.model_copy(update={"lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE})
         case _:
-            intent, expected = _recorded_request_variant(variant, intent, expected)
-    return intent, expected
+            record, expected = _recorded_request_variant(variant, record, expected)
+    return record, expected
 
 
 def _recorded_request_variant(
     variant: str,
-    intent: core.Intent,
+    record: core.RequestRecord,
     expected: core.InspectRequest,
-) -> tuple[core.Intent, core.InspectRequest]:
+) -> tuple[core.RequestRecord, core.InspectRequest]:
     if variant == "recorded_id":
-        intent = intent.model_copy(
-            update={"request": intent.request.model_copy(update={"request_id": None})}
+        record = record.model_copy(
+            update={"request": record.request.model_copy(update={"request_id": None})}
         )
     elif variant == "recorded_episode":
-        intent = intent.model_copy(
-            update={"request": intent.request.model_copy(update={"admission_id": None})}
+        record = record.model_copy(
+            update={"request": record.request.model_copy(update={"admission_id": None})}
         )
-    elif variant == "intent_identity":
-        intent = intent.model_copy(update={"request_id": core.RequestId(root="other")})
+    elif variant == "record_identity":
+        record = record.model_copy(update={"request_id": core.RequestId(root="other")})
     else:
         expected = _request_payload_variant(variant, expected)
-    return intent, expected
+    return record, expected
 
 
 def _request_payload_variant(variant: str, expected: core.InspectRequest) -> core.InspectRequest:
@@ -153,7 +155,7 @@ def _request_payload_variant(variant: str, expected: core.InspectRequest) -> cor
         case "admission":
             return expected.model_copy(update={"admission_id": core.DecisionId(root="other")})
         case "payload":
-            return expected.model_copy(update={"deadline_at": expected.deadline_at + 1})
+            return expected.model_copy(update={"target": core.RequestId(root="other-target")})
         case _:
             return expected
 
@@ -162,12 +164,12 @@ def _request_payload_variant(variant: str, expected: core.InspectRequest) -> cor
     ("variant", "denial"),
     [
         ("exact", None),
-        ("intent", Missing(ProofReason.ABSENT_REQUEST)),
+        ("record", Missing(ProofReason.ABSENT_REQUEST)),
         ("observation", Missing(ProofReason.ABSENT_OBSERVATION)),
         ("episode", Missing(ProofReason.ABSENT_EPISODE)),
         ("owner_episode", Missing(ProofReason.ABSENT_EPISODE)),
         ("recorded_id", Missing(ProofReason.ABSENT_REQUEST)),
-        ("intent_identity", Mismatch(ProofField.REQUEST_ID)),
+        ("record_identity", Mismatch(ProofField.REQUEST_ID)),
         ("request_id", Mismatch(ProofField.REQUEST_ID)),
         ("scope", Mismatch(ProofField.SCOPE)),
         ("generation", Mismatch(ProofField.GENERATION)),
@@ -176,24 +178,26 @@ def _request_payload_variant(variant: str, expected: core.InspectRequest) -> cor
 )
 @given(observation_facts())
 def test_observation_requires_recorded_episode(
-    variant: str, denial: Missing | Mismatch | None, facts: tuple[core.Intent, core.Observation]
+    variant: str,
+    denial: Missing | Mismatch | None,
+    facts: tuple[core.RequestRecord, core.Observation],
 ) -> None:
-    intent, observation = facts
+    record, observation = facts
     match variant:
-        case "intent":
-            intent = None
+        case "record":
+            record = None
         case "observation":
             observation = None
-        case "owner_episode" | "recorded_id" | "intent_identity":
-            assert isinstance(intent.request, core.InspectRequest)
-            intent, _ = _recorded_request_variant(
+        case "owner_episode" | "recorded_id" | "record_identity":
+            assert isinstance(record.request, core.InspectRequest)
+            record, _ = _recorded_request_variant(
                 "recorded_episode" if variant == "owner_episode" else variant,
-                intent,
-                intent.request,
+                record,
+                record.request,
             )
         case _:
             observation = _observation_variant(variant, observation)
-    assert observation_for(intent, observation) == (
+    assert observation_for(record, observation) == (
         Proven(observation) if denial is None else denial
     )
 
@@ -247,7 +251,9 @@ def _observation_variant(variant: str, observation: core.Observation) -> core.Ob
 )
 @given(observation_facts())
 def test_fresh_observation_source_history(
-    variant: str, denial: Missing | Mismatch | None, facts: tuple[core.Intent, core.Observation]
+    variant: str,
+    denial: Missing | Mismatch | None,
+    facts: tuple[core.RequestRecord, core.Observation],
 ) -> None:
     _, incoming = facts
     history = (incoming,)
@@ -297,7 +303,7 @@ def test_fresh_observation_source_history(
 def test_resolved_observation_semantics(
     variant: str,
     denial: Missing | Mismatch | None,
-    facts: tuple[core.Intent, core.Observation],
+    facts: tuple[core.RequestRecord, core.Observation],
 ) -> None:
     _, observation = facts
     updates = {
@@ -329,10 +335,10 @@ def test_complete_source_histories_allow_first_newer_and_identical_replay(
 
 @given(observation_facts())
 def test_request_and_observation_failure_precedence(
-    facts: tuple[core.Intent, core.Observation],
+    facts: tuple[core.RequestRecord, core.Observation],
 ) -> None:
-    intent, observation = facts
-    expected = intent.request
+    record, observation = facts
+    expected = record.request
     changed = expected.model_copy(
         update={
             "request_id": core.RequestId(root="other"),
@@ -341,9 +347,9 @@ def test_request_and_observation_failure_precedence(
             ),
         }
     )
-    assert request_matches(intent, changed) == Mismatch(ProofField.REQUEST_ID)
+    assert request_matches(record, changed) == Mismatch(ProofField.REQUEST_ID)
     changed = changed.model_copy(update={"admission_id": None})
-    assert request_matches(intent, changed) == Missing(ProofReason.ABSENT_EPISODE)
+    assert request_matches(record, changed) == Missing(ProofReason.ABSENT_EPISODE)
     wrong = observation.model_copy(
         update={
             "request_id": core.RequestId(root="other"),
@@ -352,31 +358,31 @@ def test_request_and_observation_failure_precedence(
             ),
         }
     )
-    assert observation_for(intent, wrong) == Mismatch(ProofField.REQUEST_ID)
+    assert observation_for(record, wrong) == Mismatch(ProofField.REQUEST_ID)
     wrong = wrong.model_copy(update={"admission_id": None})
-    assert observation_for(intent, wrong) == Missing(ProofReason.ABSENT_EPISODE)
+    assert observation_for(record, wrong) == Missing(ProofReason.ABSENT_EPISODE)
 
 
 @given(admission_facts(), observation_facts())
 def test_same_root_different_identity_tag_never_proves_scope(
     admission: tuple[core.AttemptView, core.Scope, core.DecisionId],
-    source: tuple[core.Intent, core.Observation],
+    source: tuple[core.RequestRecord, core.Observation],
 ) -> None:
     attempt, scope, episode = admission
     assert isinstance(scope.owner, core.AttemptId)
     unrelated = scope.model_copy(update={"owner": core.RunId(root=scope.owner.root)})
     assert current_admission(attempt, unrelated, episode) == Mismatch(ProofField.SCOPE)
-    intent, observation = source
-    request = intent.request
+    record, observation = source
+    request = record.request
     assert isinstance(request.scope.owner, core.AttemptId)
     wrong_scope = request.scope.model_copy(
         update={"owner": core.RunId(root=request.scope.owner.root)}
     )
-    assert request_matches(intent, request.model_copy(update={"scope": wrong_scope})) == Mismatch(
+    assert request_matches(record, request.model_copy(update={"scope": wrong_scope})) == Mismatch(
         ProofField.SCOPE
     )
     assert observation_for(
-        intent, observation.model_copy(update={"scope": wrong_scope})
+        record, observation.model_copy(update={"scope": wrong_scope})
     ) == Mismatch(ProofField.SCOPE)
 
 
@@ -386,7 +392,7 @@ def test_same_root_different_identity_tag_never_proves_scope(
     data=st.data(),
 )
 def test_fresh_observation_failure_is_independent_of_history_order(
-    facts: tuple[core.Intent, core.Observation],
+    facts: tuple[core.RequestRecord, core.Observation],
     faults: set[str],
     data: st.DataObject,
 ) -> None:

@@ -41,6 +41,7 @@ from server.registry import (
 )
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
+from vs_core.api import StopMode
 from vs_sim.api import OsThreads, SystemClock, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
@@ -66,7 +67,7 @@ class _Session:
         self._control = control
 
     def stop(self) -> None:
-        self._control.request_stop()
+        self._control.request_stop(StopMode.DRAIN)
 
 
 def _wait_for_stop(control: RunControlChannel, threads: OsThreads) -> None:
@@ -202,7 +203,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     finally:
         if subscriber is not None:
             subscriber.close()
-        integration.control.request_stop()
+        integration.control.request_stop(StopMode.DRAIN)
         server.join(HANG_GUARD_S)
         integration.close()
 

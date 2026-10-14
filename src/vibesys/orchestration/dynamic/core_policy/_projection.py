@@ -1,16 +1,17 @@
-"""Read model of a dynamic run: the strategy state in the shape frontends already consume.
+"""Read model of a dynamic run: the search's published record in the shape frontends consume.
 
-The strategy keeps only scientific state (hypotheses, rounds, baseline, winner).
-This module copies those facts into `AgentRunProjection` without inferring any
-resolution. Ranking facts come from the metric rows the strategy accepted from
-trusted evaluation evidence, so every measured round is an official evaluation
-and no provisional number can reach the frontier.
+The search publishes only scientific state (hypotheses, rounds, workstreams, baseline, leader).
+This module copies those facts into `AgentRunProjection` without inferring any resolution.
+Ranking facts come from the metric rows the search accepted from trusted evaluation evidence,
+so every measured round is an official evaluation and no provisional number can reach the
+frontier.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
+from vibesys.candidates.api import reading
 from vibesys.hypothesis import derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -18,6 +19,7 @@ from vibesys.hypothesis.readmodel import (
     HypothesisView,
     RoundView,
 )
+from vibesys.orchestration.dynamic.search.api import FailureKind
 from vibesys.run.contracts import (
     IterationKind,
     IterationMetric,
@@ -29,46 +31,38 @@ from vibesys.run.contracts import (
 )
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.strategy.api import (
-        AttemptRecord,
-        DynamicStrategyState,
+    from vibesys.orchestration.dynamic.search.api import (
+        FinishedWork,
         HypothesisRecord,
         MetricRow,
         RoundRecord,
-        Winner,
+        RunSnapshot,
     )
 
 type Verdict = Literal["pass", "fail", "skipped"]
 
 
-def project_strategy_state(
-    state: DynamicStrategyState, *, experiment_revision: int
-) -> PluginProjection:
-    """Project one strategy state; `experiment_revision` is the core revision it was read at."""
+def project_run_snapshot(snapshot: RunSnapshot, *, experiment_revision: int) -> PluginProjection:
+    """Project one published record; `experiment_revision` is the core revision it was read at."""
     rounds = sorted(
-        (record for item in state.hypotheses for record in item.rounds),
+        (record for item in snapshot.hypotheses for record in item.rounds),
         key=lambda record: record.sequence,
     )
-    in_flight = tuple(
-        record.plan.work_id
-        for record in sorted(state.attempts, key=lambda record: record.sequence)
-        if record.phase.value != "done" and not record.withdrawn
-    )
-    active = in_flight[-1] if in_flight else None
+    in_flight = tuple(item.plan.work_id for item in snapshot.running)
     projection = AgentRunProjection(
         current_round=len(rounds),
-        objectives=tuple(f"{row.name}:{row.direction}" for row in state.baseline.metrics),
-        active_hypothesis_id=active,
+        objectives=tuple(f"{row.name}:{row.direction}" for row in _baseline_metrics(snapshot)),
+        active_hypothesis_id=in_flight[-1] if in_flight else None,
         experiment_revision=experiment_revision,
         hypotheses=[
-            _hypothesis_view(item, active=item.hypothesis_id in in_flight, state=state)
-            for item in state.hypotheses
+            _hypothesis_view(item, active=item.hypothesis_id in in_flight, snapshot=snapshot)
+            for item in snapshot.hypotheses
         ],
         rounds=[_round_view(record) for record in rounds],
     )
     return PluginProjection(
         payload=projection.model_dump(mode="json"),
-        iterations=_workstream_iterations(state),
+        iterations=_workstream_iterations(snapshot),
         rounds=tuple(
             _summary(view, record) for view, record in zip(projection.rounds, rounds, strict=True)
         ),
@@ -76,72 +70,72 @@ def project_strategy_state(
     )
 
 
-def _workstream_iterations(state: DynamicStrategyState) -> IterationTree:
-    """Expose workstreams and attempts in scheduler order, independent of completion order."""
-    workstreams: dict[str, list[AttemptRecord]] = {}
-    for record in sorted(state.attempts, key=lambda item: item.sequence):
-        workstreams.setdefault(record.plan.work_id, []).append(record)
+def _baseline_metrics(snapshot: RunSnapshot) -> tuple[MetricRow, ...]:
+    found = reading(snapshot.baseline)
+    return () if found is None else found.metrics
+
+
+def _workstream_iterations(snapshot: RunSnapshot) -> IterationTree:
+    """Expose workstreams in the order they were scheduled, whatever order they completed in."""
+    rounds = {record.sequence: record for item in snapshot.hypotheses for record in item.rounds}
     nodes: list[IterationSummary] = []
-    for work_id, attempts in workstreams.items():
+    for sequence, work_id, title, finished in sorted(
+        (
+            *(
+                (item.sequence, item.plan.work_id, item.plan.title, item)
+                for item in snapshot.finished
+            ),
+            *(
+                (item.sequence, item.plan.work_id, item.plan.title, None)
+                for item in snapshot.running
+            ),
+        ),
+        key=lambda entry: entry[0],
+    ):
+        record = rounds.get(sequence)
         root_id = f"workstream:{work_id}"
-        latest = attempts[-1]
-        root_headline = _attempt_headline(latest)
+        status = _workstream_status(finished, record)
         nodes.append(
             IterationSummary(
                 id=root_id,
                 kind=IterationKind.WORKSTREAM,
-                label=latest.plan.title or work_id,
-                ordinal=attempts[0].sequence,
-                status=_workstream_status(attempts),
-                child_count=len(attempts),
-                headline_metrics=_headline_metrics(root_headline),
+                label=title or work_id,
+                ordinal=sequence,
+                status=status,
+                child_count=1 if record is not None else 0,
+                headline_metrics=_headline_metrics(_headline(record.metrics) if record else None),
             )
         )
-        nodes.extend(
-            IterationSummary(
-                id=record.attempt.root,
-                parent_id=root_id,
-                kind=IterationKind.ATTEMPT,
-                label=f"Attempt {record.sequence}",
-                ordinal=record.sequence,
-                status=_attempt_status(record),
-                headline_metrics=_headline_metrics(_attempt_headline(record)),
+        if record is not None:
+            nodes.append(
+                IterationSummary(
+                    id=record.attempt.root,
+                    parent_id=root_id,
+                    kind=IterationKind.ATTEMPT,
+                    label=f"Attempt {sequence}",
+                    ordinal=sequence,
+                    status=status,
+                    headline_metrics=_headline_metrics(_headline(record.metrics)),
+                )
             )
-            for record in attempts
-        )
     return IterationTree.from_nodes(tuple(nodes))
 
 
-def _attempt_status(record: AttemptRecord) -> IterationStatus:
-    if record.withdrawn:
-        return IterationStatus.CANCELLED
-    if record.phase.value != "done":
+def _workstream_status(
+    finished: FinishedWork | None, record: RoundRecord | None
+) -> IterationStatus:
+    if finished is None:
         return IterationStatus.ACTIVE
-    if record.failure is not None or record.review_passed is False:
+    failure = finished.failure if record is None else record.failure or finished.failure
+    if failure is not None:
+        return (
+            IterationStatus.CANCELLED
+            if failure.kind is FailureKind.STOPPED
+            else IterationStatus.FAILED
+        )
+    if record is not None and record.review_passed is False:
         return IterationStatus.FAILED
     return IterationStatus.COMPLETED
-
-
-def _workstream_status(attempts: list[AttemptRecord]) -> IterationStatus:
-    statuses = tuple(_attempt_status(record) for record in attempts)
-    if IterationStatus.ACTIVE in statuses:
-        return IterationStatus.ACTIVE
-    if IterationStatus.COMPLETED in statuses:
-        return IterationStatus.COMPLETED
-    if statuses and all(status is IterationStatus.CANCELLED for status in statuses):
-        return IterationStatus.CANCELLED
-    return IterationStatus.FAILED
-
-
-def _attempt_headline(record: AttemptRecord) -> MetricRow | None:
-    return next(
-        (
-            reading.headline()
-            for reading in reversed(record.readings)
-            if reading.headline() is not None
-        ),
-        None,
-    )
 
 
 def _headline_metrics(headline: MetricRow | None) -> tuple[IterationMetric, ...]:
@@ -233,17 +227,13 @@ def _delta_pct(value: float, baseline: float) -> float | None:
     return None if baseline == 0 else (value - baseline) / abs(baseline) * 100.0
 
 
-def _winner_hypothesis(winner: Winner | None) -> str | None:
-    return winner.hypothesis_id if winner is not None else None
-
-
 def _hypothesis_view(
-    item: HypothesisRecord, *, active: bool, state: DynamicStrategyState
+    item: HypothesisRecord, *, active: bool, snapshot: RunSnapshot
 ) -> HypothesisView:
     rounds = item.rounds
     measured = next((record for record in reversed(rounds) if record.metrics), None)
     headline = _headline(measured.metrics) if measured is not None else None
-    base = _headline(state.baseline.metrics)
+    base = _headline(_baseline_metrics(snapshot))
     comparable = (
         base if base is not None and headline is not None and base.name == headline.name else None
     )
@@ -273,7 +263,7 @@ def _hypothesis_view(
         perf_metric_name=headline.name if headline is not None else None,
         perf_direction=headline.direction if headline is not None else None,
         perf_baseline_value=comparable.value if comparable is not None else None,
-        kept=True if _winner_hypothesis(state.winner) == item.hypothesis_id else None,
+        kept=True if snapshot.leading == item.hypothesis_id else None,
         strategy_disposition=item.strategy.value,
         strategy_reason=item.reason or None,
         active=active,

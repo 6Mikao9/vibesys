@@ -8,7 +8,7 @@ is measured once more and then counts against the candidate (see
 facts, how the stage ended (``TerminalSignal``) and what the evaluator left behind
 (``RecordState``), and asks ``classify``. No executor branches on the cause itself.
 
-Decision table (rows: how the stage ended, columns: what the evaluator wrote):
+Command table (rows: how the stage ended, columns: what the evaluator wrote):
 
 =================================  ==========  ==========  ==========
 signal                             absent      declared    outcome

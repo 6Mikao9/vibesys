@@ -24,25 +24,25 @@ from vibesys.api import (
 )
 from vibesys.api.request import load_task
 from vibesys.events import CoreEvent, CoreEventType, RunStartedData
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
 from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
-from vibesys.orchestration.evolve.models import EvolveOptions
+from vibesys.orchestration.evolve.launch import EvolveLaunch
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
-from vibesys.orchestration.issue_queue import IssueQueueOptions
+from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.multi import (
     PLUGIN as MULTI_PLUGIN,
 )
 from vibesys.orchestration.multi import (
     PROFILE_GUIDED_PLUGIN as PROFILE_MULTI_PLUGIN,
 )
-from vibesys.orchestration.multi.models import MultiOptions
+from vibesys.orchestration.multi.launch import MultiLaunch
 from vibesys.orchestration.single import (
     PLUGIN as SINGLE_PLUGIN,
 )
 from vibesys.orchestration.single import (
     PROFILE_GUIDED_PLUGIN as PROFILE_SINGLE_PLUGIN,
 )
+from vibesys.orchestration.single.launch import SingleLaunch
 from vibesys.plugin_catalog import OrchestrationRegistration
 from vibesys.run.contracts import RoundSummary
 from vibesys.run.core_services import CoreCompositionError
@@ -185,7 +185,6 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
                     "interface": "inprocess",
                     "max_rounds": 1,
                     "max_retries_per_round": 1,
-                    "judge_every": 1,
                     "official_eval_every": 1,
                 },
             )
@@ -205,25 +204,33 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
 
 def test_builtin_plugin_metadata_declares_product_policy() -> None:
     registry = built_in_orchestrations()
-    agent_options: dict[str, JsonValue] = {
+    single_options: dict[str, JsonValue] = {
         "interface": "service",
         "max_rounds": 4,
         "max_retries_per_round": 2,
-        "judge_every": 1,
         "official_eval_every": 3,
     }
-    descriptors = (
-        OrchestrationDescriptor(id="single-agent", config_version=1, options=agent_options),
-        OrchestrationDescriptor(id="multi-agent", config_version=1, options=agent_options),
+    # Only the multi search has a judge to ask every so often.
+    multi_options: dict[str, JsonValue] = {**single_options, "judge_every": 1}
+    cases = (
+        (
+            OrchestrationDescriptor(id="single-agent", config_version=1, options=single_options),
+            SingleLaunch,
+            ("roadmap",),
+        ),
+        (
+            OrchestrationDescriptor(id="multi-agent", config_version=1, options=multi_options),
+            MultiLaunch,
+            ("roadmap", "profile"),
+        ),
     )
     # A core strategy declares only the artifact directories its run-scoped turns write, and
     # resumes with exact options (no round-budget variant until core can extend limits, #2013).
-    for descriptor, paths in zip(descriptors, (("roadmap",), ("roadmap", "profile")), strict=True):
+    for descriptor, launch, paths in cases:
         registration = registry.resolve(descriptor.id)
         options = registration.parse_options(descriptor)
-        assert isinstance(options, AgentOrchestrationOptions)
+        assert isinstance(options, launch)
         assert registration.plugin.id == descriptor.id
-        assert descriptor.options == agent_options
         assert options.max_rounds == descriptor.options["max_rounds"]
         assert registration.project_max_rounds is not None
         assert registration.project_max_rounds(options) == 4
@@ -242,7 +249,7 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
     )
     registration = registry.resolve("plain")
     plain_options = registration.parse_options(plain)
-    assert isinstance(plain_options, IssueQueueOptions)
+    assert isinstance(plain_options, IssueQueueLaunch)
     assert plain.options["load_levels"] == [{"rate": 4, "duration": 20, "max_tokens": 64}]
     assert plain_options.max_rounds == plain.options["max_rounds"]
     assert registration.project_max_rounds is not None
@@ -291,7 +298,6 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
                 "selection_temperature": 1.0,
                 "frontier_bias": 0.7,
                 "bootstrap_max_attempts": 3,
-                "keep_deployments": False,
                 "max_parallelism": 2,
                 "metric_space": {
                     "objectives": [{"name": "throughput", "direction": "max"}],
@@ -317,14 +323,14 @@ def test_builtin_plugin_parsing_preserves_strict_tuples_from_persisted_json(
     parsed = registration.parse_options(descriptor)
 
     if plugin_id == "multi-agent":
-        assert isinstance(parsed, MultiOptions)
+        assert isinstance(parsed, MultiLaunch)
         observed = parsed.operator_constraints
     elif plugin_id == "plain":
-        assert isinstance(parsed, IssueQueueOptions)
+        assert isinstance(parsed, IssueQueueLaunch)
         assert parsed.load_levels is not None
         observed = tuple(level.rate for level in parsed.load_levels)
     else:
-        assert isinstance(parsed, EvolveOptions)
+        assert isinstance(parsed, EvolveLaunch)
         observed = tuple(item.name for item in parsed.metric_space.objectives)
     assert observed == expected_tuple
     if plugin_id == "plain":
@@ -353,7 +359,6 @@ def test_evolve_plugin_resumes_with_its_exact_options() -> None:
         "selection_temperature": 1.0,
         "frontier_bias": 0.7,
         "bootstrap_max_attempts": 3,
-        "keep_deployments": False,
         "max_parallelism": 2,
     }
     recorded = OrchestrationDescriptor(id="evolve", config_version=1, options=options)

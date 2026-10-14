@@ -10,7 +10,6 @@ from .types.common import (
     AssessmentKind,
     CompletionStatus,
     ContractValidationError,
-    DependencyRef,
     EvidenceId,
     EvidenceKey,
     ObservationStatus,
@@ -33,10 +32,10 @@ from .types.strategy import Accepted, Rejected, Settle, Withdraw
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.common import AttemptRef, DecisionId, InvocationRef, RevisionRef
+    from .types.common import AttemptRef, InvocationRef, RevisionRef
     from .types.evaluation import EvidenceRef
-    from .types.intents import Intent
     from .types.kernel import DecisionReceipt, SettlementContext
+    from .types.records import RequestRecord
     from .types.sessions import Invocation
     from .types.settlement import AssessmentProposal, SettlementEvent
 
@@ -88,8 +87,8 @@ def _evidence_valid(
     )
 
 
-def _turn_request_valid(intent: Intent, invocation: Invocation) -> bool:
-    request = intent.request
+def _turn_request_valid(record: RequestRecord, invocation: Invocation) -> bool:
+    request = record.request
     # SettlementContext has no registry descriptors. Receipt/wire agreement
     # cannot establish registered operation authority without that declaration.
     return (
@@ -130,11 +129,11 @@ def _invocation_valid(
     ):
         return False
     if not any(
-        intent.request_id == observation.request_id
-        and intent.request.request_id == observation.request_id
-        and intent.request.scope == scope
-        and _turn_request_valid(intent, invocation)
-        for intent in context.intents.intents
+        record.request_id == observation.request_id
+        and record.request.request_id == observation.request_id
+        and record.request.scope == scope
+        and _turn_request_valid(record, invocation)
+        for record in context.records.records
     ):
         return False
     # Sessions owns schema validation before accepting final output. Settlement
@@ -235,6 +234,11 @@ def _eligible(settlement: Settlement, owner: AttemptView, context: SettlementCon
 
 def _normalize_choice(settlement: Settlement, owner: AttemptView | None) -> Settlement:
     """Preserve requested eligibility until finalization, except cancellation."""
+    if owner is not None and owner.closure is not None and owner.closure.retention_refused:
+        # The owner refused to keep the candidate: nothing was retained, so nothing can win.
+        return settlement.model_copy(
+            update={"outcome": "failed", "eligible": False, "retention": "discard"}
+        )
     if settlement.outcome == "cancelled" or (
         owner is not None and owner.closure is not None and owner.closure.disposition == "cancel"
     ):
@@ -251,7 +255,7 @@ def _released(owner: AttemptView, settlement: Settlement) -> bool:
         or owner.closure.disposition not in ("settle", "cancel")
         or owner.closure.admission_id != owner.admission_id
         or owner.release_dependencies
-        or owner.pending_intents
+        or owner.pending_records
     ):
         return False
     return settlement.retention == "discard" or any(
@@ -326,24 +330,6 @@ def _settlement_receipt(
     return receipt if receipt is not None and _receipt_active(receipt) else None
 
 
-def _unfinished_dependency(
-    context: SettlementContext, receipt: DecisionReceipt | None
-) -> DecisionId | None:
-    if receipt is None or receipt.decision is None:
-        return None
-    completed = {
-        item.decision_id
-        for item in context.run.receipts
-        if isinstance(item.feedback, Accepted)
-        and item.feedback.decision_id == item.decision_id
-        and item.completion == CompletionStatus.SUCCEEDED
-    }
-    return next(
-        (dependency for dependency in receipt.decision.depends_on if dependency not in completed),
-        None,
-    )
-
-
 def _refuse_proposal(
     state: SettlementState,
     context: SettlementContext,
@@ -374,8 +360,6 @@ def _finalize(
     final = _normalize_choice(_accepted_settlement(pending, receipt), owner)
     final = final.model_copy(update={"eligible": _eligible(final, owner, context)})
     if not _released(owner, final):
-        return AreaChange[SettlementState](state=state)
-    if _unfinished_dependency(context, receipt) is not None:
         return AreaChange[SettlementState](state=state)
     return AreaChange[SettlementState](
         state=state.model_copy(
@@ -436,22 +420,6 @@ def _accept_proposal(
     receipt = _canonical_settlement_receipt(context, proposal)
     if receipt is not None and not _receipt_active(receipt):
         return AreaChange[SettlementState](state=state)
-    dependency = _unfinished_dependency(context, receipt)
-    if receipt is not None and dependency is not None:
-        # Frozen dependency notifications wake intents only. Reject retriably
-        # instead of accepting a request-free settlement that cannot wake up.
-        return AreaChange[SettlementState](
-            state=state,
-            events=(
-                Rejected(
-                    decision_id=receipt.decision_id,
-                    code=RejectionCode.DEPENDENCY,
-                    path=("depends_on",),
-                    detail="settlement dependency has not completed successfully",
-                    retry_after=DependencyRef(decision_id=dependency),
-                ),
-            ),
-        )
     settlement = _normalize_choice(_accepted_settlement(proposal, receipt), owner)
     if settlement.retention != "discard" and settlement.candidate is None:
         raise ContractValidationError(

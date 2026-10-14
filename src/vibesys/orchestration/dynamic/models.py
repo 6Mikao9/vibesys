@@ -13,14 +13,12 @@ from pydantic import (
     Field,
     Tag,
     field_validator,
-    model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
 
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.plan import HypothesisStrategyUpdate
-from vibesys.orchestration.agent_options import AgentOrchestrationOptions
-from vs_core.api import Waitable, WaitingForEvaluation
+from vs_core.api import RevisionReply, Value
 from vs_runtime.api import (
     AgentId,
     ProfileField,
@@ -29,29 +27,6 @@ from vs_runtime.api import (
 if TYPE_CHECKING:
     from pydantic.json_schema import JsonSchemaMode, JsonSchemaValue
     from pydantic_core import core_schema
-
-
-class DynamicOptions(AgentOrchestrationOptions):
-    """Validated policy controls for the dynamic orchestration.
-
-    The run schedules at most ``max_rounds * max_in_flight`` workstreams, new
-    or continued alike: each is one round of agent work.
-    """
-
-    max_in_flight: Annotated[int, Field(gt=0, le=32)] = 2
-    # An attempt ends once this many of its evaluations in a row fail with
-    # one failure signature (exception type and innermost source line).
-    max_repeated_failures: Annotated[int, Field(ge=2, le=32)] = 3
-    # Turns of one workstream that may end without a candidate reaching measurement before
-    # it settles as failed and its slot returns to the planner.
-    max_unmeasured_turns: Annotated[int, Field(gt=0, le=32)] = 2
-
-    @model_validator(mode="after")
-    def _supported_interface(self) -> DynamicOptions:
-        if self.interface not in {"inprocess", "service"}:
-            message = f"unsupported dynamic interface {self.interface!r}"
-            raise ValueError(message)
-        return self
 
 
 # Agent free-text fields carry no length cap. An agent cannot count characters:
@@ -490,15 +465,26 @@ def planner_response_type(
     )
 
 
-class ImplementerResult(BaseModel):
-    """An implementer's compact, evidence-linked result."""
-
-    model_config = ConfigDict(extra="forbid")
+class WorkResult(Value):
+    """An agent's compact, evidence-linked account of the work it did in its workspace."""
 
     summary: str = Field(min_length=1)
     outcome: HypothesisOutcome
     evidence: tuple[EvidenceReference, ...] = Field(default=(), max_length=8)
     next_step: str = ""
+
+
+class ImplementerResult(WorkResult, RevisionReply):
+    """What an implementer answers: its work, which core checkpoints unless it is blocked."""
+
+    @override
+    def produces_revision(self) -> bool:
+        """A blocked implementer claims no work, so core records no checkpoint for its turn."""
+        return self.outcome is not HypothesisOutcome.BLOCKED
+
+
+class ProfilerResult(WorkResult):
+    """What a profiler answers: it measures a revision and never produces one."""
 
 
 class ReviewResult(BaseModel):
@@ -511,19 +497,12 @@ class ReviewResult(BaseModel):
     feedback: str = ""
 
 
-type ImplementerReply = Waitable[ImplementerResult]
-type JudgeReply = Waitable[ReviewResult]
-
-
 __all__ = [
     "MAX_PROFILE_QUESTION_CHARS",
-    "DynamicOptions",
     "EvidenceAttributionError",
     "EvidenceReference",
     "ImplementPortfolioPlan",
-    "ImplementerReply",
     "ImplementerResult",
-    "JudgeReply",
     "PlannedWorkstream",
     "PlannerHypothesisUpdate",
     "PlannerWorkstream",
@@ -532,9 +511,10 @@ __all__ = [
     "ProfileField",
     "ProfileOffer",
     "ProfilePlan",
+    "ProfilerResult",
     "ReviewResult",
     "StrategyReason",
-    "WaitingForEvaluation",
+    "WorkResult",
     "WorkstreamKind",
     "WorkstreamPlan",
     "planned_id",

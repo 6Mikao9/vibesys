@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING
 
-from vs_core.api import HostFence, HostId
+from vs_core.api import HostFence, HostId, Until
 from vs_runtime.api.core import ExecutionContext
 
 if TYPE_CHECKING:
@@ -37,10 +37,11 @@ def context_for(
     host: str = "host",
     now_at: float = 5.0,
 ) -> ExecutionContext:
-    """The context a shell would build for *request* on one host."""
+    """The context a shell would build for *request* on one host, ending 600 s later."""
     return ExecutionContext(
         fence=HostFence(host_id=HostId(root=host), epoch=epoch),
         now_at=now_at,
+        until=Until(at=now_at + 600.0),
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
         lease=lease or RevocableLease(),
     )

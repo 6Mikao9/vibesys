@@ -12,12 +12,13 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
-from pydantic import ValidationError as PydanticValidationError
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
 
 from .proof_digest import value_digest
 from .reopen_facts import with_reopening_continuation
+from .restart import restarts
 
 
 def _request(
@@ -90,7 +91,7 @@ def _state(
             "run": state.run.model_copy(
                 update={
                     "status": core.RunStatus.PAUSED if paused else core.RunStatus.RUNNING,
-                    "limits": limits if limits is not None else core.Limits(max_attempts=20),
+                    "limits": limits if limits is not None else sample_limits(max_attempts=20),
                 }
             ),
             "attempts": core.AttemptsState(attempts=owners),
@@ -111,6 +112,8 @@ def _step(
     state: core.CoreState, event: core.CoreEvent, codec: core.OperationRegistry | None = None
 ) -> core.Transition:
     """Every boundary survives reload and leaves the input untouched."""
+    if not restarts():
+        return core.step(state, event)
     before = state.model_dump_json()
     context = {"operation_registry": codec} if codec is not None else None
     loaded = core.CoreState.model_validate_json(before, context=context)
@@ -138,7 +141,7 @@ def test_supplied_clocks_are_monotonic_and_occupancy_is_derived(
     state = _state(
         owners=tuple(_owner(request, phase=core.AttemptPhase.ACTIVE) for request in requests),
         slots=tuple(_slot(request) for request in requests),
-        limits=core.Limits(max_attempts=20, max_parallel=slots),
+        limits=sample_limits(max_attempts=20, max_parallel=slots),
     )
     now = 0
     for increment in times:
@@ -321,7 +324,7 @@ def test_admission_usage_and_refunds_have_only_receipt_authority(
     )
     owner = owner.model_copy(update={"charges": (*owner.charges, unrelated)})
     state = _state(
-        owners=(owner,), queue=(request,), paused=True, limits=core.Limits(max_attempts=budget)
+        owners=(owner,), queue=(request,), paused=True, limits=sample_limits(max_attempts=budget)
     )
     for event in (
         core.ClockAdvanced(now_at=15.0),
@@ -476,12 +479,12 @@ def test_fifo_head_cannot_be_bypassed_when_any_admission_gate_is_closed(gate: st
         queue=(head, tail),
         slots=(_slot(running),),
         paused=gate == "paused",
-        limits=core.Limits(max_attempts=20, max_parallel=1 if gate == "capacity" else 3),
+        limits=sample_limits(max_attempts=20, max_parallel=1 if gate == "capacity" else 3),
     )
     if gate == "recovery":
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
+                "records": state.records.model_copy(
                     update={"recovery": core.RecoveryBarrier(phase=core.RecoveryPhase.BLOCKED)}
                 )
             }
@@ -497,7 +500,7 @@ def test_already_paid_queue_head_admits_with_zero_remaining_admission_budget() -
     """Registration charged queued work; later capacity admission is free, K4."""
     request = _request(0)
     state = _canonical_start(
-        _state(owners=(_owner(request),), queue=(request,), limits=core.Limits(max_attempts=1)),
+        _state(owners=(_owner(request),), queue=(request,), limits=sample_limits(max_attempts=1)),
         request,
     )
     assert core.project(state).scheduling.available_tokens == 0
@@ -510,7 +513,7 @@ def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(
 ) -> None:
     """Translate HostCore no starts after stop and exactly one EndSearch."""
     state = _state()
-    decision = core.Stop(
+    decision = core.Finish(
         decision_id=core.DecisionId(root="stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode=mode,
@@ -524,7 +527,7 @@ def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(
     assert state.scheduling.admission_closed
     assert result.requests == ()
     assert sum(isinstance(event, core.RunEnded) for event in result.events) == 1
-    siblings = (state.attempts, state.sessions, state.evaluation, state.settlement, state.intents)
+    siblings = (state.attempts, state.sessions, state.evaluation, state.settlement, state.records)
     for _ in range(3):
         result = _step(
             state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
@@ -538,7 +541,7 @@ def test_stop_closes_admission_and_duplicate_stop_has_one_terminal_receipt(
             state.sessions,
             state.evaluation,
             state.settlement,
-            state.intents,
+            state.records,
         ) == siblings
 
 
@@ -572,7 +575,7 @@ def test_drain_continues_already_registered_queue_at_attempts_boundary() -> None
     """Legacy _finishing permits FIFO starts; it only rejects new admissions."""
     request = _request(0)
     state = _state(owners=(_owner(request),), queue=(request,))
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -677,7 +680,7 @@ def test_charge_end_cannot_precede_matching_episode_admission(admitted: int, ear
 
 def test_first_terminal_stop_result_survives_a_distinct_later_stop() -> None:
     state = _state()
-    first = core.Stop(
+    first = core.Finish(
         decision_id=core.DecisionId(root="first-stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -707,7 +710,7 @@ def test_first_stop_during_cleanup_keeps_its_result_and_capacity() -> None:
     state = _state(
         owners=(_owner(request, phase=core.AttemptPhase.CLOSING),), slots=(_slot(request),)
     )
-    first = core.Stop(
+    first = core.Finish(
         decision_id=core.DecisionId(root="first-stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -740,7 +743,7 @@ def test_exhausted_receipt_budget_rejects_reordered_duplicate_starts_once(order:
     state = _state(
         owners=(_owner(occupied, phase=core.AttemptPhase.ACTIVE),),
         slots=(_slot(occupied),),
-        limits=core.Limits(max_attempts=1, max_parallel=3),
+        limits=sample_limits(max_attempts=1, max_parallel=3),
     )
     seen: set[int] = set()
     for index in order:
@@ -755,7 +758,11 @@ def test_exhausted_receipt_budget_rejects_reordered_duplicate_starts_once(order:
             budget=owner.budget,
         )
         result = _step(
-            state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+            state,
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=state.revision,
+            ),
         )
         state = result.state
         assert result.requests == ()
@@ -775,12 +782,12 @@ def test_exhausted_receipt_budget_rejects_reordered_duplicate_starts_once(order:
         assert len(ids) == len(set(ids))
 
 
-def test_host_stop_requires_explicit_result_and_closes_admission() -> None:
-    """RunControl stop carries its own result proposal; scheduling never invents one."""
+def test_host_stop_with_a_result_closes_admission_and_drains() -> None:
+    """A RunControl stop that carries a result proposal drains; scheduling never invents one."""
     state = _state()
-    control = core.ControlInput(control_id=core.ControlId(root="host-stop"), action="stop")
-    with pytest.raises(PydanticValidationError, match="required exactly for stop control"):
-        core.RunControlEvent(control=control, now_at=10.0)
+    control = core.ControlInput(
+        control_id=core.ControlId(root="host-stop"), action="stop", mode=core.StopMode.DRAIN
+    )
     proposal = core.RunResultProposal(outcome="cancelled", reason="host stop")
     result = _step(state, core.RunControlEvent(control=control, now_at=10.0, result=proposal))
     assert result.state.scheduling.admission_closed
@@ -794,7 +801,25 @@ def test_host_stop_requires_explicit_result_and_closes_admission() -> None:
     assert result.state.sessions == state.sessions
     assert result.state.evaluation == state.evaluation
     assert result.state.settlement == state.settlement
-    assert result.state.intents == state.intents
+    assert result.state.records == state.records
+
+
+def test_host_stop_without_a_result_only_tells_the_search() -> None:
+    """A soft stop is recorded once and leaves the run running: the search ends the run."""
+    state = _state()
+    control = core.ControlInput(
+        control_id=core.ControlId(root="host-stop"), action="stop", mode=core.StopMode.DRAIN
+    )
+    event = core.RunControlEvent(control=control, now_at=10.0)
+    result = _step(state, event)
+    assert result.state.run.status == state.run.status
+    assert result.state.run.result is None
+    assert not result.state.scheduling.admission_closed
+    assert result.state.run.controls == (*state.run.controls, control)
+    assert [type(e) for e in result.events] == [core.ControlChanged]
+    again = _step(result.state, event)
+    assert again.state.run.controls == result.state.run.controls
+    assert again.events == ()
 
 
 @pytest.mark.parametrize(
@@ -907,7 +932,7 @@ def test_root_mutation_and_independent_workspace_leases_can_share_capacity(
         ),
         slots=(_slot(running),),
         queue=(queued,),
-        limits=core.Limits(max_attempts=2, max_parallel=2),
+        limits=sample_limits(max_attempts=2, max_parallel=2),
     )
     _assert_attempts_boundary(state, core.ClockAdvanced(now_at=10.0), "attempt_admitted")
 
@@ -937,7 +962,7 @@ def test_updated_refund_receipts_authorize_only_the_restored_admission_budget(
             )
         }
     )
-    state = _state(owners=(owner,), limits=core.Limits(max_attempts=budget))
+    state = _state(owners=(owner,), limits=sample_limits(max_attempts=budget))
     request = _request(0, charge=new_cost)
     candidate = _owner(request)
     decision = core.StartAttempt(
@@ -949,7 +974,11 @@ def test_updated_refund_receipts_authorize_only_the_restored_admission_budget(
         budget=candidate.budget,
     )
     result = _step(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     feedback = next(
         item for item in result.events if isinstance(item, core.Accepted | core.Rejected)
@@ -1184,7 +1213,6 @@ def _reopen_proof(
         core.Operation(
             decision_id=core.DecisionId(root="reentry"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
-            deadline_at=100.0,
             request=core.ScopedAdmissionReopen(
                 attempt=attempt,
                 continuation_id=core.ContinuationId(root="continuation"),
@@ -1258,7 +1286,7 @@ def test_reentry_with_exact_canonical_park_authority_creates_a_fresh_free_episod
             ),
         }
     )
-    state = _state(owners=(owner,), limits=core.Limits(max_attempts=1))
+    state = _state(owners=(owner,), limits=sample_limits(max_attempts=1))
     state, codec, reopen = _reopen_proof(state, owner)
     state = state.model_copy(
         update={"scheduling": core.SchedulingState(queue=(reopen,), released_slot_seconds=5.0)}
@@ -1332,7 +1360,7 @@ def test_cancel_of_occupied_and_queued_work_requests_retirement_before_any_relea
         slots=(_slot(occupied),),
         queue=queued,
     )
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="cancel"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="cancel",
@@ -1375,7 +1403,7 @@ def _cancel_reentry_state() -> tuple[core.CoreState, core.OperationRegistry]:
         }
     )
     state, codec, reopen = _reopen_proof(_state(owners=(owner,)), owner)
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="cancel-reentry"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="cancel",
@@ -1465,7 +1493,7 @@ def _first_drain_state() -> core.CoreState:
     state = _state(
         owners=(_owner(request, phase=core.AttemptPhase.ACTIVE),), slots=(_slot(request),)
     )
-    first = core.Stop(
+    first = core.Finish(
         decision_id=core.DecisionId(root="first-drain"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -1536,7 +1564,7 @@ def queued_root_behind_full_slot(
         ),
         slots=(_slot(running),),
         queue=(head,),
-        limits=core.Limits(max_attempts=2, max_parallel=1),
+        limits=sample_limits(max_attempts=2, max_parallel=1),
     )
     return state, core.SlotReleased(attempt=_ref(running), admission_id=running.decision_id)
 

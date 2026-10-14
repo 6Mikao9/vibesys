@@ -1,4 +1,9 @@
-"""Public surface of the policy shared by the serial hypothesis-search strategies."""
+"""Public surface of what the serial hypothesis searches (single, multi) share.
+
+The shared designer role and its prompts, the round and run records every serial search keeps,
+the flows both call (attribution capture, asking for a plan, the trusted gates) and the pure
+judgments over a finished round.
+"""
 
 from pathlib import Path
 
@@ -6,6 +11,8 @@ from vibesys.serial_search import prompts as _prompts
 from vibesys.serial_search._attribution import (
     OUTPUT_ARGUMENT,
     AttributionConfig,
+    attributed,
+    attribution_of,
     bottlenecks_of,
     capture_failure,
     focus_of,
@@ -13,6 +20,26 @@ from vibesys.serial_search._attribution import (
     observe,
     record_round,
 )
+from vibesys.serial_search._closing import (
+    FinishedRound,
+    accuracy_passed,
+    beats_input,
+    benchmark_outcome,
+    failed_gate,
+    settle,
+)
+from vibesys.serial_search._design import (
+    PLAN_CORRECTIONS,
+    AcceptedPlan,
+    Advise,
+    Designed,
+    NoDesign,
+    ask_plan,
+    capture_attribution,
+    design,
+)
+from vibesys.serial_search._ledger import LedgerJson
+from vibesys.serial_search._measure import Gated, GateResult, NotMeasured, Unreadable, measure_gates
 from vibesys.serial_search._plan_view import (
     Bottleneck,
     FrontierRow,
@@ -22,28 +49,77 @@ from vibesys.serial_search._plan_view import (
     RoundRow,
     plan_evidence,
 )
-from vibesys.serial_search._plans import accept_plan, base_commit
+from vibesys.serial_search._plans import accept_plan, base_commit, revision_of
+from vibesys.serial_search._prompts import (
+    PlanCorrection,
+    PlanPrompt,
+    PlanTemplate,
+    correction_of,
+    plan_prompt,
+)
+from vibesys.serial_search._roles import LOST_TURN_BACKOFF, ORCHESTRATOR
+from vibesys.serial_search._run import Closed, RoundDone, RoundStart, SerialRun, round_done
+from vibesys.serial_search._work import Attempting, Room, Turn, work
 
 PROMPTS_DIR = Path(_prompts.__file__).parent
-"""Where the shared `plan.j2` lives; a strategy lists it as a fallback root of its core policy."""
+"""Where the shared `plan.j2` lives; a search lists it as a fallback root of its core policy."""
 
 __all__ = [
+    "LOST_TURN_BACKOFF",
+    "ORCHESTRATOR",
     "OUTPUT_ARGUMENT",
+    "PLAN_CORRECTIONS",
     "PROMPTS_DIR",
+    "AcceptedPlan",
+    "Advise",
+    "Attempting",
     "AttributionConfig",
     "Bottleneck",
+    "Closed",
+    "Designed",
+    "FinishedRound",
     "FrontierRow",
+    "GateResult",
+    "Gated",
     "LastProfile",
+    "LedgerJson",
+    "NoDesign",
+    "NotMeasured",
     "PendingClaim",
+    "PlanCorrection",
     "PlanEvidence",
+    "PlanPrompt",
+    "PlanTemplate",
+    "Room",
+    "RoundDone",
     "RoundRow",
+    "RoundStart",
+    "SerialRun",
+    "Turn",
+    "Unreadable",
     "accept_plan",
+    "accuracy_passed",
+    "ask_plan",
+    "attributed",
+    "attribution_of",
     "base_commit",
+    "beats_input",
+    "benchmark_outcome",
     "bottlenecks_of",
+    "capture_attribution",
     "capture_failure",
+    "correction_of",
+    "design",
+    "failed_gate",
     "focus_of",
     "focus_policy",
+    "measure_gates",
     "observe",
     "plan_evidence",
+    "plan_prompt",
     "record_round",
+    "revision_of",
+    "round_done",
+    "settle",
+    "work",
 ]

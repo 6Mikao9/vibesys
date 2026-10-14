@@ -1,7 +1,7 @@
 """Pure acquisition, retained-checkpoint and receipt authority for attempts.
 
 Retirement owns closure and release dependencies. This leaf only requests that
-work through signals; canonical intents retain acquisition and write proofs.
+work through signals; canonical records retain acquisition and write proofs.
 """
 
 from __future__ import annotations
@@ -9,6 +9,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
+from ._attempt_terminal import (
+    attempt_ref,
+    attempt_scope,
+    exact_invocation_terminal,
+    identity_mismatch,
+    request_turn_matches,
+    retained_acquisition,
+    retained_sessions_for,
+    successful,
+    unresolved_acceptance,
+)
+from ._checkpoint_events import declined, retained
+from ._deadlines import from_dispatch, limit_to
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -59,6 +72,7 @@ from .types.attempts import (
     WorkspaceObserved,
 )
 from .types.common import (
+    MAX_REASK_CHAIN,
     AttemptRef,
     ChargeId,
     ChargeKind,
@@ -69,10 +83,8 @@ from .types.common import (
     InvocationRef,
     Observation,
     ObservationStatus,
-    RequestBase,
     RequestId,
     RevisionAuthority,
-    RunId,
     RunStatus,
     Scope,
     SetupFailureKind,
@@ -80,237 +92,33 @@ from .types.common import (
     WorkspaceRef,
 )
 from .types.evaluation import ContinuationPhase
-from .types.intents import InspectRequest, IntentPhase, IntentsState, RequestPrepared
 from .types.kernel import AreaChange, DecisionReceipt
+from .types.records import (
+    InspectRequest,
+    Outbound,
+    Request,
+    RequestPhase,
+    RequestPrepared,
+    within,
+)
 from .types.scheduling import AttemptReady
 from .types.sessions import (
     Access,
-    DispatchTurn,
     EnsureSession,
-    InspectTurn,
     InvocationChargeRefunded,
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
-    ResumeSessionTurn,
     SessionPhase,
     SessionsAcquireRequested,
-    SessionsState,
 )
 from .types.strategy import Operation, RequestTurn, StartAttempt
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent
     from .types.evaluation import Continuation
-    from .types.intents import Intent
     from .types.kernel import AttemptsContext
+    from .types.records import RequestRecord
     from .types.sessions import InterruptClaim, Invocation, SessionView
-
-
-def _identity_mismatch(checks: tuple[tuple[ProofField, object, object], ...]) -> Mismatch | None:
-    ordered = sorted(checks, key=lambda check: tuple(ProofField).index(check[0]))
-    return next(
-        (Mismatch(field) for field, actual, expected in ordered if actual != expected), None
-    )
-
-
-def _terminal_lease(invocation: Invocation, session: SessionView) -> Mismatch | None:
-    ref = invocation.invocation
-    return _identity_mismatch(
-        (
-            (ProofField.INVOCATION_ID, invocation.turn.invocation_id, ref.invocation_id),
-            (ProofField.SESSION_ID, session.spec.session_id, ref.session_id),
-            (ProofField.PAYLOAD, session.spec, invocation.turn.session),
-            (
-                ProofField.RESOURCE_ID,
-                invocation.observation.resource_id
-                if invocation.observation is not None
-                and invocation.observation.resource_id is not None
-                else session.resource_id,
-                session.resource_id,
-            ),
-            (ProofField.GENERATION, session.generation, ref.generation),
-        )
-    )
-
-
-def _request_turn_matches(invocation: Invocation, request: RequestBase) -> bool:
-    if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        return request.turn == invocation.turn
-    if isinstance(request, InspectTurn):
-        return request.invocation == invocation.invocation
-    return (
-        isinstance(request, ExecuteRegisteredOperation)
-        and invocation.registered_operation is not None
-        and request.operation_id == invocation.registered_operation
-    )
-
-
-def _terminal_request(
-    invocation: Invocation, intents: IntentsState, observation: Observation, episode: DecisionId
-) -> Verdict[Observation]:
-    rows = tuple(row for row in intents.intents if row.request_id == observation.request_id)
-    if not rows:
-        return Missing(ProofReason.ABSENT_REQUEST)
-    if len(rows) != 1:
-        return Mismatch(ProofField.REQUEST_ID)
-    intent = rows[0]
-    if intent.observation is not None and intent.observation != observation:
-        return Mismatch(ProofField.PAYLOAD)
-    proof = observation_for(intent, observation)
-    if not isinstance(proof, Proven):
-        return proof
-    matches = _request_turn_matches(invocation, intent.request)
-    mismatch = _identity_mismatch(
-        (
-            (ProofField.SCOPE, observation.scope, invocation.scope),
-            (ProofField.ADMISSION_ID, observation.admission_id, episode),
-            (ProofField.PAYLOAD, matches, True),
-        )
-    )
-    return mismatch if mismatch is not None else Proven(observation)
-
-
-def exact_invocation_terminal(
-    invocation: Invocation | None,
-    session: SessionView | None,
-    intents: IntentsState,
-    episode: DecisionId | None,
-) -> Verdict[Observation]:
-    if invocation is None or session is None:
-        return Missing(
-            ProofReason.ABSENT_INVOCATION if invocation is None else ProofReason.ABSENT_SESSION
-        )
-    if episode is None:
-        return Missing(ProofReason.ABSENT_EPISODE)
-    observation = invocation.observation
-    if observation is None:
-        return Missing(ProofReason.ABSENT_OBSERVATION)
-    if observation.accepted and session.resource_id is None:
-        return Missing(ProofReason.ABSENT_RESOURCE)
-    mismatch = _terminal_lease(invocation, session)
-    if mismatch is not None:
-        return mismatch
-    proof = _terminal_request(invocation, intents, observation, episode)
-    return _resolved_terminal(proof)
-
-
-def _resolved_terminal(proof: Verdict[Observation]) -> Verdict[Observation]:
-    if not isinstance(proof, Proven):
-        return proof
-    observation = proof.value
-    if (
-        not observation.terminal
-        or observation.status == ObservationStatus.PENDING
-        or _unresolved_acceptance(observation)
-    ):
-        return Missing(ProofReason.UNRESOLVED)
-    return proof
-
-
-def _retained_session(
-    attempt: AttemptView, continuation: Continuation, rows: tuple[SessionView, ...]
-) -> Verdict[SessionView]:
-    if not rows:
-        return Missing(ProofReason.ABSENT_SESSION)
-    if len(rows) != 1:
-        return Mismatch(ProofField.SESSION_ID)
-    row = rows[0]
-    if row.resource_id is None:
-        return Missing(ProofReason.ABSENT_RESOURCE)
-    if (
-        row.spec.session_id == continuation.invocation.session_id
-        and row.generation != continuation.invocation.generation
-    ):
-        return Mismatch(ProofField.GENERATION)
-    if row.scope != _scope(attempt) and (
-        not isinstance(row.scope.owner, RunId)
-        or row.spec.policy != "reuse"
-        or row.spec.lifetime != "owner"
-    ):
-        return Mismatch(ProofField.SCOPE)
-    mismatch = _identity_mismatch(
-        (
-            (
-                ProofField.SESSION_ID,
-                continuation.invocation.session_id,
-                continuation.next_invocation.session_id,
-            ),
-            (
-                ProofField.GENERATION,
-                continuation.invocation.generation,
-                continuation.next_invocation.generation,
-            ),
-        )
-    )
-    return mismatch if mismatch is not None else Proven(row)
-
-
-def _retained_acquisition(
-    attempt: AttemptView, session: SessionView, sessions: SessionsState, intents: IntentsState
-) -> bool:
-    if not any(
-        group.attempt == _ref(attempt)
-        and group.admission_id == attempt.admission_id
-        and group.phase == "ready"
-        and session.spec.session_id in group.session_ids
-        for group in sessions.acquisition_groups
-    ):
-        return False
-    return any(
-        isinstance(row.request, EnsureSession)
-        and row.request.spec == session.spec
-        and row.request.required_resource == session.resource_id
-        and row.request.scope == session.scope
-        and row.request.admission_id == attempt.admission_id
-        and row.phase == IntentPhase.COMPLETED
-        and isinstance(observation_for(row, row.observation), Proven)
-        and row.observation is not None
-        and row.observation.resource_id == session.resource_id
-        and _successful(row.observation)
-        for row in intents.intents
-    )
-
-
-def retained_sessions_for(
-    attempt: AttemptView | None,
-    continuation: Continuation | None,
-    sessions: SessionsState,
-    intents: IntentsState,
-) -> Verdict[tuple[SessionView, ...]]:
-    if attempt is None or continuation is None:
-        return Missing(ProofReason.ABSENT_INVOCATION)
-    source = invocation_for(sessions.invocations, continuation.invocation, _scope(attempt))
-    if not isinstance(source, Proven):
-        return source
-    required = tuple(dict.fromkeys((*attempt.sessions, continuation.invocation.session_id)))
-    matched: list[SessionView] = []
-    for identity in required:
-        rows = tuple(row for row in sessions.sessions if row.spec.session_id == identity)
-        proof = _retained_session(attempt, continuation, rows)
-        if not isinstance(proof, Proven):
-            return proof
-        row = proof.value
-        if identity == continuation.invocation.session_id and (
-            row.spec != source.value.turn.session
-            or (
-                row.invocation != continuation.invocation.invocation_id
-                and (
-                    row.invocation is not None
-                    or not _retained_acquisition(attempt, row, sessions, intents)
-                )
-            )
-        ):
-            return Mismatch(ProofField.INVOCATION_ID)
-        matched.append(row)
-    return Proven(tuple(matched))
-
-
-def _ref(attempt: AttemptView) -> AttemptRef:
-    return AttemptRef(attempt_id=attempt.attempt_id, generation=attempt.generation)
-
-
-def _scope(attempt: AttemptView) -> Scope:
-    return Scope(owner=attempt.attempt_id, generation=attempt.generation)
 
 
 def _identity(attempt: AttemptView, purpose: str) -> str:
@@ -325,29 +133,34 @@ def _closed(attempt: AttemptView) -> bool:
 
 
 def _find(state: AttemptsState, ref: AttemptRef) -> AttemptView | None:
-    return next((attempt for attempt in state.attempts if _ref(attempt) == ref), None)
+    return next((attempt for attempt in state.attempts if attempt_ref(attempt) == ref), None)
 
 
 def _replace(state: AttemptsState, attempt: AttemptView) -> AttemptsState:
     return state.model_copy(
         update={
             "attempts": tuple(
-                attempt if _ref(previous) == _ref(attempt) else previous
+                attempt if attempt_ref(previous) == attempt_ref(attempt) else previous
                 for previous in state.attempts
             )
         }
     )
 
 
-def _intent(context: AttemptsContext, identity: RequestId) -> Intent | None:
-    return next((row for row in context.intents.intents if row.request_id == identity), None)
+def _within_run(context: AttemptsContext, request: Request) -> Outbound:
+    """Workspace setup and restore may take the time the run has left."""
+    return within(request, limit_to(context.run, context.run.deadline_at))
 
 
-def _fresh_observation(intent: Intent, observation: Observation) -> bool:
+def _record(context: AttemptsContext, identity: RequestId) -> RequestRecord | None:
+    return next((row for row in context.records.records if row.request_id == identity), None)
+
+
+def _fresh_observation(record: RequestRecord, observation: Observation) -> bool:
     return (
-        intent.observation is None
-        or observation.sequence > intent.observation.sequence
-        or observation == intent.observation
+        record.observation is None
+        or observation.sequence > record.observation.sequence
+        or observation == record.observation
     )
 
 
@@ -357,48 +170,33 @@ def _current(attempt: AttemptView, observation: Observation) -> bool:
     )
 
 
-def _unresolved_acceptance(observation: Observation) -> bool:
-    return observation.status == ObservationStatus.UNKNOWN or (
-        observation.status == ObservationStatus.SUCCEEDED and not observation.accepted
-    )
-
-
-def _successful(observation: Observation) -> bool:
-    return (
-        observation.status == ObservationStatus.SUCCEEDED
-        and observation.accepted
-        and observation.terminal
-    )
-
-
 def _inspection(
     state: AttemptsState, context: AttemptsContext, attempt: AttemptView, observation: Observation
 ) -> AreaChange[AttemptsState]:
-    original = _intent(context, observation.request_id)
+    original = _record(context, observation.request_id)
     if (
         original is None
-        or original.request.scope != _scope(attempt)
+        or original.request.scope != attempt_scope(attempt)
         or original.request.admission_id != attempt.admission_id
         or not _fresh_observation(original, observation)
     ):
         return AreaChange(state=state)
     identity = RequestId(root=f"inspect:{observation.request_id.root}:{observation.sequence}")
-    if _intent(context, identity) is not None:
+    if _record(context, identity) is not None:
         return AreaChange(state=state)
     return AreaChange(
         state=state,
         requests=(
-            InspectRequest(
-                request_id=identity,
-                scope=_scope(attempt),
-                admission_id=attempt.admission_id,
-                deadline_at=min(
-                    context.run.deadline_at,
-                    context.run.now_at + context.run.limits.reconciliation_bound,
+            within(
+                InspectRequest(
+                    request_id=identity,
+                    scope=attempt_scope(attempt),
+                    admission_id=attempt.admission_id,
+                    target=observation.request_id,
+                    # Root lease identity remains in the original observation.
+                    resource_id=None,
                 ),
-                target=observation.request_id,
-                # Root lease identity remains in the original observation.
-                resource_id=None,
+                context.run.limits.reconciliation_bound,
             ),
         ),
     )
@@ -437,7 +235,7 @@ def _register(state: AttemptsState, event: AttemptRegistered | AttemptAdmitted) 
             or parent.closure is None
             or parent.closure.disposition != "park"
             or parent.checkpoint != event.workspace.base
-            or parent.pending_intents
+            or parent.pending_records
             or parent.release_dependencies
         ):
             raise ContractValidationError("parked_predecessor", "parked checkpoint proof required")
@@ -464,20 +262,20 @@ def _root_conflict(state: AttemptsState, context: AttemptsContext, attempt: Atte
     """Defensive recheck of the gate in Scheduling: the root has another owner or an adoption."""
     if attempt.workspace.mode != WorkspaceMode.EXCLUSIVE_ROOT:
         return False
-    return fences_root_mutation(context.settlement, context.intents) or any(
-        _ref(other) != _ref(attempt)
+    return fences_root_mutation(context.settlement, context.records) or any(
+        attempt_ref(other) != attempt_ref(attempt)
         and other.workspace.mode == WorkspaceMode.EXCLUSIVE_ROOT
         and (
             other.phase not in (AttemptPhase.QUEUED, AttemptPhase.TERMINAL, AttemptPhase.PARKED)
             or other.release_dependencies
-            or other.pending_intents
+            or other.pending_records
         )
         for other in state.attempts
     )
 
 
 def _registered(state: AttemptsState, attempt: AttemptView) -> AttemptsState:
-    if _find(state, _ref(attempt)) is not None:
+    if _find(state, attempt_ref(attempt)) is not None:
         return state
     return state.model_copy(update={"attempts": (*state.attempts, attempt)})
 
@@ -486,7 +284,7 @@ def _decline_root(
     attempt: AttemptView, context: AttemptsContext, admission_id: DecisionId
 ) -> RetireRequested:
     return RetireRequested(
-        attempt=_ref(attempt),
+        attempt=attempt_ref(attempt),
         disposition="cancel",
         authority=RequestId(root=f"root-conflict:{admission_id.root}"),
         admission_id=admission_id,
@@ -510,14 +308,14 @@ def _admit(
     ):
         registered = (
             state
-            if _find(state, _ref(attempt)) is not None
+            if _find(state, attempt_ref(attempt)) is not None
             else state.model_copy(update={"attempts": (*state.attempts, attempt)})
         )
         return AreaChange(
             state=registered,
             signals=(
                 RetireRequested(
-                    attempt=_ref(attempt),
+                    attempt=attempt_ref(attempt),
                     disposition="cancel",
                     authority=RequestId(root=f"admission-closed:{event.admission_id.root}"),
                     admission_id=event.admission_id,
@@ -538,32 +336,34 @@ def _admit(
     identity = RequestId(root=_identity(attempt, "workspace"))
     attempt = attempt.model_copy(
         update={
-            "pending_intents": (*attempt.pending_intents, identity),
+            "pending_records": (*attempt.pending_records, identity),
             "sessions": tuple(spec.session_id for spec in event.initial_sessions),
         }
     )
     registered = (
         state
-        if _find(state, _ref(attempt)) is not None
+        if _find(state, attempt_ref(attempt)) is not None
         else state.model_copy(update={"attempts": (*state.attempts, attempt)})
     )
     return AreaChange(
         state=_replace(registered, attempt),
         requests=(
-            EnsureWorkspace(
-                request_id=identity,
-                scope=_scope(attempt),
-                admission_id=attempt.admission_id,
-                deadline_at=context.run.deadline_at,
-                attempt=_ref(attempt),
-                plan=attempt.workspace,
+            _within_run(
+                context,
+                EnsureWorkspace(
+                    request_id=identity,
+                    scope=attempt_scope(attempt),
+                    admission_id=attempt.admission_id,
+                    attempt=attempt_ref(attempt),
+                    plan=attempt.workspace,
+                ),
             ),
         ),
         signals=(
             SessionsAcquireRequested(
-                attempt=_ref(attempt),
+                attempt=attempt_ref(attempt),
                 admission_id=event.admission_id,
-                scope=_scope(attempt),
+                scope=attempt_scope(attempt),
                 specs=event.initial_sessions,
             ),
         )
@@ -572,8 +372,8 @@ def _admit(
     )
 
 
-def _workspace_request_matches(attempt: AttemptView, intent: Intent) -> bool:
-    request = intent.request
+def _workspace_request_matches(attempt: AttemptView, record: RequestRecord) -> bool:
+    request = record.request
     if isinstance(request, EnsureWorkspace):
         payload_matches = request.plan == attempt.workspace
     elif isinstance(request, RestoreRevision):
@@ -582,8 +382,8 @@ def _workspace_request_matches(attempt: AttemptView, intent: Intent) -> bool:
         return False
     return (
         payload_matches
-        and request.attempt == _ref(attempt)
-        and request.scope == _scope(attempt)
+        and request.attempt == attempt_ref(attempt)
+        and request.scope == attempt_scope(attempt)
         and request.admission_id == attempt.admission_id
     )
 
@@ -597,7 +397,7 @@ def _ready(
         (
             group
             for group in context.sessions.acquisition_groups
-            if group.attempt == _ref(attempt) and group.admission_id == attempt.admission_id
+            if group.attempt == attempt_ref(attempt) and group.admission_id == attempt.admission_id
         ),
         None,
     )
@@ -609,27 +409,27 @@ def _ready(
         return AreaChange(state=state)
     if any(
         isinstance(row.request, EnsureWorkspace | RestoreRevision)
-        and row.request.scope == _scope(attempt)
+        and row.request.scope == attempt_scope(attempt)
         and row.request.admission_id == attempt.admission_id
-        and row.request_id in attempt.pending_intents
-        for row in context.intents.intents
+        and row.request_id in attempt.pending_records
+        for row in context.records.records
     ):
         return AreaChange(state=state)
     # A retained canonical observation is the durable workspace readiness proof.
     proofs = tuple(
         row
-        for row in context.intents.intents
+        for row in context.records.records
         if isinstance(row.request, EnsureWorkspace | RestoreRevision)
-        and row.request.scope == _scope(attempt)
+        and row.request.scope == attempt_scope(attempt)
         and row.request.admission_id == attempt.admission_id
     )
     if not proofs or any(
         not _workspace_request_matches(attempt, row)
-        or row.phase != IntentPhase.COMPLETED
+        or row.phase != RequestPhase.COMPLETED
         or row.observation is None
         or not _current(attempt, row.observation)
         or row.observation.request_id != row.request_id
-        or not _successful(row.observation)
+        or not successful(row.observation)
         for row in proofs
     ):
         return AreaChange(state=state)
@@ -638,12 +438,15 @@ def _ready(
     active = attempt.model_copy(update={"phase": AttemptPhase.ACTIVE})
     return AreaChange(
         state=_replace(state, active),
-        signals=(AttemptReady(attempt=_ref(active), admission_id=attempt.admission_id),),
+        signals=(AttemptReady(attempt=attempt_ref(active), admission_id=attempt.admission_id),),
     )
 
 
 def _reacquisition_ready(
-    state: AttemptsState, context: AttemptsContext, attempt: AttemptView, proofs: tuple[Intent, ...]
+    state: AttemptsState,
+    context: AttemptsContext,
+    attempt: AttemptView,
+    proofs: tuple[RequestRecord, ...],
 ) -> AreaChange[AttemptsState]:
     continuation = next(
         (
@@ -670,13 +473,13 @@ def _reacquisition_ready(
         return AreaChange(state=state)
     retained = _retained(context, attempt, continuation)
     if not isinstance(retained, Proven) or not all(
-        _retained_acquisition(attempt, row, context.sessions, context.intents)
+        retained_acquisition(attempt, row, context.sessions, context.records)
         for row in retained.value
     ):
         return AreaChange(state=state)
     required = tuple(row.spec.session_id for row in retained.value)
     if not any(
-        group.attempt == _ref(attempt)
+        group.attempt == attempt_ref(attempt)
         and group.admission_id == attempt.admission_id
         and group.phase == "ready"
         and group.session_ids == required
@@ -687,7 +490,7 @@ def _reacquisition_ready(
         state=state,
         signals=(
             ReacquisitionReady(
-                attempt=_ref(attempt),
+                attempt=attempt_ref(attempt),
                 request_id=continuation.reopen_authority,
                 admission_id=attempt.admission_id,
             ),
@@ -699,22 +502,22 @@ def _workspace(
     state: AttemptsState, context: AttemptsContext, attempt: AttemptView, event: WorkspaceObserved
 ) -> AreaChange[AttemptsState]:
     observation = event.observation
-    intent = _intent(context, observation.request_id)
+    record = _record(context, observation.request_id)
     if (
         not _current(attempt, observation)
-        or intent is None
-        or intent.request_id not in attempt.pending_intents
-        or not _fresh_observation(intent, observation)
+        or record is None
+        or record.request_id not in attempt.pending_records
+        or not _fresh_observation(record, observation)
     ):
         return AreaChange(state=state)
     if (
-        not isinstance(intent.request, EnsureWorkspace | RestoreRevision)
-        or not _workspace_request_matches(attempt, intent)
-        or intent.request.scope != _scope(attempt)
-        or intent.request.admission_id != attempt.admission_id
+        not isinstance(record.request, EnsureWorkspace | RestoreRevision)
+        or not _workspace_request_matches(attempt, record)
+        or record.request.scope != attempt_scope(attempt)
+        or record.request.admission_id != attempt.admission_id
     ):
         return AreaChange(state=state)
-    if _unresolved_acceptance(observation):
+    if unresolved_acceptance(observation):
         return _inspection(state, context, attempt, observation)
     if (
         observation.status
@@ -723,24 +526,24 @@ def _workspace(
     ):
         return _setup_failed(state, context, attempt, observation, SetupFailureKind.TRANSIENT)
     expected = (
-        intent.request.plan.base
-        if isinstance(intent.request, EnsureWorkspace)
-        else intent.request.revision
+        record.request.plan.base
+        if isinstance(record.request, EnsureWorkspace)
+        else record.request.revision
     )
     if (
         _closed(attempt)
         or attempt.phase != AttemptPhase.ACQUIRING
-        or not _successful(observation)
-        or intent.phase != IntentPhase.COMPLETED
-        or intent.observation != observation
+        or not successful(observation)
+        or record.phase != RequestPhase.COMPLETED
+        or record.observation != observation
         or event.revision != expected
     ):
         return AreaChange(state=state)
     updated = attempt.model_copy(
         update={
-            "pending_intents": tuple(
+            "pending_records": tuple(
                 identity
-                for identity in attempt.pending_intents
+                for identity in attempt.pending_records
                 if identity != observation.request_id
             )
         }
@@ -750,25 +553,26 @@ def _workspace(
 
 
 def _setup_origin(context: AttemptsContext, attempt: AttemptView, observation: Observation) -> bool:
-    intent = _intent(context, observation.request_id)
+    record = _record(context, observation.request_id)
     if (
-        intent is None
-        or intent.request.scope != _scope(attempt)
-        or intent.request.admission_id != attempt.admission_id
-        or not _fresh_observation(intent, observation)
+        record is None
+        or record.request.scope != attempt_scope(attempt)
+        or record.request.admission_id != attempt.admission_id
+        or not _fresh_observation(record, observation)
     ):
         return False
-    if isinstance(intent.request, EnsureWorkspace | RestoreRevision):
-        return intent.request_id in attempt.pending_intents and intent.request.attempt == _ref(
-            attempt
+    if isinstance(record.request, EnsureWorkspace | RestoreRevision):
+        return (
+            record.request_id in attempt.pending_records
+            and record.request.attempt == attempt_ref(attempt)
         )
-    if isinstance(intent.request, EnsureSession):
+    if isinstance(record.request, EnsureSession):
         return any(
-            group.attempt == _ref(attempt)
+            group.attempt == attempt_ref(attempt)
             and group.admission_id == attempt.admission_id
             and group.failure_request == observation.request_id
             and group.phase == "failed"
-            and intent.request.spec.session_id in group.session_ids
+            and record.request.spec.session_id in group.session_ids
             for group in context.sessions.acquisition_groups
         )
     return False
@@ -783,7 +587,7 @@ def _setup_failed(
 ) -> AreaChange[AttemptsState]:
     if not _current(attempt, observation) or not _setup_origin(context, attempt, observation):
         return AreaChange(state=state)
-    if _unresolved_acceptance(observation) or (
+    if unresolved_acceptance(observation) or (
         failure == SetupFailureKind.UNKNOWN and not observation.terminal
     ):
         return _inspection(state, context, attempt, observation)
@@ -826,10 +630,12 @@ def _setup_failed(
     updated = attempt.model_copy(update={"charges": charges})
     return AreaChange(
         state=_replace(state, updated),
-        events=(AttemptExhausted(attempt=_ref(attempt), reason="paid-limit"),) if exhausted else (),
+        events=(AttemptExhausted(attempt=attempt_ref(attempt), reason="paid-limit"),)
+        if exhausted
+        else (),
         signals=(
             RetireRequested(
-                attempt=_ref(attempt),
+                attempt=attempt_ref(attempt),
                 disposition="cancel",
                 authority=RequestId(root=_identity(attempt, "setup-retirement")),
                 admission_id=attempt.admission_id,
@@ -842,13 +648,13 @@ def _setup_failed(
 def _invocation(
     context: AttemptsContext, attempt: AttemptView, ref: InvocationRef
 ) -> Invocation | None:
-    proof = invocation_for(context.sessions.invocations, ref, _scope(attempt))
+    proof = invocation_for(context.sessions.invocations, ref, attempt_scope(attempt))
     return proof.value if isinstance(proof, Proven) else None
 
 
 def _session_scope(context: AttemptsContext, attempt: AttemptView, session: SessionView) -> bool:
     return session.scope in (
-        _scope(attempt),
+        attempt_scope(attempt),
         Scope(owner=context.run.run_id, generation=context.run.generation),
     )
 
@@ -869,7 +675,7 @@ def _session(
 def _retained(
     context: AttemptsContext, attempt: AttemptView, continuation: Continuation
 ) -> Verdict[tuple[SessionView, ...]]:
-    proof = retained_sessions_for(attempt, continuation, context.sessions, context.intents)
+    proof = retained_sessions_for(attempt, continuation, context.sessions, context.records)
     if isinstance(proof, Proven) and not all(
         _session_scope(context, attempt, row) for row in proof.value
     ):
@@ -880,7 +686,7 @@ def _retained(
 def _terminal(context: AttemptsContext, invocation: Invocation, attempt: AttemptView) -> bool:
     session = _session(context, attempt, invocation.invocation)
     return _billing_origin(context, attempt, invocation) and isinstance(
-        exact_invocation_terminal(invocation, session, context.intents, attempt.admission_id),
+        exact_invocation_terminal(invocation, session, context.records, attempt.admission_id),
         Proven,
     )
 
@@ -903,7 +709,7 @@ def _correction_allowed(
             depth += 1
         child = previous
         predecessor = previous.turn.predecessor if previous.turn.charge_class != "resume" else None
-    return depth > 0 and depth <= min(attempt.budget.retry_limit, context.run.limits.max_retries)
+    return depth > 0 and depth <= MAX_REASK_CHAIN
 
 
 def _initial_session_acquisition(
@@ -913,7 +719,7 @@ def _initial_session_acquisition(
     return (
         session.phase == SessionPhase.ACQUIRING
         and session.invocation == ref.invocation_id
-        and bool(session.pending_intents)
+        and bool(session.pending_records)
         and not any(
             row.invocation.session_id == ref.session_id and row.invocation != ref
             for row in context.sessions.invocations
@@ -952,7 +758,7 @@ def _billing_origin(context: AttemptsContext, attempt: AttemptView, invocation: 
                 and row.decision.registered_turn == invocation.turn
             )
         )
-        and row.decision.scope == _scope(attempt)
+        and row.decision.scope == attempt_scope(attempt)
         and isinstance(
             accepted_receipt_for(context.run.receipts, row.decision_id, row.decision), Proven
         )
@@ -960,16 +766,16 @@ def _billing_origin(context: AttemptsContext, attempt: AttemptView, invocation: 
     return len(origins) == 1 and (
         (invocation.phase == SessionPhase.ACQUIRING and invocation.observation is None)
         or any(
-            _request_turn_matches(invocation, row.request)
+            request_turn_matches(invocation, row.request)
             and (
                 not isinstance(row.request, ExecuteRegisteredOperation)
                 or isinstance(operation_for(context.run.receipts, row.request), Proven)
             )
-            and row.request.scope == _scope(attempt)
+            and row.request.scope == attempt_scope(attempt)
             and row.request.admission_id == attempt.admission_id
             and row.request.decision_id == origins[0].decision_id
             and row.request_id in origins[0].request_ids
-            for row in context.intents.intents
+            for row in context.records.records
         )
     )
 
@@ -997,7 +803,9 @@ def _chargeable_invocation(
     invocation = _invocation(context, attempt, ref)
     if (
         attempt.phase != AttemptPhase.ACTIVE
-        or not isinstance(current_admission(attempt, _scope(attempt), attempt.admission_id), Proven)
+        or not isinstance(
+            current_admission(attempt, attempt_scope(attempt), attempt.admission_id), Proven
+        )
         or _closed(attempt)
         or invocation is None
         or invocation.phase in (SessionPhase.UNKNOWN, SessionPhase.CLOSING, SessionPhase.TERMINAL)
@@ -1005,10 +813,10 @@ def _chargeable_invocation(
             invocation.observation is not None
             and (
                 not _current(attempt, invocation.observation)
-                or _unresolved_acceptance(invocation.observation)
+                or unresolved_acceptance(invocation.observation)
                 or not isinstance(
                     observation_for(
-                        _intent(context, invocation.observation.request_id), invocation.observation
+                        _record(context, invocation.observation.request_id), invocation.observation
                     ),
                     Proven,
                 )
@@ -1025,7 +833,7 @@ def _chargeable_invocation(
             if isinstance(invocation.turn.workspace, WorkspaceRef)
             else invocation.turn.workspace
         )
-        != _scope(attempt)
+        != attempt_scope(attempt)
         or (
             isinstance(invocation.turn.workspace, WorkspaceRef)
             and invocation.turn.workspace.mode != attempt.workspace.mode
@@ -1141,7 +949,8 @@ def _charge(
         and (charge_class == "correction" or invocation.turn.predecessor is not None)
     ) and not _correction_allowed(context, attempt, invocation):
         return AreaChange(
-            state=state, events=(AttemptExhausted(attempt=_ref(attempt), reason="retry-limit"),)
+            state=state,
+            events=(AttemptExhausted(attempt=attempt_ref(attempt), reason="retry-limit"),),
         )
     if charge_class == "resume" and _resume_source(context, attempt, invocation) is None:
         return AreaChange(state=state)
@@ -1152,7 +961,8 @@ def _charge(
     )
     if charge_class == "paid" and spent >= attempt.budget.paid_invocation_limit:
         return AreaChange(
-            state=state, events=(AttemptExhausted(attempt=_ref(attempt), reason="paid-limit"),)
+            state=state,
+            events=(AttemptExhausted(attempt=attempt_ref(attempt), reason="paid-limit"),),
         )
     charges = (
         ChargeReceipt(
@@ -1240,7 +1050,7 @@ def _checkpoint_decline(
         # Dispatch of an ordinary mutation needs a live episode; closure retains instead.
         return CheckpointDecline.NOT_ACTIVE
     if any(
-        row.scope == _scope(attempt)
+        row.scope == attempt_scope(attempt)
         and row.invocation != invocation.invocation
         and row.turn.session.access == Access.WRITE_CANDIDATE
         and not _terminal(context, row, attempt)
@@ -1263,7 +1073,55 @@ def _decline_checkpoint(
     updated = attempt.model_copy(
         update={"checkpoint_declines": (*attempt.checkpoint_declines, row)}
     )
-    return AreaChange(state=_replace(state, updated))
+    return AreaChange(state=_replace(state, updated), events=declined(event.invocation, reason))
+
+
+def _resume_deferred_checkpoint(
+    state: AttemptsState,
+    context: AttemptsContext,
+    attempt: AttemptView,
+    event: InvocationEnded,
+) -> AreaChange[AttemptsState]:
+    """Keep the promise of a ``WRITER_ACTIVE`` decline when the later writer ends empty-handed.
+
+    A conclusive write turn that ends while another writer of the workspace is still running
+    is declined, because a snapshot would be torn; the decline leaves the checkpoint to the
+    later writer's own terminal turn. That turn earns one only when it succeeds. When it
+    fails (crash, timeout, bad reply, cancellation) it requests nothing, and the earlier
+    writer's work would stay unretained: a search that keeps its revision then has the
+    closure's retention rejected, and the attempt never releases. So every end of a writer
+    that earns no checkpoint of its own asks again for the last deferred one; if another
+    writer is still running, the ask is declined again, silently, and the next end repeats it.
+    """
+    ended = _invocation(context, attempt, event.invocation)
+    if (
+        ended is None
+        or ended.turn.session.access != Access.WRITE_CANDIDATE
+        or retains_write_turn(ended)
+    ):
+        return AreaChange(state=state)
+    deferred = [
+        row
+        for row in attempt.checkpoint_declines
+        if row.reason == CheckpointDecline.WRITER_ACTIVE
+        and row.authority == write_turn_authority(row.invocation)
+        and row.authority not in attempt.pending_records
+        and all(checkpoint.request_id != row.authority for checkpoint in attempt.checkpoints)
+    ]
+    if not deferred:
+        return AreaChange(state=state)
+    last = deferred[-1]
+    return AreaChange(
+        state=state,
+        signals=(
+            InvocationCheckpointRequested(
+                attempt=attempt_ref(attempt),
+                invocation=last.invocation,
+                retention="wip",
+                authority=last.authority,
+            ),
+        ),
+    )
 
 
 def _checkpoint_request(
@@ -1283,7 +1141,7 @@ def _checkpoint_request(
     identity = event.authority
     if (
         any(checkpoint.request_id == identity for checkpoint in attempt.checkpoints)
-        or identity in attempt.pending_intents
+        or identity in attempt.pending_records
     ):
         return AreaChange(state=state)
     declined = _checkpoint_decline(context, attempt, invocation, identity)
@@ -1291,15 +1149,14 @@ def _checkpoint_request(
         return _decline_checkpoint(state, attempt, event, declined)
     request = SnapshotAndRetain(
         request_id=identity,
-        scope=_scope(attempt),
+        scope=attempt_scope(attempt),
         admission_id=attempt.admission_id,
-        deadline_at=context.run.deadline_at,
-        attempt=_ref(attempt),
+        attempt=attempt_ref(attempt),
         retention=event.retention,
         invocation=event.invocation,
     )
-    updated = attempt.model_copy(update={"pending_intents": (*attempt.pending_intents, identity)})
-    return AreaChange(state=_replace(state, updated), requests=(request,))
+    updated = attempt.model_copy(update={"pending_records": (*attempt.pending_records, identity)})
+    return AreaChange(state=_replace(state, updated), requests=(_within_run(context, request),))
 
 
 def _checkpoint_acknowledged(
@@ -1315,13 +1172,13 @@ def _checkpoint_acknowledged(
     runs it through the same validation as an explicit InvocationCheckpointed.
     """
     observation = event.observation
-    intent = _intent(context, observation.request_id)
-    request = intent.request if intent is not None else None
+    record = _record(context, observation.request_id)
+    request = record.request if record is not None else None
     if (
         not isinstance(request, SnapshotAndRetain)
         or request.invocation is None
-        or request.attempt != _ref(attempt)
-        or observation.request_id not in attempt.pending_intents
+        or request.attempt != attempt_ref(attempt)
+        or observation.request_id not in attempt.pending_records
         or not _current(attempt, observation)
         or not observation.terminal
     ):
@@ -1343,7 +1200,7 @@ def _checkpoint_acknowledged(
             context,
             attempt,
             InvocationCheckpointed(
-                attempt=_ref(attempt),
+                attempt=attempt_ref(attempt),
                 revision=event.revision,
                 charge=charge,
                 invocation=request.invocation,
@@ -1351,24 +1208,21 @@ def _checkpoint_acknowledged(
             ),
         )
     # A conclusive failure retains nothing here; release must not wait on it forever.
+    failed = CheckpointDecline.SNAPSHOT_FAILED
     updated = attempt.model_copy(
         update={
-            "pending_intents": tuple(
-                identity
-                for identity in attempt.pending_intents
-                if identity != observation.request_id
+            "pending_records": tuple(
+                rid for rid in attempt.pending_records if rid != observation.request_id
             ),
             "checkpoint_declines": (
                 *attempt.checkpoint_declines,
                 CheckpointDeclined(
-                    invocation=request.invocation,
-                    authority=observation.request_id,
-                    reason=CheckpointDecline.SNAPSHOT_FAILED,
+                    invocation=request.invocation, authority=observation.request_id, reason=failed
                 ),
             ),
         }
     )
-    return AreaChange(state=_replace(state, updated))
+    return AreaChange(state=_replace(state, updated), events=declined(request.invocation, failed))
 
 
 def _checkpointed(
@@ -1380,7 +1234,7 @@ def _checkpointed(
     if any(row.request_id == event.checkpoint_request for row in attempt.checkpoints):
         return AreaChange(state=state)
     invocation = _invocation(context, attempt, event.invocation)
-    intent = _intent(context, event.checkpoint_request)
+    record = _record(context, event.checkpoint_request)
     if (
         invocation is None
         or not _terminal(context, invocation, attempt)
@@ -1391,40 +1245,41 @@ def _checkpointed(
     ):
         return AreaChange(state=state)
     if (
-        intent is None
-        or not isinstance(intent.request, SnapshotAndRetain)
-        or intent.request.scope != _scope(attempt)
-        or intent.request.attempt != _ref(attempt)
-        or intent.request.retention != "wip"
-        or intent.request.invocation != event.invocation
-        or intent.request.admission_id != attempt.admission_id
-        or intent.request_id not in attempt.pending_intents
-        or intent.phase != IntentPhase.COMPLETED
-        or intent.observation is None
-        or intent.observation.request_id != event.checkpoint_request
-        or not _current(attempt, intent.observation)
-        or not _successful(intent.observation)
-        or intent.observation.revision != event.revision
+        record is None
+        or not isinstance(record.request, SnapshotAndRetain)
+        or record.request.scope != attempt_scope(attempt)
+        or record.request.attempt != attempt_ref(attempt)
+        or record.request.retention != "wip"
+        or record.request.invocation != event.invocation
+        or record.request.admission_id != attempt.admission_id
+        or record.request_id not in attempt.pending_records
+        or record.phase != RequestPhase.COMPLETED
+        or record.observation is None
+        or record.observation.request_id != event.checkpoint_request
+        or not _current(attempt, record.observation)
+        or not successful(record.observation)
+        or record.observation.revision != event.revision
     ):
         return AreaChange(state=state)
     checkpoint = AttemptCheckpoint(
         invocation=event.invocation,
         request_id=event.checkpoint_request,
         revision=event.revision,
-        retention=intent.request.retention,
+        retention=record.request.retention,
     )
     updated = attempt.model_copy(
         update={
             "checkpoints": (*attempt.checkpoints, checkpoint),
-            "pending_intents": tuple(
+            "pending_records": tuple(
                 identity
-                for identity in attempt.pending_intents
+                for identity in attempt.pending_records
                 if identity != event.checkpoint_request
             ),
         }
     )
     return AreaChange(
         state=_replace(state, updated),
+        events=retained(event.invocation, checkpoint.revision),
         signals=(
             InvocationCheckpointAvailable(
                 invocation=event.invocation,
@@ -1490,7 +1345,7 @@ def refund_for(
     if claim is None or checkpoint is None or invocation is None:
         return Missing(ProofReason.ABSENT_INVOCATION)
     charge = rows[0]
-    mismatch = _identity_mismatch(
+    mismatch = identity_mismatch(
         (
             (ProofField.INVOCATION_ID, charge.invocation_id, invocation.invocation.invocation_id),
             (ProofField.INVOCATION_ID, claim.invocation, invocation.invocation),
@@ -1538,7 +1393,8 @@ def _refund(
     )
     if refunded + event.amount > context.run.limits.max_refunds:
         return AreaChange(
-            state=state, events=(AttemptExhausted(attempt=_ref(attempt), reason="refund-limit"),)
+            state=state,
+            events=(AttemptExhausted(attempt=attempt_ref(attempt), reason="refund-limit"),),
         )
     if (
         charge.kind == ChargeKind.ATTEMPT
@@ -1547,7 +1403,8 @@ def _refund(
         > attempt.budget.refund_limit
     ):
         return AreaChange(
-            state=state, events=(AttemptExhausted(attempt=_ref(attempt), reason="refund-limit"),)
+            state=state,
+            events=(AttemptExhausted(attempt=attempt_ref(attempt), reason="refund-limit"),),
         )
     receipt = charge.model_copy(
         update={
@@ -1585,7 +1442,9 @@ def _reacquire(
     if (
         attempt.phase != AttemptPhase.ACQUIRING
         or _closed(attempt)
-        or not isinstance(current_admission(attempt, _scope(attempt), event.admission_id), Proven)
+        or not isinstance(
+            current_admission(attempt, attempt_scope(attempt), event.admission_id), Proven
+        )
         or attempt.admission_id != event.admission_id
         or attempt.checkpoint != event.base
     ):
@@ -1620,26 +1479,28 @@ def _reacquire(
         decline = (_decline_root(attempt, context, event.admission_id),) if conflict else ()
         return AreaChange(state=state, signals=decline)
     identity = RequestId(root=_identity(attempt, f"restore:{event.request_id.root}"))
-    if identity in attempt.pending_intents or _intent(context, identity) is not None:
+    if identity in attempt.pending_records or _record(context, identity) is not None:
         return AreaChange(state=state)
-    updated = attempt.model_copy(update={"pending_intents": (*attempt.pending_intents, identity)})
+    updated = attempt.model_copy(update={"pending_records": (*attempt.pending_records, identity)})
     return AreaChange(
         state=_replace(state, updated),
         requests=(
-            RestoreRevision(
-                request_id=identity,
-                scope=_scope(attempt),
-                admission_id=attempt.admission_id,
-                deadline_at=context.run.deadline_at,
-                attempt=_ref(attempt),
-                revision=event.base,
+            _within_run(
+                context,
+                RestoreRevision(
+                    request_id=identity,
+                    scope=attempt_scope(attempt),
+                    admission_id=attempt.admission_id,
+                    attempt=attempt_ref(attempt),
+                    revision=event.base,
+                ),
             ),
         ),
         signals=(
             SessionsAcquireRequested(
-                attempt=_ref(attempt),
+                attempt=attempt_ref(attempt),
                 admission_id=event.admission_id,
-                scope=_scope(attempt),
+                scope=attempt_scope(attempt),
                 specs=tuple(row.spec for row in sessions),
             ),
         )
@@ -1651,7 +1512,9 @@ def _reacquire(
 def _revision_request(
     state: AttemptsState, context: AttemptsContext, event: RevisionOperationRequested
 ) -> AreaChange[AttemptsState]:
-    attempt = next((row for row in state.attempts if _scope(row) == event.request.scope), None)
+    attempt = next(
+        (row for row in state.attempts if attempt_scope(row) == event.request.scope), None
+    )
     # Retirement owns DISCARD; acquisition has no canonical disposal signal.
     if (
         attempt is None
@@ -1666,7 +1529,9 @@ def _revision_request(
             operation_for(
                 context.run.receipts,
                 RequestPrepared(
-                    request=event.request, lifecycle=event.request.operation.schema_ref.lifecycle
+                    request=event.request,
+                    until=event.until,
+                    lifecycle=event.request.operation.schema_ref.lifecycle,
                 ),
             ),
             Proven,
@@ -1686,15 +1551,15 @@ def _revision_request(
     ):
         return AreaChange(state=state)
     if any(
-        row.scope == _scope(attempt)
+        row.scope == attempt_scope(attempt)
         and row.turn.session.access == Access.WRITE_CANDIDATE
         and not _terminal(context, row, attempt)
         for row in context.sessions.invocations
     ):
         return AreaChange(state=state)
     if (
-        event.request.request_id in attempt.pending_intents
-        or _intent(context, event.request.request_id) is not None
+        event.request.request_id in attempt.pending_records
+        or _record(context, event.request.request_id) is not None
     ):
         return AreaChange(state=state)
     # DISCARD releases the workspace hold, which only closure may do: Retirement dispatches a
@@ -1703,9 +1568,12 @@ def _revision_request(
     if event.authority == RevisionAuthority.DISCARD:
         return AreaChange(state=state)
     updated = attempt.model_copy(
-        update={"pending_intents": (*attempt.pending_intents, event.request.request_id)}
+        update={"pending_records": (*attempt.pending_records, event.request.request_id)}
     )
-    return AreaChange(state=_replace(state, updated), requests=(event.request,))
+    return AreaChange(
+        state=_replace(state, updated),
+        requests=(Outbound(request=event.request, until=from_dispatch(context.run, event.until)),),
+    )
 
 
 type AcquisitionEvent = (
@@ -1739,7 +1607,7 @@ def advance(
             None,
         )
         if owner is None or event.history != produce_history(
-            scope, context.evaluation, context.intents, owner, context.run
+            scope, context.evaluation, context.records, owner, context.run
         ):
             raise ContractError(("history",), "requires canonical measurement coverage")
         if any(record not in event.history.records for record in owner.evaluation_history.records):
@@ -1845,7 +1713,7 @@ def _advance_registration(
         return AreaChange(state=state)
     if isinstance(event, AttemptRegistered):
         attempt = _register(state, event)
-        if _find(state, _ref(attempt)) is not None:
+        if _find(state, attempt_ref(attempt)) is not None:
             return AreaChange(state=state)
         return AreaChange(state=state.model_copy(update={"attempts": (*state.attempts, attempt)}))
     if isinstance(event, AttemptAdmitted):
@@ -1858,29 +1726,31 @@ def _advance_registration(
 def _revision_observed(
     state: AttemptsState, context: AttemptsContext, event: RevisionOperationObserved
 ) -> AreaChange[AttemptsState]:
-    attempt = next((row for row in state.attempts if _scope(row) == event.observation.scope), None)
-    intent = _intent(context, event.observation.request_id)
+    attempt = next(
+        (row for row in state.attempts if attempt_scope(row) == event.observation.scope), None
+    )
+    record = _record(context, event.observation.request_id)
     if (
         attempt is None
-        or intent is None
-        or not isinstance(intent.request, ExecuteRegisteredOperation)
-        or intent.request.operation_id != event.operation_id
-        or intent.request.scope != _scope(attempt)
-        or intent.request.admission_id != attempt.admission_id
-        or not _fresh_observation(intent, event.observation)
+        or record is None
+        or not isinstance(record.request, ExecuteRegisteredOperation)
+        or record.request.operation_id != event.operation_id
+        or record.request.scope != attempt_scope(attempt)
+        or record.request.admission_id != attempt.admission_id
+        or not _fresh_observation(record, event.observation)
         or not _current(attempt, event.observation)
-        or event.observation.request_id not in attempt.pending_intents
+        or event.observation.request_id not in attempt.pending_records
     ):
         return AreaChange(state=state)
-    if _unresolved_acceptance(event.observation):
+    if unresolved_acceptance(event.observation):
         return _inspection(state, context, attempt, event.observation)
     if not event.observation.terminal:
         return AreaChange(state=state)
     updated = attempt.model_copy(
         update={
-            "pending_intents": tuple(
+            "pending_records": tuple(
                 identity
-                for identity in attempt.pending_intents
+                for identity in attempt.pending_records
                 if identity != event.observation.request_id
             )
         }
@@ -1890,11 +1760,11 @@ def _revision_observed(
 
 def is_invocation_snapshot(context: AttemptsContext, event: WorkspaceObserved) -> bool:
     """Whether a workspace observation answers an invocation's checkpoint request."""
-    intent = _intent(context, event.observation.request_id)
+    record = _record(context, event.observation.request_id)
     return (
-        intent is not None
-        and isinstance(intent.request, SnapshotAndRetain)
-        and intent.request.invocation is not None
+        record is not None
+        and isinstance(record.request, SnapshotAndRetain)
+        and record.request.invocation is not None
     )
 
 
@@ -1918,7 +1788,7 @@ def _advance_acquisition(
             (
                 row
                 for row in context.sessions.acquisition_groups
-                if row.attempt == _ref(attempt) and row.admission_id == attempt.admission_id
+                if row.attempt == attempt_ref(attempt) and row.admission_id == attempt.admission_id
             ),
             None,
         )
@@ -1933,14 +1803,14 @@ def _advance_acquisition(
     if isinstance(event, InitialSessionsFailed) and (
         event.admission_id != attempt.admission_id
         or not any(
-            group.attempt == _ref(attempt)
+            group.attempt == attempt_ref(attempt)
             and group.admission_id == attempt.admission_id
             and event.session_id in group.session_ids
             for group in context.sessions.acquisition_groups
         )
-        or (intent := _intent(context, event.observation.request_id)) is None
-        or not isinstance(intent.request, EnsureSession)
-        or intent.request.spec.session_id != event.session_id
+        or (record := _record(context, event.observation.request_id)) is None
+        or not isinstance(record.request, EnsureSession)
+        or record.request.spec.session_id != event.session_id
     ):
         return AreaChange(state=state)
     return _setup_failed(state, context, attempt, event.observation, event.failure)
@@ -1962,15 +1832,24 @@ def _advance_accounting(
     if (
         observation is not None
         and _current(attempt, observation)
-        and _unresolved_acceptance(observation)
+        and unresolved_acceptance(observation)
     ):
         return _inspection(state, context, attempt, observation)
     if isinstance(event, InvocationChargeRequested):
         return _charge(state, context, attempt, event)
-    if isinstance(event, InvocationCheckpointRequested):
-        return _checkpoint_request(state, context, attempt, event)
-    if isinstance(event, InvocationCheckpointed):
-        return _checkpointed(state, context, attempt, event)
     if isinstance(event, AttemptChargeRefundRequested):
         return _refund(state, context, attempt, event)
-    return AreaChange(state=state)
+    return _advance_checkpoint(state, context, attempt, event)
+
+
+def _advance_checkpoint(
+    state: AttemptsState,
+    context: AttemptsContext,
+    attempt: AttemptView,
+    event: InvocationEnded | InvocationCheckpointRequested | InvocationCheckpointed,
+) -> AreaChange[AttemptsState]:
+    if isinstance(event, InvocationEnded):
+        return _resume_deferred_checkpoint(state, context, attempt, event)
+    if isinstance(event, InvocationCheckpointRequested):
+        return _checkpoint_request(state, context, attempt, event)
+    return _checkpointed(state, context, attempt, event)

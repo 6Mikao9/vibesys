@@ -49,7 +49,6 @@ def _turn() -> core.TurnSpec:
         workspace=core.Scope(owner=core.RunId(root="run"), generation=0),
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=10.0,
         charge_class="paid",
     )
 

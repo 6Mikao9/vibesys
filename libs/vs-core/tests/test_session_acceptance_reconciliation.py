@@ -27,7 +27,6 @@ def turn(identity: str = "planner", charge: str = "free") -> core.TurnSpec:
             "workspace": scope(),
             "prompts": (),
             "output_schema": core.SchemaRef(name="plan", version=1),
-            "deadline_at": 100.0,
             "charge_class": charge,
         }
     )
@@ -42,11 +41,7 @@ def invocation(spec: core.TurnSpec) -> core.InvocationRef:
 def waiting_turn_state(spec: core.TurnSpec) -> core.CoreState:
     state = core.initial_state()
     state = state.model_copy(
-        update={
-            "run": state.run.model_copy(
-                update={"limits": state.run.limits.model_copy(update={"max_retries": 2})}
-            )
-        }
+        update={"run": state.run.model_copy(update={"limits": state.run.limits})}
     )
     return state.model_copy(
         update={
@@ -63,6 +58,7 @@ def waiting_turn_state(spec: core.TurnSpec) -> core.CoreState:
                 ),
                 invocations=(
                     core.Invocation(
+                        until=core.Until(at=100.0),
                         invocation=invocation(spec),
                         scope=scope(),
                         turn=spec,
@@ -167,11 +163,16 @@ def test_unacknowledged_success_requests_exact_inspection_and_fences_session_reu
     assert isinstance(result.events[0], core.TurnResult)
     assert result.events[0].output_json == event.output_json
     with pytest.raises(core.ContractValidationError, match="session"):
-        core.step(result.state, core.TurnRequested(scope=scope(), turn=turn(identity="successor")))
+        core.step(
+            result.state,
+            core.TurnRequested(
+                until=core.Until(at=100.0), scope=scope(), turn=turn(identity="successor")
+            ),
+        )
     replay = reload_step(result.state, event)
     assert replay.requests == ()
     assert replay.events == ()
-    assert inspection in core.pending_requests(replay.state.intents)
+    assert inspection in core.pending_requests(replay.state.records)
 
 
 @given(
@@ -198,11 +199,14 @@ def test_unacknowledged_terminal_proof_keeps_one_inspection_and_reserved_payload
             update={"predecessor": event.invocation} if charge == "correction" else {}
         )
         with pytest.raises(core.ContractValidationError, match="session"):
-            core.step(result.state, core.TurnRequested(scope=scope(), turn=successor))
+            core.step(
+                result.state,
+                core.TurnRequested(until=core.Until(at=100.0), scope=scope(), turn=successor),
+            )
         state = result.state
     assert len(inspections) == 1
     assert len(outputs) == 1
-    pending = core.pending_requests(state.intents)
+    pending = core.pending_requests(state.records)
     assert len([row for row in pending if isinstance(row, core.InspectTurn)]) == 1
 
 

@@ -1,4 +1,11 @@
-"""The dynamic projector shows only recorded, official facts, from live state or the stored record."""
+"""The dynamic projector shows only recorded, official facts, from the published record.
+
+The search publishes a `RunSnapshot`; `project_run_snapshot` turns it into the iteration tree,
+the rounds and the agent projection frontends read. Its properties are stated over generated
+snapshots: one workstream node per scheduled workstream in the order it was scheduled, a
+status that follows how it ended, the leader marked kept, and a metric shown only when a
+trusted evaluation measured it.
+"""
 
 from __future__ import annotations
 
@@ -9,23 +16,49 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, JsonValue
 from tests.support.core_plugins import failing_plugin
-from tests.vibesys.orchestration.dynamic.strategy._harness import envelope
+from tests.vibesys.orchestration.dynamic._host import begin, config
 
+from vibesys.candidates.api import InputReading, Measured, NotConfigured
 from vibesys.dynamic_core import dynamic_projector
 from vibesys.hypothesis.readmodel import agent_projection
-from vibesys.orchestration.dynamic.core_policy.api import project_strategy_state
-from vibesys.orchestration.dynamic.strategy.api import (
-    DynamicStrategyState,
+from vibesys.metrics import MetricRow
+from vibesys.orchestration.dynamic.core_policy.api import project_run_snapshot
+from vibesys.orchestration.dynamic.search.api import (
+    AgentName,
+    Failure,
+    FailureKind,
+    FinishedWork,
     HypothesisRecord,
-    MetricRow,
     RoundRecord,
+    Running,
+    RunSnapshot,
+    WorkKind,
+    WorkPlan,
+    dynamic,
 )
 from vibesys.plugin_registration import OrchestrationRegistration, project_run
-from vibesys.run.contracts import RunStatus, RunView
-from vs_core.api import AttemptId, EventCursor, HostFence, HostId, RunEnvelope
+from vibesys.run.contracts import (
+    IterationKind,
+    IterationStatus,
+    IterationTree,
+    RunStatus,
+    RunView,
+)
+from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
+    AttemptId,
+    EventCursor,
+    FlowState,
+    HostFence,
+    HostId,
+    RevisionRef,
+    RunEnvelope,
+)
+from vs_core.testing.builders import initial_state
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import RuntimeRecord
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,6 +68,7 @@ class _Options(BaseModel):
     pass
 
 
+_PARENT = RevisionRef.of_git_commit("parent")
 _row = st.builds(
     MetricRow,
     name=st.just("throughput"),
@@ -42,48 +76,90 @@ _row = st.builds(
     direction=st.just("max"),
     unit=st.just("tok/s"),
 )
-_metrics = st.lists(_row, max_size=2).map(tuple)
+_FAILURES = st.sampled_from(
+    (
+        None,
+        Failure(kind=FailureKind.STOPPED),
+        Failure(kind=FailureKind.INVALID_REPLY, role=AgentName.IMPLEMENTER),
+    )
+)
 
 
 @st.composite
-def _states(draw: st.DrawFn) -> DynamicStrategyState:
-    counts = draw(st.lists(st.integers(0, 3), max_size=4))
-    sequence = 0
-    hypotheses = []
-    for index, count in enumerate(counts):
-        rounds = []
-        first = sequence + 1
-        for _ in range(count):
-            sequence += 1
-            rounds.append(
-                RoundRecord(
-                    sequence=sequence,
-                    attempt=AttemptId(root=f"attempt-{sequence}"),
-                    review_passed=draw(st.none() | st.booleans()),
-                    metrics=draw(_metrics),
-                    failure=draw(st.none() | st.just("boom")),
+def _snapshots(draw: st.DrawFn) -> RunSnapshot:
+    """A run in progress: workstreams scheduled in order, some running, some finished."""
+    finished: list[FinishedWork] = []
+    running: list[Running] = []
+    hypotheses: list[HypothesisRecord] = []
+    for sequence in range(1, draw(st.integers(0, 5)) + 1):
+        plan = WorkPlan(
+            kind=WorkKind.IMPLEMENT,
+            work_id=f"w{sequence}",
+            title=draw(st.sampled_from(("", f"Title {sequence}"))),
+        )
+        rounds: tuple[RoundRecord, ...] = ()
+        if draw(st.booleans()):
+            if draw(st.booleans()):
+                finished.append(
+                    FinishedWork(
+                        sequence=sequence, plan=plan, parent=_PARENT, failure=draw(_FAILURES)
+                    )
                 )
-            )
+                rounds = (
+                    RoundRecord(
+                        sequence=sequence,
+                        attempt=AttemptId(root=f"attempt-{sequence}"),
+                        review_passed=draw(st.none() | st.booleans()),
+                        metrics=tuple(draw(st.lists(_row, max_size=2))),
+                        failure=draw(_FAILURES),
+                    ),
+                )
+            else:
+                finished.append(FinishedWork(sequence=sequence, plan=plan, parent=_PARENT))
+        else:
+            running.append(Running(sequence=sequence, plan=plan))
         hypotheses.append(
             HypothesisRecord(
-                hypothesis_id=f"h{index}",
-                title=f"title {index}",
+                hypothesis_id=plan.work_id,
+                title=plan.title,
                 hypothesis="claim",
-                first_sequence=first,
-                rounds=tuple(rounds),
+                first_sequence=sequence,
+                rounds=rounds,
             )
         )
-    return DynamicStrategyState(hypotheses=tuple(hypotheses))
+    leading = (
+        draw(st.none() | st.sampled_from([item.hypothesis_id for item in hypotheses]))
+        if hypotheses
+        else None
+    )
+    baseline = draw(
+        st.sampled_from((NotConfigured(), Measured(reading=InputReading(accuracy_passed=True))))
+    )
+    return RunSnapshot(
+        baseline=baseline,
+        hypotheses=tuple(hypotheses),
+        finished=tuple(finished),
+        running=tuple(running),
+        leading=leading,
+    )
 
 
-@settings(max_examples=60, deadline=None)
-@given(_states(), st.integers(0, 50))
+def _rounds(snapshot: RunSnapshot) -> list[RoundRecord]:
+    return [record for item in snapshot.hypotheses for record in item.rounds]
+
+
+def _workstreams(tree: IterationTree) -> list:
+    return [node for node in tree.nodes if node.parent_id is None]
+
+
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+@given(_snapshots(), st.integers(0, 50))
 def test_projection_copies_recorded_rounds_and_only_measured_numbers(
-    state: DynamicStrategyState, revision: int
+    snapshot: RunSnapshot, revision: int
 ) -> None:
-    projection = project_strategy_state(state, experiment_revision=revision)
+    projection = project_run_snapshot(snapshot, experiment_revision=revision)
     view = agent_projection(_run_view(projection.payload))
-    recorded = [record for item in state.hypotheses for record in item.rounds]
+    recorded = _rounds(snapshot)
 
     assert view is not None
     assert view.experiment_revision == revision == projection.experiment_revision
@@ -102,8 +178,93 @@ def test_projection_copies_recorded_rounds_and_only_measured_numbers(
             == {None: "skipped", True: "pass", False: "fail"}[record.review_passed]
         )
     assert [item.hypothesis_id for item in view.hypotheses] == [
-        item.hypothesis_id for item in state.hypotheses
+        item.hypothesis_id for item in snapshot.hypotheses
     ]
+
+
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+@given(_snapshots())
+def test_every_scheduled_workstream_is_one_node_in_the_order_it_was_scheduled(
+    snapshot: RunSnapshot,
+) -> None:
+    tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
+    assert isinstance(tree, IterationTree)
+
+    roots = _workstreams(tree)
+
+    scheduled = sorted(
+        [*((item.sequence, item.plan) for item in snapshot.finished)]
+        + [(item.sequence, item.plan) for item in snapshot.running],
+        key=lambda entry: entry[0],
+    )
+    assert [(node.id, node.ordinal) for node in roots] == [
+        (f"workstream:{plan.work_id}", sequence) for sequence, plan in scheduled
+    ]
+    assert all(node.kind is IterationKind.WORKSTREAM for node in roots)
+    assert [node.label for node in roots] == [plan.title or plan.work_id for _, plan in scheduled]
+
+
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+@given(_snapshots())
+def test_each_recorded_round_is_an_attempt_under_its_workstream(snapshot: RunSnapshot) -> None:
+    tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
+    assert isinstance(tree, IterationTree)
+
+    attempts = [node for node in tree.nodes if node.parent_id is not None]
+
+    rounds = {record.sequence: record for record in _rounds(snapshot)}
+    assert sorted(node.ordinal for node in attempts) == sorted(rounds)
+    for node in attempts:
+        record = rounds[node.ordinal]
+        assert node.id == record.attempt.root
+        assert node.kind is IterationKind.ATTEMPT
+        assert (node.headline_metrics == ()) is (not record.metrics)
+    for root in _workstreams(tree):
+        assert root.child_count == sum(node.parent_id == root.id for node in attempts)
+
+
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None)
+@given(_snapshots())
+def test_a_workstream_status_follows_how_it_ended(snapshot: RunSnapshot) -> None:
+    tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
+    assert isinstance(tree, IterationTree)
+    status = {node.id: node.status for node in tree.nodes}
+    rounds = {record.sequence: record for record in _rounds(snapshot)}
+
+    for item in snapshot.running:
+        assert status[f"workstream:{item.plan.work_id}"] is IterationStatus.ACTIVE
+    for item in snapshot.finished:
+        record = rounds.get(item.sequence)
+        failure = item.failure if record is None else record.failure or item.failure
+        if failure is not None:
+            expected = (
+                IterationStatus.CANCELLED
+                if failure.kind is FailureKind.STOPPED
+                else IterationStatus.FAILED
+            )
+        elif record is not None and record.review_passed is False:
+            expected = IterationStatus.FAILED
+        else:
+            expected = IterationStatus.COMPLETED
+        assert status[f"workstream:{item.plan.work_id}"] is expected
+        if record is not None:
+            assert status[record.attempt.root] is expected
+
+
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+@given(_snapshots())
+def test_only_the_leader_is_kept_and_only_running_work_is_active(snapshot: RunSnapshot) -> None:
+    view = agent_projection(
+        _run_view(project_run_snapshot(snapshot, experiment_revision=1).payload)
+    )
+
+    assert view is not None
+    assert [item.hypothesis_id for item in view.hypotheses if item.kept] == (
+        [] if snapshot.leading is None else [snapshot.leading]
+    )
+    running = {item.plan.work_id for item in snapshot.running}
+    assert {item.hypothesis_id for item in view.hypotheses if item.active} == running
+    assert view.active_hypothesis_id in (running or {None})
 
 
 def _run_view(payload: dict[str, JsonValue] | None) -> RunView:
@@ -127,17 +288,25 @@ def _project_with_run(root: Path) -> tuple[Project, str]:
     return project, manifest.run_id
 
 
-def _commit(
-    project: Project, run_id: str, state: DynamicStrategyState
-) -> RuntimeRecord[DynamicStrategyState]:
-    _, saved = envelope(state)
-    record = RuntimeRecord[DynamicStrategyState].fresh(
-        RunEnvelope[DynamicStrategyState](
-            schema_version=saved.schema_version,
+def _published(snapshot: RunSnapshot) -> FlowState:
+    """The state of a started dynamic search whose last publication is ``snapshot``."""
+    state = begin(config(), restarting=False).run.state
+    return state.model_copy(
+        update={"live": state.live.model_copy(update={"published": snapshot.model_dump_json()})}
+    )
+
+
+def _commit(project: Project, run_id: str, state: FlowState) -> RuntimeRecord[FlowState]:
+    declaration = dynamic.declaration
+    core = initial_state()
+    core = core.model_copy(update={"run": core.run.model_copy(update={"declaration": declaration})})
+    record = RuntimeRecord[FlowState].fresh(
+        RunEnvelope[FlowState](
+            schema_version=ENVELOPE_SCHEMA_VERSION,
             fence=HostFence(host_id=HostId(root="writer"), epoch=1),
-            strategy_id=saved.strategy_id,
-            state_schema=saved.state_schema,
-            core=saved.core,
+            strategy_id=declaration.strategy_id,
+            state_schema=declaration.state_schema,
+            core=core,
             strategy=state,
             event_cursor=EventCursor(sequence=0),
         )
@@ -154,23 +323,30 @@ def _commit(
     return record
 
 
-def _state() -> DynamicStrategyState:
-    round_ = RoundRecord(
-        sequence=1,
-        attempt=AttemptId(root="attempt-1"),
-        review_passed=True,
-        metrics=(MetricRow(name="throughput", value=81.5, direction="max", unit="tok/s"),),
-    )
-    return DynamicStrategyState(
+def _snapshot() -> RunSnapshot:
+    plan = WorkPlan(kind=WorkKind.IMPLEMENT, work_id="fuse", title="Fuse")
+    return RunSnapshot(
+        baseline=NotConfigured(),
         hypotheses=(
             HypothesisRecord(
                 hypothesis_id="fuse",
                 title="Fuse",
                 hypothesis="fusing helps",
                 first_sequence=1,
-                rounds=(round_,),
+                rounds=(
+                    RoundRecord(
+                        sequence=1,
+                        attempt=AttemptId(root="attempt-1"),
+                        review_passed=True,
+                        metrics=(
+                            MetricRow(name="throughput", value=81.5, direction="max", unit="tok/s"),
+                        ),
+                    ),
+                ),
             ),
-        )
+        ),
+        finished=(FinishedWork(sequence=1, plan=plan, parent=_PARENT),),
+        leading="fuse",
     )
 
 
@@ -190,13 +366,24 @@ def test_a_run_without_a_record_has_identity_and_status_only_and_stays_unopened(
     assert project.state.state_store_namespace(run_id).read_bytes("store.json") is None
 
 
+def test_a_record_that_published_nothing_projects_to_an_empty_run(tmp_path: Path) -> None:
+    project, run_id = _project_with_run(tmp_path)
+    state = begin(config(), restarting=False).run.state
+    _commit(project, run_id, state)
+
+    view = dynamic_projector().view(project, run_id, status=RunStatus.ACTIVE, loop="dynamic")
+
+    assert view.projection == {}
+    assert view.rounds == ()
+
+
 def test_the_stored_record_projects_at_its_core_revision(tmp_path: Path) -> None:
     project, run_id = _project_with_run(tmp_path)
-    record = _commit(project, run_id, _state())
+    record = _commit(project, run_id, _published(_snapshot()))
 
     view = dynamic_projector().view(project, run_id, status=RunStatus.COMPLETED, loop="dynamic")
 
-    expected = project_strategy_state(_state(), experiment_revision=record.envelope.revision)
+    expected = project_run_snapshot(_snapshot(), experiment_revision=record.envelope.revision)
     assert view.projection == expected.payload
     assert view.rounds == expected.rounds
     assert view.experiment_revision == record.envelope.revision
@@ -205,19 +392,20 @@ def test_the_stored_record_projects_at_its_core_revision(tmp_path: Path) -> None
 
 def test_a_just_committed_record_projects_without_reading_disk(tmp_path: Path) -> None:
     project, run_id = _project_with_run(tmp_path)
-    record = _commit(project, run_id, _state())
+    state = _published(_snapshot())
+    record = _commit(project, run_id, state)
     projector = dynamic_projector()
 
     view = projector.project_committed("dynamic", record, run_id=run_id)
 
     assert view == projector.view(project, run_id, status=RunStatus.ACTIVE, loop="dynamic")
     assert projector.project_committed("another-plugin", record, run_id=run_id) is None
-    assert projector.project_committed("dynamic", _state(), run_id=run_id) is None
+    assert projector.project_committed("dynamic", state, run_id=run_id) is None
 
 
 def test_a_plugin_registers_the_projector(tmp_path: Path) -> None:
     project, run_id = _project_with_run(tmp_path)
-    _commit(project, run_id, _state())
+    _commit(project, run_id, _published(_snapshot()))
     plugin = failing_plugin("dynamic", options=_Options)
 
     registration = OrchestrationRegistration(plugin=plugin, projector=dynamic_projector())

@@ -1,1 +1,1 @@
-"""Single's core policy: limits, reply schemas, projection and prompts; import through `api`."""
+"""Single's core policy: evidence requirements, run prompt variables, projection and prompts; import through `api`."""

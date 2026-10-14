@@ -25,7 +25,13 @@ from vs_evaluator_protocol.api import PartialMeasurement
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import Limits, OperationRegistration, RevisionRef, SchemaRef, Strategy
+    from vs_core.api import (
+        Limits,
+        OperationRegistration,
+        RequestRetries,
+        RevisionRef,
+        SearchDef,
+    )
     from vs_core.api import RunFacts as CoreRunFacts
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
@@ -313,6 +319,9 @@ class Workspaces(Protocol):
         working directory. At most one live candidate exists per member ID;
         creating a second while the first is live raises
         :class:`RuntimeContractError`.
+
+        A ``from_revision`` the run's repository does not hold (unknown, malformed, or not a
+        commit) raises :class:`WorkspaceRestoreError`; nothing is created.
         """
         ...
 
@@ -683,8 +692,18 @@ class CoreRunContext:
     """How often a running evaluation job is polled."""
     observe_backoff_cap_seconds: int
     """The longest wait after a poll that could not read the job."""
+    request_retries: RequestRetries
+    """How the backend wants a request its executor did not run re-sent; a fact, not a choice."""
     max_run_seconds: int | None
     """Wall-clock budget of the run, or ``None`` for no deadline."""
+    cancellation_bound_seconds: int
+    """The longest core waits for a cancelled job to be confirmed gone."""
+    cleanup_bound_seconds: int
+    """The least time core gives its own cleanup requests once the deadline has passed."""
+    reconciliation_bound_seconds: int
+    """The longest core waits to learn what became of a request it could not read."""
+    role_models: Mapping[str, str] = field(default_factory=dict)
+    """The model the operator chose for a role (by role id) where it differs from the run's."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -697,14 +716,15 @@ class CoreOperation:
 
 @dataclass(frozen=True, slots=True)
 class CorePlan:
-    """What a policy resolves for one run: the pure strategy and the facts it starts from.
+    """What a policy resolves for one run: the pure search, its config and the facts it starts from.
 
     ``deadline_seconds`` is the run's budget, counted from the moment the run first
     starts; the host places it on the run clock's timeline.
     """
 
-    strategy: Strategy[Any]
-    reply_schemas: Mapping[SchemaRef, type[BaseModel]]
+    search: SearchDef[Any]
+    """The pure search; its declared roles say what each agent answers with."""
+    config: object
     facts: CoreRunFacts
     limits: Limits
     deadline_seconds: float

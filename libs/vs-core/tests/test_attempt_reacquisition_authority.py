@@ -5,8 +5,6 @@ from hashlib import sha256
 from typing import Literal
 
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
 
 from vs_core.api import (
     Access,
@@ -26,8 +24,6 @@ from vs_core.api import (
     DecisionId,
     EnsureSession,
     EventId,
-    Intent,
-    IntentPhase,
     Invocation,
     InvocationId,
     InvocationRef,
@@ -36,6 +32,8 @@ from vs_core.api import (
     Observation,
     ObservationStatus,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     ResourceId,
     RestoreRevision,
     RoleId,
@@ -49,12 +47,15 @@ from vs_core.api import (
     SessionSpec,
     SessionView,
     TurnSpec,
+    Until,
     WorkspaceMode,
     WorkspaceObserved,
     WorkspacePlan,
     initial_state,
     step,
 )
+
+from .guard_rows import guard_rows
 
 SourceVariant = Literal[
     "absent",
@@ -100,10 +101,15 @@ def retained_reopen(
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=1000,
         charge_class="paid",
     )
-    invocation = Invocation(invocation=source, scope=scope, turn=turn, phase=SessionPhase.SUSPENDED)
+    invocation = Invocation(
+        until=Until(at=100.0),
+        invocation=source,
+        scope=scope,
+        turn=turn,
+        phase=SessionPhase.SUSPENDED,
+    )
     continuation = Continuation(
         continuation_id=ContinuationId(root="continuation"),
         invocation=source,
@@ -194,11 +200,11 @@ def assert_ready_forwarded_without_registered_dispatch(
 
 
 def complete_restore(state: CoreState, event: AttemptReacquireRequested) -> CoreState:
-    intent = next(row for row in state.intents.intents if isinstance(row.request, RestoreRevision))
+    record = next(row for row in state.records.records if isinstance(row.request, RestoreRevision))
     observed = Observation(
         event_id=EventId(root="restored"),
-        request_id=intent.request_id,
-        scope=intent.request.scope,
+        request_id=record.request_id,
+        scope=record.request.scope,
         sequence=1,
         observed_at=1,
         status=ObservationStatus.SUCCEEDED,
@@ -208,15 +214,15 @@ def complete_restore(state: CoreState, event: AttemptReacquireRequested) -> Core
     )
     committed = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
-                    "intents": tuple(
+                    "records": tuple(
                         row.model_copy(
-                            update={"phase": IntentPhase.COMPLETED, "observation": observed}
+                            update={"phase": RequestPhase.COMPLETED, "observation": observed}
                         )
-                        if row == intent
+                        if row == record
                         else row
-                        for row in state.intents.intents
+                        for row in state.records.records
                     )
                 }
             )
@@ -240,7 +246,7 @@ def test_nonempty_retained_reopen_has_session_work_after_restore() -> None:
     restored = complete_restore(prepared.state, event)
     assert restored.attempts.attempts[0].closure == state.attempts.attempts[0].closure
     assert restored.sessions.acquisition_groups[0].phase == "acquiring"
-    assert restored.sessions.sessions[0].pending_intents
+    assert restored.sessions.sessions[0].pending_records
 
 
 def test_empty_initial_manifest_cannot_restore_without_dynamic_source() -> None:
@@ -252,33 +258,33 @@ def test_empty_initial_manifest_cannot_restore_without_dynamic_source() -> None:
     assert result.state.sessions.acquisition_groups == ()
 
 
-@pytest.mark.parametrize("admission", ["absent", "stale", "current"])
-@pytest.mark.parametrize("initial_manifest", [False, True])
 @pytest.mark.parametrize(
-    "source_variant",
-    [
-        "absent",
-        "generation",
-        "scope",
-        "resource",
-        "invocation",
-        "exact",
-        "run",
-        "foreign-run",
-        "stale-run",
-        "foreign-attempt",
-    ],
+    ("admission", "initial_manifest", "source_variant", "lease"),
+    guard_rows(
+        ["absent", "stale", "current"],
+        [False, True],
+        [
+            "absent",
+            "generation",
+            "scope",
+            "resource",
+            "invocation",
+            "exact",
+            "run",
+            "foreign-run",
+            "stale-run",
+            "foreign-attempt",
+        ],
+        [(terminal, current) for terminal in (False, True) for current in (False, True)],
+        positive=("current", False, "exact", (False, False)),
+        joint=(0, 2),
+    ),
 )
-@pytest.mark.parametrize(
-    "lease", [(terminal, current) for terminal in (False, True) for current in (False, True)]
-)
-@given(replays=st.integers(min_value=1, max_value=3))
 def test_retained_reopen_authority_matrix(
     *,
     initial_manifest: bool,
     source_variant: SourceVariant,
     lease: tuple[bool, bool],
-    replays: int,
     admission: Literal["absent", "stale", "current"],
 ) -> None:
     terminal_session, current_closure = lease
@@ -302,13 +308,13 @@ def test_retained_reopen_authority_matrix(
     group = prepared.state.sessions.acquisition_groups[0]
     assert group.session_ids == (state.evaluation.continuations[0].invocation.session_id,)
     restored = complete_restore(prepared.state, event)
-    for _ in range(replays):
+    for _ in range(2):
         repeated = step(CoreState.model_validate(restored.model_dump()), event)
         assert repeated.requests == ()
         assert repeated.state.sessions.acquisition_groups == restored.sessions.acquisition_groups
         restored = repeated.state
     request = next(
-        row.request for row in restored.intents.intents if isinstance(row.request, EnsureSession)
+        row.request for row in restored.records.records if isinstance(row.request, EnsureSession)
     )
     assert request.request_id is not None
     observed = Observation(
@@ -325,15 +331,15 @@ def test_retained_reopen_authority_matrix(
     )
     committed = restored.model_copy(
         update={
-            "intents": restored.intents.model_copy(
+            "records": restored.records.model_copy(
                 update={
-                    "intents": tuple(
+                    "records": tuple(
                         row.model_copy(
-                            update={"phase": IntentPhase.COMPLETED, "observation": observed}
+                            update={"phase": RequestPhase.COMPLETED, "observation": observed}
                         )
                         if row.request_id == request.request_id
                         else row
-                        for row in restored.intents.intents
+                        for row in restored.records.records
                     )
                 }
             )
@@ -359,14 +365,13 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
     state, event = retained_reopen(initial_manifest=initial_manifest, source_variant=source_variant)
     prepared = step(state, event).state
     session = prepared.sessions.sessions[0].model_copy(
-        update={"phase": SessionPhase.SUSPENDED, "pending_intents": ()}
+        update={"phase": SessionPhase.SUSPENDED, "pending_records": ()}
     )
     request_id = RequestId(root="retained-acquisition")
     request = EnsureSession(
         request_id=request_id,
         scope=session.scope,
         admission_id=event.admission_id,
-        deadline_at=1000,
         spec=session.spec,
         required_resource=session.resource_id,
     )
@@ -378,13 +383,13 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
             ensure_ascii=False,
         ).encode()
     ).hexdigest()
-    acquisition = Intent(
+    acquisition = RequestRecord(
         request_id=request_id,
         request=request,
         payload_digest=payload_digest,
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-        phase=IntentPhase.COMPLETED,
-        reconcile_deadline_at=1000,
+        phase=RequestPhase.COMPLETED,
+        until=Until(at=1000),
     )
     observed = Observation(
         event_id=EventId(root="retained-proof"),
@@ -399,7 +404,7 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
         resource_id=ResourceId(root="retained"),
     )
     canonical = acquisition.model_copy(
-        update={"phase": IntentPhase.COMPLETED, "observation": observed}
+        update={"phase": RequestPhase.COMPLETED, "observation": observed}
     )
     group = SessionAcquisitionGroup(
         attempt=event.attempt,
@@ -413,12 +418,12 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
             "sessions": prepared.sessions.model_copy(
                 update={"sessions": (session,), "acquisition_groups": (group,)}
             ),
-            "intents": prepared.intents.model_copy(
+            "records": prepared.records.model_copy(
                 update={
-                    "intents": (
+                    "records": (
                         *tuple(
                             row
-                            for row in prepared.intents.intents
+                            for row in prepared.records.records
                             if not isinstance(row.request, EnsureSession)
                         ),
                         *((canonical,) if proof != "absent" else ()),

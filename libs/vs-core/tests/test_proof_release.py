@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 from vs_core.api.proofs import Mismatch, Missing, ProofField, ProofReason, Proven, released_owner
 
-type OwnerKind = Literal["intent", "job", "builtin", "child", "session"]
+type OwnerKind = Literal["record", "job", "builtin", "child", "session"]
 
 
 def digest(value: core.RequestBase) -> str:
@@ -24,8 +24,12 @@ def digest(value: core.RequestBase) -> str:
 def release_facts(
     draw: st.DrawFn, kind: OwnerKind, *, run_owned: bool = False
 ) -> tuple[
-    core.Intent | core.OwnedJob | core.RegisteredOwnedJob | core.ChildLease | core.SessionView,
-    tuple[core.Intent, ...],
+    core.RequestRecord
+    | core.OwnedJob
+    | core.RegisteredOwnedJob
+    | core.ChildLease
+    | core.SessionView,
+    tuple[core.RequestRecord, ...],
 ]:
     identity = draw(st.integers(min_value=0, max_value=10000))
     scope = core.Scope(
@@ -47,14 +51,12 @@ def release_facts(
         request_id=core.RequestId(root=f"request:{identity}"),
         scope=scope,
         admission_id=episode,
-        deadline_at=100.0,
         turn=core.TurnSpec(
             session=session,
             invocation_id=core.InvocationId(root=f"invocation:{identity}"),
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="free",
         ),
     )
@@ -63,7 +65,6 @@ def release_facts(
             request_id=request.request_id,
             scope=scope,
             admission_id=episode,
-            deadline_at=100.0,
             operation_id=core.OperationId(root=f"operation:{identity}"),
             operation=core.OperationWire(
                 schema_ref=core.OperationSchemaRef(
@@ -81,7 +82,6 @@ def release_facts(
             request_id=request.request_id,
             scope=scope,
             admission_id=episode,
-            deadline_at=100.0,
             plan=core.MeasurementPlan(
                 purpose="official",
                 candidate=core.initial_state().run.facts.baseline,
@@ -95,7 +95,7 @@ def release_facts(
                 ),
                 submitted_at=0.0,
                 queue_allowance=0.0,
-                deadline_at=1.0,
+                accuracy_gated=(),
             ),
         )
     elif kind == "session":
@@ -103,7 +103,6 @@ def release_facts(
             request_id=request.request_id,
             scope=scope,
             admission_id=episode,
-            deadline_at=100.0,
             session_id=session.session_id,
         )
     assert request.request_id is not None
@@ -121,20 +120,20 @@ def release_facts(
         released=True,
         children_complete=True,
     )
-    source = core.Intent(
+    source = core.RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest=digest(request),
         lifecycle={
-            "intent": core.LifecycleClass.SESSION_TURN,
+            "record": core.LifecycleClass.SESSION_TURN,
             "job": core.LifecycleClass.OWNED_JOB,
             "builtin": core.LifecycleClass.OWNED_JOB,
             "child": core.LifecycleClass.SESSION_TURN,
             "session": core.LifecycleClass.IDEMPOTENT_WRITE,
         }[kind],
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=observation,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     if kind == "job":
         assert isinstance(request, core.ExecuteRegisteredOperation)
@@ -187,7 +186,7 @@ def release_facts(
     return owner, (source,)
 
 
-@pytest.mark.parametrize("kind", ["intent", "job", "builtin", "child", "session"])
+@pytest.mark.parametrize("kind", ["record", "job", "builtin", "child", "session"])
 @given(data=st.data())
 def test_exact_owner_release_and_missing_canonical_sources(
     kind: OwnerKind, data: st.DataObject
@@ -196,7 +195,7 @@ def test_exact_owner_release_and_missing_canonical_sources(
     proof = released_owner(owner, sources)
     assert isinstance(proof, Proven)
     assert proof.value == sources[0].observation
-    if kind != "intent":
+    if kind != "record":
         assert released_owner(owner, ()) == Missing(ProofReason.ABSENT_REQUEST)
     assert released_owner(None, sources) == Missing(ProofReason.ABSENT_REQUEST)
 
@@ -215,7 +214,7 @@ def test_release_requires_the_unique_canonical_request_for_every_owner(
         assert released_owner(owner, (forged,)) == Mismatch(ProofField.DIGEST)
 
 
-@pytest.mark.parametrize("kind", ["intent", "job", "builtin"])
+@pytest.mark.parametrize("kind", ["record", "job", "builtin"])
 @pytest.mark.parametrize(
     ("field", "expected"),
     [
@@ -236,7 +235,7 @@ def test_owner_release_rejects_each_corrupted_observation(
     data: st.DataObject,
 ) -> None:
     owner, sources = data.draw(release_facts(kind))
-    assert isinstance(owner, (core.Intent, core.OwnedJob, core.RegisteredOwnedJob))
+    assert isinstance(owner, (core.RequestRecord, core.OwnedJob, core.RegisteredOwnedJob))
     observation = owner.observation
     assert observation is not None
     changed = {
@@ -259,7 +258,7 @@ def test_owner_release_rejects_each_corrupted_observation(
     )
 
 
-@pytest.mark.parametrize("kind", ["intent", "job", "builtin", "child", "session"])
+@pytest.mark.parametrize("kind", ["record", "job", "builtin", "child", "session"])
 @pytest.mark.parametrize("missing", ["request", "observation"])
 @given(data=st.data())
 def test_release_requires_every_recorded_attempt_episode(
@@ -288,7 +287,7 @@ def test_release_requires_every_recorded_attempt_episode(
             )
         else:
             owner = owner.model_copy(update={"observation": observation})
-    if kind == "intent" and missing == "request":
+    if kind == "record" and missing == "request":
         owner = source
     assert released_owner(owner, (source,)) == Missing(ProofReason.ABSENT_EPISODE)
 
@@ -319,8 +318,8 @@ def test_job_status_is_an_independent_release_fact(
 def test_conclusive_negative_session_turn_can_release_without_a_resource(
     status: core.ObservationStatus, data: st.DataObject
 ) -> None:
-    owner, sources = data.draw(release_facts("intent"))
-    assert isinstance(owner, core.Intent)
+    owner, sources = data.draw(release_facts("record"))
+    assert isinstance(owner, core.RequestRecord)
     assert owner.observation is not None
     observation = owner.observation.model_copy(
         update={"accepted": False, "status": status, "resource_id": None}
@@ -379,7 +378,7 @@ def test_session_release_requires_its_lease_generation_and_terminal_state(
     assert released_owner(owner, sources) == expected
 
 
-@pytest.mark.parametrize("kind", ["intent", "job", "builtin", "child", "session"])
+@pytest.mark.parametrize("kind", ["record", "job", "builtin", "child", "session"])
 @given(data=st.data())
 def test_release_requires_the_canonical_requests_optional_identity(
     kind: OwnerKind, data: st.DataObject
@@ -388,7 +387,7 @@ def test_release_requires_the_canonical_requests_optional_identity(
     source = sources[0]
     request = source.request.model_copy(update={"request_id": None})
     source = source.model_copy(update={"request": request, "payload_digest": digest(request)})
-    if kind == "intent":
+    if kind == "record":
         owner = source
     assert released_owner(owner, (source,)) == Missing(ProofReason.ABSENT_REQUEST)
 
@@ -398,8 +397,8 @@ def test_release_requires_the_canonical_requests_optional_identity(
 def test_accepted_session_turn_never_proves_release_without_resource(
     status: core.ObservationStatus, data: st.DataObject
 ) -> None:
-    owner, sources = data.draw(release_facts("intent"))
-    assert isinstance(owner, core.Intent)
+    owner, sources = data.draw(release_facts("record"))
+    assert isinstance(owner, core.RequestRecord)
     assert owner.observation is not None
     observation = owner.observation.model_copy(
         update={"accepted": True, "status": status, "resource_id": None}

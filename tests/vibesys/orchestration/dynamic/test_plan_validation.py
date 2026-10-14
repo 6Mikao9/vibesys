@@ -1,0 +1,323 @@
+"""Plan validation splits a portfolio into what may be scheduled and typed violations by field.
+
+Validation reads only the run's record (hypotheses, what runs, profile IDs, the parents on offer)
+and never raises. The properties: every rule has a scenario that breaks exactly it, at the
+field the planner's correction will quote; and over any generated record and portfolio, what is
+accepted fits the record, and the accepted entries alone always make a valid plan.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from tests.vibesys.orchestration.dynamic._values import (
+    finished_profile,
+    hypothesis_record,
+    implement_entry,
+    portfolio,
+    portfolios,
+    profile_entry,
+    run_record,
+    snapshot,
+    update_entry,
+)
+
+from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
+from vibesys.orchestration.dynamic.models import (
+    PlannerHypothesisUpdate,
+    PortfolioPlan,
+    ProfileField,
+    ProfileOffer,
+)
+from vibesys.orchestration.dynamic.search.api import (
+    HypothesisRecord,
+    ParentSnapshot,
+    PlanCheck,
+    ViolationCode,
+    WorkKind,
+    WorkPlan,
+    validate,
+)
+from vs_sim.api.testing import examples
+
+CAPACITY = 4
+
+
+@dataclass
+class Record:
+    """What a scenario sets up in the run's record before the plan is validated."""
+
+    hypotheses: list[HypothesisRecord] = field(default_factory=list)
+    running: list[str] = field(default_factory=list)
+    profiles: list[str] = field(default_factory=list)
+    parents: list[ParentSnapshot] = field(default_factory=list)
+    offer: ProfileOffer | None = None
+
+
+def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> PlanCheck:
+    """Validate ``plan`` against a run record set up as ``record`` says."""
+    run = run_record()
+    for item in record.hypotheses:
+        run.hypotheses[item.hypothesis_id] = item
+    run.accepted.extend(
+        WorkPlan(kind=WorkKind.IMPLEMENT, work_id=identifier) for identifier in record.running
+    )
+    run.ready_to_start(len(record.running))
+    run.finished_work.extend(
+        finished_profile(identifier, index) for index, identifier in enumerate(record.profiles, 90)
+    )
+    run.parents = tuple(record.parents)
+    world = run.world()
+    return validate(plan, world.ledger, run.offered(), capacity=capacity, offer=record.offer)
+
+
+def codes(result: PlanCheck) -> list[ViolationCode]:
+    return [item.code for item in result.violations]
+
+
+SUPPORTED = HypothesisOutcome.SUPPORTED
+FINISHED_A = hypothesis_record("a", HypothesisOutcome.INCONCLUSIVE)
+GOOD_PARENT = snapshot("b", 1, value=10.0)
+
+type Scenario = tuple[PortfolioPlan, Record, str]
+"""A plan, the record it is validated against, and the field the violation must name."""
+
+
+def _scenarios() -> dict[ViolationCode, Scenario]:
+    keep = Record(hypotheses=[FINISHED_A])
+    abandoned = hypothesis_record(
+        "a", HypothesisOutcome.INCONCLUSIVE, strategy=HypothesisStrategy.ABANDONED
+    )
+    parented = Record(parents=[GOOD_PARENT])
+    unsupported = ProfileOffer(fields=())
+    return {
+        ViolationCode.OVER_CAPACITY: (
+            portfolio(implement_entry("a"), implement_entry("b")),
+            Record(),
+            "workstreams",
+        ),
+        ViolationCode.DUPLICATE_ID: (
+            portfolio(implement_entry("a"), implement_entry("a")),
+            Record(),
+            "workstreams.1",
+        ),
+        ViolationCode.HYPOTHESIS_ID_USED: (
+            portfolio(implement_entry("a")),
+            keep,
+            "workstreams.0.hypothesis_id",
+        ),
+        ViolationCode.HYPOTHESIS_ABANDONED: (
+            portfolio(implement_entry("a", continue_hypothesis=True)),
+            Record(hypotheses=[abandoned]),
+            "workstreams.0.hypothesis_id",
+        ),
+        ViolationCode.HYPOTHESIS_IN_FLIGHT: (
+            portfolio(implement_entry("a", continue_hypothesis=True)),
+            Record(running=["a"]),
+            "workstreams.0.hypothesis_id",
+        ),
+        ViolationCode.HYPOTHESIS_UNKNOWN: (
+            portfolio(implement_entry("z", continue_hypothesis=True)),
+            keep,
+            "workstreams.0.hypothesis_id",
+        ),
+        ViolationCode.HYPOTHESIS_TERMINAL: (
+            portfolio(implement_entry("a", continue_hypothesis=True)),
+            Record(hypotheses=[hypothesis_record("a", SUPPORTED)]),
+            "workstreams.0.hypothesis_id",
+        ),
+        ViolationCode.HYPOTHESIS_BLOCKED: (
+            portfolio(implement_entry("a", continue_hypothesis=True, task="same")),
+            Record(hypotheses=[hypothesis_record("a", HypothesisOutcome.BLOCKED, task="same")]),
+            "workstreams.0.task",
+        ),
+        ViolationCode.REVISION_WITHOUT_PARENT: (
+            portfolio(implement_entry("n", parent_revision="b-r1")),
+            parented,
+            "workstreams.0.parent_revision",
+        ),
+        ViolationCode.CONTINUATION_HAS_PARENT: (
+            portfolio(implement_entry("a", continue_hypothesis=True, parent_hypothesis_id="b")),
+            Record(hypotheses=[FINISHED_A], parents=[GOOD_PARENT]),
+            "workstreams.0.parent_hypothesis_id",
+        ),
+        ViolationCode.REVISION_NOT_OFFERED: (
+            portfolio(implement_entry("n", parent_hypothesis_id="b", parent_revision="nope")),
+            parented,
+            "workstreams.0.parent_revision",
+        ),
+        ViolationCode.PARENT_NOT_BUILDABLE: (
+            portfolio(implement_entry("n", parent_hypothesis_id="b")),
+            Record(),
+            "workstreams.0.parent_hypothesis_id",
+        ),
+        ViolationCode.PROFILE_NOT_OFFERED: (
+            portfolio(profile_entry("p")),
+            Record(),
+            "workstreams.0.kind",
+        ),
+        ViolationCode.PROFILE_FIELDS_UNSUPPORTED: (
+            portfolio(profile_entry("p", required_fields=[ProfileField.HIP_API_TIMING])),
+            Record(offer=unsupported),
+            "workstreams.0.required_fields",
+        ),
+        ViolationCode.PROFILE_ID_USED: (
+            portfolio(profile_entry("a")),
+            Record(hypotheses=[FINISHED_A], offer=ProfileOffer(fields=())),
+            "workstreams.0.profile_id",
+        ),
+        ViolationCode.UPDATE_RUNNING: (
+            portfolio(implement_entry("n"), updates=(update_entry("a"),)),
+            Record(hypotheses=[FINISHED_A], running=["a"]),
+            "hypothesis_updates.0.hypothesis_id",
+        ),
+        ViolationCode.UPDATE_DUPLICATE: (
+            portfolio(implement_entry("n"), updates=(update_entry("a"), update_entry("a"))),
+            keep,
+            "hypothesis_updates.1.hypothesis_id",
+        ),
+        ViolationCode.UPDATE_UNKNOWN: (
+            portfolio(implement_entry("n"), updates=(update_entry("z"),)),
+            keep,
+            "hypothesis_updates.0.hypothesis_id",
+        ),
+        ViolationCode.UPDATE_INCOMPLETE: (
+            portfolio(implement_entry("n"), updates=(update_entry("a"),)),
+            Record(hypotheses=[hypothesis_record("a")]),
+            "hypothesis_updates.0.hypothesis_id",
+        ),
+    }
+
+
+SCENARIOS = _scenarios()
+
+
+def _where(path: tuple[str | int, ...]) -> str:
+    return ".".join(str(item) for item in path)
+
+
+def test_every_violation_code_has_a_scenario() -> None:
+    assert set(SCENARIOS) == set(ViolationCode)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(code=st.sampled_from(sorted(SCENARIOS, key=str)))
+def test_a_broken_rule_is_named_by_its_code_at_the_field_the_planner_must_fix(
+    code: ViolationCode,
+) -> None:
+    plan, record, where = SCENARIOS[code]
+    result = check(plan, record, capacity=1 if code is ViolationCode.OVER_CAPACITY else CAPACITY)
+    named = [item for item in result.violations if item.code is code]
+    assert len(named) == 1, result.violations
+    assert _where(named[0].path) == where
+    assert not result.valid
+
+
+def test_a_plan_that_breaks_no_rule_is_accepted_whole_in_order() -> None:
+    plan = portfolio(
+        implement_entry("n"),
+        implement_entry("a", continue_hypothesis=True),
+        implement_entry("m", parent_hypothesis_id="b", parent_revision="b-r1"),
+        updates=(update_entry("c", "abandoned"),),
+    )
+    record = Record(
+        hypotheses=[FINISHED_A, hypothesis_record("c", HypothesisOutcome.INCONCLUSIVE)],
+        parents=[GOOD_PARENT],
+    )
+    result = check(plan, record)
+    assert result.valid
+    assert [item.work_id for item in result.accepted] == ["n", "a", "m"]
+    assert [(item.hypothesis_id, item.disposition) for item in result.updates] == [
+        ("c", HypothesisStrategy.ABANDONED)
+    ]
+
+
+@st.composite
+def records(draw: st.DrawFn) -> Record:
+    """A run record: some hypotheses with rounds, some running, some profiles, some parents."""
+    ids = draw(st.lists(st.sampled_from("abcdefgh"), unique=True, max_size=6))
+    hypotheses = [
+        hypothesis_record(
+            identifier,
+            *draw(st.lists(st.sampled_from(list(HypothesisOutcome)), max_size=2)),
+            task=draw(st.sampled_from(["same", "other"])),
+            strategy=draw(st.sampled_from(list(HypothesisStrategy))),
+        )
+        for identifier in ids
+    ]
+    running = draw(st.lists(st.sampled_from(ids), unique=True, max_size=2)) if ids else []
+    spare = [item for item in "abcdefgh" if item not in ids]
+    profiles = draw(st.lists(st.sampled_from(spare), unique=True, max_size=2)) if spare else []
+    parents = [
+        snapshot(draw(st.sampled_from("abcdefgh")), n, value=draw(st.none() | st.just(5.0)))
+        for n in range(1, draw(st.integers(0, 3)) + 1)
+    ]
+    offer = draw(st.none() | st.just(ProfileOffer(fields=tuple(ProfileField))))
+    return Record(hypotheses, running, profiles, parents, offer)
+
+
+def _entry_positions(result: PlanCheck) -> set[int]:
+    return {
+        item.path[1]
+        for item in result.violations
+        if item.path[0] == "workstreams" and len(item.path) > 1 and isinstance(item.path[1], int)
+    }
+
+
+@settings(max_examples=examples(pr=10, nightly=150), deadline=None, derandomize=True, database=None)
+@given(plan=portfolios, record=records(), capacity=st.integers(0, 4))
+def test_what_is_accepted_fits_the_record_and_alone_makes_a_valid_plan(
+    plan: PortfolioPlan, record: Record, capacity: int
+) -> None:
+    result = check(plan, record, capacity)
+
+    assert check(plan, record, capacity) == result  # a pure function of its inputs
+    accepted = [item.work_id for item in result.accepted]
+    assert len(accepted) == len(set(accepted)) <= capacity
+    known = {item.hypothesis_id: item for item in record.hypotheses}
+    for item in result.accepted:
+        if item.kind is WorkKind.PROFILE:
+            assert record.offer is not None
+            assert item.work_id not in known
+            assert item.work_id not in record.profiles
+            continue
+        assert item.work_id not in record.profiles
+        assert item.work_id not in record.running
+        if item.continue_hypothesis:
+            prior = known[item.work_id]
+            assert prior.strategy is not HypothesisStrategy.ABANDONED
+            assert not prior.rounds or prior.rounds[-1].outcome not in {
+                HypothesisOutcome.SUPPORTED,
+                HypothesisOutcome.NOMINATED,
+                HypothesisOutcome.DISPROVEN,
+            }
+        else:
+            assert item.work_id not in known
+    for update in result.updates:
+        assert known[update.hypothesis_id].rounds
+        assert update.hypothesis_id not in record.running
+    updated = [item.hypothesis_id for item in result.updates]
+    assert len(updated) == len(set(updated))
+    assert result.valid == (not result.violations)
+    if result.valid:
+        assert len(accepted) == len(plan.workstreams)
+
+    dropped = _entry_positions(result)
+    kept = [entry for index, entry in enumerate(plan.workstreams) if index not in dropped]
+    if kept:
+        retry = check(portfolio(*kept, updates=_kept_updates(plan, result)), record, capacity)
+        assert [item.work_id for item in retry.accepted] == accepted
+        assert all(item.code is ViolationCode.OVER_CAPACITY for item in retry.violations)
+
+
+def _kept_updates(plan: PortfolioPlan, result: PlanCheck) -> tuple[PlannerHypothesisUpdate, ...]:
+    kept = {item.hypothesis_id for item in result.updates}
+    seen: set[str] = set()
+    chosen = []
+    for update in plan.hypothesis_updates:
+        if update.hypothesis_id in kept and update.hypothesis_id not in seen:
+            seen.add(update.hypothesis_id)
+            chosen.append(update)
+    return tuple(chosen)

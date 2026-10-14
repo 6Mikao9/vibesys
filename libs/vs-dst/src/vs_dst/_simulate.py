@@ -140,7 +140,7 @@ class SimulatedRun:
         The run's journal is checked against its final core state with the retry budget of the
         world's limits, expecting the run to end in its terminal state.
         """
-        budget = Budget(retries=self._outside.world.setup.harness.limits.max_retries)
+        budget = Budget(retries=self._outside.world.setup.harness.limits.request_retries.limit)
         return tuple(liveness(self._run.journal, self._run.core, budget))
 
     @property
@@ -166,7 +166,7 @@ class SimulatedRun:
     def crash_points(self, kind: CrashKind | None = None) -> tuple[CrashPoint, ...]:
         """The places a host of this run can die that the suite's policy tries.
 
-        A sample on pull requests, every boundary under ``--dst-crash-points=all``. ``kind``
+        A sample on pull requests, every boundary under ``--depth=nightly``. ``kind``
         keeps one kind of point (a suite splits a long sweep that way). A run that started from a
         crash offers the commits its own hosts made, so it can be crashed again. Choosing costs
         nothing: the run only counted its commits.
@@ -201,8 +201,9 @@ class SimulatedRun:
             self._take_snapshots(self._pristine, offered | {point})
         snapshot = self._snapshots[point]
         outside = snapshot.outside.copy()
-        # The next host starts after the dead one's lease has expired.
-        clock_at = self._started.clock_at + LEASE + 1
+        # The next host starts after the dead one's lease has expired, however far the dead
+        # host's clock had run by the crash (a run that waits out a limit runs it far ahead).
+        clock_at = max(self._started.clock_at + LEASE, snapshot.outside.store.lease_ends_at) + 1
         run = _run_host(outside, self._options, clock_at, None)
         started = Start(
             clock_at=clock_at,
@@ -250,7 +251,7 @@ def _run_host(
     setup = world.setup
     enactment = _Enactment(world)
     host = scripted_host(
-        setup.new_strategy(),
+        setup.new_launch(),
         world,
         setup.harness,
         setup.schemas,

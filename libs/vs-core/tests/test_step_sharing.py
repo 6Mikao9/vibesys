@@ -83,11 +83,14 @@ def test_a_step_returns_what_it_left_unchanged_as_the_same_objects(count: int) -
                 decision_id=core.DecisionId(root=f"d:{index}"),
                 scope=scope,
                 request=Query(value=index),
-                deadline_at=100.0,
             )
         )
         result = core.step(
-            state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+            state,
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=state.revision,
+            ),
         )
         assert _rebuilt(state, result.state) == []
         assert len(result.state.run.receipts) == index + 1

@@ -1,11 +1,13 @@
 """Run-owned session authority and execution manifests through public contracts."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 
 def _scope(generation: int = 0) -> core.Scope:
@@ -154,11 +156,11 @@ def test_pool_capacities_are_positive_unique_and_preserved(capacities: list[int]
         core.PoolCapacity(pool_id=core.PoolId(root=f"pool-{index}"), capacity=capacity)
         for index, capacity in enumerate(capacities)
     )
-    limits = core.Limits(pool_capacities=pools)
+    limits = sample_limits(pool_capacities=pools)
     assert core.Limits.model_validate_json(limits.model_dump_json()) == limits
     if pools:
         with pytest.raises(ValidationError, match="duplicate pool_id"):
-            core.Limits(pool_capacities=(*pools, pools[0]))
+            sample_limits(pool_capacities=(*pools, pools[0]))
     with pytest.raises(ValidationError, match="capacity"):
         core.PoolCapacity(pool_id=core.PoolId(root="invalid"), capacity=0)
 
@@ -176,7 +178,6 @@ def test_registered_input_manifest_preserves_distinct_equal_artifact_occurrences
     )
     request = core.ExecuteRegisteredOperation(
         scope=_scope(),
-        deadline_at=10.0,
         operation_id=core.OperationId(root="operation"),
         operation=core.OperationWire(
             schema_ref=core.OperationSchemaRef(
@@ -207,14 +208,16 @@ def test_registered_input_manifest_preserves_distinct_equal_artifact_occurrences
 
 
 @given(st.sampled_from(["pause", "resume", "steer"]))
-def test_operator_stop_result_is_required_only_for_stop(action: str) -> None:
+def test_operator_stop_result_is_allowed_only_for_stop(action: str) -> None:
     result = core.RunResultProposal(outcome="cancelled", reason="operator requested stop")
     payload = {
-        "control": core.ControlInput(control_id=core.ControlId(root="stop"), action="stop"),
+        "control": core.ControlInput(
+            control_id=core.ControlId(root="stop"), action="stop", mode=core.StopMode.DRAIN
+        ),
         "now_at": 1.0,
     }
-    with pytest.raises(ValidationError, match="result"):
-        core.RunControlEvent.model_validate(payload)
+    bare = core.RunControlEvent.model_validate(payload)  # a stop without a result is soft
+    assert bare.result is None
     event = core.RunControlEvent.model_validate({**payload, "result": result})
     assert TypeAdapter(core.CoreEvent).validate_json(event.model_dump_json()) == event
     payload["control"] = core.ControlInput.model_validate(
@@ -239,13 +242,15 @@ def test_run_paid_turn_is_rejected_without_spending_any_currency(max_turns: int)
         workspace=_scope(),
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=10.0,
         charge_class="paid",
         max_turns=max_turns,
     )
     event = core.DecisionSubmitted(
-        decision=core.RequestTurn(
-            decision_id=core.DecisionId(root="paid"), scope=_scope(), turn=turn
+        decision=core.Wait(
+            request=core.RequestTurn(
+                decision_id=core.DecisionId(root="paid"), scope=_scope(), turn=turn
+            ),
+            until=core.Within(limit=100.0),
         ),
         expected_revision=0,
     )
@@ -263,30 +268,29 @@ def test_run_paid_turn_is_rejected_without_spending_any_currency(max_turns: int)
 
 
 @given(st.integers(min_value=0, max_value=1000))
-def test_run_checkpoint_pending_request_preserves_intent_in_public_codec(generation: int) -> None:
+def test_run_checkpoint_pending_request_preserves_record_in_public_codec(generation: int) -> None:
     state = core.initial_state()
     request = core.SnapshotAndRetainRun(
         request_id=core.RequestId(root="checkpoint"),
         scope=_scope(generation),
         invocation=_invocation(generation),
         retention="wip",
-        deadline_at=30.0,
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=core.RequestId(root="checkpoint"),
         request=request,
         payload_digest="checkpoint-payload",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.PREPARED,
-        reconcile_deadline_at=30.0,
+        phase=core.RequestPhase.PREPARED,
+        until=core.Until(at=30.0),
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
     codec = core.OperationRegistry()
     envelope = _envelope(state)
     restored = codec.decode_envelope(type(envelope), codec.encode_envelope(envelope))
-    assert restored.core.intents.intents == (intent,)
+    assert restored.core.records.records == (record,)
     assert restored.core.sessions.run_checkpoints == ()
     event = core.RunInvocationCheckpointRequested(
         scope=_scope(generation),
@@ -301,10 +305,11 @@ def test_run_checkpoint_pending_request_preserves_intent_in_public_codec(generat
         now_at=2.0,
     )
     unchanged = core.step(restored.core, steer)
-    assert unchanged.state.intents.intents == (intent,)
+    assert unchanged.state.records.records == (record,)
     assert unchanged.state.sessions.run_checkpoints == ()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(st.integers(min_value=0, max_value=1000))
 def test_run_drain_requires_run_ownership_and_typed_stop_authority(generation: int) -> None:
     event = core.RunSessionsDrainRequested(
@@ -327,7 +332,7 @@ def test_run_drain_requires_run_ownership_and_typed_stop_authority(generation: i
     failure=st.sampled_from(tuple(core.SetupFailureKind)),
     accepted=st.booleans(),
 )
-def test_setup_classification_survives_root_target_and_canonical_intent_codecs(
+def test_setup_classification_survives_root_target_and_canonical_record_codecs(
     *, failure: core.SetupFailureKind, accepted: bool
 ) -> None:
     observation = _observation(accepted=accepted)
@@ -355,7 +360,6 @@ def test_setup_classification_survives_root_target_and_canonical_intent_codecs(
     request = core.EnsureSession(
         request_id=observation.request_id,
         scope=observation.scope,
-        deadline_at=10.0,
         spec=core.SessionSpec(
             session_id=core.SessionId(root="session"),
             role_id=core.RoleId(root="planner"),
@@ -364,33 +368,33 @@ def test_setup_classification_survives_root_target_and_canonical_intent_codecs(
             access=core.Access.READ_ONLY,
         ),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=observation.request_id,
         request=request,
         payload_digest="ensure-payload",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=observation,
         setup_failure=failure,
         sequence=observation.sequence,
-        reconcile_deadline_at=10.0,
+        until=core.Until(at=10.0),
     )
     state = core.initial_state()
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,)})}
+        update={"records": state.records.model_copy(update={"records": (record,)})}
     )
     codec = core.OperationRegistry()
     envelope = _envelope(state)
     restored = codec.decode_envelope(type(envelope), codec.encode_envelope(envelope))
-    assert restored.core.intents.intents[0].setup_failure == failure
-    restored_observation = restored.core.intents.intents[0].observation
+    assert restored.core.records.records[0].setup_failure == failure
+    restored_observation = restored.core.records.records[0].observation
     assert restored_observation is not None
     assert restored_observation.accepted == accepted
     steer = core.RunControlEvent(
         control=core.ControlInput(control_id=core.ControlId(root="steer"), action="steer"),
         now_at=3.0,
     )
-    assert core.step(restored.core, steer).state.intents == state.intents
+    assert core.step(restored.core, steer).state.records == state.records
     if accepted:
         # Even FAILED does not turn accepted external ownership into release.
         assert not restored_observation.released
@@ -422,10 +426,10 @@ def test_paid_cycle_prefix_stays_immutable_across_correction_resume_and_codecs(
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="result", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
     original = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=original_ref,
         scope=scope,
         turn=turn,
@@ -436,6 +440,7 @@ def test_paid_cycle_prefix_stays_immutable_across_correction_resume_and_codecs(
         update={"invocation_id": core.InvocationId(root="correction")}
     )
     correction = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=correction_ref,
         scope=scope,
         turn=turn.model_copy(
@@ -452,6 +457,7 @@ def test_paid_cycle_prefix_stays_immutable_across_correction_resume_and_codecs(
         update={"invocation_id": core.InvocationId(root="resume")}
     )
     resumed = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=resumed_ref,
         scope=scope,
         turn=turn.model_copy(

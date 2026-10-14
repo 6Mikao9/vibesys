@@ -11,6 +11,7 @@ from vs_core.api import (
     AttemptBudget,
     AttemptChargeRefundRequested,
     AttemptCheckpoint,
+    AttemptExhausted,
     AttemptId,
     AttemptPhase,
     AttemptRef,
@@ -25,8 +26,6 @@ from vs_core.api import (
     DecisionReceipt,
     DispatchTurn,
     EventId,
-    Intent,
-    IntentPhase,
     InterruptClaim,
     Invocation,
     InvocationChargeRequested,
@@ -35,12 +34,13 @@ from vs_core.api import (
     InvocationRef,
     ItemId,
     LifecycleClass,
-    Limits,
     Observation,
     ObservationStatus,
     Rejected,
     RejectionCode,
     RequestId,
+    RequestPhase,
+    RequestRecord,
     RequestTurn,
     ResourceId,
     RoleId,
@@ -53,11 +53,37 @@ from vs_core.api import (
     SessionView,
     SnapshotAndRetain,
     TurnSpec,
+    Until,
     WorkspaceMode,
     WorkspacePlan,
     advance_attempt,
     initial_state,
 )
+from vs_core.api.testing import sample_limits
+
+from .guard_rows import guard_rows
+
+STATUSES = [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED]
+CORRELATIONS = ["exact", "unrelated", "unregistered"]
+EPISODES = ["absent", "old", "current"]
+RECEIPTS = [
+    "absent",
+    "rejected",
+    "mismatched",
+    "exact",
+    "foreign-request-decision",
+    "missing-request-membership",
+    "foreign-session-scope",
+]
+LIFECYCLES = [
+    (phase, status)
+    for phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN, SessionPhase.TERMINAL)
+    for status in (
+        ObservationStatus.PENDING,
+        ObservationStatus.UNKNOWN,
+        ObservationStatus.SUCCEEDED,
+    )
+]
 
 
 def invocation_fixture(
@@ -88,7 +114,6 @@ def invocation_fixture(
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="output", version=1),
-        deadline_at=1000,
         charge_class="paid",
     )
     request = DispatchTurn(
@@ -96,7 +121,6 @@ def invocation_fixture(
         scope=scope,
         admission_id=episode,
         decision_id=DecisionId(root="request-turn"),
-        deadline_at=1000,
         turn=turn,
     )
     assert request.request_id is not None
@@ -120,7 +144,12 @@ def invocation_fixture(
         )
     )
     invocation = Invocation(
-        invocation=ref, scope=scope, turn=turn, phase=phase, observation=observed
+        until=Until(at=100.0),
+        invocation=ref,
+        scope=scope,
+        turn=turn,
+        phase=phase,
+        observation=observed,
     )
     owner = AttemptView(
         attempt_id=scope.owner,
@@ -139,14 +168,14 @@ def invocation_fixture(
         invocation=ref.invocation_id,
         resource_id=ResourceId(root="conversation"),
     )
-    intent = Intent(
+    record = RequestRecord(
         request_id=request.request_id,
         request=request,
         payload_digest="turn",
         lifecycle=LifecycleClass.SESSION_TURN,
-        phase=IntentPhase.COMPLETED,
+        phase=RequestPhase.COMPLETED,
         observation=observed if correlation == "exact" else None,
-        reconcile_deadline_at=1000,
+        until=Until(at=1000),
     )
     decision = RequestTurn(decision_id=request.decision_id, scope=scope, turn=turn)
     if receipt_kind == "mismatched":
@@ -185,7 +214,7 @@ def invocation_fixture(
     )
     if receipt_kind == "foreign-request-decision":
         request = request.model_copy(update={"decision_id": DecisionId(root="foreign")})
-        intent = intent.model_copy(update={"request": request})
+        record = record.model_copy(update={"request": request})
     elif receipt_kind == "missing-request-membership":
         receipt = receipt.model_copy(update={"request_ids": ()})
     elif receipt_kind == "foreign-session-scope":
@@ -213,13 +242,13 @@ def invocation_fixture(
                     ),
                 }
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": () if correlation == "unregistered" else (intent,)}
+            "records": state.records.model_copy(
+                update={"records": () if correlation == "unregistered" else (record,)}
             ),
             "run": state.run.model_copy(
                 update={
                     "receipts": () if receipt_kind == "absent" else (receipt,),
-                    "limits": Limits(max_turns=10, max_refunds=2),
+                    "limits": sample_limits(max_turns=10, max_refunds=2),
                 }
             ),
         }
@@ -234,7 +263,7 @@ def context(state: CoreState) -> AttemptsContext:
         sessions=state.sessions,
         evaluation=state.evaluation,
         settlement=state.settlement,
-        intents=state.intents,
+        records=state.records,
     )
 
 
@@ -249,21 +278,16 @@ def checkpoint_event(state: CoreState) -> InvocationCheckpointRequested:
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
+    ("status", "correlation", "admission", "observed_episode", "receipt_kind"),
+    guard_rows(
+        STATUSES,
+        CORRELATIONS,
+        ["absent", "current"],
+        EPISODES,
+        RECEIPTS,
+        positive=(ObservationStatus.SUCCEEDED, "exact", "current", "current", "exact"),
+    ),
 )
-@pytest.mark.parametrize("status", [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize("admission", ["absent", "current"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
 def test_checkpoint_requires_exact_current_terminal_invocation_proof(
     status: ObservationStatus,
     correlation: str,
@@ -297,26 +321,24 @@ def test_checkpoint_requires_exact_current_terminal_invocation_proof(
         and observed_episode == "current"
         and correlation == "exact"
     )
-    assert any(isinstance(request, SnapshotAndRetain) for request in result.requests) == proven
+    assert (
+        any(isinstance(outbound.request, SnapshotAndRetain) for outbound in result.requests)
+        == proven
+    )
     if not proven:
         assert result.state == state.attempts
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
+    ("status", "correlation", "observed_episode", "receipt_kind"),
+    guard_rows(
+        STATUSES,
+        CORRELATIONS,
+        EPISODES,
+        RECEIPTS,
+        positive=(ObservationStatus.SUCCEEDED, "exact", "current", "exact"),
+    ),
 )
-@pytest.mark.parametrize("status", [ObservationStatus.SUCCEEDED, ObservationStatus.REJECTED])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
 def test_refund_requires_exact_current_terminal_invocation_proof(
     status: ObservationStatus,
     correlation: str,
@@ -375,31 +397,23 @@ def test_refund_requires_exact_current_terminal_invocation_proof(
 
 
 @pytest.mark.parametrize(
-    "receipt_kind",
-    [
-        "absent",
-        "rejected",
-        "mismatched",
-        "exact",
-        "foreign-request-decision",
-        "missing-request-membership",
-        "foreign-session-scope",
-    ],
-)
-@pytest.mark.parametrize("admission", ["absent", "current"])
-@pytest.mark.parametrize("observed_episode", ["absent", "old", "current"])
-@pytest.mark.parametrize("correlation", ["exact", "unrelated", "unregistered"])
-@pytest.mark.parametrize(
-    "lifecycle",
-    [
-        (phase, status)
-        for phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN, SessionPhase.TERMINAL)
-        for status in (
-            ObservationStatus.PENDING,
-            ObservationStatus.UNKNOWN,
-            ObservationStatus.SUCCEEDED,
-        )
-    ],
+    ("receipt_kind", "admission", "observed_episode", "correlation", "lifecycle"),
+    # The rule reads the episode, the correlation and the status together.
+    guard_rows(
+        RECEIPTS,
+        ["absent", "current"],
+        EPISODES,
+        CORRELATIONS,
+        LIFECYCLES,
+        positive=(
+            "exact",
+            "current",
+            "current",
+            "exact",
+            (SessionPhase.EXECUTING, ObservationStatus.SUCCEEDED),
+        ),
+        joint=(2, 3, 4),
+    ),
 )
 def test_billing_requires_current_unambiguous_invocation_evidence(
     admission: str,
@@ -474,7 +488,9 @@ def test_ambiguous_charge_identity_never_refunds_multiple_receipts(copies: int) 
                     )
                 }
             ),
-            "run": state.run.model_copy(update={"limits": Limits(max_turns=10, max_refunds=1)}),
+            "run": state.run.model_copy(
+                update={"limits": sample_limits(max_turns=10, max_refunds=1)}
+            ),
         }
     )
     state = CoreState.model_validate_json(state.model_dump_json())
@@ -490,3 +506,55 @@ def test_ambiguous_charge_identity_never_refunds_multiple_receipts(copies: int) 
     assert result.state == state.attempts
     assert result.signals == ()
     assert result.events == ()
+
+
+@pytest.mark.parametrize("limit", [0, 1, 2, 3])
+@pytest.mark.parametrize("spent", [0, 1, 2, 3, 4])
+def test_a_paid_invocation_is_charged_exactly_while_the_attempt_has_paid_invocations_left(
+    limit: int, spent: int
+) -> None:
+    """The limit is the number of paid invocations an attempt may spend: no more, no fewer."""
+    state = invocation_fixture()
+    owner = state.attempts.attempts[0]
+    earlier = tuple(
+        ChargeReceipt(
+            charge_id=ChargeId(root=f"earlier-{index}"),
+            kind=ChargeKind.ATTEMPT,
+            charged=1,
+            invocation_id=InvocationId(root=f"earlier-{index}"),
+        )
+        for index in range(spent)
+    )
+    state = state.model_copy(
+        update={
+            "attempts": AttemptsState(
+                attempts=(
+                    owner.model_copy(
+                        update={
+                            "charges": earlier,
+                            "budget": owner.budget.model_copy(
+                                update={"paid_invocation_limit": limit}
+                            ),
+                        }
+                    ),
+                )
+            )
+        }
+    )
+    event = InvocationChargeRequested(
+        attempt=AttemptRef(attempt_id=owner.attempt_id, generation=0),
+        invocation=state.sessions.invocations[0].invocation,
+    )
+
+    result = advance_attempt(state.attempts, context(state), event)
+
+    paid = sum(
+        row.charged for row in result.state.attempts[0].charges if row.kind == ChargeKind.ATTEMPT
+    )
+    exhausted = [e for e in result.events if isinstance(e, AttemptExhausted)]
+    if spent < limit:
+        assert paid == spent + 1
+        assert exhausted == []
+    else:
+        assert paid == spent
+        assert [e.reason for e in exhausted] == ["paid-limit"]

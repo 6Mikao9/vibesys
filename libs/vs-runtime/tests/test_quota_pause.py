@@ -25,6 +25,7 @@ from vs_agent.api import (
     QuotaPlan,
 )
 from vs_agent.api.testing import FakeAgentClient
+from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
     QuotaAction,
@@ -91,7 +92,7 @@ class _Run:
         if self.operator == "resume":
             self.control.resume()
         else:
-            self.control.request_stop()
+            self.control.request_stop(StopMode.DRAIN)
 
     def play(self, client: FakeAgentClient, prompts: tuple[str, ...]) -> list[str]:
         control = create_run_control_channel(

@@ -165,16 +165,31 @@ The core imports no I/O library or interface. Shared pure value contracts may
 live in pure libraries; do not import mixed I/O APIs for their types. Preserve
 one-way dependencies and the [placement rule](../../../../docs/contributing/architecture.md).
 
-## Worked example: DynamicStrategy
+## Worked example: DynamicSearch
 
-Read [DynamicStrategy](../../../../src/vibesys/orchestration/dynamic/strategy/_strategy.py)
-and its [scenario tests](../../../../tests/vibesys/orchestration/dynamic/strategy/test_scenarios.py).
-`decide` is a pure function of the strategy state, the `RunView` and the static
-config. It returns requests (start an attempt, plan, judge, stop) and never
-starts anything. `on_event` folds one typed feedback into the next state. The
-shell executes each request through its interface and feeds the observation
-back. Slot and budget decisions need no async execution, and restart replays
-the committed intent against the same identities.
+Read [DynamicSearch](../../../../src/vibesys/orchestration/dynamic/search/_search.py)
+and one [workstream flow](../../../../src/vibesys/orchestration/dynamic/search/_workstream.py).
+Then read the
+[story tests](../../../../tests/vibesys/orchestration/dynamic/test_stories.py),
+which drive one hypothesis from baseline to adoption by answering the waits the search opens
+and asserting on the decisions that come back. [Flows](../../../../docs/contributing/flows.md)
+says how a search is written.
+
+- A search is ordinary `async def` code over `ctx`: the runtime journals what the flow
+  observes and replays it after a restart, so the flow itself holds no hand-written state
+  record. The flow is pure in the sense that matters here: its only inputs are the config
+  and the journaled values `ctx` returns, and it reaches the world only through `ctx`.
+- Each part of the run (baseline, each workstream) is a flow. Where it waits is where it
+  awaits (`session.turn`, `ctx.evaluation.measure`), so a wait that does not fit the flow's
+  position cannot be written, instead of being an event to reject.
+- A request that asks for work carries its `within` limit, stated by whoever asks; the
+  runtime enforces it and reports expiry as a typed `Failed` value the flow must match.
+- A workspace is a resource: it always settles, after the work, after a failure that ends it,
+  and after an operator stop.
+- Flows start child flows in a group, so concurrent parts never read each other's state; they
+  hand results back as values.
+- The runtime executes each request through its interface and returns the result to the
+  `await`. Restart replays the journal against the same identities.
 
 ## When not to use it
 

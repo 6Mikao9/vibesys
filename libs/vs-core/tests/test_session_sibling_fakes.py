@@ -21,20 +21,20 @@ def _input_proof(
 ) -> core.Invocation:
     invocation = _invocation(state, event.invocation)
     observation = event.observation
-    intent = next(
-        (row for row in context.intents.intents if row.request_id == observation.request_id), None
+    record = next(
+        (row for row in context.records.records if row.request_id == observation.request_id), None
     )
     if (
         invocation.scope != observation.scope
         or invocation.observation is None
         or invocation.observation.request_id != observation.request_id
-        or intent is None
-        or intent.request.scope != invocation.scope
-        or not isinstance(intent.request, core.DispatchTurn | core.ResumeSessionTurn)
-        or intent.request.turn != invocation.turn
+        or record is None
+        or record.request.scope != invocation.scope
+        or not isinstance(record.request, core.DispatchTurn | core.ResumeSessionTurn)
+        or record.request.turn != invocation.turn
     ):
         raise core.ContractValidationError("observation", "input proof lacks exact dispatch")
-    manifest = tuple(row.input_id for row in intent.request.inputs)
+    manifest = tuple(row.input_id for row in record.request.inputs)
     records = tuple(row for row in state.inputs if row.reserved_to == event.invocation)
     if (
         manifest != invocation.input_ids
@@ -139,21 +139,21 @@ def _failed_checkpoint(
         ),
         None,
     )
-    intent = next(
-        (row for row in context.intents.intents if row.request_id == event.observation.request_id),
+    record = next(
+        (row for row in context.records.records if row.request_id == event.observation.request_id),
         None,
     )
     scope = core.Scope(owner=event.attempt.attempt_id, generation=event.attempt.generation)
     if (
         owner is None
-        or intent is None
-        or not isinstance(intent.request, core.SnapshotAndRetain)
-        or intent.request.attempt != event.attempt
-        or intent.request.scope != scope
+        or record is None
+        or not isinstance(record.request, core.SnapshotAndRetain)
+        or record.request.attempt != event.attempt
+        or record.request.scope != scope
         or event.observation.scope != scope
-        or intent.request.admission_id != owner.admission_id
+        or record.request.admission_id != owner.admission_id
         or event.observation.admission_id != owner.admission_id
-        or intent.request_id not in owner.pending_intents
+        or record.request_id not in owner.pending_records
         or not event.observation.terminal
         or event.revision is not None
         or event.observation.status
@@ -220,19 +220,18 @@ def fake_attempts(
         request_id=request_id,
         scope=invocation.scope,
         admission_id=owner.admission_id,
-        deadline_at=min(context.run.deadline_at, invocation.turn.deadline_at),
         attempt=event.attempt,
         retention=event.retention,
         invocation=event.invocation,
     )
-    if request_id in owner.pending_intents:
+    if request_id in owner.pending_records:
         return core.AreaChange(state=state)
-    updated = owner.model_copy(update={"pending_intents": (*owner.pending_intents, request_id)})
+    updated = owner.model_copy(update={"pending_records": (*owner.pending_records, request_id)})
     return core.AreaChange(
         state=state.model_copy(
             update={"attempts": tuple(updated if row == owner else row for row in state.attempts)}
         ),
-        requests=(request,),
+        requests=(core.within(request, 100.0),),
     )
 
 

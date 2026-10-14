@@ -263,14 +263,14 @@ def _envelope(
     hypotheses: int = 1,
     submitted_at: list[float] | None = None,
 ) -> dict[str, object]:
-    intents = [
+    records = [
         {"request": {"kind": "submit_measurement", "plan": {"submitted_at": at}}}
         for at in submitted_at or []
     ]
     return {
         "core": {
             "run": {"status": status, "result": {"outcome": outcome} if outcome else None},
-            "intents": {"intents": intents},
+            "records": {"records": records},
         },
         "strategy": {"hypotheses": [{"hypothesis_id": f"h{i}"} for i in range(hypotheses)]},
     }
@@ -288,6 +288,15 @@ def test_a_core_run_that_completes_without_a_hypothesis_is_empty() -> None:
     assert _violations([_started(), _finished()], _envelope(hypotheses=0)) == {
         Invariant.EMPTY_COMPLETION
     }
+
+
+@given(hypotheses=st.integers(min_value=0, max_value=3))
+def test_a_flow_search_keeps_its_hypotheses_in_its_published_record(hypotheses: int) -> None:
+    envelope = _envelope()
+    published = {"hypotheses": [{"hypothesis_id": f"h{i}"} for i in range(hypotheses)]}
+    envelope["strategy"] = {"journal": [], "live": {"published": json.dumps(published)}}
+    expected = set() if hypotheses else {Invariant.EMPTY_COMPLETION}
+    assert _violations([_started(), _finished()], envelope) == expected
 
 
 @given(

@@ -16,31 +16,37 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
-from pydantic import BaseModel
 from tests.support.session_world import (
     FakeSessionResolver,
     ProviderFaults,
     SessionHost,
 )
 from tests.support.skeleton_faults import FaultingExecutors, FaultingReceipts, FaultingStore
-from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import (
+    DIGEST,
+    IMPLEMENTATION,
+    IMPLEMENTER,
+    OPERATIONS,
+    Implementation,
+    SkeletonStrategy,
+)
 from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_core.api import (
     ClockAdvanced,
+    FlowState,
     Limits,
-    RoleId,
     RunFacts,
     RunStatus,
-    SchemaRef,
     TurnSpec,
 )
+from vs_core.api.testing import sample_limits
 from vs_evaluation.api import ExecutorPoll, PollPhase
 from vs_project.api.testing import CliWorldGit, GitKind, WorldGit, world_git
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import render_stage_failure
+from vs_runtime.api import ArtifactStore, render_stage_failure
 from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
@@ -50,14 +56,19 @@ from vs_runtime.api.core import (
     ExecutorRefusal,
     JournalPublicationDelivery,
     MeasurementServices,
+    NotApplied,
     OperationCatalog,
+    OperationRole,
+    RenderArtifactsOwner,
     RunLoopConfig,
     RunStalledError,
     SessionServices,
+    build_operation_catalog,
     core_bindings,
     drive_core,
     empty_catalog,
     new_core_state,
+    operation_roles,
     revision_ref,
 )
 from vs_runtime.api.infrastructure import (
@@ -74,11 +85,11 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterator
+    from collections.abc import Awaitable, Callable, Iterator, Mapping
     from pathlib import Path
 
     from vs_agent.api import AgentSessionSpec, AgentTurnRequest
-    from vs_core.api import CoreState
+    from vs_core.api import CoreState, OperationRequest
     from vs_evaluation.api import (
         AvailabilitySnapshot,
         EvaluationRequest,
@@ -88,7 +99,13 @@ if TYPE_CHECKING:
     )
     from vs_faults.api import FaultGate
     from vs_project.api import StateNamespace, StateStore
-    from vs_runtime.api.core import AccessGuardedWorkspace, CommitObserver, TurnYields
+    from vs_runtime.api.core import (
+        AccessGuardedWorkspace,
+        CommitObserver,
+        ExecutionContext,
+        Inspection,
+        TurnYields,
+    )
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
     from vs_sim.api import Clock, SleepingClock
 
@@ -161,10 +178,16 @@ class World:
     agents: SessionHost
     strategy: SkeletonStrategy = field(default_factory=SkeletonStrategy)
     operations: OperationCatalog = field(default_factory=empty_catalog)
+    """What the host offers the search: the skeleton's operations, rendered from ``templates``."""
     timed: tuple[Clock, float] | None = None
     polls: list[str] = field(default_factory=list)
     during_submit: Callable[[], Awaitable[None]] | None = None
-    limits: Limits = field(default_factory=Limits)
+    limits: Limits = field(default_factory=lambda: sample_limits(reconciliation_bound=300.0))
+    """A reconciliation bound that outlasts the restart delay of the crash sweeps (one lease and a
+    little more). Core does not yet keep a restart later than its own bounds: a poll of an owned
+    job that lapsed while the host was down fails the measurement or orphans the job instead of
+    being polled anew (`vs_core._waits`, OWNED_JOB halts the run). Use the default limits once
+    core keeps that property."""
     yields: Callable[[RuntimeWorkspaces, StateNamespace], TurnYields] | None = None
     """Builds the turn-yield source from the host's workspaces and receipts, per process."""
     commits: CommitObserver | None = None
@@ -192,9 +215,14 @@ class World:
         return new_core_state(
             RUN_ID,
             facts,
-            DECLARATION,
+            self.strategy.declaration,
             offered=self.operations,
-            startup=CoreStartup(deadline_at=1000.0, limits=self.limits),
+            startup=CoreStartup(
+                deadline_at=1000.0,
+                limits=self.limits,
+                # Waiting for evaluations is served exactly when the world has a yield source.
+                lifecycle=frozenset() if self.yields is None else frozenset({"suspend"}),
+            ),
         )
 
     def bindings(self) -> CoreRuntimeBindings:
@@ -266,8 +294,12 @@ class World:
         store: StateStore = self.env.project.state_store(RUN_ID)
         if self.gate is not None:
             store = FaultingStore(store, self.gate)
-        shell: CoreRuntime[SkeletonState] = CoreRuntime(
-            store, self.strategy, self.initial(), bindings=bindings
+        shell = CoreRuntime(
+            store,
+            self.strategy.driver(bindings.registry),
+            self.initial(),
+            config=self.strategy.config,
+            bindings=bindings,
         )
         delivery = JournalPublicationDelivery(
             self.env.project.state.portable_namespace(RUN_ID, "publications"),
@@ -281,7 +313,7 @@ class World:
 class Process:
     """One host process: a shell and the publication delivery it runs with."""
 
-    shell: CoreRuntime[SkeletonState]
+    shell: CoreRuntime[FlowState]
     delivery: JournalPublicationDelivery
 
 
@@ -335,7 +367,6 @@ async def run_until_crash(process: Process, point: CrashPoint, *, start: float) 
     shell = process.shell
     for _ in range(40):
         shell.submit(ClockAdvanced(now_at=now), now_at=now)
-        shell.decide(now_at=now)
         while shell.advance():
             pass
         outcome = await shell.dispatch_one(now_at=now)
@@ -349,17 +380,6 @@ async def run_until_crash(process: Process, point: CrashPoint, *, start: float) 
         now += 1.0
     message = "no request was dispatched"
     raise AssertionError(message)
-
-
-class Implementation(BaseModel):
-    """The implementer's structured reply: the commit it made in its workspace."""
-
-    commit: str
-    waiting: bool = False
-
-
-IMPLEMENTATION = SchemaRef(name="implementation", version=1)
-IMPLEMENTER = RoleId(root="implementer")
 
 
 @dataclass
@@ -438,6 +458,40 @@ def _open_agents(root: Path) -> SessionHost:
     return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
 
+def _skeleton_operations(env: WorkspaceEnv, templates: Path) -> OperationCatalog:
+    """The operations the skeleton search declares, with the real renderer as their owner."""
+    templates.mkdir(parents=True, exist_ok=True)
+    (templates / "skeleton.j2").write_text("Make the candidate faster.\n", encoding="utf-8")
+    (templates / "skeleton-resume.j2").write_text("Your evaluations are in.\n", encoding="utf-8")
+    store = ArtifactStore(env.project.state.local_namespace(RUN_ID, "artifacts"))
+    roles = operation_roles(OPERATIONS)
+    return build_operation_catalog(
+        roles,
+        {
+            OperationRole.RENDER_ARTIFACTS: RenderArtifactsOwner(
+                TemplateRenderer(templates), store
+            ),
+            OperationRole.VERIFY_REVISION: _Unused(),
+            OperationRole.INTERPRET_EVIDENCE: _Unused(),
+        },
+    )
+
+
+class _Unused:
+    """An operation the skeleton declares (core requires it) but never asks for."""
+
+    async def execute(
+        self, request: OperationRequest, context: ExecutionContext
+    ) -> Mapping[str, object]:
+        del context
+        message = f"the skeleton asked for {request.kind}"
+        raise AssertionError(message)
+
+    async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
+        del request, context
+        return NotApplied()
+
+
 @contextmanager
 def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; every parameter after tmp_path is an independent optional seam of the world, and a settings object would be a wrapper type each of ~40 call sites must build.
     tmp_path: Path,
@@ -463,5 +517,6 @@ def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; e
             cluster=cluster or ScenarioCluster(),
             agents=hosted,
             strategy=strategy or SkeletonStrategy(),
+            operations=_skeleton_operations(env, tmp_path / "templates"),
             timed=timed,
         )

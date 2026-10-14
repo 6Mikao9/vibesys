@@ -7,6 +7,18 @@ import threading
 import pytest
 from pydantic import ValidationError
 
+from vs_core.api import (
+    ArtifactId,
+    ArtifactRef,
+    ControlId,
+    ControlInput,
+    RunControlEvent,
+    SessionInputReceived,
+    StopMode,
+    initial_state,
+    step,
+)
+from vs_runtime.api.core import RunControlBridge
 from vs_runtime.api.infrastructure import (
     RunControlTransition,
     RunControlTransitionKind,
@@ -84,7 +96,7 @@ def test_stop_releases_a_paused_boundary_and_unwinds() -> None:
 
     waiter = start_thread(wait_at_boundary)
     wait_until_started_sync(paused, waiter)
-    control.request_stop()
+    control.request_stop(StopMode.DRAIN)
     waiter.result(timeout=HANG_GUARD_S)
 
     assert [type(error) for error in raised] == [RunStopped]
@@ -99,7 +111,7 @@ def test_stop_releases_a_paused_boundary_and_unwinds() -> None:
 def test_stop_lands_on_every_boundary_until_resume_cancels_it() -> None:
     events = FakeRunControlEventSink()
     control = create_run_control_channel(events)
-    control.request_stop()
+    control.request_stop(StopMode.DRAIN)
 
     with pytest.raises(RunStopped):
         control.raise_if_stopped()
@@ -172,7 +184,7 @@ def test_a_bounded_wait_that_something_resumed_reports_it() -> None:
 def test_a_stop_ends_a_bounded_wait_and_is_never_cleared_by_its_timeout() -> None:
     control = create_run_control_channel(FakeRunControlEventSink())
     control.request_pause()
-    control.request_stop()
+    control.request_stop(StopMode.DRAIN)
 
     with pytest.raises(RunStopped):
         control.wait_resumed(0.0)
@@ -249,8 +261,36 @@ def test_a_boundary_reached_while_a_request_is_published_does_not_land_it(
 
     control = create_run_control_channel(sink)
 
-    getattr(control, request_control)()
+    if request_control == "request_stop":
+        control.request_stop(StopMode.DRAIN)
+    else:
+        getattr(control, request_control)()
 
     assert observed in ([None], [False])
     assert seen == [requested]
     assert landed not in seen
+
+
+class _DiscardingSteerArtifacts:
+    def put(self, ref: ArtifactRef, text: str) -> None:
+        del ref, text
+
+
+def test_a_steer_control_without_its_input_gets_the_input_on_the_next_poll() -> None:
+    """A crash between a steer control and its input is repaired: the poll supplies the input."""
+    control = ControlInput(
+        control_id=ControlId(root="control-0"),
+        action="steer",
+        artifact=ArtifactRef(artifact_id=ArtifactId(root="steer-text"), digest="d"),
+    )
+    held = step(initial_state(), RunControlEvent(control=control, now_at=1.0)).state
+    assert held.sessions.inputs == ()
+    bridge = RunControlBridge(
+        create_run_control_channel(FakeRunControlEventSink()), _DiscardingSteerArtifacts()
+    )
+    repaired = bridge.poll(held, 2.0)
+    assert [
+        event.input.input_id.root for event in repaired if isinstance(event, SessionInputReceived)
+    ] == ["steer-control-0"]
+    recorded = step(held, repaired[0]).state
+    assert bridge.poll(recorded, 3.0) == ()

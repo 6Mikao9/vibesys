@@ -26,7 +26,9 @@ class CheckpointDecline(StrEnum):
 
     WRITER_ACTIVE = "writer_active"
     """Another writer of the attempt's workspace has not ended, so a snapshot would
-    be torn. The later writer's own terminal turn requests the checkpoint."""
+    be torn. The later writer's own terminal turn requests the checkpoint; when that turn
+    ends without earning one (it failed or was cancelled), core asks again for the last
+    declined one, and a ``Retained`` then follows the ``Declined``."""
 
     UNAUTHORIZED = "unauthorized"
     """Neither an interruption claim nor a terminal write turn authorizes it."""
@@ -43,6 +45,17 @@ class CheckpointDecline(StrEnum):
     still retains the workspace, so the attempt can release."""
 
 
+class TurnFailureKind(StrEnum):
+    """Why a turn ended without a usable reply, as a closed set strategies match on."""
+
+    PROVIDER_FAILED = "provider_failed"
+    """The executor ended the turn: the provider refused it, or its reply broke the schema."""
+    TRANSPORT_LOST = "transport_lost"
+    """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
+    CANCELLED = "cancelled"
+    """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
+
+
 class Value(BaseModel):
     """Persistable data, never live interfaces or mutable containers."""
 
@@ -52,8 +65,11 @@ class Value(BaseModel):
     # keys its memoized checks (`lru_cache` on whole envelopes and requests) by these values, so
     # each lookup re-walked the entire unchanged history: the dominant cost of a step. A value
     # cannot change, so its hash is computed once. A slot keeps it out of `__dict__` and out of
-    # equality, copies and serialization; a copy is a new object and hashes afresh.
-    __slots__ = ("_hash",)
+    # equality, copies and serialization; a copy is a new object and hashes afresh. The other
+    # slots hold facts derived from the fields (immutability verdict, canonical text, JSON
+    # fragment; see `vs_core._values.recall`) under the same rule, and are why those facts cost
+    # an attribute read instead of a side-table lookup.
+    __slots__ = ("_canonical", "_hash", "_immutable", "_text")
 
     def __hash__(self) -> int:
         """Hash of the class's fields, computed once."""
@@ -306,6 +322,10 @@ class Scope(Value):
     generation: Generation
 
 
+THIS_RUN = Scope(owner=RunId(root="this-run"), generation=0)
+"""The scope a search names for work the run itself owns. Core replaces it with the run's own."""
+
+
 class AttemptRef(Value):
     """Attempt ref lifecycle contract."""
 
@@ -416,7 +436,7 @@ class Area(StrEnum):
     SESSIONS = "sessions"
     EVALUATION = "evaluation"
     SETTLEMENT = "settlement"
-    INTENTS = "intents"
+    RECORDS = "records"
 
 
 class KernelNotImplementedError(Exception):
@@ -566,27 +586,72 @@ class PoolCapacity(Value):
     capacity: int = Field(ge=1)
 
 
-# How many times one measurement is submitted in all, unless the run says otherwise.
-DEFAULT_MAX_MEASUREMENT_SUBMISSIONS = 3
+# Hard caps no declaration can lift. A backend declares its own bounds below these; core
+# refuses a declaration above them and enforces them whatever a declaration says.
+MAX_REQUEST_RETRIES = 10
+MAX_SUBMISSIONS_PER_MEASUREMENT = 5
+MAX_CORRECTIONS = 5
+"""The most corrections of one reply any role may ask for."""
+MAX_LOST_TURNS = 5
+"""The most times any role may have a lost turn asked again."""
+MAX_REASK_CHAIN = MAX_CORRECTIONS + MAX_LOST_TURNS
+"""The longest chain of corrections and re-asks any role's bounds allow; core refuses a longer one."""
+
+
+class RequestRetries(Value):
+    """How core re-sends a request its executor said it did not run. Declared by the backend.
+
+    ``limit`` re-sends follow the first attempt, the n-th after ``backoff * 2**(n-1)`` seconds
+    of core time, never more than ``backoff_cap``. Core holds no default for any field and
+    refuses a ``limit`` above ``MAX_REQUEST_RETRIES``.
+    """
+
+    limit: Count
+    backoff: Seconds = Field(gt=0)
+    backoff_cap: Seconds = Field(gt=0)
+
+    @model_validator(mode="after")
+    def within_hard_cap(self) -> RequestRetries:
+        """Reject a limit above the hard cap and a cap below the first wait."""
+        if self.limit > MAX_REQUEST_RETRIES:
+            raise ContractValidationError("limit", f"above the hard cap {MAX_REQUEST_RETRIES}")
+        if self.backoff_cap < self.backoff:
+            raise ContractValidationError("backoff_cap", "below backoff")
+        return self
+
+    def delay(self, retries: int) -> float:
+        """Core seconds to wait before attempt number ``retries + 1``: doubling, capped."""
+        return min(self.backoff * 2 ** max(retries - 1, 0), self.backoff_cap)
 
 
 class Limits(Value):
-    """Run bounds; Scheduling enforces capacities before acquiring an episode."""
+    """Run bounds; every field is explicit, one field per meaning, no default.
 
-    max_attempts: Count = 1
-    max_turns: Count = 1
-    max_parallel: int = Field(default=1, ge=1)
-    pool_capacities: tuple[PoolCapacity, ...] = ()
-    max_retries: Count = 0
-    max_refunds: Count = 0
-    max_measurement_submissions: Count = DEFAULT_MAX_MEASUREMENT_SUBMISSIONS
-    queue_allowance: Seconds = 900.0
-    cancellation_bound: Seconds = 60.0
-    reconciliation_bound: Seconds = 60.0
+    Budget (the run's own): ``max_attempts``, ``max_turns``, ``max_parallel``,
+    ``pool_capacities``, ``max_refunds`` and ``max_adoption_rounds``. How often a reply is corrected or a lost turn
+    asked again is the role's (`Role.corrections`, `Role.lost_turns`); core keeps only
+    `MAX_REASK_CHAIN`.
+    Declared by the backend and applied by core: ``request_retries``. Core's own bounds on its
+    waits and cleanup: the remaining ``*_bound`` and ``observe_*`` fields.
+    """
+
+    max_attempts: Count
+    max_turns: Count
+    max_parallel: int = Field(ge=1)
+    pool_capacities: tuple[PoolCapacity, ...]
+    max_refunds: Count
+    max_adoption_rounds: int = Field(ge=1)
+    """AdoptRevision rounds per selection, the first included."""
+    request_retries: RequestRetries
+    cancellation_bound: Seconds
+    # The least time core gives its own cleanup and inspection requests, even once the run
+    # deadline has passed (see `cleanup` in `_deadlines`).
+    cleanup_bound: Seconds = Field(gt=0)
+    reconciliation_bound: Seconds
     # Poll cadence for a submitted measurement job, and the cap of the doubling
     # delay before re-polling a job whose last poll was unknown.
-    observe_interval: Seconds = Field(default=10.0, gt=0)
-    observe_backoff_cap: Seconds = Field(default=120.0, gt=0)
+    observe_interval: Seconds = Field(gt=0)
+    observe_backoff_cap: Seconds = Field(gt=0)
 
     @model_validator(mode="after")
     def observe_cap_covers_interval(self) -> Limits:
@@ -611,6 +676,67 @@ class PureOption(Value):
     value: str | int | Annotated[float, Field(allow_inf_nan=False)] | bool | None
 
 
+class TaskStage(Value):
+    """One stage the task can measure and the seconds its execution may take."""
+
+    stage_id: str = Field(min_length=1)
+    execution_seconds: float = Field(ge=0, allow_inf_nan=False)
+
+
+class TaskObjective(Value):
+    """One axis the task compares candidates on, and which way is better."""
+
+    name: str = Field(min_length=1)
+    direction: Literal["max", "min"]
+
+
+class TaskTerms(Value):
+    """What the task fixes about measuring and comparing candidates.
+
+    Core carries these terms and holds none of them as a default: the host resolves them from
+    the task's input bundle and domain, and a search reads them through ``ctx.task``. The
+    evaluator, workload and environment identities that go with them are the run facts'.
+    """
+
+    recipe: ArtifactRef
+    """The stored evaluation plan every measurement plan cites."""
+    stages: tuple[TaskStage, ...]
+    """Every stage the task can measure, in dependency order, with its time limit."""
+    measured: tuple[str, ...]
+    """The stages a candidate is measured on, in order: the task's gates."""
+    queue_allowance: float = Field(ge=0, allow_inf_nan=False)
+    """Seconds a measurement may wait in the evaluation queue."""
+    accuracy_stage: str | None = Field(default=None, min_length=1)
+    """The stage whose pass is the correctness gate."""
+    accuracy_gated: tuple[EvidenceKind, ...] = ()
+    """Evidence kinds that count only if the accuracy stage passed."""
+    operation_seconds: float = Field(gt=0, allow_inf_nan=False)
+    """Seconds one read of the evidence (decoding it, verifying a parent) may take."""
+    objectives: tuple[TaskObjective, ...] = ()
+    """The directed axes candidates are ranked on, headline first."""
+    relative_noise: float = Field(default=0.0, ge=0.0, lt=1.0)
+    """The benchmark's declared variation: a reading must beat the input by more than this."""
+    profile_fields: tuple[str, ...] = ()
+    """The measurement fields the task's profile capture supplies."""
+
+    @property
+    def requires_accuracy_proof(self) -> bool:
+        """Whether a candidate must carry an accepted accuracy proof to be adopted.
+
+        Only a task that measures its accuracy stage can produce one; a task without that gate
+        adopts what its other gates admit.
+        """
+        return self.accuracy_stage is not None and self.accuracy_stage in self.measured
+
+    @model_validator(mode="after")
+    def _stages_exist(self) -> TaskTerms:
+        known = {item.stage_id for item in self.stages}
+        named = {*self.measured, *([self.accuracy_stage] if self.accuracy_stage else [])}
+        if unknown := sorted(named - known):
+            raise ContractValidationError("measured", f"names stages the task lacks: {unknown}")
+        return self
+
+
 class RunFacts(Value):
     """Run facts lifecycle contract."""
 
@@ -622,6 +748,15 @@ class RunFacts(Value):
     workload_digest: str
     environment_digest: str
     artifacts: tuple[ArtifactRef, ...] = ()
+    task: TaskTerms | None = None
+    """What the task fixes; a search that measures candidates reads it with ``ctx.task``."""
+
+
+class StopMode(StrEnum):
+    """How a stop treats work in flight: let it finish, or cancel it."""
+
+    DRAIN = "drain"
+    CANCEL = "cancel"
 
 
 class ControlInput(Value):
@@ -629,7 +764,16 @@ class ControlInput(Value):
 
     control_id: ControlId
     action: Literal["pause", "resume", "stop", "steer"]
+    mode: StopMode | None = None
+    """Drain or cancel what is in flight: the operator's choice, given with every stop."""
     artifact: ArtifactRef | None = None
+
+    @model_validator(mode="after")
+    def mode_belongs_to_stop(self) -> ControlInput:
+        """A stop names how it ends in-flight work; no other action has a mode."""
+        if (self.action == "stop") != (self.mode is not None):
+            raise ContractValidationError("mode", "required for stop and only for stop")
+        return self
 
 
 class CompletionStatus(StrEnum):
@@ -649,7 +793,7 @@ class DependencyStatus(StrEnum):
 
 
 class RequestBase(Value):
-    """Canonical I/O intent correlation, including the current occupancy episode.
+    """Canonical I/O record correlation, including the current occupancy episode.
 
     Attempt mutations carry admission_id. Canonical registration derives a
     missing attempt episode from the exact owner and generation. Explicit older
@@ -663,8 +807,6 @@ class RequestBase(Value):
     depends_on: tuple[RequestId, ...] = ()
     decision_id: DecisionId | None = None
     admission_id: DecisionId | None = None
-    decision_dependencies: tuple[DecisionId, ...] = ()
-    deadline_at: Seconds
 
 
 class ChildManifest(Value):
@@ -891,7 +1033,7 @@ class ExecuteRegisteredOperation(RequestBase):
     """Execute a canonical registered wire with separately reserved input payload.
 
     Sessions A resolves the accepted Operation origin and reserves its inputs
-    before Intents A registers this final executable payload. Dispatch uses that
+    before Records A registers this final executable payload. Dispatch uses that
     sole canonical manifest; changing it under the same request ID is a conflict.
     """
 

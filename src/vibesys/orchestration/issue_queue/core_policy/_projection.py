@@ -1,11 +1,10 @@
-"""Read model of an issue-queue run: the strategy state in the shape frontends already consume."""
+"""Read model of an issue-queue run: the search's published record in the shape frontends consume."""
 
 from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING
 
-from vibesys.candidates.api import RunPhase
 from vibesys.run.contracts import (
     IterationKind,
     IterationMetric,
@@ -14,64 +13,70 @@ from vibesys.run.contracts import (
     IterationTree,
     PluginProjection,
 )
-from vs_issue_tracker.api import IssueRow, IssueStatus
+from vs_issue_tracker.api import IssueStatus
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.issue_queue.strategy.api import IssueQueueStrategyState
+    from vibesys.orchestration.issue_queue.search.api import IssueBrief, QueueSnapshot
 
 
-def project_strategy_state(
-    state: IssueQueueStrategyState, *, experiment_revision: int
-) -> PluginProjection:
-    """Project one strategy state; `experiment_revision` is the core revision it was read at."""
-    job = state.job
+def project_run_snapshot(snapshot: QueueSnapshot, *, experiment_revision: int) -> PluginProjection:
+    """Project one published record; `experiment_revision` is the core revision it was read at."""
     payload = {
         "version": 1,
-        "round_idx": state.round_idx,
-        "cursor": state.cursor.value,
-        "phase": None if job is None else job.phase.value,
-        "current_issue_id": None if job is None or job.issue is None else job.issue.id,
-        "bootstrap_done": state.board.bootstrap_done,
+        "round_idx": snapshot.round_idx,
+        "cursor": snapshot.cursor,
+        "phase": _phase(snapshot),
+        "current_issue_id": snapshot.current_issue_id,
+        "bootstrap_done": bool(snapshot.issues),
         "issues": [
             {
                 "id": issue.id,
-                "type": issue.type.value,
-                "status": issue.status.value,
+                "type": issue.type,
+                "status": issue.status,
                 "title": issue.title,
                 "attempts": issue.attempts,
             }
-            for issue in state.board.issues
+            for issue in snapshot.issues
         ],
         "performance": [
             {
                 "iteration": record.iteration,
-                "throughput_trend": record.throughput_trend,
-                "latency_trend": record.latency_trend,
+                "throughput_trend": record.primary_trend,
+                "latency_trend": record.secondary_trend,
                 "metrics": json.loads(record.metrics_json) if record.metrics_json else {},
                 "new_issue_ids": list(record.new_issues),
             }
-            for record in state.performance
+            for record in snapshot.performance
         ],
     }
     return PluginProjection(
         payload=payload,
         experiment_revision=experiment_revision,
-        iterations=_iterations(state),
+        iterations=_iterations(snapshot),
     )
 
 
-def _iterations(state: IssueQueueStrategyState) -> IterationTree:
+def _phase(snapshot: QueueSnapshot) -> str | None:
+    """``"work"`` while a job is in flight, else None.
+
+    The state machine reported the step of the job (start, claim, work, record, ...). A flow has
+    no step phases, so the one fact left is whether a job is running.
+    """
+    working = snapshot.current_issue_id is not None or snapshot.cursor == "assess"
+    return "work" if working else None
+
+
+def _iterations(snapshot: QueueSnapshot) -> IterationTree:
     """Map the durable board snapshot without borrowing round semantics."""
     root_id = "board:issues"
-    active_issue_id = None if state.job is None or state.job.issue is None else state.job.issue.id
-    issues = tuple(sorted(state.board.issues, key=lambda issue: issue.id))
+    issues = tuple(sorted(snapshot.issues, key=lambda issue: issue.id))
     nodes = [
         IterationSummary(
             id=root_id,
             kind=IterationKind.BOARD,
             label="Issue board",
             ordinal=0,
-            status=_board_status(state),
+            status=_board_status(snapshot),
             child_count=len(issues),
         )
     ]
@@ -82,7 +87,7 @@ def _iterations(state: IssueQueueStrategyState) -> IterationTree:
             kind=IterationKind.ITEM,
             label=f"#{issue.id} {issue.title}",
             ordinal=issue.id,
-            status=_issue_status(issue, active=issue.id == active_issue_id),
+            status=_issue_status(issue, active=issue.id == snapshot.current_issue_id),
             headline_metrics=(IterationMetric(id="attempts", value=float(issue.attempts)),),
         )
         for issue in issues
@@ -90,23 +95,24 @@ def _iterations(state: IssueQueueStrategyState) -> IterationTree:
     return IterationTree.from_nodes(tuple(nodes))
 
 
-def _board_status(state: IssueQueueStrategyState) -> IterationStatus:
-    if state.phase is RunPhase.FINISHED:
-        if state.stopping:
+def _board_status(snapshot: QueueSnapshot) -> IterationStatus:
+    if snapshot.cursor == "finished":
+        if snapshot.stopped:
             return IterationStatus.CANCELLED
-        if state.ending is not None and state.ending.outcome == "failure":
+        if snapshot.ending is not None and snapshot.ending.outcome == "failure":
             return IterationStatus.FAILED
         return IterationStatus.COMPLETED
-    if state.board.bootstrap_done or state.job is not None or state.round_idx > 0:
+    if snapshot.issues or snapshot.current_issue_id is not None or snapshot.round_idx > 0:
         return IterationStatus.ACTIVE
     return IterationStatus.PENDING
 
 
-def _issue_status(issue: IssueRow, *, active: bool) -> IterationStatus:
-    if issue.status is IssueStatus.CLOSED:
+def _issue_status(issue: IssueBrief, *, active: bool) -> IterationStatus:
+    status = IssueStatus(issue.status)
+    if status is IssueStatus.CLOSED:
         return IterationStatus.COMPLETED
-    if issue.status is IssueStatus.BLOCKED:
+    if status is IssueStatus.BLOCKED:
         return IterationStatus.FAILED
-    if active or issue.status is IssueStatus.IN_PROGRESS:
+    if active or status is IssueStatus.IN_PROGRESS:
         return IterationStatus.ACTIVE
     return IterationStatus.PENDING

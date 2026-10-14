@@ -11,13 +11,16 @@ key. The ported strategies follow the same rule with their own prefix.
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import Config
 from vibesys.errors import ConfigurationError
 from vibesys.orchestration.dynamic.plugin import PLUGIN
+from vibesys.orchestration.dynamic.search.api import ROLES, dynamic
+from vs_core.api import UnknownRoleError
+from vs_sim.api.testing import examples
 
 DYNAMIC_ROLES = ("dynamic-orchestrator", "dynamic-implementer", "dynamic-judge", "dynamic-profiler")
 LEGACY_ROLES = ("orchestrator", "implementer", "judge", "profiler")
@@ -31,6 +34,7 @@ def test_the_plugin_declares_the_prefixed_role_ids() -> None:
     assert tuple(role.id for role in PLUGIN.agents) == DYNAMIC_ROLES
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     overrides=st.dictionaries(
         st.sampled_from(DYNAMIC_ROLES),
@@ -50,3 +54,24 @@ def test_a_legacy_role_id_is_refused_naming_the_key(legacy: str) -> None:
     config = _config({legacy: {"model": "other"}})
     with pytest.raises(ConfigurationError, match=f"agent.roles.{legacy}"):
         resolve_agent_specs(config, PLUGIN.agents)
+
+
+ROLE_NAMES = tuple(role.name for role in ROLES)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    unknown=st.lists(
+        st.text(alphabet="abcdefghij-", min_size=1, max_size=12).filter(
+            lambda name: name not in ROLE_NAMES
+        ),
+        min_size=1,
+        unique=True,
+    )
+)
+def test_a_model_for_a_role_the_search_does_not_declare_is_rejected_and_named(
+    unknown: list[str],
+) -> None:
+    with pytest.raises(UnknownRoleError) as raised:
+        dynamic.with_models(dict.fromkeys(unknown, "m") | {ROLE_NAMES[0]: "m"})
+    assert all(name in str(raised.value) for name in unknown)

@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from scripts.ast_identity import node_identity
+from scripts.flow_code import async_allowed_paths
 from vs_project.api import run_git
 
 # Each export is reviewed as deterministic value construction or transformation.
@@ -66,9 +67,14 @@ PURE_EXPORTS = {
     "collections": frozenset({"Counter", "OrderedDict", "defaultdict", "deque", "namedtuple"}),
     "collections.abc": frozenset(
         {
+            "AsyncGenerator",
+            "AsyncIterable",
+            "AsyncIterator",
+            "Awaitable",
             "Callable",
             "Collection",
             "Container",
+            "Coroutine",
             "Generator",
             "Hashable",
             "Iterable",
@@ -83,6 +89,8 @@ PURE_EXPORTS = {
             "Sized",
         }
     ),
+    # Scope managers that only run the code they wrap; they open nothing themselves.
+    "contextlib": frozenset({"asynccontextmanager", "contextmanager", "suppress"}),
     "dataclasses": frozenset(
         {"asdict", "astuple", "dataclass", "field", "fields", "is_dataclass", "replace"}
     ),
@@ -304,6 +312,7 @@ PURE_EXPORTS = {
             "Any",
             "Callable",
             "ClassVar",
+            "Concatenate",
             "Final",
             "Generic",
             "Literal",
@@ -319,6 +328,7 @@ PURE_EXPORTS = {
             "TypeVar",
             "TypedDict",
             "Union",
+            "Unpack",
             "assert_never",
             "cast",
             "get_args",
@@ -460,6 +470,8 @@ PURE_REQUEST_APIS = (
 )
 IMPLEMENTATIONS = frozenset({"docker", "modal", "slurm", "claude-code"})
 BUILTINS = frozenset(vars(builtins)) - PURE_BUILTINS
+#: Builtins that drive an awaitable or async iterator: only meaningful where `await` is allowed.
+ASYNC_BUILTINS = frozenset({"aiter", "anext", "StopAsyncIteration"})
 LEGACY_SCOPE = (
     "src/vibesys/orchestration",
     "src/vibesys/domains",
@@ -487,13 +499,18 @@ class Violation:
 class PurityVisitor(ast.NodeVisitor):
     """Scan nested functions, class bodies and TYPE_CHECKING imports alike."""
 
-    def __init__(self, path: str) -> None:
-        """Start a file-local scanner with stable lexical identities."""
+    def __init__(self, path: str, *, flow_code: bool = False) -> None:
+        """Start a file-local scanner with stable lexical identities.
+
+        `flow_code` marks a flow module or the flow framework, where `async`/`await` is the
+        point; every other rule still applies there.
+        """
         self.path = path
+        self.flow_code = flow_code
         self.symbols: list[str] = []
         self.counts: Counter[tuple[str, str, str]] = Counter()
         self.violations: list[Violation] = []
-        self.builtin_aliases = set(BUILTINS)
+        self.builtin_aliases = set(BUILTINS - ASYNC_BUILTINS if flow_code else BUILTINS)
         self.builtin_modules = {"builtins"}
         self.model_classes: dict[str, frozenset[str]] = {}
         self.model_super: list[str] = []
@@ -742,23 +759,27 @@ class PurityVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Async definitions cannot enter the pure core."""
         self.symbols.append(node.name)
-        self.record("async-def", node.name)
+        if not self.flow_code:
+            self.record("async-def", node.name)
         self.generic_visit(node)
         self.symbols.pop()
 
     def visit_Await(self, node: ast.Await) -> None:
         """Await syntax is forbidden even if the awaited name is pure."""
-        self.record("await", node_identity(node.value))
+        if not self.flow_code:
+            self.record("await", node_identity(node.value))
         self.generic_visit(node)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
         """Async iteration is shell behavior."""
-        self.record("async-for", node_identity(node.iter))
+        if not self.flow_code:
+            self.record("async-for", node_identity(node.iter))
         self.generic_visit(node)
 
     def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
         """Async resource scope belongs in the shell."""
-        self.record("async-with", node_identity(node.items[0].context_expr))
+        if not self.flow_code:
+            self.record("async-with", node_identity(node.items[0].context_expr))
         self.generic_visit(node)
 
 
@@ -767,7 +788,14 @@ class PurityVisitor(ast.NodeVisitor):
 #: weak reference that evicts the entry. A hit is proven by `ref() is obj`, so it returns exactly
 #: what recomputing would and no result depends on addresses or collection timing. Nothing else
 #: in the pure scope may use `id` or `weakref`.
+#: `vs_core.flows._defs` tags the flow function a decorator returns with its definition (`setattr`
+#: on the decorated function, at import time); nothing else in the pure scope may use `setattr`.
 MODULE_EXEMPTIONS = {
+    "libs/vs-core/src/vs_core/flows/_defs.py": frozenset({("builtin", "setattr")}),
+    # `vs_core.flows._workspaces._workspace` is an async generator that must let `GeneratorExit`
+    # pass untouched: when the flow is discarded nothing can serve a settlement, and the generic
+    # `except BaseException` below it would otherwise try to settle (and await) during close.
+    "libs/vs-core/src/vs_core/flows/_workspaces.py": frozenset({("builtin", "GeneratorExit")}),
     "libs/vs-core/src/vs_core/_values.py": frozenset(
         {
             ("banned-import", "weakref"),
@@ -778,9 +806,13 @@ MODULE_EXEMPTIONS = {
 }
 
 
-def scan_source(path: str, source: str) -> tuple[Violation, ...]:
-    """Return stable violations; syntax errors fail closed."""
-    visitor = PurityVisitor(path)
+def scan_source(path: str, source: str, *, flow_code: bool = False) -> tuple[Violation, ...]:
+    """Return stable violations; syntax errors fail closed.
+
+    Flow code (see `scripts/flow_code.py`) is async by design, so `async`/`await` is not counted
+    there; its clock, randomness, I/O and `asyncio` use still is.
+    """
+    visitor = PurityVisitor(path, flow_code=flow_code)
     visitor.visit(ast.parse(source, filename=path))
     approved = MODULE_EXEMPTIONS.get(path, frozenset())
     return tuple(v for v in visitor.violations if (v.rule, v.subject) not in approved)
@@ -827,13 +859,17 @@ def scan_value_exports(root: Path) -> tuple[Violation, ...]:
 def scan_repository(root: Path) -> tuple[Violation, ...]:
     """Scan the full legacy ratchet scope and the zero-waiver lifecycle core."""
     violations: list[Violation] = []
+    flow_paths = async_allowed_paths(root)
     for scope in (*LEGACY_SCOPE, PURE_SCOPE):
         location = root / scope
         paths = [location] if location.is_file() else sorted(location.rglob("*.py"))
         for path in paths:
             if "__pycache__" in path.parts:
                 continue
-            violations.extend(scan_source(path.relative_to(root).as_posix(), path.read_text()))
+            relative = path.relative_to(root).as_posix()
+            violations.extend(
+                scan_source(relative, path.read_text(), flow_code=relative in flow_paths)
+            )
     violations.extend(scan_value_exports(root))
     return tuple(sorted(set(violations)))
 

@@ -1,0 +1,18 @@
+{#- The typed problems of a reply that broke its output schema, one line each. -#}
+{% macro error_path(path) -%}
+{% if path %}{% for step in path %}{% if step is number %}[{{ step }}]{% else %}{% if not loop.first %}.{% endif %}{{ step }}{% endif %}{% endfor %}{% else %}the reply as a whole{% endif %}
+{%- endmacro %}
+{% macro error_meaning(code) -%}
+{% if code == 'missing' %}a required field is missing
+{%- elif code == 'unexpected' %}a field is not allowed here
+{%- elif code == 'wrong-type' %}the value has the wrong type
+{%- elif code == 'invalid-value' %}the value is not one the schema permits
+{%- elif code == 'not-json' %}the reply is not valid JSON
+{%- else %}{{ code }}{% endif %}
+{%- endmacro %}
+{% macro reply_errors(errors) -%}
+{% for error in errors %}
+- {{ error_path(error.path) }}: {{ error_meaning(error.code.value) }} ({{ error.code.value }}){% if error.message %}: {{ error.message }}{% endif %}
+
+{% endfor %}
+{%- endmacro %}

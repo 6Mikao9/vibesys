@@ -15,6 +15,10 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 RUN_SCOPE = core.Scope(owner=core.RunId(root="run"), generation=0)
 ATTEMPT_SCOPE = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
@@ -25,6 +29,8 @@ def rev(name: str) -> core.RevisionRef:
 
 
 def reload(state: core.CoreState) -> core.CoreState:
+    if not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -118,7 +124,9 @@ def world(max_retries: int = 0) -> core.CoreState:
     return state.model_copy(
         update={
             "run": state.run.model_copy(
-                update={"limits": core.Limits(max_retries=max_retries, max_attempts=4)}
+                update={
+                    "limits": sample_limits(max_adoption_rounds=max_retries + 1, max_attempts=4)
+                }
             ),
             "settlement": core.SettlementState(settlements=SETTLEMENTS),
             "evaluation": core.EvaluationState(
@@ -155,7 +163,10 @@ class Run:
             selection=selection,
         )
         return self.feed(
-            core.DecisionSubmitted(decision=decision, expected_revision=self.state.revision)
+            core.DecisionSubmitted(
+                decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+                expected_revision=self.state.revision,
+            )
         )
 
     def answer(
@@ -269,7 +280,7 @@ def test_a_successful_result_must_name_the_verified_adopted_winner() -> None:
     result = core.RunResultProposal(outcome="success", reason="done", selection=selection)
 
     def stop() -> list[core.Rejected]:
-        decision = core.Stop(
+        decision = core.Finish(
             decision_id=core.DecisionId(root=f"stop-{len(run.state.run.receipts)}"),
             scope=RUN_SCOPE,
             mode="drain",
@@ -319,6 +330,46 @@ def test_a_better_failed_partial_is_never_adopted_over_the_frozen_parents() -> N
     assert adopt.selection == GOOD[1]
 
 
+UNPROVEN = BAD[1]
+"""A retained, eligible candidate with no accepted accuracy proof."""
+
+
+def task_measuring(*measured: str) -> core.TaskTerms:
+    """A task over the two gate stages that measures only ``measured`` of them."""
+    return core.TaskTerms(
+        recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
+        stages=tuple(core.TaskStage(stage_id=name, execution_seconds=1.0) for name in GATES),
+        measured=measured,
+        queue_allowance=1.0,
+        accuracy_stage="accuracy" if "accuracy" in measured else None,
+        operation_seconds=1.0,
+    )
+
+
+GATES = ("accuracy", "benchmark")
+
+
+@given(
+    measured=st.lists(st.sampled_from(GATES), unique=True).map(tuple),
+    declared=st.booleans(),
+)
+def test_an_accuracy_proof_is_asked_only_of_a_task_that_measures_accuracy(
+    measured: tuple[str, ...], *, declared: bool
+) -> None:
+    """The proof is the accuracy gate's product: a task without that gate cannot supply one."""
+    state = world()
+    facts = state.run.facts.model_copy(
+        update={"task": task_measuring(*measured) if declared else None}
+    )
+    run = Run(state.model_copy(update={"run": state.run.model_copy(update={"facts": facts})}))
+
+    transition = run.propose(UNPROVEN)
+
+    needs_proof = not declared or "accuracy" in measured
+    assert bool(new_requests(transition)) is not needs_proof
+    assert bool([e for e in transition.events if isinstance(e, core.Rejected)]) is needs_proof
+
+
 def test_applied_but_unverified_is_recovered_by_verify_not_by_adopting_again() -> None:
     run = start()
     selection = GOOD[0]
@@ -330,11 +381,11 @@ def test_applied_but_unverified_is_recovered_by_verify_not_by_adopting_again() -
     # A ledger that lost the verify record gets exactly that request back, never AdoptRevision.
     lost = run.state.model_copy(
         update={
-            "intents": run.state.intents.model_copy(
+            "records": run.state.records.model_copy(
                 update={
-                    "intents": tuple(
+                    "records": tuple(
                         row
-                        for row in run.state.intents.intents
+                        for row in run.state.records.records
                         if row.request_id != verify.request_id
                     )
                 }
@@ -344,8 +395,11 @@ def test_applied_but_unverified_is_recovered_by_verify_not_by_adopting_again() -
     recovered = core.step(
         lost,
         core.DecisionSubmitted(
-            decision=core.ProposeWinner(
-                decision_id=core.DecisionId(root="again"), scope=RUN_SCOPE, selection=selection
+            decision=core.Wait(
+                request=core.ProposeWinner(
+                    decision_id=core.DecisionId(root="again"), scope=RUN_SCOPE, selection=selection
+                ),
+                until=core.Within(limit=100.0),
             ),
             expected_revision=lost.revision,
         ),
@@ -482,7 +536,11 @@ def _start_root_attempt(run: Run) -> _FenceProbe:
         budget=core.AttemptBudget(),
     )
     transition = core.step(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
     return _FenceProbe(
         run, [event for event in transition.events if isinstance(event, core.Rejected)]
@@ -636,7 +694,7 @@ actions = st.one_of(
 )
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 @given(
     plan=st.lists(actions, min_size=1, max_size=30),
     retries=st.integers(0, 2),
@@ -715,7 +773,7 @@ def _executor_answer(
     status: core.ObservationStatus,
     revision: core.RevisionRef | None = None,
 ) -> core.Transition:
-    """Answer through the intent ledger, the way an executor's result enters the core."""
+    """Answer through the record ledger, the way an executor's result enters the core."""
     assert request.request_id is not None
     key = request.request_id.root
     run.sequences[key] = run.sequences.get(key, 0) + 1
@@ -736,7 +794,7 @@ def _executor_answer(
 
 
 def test_the_winner_decision_completes_only_after_its_adoption_is_verified() -> None:
-    """INTENTS-A gap: completing on the restore alone would precede the verification."""
+    """RECORDS-A gap: completing on the restore alone would precede the verification."""
     run = start()
     selection = GOOD[0]
     (adopt,) = new_requests(run.propose(selection))

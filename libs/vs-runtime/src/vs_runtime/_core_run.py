@@ -10,7 +10,7 @@ answers (the Fake cluster answers instantly, a real cluster costs a Slurm call e
 design has three parts, so that a busy loop on a running job cannot happen:
 
 * Core decides when the next observation is due and exposes it as a core time
-  (``RunView.next_observe_at``, the default ``next_wake``). Core emits the next observe
+  (``CoreView.next_observe_at``, the default ``next_wake``). Core emits the next observe
   only once ``ClockAdvanced`` reaches that time.
 * The loop never calls the executor on its own. Between settles it either made progress
   (state changed) or it waits until the earliest of: the next time core asks for, the
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from vs_core.api import (
@@ -45,6 +45,7 @@ from vs_core.api import (
     RunResultProposal,
     RunStatus,
     SessionPhase,
+    StopMode,
     orphan_waits,
     project,
 )
@@ -100,7 +101,7 @@ class NextWake(Protocol):
     """The earliest core time at which a ``ClockAdvanced`` would make core emit work.
 
     ``None`` means core is waiting for nothing time-driven. The default reads core's
-    pacing (``RunView.next_observe_at``).
+    pacing (``CoreView.next_observe_at``).
     """
 
     def __call__(self, core: CoreState) -> float | None:
@@ -150,16 +151,6 @@ class RunLoopConfig:
     max_dispatches: int = 100_000
     max_concurrent: int | None = None
     """Requests the shell executes at once; None takes the run's ``Limits.max_parallel``."""
-    stop_result: RunResultProposal = field(
-        default_factory=lambda: RunResultProposal(
-            outcome="cancelled", reason="stop requested by the operator"
-        )
-    )
-    deadline_result: RunResultProposal = field(
-        default_factory=lambda: RunResultProposal(
-            outcome="cancelled", reason="run deadline reached"
-        )
-    )
 
     def __post_init__(self) -> None:
         """Reject intervals that would let the loop spin or lose its lease."""
@@ -191,21 +182,18 @@ class RunControlBridge:
     The channel is level-triggered (a pause flag, a stop flag, a queue of steer texts).
     Each ``poll`` emits one event per change since the last poll, with stable
     identities ``control-<n>`` that continue the count of controls core already holds,
-    so a resumed run never reuses an identity. Stop carries the configured result
-    proposal; core never invents one.
+    so a resumed run never reuses an identity. A stop carries no result: the search
+    adopts its last choice and ends the run itself.
     """
 
     def __init__(
         self,
         channel: RunControlChannel,
         steer: SteerArtifacts,
-        *,
-        stop_result: RunResultProposal,
     ) -> None:
-        """Bind the mailbox, the steer text store and the stop proposal."""
+        """Bind the mailbox and the steer text store."""
         self._channel = channel
         self._steer = steer
-        self._stop_result = stop_result
         self._count = 0
         self._consumption = SteerConsumption()
         self._started = False
@@ -241,7 +229,7 @@ class RunControlBridge:
             return tuple(events)
         if self._channel.stop_requested():
             self._stopped = True
-            events.append(self._event("stop", now_at, result=self._stop_result))
+            events.append(self._event("stop", now_at, mode=self._channel.stop_mode()))
         elif self._channel.pause_requested() != self._paused:
             self._paused = not self._paused
             events.append(self._event("pause" if self._paused else "resume", now_at))
@@ -258,7 +246,7 @@ class RunControlBridge:
         now_at: float,
         *,
         text: str | None = None,
-        result: RunResultProposal | None = None,
+        mode: StopMode | None = None,
     ) -> RunControlEvent:
         self._count += 1
         identity = ControlId(root=f"control-{self._count}")
@@ -269,8 +257,8 @@ class RunControlBridge:
                 digest=hashlib.sha256(text.encode()).hexdigest(),
             )
             self._steer.put(artifact, text)
-        control = ControlInput(control_id=identity, action=action, artifact=artifact)
-        return RunControlEvent(control=control, now_at=now_at, result=result)
+        control = ControlInput(control_id=identity, action=action, mode=mode, artifact=artifact)
+        return RunControlEvent(control=control, now_at=now_at)
 
 
 @dataclass(frozen=True)
@@ -415,8 +403,8 @@ class _Loop:
             self._shell.submit(ClockAdvanced(now_at=now), now_at=now)
             before = self._signature()
             refusal = await self._settle(now)
-            if refusal is None and self._core().intents.recovery.phase == RecoveryPhase.READY:
-                self._shell.decide(now_at=now)
+            if refusal is None and self._core().records.recovery.phase == RecoveryPhase.READY:
+                self._shell.flush(now_at=now)
                 refusal = await self._settle(now)
             if refusal is not None:
                 # Requests already running finish and commit before the refusal ends the run.
@@ -479,9 +467,10 @@ class _Loop:
             self._deadline_stop = True
             events.append(
                 RunControlEvent(
-                    control=ControlInput(control_id=ControlId(root="deadline"), action="stop"),
+                    control=ControlInput(
+                        control_id=ControlId(root="deadline"), action="stop", mode=StopMode.DRAIN
+                    ),
                     now_at=now,
-                    result=self._config.deadline_result,
                 )
             )
         return tuple(events)
@@ -498,14 +487,14 @@ class _Loop:
     async def _wait(self, now: float) -> None:
         core = self._core()
         due = self._next_wake(core)
-        asked = self._shell.strategy_wake_at
+        asked = self._shell.next_wake_at
         if asked is not None and asked > now:
             due = asked if due is None else min(due, asked)
         if self._shell.in_flight:
             await self._wait_while_running(due)
             return
         paused = core.run.status == RunStatus.PAUSED
-        recovering = core.intents.recovery.phase != RecoveryPhase.READY
+        recovering = core.records.recovery.phase != RecoveryPhase.READY
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):
             raise RunStalledError(_describe(core, self._stall_notes()))
@@ -567,20 +556,20 @@ def _noop() -> None:
 
 
 def _describe(core: CoreState, notes: Sequence[str]) -> str:
-    """Why nothing can proceed: the open intents, then every wait nothing will end.
+    """Why nothing can proceed: the open records, then every wait nothing will end.
 
-    A stalled run always names a cause. When core holds no open intent and no orphaned wait,
+    A stalled run always names a cause. When core holds no open record and no orphaned wait,
     the strategy still has unfinished work core is not waiting on, so the report lists the
     attempts, sessions and continuations that have not ended.
     """
-    open_intents = [
-        f"{intent.request.kind}:{intent.phase.value}"
-        for intent in core.intents.intents
-        if intent.phase.value != "completed"
+    open_records = [
+        f"{record.request.kind}:{record.phase.value}"
+        for record in core.records.records
+        if record.phase.value != "completed"
     ]
     text = (
         f"run {core.run.run_id.root} stalled at core revision {core.revision} "
-        f"with status {core.run.status.value}; open intents {open_intents}"
+        f"with status {core.run.status.value}; open records {open_records}"
     )
     # An attempt that cannot finish closing is the usual reason nothing else is left to do.
     waiting = [
@@ -594,7 +583,7 @@ def _describe(core: CoreState, notes: Sequence[str]) -> str:
     orphans = [f"{wait.waiter.value} {wait.subject}" for wait in orphan_waits(core)]
     if orphans:
         text += f"; waits nothing will end {orphans}"
-    if not open_intents and not waiting and not orphans:
+    if not open_records and not waiting and not orphans:
         text += f"; {_unfinished(core)}"
     if notes:
         text += f"; {'; '.join(notes)}"

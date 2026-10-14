@@ -21,13 +21,14 @@ from vs_core.api import (
     DecisionId,
     EnsureSession,
     EventId,
+    FlowState,
     InputId,
-    IntentPhase,
     Observation,
     ObservationStatus,
     Request,
     RequestId,
     RequestObserved,
+    RequestPhase,
     Scope,
     ScopeInputTarget,
     SessionId,
@@ -35,9 +36,10 @@ from vs_core.api import (
     SessionInputReceived,
     SessionObserved,
     Transition,
+    Until,
     initial_state,
 )
-from vs_project.api import FakeStateStore, StoredEnvelope
+from vs_project.api import CommitOutcome, FakeStateStore, StoredEnvelope, StoreFence
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     CoreRuntime,
@@ -59,13 +61,21 @@ from vs_runtime.api.core import (
     RuntimeCommitError,
     RuntimeExecutionError,
 )
-from vs_runtime.api.core_shell_fixtures import CounterState, CounterStrategy, ShellTraceTransitions
+from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
 from vs_runtime.api.testing import FakePublicationDelivery, FakeRequestExecution
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_runtime.api.core import ExecutionLease
+
+
+def declared() -> CoreState:
+    """A new run whose declaration is the counter search's."""
+    core = initial_state()
+    return core.model_copy(
+        update={"run": core.run.model_copy(update={"declaration": counter.declaration})}
+    )
 
 
 class ScriptedExecution:
@@ -86,11 +96,12 @@ class ScriptedExecution:
 
 def make_shell(
     store: FakeStateStore, sessions: ScriptedExecution | None = None
-) -> CoreRuntime[CounterState]:
+) -> CoreRuntime[FlowState]:
     return CoreRuntime(
         store,
-        CounterStrategy(),
-        initial_state(),
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(
             transitions=ShellTraceTransitions(with_requests=True),
             executors=RequestExecutors(
@@ -117,7 +128,7 @@ def with_owner_events(result: ExecutionResult, *events: OwnerEvent) -> Execution
     return result.model_copy(update={"owner_events": events})
 
 
-async def prepared(shell: CoreRuntime[CounterState], store: FakeStateStore) -> None:
+async def prepared(shell: CoreRuntime[FlowState], store: FakeStateStore) -> None:
     del store
     shell.start("first", now_at=0, lease_duration=100)
     shell.submit(ClockAdvanced(now_at=1), now_at=1)
@@ -149,13 +160,13 @@ async def test_lease_is_renewable_while_an_executor_is_in_flight() -> None:
     assert await shell.dispatch_one(now_at=1) == DispatchProgress.DISPATCHED
     assert observed == [True, True]
     assert shell.advance()
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.RECONCILING
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.RECONCILING
 
 
 @pytest.mark.asyncio
 async def test_shell_renew_is_not_rejected_as_busy_during_dispatch() -> None:
     store = FakeStateStore()
-    holder: list[CoreRuntime[CounterState]] = []
+    holder: list[CoreRuntime[FlowState]] = []
 
     async def renewing(
         request: Request, context: ExecutionContext, result: ExecutionResult
@@ -213,7 +224,7 @@ def wrong_request_result(result: ExecutionResult) -> ExecutionResult:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", list(Failure))
-async def test_failed_execution_halts_and_restart_inspects_the_stranded_intent(
+async def test_failed_execution_halts_and_restart_inspects_the_stranded_record(
     failure: Failure,
 ) -> None:
     store = FakeStateStore()
@@ -238,8 +249,8 @@ async def test_failed_execution_halts_and_restart_inspects_the_stranded_intent(
     await prepared(shell, store)
     with pytest.raises((OSError, ContractError, RuntimeCommitError)):
         await shell.dispatch_one(now_at=1)
-    # The intent is DISPATCHED and the shell must not report idle or keep dispatching.
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED
+    # The record is DISPATCHED and the shell must not report idle or keep dispatching.
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
     with pytest.raises(RuntimeCommitError):
         await shell.dispatch_one(now_at=2)
     with pytest.raises(RuntimeCommitError):
@@ -247,8 +258,8 @@ async def test_failed_execution_halts_and_restart_inspects_the_stranded_intent(
 
     restarted = make_shell(store)
     restarted.start("second", now_at=100, lease_duration=100)
-    kinds = {row.request.kind: row.phase for row in restarted.record.envelope.core.intents.intents}
-    assert kinds["inspect_request"] == IntentPhase.PREPARED
+    kinds = {row.request.kind: row.phase for row in restarted.record.envelope.core.records.records}
+    assert kinds["inspect_request"] == RequestPhase.PREPARED
 
 
 @pytest.mark.asyncio
@@ -256,8 +267,9 @@ async def test_unbound_role_is_refused_before_authorization_is_committed() -> No
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
-        initial_state(),
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions(with_requests=True)),
     )
     shell.start("host", now_at=0, lease_duration=100)
@@ -269,7 +281,7 @@ async def test_unbound_role_is_refused_before_authorization_is_committed() -> No
         assert isinstance(refusal, ExecutorRefusal)
         assert refusal.role == ExecutorRole.SESSIONS
     assert shell.storage_revision == revision
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.PREPARED
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.PREPARED
 
 
 # P2-2 ---------------------------------------------------------------------------------
@@ -353,7 +365,7 @@ async def test_owner_events_outside_the_executed_scope_or_admission_halt_the_she
     with pytest.raises(RuntimeCommitError):
         shell.advance()
     assert shell.record.pending_inputs == ()
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
 
 
 # P3-2 ---------------------------------------------------------------------------------
@@ -388,14 +400,16 @@ async def test_unrouted_request_type_is_a_typed_contract_error() -> None:
     store = FakeStateStore()
     shell = make_shell(store)
     await prepared(shell, store)
-    request = shell.record.envelope.core.intents.intents[0].request
+    request = shell.record.envelope.core.records.records[0].request
     assert isinstance(request, EnsureSession)
 
     class Unrouted(EnsureSession):
         pass
 
     clone = Unrouted(**{name: getattr(request, name) for name in type(request).model_fields})
-    context = ExecutionContext(fence=shell.record.envelope.fence, now_at=1, payload_digest="digest")
+    context = ExecutionContext(
+        fence=shell.record.envelope.fence, now_at=1, payload_digest="digest", until=Until(at=100.0)
+    )
     with pytest.raises(ContractError, match="no executor role"):
         await RequestExecutors().dispatch(clone, context)
 
@@ -467,8 +481,9 @@ async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() 
     sessions = ScriptedExecution()
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
-        initial_state(),
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(
             transitions=RejectingObservations(with_requests=True),
             executors=RequestExecutors(
@@ -477,19 +492,19 @@ async def test_an_observation_core_rejects_halts_the_shell_naming_the_request() 
         ),
     )
     await prepared(shell, store)
-    (intent,) = shell.record.envelope.core.intents.intents
+    (record,) = shell.record.envelope.core.records.records
     delivery = FakePublicationDelivery(store)
     with pytest.raises(RuntimeExecutionError) as raised:
         await shell.run_until_idle(delivery, now_at=1)
     assert isinstance(raised.value, ObservationRejectedError)
-    assert raised.value.request_id == intent.request_id
+    assert raised.value.request_id == record.request_id
     assert raised.value.path == ("observation", "sequence")
     assert "Mismatch(SEQUENCE)" in str(raised.value)
     # The effect ran once; the result is not dropped into an idle shell.
     assert len(sessions.inner.executions) == 1
     with pytest.raises(RuntimeCommitError):
         await shell.run_until_idle(delivery, now_at=2)
-    assert shell.record.envelope.core.intents.intents[0].phase == IntentPhase.DISPATCHED
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
 
 
 class RejectingOwnerInputs(ShellTraceTransitions):
@@ -517,8 +532,9 @@ async def test_an_owner_event_core_rejects_halts_the_shell_instead_of_being_drop
 
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
-        initial_state(),
+        counter.driver(CounterConfig()),
+        declared(),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(
             transitions=RejectingOwnerInputs(with_requests=True),
             executors=RequestExecutors(
@@ -536,3 +552,76 @@ async def test_an_owner_event_core_rejects_halts_the_shell_instead_of_being_drop
         shell.advance()
     # The rejected event is still durable: a restart cannot lose it silently either.
     assert len(shell.record.pending_inputs) == count
+
+
+class RivalAfterCommit(FakeStateStore):
+    """A store whose lease passes to a rival host right after this host's next commit."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.armed = False
+
+    def commit(
+        self,
+        expected_revision: int | None,
+        envelope: StoredEnvelope,
+        fence: StoreFence,
+        now: float,
+    ) -> CommitOutcome:
+        outcome = super().commit(expected_revision, envelope, fence, now)
+        if self.armed:
+            self.armed = False
+            assert self.acquire("rival", now=10_000, duration=100) is not None
+        return outcome
+
+
+@pytest.mark.asyncio
+async def test_a_host_that_loses_its_lease_after_authorizing_starts_no_effect_and_halts() -> None:
+    """The fence is verified after the authorization is durable and before the executor starts."""
+    store = RivalAfterCommit()
+    started: list[str] = []
+
+    async def effect(
+        request: Request, context: ExecutionContext, result: ExecutionResult
+    ) -> ExecutionOutcome:
+        del context
+        started.append(request.kind)
+        return result
+
+    shell = make_shell(store, ScriptedExecution(effect))
+    await prepared(shell, store)
+    store.armed = True
+    with pytest.raises(RuntimeCommitError, match="fence lost before execution"):
+        await shell.dispatch_one(now_at=1)
+    assert started == []
+    # The authorization stayed durable: the next host's inspection settles it.
+    assert shell.record.envelope.core.records.records[0].phase == RequestPhase.DISPATCHED
+    with pytest.raises(RuntimeCommitError):
+        await shell.dispatch_one(now_at=2)
+    assert started == []
+
+
+@pytest.mark.asyncio
+async def test_a_host_that_loses_its_lease_before_a_publication_publishes_nothing_and_halts() -> (
+    None
+):
+    store = FakeStateStore()
+    shell = make_shell(store)
+    await prepared(shell, store)
+    assert store.acquire("rival", now=10_000, duration=100) is not None
+    published: list[Publication] = []
+
+    class Recording:
+        async def publish(
+            self, publication: Publication, context: PublicationContext
+        ) -> PublicationAcknowledgement:
+            del context
+            published.append(publication)
+            return PublicationAcknowledgement(
+                publication_id=publication.publication_id, sequence=publication.sequence
+            )
+
+    delivery: PublicationDelivery = Recording()
+    with pytest.raises(RuntimeCommitError, match="fence lost before publication"):
+        await shell.publish_one(delivery, now_at=1)
+    assert published == []

@@ -42,6 +42,7 @@ from .common import (
 from .evaluation import MeasurementIdentity, MeasurementPlan
 from .sessions import SessionSpec, TurnSpec
 from .settlement import AssessmentProposal, RunResultProposal, Selection
+from .until import Within
 
 
 class DecisionBase(Value):
@@ -49,7 +50,7 @@ class DecisionBase(Value):
 
     decision_id: DecisionId
     scope: Scope
-    depends_on: tuple[DecisionId, ...] = ()
+    """Who owns the work. ``THIS_RUN`` means the run itself; core fills in its own scope."""
 
 
 class RequestTurn(DecisionBase):
@@ -131,10 +132,10 @@ class ProposeWinner(DecisionBase):
     selection: Selection
 
 
-class Stop(DecisionBase):
-    """Stop lifecycle contract."""
+class Finish(DecisionBase):
+    """End the run with a result, draining or cancelling what is still in flight."""
 
-    kind: Literal["stop"] = "stop"
+    kind: Literal["finish"] = "finish"
     mode: Literal["drain", "cancel"]
     result: RunResultProposal
 
@@ -152,7 +153,6 @@ class Operation(DecisionBase):
 
     kind: Literal["operation"] = "operation"
     request: SerializeAsAny[OperationRequest]
-    deadline_at: Seconds
     normalized_turn: TurnSpec | None = None
     normalized_measurement: MeasurementIdentity | None = None
     normalized_scope_reopen: ScopeReopenNormalization | None = None
@@ -235,10 +235,43 @@ class Operation(DecisionBase):
         return value
 
 
-type Decision = Annotated[
-    RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Stop | Operation,
+type Work = Annotated[
+    RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation,
     Field(discriminator="kind"),
 ]
+"""What a search can ask for. It only starts inside a ``Wait``."""
+
+
+class Wait(Value):
+    """Start ``request`` and wait for its result, at most ``until``.
+
+    This is the only way a search starts work. A bare request is not a ``Decision``, and
+    ``until`` is required: every wait has a limit.
+    """
+
+    kind: Literal["wait"] = "wait"
+    request: Work
+    until: Within
+
+
+class WakeAt(Value):
+    """Ask to be called again at a run-clock time even if nothing else happens."""
+
+    kind: Literal["wake_at"] = "wake_at"
+    time: Seconds
+
+
+type Decision = Annotated[Wait | WakeAt | Finish, Field(discriminator="kind")]
+"""What ``Search.init`` and ``Search.update`` return."""
+
+type Submission = Annotated[Wait | Finish, Field(discriminator="kind")]
+"""What the kernel accepts from a search: a ``Wait`` (with its ``until``) or a ``Finish``."""
+
+type Command = Annotated[
+    RequestTurn | StartAttempt | Withdraw | Measure | ProposeWinner | Operation | Finish,
+    Field(discriminator="kind"),
+]
+"""What the kernel acts on: a ``Work`` or the ``Finish``. ``Wait`` supplies the ``until``."""
 
 
 class StrategyState(Value):
@@ -247,31 +280,27 @@ class StrategyState(Value):
     schema_version: int = Field(ge=1)
 
 
-class Proposal[S: StrategyState](Value):
-    """Proposal lifecycle contract."""
+class SearchDeclaration(Value):
+    """What core derives about a search: its identity and what it needs from the host.
 
-    state: S
-    decisions: tuple[Decision, ...]
-    wake_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    """The earliest run-clock time the strategy wants to be asked again, when it waits for time.
-
-    A strategy that holds work back until a time returns that time here, so the run loop
-    wakes then instead of concluding that nothing can happen. None means it waits for no time.
+    A search author declares none of this. ``@search`` names the search, and the rest
+    (the operations its namespace owns, the lifecycle capabilities it requires) comes from the
+    registration; the event kinds it hears and the work it starts are whatever its flows do.
     """
 
-
-class StrategyDeclaration(Value):
-    """Strategy declaration lifecycle contract."""
-
     strategy_id: StrategyId
-    state_schema: SchemaRef
     required_operations: tuple[OperationSchemaRef, ...] = ()
     optional_operations: tuple[OperationSchemaRef, ...] = ()
     required: frozenset[LifecycleCapability] = frozenset()
     optional: frozenset[LifecycleCapability] = frozenset()
 
+    @property
+    def state_schema(self) -> SchemaRef:
+        """The schema of the persisted flow state, named by the search."""
+        return SchemaRef(name=f"{self.strategy_id.root}.flow-state", version=1)
+
     @field_serializer("required", "optional", when_used="json")
-    def _sorted_abilities(self, value: frozenset[LifecycleCapability]) -> list[str]:
+    def _sorted_sets(self, value: frozenset[str]) -> list[str]:
         """Write the sets in sorted order, as `Capabilities.lifecycle` does."""
         return sorted(value)
 

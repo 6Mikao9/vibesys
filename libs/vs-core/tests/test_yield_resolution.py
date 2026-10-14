@@ -19,6 +19,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_session_sibling_fakes import fake_evaluation
 from .test_session_yield_completion import terminal_yield, yield_state
@@ -87,9 +88,9 @@ class Run:
         """The checkpoint requests the executor has been asked and has not yet concluded."""
         return [
             row.request
-            for row in self.state.intents.intents
+            for row in self.state.records.records
             if isinstance(row.request, core.SnapshotAndRetain)
-            and row.phase != core.IntentPhase.COMPLETED
+            and row.phase != core.RequestPhase.COMPLETED
             and row.request.request_id is not None
             and row.request.request_id.root not in self.answered
         ]
@@ -161,12 +162,12 @@ class Run:
     def live_checkpoint(self) -> bool:
         return any(
             isinstance(row.request, core.SnapshotAndRetain)
-            and row.phase in (core.IntentPhase.PREPARED, core.IntentPhase.DISPATCHED)
-            for row in self.state.intents.intents
+            and row.phase in (core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED)
+            for row in self.state.records.records
         ) or any(
             isinstance(row.request, core.SnapshotAndRetain)
-            and row.phase == core.IntentPhase.RECONCILING
-            for row in self.state.intents.intents
+            and row.phase == core.RequestPhase.RECONCILING
+            for row in self.state.records.records
         )
 
 
@@ -285,7 +286,7 @@ SCENARIOS = st.builds(
 )
 
 
-@settings(max_examples=300, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=300), deadline=None)
 @example(
     scenario=Scenario(
         access=core.Access.READ_ONLY,
@@ -389,17 +390,17 @@ def test_a_checkpoint_declined_because_the_attempt_is_no_longer_active_ends_the_
     run = _world()
     run.end_turn()
     owner = run.state.attempts.attempts[0].model_copy(
-        update={"phase": core.AttemptPhase.CLOSING, "pending_intents": ()}
+        update={"phase": core.AttemptPhase.CLOSING, "pending_records": ()}
     )
-    intents = tuple(
+    records = tuple(
         row
-        for row in run.state.intents.intents
+        for row in run.state.records.records
         if not isinstance(row.request, core.SnapshotAndRetain)
     )
     run.state = run.state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": run.state.intents.model_copy(update={"intents": intents}),
+            "records": run.state.records.model_copy(update={"records": records}),
         }
     )
     ref = run.invocation.invocation
@@ -488,7 +489,7 @@ def test_a_stall_naming_a_suspension_with_a_producer_changes_nothing() -> None:
 def test_a_checkpoint_answered_retryably_every_time_is_retried_then_fails_with_a_named_reason() -> (
     None
 ):
-    """The reported spin (#2154): a retryable answer left the intent dispatched with no driver.
+    """The reported spin (#2154): a retryable answer left the record dispatched with no driver.
 
     Core asks again after a growing delay, at most ``max_retries`` more times, and then the
     checkpoint concludes as failed and the turn ends with the executor's failure named.
@@ -503,7 +504,7 @@ def test_a_checkpoint_answered_retryably_every_time_is_retried_then_fails_with_a
             break
         asks += 1
         run.wait_out_retries(limit=1)
-    assert asks == run.state.run.limits.max_retries + 1
+    assert asks == run.state.run.limits.request_retries.limit + 1
     assert core.orphan_waits(run.state) == ()
     assert run.invocation.pending_suspension is None
     [failure] = run.failures()

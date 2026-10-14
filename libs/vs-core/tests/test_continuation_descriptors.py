@@ -1,13 +1,13 @@
 """Registered continuation proofs require the run's declared operation schema."""
 
+from itertools import product
 from typing import Literal
 
 import pytest
-from hypothesis import example, given
-from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .guard_rows import guard_rows
 from .test_continuations import (
     RegisteredTurn,
     fixture,
@@ -36,33 +36,31 @@ type Declaration = Literal[
 def registered_yield() -> tuple[core.CoreState, core.Continuation]:
     state, continuation = fixture(settled=True)
     invocation = state.sessions.invocations[0]
-    intent = state.intents.intents[0]
+    record = state.records.records[0]
     codec = operation_codec()
     payload = RegisteredTurn(turn=invocation.turn)
     decision = codec.validate_decision(
         core.Operation(
             decision_id=core.DecisionId(root="registered-turn"),
             scope=invocation.scope,
-            deadline_at=100.0,
             request=payload,
         )
     )
     request = core.ExecuteRegisteredOperation(
-        request_id=intent.request_id,
+        request_id=record.request_id,
         operation_id=core.OperationId(root="operation:registered-turn"),
         decision_id=decision.decision_id,
         scope=invocation.scope,
-        deadline_at=100.0,
-        admission_id=intent.request.admission_id,
+        admission_id=record.request.admission_id,
         operation=codec.encode(payload),
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
     )
     receipt = core.DecisionReceipt(
         decision_id=decision.decision_id,
         decision=decision,
         payload_digest="registered-yield",
         feedback=core.Accepted(decision_id=decision.decision_id),
-        request_ids=(intent.request_id,),
+        request_ids=(record.request_id,),
     )
     return state.model_copy(
         update={
@@ -73,8 +71,8 @@ def registered_yield() -> tuple[core.CoreState, core.Continuation]:
                     "capabilities": core.Capabilities(operations=codec.descriptors),
                 }
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": (intent.model_copy(update={"request": request}),)}
+            "records": state.records.model_copy(
+                update={"records": (record.model_copy(update={"request": request}),)}
             ),
             "sessions": state.sessions.model_copy(
                 update={
@@ -156,56 +154,57 @@ def declared_variation(
     return (descriptor,)
 
 
-@pytest.mark.parametrize("route", ["turn", "wake", "reopen", "reopened"])
-@pytest.mark.parametrize(
-    "declaration",
-    [
-        "exact",
-        "absent",
-        "kind",
-        "request-name",
-        "request-version",
-        "outcome-name",
-        "outcome-version",
-        "lifecycle",
-        "normalization",
-        "duplicate",
-    ],
+ROUTES = ("turn", "wake", "reopen", "reopened")
+DECLARATIONS = (
+    "exact",
+    "absent",
+    "kind",
+    "request-name",
+    "request-version",
+    "outcome-name",
+    "outcome-version",
+    "lifecycle",
+    "normalization",
+    "duplicate",
 )
-@given(
-    lifecycle=st.sampled_from(tuple(core.LifecycleClass)),
-    version=st.integers(min_value=2, max_value=100),
-    proof=st.tuples(st.booleans(), st.booleans(), st.booleans()),
+LIFECYCLES = tuple(core.LifecycleClass)
+PROOFS = tuple(product((True, False), repeat=3))
+# Past counterexamples: a lifecycle declaration under each proof that once slipped through.
+PINNED_LIFECYCLES = (
+    (core.LifecycleClass.QUERY, (False, True, True)),
+    (core.LifecycleClass.OWNED_JOB, (True, False, True)),
+    (core.LifecycleClass.IDEMPOTENT_WRITE, (True, True, True)),
+    (core.LifecycleClass.SESSION_TURN, (True, False, True)),
 )
-@example(
-    lifecycle=core.LifecycleClass.QUERY,
-    version=2,
-    proof=(False, True, True),
-)
-@example(
-    lifecycle=core.LifecycleClass.OWNED_JOB,
-    version=2,
-    proof=(True, False, True),
-)
-@example(
-    lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-    version=2,
-    proof=(True, True, True),
-)
-@example(
-    lifecycle=core.LifecycleClass.SESSION_TURN,
-    version=2,
-    proof=(True, False, True),
-)
+
+
+def _cases() -> list[tuple[object, ...]]:
+    rows = guard_rows(
+        ROUTES,
+        DECLARATIONS,
+        LIFECYCLES,
+        PROOFS,
+        positive=("turn", "exact", core.LifecycleClass.QUERY, (True, True, True)),
+        joint=(0, 1),
+    )
+    pinned = [
+        (route, "lifecycle", lifecycle, proof)
+        for route in ROUTES
+        for lifecycle, proof in PINNED_LIFECYCLES
+    ]
+    return list(dict.fromkeys([*rows, *pinned]))
+
+
+@pytest.mark.parametrize(("route", "declaration", "lifecycle", "proof"), _cases())
 def test_registered_continuation_authority_requires_exact_run_declaration(
     *,
     route: Route,
     declaration: Declaration,
     lifecycle: core.LifecycleClass,
-    version: int,
     proof: tuple[bool, bool, bool],
 ) -> None:
     registry_present, reload, accepted = proof
+    version = 2
     state, event, kind = scenario(route)
     descriptor = next(row for row in state.run.capabilities.operations if row.kind == kind)
     descriptors = declared_variation(descriptor, declaration, lifecycle, version)

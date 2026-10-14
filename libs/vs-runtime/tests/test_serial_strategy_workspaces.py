@@ -1,7 +1,7 @@
 """Assumptions A1 and A2 of the strategy port design, on the workspace executor.
 
 A1 (runtime half): a revision retained as a non-adoptable `candidate` is a legal base for a
-later attempt's workspace. Core's half is `tests/vibesys/orchestration/test_serial_strategy_assumptions.py`.
+later attempt's workspace. Core's half tested the step API that the flows replaced and was removed with it.
 
 A2: a serial run can use the exclusive root.
 

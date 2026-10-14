@@ -63,6 +63,26 @@ framework setup when requested. Requested stages without a declared timeout
 cannot produce a suspension deadline. Queue estimates inform planning; they do
 not extend the deadline.
 
+### Backend retries
+
+The backend, not the search, decides how often it tries again when a failure is not the
+candidate's. Declare its bounds in `agent.toml`:
+
+```toml
+[evaluation]
+infrastructure_attempts = 3    # tries in all after a node fault or lost job
+ambiguous_attempts = 2         # tries in all when the evidence cannot say whose fault it was
+request_retry_limit = 3        # re-sends of a request the executor did not run
+request_backoff_seconds = 1.0
+request_backoff_cap_seconds = 30.0
+```
+
+The search sees one result per measurement, the last try's. A failure that is the
+candidate's own is a result and is never tried again. Each attempts value is at most 5 and
+`request_retry_limit` at most 10: caps in the core that no setting can lift.
+`[run]` also holds `cancellation_bound_seconds`, `cleanup_bound_seconds` and
+`reconciliation_bound_seconds` (60 each), the time core gives its own cleanup waits.
+
 ### Provider quota and rate limits
 
 When a provider runs out of quota, or stays rate limited after the agent

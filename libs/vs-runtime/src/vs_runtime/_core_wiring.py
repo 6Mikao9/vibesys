@@ -16,15 +16,15 @@ from vs_core.api import (
     Capabilities,
     CoreState,
     EvidenceRequirements,
-    IntentsState,
     Limits,
     OperationRegistry,
+    RecordsState,
     RecoveryBarrier,
     RecoveryPhase,
     RunFacts,
     RunId,
     RunState,
-    StrategyDeclaration,
+    SearchDeclaration,
     validate_startup,
 )
 from vs_runtime._core_loop import CoreRuntimeBindings
@@ -89,7 +89,7 @@ class CoreStartup:
     """
 
     deadline_at: float
-    limits: Limits = dataclasses.field(default_factory=Limits)
+    limits: Limits
     lifecycle: frozenset[LifecycleCapability] = frozenset()
     requirements: EvidenceRequirements = dataclasses.field(default_factory=EvidenceRequirements)
 
@@ -97,7 +97,7 @@ class CoreStartup:
 def new_core_state(
     run_id: str,
     facts: RunFacts,
-    declaration: StrategyDeclaration,
+    declaration: SearchDeclaration,
     *,
     offered: OperationCatalog,
     startup: CoreStartup,
@@ -116,7 +116,7 @@ def new_core_state(
     )
     return CoreState(
         registry=selected.operations,
-        intents=IntentsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
+        records=RecordsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
         run=RunState(
             run_id=RunId(root=run_id),
             now_at=0.0,

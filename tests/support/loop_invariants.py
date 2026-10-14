@@ -14,7 +14,7 @@ only records, never agent choices, so they hold for any agent behavior:
 
 A core-path run (the vs-core policy driven by the vs-runtime shell) has no
 ``state.json``: its committed record is the run envelope (``RunRecords.from_core``),
-whose ``core`` holds the run status, result and measurement intents and whose
+whose ``core`` holds the run status, result and measurement records and whose
 ``strategy`` holds the search state. Its event stream is the host's ``CoreEvent`` rows.
 
 Each violated invariant yields a :class:`Violation` naming the
@@ -216,6 +216,22 @@ def terminal_event(records: RunRecords) -> Record | None:
     return terminal[-1] if terminal else None
 
 
+def _hypotheses(strategy: object) -> list[Record] | None:
+    """The hypotheses a search recorded, or None when its state does not keep any.
+
+    A flow search publishes its record beside its journal (``live.published``, JSON); other
+    states hold the hypotheses themselves.
+    """
+    if not isinstance(strategy, dict):
+        return None
+    live = strategy.get("live")
+    published = live.get("published") if isinstance(live, dict) else None
+    if isinstance(published, str):
+        record = json.loads(published)
+        return _list(record, "hypotheses") if "hypotheses" in record else None
+    return _list(strategy, "hypotheses") if "hypotheses" in strategy else None
+
+
 def terminal_status(records: RunRecords) -> list[Violation]:
     """The run ends in one typed terminal event; a completed run did work."""
     terminal = [event for event in records.events if _is_terminal(event)]
@@ -229,8 +245,8 @@ def terminal_status(records: RunRecords) -> list[Violation]:
         if scheduled == 0:
             return [Violation(Invariant.EMPTY_COMPLETION, "completed with zero workstreams")]
     if status == "completed" and records.envelope is not None:
-        strategy = records.envelope.get("strategy")
-        if isinstance(strategy, dict) and not _list(strategy, "hypotheses"):
+        hypotheses = _hypotheses(records.envelope.get("strategy"))
+        if hypotheses is not None and not hypotheses:
             return [Violation(Invariant.EMPTY_COMPLETION, "completed with zero hypotheses")]
     return record_agreement(records, str(status))
 
@@ -418,8 +434,8 @@ def stop_bound(records: RunRecords, grace_s: float | None) -> list[Violation]:
 def _core_evaluations_after(records: RunRecords, stopped_at: datetime) -> list[Violation]:
     """Measurement submissions the core record shows after the stop request."""
     core = records.envelope.get("core") if records.envelope is not None else None
-    intents = core.get("intents") if isinstance(core, dict) else None
-    rows = intents.get("intents") if isinstance(intents, dict) else None
+    ledger = core.get("records") if isinstance(core, dict) else None
+    rows = ledger.get("records") if isinstance(ledger, dict) else None
     violations: list[Violation] = []
     for row in rows if isinstance(rows, list) else []:
         request = row.get("request") if isinstance(row, dict) else None

@@ -21,11 +21,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
 from vs_core._registry import OperationRegistration, OperationRegistry
+from vs_core.types.agents import ProtocolContext
 from vs_core.types.common import (
     ArtifactRef,
     LifecycleClass,
@@ -78,14 +79,17 @@ class RenderRoleArtifactsBase[C: Value](OperationRequest):
 
     Idempotent per (subject, ordinal): the executor must return the same artifacts
     for a repeated request, so replay after a crash never forks a prompt. ``C`` is the
-    strategy's prompt-context type.
+    strategy's prompt-context type. ``template`` is the template file to render, taken from
+    the role's declaration; the context is either the search's own prompt or one of the
+    contexts of the exchanges core starts (a correction, a resume).
     """
 
     lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
     outcome_model: ClassVar[type[BaseModel]] = RenderedArtifacts
+    template: str = Field(min_length=1)
     subject: str = Field(min_length=1)
     ordinal: int = Field(ge=0)
-    context: C
+    context: C | ProtocolContext
 
 
 class ParentVerification(Value):
@@ -244,11 +248,12 @@ class StrategyOperations:
     """The operations of one strategy namespace, by the role the runtime performs for each."""
 
     namespace: str
-    render: type[OperationRequest]
+    render: type[RenderRoleArtifactsBase[Any]]
     """A subclass of `RenderRoleArtifactsBase` for the strategy's context type."""
     verify: type[VerifyParentRevisionBase]
     interpret: type[InterpretEvidenceBase]
-    retain: type[RetainVerifiedRevisionBase]
+    retain: type[RetainVerifiedRevisionBase] | None = None
+    """The optional retention of a verified revision, for a strategy whose producer may still edit it."""
     capture: type[CaptureCommandBase] | None = None
     """The optional command capture a profile-guided strategy declares."""
     validate_local: type[ValidateLocalBase] | None = None
@@ -268,8 +273,8 @@ class StrategyOperations:
             (RENDER_SUFFIX, self.render),
             (VERIFY_SUFFIX, self.verify),
             (INTERPRET_SUFFIX, self.interpret),
-            (RETAIN_SUFFIX, self.retain),
         )
+        retain = ((RETAIN_SUFFIX, self.retain),) if self.retain is not None else ()
         capture = ((CAPTURE_SUFFIX, self.capture),) if self.capture is not None else ()
         validate = (
             ((VALIDATE_LOCAL_SUFFIX, self.validate_local),)
@@ -279,7 +284,7 @@ class StrategyOperations:
         export = (
             ((EXPORT_PATCH_SUFFIX, self.export_patch),) if self.export_patch is not None else ()
         )
-        return (*required, *capture, *validate, *export)
+        return (*required, *retain, *capture, *validate, *export)
 
     def registration_of(self, suffix: str) -> OperationRegistration | None:
         """The registration of the operation with this suffix, or None when not declared."""

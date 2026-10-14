@@ -15,18 +15,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
-    COMMIT,
-    bounds_of,
-    options_of,
+    plan_of,
     resolved,
-    run_request,
+    write_project,
 )
 
-from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.run.environment import open_run_environment
-from vs_core.api import RevisionRef
 from vs_project.api import RunResourceRequest
-from vs_runtime.api import CoreRunContext
 from vs_runtime.api.infrastructure import (
     RunEnvironment,
     RunEnvironmentRequest,
@@ -507,27 +502,8 @@ def test_the_dynamic_loop_accepts_every_slurm_configuration_including_agent_gpu_
     try:
         assert session.view.parallel_candidate_obstacle is None
         project = tmp_path / "project"
-        request = run_request(project)
-        run = resolved(project)
-        bounds = bounds_of(request)
-        assert PLUGIN.core is not None
-
-        PLUGIN.core.plan(
-            CoreRunContext(
-                run_id="policy",
-                options=options_of(request),
-                facts=run.facts,
-                baseline=RevisionRef.of_git_commit(COMMIT),
-                evaluation_plan=run.evaluation_plan,
-                environment=session.view,
-                artifacts=run.artifacts,
-                evaluation_capacity=1,
-                queue_allowance_seconds=bounds.queue_allowance_seconds,
-                observe_interval_seconds=bounds.observe_interval_seconds,
-                observe_backoff_cap_seconds=bounds.observe_backoff_cap_seconds,
-                max_run_seconds=bounds.max_run_seconds,
-            )
-        )
+        write_project(project)
+        plan_of(resolved(project, environment=session.view))
     finally:
         session.close()
 

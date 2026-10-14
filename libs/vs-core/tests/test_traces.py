@@ -15,8 +15,6 @@ from vs_core.api import (
     DecisionId,
     DecisionSubmitted,
     InspectRequest,
-    IntentPhase,
-    IntentsChange,
     Interrupt,
     InterruptRequested,
     InvocationId,
@@ -24,9 +22,11 @@ from vs_core.api import (
     OperationId,
     OperationRef,
     OperationRetireRequested,
+    RecordsChange,
     RecoveryStarted,
     ReducerTrace,
     RequestId,
+    RequestPhase,
     RunControlEvent,
     RunId,
     RunStatus,
@@ -36,11 +36,14 @@ from vs_core.api import (
     SessionsChange,
     SignalCycleError,
     TraceFrame,
+    Wait,
     Withdraw,
+    Within,
     initial_state,
     project,
     step,
     trace_step,
+    within,
 )
 
 
@@ -50,13 +53,13 @@ def test_request_registration_is_deterministic_immutable_and_serializable(now: f
     signal = ClockAdvanced(now_at=now)
     request = InspectRequest(
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=100.0,
         target=RequestId(root="previous"),
     )
     trace = ReducerTrace(
         frames=(
             TraceFrame(
-                signal=signal, change=SchedulingChange(state=state.scheduling, requests=(request,))
+                signal=signal,
+                change=SchedulingChange(state=state.scheduling, requests=(within(request, 10.0),)),
             ),
         )
     )
@@ -66,12 +69,13 @@ def test_request_registration_is_deterministic_immutable_and_serializable(now: f
     assert state.model_dump_json() == before
     assert result.state.revision == state.revision + 1
     assert result.requests[0].request_id is not None
-    intent = result.state.intents.intents[0]
-    assert intent.phase == IntentPhase.PREPARED
-    assert intent.request == result.requests[0]
+    record = result.state.records.records[0]
+    assert record.phase == RequestPhase.PREPARED
+    assert record.request == result.requests[0]
+    assert record.until.at == now + 10.0
     restarted = CoreState.model_validate_json(result.state.model_dump_json())
     assert restarted == result.state
-    assert type(restarted.intents.intents[0].request.scope.owner) is RunId
+    assert type(restarted.records.records[0].request.scope.owner) is RunId
 
 
 def test_attempt_scope_keeps_its_distinct_identity_on_wire() -> None:
@@ -93,7 +97,7 @@ def test_fixed_order_and_one_revision_for_propagated_signals() -> None:
                 change=SchedulingChange(state=state.scheduling, signals=(recovery, next_clock)),
             ),
             TraceFrame(signal=next_clock, change=SchedulingChange(state=state.scheduling)),
-            TraceFrame(signal=recovery, change=IntentsChange(state=state.intents)),
+            TraceFrame(signal=recovery, change=RecordsChange(state=state.records)),
         )
     )
     assert trace_step(state, clock, trace).state.revision == 1
@@ -119,7 +123,6 @@ def test_reusing_explicit_request_id_with_conflicting_payload_is_rejected() -> N
     request = InspectRequest(
         request_id=RequestId(root="stable"),
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=10.0,
         target=RequestId(root="one"),
     )
     conflict = request.model_copy(update={"target": RequestId(root="two")})
@@ -127,7 +130,10 @@ def test_reusing_explicit_request_id_with_conflicting_payload_is_rejected() -> N
         frames=(
             TraceFrame(
                 signal=clock,
-                change=SchedulingChange(state=state.scheduling, requests=(request, conflict)),
+                change=SchedulingChange(
+                    state=state.scheduling,
+                    requests=(within(request, 10.0), within(conflict, 10.0)),
+                ),
             ),
         )
     )
@@ -136,28 +142,29 @@ def test_reusing_explicit_request_id_with_conflicting_payload_is_rejected() -> N
 
 
 @given(later=st.floats(min_value=0.0, max_value=1e6, allow_nan=False))
-def test_a_request_proposed_again_with_another_deadline_is_the_same_request(later: float) -> None:
-    """The deadline belongs to the attempt, not the identity: the prepared request keeps its own."""
+def test_a_request_proposed_again_with_another_limit_is_the_same_request(later: float) -> None:
+    """The limit belongs to the attempt, not the identity: the prepared request keeps its own."""
     state = initial_state()
     clock = ClockAdvanced(now_at=1.0)
     request = InspectRequest(
         request_id=RequestId(root="stable"),
         scope=Scope(owner=state.run.run_id, generation=0),
-        deadline_at=10.0,
         target=RequestId(root="one"),
     )
-    again = request.model_copy(update={"deadline_at": later})
     trace = ReducerTrace(
         frames=(
             TraceFrame(
                 signal=clock,
-                change=SchedulingChange(state=state.scheduling, requests=(request, again)),
+                change=SchedulingChange(
+                    state=state.scheduling,
+                    requests=(within(request, 9.0), within(request, later)),
+                ),
             ),
         )
     )
     result = trace_step(state, clock, trace)
-    prepared = [row for row in result.state.intents.intents if row.request_id == request.request_id]
-    assert [row.request.deadline_at for row in prepared] == [10.0]
+    prepared = [row for row in result.state.records.records if row.request_id == request.request_id]
+    assert [row.until.at for row in prepared] == [10.0]
 
 
 def test_kernel_projects_time_and_persisted_controls_without_turning_steer_into_pause() -> None:
@@ -202,7 +209,9 @@ def test_interrupt_refund_is_preserved_through_kernel_routing(refund: int) -> No
     )
     result = trace_step(
         state,
-        DecisionSubmitted(decision=decision, expected_revision=0),
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
         ReducerTrace(
             frames=(
                 TraceFrame(
@@ -219,7 +228,7 @@ def test_interrupt_refund_is_preserved_through_kernel_routing(refund: int) -> No
     assert result.state.scheduling == state.scheduling
 
 
-def test_operation_retirement_routes_to_owning_intents_area() -> None:
+def test_operation_retirement_routes_to_owning_records_area() -> None:
     state = initial_state()
     scope = Scope(owner=state.run.run_id, generation=0)
     target = OperationRef(operation_id=OperationId(root="owned-operation"), generation=0)
@@ -231,12 +240,14 @@ def test_operation_retirement_routes_to_owning_intents_area() -> None:
     )
     result = trace_step(
         state,
-        DecisionSubmitted(decision=decision, expected_revision=0),
+        DecisionSubmitted(
+            decision=Wait(request=decision, until=Within(limit=100.0)), expected_revision=0
+        ),
         ReducerTrace(
             frames=(
                 TraceFrame(
                     signal=OperationRetireRequested(operation=target, scope=scope),
-                    change=IntentsChange(state=state.intents),
+                    change=RecordsChange(state=state.records),
                 ),
             )
         ),

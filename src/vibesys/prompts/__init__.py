@@ -2,8 +2,6 @@
 
 from vibesys.prompts.core_protocol import (
     CoreProtocolTemplate,
-    ReplyCorrectionPrompt,
-    ResumePrompt,
     WaitUnrecordedPrompt,
 )
 from vibesys.prompts.plan_correction import render_plan_correction
@@ -31,8 +29,6 @@ __all__ = [
     "CpuComputeBackendFragment",
     "CudaComputeBackendFragment",
     "MetalComputeBackendFragment",
-    "ReplyCorrectionPrompt",
-    "ResumePrompt",
     "RocmComputeBackendFragment",
     "TrainiumComputeBackendFragment",
     "WaitUnrecordedPrompt",

@@ -211,7 +211,10 @@ def test_queued_retirement_requires_one_canonical_start_registration(
             ),
         )
     )
-    event = core.DecisionSubmitted(decision=withdrawal, expected_revision=state.revision)
+    event = core.DecisionSubmitted(
+        decision=core.Wait(request=withdrawal, until=core.Within(limit=100.0)),
+        expected_revision=state.revision,
+    )
     if variant != "exact":
         with pytest.raises(core.ContractError, match="admission"):
             core.trace_step(state, event, trace)
@@ -223,11 +226,13 @@ def test_queued_retirement_requires_one_canonical_start_registration(
         assert result.requests == ()
 
 
-def cleanup_facts(identity: int, variant: ReceiptVariant) -> tuple[core.CoreState, core.Intent]:
-    """Record a canonical Stop cleanup request in its source admission episode."""
+def cleanup_facts(
+    identity: int, variant: ReceiptVariant
+) -> tuple[core.CoreState, core.RequestRecord]:
+    """Record a canonical Finish cleanup request in its source admission episode."""
     state, start, _ = admission_facts(identity, variant)
     result = core.RunResultProposal(outcome="cancelled", reason="drain")
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="stop"),
         scope=core.Scope(owner=state.run.run_id, generation=0),
         mode="drain",
@@ -255,16 +260,15 @@ def cleanup_facts(identity: int, variant: ReceiptVariant) -> tuple[core.CoreStat
         attempt=target,
         admission_id=start.decision_id,
         decision_id=stop.decision_id,
-        deadline_at=100.0,
     )
     assert command.request_id is not None
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=command.request_id,
         request=command,
         payload_digest=value_digest(command),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.PREPARED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.PREPARED,
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={
@@ -276,10 +280,10 @@ def cleanup_facts(identity: int, variant: ReceiptVariant) -> tuple[core.CoreStat
                 }
             ),
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
-    return state, intent
+    return state, record
 
 
 @pytest.mark.parametrize("variant", ["exact", "wrong_run"])
@@ -287,15 +291,15 @@ def cleanup_facts(identity: int, variant: ReceiptVariant) -> tuple[core.CoreStat
 def test_stop_cleanup_requires_the_recorded_episode_from_this_run(
     variant: ReceiptVariant, identity: int
 ) -> None:
-    state, intent = cleanup_facts(identity, variant)
-    event = core.DispatchAuthorized(request_id=intent.request_id)
-    dispatched = intent.model_copy(update={"phase": core.IntentPhase.DISPATCHED})
+    state, record = cleanup_facts(identity, variant)
+    event = core.DispatchAuthorized(request_id=record.request_id)
+    dispatched = record.model_copy(update={"phase": core.RequestPhase.DISPATCHED})
     trace = core.ReducerTrace(
         frames=(
             core.TraceFrame(
                 signal=event,
-                change=core.IntentsChange(
-                    state=state.intents.model_copy(update={"intents": (dispatched,)})
+                change=core.RecordsChange(
+                    state=state.records.model_copy(update={"records": (dispatched,)})
                 ),
             ),
         )
@@ -303,28 +307,28 @@ def test_stop_cleanup_requires_the_recorded_episode_from_this_run(
     if variant == "wrong_run":
         with pytest.raises(core.ContractError, match="admission"):
             core.trace_step(state, event, trace)
-        assert state.intents.intents == (intent,)
+        assert state.records.records == (record,)
     else:
         transition = core.trace_step(state, event, trace)
-        assert transition.state.intents.intents == (dispatched,)
+        assert transition.state.records.records == (dispatched,)
         assert transition.requests == ()
 
 
 @pytest.mark.parametrize("count", [1, 2])
 @given(identity=st.integers(min_value=0, max_value=10000))
-def test_dispatch_requires_an_unambiguous_canonical_intent(count: int, identity: int) -> None:
-    state, intent = cleanup_facts(identity, "exact")
+def test_dispatch_requires_an_unambiguous_canonical_record(count: int, identity: int) -> None:
+    state, record = cleanup_facts(identity, "exact")
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (intent,) * count})}
+        update={"records": state.records.model_copy(update={"records": (record,) * count})}
     )
-    event = core.DispatchAuthorized(request_id=intent.request_id)
-    dispatched = intent.model_copy(update={"phase": core.IntentPhase.DISPATCHED})
+    event = core.DispatchAuthorized(request_id=record.request_id)
+    dispatched = record.model_copy(update={"phase": core.RequestPhase.DISPATCHED})
     trace = core.ReducerTrace(
         frames=(
             core.TraceFrame(
                 signal=event,
-                change=core.IntentsChange(
-                    state=state.intents.model_copy(update={"intents": (dispatched,) * count})
+                change=core.RecordsChange(
+                    state=state.records.model_copy(update={"records": (dispatched,) * count})
                 ),
             ),
         )
@@ -332,8 +336,8 @@ def test_dispatch_requires_an_unambiguous_canonical_intent(count: int, identity:
     if count > 1:
         with pytest.raises(core.ContractError, match="ambiguous canonical request identity"):
             core.trace_step(state, event, trace)
-        assert state.intents.intents == (intent,) * count
+        assert state.records.records == (record,) * count
     else:
         result = core.trace_step(state, event, trace)
-        assert result.state.intents.intents == (dispatched,)
+        assert result.state.records.records == (dispatched,)
         assert result.requests == ()

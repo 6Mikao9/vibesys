@@ -21,6 +21,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits, sample_retries
+from vs_sim.api.testing import examples
 
 from .test_adoption import GOOD, RUN_SCOPE, STATUSES, reload, world
 from .test_measurements import plan
@@ -63,8 +65,18 @@ class Session:
         self.requests.extend(transition.requests)
         self.results.extend(row for row in transition.events if isinstance(row, core.TurnResult))
 
-    def decide(self, decision: core.Decision) -> None:
-        self.feed(core.DecisionSubmitted(decision=decision, expected_revision=self.state.revision))
+    def decide(self, decision: core.Command) -> None:
+        submission = (
+            decision
+            if isinstance(decision, core.Finish)
+            else core.Wait(request=decision, until=core.Within(limit=100.0))
+        )
+        self.feed(
+            core.DecisionSubmitted(
+                decision=submission,
+                expected_revision=self.state.revision,
+            )
+        )
 
     def start(self, mode: core.WorkspaceMode) -> None:
         self.started += 1
@@ -106,7 +118,6 @@ class Session:
                     ),
                     prompts=(),
                     output_schema=core.SchemaRef(name="implementation", version=1),
-                    deadline_at=self.state.run.deadline_at,
                     charge_class="paid",
                 ),
             )
@@ -248,7 +259,7 @@ class Session:
 
     def stop(self, mode: Literal["drain", "cancel"]) -> None:
         self.decide(
-            core.Stop(
+            core.Finish(
                 decision_id=core.DecisionId(root="stop"),
                 scope=RUN_SCOPE,
                 mode=mode,
@@ -275,7 +286,7 @@ def test_the_generator_reaches_a_queued_exclusive_root_behind_an_adoption() -> N
     session.state = session.state.model_copy(
         update={
             "run": session.state.run.model_copy(
-                update={"limits": core.Limits(max_attempts=4, max_parallel=1)}
+                update={"limits": sample_limits(max_attempts=4, max_parallel=1)}
             )
         }
     )
@@ -289,7 +300,7 @@ def test_the_generator_reaches_a_queued_exclusive_root_behind_an_adoption() -> N
 def seeded(mode: core.WorkspaceMode | None, parallel: int) -> core.CoreState:
     """The adoption world, optionally with a workspace-mode head queued behind a closing slot."""
     state = world(max_retries=1)
-    limits = core.Limits(max_attempts=6, max_parallel=parallel, max_retries=1)
+    limits = sample_limits(max_attempts=6, max_parallel=parallel, request_retries=sample_retries(1))
     if mode is not None:
         queued, _ = queued_root_behind_full_slot(mode)
         state = queued.model_copy(
@@ -302,7 +313,7 @@ def seeded(mode: core.WorkspaceMode | None, parallel: int) -> core.CoreState:
     return state.model_copy(update={"run": state.run.model_copy(update={"limits": limits})})
 
 
-@settings(max_examples=200, deadline=None)
+@settings(max_examples=examples(pr=3, nightly=200), deadline=None)
 @given(
     plan=st.lists(actions, min_size=1, max_size=40),
     parallel=st.integers(1, 2),
@@ -355,14 +366,14 @@ def _assert_owner_facts_reach_their_results(session: Session) -> None:
 
     Only the owner's event carries a turn's reply, so a published success without it
     means the observation pre-empted the owner event. A job that ended completes the
-    submit intent that created it.
+    submit record that created it.
     """
     for result in session.results:
         if result.observation.status == core.ObservationStatus.SUCCEEDED:
             assert result.output_json == REPLY
     for job in session.state.evaluation.jobs:
         if job.terminal and job.observation is not None:
-            intent = next(
-                row for row in session.state.intents.intents if row.request_id == job.submission_id
+            record = next(
+                row for row in session.state.records.records if row.request_id == job.submission_id
             )
-            assert intent.phase == core.IntentPhase.COMPLETED
+            assert record.phase == core.RequestPhase.COMPLETED

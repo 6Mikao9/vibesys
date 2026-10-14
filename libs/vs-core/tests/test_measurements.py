@@ -3,10 +3,13 @@
 import json
 from hashlib import sha256
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 
 def plan(**updates: object) -> core.MeasurementPlan:
@@ -26,9 +29,8 @@ def plan(**updates: object) -> core.MeasurementPlan:
         "recipe": core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         "submitted_at": 0.0,
         "queue_allowance": 10.0,
-        "deadline_at": 100.0,
-        "submission_limit": 3,
         "accuracy_stage": "accuracy",
+        "accuracy_gated": (core.EvidenceKind.CORRECTNESS, core.EvidenceKind.BENCHMARK),
     }
     merged = {**data, **updates}
     stages = updates.get("stages", data["stages"])
@@ -37,12 +39,16 @@ def plan(**updates: object) -> core.MeasurementPlan:
         stage.stage_id == "accuracy" for stage in stages
     ):
         merged["accuracy_stage"] = None
+    if merged["accuracy_stage"] is None and "accuracy_gated" not in updates:
+        merged["accuracy_gated"] = ()
     return core.MeasurementPlan.model_validate(merged)
 
 
 def roundtrip(
     state: core.CoreState, *, codec: core.OperationRegistry | None = None
 ) -> core.CoreState:
+    if not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -65,6 +71,8 @@ def transition(
     codec: core.OperationRegistry | None = None,
     reducers: core.CoreReducers | None = None,
 ) -> core.Transition:
+    if not restarts():
+        return core.step(state, event, reducers=reducers)
     before = state.model_dump_json()
     result = core.step(state, event, reducers=reducers)
     assert result == core.step(roundtrip(state, codec=codec), event, reducers=reducers)
@@ -101,7 +109,11 @@ def requested(
         plan=measurement,
     )
     return transition(
-        state, core.DecisionSubmitted(decision=decision, expected_revision=state.revision)
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
     )
 
 
@@ -127,7 +139,7 @@ def committed(
     observed: core.Observation,
     facts: core.EvaluationTerminalFacts | None = None,
 ) -> core.CoreState:
-    # Sibling Intents A owns this atomic ingress, which is still a stub on main.
+    # Sibling Records A owns this atomic ingress, which is still a stub on main.
     # Supply its immutable public output, never replace running code.
     rows = tuple(
         row.model_copy(
@@ -139,9 +151,9 @@ def committed(
         )
         if row.request_id == observed.request_id
         else row
-        for row in state.intents.intents
+        for row in state.records.records
     )
-    return state.model_copy(update={"intents": state.intents.model_copy(update={"intents": rows})})
+    return state.model_copy(update={"records": state.records.model_copy(update={"records": rows})})
 
 
 def submitted(
@@ -199,16 +211,17 @@ def test_submission_receipt_and_request_are_allocated_atomically() -> None:
     assert isinstance(request, core.SubmitMeasurement)
     assert request.request_id is not None
     budget = result.state.evaluation.submission_budgets[0]
-    assert budget.limit == 3
+    assert budget.limit == core.MAX_SUBMISSIONS_PER_MEASUREMENT
     assert budget.receipts == (
         core.PreparedSubmissionReceipt(request_id=request.request_id, ordinal=1),
     )
-    assert result.state.intents.intents[0].request == request
+    assert result.state.records.records[0].request == request
     replay = requested(result.state)
     assert replay.requests == ()
     assert replay.state.evaluation == result.state.evaluation
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(order=st.lists(st.integers(min_value=1, max_value=8), min_size=1, max_size=20))
 def test_duplicate_reordered_observations_and_reload_never_regress(order: list[int]) -> None:
     state, request = submitted()
@@ -282,7 +295,7 @@ def test_submission_retry_requires_conclusive_infrastructure_failure(
     retried = requested(
         result.state,
         identity="retry",
-        measurement=plan(submitted_at=2.0, deadline_at=102.0, submission_limit=99),
+        measurement=plan(submitted_at=2.0),
     )
     allowed = (
         terminal
@@ -292,7 +305,7 @@ def test_submission_retry_requires_conclusive_infrastructure_failure(
     )
     assert bool(retried.requests) == allowed
     budget = retried.state.evaluation.submission_budgets[0]
-    assert budget.limit == 3
+    assert budget.limit == core.MAX_SUBMISSIONS_PER_MEASUREMENT
     assert len(budget.receipts) == 1 + int(allowed)
 
 
@@ -321,24 +334,28 @@ def test_a_failure_after_the_run_stopped_is_never_resubmitted(
     retried = requested(
         stopped_state,
         identity="retry",
-        measurement=plan(submitted_at=2.0, deadline_at=102.0, submission_limit=99),
+        measurement=plan(submitted_at=2.0),
     )
     assert retried.requests == ()
     assert len(retried.state.evaluation.submission_budgets[0].receipts) == 1
 
 
-@given(count=st.integers(min_value=4, max_value=10))
+@settings(max_examples=examples(pr=4, nightly=100))
+@given(count=st.integers(min_value=core.MAX_SUBMISSIONS_PER_MEASUREMENT + 1, max_value=10))
 def test_preacceptance_failures_are_bounded_and_timing_never_resets_identity(count: int) -> None:
     state = core.initial_state()
     for index in range(count):
         result = requested(
             state,
             identity=f"measure-{index}",
-            measurement=plan(submitted_at=float(index), deadline_at=100.0 + index),
+            measurement=plan(submitted_at=float(index)),
         )
-        if index >= 3:
+        if index >= core.MAX_SUBMISSIONS_PER_MEASUREMENT:
             assert result.requests == ()
-            assert len(result.state.evaluation.submission_budgets[0].receipts) == 3
+            assert (
+                len(result.state.evaluation.submission_budgets[0].receipts)
+                == core.MAX_SUBMISSIONS_PER_MEASUREMENT
+            )
             state = result.state
             continue
         request = result.requests[0]
@@ -413,7 +430,7 @@ def test_r23_accuracy_and_exact_failed_partial_keep_original_artifacts() -> None
     assert retained[1].acceptance_receipt is not None
     assert retained[1].source_request == request.request_id
     assert retained[1].observation_sequence == 2
-    assert result.state.intents.intents[0].evaluation_result == facts
+    assert result.state.records.records[0].evaluation_result == facts
     late = observation(
         request, 3, terminal=True, released=True, status=core.ObservationStatus.SUCCEEDED
     )
@@ -532,21 +549,20 @@ def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
         # The ledger holds no observation of the submission, so nothing vouches for the job.
         rows = tuple(
             row.model_copy(update={"observation": None, "sequence": 0})
-            for row in state.intents.intents
+            for row in state.records.records
         )
         state = state.model_copy(
-            update={"intents": state.intents.model_copy(update={"intents": rows})}
+            update={"records": state.records.model_copy(update={"records": rows})}
         )
     elif mismatch == "conflicts-with-ledger":
-        held = state.intents.intents[0].observation
+        held = state.records.records[0].observation
         assert held is not None
         observed = observation(request, held.sequence, status=core.ObservationStatus.SUCCEEDED)
     elif mismatch == "wrong-kind":
-        source = state.intents.intents[0]
+        source = state.records.records[0]
         query = core.ObserveOwnedJob(
             request_id=source.request_id,
             scope=request.scope,
-            deadline_at=100.0,
             resource_id=core.ResourceId(root="job"),
         )
         codec_digest = sha256(
@@ -566,7 +582,7 @@ def test_unknown_foreign_wrong_kind_and_uncommitted_sources_are_inert(
             }
         )
         state = state.model_copy(
-            update={"intents": state.intents.model_copy(update={"intents": (source,)})}
+            update={"records": state.records.model_copy(update={"records": (source,)})}
         )
     before = state.evaluation
     result = transition(
@@ -612,9 +628,18 @@ def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
         assert state.evaluation.jobs[0].observation == polled
         assert not [r for r in step.requests if isinstance(r, core.ObserveOwnedJob)]
         # Each poll of a live job comes due once, and an ended job is never polled again.
-        assert core.project(state).next_observe_at == (
-            None if terminal else state.evaluation.jobs[0].pacing.next_at
-        )
+        # The submission request stays open in the ledger (job observations never reach it),
+        # so the run loop also wakes at that request's limit.
+        job_due = None if terminal else state.evaluation.jobs[0].pacing.next_at
+        limits = [
+            row.until.at
+            for row in state.records.records
+            if row.phase in (core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED)
+        ]
+        wakes = [due for due in (job_due, *limits) if due is not None]
+        assert core.project(state).next_observe_at == min(wakes)
+        if terminal:
+            assert state.evaluation.jobs[0].pacing.next_at is None
         if not terminal:
             state = _tick_to_next_poll(state, resource)
         stale = core.step(
@@ -624,6 +649,7 @@ def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
     return state
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(polls=st.integers(min_value=1, max_value=5))
 def test_a_submitted_job_is_polled_until_it_ends(polls: int) -> None:
     pending = [core.ObservationStatus.PENDING] * (polls - 1)

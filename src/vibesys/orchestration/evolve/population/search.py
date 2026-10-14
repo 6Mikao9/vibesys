@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 from typing import cast
 
-from vibesys.orchestration.evolve.population import openevolve_selector, vibesys_selector
+from vibesys.orchestration.evolve.population import vibesys_selector
 from vibesys.orchestration.evolve.population.models import (
     CandidateOutcome,
     Individual,
@@ -40,6 +40,10 @@ class PopulationSearch:
         rng = random.Random(self.config.seed)  # noqa: S311  # sampling, not security  # LW-040056 [S311]; the generator only seeds deterministic search sampling and is not used for security.
         selector_state: OpenEvolveSelectorState | None = None
         if self.config.selector == "openevolve":
+            from vibesys.orchestration.evolve.population import (  # noqa: PLC0415  # lint-waiver: LW-209111 [PLC0415]; the OpenEvolve selector loads OpenEvolve, its LLM clients and numpy (about a third of a second), and only runs with selector="openevolve" use it.
+                openevolve_selector,
+            )
+
             oe_rng = random.Random(self.config.seed)  # noqa: S311  # LW-040057 [S311]; the generator only seeds deterministic search sampling and is not used for security.
             selector_state = OpenEvolveSelectorState(
                 config=self.config.openevolve or OpenEvolveSelectorConfig(),
@@ -83,6 +87,10 @@ class PopulationSearch:
         if state.selector_state is None:
             message = "openevolve selector requires PopulationState.selector_state"
             raise ValueError(message)
+        from vibesys.orchestration.evolve.population import (  # noqa: PLC0415  # lint-waiver: LW-209112 [PLC0415]; the OpenEvolve selector loads OpenEvolve, its LLM clients and numpy (about a third of a second), and only runs with selector="openevolve" use it.
+            openevolve_selector,
+        )
+
         proposal, selector_state = openevolve_selector.select(
             state.selector_state,
             state.individuals,
@@ -122,6 +130,10 @@ class PopulationSearch:
             if selector_state is None:
                 message = "openevolve selector requires PopulationState.selector_state"
                 raise ValueError(message)
+            from vibesys.orchestration.evolve.population import (  # noqa: PLC0415  # lint-waiver: LW-209113 [PLC0415]; the OpenEvolve selector loads OpenEvolve, its LLM clients and numpy (about a third of a second), and only runs with selector="openevolve" use it.
+                openevolve_selector,
+            )
+
             selector_state = openevolve_selector.admit(
                 selector_state,
                 individual,

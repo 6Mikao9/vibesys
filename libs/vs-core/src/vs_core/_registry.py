@@ -12,6 +12,7 @@ from ._values import (
     InstanceMemo,
     canonical_json,
     deeply_immutable,
+    encode_json,
     validate_immutable_schema,
 )
 from .types.common import (
@@ -26,11 +27,11 @@ from .types.common import (
     ScopeReopenNormalization,
 )
 from .types.evaluation import MeasurementIdentity
-from .types.intents import OperationResult, RequestObserved
+from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
-from .types.strategy import Decision, Operation, StrategyState
+from .types.strategy import Command, Operation, StrategyState, Wait
 
-ENVELOPE_SCHEMA_VERSION = 3
+ENVELOPE_SCHEMA_VERSION = 4
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from .types.kernel import CoreState, RunEnvelope
-    from .types.strategy import OperationRequest, StrategyDeclaration
+    from .types.strategy import OperationRequest, SearchDeclaration, Submission
 
 
 class ContractError(ValueError):
@@ -48,6 +49,19 @@ class ContractError(ValueError):
         self.path = path
         self.detail = detail
         super().__init__(f"{'.'.join(map(str, path))}: {detail}")
+
+
+class UnexpectedEvent(ContractError):  # noqa: N818  # LW-220423 [N818]; the name states the situation it reports, as the search API reads `raise UnexpectedEvent(phase, event)`.
+    """A search machine received an event its phase has no transition for.
+
+    Every machine ends its ``match`` with this, so a pair nobody planned for stops the run
+    with the phase and the event named instead of being ignored.
+    """
+
+    def __init__(self, phase: object, event: object) -> None:
+        self.phase = type(phase).__name__
+        self.event = str(getattr(event, "kind", type(event).__name__))
+        super().__init__(("update", self.phase), f"no transition for the event {self.event}")
 
 
 @dataclass(frozen=True)
@@ -84,7 +98,7 @@ class OperationRegistry:
     """Closed registered codec; changed schemas require explicit migration."""
 
     def __init__(self, registrations: tuple[OperationRegistration, ...] = ()) -> None:
-        self._checked_intents: InstanceMemo[bool] = InstanceMemo()
+        self._checked_records: InstanceMemo[bool] = InstanceMemo()
         self._registrations = registrations
         seen: set[str] = set()
         for index, registration in enumerate(registrations):
@@ -272,9 +286,9 @@ class OperationRegistry:
     def validate_decision(self, decision: Operation) -> Operation: ...
 
     @overload
-    def validate_decision(self, decision: Decision) -> Decision: ...
+    def validate_decision(self, decision: Command) -> Command: ...
 
-    def validate_decision(self, decision: Decision) -> Decision:
+    def validate_decision(self, decision: Command) -> Command:
         """The shell validates operation proposals before calling step."""
         if not isinstance(decision, Operation):
             return decision
@@ -282,6 +296,13 @@ class OperationRegistry:
         return Operation.model_validate_json(
             decision.model_dump_json(), context={"operation_registry": self}
         )
+
+    def validate_submission(self, decision: Submission) -> Submission:
+        """Validate the operation a ``Wait`` carries; any other decision passes through."""
+        if not isinstance(decision, Wait):
+            return decision
+        validated = self.validate_decision(decision.request)
+        return decision.model_copy(update={"request": validated})
 
     def validate_envelope(self, envelope: RunEnvelope) -> None:
         """Check what writing the envelope requires, without serializing it.
@@ -300,6 +321,18 @@ class OperationRegistry:
         """Write the whole atomic envelope with registered operation subtypes."""
         self.validate_envelope(envelope)
         return canonical_json(envelope)
+
+    def reload_envelope[S: StrategyState](
+        self, model: type[RunEnvelope[S]], envelope: RunEnvelope[S]
+    ) -> RunEnvelope[S]:
+        """The envelope as a later process reads it: validated, written, and decoded again.
+
+        It is written the way the runtime persists it (`encode_json`, which reuses the text of
+        every unchanged part), not in the sorted canonical form of `encode_envelope`, which
+        walks and serializes the whole envelope again each time.
+        """
+        self.validate_envelope(envelope)
+        return self.decode_envelope(model, encode_json(envelope).decode())
 
     def decode_envelope[S: StrategyState](
         self, model: type[RunEnvelope[S]], source: str
@@ -332,21 +365,21 @@ class OperationRegistry:
             )
             if self._find(schema).descriptor != descriptor:
                 raise ContractError(("registry", descriptor.kind), "descriptor migration required")
-        for intent in state.intents.intents:
-            if self._checked_intents.get(intent):
+        for record in state.records.records:
+            if self._checked_records.get(record):
                 continue
-            if isinstance(intent.request, ExecuteRegisteredOperation):
-                self.decode(intent.request.operation)
-                if intent.outcome_json is not None:
-                    self.decode_outcome(intent.request.operation.schema_ref, intent.outcome_json)
-            if intent.model_config.get("frozen"):
-                # An intent is checked against this registry's codecs, and a frozen one never
-                # changes, so each durable write re-proves only the intents it adds.
-                self._checked_intents.put(intent, fact=True)
+            if isinstance(record.request, ExecuteRegisteredOperation):
+                self.decode(record.request.operation)
+                if record.outcome_json is not None:
+                    self.decode_outcome(record.request.operation.schema_ref, record.outcome_json)
+            if record.model_config.get("frozen"):
+                # A record is checked against this registry's codecs, and a frozen one never
+                # changes, so each durable write re-proves only the records it adds.
+                self._checked_records.put(record, fact=True)
 
 
 def operation_result(operation_id: OperationId, event: RequestObserved) -> OperationResult:
-    """Let intents forward a codec-validated owner payload to Strategy.on_event."""
+    """Let records forward a codec-validated owner payload to Strategy.on_event."""
     if not event.outcome_is_registered or event.operation_schema is None or event.outcome is None:
         raise ContractError(("outcome",), "registered observation outcome required")
     result = OperationResult(
@@ -373,7 +406,10 @@ def _read_envelope_version(source: str, path: tuple[str | int, ...]) -> int:
 
 def _validate_envelope_version(version: object) -> None:
     if type(version) is not int or version != ENVELOPE_SCHEMA_VERSION:
-        raise ContractError(("schema_version",), "explicit envelope migration required")
+        raise ContractError(
+            ("schema_version",),
+            f"envelope version {version!r} is not supported; version {ENVELOPE_SCHEMA_VERSION} required",
+        )
 
 
 def _normalize[M: BaseModel](
@@ -446,7 +482,7 @@ def _validate_operation(descriptor: OperationDescriptor, path: tuple[str | int, 
         raise ContractError((*path, "cancel/watch"), "owned lifecycle requires cancel and watch")
 
 
-def validate_startup(declaration: StrategyDeclaration, available: Capabilities) -> Capabilities:
+def validate_startup(declaration: SearchDeclaration, available: Capabilities) -> Capabilities:
     """Reject required absence; expose only the declared validated intersection."""
     if declaration.required & declaration.optional:
         raise ContractError(("declaration", "optional"), "capability also required")
@@ -461,7 +497,7 @@ def validate_startup(declaration: StrategyDeclaration, available: Capabilities) 
 
 
 def _select_operations(
-    declaration: StrategyDeclaration, available: Capabilities
+    declaration: SearchDeclaration, available: Capabilities
 ) -> tuple[OperationDescriptor, ...]:
     offered: dict[str, OperationDescriptor] = {}
     for index, descriptor in enumerate(available.operations):

@@ -10,15 +10,25 @@ from the pack path.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import cache
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import find
 from tests.support.prompt_context import context_variables
+from tests.vibesys.orchestration.dynamic.core_policy._contexts import (
+    CONTEXTS,
+    RENDERER,
+    TEMPLATE_FILES,
+)
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
-    COMMIT,
-    bounds_of,
+    context_of,
+    plan_of,
     resolved,
-    run_request,
+    write_project,
+)
+from tests.vibesys.orchestration.dynamic.prompt_variables import (
+    context_variables as dynamic_variables,
 )
 
 from vibesys.constants import DomainName
@@ -26,24 +36,26 @@ from vibesys.domains.base import DomainRole
 from vibesys.domains.registry import resolve_domain
 from vibesys.domains.rendering import render_domain_sections
 from vibesys.orchestration import dynamic, evolve, issue_queue, multi, single
-from vibesys.orchestration.dynamic.strategy import api as dynamic_api
-from vibesys.orchestration.evolve.strategy import api as evolve_api
-from vibesys.orchestration.issue_queue.strategy import api as plain_api
-from vibesys.orchestration.multi.strategy import api as multi_api
-from vibesys.orchestration.single.strategy import api as single_api
+from vibesys.orchestration.dynamic.search.api import PromptTemplate
+from vibesys.orchestration.evolve.search import api as evolve_api
+from vibesys.orchestration.issue_queue.search import api as plain_api
+from vibesys.orchestration.multi.search import api as multi_api
+from vibesys.orchestration.single.search import api as single_api
+from vibesys.serial_search.api import PlanPrompt
 from vs_core.api import RevisionId, RevisionRef
 from vs_project.api import OrchestrationDescriptor
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import CorePlan, CoreRunContext
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from pydantic import BaseModel, JsonValue
 
     from vibesys.plugin_registration import OrchestrationRegistration
-    from vs_runtime.api import OrchestrationPlugin, RunFacts
+    from vs_runtime.api import CorePlan, OrchestrationPlugin, RunFacts
 
+_RolePrompts = tuple[tuple[DomainRole, "BaseModel"], ...]
 _CRITERIA = "criteria"
 _REV = RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1")
 _ROUND: dict[str, JsonValue] = {
@@ -52,13 +64,19 @@ _ROUND: dict[str, JsonValue] = {
     "max_retries_per_round": 1,
 }
 _ROUNDS: dict[str, JsonValue] = {**_ROUND, "max_rounds": 2, "official_eval_every": 1}
+_SINGLE: dict[str, JsonValue] = {k: v for k, v in _ROUNDS.items() if k != "judge_every"}
+_EVOLVE_PROFILER = {
+    "profiler_kind": "torch",
+    "profile_execution": "local",
+    "profiler_support_name": "torch_profiler",
+    "profiler_mcp_name": "vibesys-torch-profiler",
+}
 _EVOLVE: dict[str, JsonValue] = {
     "bootstrap_max_attempts": 1,
     "children_per_generation": 1,
     "frontier_bias": 0.5,
     "k_random_inspirations": 1,
     "k_top_inspirations": 1,
-    "keep_deployments": False,
     "max_generations": 1,
     "max_parallelism": 1,
     "selection_temperature": 1.0,
@@ -83,22 +101,35 @@ class _Strategy:
     name: str
     registration: OrchestrationRegistration
     options: dict[str, JsonValue]
-    prompts: tuple[tuple[DomainRole, BaseModel], ...]
+    # Eager, or a callable run on first use: the dynamic search's contexts come from
+    # hypothesis `find`, which takes seconds, and a module-level call would be paid by
+    # every xdist worker while it collects, before the first test starts.
+    role_prompts: _RolePrompts | Callable[[], _RolePrompts]
+
+    @property
+    def prompts(self) -> _RolePrompts:
+        return self.role_prompts if isinstance(self.role_prompts, tuple) else self.role_prompts()
 
     @property
     def plugin(self) -> OrchestrationPlugin:
         return self.registration.plugin
 
 
+@cache
+def _example(template: PromptTemplate) -> BaseModel:
+    """The simplest context the dynamic search generates for ``template``."""
+    return find(CONTEXTS[template], lambda _: True)
+
+
 _STRATEGIES = (
     _Strategy(
         "single",
         single.REGISTRATION,
-        _ROUNDS,
+        _SINGLE,
         (
             (
                 DomainRole.ORCHESTRATOR,
-                single_api.PlanPrompt(round_number=1, max_rounds=2, base_revision=_REV),
+                PlanPrompt(round_number=1, max_rounds=2, base_revision=_REV),
             ),
             (
                 DomainRole.SINGLE_AGENT,
@@ -121,7 +152,7 @@ _STRATEGIES = (
         (
             (
                 DomainRole.ORCHESTRATOR,
-                multi_api.PlanPrompt(round_number=1, max_rounds=2, base_revision=_REV),
+                PlanPrompt(round_number=1, max_rounds=2, base_revision=_REV),
             ),
             (
                 DomainRole.IMPLEMENTER,
@@ -152,11 +183,7 @@ _STRATEGIES = (
                 DomainRole.PROFILER,
                 multi_api.ProfilerPrompt(
                     round_number=1,
-                    profiler_kind="torch",
                     profile_focus="hot path",
-                    profile_execution="local",
-                    profiler_support_name="torch_profiler",
-                    profiler_mcp_name="vibesys-torch-profiler",
                     evidence_directory="profile",
                 ),
             ),
@@ -174,13 +201,7 @@ _STRATEGIES = (
             (DomainRole.JUDGE, evolve_api.JudgePrompt(candidate=_REV)),
             (
                 DomainRole.PROFILER,
-                evolve_api.ProfilerPrompt(
-                    candidate=_REV,
-                    profiler_kind="torch",
-                    profile_execution="local",
-                    profiler_support_name="torch_profiler",
-                    profiler_mcp_name="vibesys-torch-profiler",
-                ),
+                evolve_api.ProfilerPrompt(candidate=_REV),
             ),
         ),
     ),
@@ -188,42 +209,11 @@ _STRATEGIES = (
         "dynamic",
         dynamic.REGISTRATION,
         _ROUNDS | {"max_in_flight": 2},
-        (
-            (
-                DomainRole.ORCHESTRATOR,
-                dynamic_api.PlannerPrompt(
-                    capacity=1,
-                    in_flight=0,
-                    remaining=2,
-                    base_revision=_REV,
-                    base_accuracy_passed=None,
-                    offer_snapshot="offer",
-                ),
-            ),
-            (
-                DomainRole.IMPLEMENTER,
-                dynamic_api.ImplementPrompt(
-                    hypothesis_id="h1",
-                    hypothesis="claim",
-                    task="task",
-                    pass_criteria=_CRITERIA,
-                    parent_revision=_REV,
-                ),
-            ),
-            (
-                DomainRole.JUDGE,
-                dynamic_api.ReviewPrompt(
-                    hypothesis_id="h1",
-                    hypothesis="claim",
-                    pass_criteria=_CRITERIA,
-                    candidate=_REV,
-                    summary="s",
-                ),
-            ),
-            (
-                DomainRole.PROFILER,
-                dynamic_api.ProfilePrompt(question="where is the time going?", target=_REV),
-            ),
+        lambda: (
+            (DomainRole.ORCHESTRATOR, _example(PromptTemplate.PORTFOLIO)),
+            (DomainRole.IMPLEMENTER, _example(PromptTemplate.IMPLEMENT)),
+            (DomainRole.JUDGE, _example(PromptTemplate.REVIEW)),
+            (DomainRole.PROFILER, _example(PromptTemplate.PROFILE_REQUEST)),
         ),
     ),
     _Strategy(
@@ -259,46 +249,49 @@ def _sections(domain: DomainName) -> dict[DomainRole, str]:
 
 
 def _plan(strategy: _Strategy, domain: DomainName, root: Path) -> CorePlan:
-    request = run_request(root)
-    run = resolved(root)
+    write_project(root)
+    if strategy.name == "dynamic":
+        run = resolved(root)
+        return plan_of(replace(run, facts=run.facts.model_copy(update={"domain_id": domain.value})))
+    run = resolved(root, profiler_id="torch" if strategy.name == "multi" else "none")
     facts: RunFacts = run.facts.model_copy(update={"domain_id": domain.value})
     descriptor = OrchestrationDescriptor(
         id=strategy.plugin.id,
         config_version=strategy.plugin.config_version,
         options=strategy.options,
     )
-    bounds = bounds_of(request)
     assert strategy.plugin.core is not None
+    context = context_of(replace(run, facts=facts))
     return strategy.plugin.core.plan(
-        CoreRunContext(
-            run_id="policy",
-            options=strategy.registration.parse_options(descriptor),
-            facts=facts,
-            baseline=RevisionRef.of_git_commit(COMMIT),
-            evaluation_plan=run.evaluation_plan,
-            environment=replace(
-                run.environment,
-                env_kind="docker",
-                cli_sandboxed=True,
-                share_agent_session=False,
-            ),
-            artifacts=run.artifacts,
-            evaluation_capacity=1,
-            queue_allowance_seconds=bounds.queue_allowance_seconds,
-            observe_interval_seconds=bounds.observe_interval_seconds,
-            observe_backoff_cap_seconds=bounds.observe_backoff_cap_seconds,
-            max_run_seconds=bounds.max_run_seconds,
-        )
+        replace(context, options=strategy.registration.parse_options(descriptor))
     )
 
 
 def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
+    if strategy.name == "dynamic":
+        template = PromptTemplate(context.model_dump()["template"])
+        return RENDERER.render_template(
+            TEMPLATE_FILES[template], **plan.prompt_variables, **dynamic_variables(context)
+        )
     core = strategy.plugin.core
     assert core is not None
     renderer = TemplateRenderer(core.prompt_templates, fallback_roots=core.prompt_fallback_roots)
-    fields = context_variables(context, plan.reply_schemas)
+    searches = {
+        "plain": plan.search,
+        "single": single_api.single,
+        "multi": multi_api.multi,
+        "evolve": evolve_api.evolve,
+    }
+    schemas = (
+        searches[strategy.name].reply_schemas
+        if strategy.name in searches
+        else plan.search.reply_schemas
+    )
+    fields = context_variables(context, schemas)
+    # The host supplies the run's profiler to every prompt of the evolve search (`evolve_core`).
+    host = _EVOLVE_PROFILER if strategy.name == "evolve" else {}
     return renderer.render_template(
-        f"{context.model_dump()['template']}.j2", **plan.prompt_variables, **fields
+        f"{context.model_dump()['template']}.j2", **host, **plan.prompt_variables, **fields
     )
 
 

@@ -67,7 +67,10 @@ def prepare(state: core.CoreState, requests: tuple[core.Request, ...]) -> core.C
             frames=(
                 core.TraceFrame(
                     signal=recovery,
-                    change=core.IntentsChange(state=state.intents, requests=requests),
+                    change=core.RecordsChange(
+                        state=state.records,
+                        requests=tuple(core.within(item, 60.0) for item in requests),
+                    ),
                 ),
             )
         ),
@@ -81,7 +84,6 @@ def registered_fixture() -> tuple[core.OperationRegistry, core.CoreState, core.R
     source = core.ExecuteRegisteredOperation(
         request_id=core.RequestId(root="original"),
         scope=scope,
-        deadline_at=100.0,
         operation_id=core.OperationId(root="alpha"),
         operation=registry.encode(Alpha()),
         retry_limit=0,
@@ -89,7 +91,6 @@ def registered_fixture() -> tuple[core.OperationRegistry, core.CoreState, core.R
     query = core.InspectRequest(
         request_id=core.RequestId(root="query"),
         scope=scope,
-        deadline_at=100.0,
         target=core.RequestId(root="original"),
     )
     state = state.model_copy(
@@ -197,7 +198,6 @@ def turn(scope: core.Scope) -> core.TurnSpec:
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
 
@@ -214,19 +214,15 @@ def turn_fixture(
     original = core.DispatchTurn(
         request_id=core.RequestId(root="original"),
         scope=scope,
-        deadline_at=100.0,
         turn=spec,
         decision_id=core.DecisionId(root="original-cause"),
-        decision_dependencies=(core.DecisionId(root="original-dependency"),),
         admission_id=admission_id,
     )
     query = core.InspectTurn(
         request_id=core.RequestId(root="query"),
         scope=scope,
-        deadline_at=100.0,
         invocation=invocation,
         decision_id=core.DecisionId(root="query-cause"),
-        decision_dependencies=(core.DecisionId(root="query-dependency"),),
         admission_id=core.DecisionId(root="query-episode"),
     )
     state = state.model_copy(
@@ -234,6 +230,7 @@ def turn_fixture(
             "sessions": core.SessionsState(
                 invocations=(
                     core.Invocation(
+                        until=core.Until(at=100.0),
                         invocation=invocation,
                         scope=scope,
                         turn=spec,
@@ -280,31 +277,30 @@ def test_turn_inspection_cannot_name_an_unrelated_original_invocation() -> None:
         core.step(state, event)
 
 
-def test_inspected_turn_successors_restore_original_cause_dependencies_and_episode() -> None:
+def test_inspected_turn_successors_restore_original_cause_and_episode() -> None:
     state, event, invocation = turn_fixture()
     assert event.target is not None
     signal = core.TurnObserved(invocation=invocation, observation=event.target.observation)
-    request = core.InspectTurn(
-        scope=signal.observation.scope, deadline_at=100.0, invocation=invocation
-    )
+    request = core.InspectTurn(scope=signal.observation.scope, invocation=invocation)
     result = core.trace_step(
         state,
         event,
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
-                    signal=event, change=core.IntentsChange(state=state.intents, signals=(signal,))
+                    signal=event, change=core.RecordsChange(state=state.records, signals=(signal,))
                 ),
                 core.TraceFrame(
                     signal=signal,
-                    change=core.SessionsChange(state=state.sessions, requests=(request,)),
+                    change=core.SessionsChange(
+                        state=state.sessions, requests=(core.within(request, 60.0),)
+                    ),
                 ),
             )
         ),
     )
     successor = result.requests[0]
     assert successor.decision_id == core.DecisionId(root="original-cause")
-    assert successor.decision_dependencies == (core.DecisionId(root="original-dependency"),)
     assert successor.admission_id == core.DecisionId(root="original-episode")
 
 
@@ -313,25 +309,24 @@ def test_known_child_cannot_masquerade_as_root_target(inspection: str) -> None:
     _, state, event = registered_fixture()
     assert event.target is not None
     child = core.ResourceId(root="child")
-    original = state.intents.intents[0]
+    original = state.records.records[0]
     root_observation = observation(
         original.request.scope, "original", core.ResourceId(root="root")
     ).model_copy(update={"children": (child,)})
     original = original.model_copy(update={"observation": root_observation})
-    query = state.intents.intents[1]
+    query = state.records.records[1]
     if inspection == "job":
         query = query.model_copy(
             update={
                 "request": core.InspectOwnedJob(
                     request_id=query.request_id,
                     scope=query.request.scope,
-                    deadline_at=100.0,
                     resource_id=child,
                 )
             }
         )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (original, query)})}
+        update={"records": state.records.model_copy(update={"records": (original, query)})}
     )
     target = event.target.model_copy(
         update={"observation": event.target.observation.model_copy(update={"resource_id": child})}
@@ -370,15 +365,15 @@ def test_observation_cannot_claim_another_owner_or_admission_episode(
         core.step(state, event)
 
 
-@pytest.mark.parametrize("manifest", ["intent", "job", "job_observation", "lease"])
+@pytest.mark.parametrize("manifest", ["record", "job", "job_observation", "lease"])
 def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manifest: str) -> None:
     _, state, event = registered_fixture()
     assert event.target is not None
     child = core.ResourceId(root="child")
-    original, query = state.intents.intents
+    original, query = state.records.records
     scope = original.request.scope
     discovered = observation(scope, "original").model_copy(update={"children": (child,)})
-    if manifest == "intent":
+    if manifest == "record":
         original = original.model_copy(update={"observation": discovered})
     elif manifest in ("job", "job_observation"):
         job = core.RegisteredOwnedJob(
@@ -395,7 +390,7 @@ def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manif
     else:
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
+                "records": state.records.model_copy(
                     update={
                         "children": (
                             core.ChildLease(
@@ -409,7 +404,7 @@ def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manif
             }
         )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (original, query)})}
+        update={"records": state.records.model_copy(update={"records": (original, query)})}
     )
     target = event.target.model_copy(
         update={"observation": event.target.observation.model_copy(update={"resource_id": child})}
@@ -421,7 +416,7 @@ def test_missing_root_identity_does_not_let_known_child_masquerade_as_root(manif
 def test_inspection_job_resource_must_match_the_recorded_owner() -> None:
     _, state, event = registered_fixture()
     assert event.target is not None
-    original, query = state.intents.intents
+    original, query = state.records.records
     resource = core.ResourceId(root="job")
     original = original.model_copy(
         update={"observation": observation(original.request.scope, "original", resource)}
@@ -431,13 +426,12 @@ def test_inspection_job_resource_must_match_the_recorded_owner() -> None:
             "request": core.InspectOwnedJob(
                 request_id=query.request_id,
                 scope=query.request.scope,
-                deadline_at=100.0,
                 resource_id=core.ResourceId(root="unrelated"),
             )
         }
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"intents": (original, query)})}
+        update={"records": state.records.model_copy(update={"records": (original, query)})}
     )
     event = event.model_copy(
         update={
@@ -458,20 +452,20 @@ def test_query_episode_cannot_replace_an_original_targets_absent_episode() -> No
     state, event, invocation = turn_fixture(None)
     assert event.target is not None
     signal = core.TurnObserved(invocation=invocation, observation=event.target.observation)
-    request = core.InspectTurn(
-        scope=signal.observation.scope, deadline_at=100.0, invocation=invocation
-    )
+    request = core.InspectTurn(scope=signal.observation.scope, invocation=invocation)
     result = core.trace_step(
         state,
         event,
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
-                    signal=event, change=core.IntentsChange(state=state.intents, signals=(signal,))
+                    signal=event, change=core.RecordsChange(state=state.records, signals=(signal,))
                 ),
                 core.TraceFrame(
                     signal=signal,
-                    change=core.SessionsChange(state=state.sessions, requests=(request,)),
+                    change=core.SessionsChange(
+                        state=state.sessions, requests=(core.within(request, 60.0),)
+                    ),
                 ),
             )
         ),

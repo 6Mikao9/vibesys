@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import host_container_backend
-from tests.support.skeleton_strategy import BaselineProbeStrategy
+from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
@@ -23,6 +23,7 @@ from vibesys.run.contracts import RunRequest
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
+from vs_core.api import StopMode
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, RunStopped
@@ -32,7 +33,7 @@ from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster
 if TYPE_CHECKING:
     from pathlib import Path
 
-_PLUGIN = capability_plugin("slurm-exit", strategy=BaselineProbeStrategy())
+_PLUGIN = capability_plugin("slurm-exit", strategy=SkeletonStrategy.baseline_probe())
 
 
 def _write_slurm_config(path: Path, state: Path, transport: str) -> None:
@@ -87,17 +88,18 @@ def _request(project_root: Path, config_path: Path) -> RunRequest:
     )
 
 
-@pytest.mark.parametrize("transport", ["connector", "ssh"])
 def test_a_stopped_run_cancels_a_pending_benchmark_job(
-    tmp_path: Path, transport: str, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Budget: a whole run over a fake cluster in a child process, reached by the production
+    transport (ssh); the connector transport differs only in how the broker spawns the cluster."""
     # The agent container needs the credential its CLI would start with.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
     state = executing_cluster(tmp_path / "cluster")
     (state / HOLD_FILE).touch()
     os.mkfifo(state / SUBMITTED_FILE)
     config_path = tmp_path / "slurm.toml"
-    _write_slurm_config(config_path, state, transport)
+    _write_slurm_config(config_path, state, "ssh")
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration()
@@ -124,7 +126,7 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
         submitted = await asyncio.to_thread((state / SUBMITTED_FILE).read_text, encoding="utf-8")
         assert submitted.isdigit()
         submitted_ids.append(submitted)
-        integration.control.request_stop()
+        integration.control.request_stop(StopMode.CANCEL)
         with pytest.raises(RunStopped):
             await run
 

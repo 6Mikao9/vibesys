@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from ._deadlines import bound_to_run, time_remains
+from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
 from ._registry import ContractError
 from ._session_scope import dispatching_request
@@ -50,9 +50,9 @@ from .types.evaluation import (
     TurnSuspended,
 )
 from .types.evaluation_history import EvaluationHistoryAvailability
-from .types.intents import InspectRequest, IntentPhase
 from .types.job_observations import JobTimeout, TimedOut
 from .types.kernel import AreaChange, EvaluationContext
+from .types.records import InspectRequest, Outbound, RequestPhase, within
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn, SessionPhase
 from .types.strategy import Accepted, Operation
@@ -67,8 +67,8 @@ if TYPE_CHECKING:
         OwnedJob,
     )
     from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
-    from .types.intents import ChildLease, Intent, Request
     from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
+    from .types.records import ChildLease, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
 
 
@@ -173,7 +173,7 @@ def wait_refused_at_turn_end(
 ) -> bool:
     """Whether the suspension gate refuses ``wait`` against the state a turn's end produces."""
     evaluation = EvaluationContext(
-        run=context.run, attempts=context.attempts, sessions=sessions, intents=context.intents
+        run=context.run, attempts=context.attempts, sessions=sessions, records=context.records
     )
     return wait_refusal_in(evaluation, context.evaluation, invocation, wait) is not None
 
@@ -231,6 +231,18 @@ def commit_refusal_in(
     if not time_remains(context.run, wait.deadline_at):
         return SuspensionRefusal.DEADLINE_EXCEEDED
     return None
+
+
+def _inspection(context: EvaluationContext, request: Request) -> Outbound:
+    """A reconciling inspection gets core's own bounded cleanup time."""
+    return cleanup(context.run, request)
+
+
+def _until_wait_ends(
+    context: EvaluationContext, continuation: Continuation, request: Request
+) -> Outbound:
+    """A poll of a job an agent waits on ends when that wait's deadline passes."""
+    return within(request, limit_to(context.run, continuation.deadline_at))
 
 
 def bounded_wait(run: RunState, wait: Continuation) -> Continuation:
@@ -405,7 +417,7 @@ def _descendant_released(
     jobs = tuple(
         job for job in (*state.jobs, *state.registered_jobs) if job.resource_id == resource
     )
-    leases = tuple(child for child in context.intents.children if child.resource_id == resource)
+    leases = tuple(child for child in context.records.children if child.resource_id == resource)
     return bool(jobs or leases) and (
         len(jobs) <= 1
         and len(leases) <= 1
@@ -438,7 +450,7 @@ def _descendants(
                 descendants.update(job.children)
                 if job.observation is not None:
                     descendants.update(job.observation.descendants)
-        for child in context.intents.children:
+        for child in context.records.children:
             if child.scope == scope and (
                 sources.intersection(child.source_requests)
                 or resources.intersection(child.parent_resources)
@@ -526,7 +538,7 @@ def _authorize(
     invocation = _invocation(context, continuation)
     if not _active(context, invocation.scope):
         return AreaChange(state=state)
-    if not attempt_settled(invocation.scope, state, context.intents):
+    if not attempt_settled(invocation.scope, state, context.records):
         # Stay WAITING: each submission's conclusive observation wakes this again.
         return AreaChange(state=state)
     _successor(context, continuation)
@@ -552,7 +564,7 @@ def _authorize(
         )
     owner = _attempt(context, invocation.scope)
     history = (
-        produce_history(invocation.scope, state, context.intents, owner, context.run)
+        produce_history(invocation.scope, state, context.records, owner, context.run)
         if owner
         else None
     )
@@ -626,7 +638,7 @@ def _validate_new(
         or continuation.authorization_receipt is not None
         or continuation.preceding_submission is not None
     ):
-        raise ContractError(("continuation",), "new suspension must contain only waiting intent")
+        raise ContractError(("continuation",), "new suspension must contain only waiting record")
     if not continuation.jobs or len(set(continuation.jobs)) != len(continuation.jobs):
         raise ContractError(("continuation", "jobs"), "requires distinct nonempty dependencies")
     _successor(context, continuation)
@@ -675,9 +687,11 @@ def _declared_operation(
     )
 
 
-def _turn_matches(context: EvaluationContext, invocation: Invocation, intent: Intent) -> bool:
-    request = intent.request
-    if intent.lifecycle != LifecycleClass.SESSION_TURN or request.request_id != intent.request_id:
+def _turn_matches(
+    context: EvaluationContext, invocation: Invocation, record: RequestRecord
+) -> bool:
+    request = record.request
+    if record.lifecycle != LifecycleClass.SESSION_TURN or request.request_id != record.request_id:
         return False
     if request.scope != invocation.scope:
         return False
@@ -705,11 +719,14 @@ def _turn_matches(context: EvaluationContext, invocation: Invocation, intent: In
 
 
 def _resume_ancestry(
-    state: EvaluationState, context: EvaluationContext, invocation: Invocation, intent: Intent
+    state: EvaluationState,
+    context: EvaluationContext,
+    invocation: Invocation,
+    record: RequestRecord,
 ) -> None:
     identity = (
-        intent.request.continuation_id
-        if isinstance(intent.request, ResumeSessionTurn)
+        record.request.continuation_id
+        if isinstance(record.request, ResumeSessionTurn)
         else invocation.turn.continuation_id
     )
     if identity is None:
@@ -759,8 +776,8 @@ def _yield_proof(
         ),
         None,
     )
-    intent = next(
-        (row for row in context.intents.intents if row.request_id == observation.request_id), None
+    record = next(
+        (row for row in context.records.records if row.request_id == observation.request_id), None
     )
     if (
         session is None
@@ -778,19 +795,19 @@ def _yield_proof(
             else (SessionPhase.SUSPENDED, SessionPhase.CHECKPOINTED)
         )
         or session.resource_id is None
-        or intent is None
-        or not _turn_matches(context, invocation, intent)
-        or intent.phase != IntentPhase.COMPLETED
-        or intent.observation != observation
-        or observation.admission_id != intent.request.admission_id
+        or record is None
+        or not _turn_matches(context, invocation, record)
+        or record.phase != RequestPhase.COMPLETED
+        or record.observation != observation
+        or observation.admission_id != record.request.admission_id
     ):
         raise ContractError(
             ("continuation", "invocation"),
             "requires canonical accepted turn and session correspondence",
         )
-    _resume_ancestry(state, context, invocation, intent)
-    if intent.suspension is not None and any(
-        getattr(intent.suspension, field) != getattr(continuation, field)
+    _resume_ancestry(state, context, invocation, record)
+    if record.suspension is not None and any(
+        getattr(record.suspension, field) != getattr(continuation, field)
         for field in ("continuation_id", "invocation", "next_invocation", "jobs", "deadline_at")
     ):
         raise ContractError(
@@ -806,8 +823,8 @@ def _yield_proof(
     attempt = _attempt(context, invocation.scope)
     if (
         attempt is None
-        or intent.request.admission_id is None
-        or (not retained and intent.request.admission_id != attempt.admission_id)
+        or record.request.admission_id is None
+        or (not retained and record.request.admission_id != attempt.admission_id)
     ):
         raise ContractError(("continuation", "invocation"), "requires exact admitted turn episode")
     if not any(
@@ -865,7 +882,7 @@ def _previous_publication(
         return _PublicationMissing("receipt" if receipt is None else "predecessor")
     sources = tuple(
         row
-        for row in context.intents.intents
+        for row in context.records.records
         if invocation.observation is not None
         and row.request_id == invocation.observation.request_id
     )
@@ -951,7 +968,7 @@ def _suspend(
     invocation = _validate_new(state, context, continuation)
     if invocation.observation is None or invocation.observation.status == ObservationStatus.UNKNOWN:
         if not any(
-            _turn_matches(context, invocation, intent) for intent in context.intents.intents
+            _turn_matches(context, invocation, record) for record in context.records.records
         ):
             raise ContractError(
                 ("continuation", "invocation"), "inspection requires a canonical owned turn"
@@ -959,12 +976,16 @@ def _suspend(
         return AreaChange(
             state=state,
             requests=(
-                InspectTurn(
-                    request_id=RequestId(root=f"{continuation.continuation_id.root}/inspect-yield"),
-                    scope=invocation.scope,
-                    deadline_at=context.run.deadline_at,
-                    invocation=invocation.invocation,
-                    dispatch=dispatching_request(context.intents, invocation),
+                _inspection(
+                    context,
+                    InspectTurn(
+                        request_id=RequestId(
+                            root=f"{continuation.continuation_id.root}/inspect-yield"
+                        ),
+                        scope=invocation.scope,
+                        invocation=invocation.invocation,
+                        dispatch=dispatching_request(context.records, invocation),
+                    ),
                 ),
             ),
         )
@@ -992,7 +1013,7 @@ def _suspend(
     if _ready(updated, continuation):
         change = _authorize(updated, context, continuation)
         return change.model_copy(update={"events": (*notice, *change.events)})
-    requests: list[Request] = []
+    requests: list[Outbound] = []
     for job in _jobs(state, continuation):
         if _settled(job):
             continue
@@ -1000,8 +1021,10 @@ def _suspend(
             InspectOwnedJob if job.status == ObservationStatus.UNKNOWN else ObserveOwnedJob
         )
         requests.append(
-            request_type(
-                scope=job.scope, resource_id=_resource(job), deadline_at=continuation.deadline_at
+            _until_wait_ends(
+                context,
+                continuation,
+                request_type(scope=job.scope, resource_id=_resource(job)),
             )
         )
     return AreaChange(state=updated, requests=tuple(requests), events=notice)
@@ -1059,7 +1082,7 @@ def _changed(
 ) -> AreaChange[EvaluationState]:
     events: list[StrategyEvent] = []
     signals: list[Signal] = []
-    requests: list[Request] = []
+    requests: list[Outbound] = []
     for continuation in state.continuations:
         if (
             event.resource_id not in continuation.jobs
@@ -1075,13 +1098,16 @@ def _changed(
         _deadline_proof(state, continuation)
         if job.status == ObservationStatus.UNKNOWN:
             requests.append(
-                InspectOwnedJob(
-                    request_id=RequestId(
-                        root=f"inspect-job:{len(continuation.continuation_id.root)}:{continuation.continuation_id.root}:{len(_resource(job).root)}:{_resource(job).root}:{event.observation_sequence}"
+                _until_wait_ends(
+                    context,
+                    continuation,
+                    InspectOwnedJob(
+                        request_id=RequestId(
+                            root=f"inspect-job:{len(continuation.continuation_id.root)}:{continuation.continuation_id.root}:{len(_resource(job).root)}:{_resource(job).root}:{event.observation_sequence}"
+                        ),
+                        scope=job.scope,
+                        resource_id=_resource(job),
                     ),
-                    scope=job.scope,
-                    resource_id=_resource(job),
-                    deadline_at=continuation.deadline_at,
                 )
             )
         change = _authorize(state, context, continuation)
@@ -1133,7 +1159,7 @@ def _retire(
     if event.disposition == "park":
         scope = _invocation(context, continuation).scope
         authority = next(
-            (row for row in context.intents.intents if row.request_id == event.park_authority), None
+            (row for row in context.records.records if row.request_id == event.park_authority), None
         )
         if (
             authority is None
@@ -1187,11 +1213,10 @@ def _reopen_decision(
             and decision.registered_wire == request.operation
             and decision.normalized_scope_reopen == decision.registered_scope_reopen
             and decision.scope == request.scope
-            and decision.deadline_at == request.deadline_at
             and request.scope == Scope(owner=context.run.run_id, generation=context.run.generation)
             and request.operation_id == OperationId(root=identity)
             and request.request_id == RequestId(root=identity)
-            and request.retry_limit == context.run.limits.max_retries
+            and request.retry_limit == context.run.limits.request_retries.limit
             and request.decision_id in (None, decision.decision_id)
         ):
             return decision
@@ -1257,14 +1282,14 @@ def _reopen(
             ("resolved_cancelled_jobs",), "must resolve exactly cancelled dependencies"
         )
     authority = next(
-        (row for row in context.intents.intents if row.request_id == continuation.park_authority),
+        (row for row in context.records.records if row.request_id == continuation.park_authority),
         None,
     )
     if (
         authority is None
         or not isinstance(authority.request, CloseAttemptScope)
         or not _close_matches(context, scope, authority.request)
-        or authority.phase != IntentPhase.COMPLETED
+        or authority.phase != RequestPhase.COMPLETED
         or authority.observation is None
         or authority.observation.status != ObservationStatus.SUCCEEDED
         or authority.observation.scope != scope
@@ -1303,7 +1328,7 @@ def _reopened(
     attempt = _attempt(context, scope)
     observation = event.observation
     authority = next(
-        (row for row in context.intents.intents if row.request_id == continuation.reopen_authority),
+        (row for row in context.records.records if row.request_id == continuation.reopen_authority),
         None,
     )
     decision = (
@@ -1347,18 +1372,20 @@ def _reopened(
         return AreaChange(
             state=state,
             requests=(
-                InspectRequest(
-                    request_id=RequestId(root=f"{observation.request_id.root}/inspect-reopen"),
-                    scope=authority.request.scope,
-                    deadline_at=context.run.deadline_at,
-                    target=observation.request_id,
+                _inspection(
+                    context,
+                    InspectRequest(
+                        request_id=RequestId(root=f"{observation.request_id.root}/inspect-reopen"),
+                        scope=authority.request.scope,
+                        target=observation.request_id,
+                    ),
                 ),
             ),
         )
     if (
         observation.request_id != continuation.reopen_authority
         or observation.scope != authority.request.scope
-        or authority.phase != IntentPhase.COMPLETED
+        or authority.phase != RequestPhase.COMPLETED
         or authority.observation != observation
         or not isinstance(authority.outcome, ScopedAdmissionReopenOutcome)
         or authority.outcome.scope != scope

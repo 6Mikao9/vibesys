@@ -46,7 +46,7 @@ def test_alternating_source_watermarks_survive_public_step_and_codec(
     )
     state = core.initial_state()
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": (lease,)})}
+        update={"records": state.records.model_copy(update={"children": (lease,)})}
     )
     result = core.step(
         state,
@@ -56,12 +56,12 @@ def test_alternating_source_watermarks_survive_public_step_and_codec(
         ),
     )
     restored = core.CoreState.model_validate_json(result.state.model_dump_json())
-    assert restored.intents.children == (lease,)
+    assert restored.records.children == (lease,)
     assert tuple(mark.observation.sequence for mark in lease.observation_watermarks) == (
         first,
         second,
     )
-    assert restored.intents.children[0].observation == observations[0]
+    assert restored.records.children[0].observation == observations[0]
 
 
 @pytest.mark.parametrize(

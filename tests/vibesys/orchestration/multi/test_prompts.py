@@ -11,35 +11,35 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.prompt_context import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from tests.vibesys.reply_variables import context_variables
 
 import vibesys.orchestration.multi.core_policy.prompts as templates
-from vibesys.orchestration.multi.core_policy.api import reply_schemas, run_prompt_variables
-from vibesys.orchestration.multi.strategy.api import (
+from vibesys.orchestration.multi.core_policy.api import run_prompt_variables
+from vibesys.orchestration.multi.search.api import (
     ArchiveConflictView,
     ConflictMetric,
-    ContinuePrompt,
     Dominator,
     GateFacts,
     HypothesisPlan,
     ImplementerClaims,
     ImplementPrompt,
     JudgePrompt,
-    PlanPrompt,
     PreRoundPrompt,
     ProfilerPrompt,
     PromptTemplate,
     ValidationFailure,
+    multi,
 )
 from vibesys.orchestration.profilers import ACTIVE_PROFILER_KINDS
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
-from vibesys.serial_search.api import LastProfile
+from vibesys.serial_search.api import LastProfile, PlanPrompt, PlanTemplate
 from vs_core.api import RevisionId, RevisionRef, Value
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import examples
 
 _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
@@ -112,17 +112,7 @@ _IMPLEMENT = st.builds(
     official_reason=st.none() | _TEXT,
     benchmark_enabled=st.booleans(),
     active_component=st.none() | _TEXT,
-    reference_path=st.sampled_from((".", "reference")),
-    **_REPAIR,
-)
-_CONTINUE = st.builds(
-    ContinuePrompt,
-    round_number=st.integers(1, 5),
-    retry=st.integers(1, 3),
-    plan=_PLAN,
-    base_revision=_REVISIONS,
-    continuation_step=_TEXT,
-    framework=_GATES,
+    continuation_step=st.none() | _TEXT,
     **_REPAIR,
 )
 _CLAIMS = st.builds(
@@ -152,8 +142,6 @@ _PRE_ROUND = st.builds(
     PreRoundPrompt,
     round_number=st.integers(1, 5),
     has_history=st.booleans(),
-    profiler_kind=st.sampled_from(("none", "linux_cpu")),
-    profile_execution=st.sampled_from(("local", "remote")),
     regression_kind=st.none() | _TEXT,
     regression_round=st.none() | st.integers(1, 4),
     exhaustion_feedback=st.none() | _TEXT,
@@ -162,12 +150,7 @@ _PRE_ROUND = st.builds(
 _PROFILER = st.builds(
     ProfilerPrompt,
     round_number=st.integers(1, 5),
-    profiler_kind=st.sampled_from(sorted(kind.value for kind in ACTIVE_PROFILER_KINDS)),
     profile_focus=_TEXT,
-    benchmark_command=st.none() | _TEXT,
-    profile_execution=st.sampled_from(("local", "remote")),
-    profiler_support_name=_TEXT,
-    profiler_mcp_name=_TEXT,
     evidence_directory=st.just("profile/round-0001/"),
 )
 _PLANNING = st.builds(
@@ -186,8 +169,10 @@ _PLANNING = st.builds(
 )
 
 
-def _variables(context: Value, *, agent_evaluation: bool = True) -> dict[str, object]:
-    variables = context_variables(context, reply_schemas())
+def _variables(
+    context: Value, *, agent_evaluation: bool = True, profiler_kind: str = "linux_cpu"
+) -> dict[str, object]:
+    variables = context_variables(context, multi.reply_schemas)
     return {
         **run_prompt_variables(
             domain_sections=EMPTY_DOMAIN_SECTIONS,
@@ -195,53 +180,79 @@ def _variables(context: Value, *, agent_evaluation: bool = True) -> dict[str, ob
             environment_notes="note",
             agent_evaluation=agent_evaluation,
             validation_recipe_schema='{"version": 1}',
+            profiler_id=profiler_kind,
+            profile_execution="local",
+            profiler_support_name="support",
+            profiler_mcp_name="profiler",
+            benchmark_command="bench",
+            reference_path=".",
+            interface="inprocess",
         ),
         **variables,
     }
 
 
-def _render(template: PromptTemplate, context: Value) -> str:
-    text = _RENDERER.render_template(f"{template.value}.j2", **_variables(context))
+def _render(
+    template: PromptTemplate | PlanTemplate, context: Value, *, profiler_kind: str = "linux_cpu"
+) -> str:
+    text = _RENDERER.render_template(
+        f"{template.value}.j2", **_variables(context, profiler_kind=profiler_kind)
+    )
     assert text.strip()
     return text
 
 
-@given(context=_PRE_ROUND)
-def test_the_routing_prompt_renders_for_every_context(context: PreRoundPrompt) -> None:
-    assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, context)
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_PRE_ROUND, kind=st.sampled_from(("none", "linux_cpu")))
+def test_the_routing_prompt_renders_for_every_context(context: PreRoundPrompt, kind: str) -> None:
+    assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, context, profiler_kind=kind)
 
 
-@given(context=_PROFILER)
-def test_the_profiler_prompt_renders_for_every_runnable_profiler(context: ProfilerPrompt) -> None:
-    text = _render(PromptTemplate.PROFILER, context)
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    context=_PROFILER,
+    kind=st.sampled_from(sorted(kind.value for kind in ACTIVE_PROFILER_KINDS)),
+)
+def test_the_profiler_prompt_renders_for_every_runnable_profiler(
+    context: ProfilerPrompt, kind: str
+) -> None:
+    text = _render(PromptTemplate.PROFILER, context, profiler_kind=kind)
     assert context.evidence_directory in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_PLANNING)
 def test_the_planning_prompt_shows_a_fresh_profile_with_its_evidence_directory(
     context: PlanPrompt,
 ) -> None:
-    text = _render(PromptTemplate.PLAN, context)
+    text = _render(PlanTemplate.PLAN, context)
     if context.last_profile is not None:
         assert "fresh profiler result" in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_IMPLEMENT)
 def test_the_implementation_prompt_renders_for_every_context(context: ImplementPrompt) -> None:
     text = _render(PromptTemplate.IMPLEMENT, context)
-    assert context.plan.task in text
+    if context.continuation_step is None:
+        assert context.plan.task in text
     if context.feedback is not None:
         assert context.feedback in text
     if context.validation_failure is not None and context.validation_failure.recipe_unusable:
         assert "could not be used" in text
 
 
-@given(context=_CONTINUE)
-def test_the_continuation_prompt_renders_for_every_context(context: ContinuePrompt) -> None:
-    text = _render(PromptTemplate.CONTINUE, context)
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_IMPLEMENT.filter(lambda item: item.continuation_step is not None))
+def test_a_continuation_asks_for_the_bounded_step_the_implementer_named(
+    context: ImplementPrompt,
+) -> None:
+    text = _render(PromptTemplate.IMPLEMENT, context)
+    assert context.continuation_step is not None
     assert context.continuation_step in text
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_JUDGE)
 def test_the_review_prompt_renders_for_every_context(context: JudgePrompt) -> None:
     text = _render(PromptTemplate.JUDGE, context)

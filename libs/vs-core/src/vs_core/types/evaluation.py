@@ -12,6 +12,7 @@ from .common import (
     ContinuationId,
     ContractValidationError,
     Count,
+    DecisionId,
     EvidenceId,
     EvidenceKey,
     EvidenceKind,
@@ -36,6 +37,7 @@ from .evaluation_history import (
     RepeatedFailureGuidance,
 )
 from .job_observations import JobProgress, MeasurementFailure, TimedOut
+from .until import Within
 
 
 class SnapshotResultRef(Value):
@@ -47,7 +49,7 @@ class SnapshotResultRef(Value):
 class StageRequirements(Value):
     """A stage value that may name the outputs its evidence must contain.
 
-    ``required_outputs`` joined stages after runs had already stored digests of plans, intents
+    ``required_outputs`` joined stages after runs had already stored digests of plans, records
     and receipts. A stage that requires nothing serializes exactly as it did before the field
     existed, so every stored digest, submission budget key and recipe digest still matches and
     a run started earlier resumes. Only a stage that requires something carries the field.
@@ -91,14 +93,19 @@ class MeasurementPlan(Value):
     recipe: ArtifactRef
     submitted_at: Seconds
     queue_allowance: Seconds
-    deadline_at: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
-    submission_limit: int = Field(default=1, ge=1)
     accuracy_stage: str | None = Field(default=None, min_length=1)
     """The stage whose pass is the correctness (accuracy) gate, named explicitly.
 
     None declares no accuracy stage: correctness evidence then requires every
     stage to pass instead of inferring a gate from stage dependencies.
+    """
+    accuracy_gated: tuple[EvidenceKind, ...]
+    """Evidence kinds that count only when the accuracy stage passed. Declared by the task.
+
+    Core holds no such rule of its own: a task that wants "a benchmark counts only if
+    accuracy passed" lists ``BENCHMARK`` here, a task that does not leaves it out. Naming a
+    kind requires ``accuracy_stage``.
     """
 
     @model_validator(mode="after")
@@ -109,6 +116,8 @@ class MeasurementPlan(Value):
             raise MeasurementPlanError("stages", "duplicate stage ID")
         if self.accuracy_stage is not None and self.accuracy_stage not in graph:
             raise MeasurementPlanError("accuracy_stage", "unknown stage")
+        if self.accuracy_gated and self.accuracy_stage is None:
+            raise MeasurementPlanError("accuracy_gated", "requires an accuracy_stage")
         for stage in self.stages:
             if set(stage.depends_on) - graph.keys():
                 raise MeasurementPlanError(stage.stage_id, "unknown dependency")
@@ -122,14 +131,16 @@ class MeasurementPlan(Value):
                 for name, dependencies in remaining.items()
                 if name not in ready
             }
-        maximum = (
-            self.submitted_at
-            + self.queue_allowance
-            + sum(stage.execution_budget for stage in self.stages)
-        )
-        if not self.submitted_at <= self.deadline_at <= maximum:
-            raise MeasurementPlanError("deadline_at", "deadline exceeds declared stage bound")
         return self
+
+    @property
+    def time_bound(self) -> float:
+        """The most time the declared stages and queue allowance can take.
+
+        The plan states no deadline: how long a submission may take is the ``Within`` of the
+        wait that asks for it, capped at this bound for an agent's own submission.
+        """
+        return self.queue_allowance + sum(stage.execution_budget for stage in self.stages)
 
 
 class EvidenceAcceptanceReceipt(Value):
@@ -380,6 +391,7 @@ class MeasurementIdentity(Value):
     recipe_digest: str = Field(min_length=1)
     stages: tuple[MeasurementStageIdentity, ...]
     accuracy_stage: str | None = Field(default=None, min_length=1)
+    accuracy_gated: tuple[EvidenceKind, ...]
 
     @classmethod
     def from_plan(cls, plan: MeasurementPlan, candidate: RevisionRef) -> MeasurementIdentity:
@@ -400,6 +412,7 @@ class MeasurementIdentity(Value):
                 for stage in plan.stages
             ),
             accuracy_stage=plan.accuracy_stage,
+            accuracy_gated=tuple(sorted(set(plan.accuracy_gated))),
         )
 
     @model_validator(mode="after")
@@ -410,6 +423,8 @@ class MeasurementIdentity(Value):
             raise MeasurementPlanError("stages", "duplicate stage ID")
         if self.accuracy_stage is not None and self.accuracy_stage not in graph:
             raise MeasurementPlanError("accuracy_stage", "unknown stage")
+        if self.accuracy_gated and self.accuracy_stage is None:
+            raise MeasurementPlanError("accuracy_gated", "requires an accuracy_stage")
         for stage in self.stages:
             if len(set(stage.depends_on)) != len(stage.depends_on):
                 raise MeasurementPlanError(stage.stage_id, "duplicate dependency")
@@ -465,7 +480,7 @@ class SubmissionBudget(Value):
 
     The first limit cannot exceed the run ceiling. Workload rejection is durable;
     conclusive infrastructure failure may retry within this bound. Transport
-    reconciliation accounting remains Intent.retry_count, not this receipt list.
+    reconciliation accounting remains RequestRecord.retry_count, not this receipt list.
     """
 
     scope: Scope
@@ -550,6 +565,12 @@ class AgentMeasurementRequested(Value):
     kind: Literal["agent_measurement_requested"] = "agent_measurement_requested"
     scope: Scope
     plan: MeasurementPlan
+    within: Within
+    """How long the submission may take: the single time limit of this request.
+
+    Parsed from the agent's call at the boundary; core caps it at the plan's
+    ``time_bound`` and at the run deadline.
+    """
     call_id: str = Field(min_length=1)
 
 
@@ -934,6 +955,18 @@ class JobsDrainRequested(Value):
     disposition: Literal["park", "cancel", "settle"]
 
 
+class RunJobsCancelRequested(Value):
+    """A committed cancel stop ends the jobs its scope owns that no attempt closure drains.
+
+    ``authority`` is the stop's decision; evaluation acts only while it is the run's first
+    committed stop, in cancel mode, for this scope.
+    """
+
+    kind: Literal["run_jobs_cancel_requested"] = "run_jobs_cancel_requested"
+    scope: Scope
+    authority: DecisionId
+
+
 class MeasurementSubmissionObserved(Value):
     """Classified submission observation updates its immutable budget receipt."""
 
@@ -957,6 +990,7 @@ type EvaluationEvent = Annotated[
     | ContinuationReopenRequested
     | ContinuationScopeReopened
     | JobsDrainRequested
+    | RunJobsCancelRequested
     | MeasurementSubmissionObserved,
     Field(discriminator="kind"),
 ]

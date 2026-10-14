@@ -31,6 +31,11 @@ from vs_runtime._local_validation import (
     ValidationRecipeArtifactPath,
 )
 from vs_runtime._polling_evaluation import PollingEvaluationExecutor
+from vs_runtime._retrying_evaluation import (
+    ClosableEvaluationExecutor,
+    EvaluationRetries,
+    RetryingEvaluationExecutor,
+)
 
 # A stop lands in policy code as this BaseException; a policy that runs work
 # concurrently re-raises it as one exception, not a group.
@@ -109,6 +114,7 @@ __all__ = [
     "BenchmarkFailureKind",
     "BenchmarkObjective",
     "CandidateWorkspace",
+    "ClosableEvaluationExecutor",
     "CommandResult",
     "Commands",
     "Completed",
@@ -117,6 +123,7 @@ __all__ = [
     "CorePolicy",
     "CoreRunContext",
     "Evaluation",
+    "EvaluationRetries",
     "InvalidResponse",
     "InvocationConflictError",
     "InvocationOutcome",
@@ -131,6 +138,7 @@ __all__ = [
     "ProfileExecution",
     "ProfileField",
     "Progress",
+    "RetryingEvaluationExecutor",
     "RevisionLedger",
     "RunCleanupError",
     "RunExecution",

@@ -1,10 +1,17 @@
 """Owner of the prompt-rendering operation: templates in, stored artifacts out.
 
-Python passes data only. The request carries a typed context whose ``template``
-names one template file, and its other fields are the template's variables. The
+Python passes data only. The request names one template file (the role's prompt, or one of
+the exchanges core starts), and the fields of its typed context are the template's variables. The
 template owns all wording, and ``vs_prompts`` renders it with strict undefined
 variables, so a missing variable is a typed failure and never an empty string.
 Artifacts are content addressed, so the operation is idempotent by construction.
+
+Any context field that holds a non-empty tuple of ``EvidenceRef`` names evidence records the
+prompt states the results of. The template receives that field's name bound to one mapping per
+record (``evidence_id``, ``kind``, ``revision``, ``status``, ``passed``, ``stage``, ``metrics``
+with name, value, direction and unit, ``partial`` and ``feedback``), built from the ledger by the
+projection the evidence interpretation uses. ``passed`` is None for a record the ledger holds
+no reading of.
 """
 
 from __future__ import annotations
@@ -14,7 +21,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 from jinja2.exceptions import TemplateError
 
-from vs_core.api import ArtifactId, ArtifactRef, RolePromptContext
+from vs_core.api import ArtifactId, ArtifactRef, EvidenceRef, RolePromptContext
 from vs_prompts.api import reply_fields
 from vs_runtime._evidence_operations import reading_mapping
 from vs_runtime._operation_catalog import Applied, Inspection, NotApplied
@@ -24,7 +31,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import EvidenceRef, OperationRequest, SchemaRef
+    from vs_core.api import OperationRequest, SchemaRef
     from vs_prompts.api import ReplyFields, TemplateRenderer
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._core_requests import ExecutionContext
@@ -34,15 +41,15 @@ if TYPE_CHECKING:
 REPLY_VARIABLE = "reply"
 """The template variable that names the reply fields the turn is offered."""
 
-CITED_EVIDENCE = "cited_evidence"
-"""The context field that names evidence records a prompt states the results of.
 
-A context declares ``cited_evidence: tuple[EvidenceRef, ...]``; the template receives the
-same name bound to one mapping per record (``evidence_id``, ``kind``, ``revision``,
-``status``, ``passed``, ``stage``, ``metrics`` with name, value, direction and unit,
-``partial`` and ``feedback``), built from the ledger by the projection the evidence
-interpretation uses. ``passed`` is None for a record the ledger holds no reading of.
-"""
+def _cites_evidence(value: object) -> bool:
+    """Whether a context field holds evidence records a prompt states the results of."""
+    return (
+        isinstance(value, tuple)
+        and len(value) > 0
+        and all(isinstance(item, EvidenceRef) for item in value)
+    )
+
 
 _UNREAD: Mapping[str, object] = {
     "passed": None,
@@ -82,6 +89,7 @@ def _fields_of(schema: SchemaRef, replies: Mapping[SchemaRef, type[BaseModel]]) 
 class RenderRequest(Protocol):
     """The request shape this owner serves, declared by the strategy that issues it."""
 
+    template: str
     subject: str
     ordinal: int
     context: BaseModel
@@ -101,7 +109,7 @@ class RenderArtifactsOwner:
         """Bind the template root, the artifact store, the run-level variables and the ledger.
 
         ``evidence`` is the ledger accepted results are recorded in. A context that cites
-        evidence (see ``CITED_EVIDENCE``) has each citation read from it at render time, so a
+        evidence (see the module docstring) has each citation read from it at render time, so a
         prompt states what was measured and no strategy has to carry the numbers.
 
         ``replies`` are the run's reply types by schema. A context that names the schema its
@@ -117,17 +125,16 @@ class RenderArtifactsOwner:
     def _render(self, request: OperationRequest) -> tuple[bytes, ArtifactId] | None:
         render = cast("RenderRequest", request)
         context = render.context
-        template = str(getattr(context, "template", ""))
         variables = {
             **self._variables,
             **{name: getattr(context, name) for name in type(context).model_fields},
         }
-        variables.pop("template", None)
         variables.update(reply_variable(context, self._replies))
-        if CITED_EVIDENCE in variables:
-            variables[CITED_EVIDENCE] = self._readings(variables[CITED_EVIDENCE])
+        for name, value in list(variables.items()):
+            if _cites_evidence(value):
+                variables[name] = self._readings(value)
         try:
-            text = self._renderer.render_template(f"{template}.j2", **variables)
+            text = self._renderer.render_template(render.template, **variables)
         except TemplateError:
             return None
         return text.encode(), ArtifactId(root=f"render:{render.subject}:{render.ordinal}")

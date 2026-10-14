@@ -7,72 +7,44 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import ValidationError
 
-from vibesys.orchestration.dynamic.core_policy.api import reply_schemas as dynamic_schemas
-from vibesys.orchestration.dynamic.strategy.api import (
-    IMPLEMENTER_REPLY as DYNAMIC_IMPLEMENTER_REPLY,
-)
-from vibesys.orchestration.dynamic.strategy.api import JUDGE_REPLY as DYNAMIC_JUDGE_REPLY
-from vibesys.orchestration.dynamic.strategy.api import (
-    PROFILER_REPLY as DYNAMIC_PROFILER_REPLY,
-)
-from vibesys.orchestration.dynamic.strategy.api import DynamicConfig
-from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_schemas
-from vibesys.orchestration.evolve.strategy.api import JUDGE_REPLY as EVOLVE_JUDGE_REPLY
-from vibesys.orchestration.evolve.strategy.api import MUTATOR_REPLY as EVOLVE_MUTATOR_REPLY
+from vibesys.hypothesis import HypothesisOutcome
+from vibesys.orchestration.dynamic.search.api import dynamic
+from vibesys.orchestration.evolve.search.api import evolve
 from vibesys.orchestration.issue_queue.core_policy import prompts as issue_queue_prompts
-from vibesys.orchestration.issue_queue.core_policy.api import (
-    reply_schemas as issue_queue_schemas,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
-    IMPLEMENTER_REPLY as ISSUE_QUEUE_IMPLEMENTER_REPLY,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
-    JUDGE_REPLY as ISSUE_QUEUE_JUDGE_REPLY,
-)
-from vibesys.orchestration.issue_queue.strategy.api import IssueQueueConfig
-from vibesys.orchestration.multi.core_policy.api import reply_schemas as multi_schemas
-from vibesys.orchestration.multi.strategy.api import IMPLEMENTER_REPLY as MULTI_IMPLEMENTER_REPLY
-from vibesys.orchestration.multi.strategy.api import JUDGE_REPLY as MULTI_JUDGE_REPLY
-from vibesys.orchestration.single.core_policy.api import reply_schemas as single_schemas
-from vibesys.orchestration.single.strategy.api import IMPLEMENTER_REPLY as SINGLE_IMPLEMENTER_REPLY
+from vibesys.orchestration.issue_queue.search.api import issue_queue
+from vibesys.orchestration.multi.search.api import multi
+from vibesys.orchestration.review import Verdict
+from vibesys.orchestration.single.search.api import single
 from vibesys.prompts import render_template
 from vs_agent.api import AgentClient, native_schema_problems
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
-from vs_core.api import ArtifactId, ArtifactRef
+from vs_core.api import WaitableReply
 from vs_prompts.api import TemplateRenderer
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vs_core.api.search import Role
 
-_DYNAMIC = dynamic_schemas(
-    DynamicConfig(
-        recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
-        max_rounds=1,
-    )
-)
-_EVOLVE = evolve_schemas()
-_SINGLE = single_schemas()
-_MULTI = multi_schemas()
-_ISSUE_QUEUE = issue_queue_schemas(
-    IssueQueueConfig(
-        recipe=ArtifactRef(artifact_id=ArtifactId(root="issue-recipe"), digest="issue-recipe"),
-        max_rounds=1,
-        max_attempts_per_issue=1,
-        max_issues_per_perf_eval=1,
-        max_issues_per_round=1,
-    )
-)
 
-_IMPLEMENTER = {"summary": "done", "outcome": "supported"}
+_DYNAMIC = {role.name: dynamic.reply_schemas[role.reply_schema] for role in dynamic.roles}
+_EVOLVE = {role.name: evolve.reply_schemas[role.reply_schema] for role in evolve.roles}
+_SINGLE = {role.name: single.reply_schemas[role.reply_schema] for role in single.roles}
+_MULTI = {role.name: multi.reply_schemas[role.reply_schema] for role in multi.roles}
+_ISSUE_QUEUE = {
+    role.name: issue_queue.reply_schemas[role.reply_schema] for role in issue_queue.roles
+}
+
+_IMPLEMENTER = {"summary": "done", "outcome": HypothesisOutcome.SUPPORTED}
 _JUDGE = {"passed": True, "analysis": "checked"}
 _SINGLE_RESULT = {
     "summary": "done",
     "expected_behavior": "faster",
     "self_review": "checked",
     "feedback": "",
-    "verdict": "pass",
+    "verdict": Verdict.PASS,
     "bottlenecks": "",
     "suggestions": "",
     "profile_analysis": "",
@@ -80,7 +52,7 @@ _SINGLE_RESULT = {
 _MULTI_IMPLEMENTER = {"summary": "done", "expected_behavior": "faster"}
 _EVOLVE_MUTATOR = {"summary": "did it", "hypothesis": "because", "expected_behavior": "faster"}
 _EVOLVE_JUDGE = {"analysis": "checked", "feedback": "", "verdict": "pass"}
-_MULTI_JUDGE = {"analysis": "checked", "feedback": "", "verdict": "pass"}
+_MULTI_JUDGE = {"analysis": "checked", "feedback": "", "verdict": Verdict.PASS}
 _ISSUE_QUEUE_IMPLEMENTER = {
     "summary": "done",
     "files_touched": (),
@@ -93,20 +65,19 @@ _ISSUE_QUEUE_JUDGE = {
     "new_issues": (),
 }
 _AFFECTED_ROLES: tuple[tuple[str, type[BaseModel], dict[str, object]], ...] = (
-    ("dynamic-implementer", _DYNAMIC[DYNAMIC_IMPLEMENTER_REPLY], _IMPLEMENTER),
-    ("dynamic-profiler", _DYNAMIC[DYNAMIC_PROFILER_REPLY], _IMPLEMENTER),
-    ("dynamic-judge", _DYNAMIC[DYNAMIC_JUDGE_REPLY], _JUDGE),
-    ("evolve-mutator", _EVOLVE[EVOLVE_MUTATOR_REPLY], _EVOLVE_MUTATOR),
-    ("evolve-judge", _EVOLVE[EVOLVE_JUDGE_REPLY], _EVOLVE_JUDGE),
-    ("single-implementer", _SINGLE[SINGLE_IMPLEMENTER_REPLY], _SINGLE_RESULT),
-    ("multi-implementer", _MULTI[MULTI_IMPLEMENTER_REPLY], _MULTI_IMPLEMENTER),
-    ("multi-judge", _MULTI[MULTI_JUDGE_REPLY], _MULTI_JUDGE),
+    ("dynamic-implementer", _DYNAMIC["implementer"], _IMPLEMENTER),
+    ("dynamic-judge", _DYNAMIC["judge"], _JUDGE),
+    ("evolve-mutator", _EVOLVE["mutator"], _EVOLVE_MUTATOR),
+    ("evolve-judge", _EVOLVE["judge"], _EVOLVE_JUDGE),
+    ("single-implementer", _SINGLE["implementer"], _SINGLE_RESULT),
+    ("multi-implementer", _MULTI["implementer"], _MULTI_IMPLEMENTER),
+    ("multi-judge", _MULTI["judge"], _MULTI_JUDGE),
     (
         "issue-queue-implementer",
-        _ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY],
+        _ISSUE_QUEUE["implementer"],
         _ISSUE_QUEUE_IMPLEMENTER,
     ),
-    ("issue-queue-judge", _ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], _ISSUE_QUEUE_JUDGE),
+    ("issue-queue-judge", _ISSUE_QUEUE["judge"], _ISSUE_QUEUE_JUDGE),
 )
 
 
@@ -146,27 +117,26 @@ def test_pre_envelope_wait_replies_remain_compatible(
 @pytest.mark.parametrize(
     ("model", "expected"),
     [
-        (_DYNAMIC[DYNAMIC_IMPLEMENTER_REPLY], []),
-        (_DYNAMIC[DYNAMIC_PROFILER_REPLY], []),
-        (_DYNAMIC[DYNAMIC_JUDGE_REPLY], []),
+        (_DYNAMIC["implementer"], []),
+        (_DYNAMIC["judge"], []),
         (
-            _SINGLE[SINGLE_IMPLEMENTER_REPLY],
+            _SINGLE["implementer"],
             [
                 "#/$defs/SingleAgentRoundResponse/properties/candidate_metrics allows arbitrary object keys"
             ],
         ),
         (
-            _MULTI[MULTI_IMPLEMENTER_REPLY],
+            _MULTI["implementer"],
             [
                 "#/$defs/ImplementerResponse/properties/metrics allows arbitrary object keys",
                 "#/$defs/ImplementerResponse/properties/candidate_metrics allows arbitrary object keys",
             ],
         ),
-        (_MULTI[MULTI_JUDGE_REPLY], []),
-        (_EVOLVE[EVOLVE_MUTATOR_REPLY], []),
-        (_EVOLVE[EVOLVE_JUDGE_REPLY], []),
-        (_ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY], []),
-        (_ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], []),
+        (_MULTI["judge"], []),
+        (_EVOLVE["mutator"], []),
+        (_EVOLVE["judge"], []),
+        (_ISSUE_QUEUE["implementer"], []),
+        (_ISSUE_QUEUE["judge"], []),
     ],
 )
 def test_waitable_schemas_have_no_root_union_or_unresolved_reference(
@@ -175,17 +145,29 @@ def test_waitable_schemas_have_no_root_union_or_unresolved_reference(
     assert native_schema_problems(model, "codex") == expected
 
 
+@pytest.mark.parametrize("role", dynamic.roles, ids=lambda role: role.name)
+def test_a_dynamic_role_answers_with_a_waitable_reply_exactly_when_it_may_wait(role: Role) -> None:
+    """Only a role whose agent can request evaluations accepts the wait reply."""
+    model = _DYNAMIC[role.name]
+    wait = {"reply": {"kind": "waiting_for_evaluation", "handles": ["measurement"]}}
+
+    assert issubclass(model, WaitableReply) is role.may_wait_for_evaluations
+    assert native_schema_problems(model, "codex") == []
+    if not role.may_wait_for_evaluations:
+        with pytest.raises(ValidationError):
+            model.model_validate(wait)
+
+
 @pytest.mark.parametrize(
     ("model", "payload"),
     [
-        (_DYNAMIC[DYNAMIC_IMPLEMENTER_REPLY], {"reply": _IMPLEMENTER}),
-        (_DYNAMIC[DYNAMIC_PROFILER_REPLY], {"reply": _IMPLEMENTER}),
-        (_DYNAMIC[DYNAMIC_JUDGE_REPLY], {"reply": _JUDGE}),
+        (_DYNAMIC["implementer"], {"reply": _IMPLEMENTER}),
+        (_DYNAMIC["judge"], {"reply": _JUDGE}),
         (
-            _ISSUE_QUEUE[ISSUE_QUEUE_IMPLEMENTER_REPLY],
+            _ISSUE_QUEUE["implementer"],
             {"reply": _ISSUE_QUEUE_IMPLEMENTER},
         ),
-        (_ISSUE_QUEUE[ISSUE_QUEUE_JUDGE_REPLY], {"reply": _ISSUE_QUEUE_JUDGE}),
+        (_ISSUE_QUEUE["judge"], {"reply": _ISSUE_QUEUE_JUDGE}),
     ],
 )
 def test_waitable_replies_reach_codex_as_native_schemas(

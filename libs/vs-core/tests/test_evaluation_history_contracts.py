@@ -33,8 +33,6 @@ from vs_core.api import (
     EventId,
     HostFence,
     HostId,
-    Intent,
-    IntentPhase,
     InvocationId,
     InvocationRef,
     ItemId,
@@ -53,6 +51,8 @@ from vs_core.api import (
     RepeatedFailureGuidance,
     RequestId,
     RequestObserved,
+    RequestPhase,
+    RequestRecord,
     ResourceId,
     ResumeAuthorizationReceipt,
     ResumeAuthorized,
@@ -65,6 +65,7 @@ from vs_core.api import (
     TargetObservation,
     TimedOut,
     UnobservedJobFacts,
+    Until,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -420,14 +421,15 @@ def test_publication_receipt_cannot_rewrite_frozen_timeout(reached: float) -> No
 
 
 @pytest.mark.parametrize(
-    "carrier", [JobObserved, RegisteredJobObserved, RequestObserved, TargetObservation, Intent]
+    "carrier",
+    [JobObserved, RegisteredJobObserved, RequestObserved, TargetObservation, RequestRecord],
 )
 @given(
     accepted=st.booleans(), terminal=st.booleans(), status=st.sampled_from(tuple(ObservationStatus))
 )
 def test_scientific_terminal_ingress_requires_positive_execution_source(
     carrier: type[
-        JobObserved | RegisteredJobObserved | RequestObserved | TargetObservation | Intent
+        JobObserved | RegisteredJobObserved | RequestObserved | TargetObservation | RequestRecord
     ],
     *,
     accepted: bool,
@@ -450,13 +452,12 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
         payload["resource_id"] = ResourceId(root="job")
     elif carrier is RegisteredJobObserved:
         payload["operation_id"] = OperationId(root="operation")
-    elif carrier is Intent:
+    elif carrier is RequestRecord:
         payload.update(
             request_id=observation.request_id,
             request=SubmitMeasurement(
                 request_id=observation.request_id,
                 scope=observation.scope,
-                deadline_at=100.0,
                 plan=MeasurementPlan(
                     purpose="official",
                     candidate=initial_state().run.facts.baseline,
@@ -468,16 +469,16 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
                     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
                     submitted_at=0.0,
                     queue_allowance=100.0,
-                    deadline_at=100.0,
+                    accuracy_gated=(),
                 ),
             ),
             payload_digest="payload",
             lifecycle=LifecycleClass.OWNED_JOB,
-            phase=IntentPhase.COMPLETED,
-            reconcile_deadline_at=100.0,
+            phase=RequestPhase.COMPLETED,
+            until=Until(at=100.0),
         )
         with pytest.raises(ValidationError, match="evaluation_result"):
-            Intent.model_validate({**payload, "observation": None})
+            RequestRecord.model_validate({**payload, "observation": None})
     if (
         accepted
         and terminal

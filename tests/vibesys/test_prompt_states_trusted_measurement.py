@@ -17,21 +17,11 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
-from tests.vibesys.orchestration.issue_queue.strategy.world import issue_queue_config
 
 from vibesys.orchestration.evolve.core_policy.api import prompts as evolve_prompts
-from vibesys.orchestration.evolve.core_policy.api import reply_schemas as evolve_replies
-from vibesys.orchestration.evolve.strategy.api import JudgePrompt as EvolveJudgePrompt
-from vibesys.orchestration.issue_queue.core_policy.api import prompts as issue_queue_prompts
-from vibesys.orchestration.issue_queue.core_policy.api import (
-    reply_schemas as issue_queue_replies,
-)
-from vibesys.orchestration.issue_queue.strategy.api import (
-    IssueDetail,
-    ReviewPrompt,
-)
-from vibesys.orchestration.issue_queue.strategy.api import ResumePrompt as IssueQueueResume
-from vibesys.prompts import CORE_PROTOCOL_DIR, ResumePrompt
+from vibesys.orchestration.evolve.search.api import JudgePrompt as EvolveJudgePrompt
+from vibesys.orchestration.evolve.search.api import evolve
+from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import (
     ArtifactRef,
     EvidenceId,
@@ -41,10 +31,12 @@ from vs_core.api import (
     HostId,
     ObservationStatus,
     RequestId,
+    ResumeFacts,
     RevisionId,
     RevisionRef,
     RunId,
     Scope,
+    Until,
 )
 from vs_evaluation.api import (
     ContentDigest,
@@ -60,6 +52,7 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, RunFacts
 from vs_runtime.api.core import ExecutionContext, RenderArtifactsOwner
 from vs_runtime.api.testing import FakeEvidenceLedger
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -89,6 +82,9 @@ class _Request:
 
     def __init__(self, context: BaseModel) -> None:
         self.context = context
+        # A search's prompt context names its template; core's exchanges name theirs by kind.
+        dumped = context.model_dump()
+        self.template = f"{dumped.get('template', dumped.get('kind'))}.j2"
 
 
 def _record(
@@ -124,8 +120,8 @@ def _record(
     return ref, evidence
 
 
-# The reply types of both strategies whose prompts cite evidence; their schema names differ.
-_REPLIES = {**evolve_replies(), **issue_queue_replies(issue_queue_config())}
+# The reply types of the strategies whose prompts cite evidence; their schema names differ.
+_REPLIES = dict(evolve.reply_schemas)
 
 
 def _render(
@@ -149,7 +145,10 @@ def _render(
         _REPLIES,
     )
     fence = ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1), now_at=1.0, payload_digest="d"
+        fence=HostFence(host_id=HostId(root="host"), epoch=1),
+        now_at=1.0,
+        payload_digest="d",
+        until=Until(at=100.0),
     )
     outcome = asyncio.run(owner.execute(cast("OperationRequest", _Request(context)), fence))
     assert outcome["status"] == "succeeded", outcome
@@ -159,34 +158,10 @@ def _render(
 
 def _cases() -> dict[str, Callable[..., str]]:
     def core(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
-        context = ResumePrompt(
-            role="implementer", retained_revision=REVISION, timed_out=False, cited_evidence=(ref,)
+        context = ResumeFacts(
+            agent="implementer", retained=REVISION, timed_out=False, evidence=(ref,)
         )
         return _render(root, (CORE_PROTOCOL_DIR,), context, (ref, evidence))
-
-    def queue_resume(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
-        context = IssueQueueResume(
-            role="implementer", retained_revision=REVISION, timed_out=False, cited_evidence=(ref,)
-        )
-        return _render(
-            root,
-            (Path(issue_queue_prompts.__file__).parent, CORE_PROTOCOL_DIR),
-            context,
-            (ref, evidence),
-        )
-
-    def queue_review(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
-        issue = IssueDetail(
-            id=1, type="feature", status="open", title="t", attempts=0, description="d"
-        )
-        context = ReviewPrompt(issue=issue, summary="s", cited_evidence=(ref,))
-        return _render(
-            root,
-            (Path(issue_queue_prompts.__file__).parent, CORE_PROTOCOL_DIR),
-            context,
-            (ref, evidence),
-            _RUN,
-        )
 
     def evolve_judge(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
         context = EvolveJudgePrompt(candidate=REVISION, cited_evidence=(ref,))
@@ -199,16 +174,16 @@ def _cases() -> dict[str, Callable[..., str]]:
         )
 
     return {
-        "single/multi/dynamic/evolve resume": core,
-        "issue_queue resume": queue_resume,
-        "issue_queue review": queue_review,
+        "single/multi/dynamic/evolve/issue_queue resume": core,
         "evolve judge": evolve_judge,
     }
 
 
 @pytest.mark.parametrize("name", sorted(_cases()))
 @settings(
-    max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=15),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(
     value=st.floats(0.1, 1e6, allow_nan=False).map(lambda x: round(x, 1)),
@@ -227,7 +202,7 @@ def test_a_prompt_citing_trusted_evidence_states_value_unit_direction_and_verdic
     assert ("PASS" if passed else "FAIL") in text
 
 
-@settings(max_examples=30, deadline=None)
+@settings(max_examples=examples(pr=10, nightly=30), deadline=None)
 @given(
     value=st.floats(0.1, 1e6, allow_nan=False).map(lambda x: round(x, 1)),
     unit=st.sampled_from(["calls/s", "tokens/s", "ms"]),

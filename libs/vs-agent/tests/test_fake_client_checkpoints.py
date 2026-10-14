@@ -6,10 +6,12 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import BaseModel
 
 from vs_agent.api import (
     AgentCapabilities,
     AgentExecutionPolicy,
+    AgentOutputSchemaError,
     AgentSessionKey,
     AgentSessionSpec,
     AgentSessionState,
@@ -157,3 +159,31 @@ def test_changed_spec_replaces_durable_fake_conversation(
     assert changed.provider_session_id != first.provider_session_id
     assert peer.provider_session_id != first.provider_session_id
     assert peer.provider_session_id != changed.provider_session_id
+
+
+class _Reply(BaseModel):
+    value: int
+
+
+def test_a_rejected_reply_still_leaves_the_conversation_for_a_restarted_host(
+    tmp_path: Path,
+) -> None:
+    """The provider hands out the conversation id with the turn, accepted or not."""
+    store = _checkpoint_store(tmp_path)
+    capabilities = AgentCapabilities(session_reuse=True, provider_session_resume=True)
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="fake",
+        workspace=tmp_path,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    key = AgentSessionKey.for_member("implementer", "held")
+    first = FakeAgentClient(capabilities=capabilities, session_store=store)
+    first.set_response("implementer", {"value": "not a number"})
+    turn = AgentTurnRequest(message="submit", output_schema=_Reply)
+
+    with pytest.raises(AgentOutputSchemaError):
+        first.run(session_spec=spec, turn=turn, session_key=key)
+
+    restarted = FakeAgentClient(capabilities=capabilities, session_store=store)
+    assert restarted.provider_session_id(key) == first.provider_session_id(key) is not None

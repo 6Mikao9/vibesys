@@ -1,18 +1,19 @@
-"""Assemble the dynamic core policy from a run's resolved resources.
+"""Assemble the dynamic search as a core run from a run's resolved resources.
 
-The pure policy lives in `orchestration/dynamic/core_policy`. This module does the
-effects it cannot: store the evaluation recipe, read the evaluation identity,
-bind the strategy's operation roles to the runtime's production owners and read
-a run's committed record.
+The search itself is `orchestration/dynamic/search`: one flow, its roles and its pure helpers.
+This module does the effects the search cannot: store the evaluation recipe, read the evaluation
+identity, resolve the task's terms from the input bundle and the plan, bind the search's
+operations to the runtime's production owners and read a run's committed record.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from vibesys.candidates.api import Gates, Measuring, limits_for, run_deadline_at, terms_of
 from vibesys.core_wiring import (
+    EvaluationInputs,
     ResolvedRun,
     agent_evaluation_policy,
     domain_prompt_sections,
@@ -21,21 +22,19 @@ from vibesys.core_wiring import (
     require_candidate_sandboxes,
 )
 from vibesys.dynamic_roles import CORE_ROLES
+from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.dynamic.core_policy.api import (
-    PolicyInputs,
-    RunBounds,
-    build_core_policy,
-    project_strategy_state,
+    project_run_snapshot,
     prompts,
+    requirements_for,
     run_prompt_variables,
 )
-from vibesys.orchestration.dynamic.models import DynamicOptions
-from vibesys.orchestration.dynamic.strategy.api import (
+from vibesys.orchestration.dynamic.launch import DynamicLaunch
+from vibesys.orchestration.dynamic.search.api import (
     OPERATIONS,
-    STATE_SCHEMA,
-    DynamicStrategyState,
-    dynamic_operation_registry,
-    measurement_recipe,
+    RunSnapshot,
+    budget,
+    dynamic,
 )
 from vibesys.plugin_registration import (
     IterationSupport,
@@ -43,6 +42,9 @@ from vibesys.plugin_registration import (
     RuntimeRecordProjector,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
+from vibesys.run.contracts import IterationTree, PluginProjection
+from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, RevisionRef
+from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import (
     CoreOperation,
     CorePlan,
@@ -60,41 +62,32 @@ from vs_runtime.api.core import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vibesys.orchestration.dynamic.core_policy.api import DynamicCorePolicy
+    from vs_core.api import TaskTerms
     from vs_runtime.api import CoreRunContext
 
-_PLUGIN_ID = STATE_SCHEMA.name.removesuffix(".strategy-state")
-
-
-def resolve_core_policy(
-    options: DynamicOptions, bounds: RunBounds, run: ResolvedRun
-) -> DynamicCorePolicy:
-    """The core policy of one run: stores the evaluation recipe, then builds the pure policy."""
-    evaluation = evaluation_inputs(run)
-    return build_core_policy(
-        options,
-        bounds,
-        PolicyInputs(
-            objective=run.facts.objective,
-            baseline_commit=run.baseline_commit,
-            **asdict(evaluation),
-        ),
-    )
+_PLUGIN_ID = dynamic.name
 
 
 def dynamic_operation_catalog(ports: OperationPorts) -> OperationCatalog:
-    """The operations the dynamic strategy requires, each owned by the production owner of its role."""
+    """The operations the dynamic search requires, each owned by the production owner of its role."""
     return operation_catalog(OPERATIONS, ports)
 
 
-def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
-    """Read a dynamic run's strategy state from its committed runtime record."""
+def dynamic_projector() -> RuntimeRecordProjector[FlowState]:
+    """Read a dynamic run's published record from its committed runtime record."""
+
+    def project(state: FlowState, revision: int) -> PluginProjection:
+        record = FlowDriver.published(state, RunSnapshot)
+        if record is None:
+            return PluginProjection(payload={}, iterations=IterationTree.from_nodes(()), rounds=())
+        return project_run_snapshot(record, experiment_revision=revision)
+
     return RuntimeRecordProjector(
         plugin_id=_PLUGIN_ID,
-        state_type=DynamicStrategyState,
-        record_type=RuntimeRecord[DynamicStrategyState],
-        operations=dynamic_operation_registry(),
-        project=lambda state, revision: project_strategy_state(state, experiment_revision=revision),
+        state_type=FlowState,
+        record_type=RuntimeRecord[FlowState],
+        operations=OPERATIONS.registry(),
+        project=project,
     )
 
 
@@ -102,58 +95,103 @@ def dynamic_projector() -> RuntimeRecordProjector[DynamicStrategyState]:
 RETENTION_LABEL = "verified"
 
 
+def _task_terms(
+    evaluation: EvaluationInputs, context: CoreRunContext, launch: DynamicLaunch
+) -> TaskTerms:
+    """What the task fixes: resolved from the evaluation plan, the metric space and the domain."""
+    return terms_of(
+        evaluation.recipe,
+        Gates(accuracy=evaluation.accuracy_configured, benchmark=evaluation.benchmark_configured),
+        launch.metric_space,
+        Measuring(
+            stage_seconds={
+                "accuracy": evaluation.accuracy_seconds,
+                "benchmark": evaluation.benchmark_seconds,
+                "profile": evaluation.profile_seconds,
+            },
+            queue_allowance=float(context.queue_allowance_seconds),
+            benchmark_needs_accuracy=evaluation.benchmark_needs_accuracy,
+            profile_fields=(
+                tuple(item.value for item in evaluation.profile_fields)
+                if evaluation.profile_measurement
+                else ()
+            ),
+        ),
+    )
+
+
 def _core_plan(context: CoreRunContext) -> CorePlan:
-    """The plan of one run: the policy resolved from what the host opened for it."""
+    """The plan of one run: the search, its config and the task resolved from what the host opened."""
     require_candidate_sandboxes(context.environment, loop="dynamic")
-    options = DynamicOptions.model_validate(context.options)
+    launch = DynamicLaunch.model_validate(context.options)
     commit = context.baseline.git_commit
     if commit is None:
         message = "the dynamic core policy needs a Git baseline revision"
         raise ValueError(message)
-    bounds = RunBounds(
-        queue_allowance_seconds=context.queue_allowance_seconds,
-        observe_interval_seconds=context.observe_interval_seconds,
-        observe_backoff_cap_seconds=context.observe_backoff_cap_seconds,
-        max_run_seconds=context.max_run_seconds,
-    )
-    policy = resolve_core_policy(
-        options,
-        bounds,
+    evaluation = evaluation_inputs(
         ResolvedRun(
             facts=context.facts,
             evaluation_plan=context.evaluation_plan,
             environment=context.environment,
             baseline_commit=commit,
             artifacts=context.artifacts,
-        ),
+        )
     )
+    terms = _task_terms(evaluation, context, launch)
+    facts = CoreRunFacts(
+        objective=context.facts.objective,
+        baseline=RevisionRef.of_git_commit(commit),
+        evaluator_digest=evaluation.evaluator_digest,
+        workload_digest=evaluation.workload_digest,
+        environment_digest=evaluation.environment_digest,
+        task=terms,
+    )
+    # The operator chooses how wide and how long to search; whether to profile follows the
+    # evaluation plan (a profile command and a chosen profiler), which only the host knows.
+    if evaluation.profile_capture_withheld:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="dynamic_profiling_unsupported",
+                stage="run_environment_validation",
+                message=(
+                    "profiling is on (a profile command and a profiler are chosen) but the "
+                    f"{context.environment.env_kind!r} run environment offers no profile capture; "
+                    "choose a profiler of 'none' or a run environment that can capture a profile"
+                ),
+            )
+        )
+    config = launch.search_config(profiling=evaluation.profile_measurement)
+    models = {dynamic.ids.role_id(role.name).root: role.name for role in dynamic.roles}
+    chosen = {models[role]: model for role, model in context.role_models.items() if role in models}
     return CorePlan(
-        strategy=policy.strategy,
-        reply_schemas=policy.reply_schemas,
-        facts=policy.facts,
-        limits=policy.limits,
-        deadline_seconds=policy.deadline_at,
+        search=dynamic.with_models(chosen),
+        config=config,
+        facts=facts,
+        limits=limits_for(budget(config), context),
+        deadline_seconds=run_deadline_at(context.max_run_seconds),
         prompt_variables=run_prompt_variables(
-            objective=policy.facts.objective,
+            objective=facts.objective,
             environment_notes=context.facts.environment_notes,
             agent_evaluation=True,
             domain_sections=domain_prompt_sections(
-                context.facts, modality=options.modality, interface=options.interface
+                context.facts, modality=launch.modality, interface=launch.interface
             ),
         ),
-        requirements=policy.requirements,
-        agent_evaluation=_agent_evaluation(policy),
-        profile_capture_withheld=policy.profile_capture_withheld,
+        requirements=requirements_for(terms),
+        agent_evaluation=_agent_evaluation(facts),
     )
 
 
-def _agent_evaluation(policy: DynamicCorePolicy) -> AgentEvaluationPolicy:
+def _agent_evaluation(facts: CoreRunFacts) -> AgentEvaluationPolicy:
     """The plan an implementer or judge measures with: the run's configured gates, once each."""
-    config = policy.strategy.config
+    terms = facts.task
+    if terms is None:
+        message = "the dynamic run's facts carry no task terms"
+        raise ValueError(message)
     return agent_evaluation_policy(
-        measurement_recipe(config, policy.facts),
-        accuracy=config.accuracy_configured,
-        benchmark=config.benchmark_configured,
+        MeasurementRecipe.of(facts),
+        accuracy="accuracy" in terms.measured,
+        benchmark="benchmark" in terms.measured,
     )
 
 
@@ -175,9 +213,9 @@ def _project_max_rounds(options: BaseModel) -> int:
     """The operator's ``--max-rounds``, which ``run_started`` reports as ``max_rounds``.
 
     The search schedules ``max_rounds * max_in_flight`` workstreams; that product is the
-    search's own limit (``hypothesis_config``), not the number the operator asked for.
+    search's own limit (``start_budget``), not the number the operator asked for.
     """
-    return DynamicOptions.model_validate(options).max_rounds
+    return DynamicLaunch.model_validate(options).max_rounds
 
 
 def dynamic_core_registration() -> OrchestrationRegistration:
@@ -185,7 +223,7 @@ def dynamic_core_registration() -> OrchestrationRegistration:
     plugin = OrchestrationPlugin(
         id=_PLUGIN_ID,
         agents=CORE_ROLES,
-        options=DynamicOptions,
+        options=DynamicLaunch,
         core=dynamic_core_policy(),
     )
     return OrchestrationRegistration(

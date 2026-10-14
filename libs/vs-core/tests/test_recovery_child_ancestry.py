@@ -1,14 +1,15 @@
 """Descendant ancestry and cleanup guards through the public kernel step."""
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
-from .test_intent_recovery import (
+from .test_request_recovery import (
     observed,
-    pending_intent,
+    pending_record,
     recovering_state,
     reload,
     with_sibling_history,
@@ -17,7 +18,7 @@ from .test_intent_recovery import (
 
 @given(st.text(alphabet="abc123", min_size=1, max_size=20))
 def test_recovery_rejects_a_resource_discovering_itself(identity: str) -> None:
-    original = pending_intent()
+    original = pending_record()
     resource = core.ResourceId(root=identity)
     original = original.model_copy(
         update={"observation": observed(original, resource_id=resource, children=(resource,))}
@@ -31,7 +32,7 @@ def test_recovery_rejects_a_resource_discovering_itself(identity: str) -> None:
 
 @given(st.integers(min_value=2, max_value=8))
 def test_recovery_rejects_discovery_of_a_transitive_ancestor(depth: int) -> None:
-    original = pending_intent()
+    original = pending_record()
     resources = tuple(core.ResourceId(root=f"resource-{index}") for index in range(depth))
     original = original.model_copy(
         update={
@@ -49,7 +50,7 @@ def test_recovery_rejects_discovery_of_a_transitive_ancestor(depth: int) -> None
     )
     state = recovering_state(original)
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": children})}
+        update={"records": state.records.model_copy(update={"children": children})}
     )
     before = state.model_dump_json()
     with pytest.raises(core.ContractError, match="cyclic child ownership ancestry"):
@@ -59,8 +60,8 @@ def test_recovery_rejects_discovery_of_a_transitive_ancestor(depth: int) -> None
 
 @given(st.integers(min_value=1, max_value=10))
 def test_recovery_rejects_shared_child_discovery_in_another_scope(generation: int) -> None:
-    original = pending_intent(identity="original")
-    foreign = pending_intent(identity="foreign")
+    original = pending_record(identity="original")
+    foreign = pending_record(identity="foreign")
     foreign = foreign.model_copy(
         update={
             "request": foreign.request.model_copy(
@@ -79,7 +80,7 @@ def test_recovery_rejects_shared_child_discovery_in_another_scope(generation: in
     )
     state = recovering_state(original, foreign)
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": (child,)})}
+        update={"records": state.records.model_copy(update={"children": (child,)})}
     )
     before = state.model_dump_json()
     with pytest.raises(core.ContractError, match="conflicting child ownership scope"):
@@ -89,7 +90,7 @@ def test_recovery_rejects_shared_child_discovery_in_another_scope(generation: in
 
 @given(st.integers(min_value=1, max_value=5))
 def test_prepared_source_with_descendants_cannot_be_safe_to_dispatch(count: int) -> None:
-    original = pending_intent(phase=core.IntentPhase.PREPARED)
+    original = pending_record(phase=core.RequestPhase.PREPARED)
     children = tuple(
         core.ChildLease(
             resource_id=core.ResourceId(root=f"child-{index}"),
@@ -100,14 +101,14 @@ def test_prepared_source_with_descendants_cannot_be_safe_to_dispatch(count: int)
     )
     state = recovering_state(original)
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": children})}
+        update={"records": state.records.model_copy(update={"children": children})}
     )
     event = core.RecoveryStarted(epoch=1, now_at=11.0)
     result = core.step(reload(state), event)
-    assert result.state.intents.children == children
-    assert result.state.intents.intents[0] == original
-    assert result.state.intents.recovery.phase == core.RecoveryPhase.RECOVERING
-    assert result.state.intents.recovery.checks[0].resolution == "pending"
+    assert result.state.records.children == children
+    assert result.state.records.records[0] == original
+    assert result.state.records.recovery.phase == core.RecoveryPhase.RECOVERING
+    assert result.state.records.recovery.checks[0].resolution == "pending"
     assert len(result.requests) == count + 1
     assert all(isinstance(request, core.InspectRequest) for request in result.requests)
     assert {
@@ -120,12 +121,13 @@ def test_prepared_source_with_descendants_cannot_be_safe_to_dispatch(count: int)
     }
     replay = core.step(reload(result.state), event)
     assert replay.requests == ()
-    assert replay.state.intents == result.state.intents
+    assert replay.state.records == result.state.records
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(st.lists(st.integers(min_value=100, max_value=200), min_size=1, max_size=10))
 def test_reattached_parent_deadlines_cancel_only_unreleased_descendants(times: list[int]) -> None:
-    original = pending_intent()
+    original = pending_record()
     parent = core.ResourceId(root="parent-resource")
     resource = core.ResourceId(root="child-resource")
     original = original.model_copy(
@@ -148,7 +150,7 @@ def test_reattached_parent_deadlines_cancel_only_unreleased_descendants(times: l
         phase=core.SessionPhase.IDLE,
         accepted=True,
         resource_id=parent,
-        pending_intents=(original.request_id,),
+        pending_records=(original.request_id,),
     )
     child = core.ChildLease(
         resource_id=resource,
@@ -178,7 +180,7 @@ def test_reattached_parent_deadlines_cancel_only_unreleased_descendants(times: l
     state = state.model_copy(
         update={
             "sessions": core.SessionsState(sessions=(session,)),
-            "intents": state.intents.model_copy(update={"children": (child,)}),
+            "records": state.records.model_copy(update={"children": (child,)}),
         }
     )
     emitted = set()
@@ -187,10 +189,10 @@ def test_reattached_parent_deadlines_cancel_only_unreleased_descendants(times: l
         result = core.step(reload(state), event)
         assert result == core.step(state, event)
         assert result.state.sessions == state.sessions
-        assert result.state.intents.children == (child,)
-        assert result.state.intents.recovery == state.intents.recovery
+        assert result.state.records.children == (child,)
+        assert result.state.records.recovery == state.records.recovery
         for request in result.requests:
-            assert isinstance(request, core.BlockIntent | core.CancelOwnedResource)
+            assert isinstance(request, core.BlockRequest | core.CancelOwnedResource)
             if isinstance(request, core.CancelOwnedResource):
                 assert request.resource_id == resource
             assert request.request_id not in emitted
@@ -201,7 +203,7 @@ def test_reattached_parent_deadlines_cancel_only_unreleased_descendants(times: l
 
 @given(st.text(alphabet="abc123", min_size=1, max_size=20))
 def test_unrelated_invocation_does_not_prove_a_session_lease(identity: str) -> None:
-    original = pending_intent(identity=identity)
+    original = pending_record(identity=identity)
     original = original.model_copy(
         update={
             "observation": observed(
@@ -215,7 +217,7 @@ def test_unrelated_invocation_does_not_prove_a_session_lease(identity: str) -> N
     )
     state = with_sibling_history(recovering_state(original), (2, 1))
     result = core.step(reload(state), core.RecoveryStarted(epoch=1, now_at=11.0))
-    assert result.state.intents.recovery.checks[0].resolution == "pending"
+    assert result.state.records.recovery.checks[0].resolution == "pending"
     assert len(result.requests) == 1
     assert isinstance(result.requests[0], core.InspectRequest)
     assert result.state.sessions == state.sessions
@@ -224,15 +226,14 @@ def test_unrelated_invocation_does_not_prove_a_session_lease(identity: str) -> N
 
 @given(pending=st.booleans())
 def test_workspace_reattachment_requires_the_owners_pending_request(*, pending: bool) -> None:
-    original = pending_intent()
+    original = pending_record()
     state = with_sibling_history(recovering_state(original), (2, 1))
     owner = state.attempts.attempts[0]
-    owner = owner.model_copy(update={"pending_intents": (original.request_id,) if pending else ()})
+    owner = owner.model_copy(update={"pending_records": (original.request_id,) if pending else ()})
     request = core.EnsureWorkspace(
         request_id=original.request_id,
         scope=core.Scope(owner=owner.attempt_id, generation=owner.generation),
         admission_id=owner.admission_id,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
         plan=owner.workspace,
     )
@@ -252,16 +253,16 @@ def test_workspace_reattachment_requires_the_owners_pending_request(*, pending: 
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(
-                update={"intents": (original, pending_intent(identity="anchor"))}
+            "records": state.records.model_copy(
+                update={"records": (original, pending_record(identity="anchor"))}
             ),
         }
     )
     result = core.step(reload(state), core.RecoveryStarted(epoch=1, now_at=11.0))
-    assert result.state.intents.recovery.checks[0].resolution == (
+    assert result.state.records.recovery.checks[0].resolution == (
         "reattached" if pending else "pending"
     )
     assert len(result.requests) == (1 if pending else 2)
     assert result.state.attempts == state.attempts
     assert result.state.sessions == state.sessions
-    assert result.state.intents.intents[0] == original
+    assert result.state.records.records[0] == original

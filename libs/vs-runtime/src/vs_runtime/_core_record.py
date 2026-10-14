@@ -15,6 +15,7 @@ from pydantic import (
 
 from vs_core.api import (
     ContractError,
+    Decision,
     OperationRegistry,
     RetainedCandidate,
     RunEnvelope,
@@ -56,6 +57,8 @@ class RuntimeRecord[S: StrategyState](BaseModel):
     pending_inputs holds executor owner events committed in the same write as
     their observation. Each leaves this tuple in the commit that applies it, so
     a crash between the observation and its owner events loses none of them.
+    pending_decisions and wakes persist what the search asked for, in the commit that
+    handled the event that made it ask, so a crash loses neither.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -65,6 +68,10 @@ class RuntimeRecord[S: StrategyState](BaseModel):
     delivery_cursor: int = Field(ge=0)
     next_publication_sequence: int = Field(ge=1)
     pending_inputs: tuple[OwnerEvent, ...]
+    pending_decisions: tuple[Decision, ...] = ()
+    """Decisions the search made that core could not take yet (recovery was not ready)."""
+    wakes: tuple[float, ...] = ()
+    """Run-clock times the search asked to be woken at, earliest first, until they are reached."""
 
     @model_validator(mode="after")
     def publication_order(self) -> RuntimeRecord[S]:
@@ -104,6 +111,8 @@ class RuntimeRecord[S: StrategyState](BaseModel):
             delivery_cursor=0,
             next_publication_sequence=1,
             pending_inputs=(),
+            pending_decisions=(),
+            wakes=(),
         )
 
     @classmethod

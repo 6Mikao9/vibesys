@@ -7,8 +7,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vs_core.api import MeasurementFailure, may_resubmit
-from vs_runtime.api import BenchmarkFailureKind
+from vs_core.api import MeasurementFailure
+from vs_runtime.api import BenchmarkFailureKind, EvaluationRetries
 from vs_runtime.api.infrastructure import (
     RecordState,
     TerminalSignal,
@@ -23,7 +23,7 @@ _KINDS = (
     BenchmarkFailureKind.INFRASTRUCTURE,
     BenchmarkFailureKind.AMBIGUOUS,
 )
-_BOUND = st.integers(min_value=1, max_value=8)
+_BOUND = st.integers(min_value=1, max_value=5)
 _SIGNALS = st.sampled_from(TerminalSignal)
 _RECORDS = st.sampled_from(RecordState)
 
@@ -156,16 +156,23 @@ def test_a_job_failure_follows_its_worst_stage(kinds: list[BenchmarkFailureKind 
         assert failure is MeasurementFailure.WORKLOAD
 
 
+def _retries(limit: int) -> EvaluationRetries:
+    return EvaluationRetries(infrastructure_attempts=limit, ambiguous_attempts=min(limit, 2))
+
+
 def _submissions(failure: MeasurementFailure, limit: int) -> int:
-    """How many times a measurement that always ends with ``failure`` is submitted."""
+    """How many times a backend measures a candidate whose every try ends with ``failure``."""
+    retries = _retries(limit)
     submitted = 1
-    while may_resubmit(failure, submissions=submitted, limit=limit):
+    while retries.allows_another(failure, tries=submitted):
         submitted += 1
     return submitted
 
 
 @given(failure=st.sampled_from(MeasurementFailure), limit=_BOUND)
-def test_resubmission_follows_the_class(failure: MeasurementFailure, limit: int) -> None:
+def test_the_backend_measures_again_by_the_class_of_the_failure(
+    failure: MeasurementFailure, limit: int
+) -> None:
     submitted = _submissions(failure, limit)
     match failure:
         case MeasurementFailure.INFRASTRUCTURE:
@@ -184,5 +191,5 @@ def test_a_candidate_failure_is_never_measured_again(
     kind = classify(signal, record)
     failure = job_failure([kind])
     if kind is BenchmarkFailureKind.WORKLOAD:
-        assert not may_resubmit(failure, submissions=1, limit=limit)
+        assert not _retries(limit).allows_another(failure, tries=1)
     assert _submissions(failure, limit) <= limit

@@ -143,9 +143,9 @@ from vs_runtime._operation_catalog import (
     RefusalReason,
 )
 from vs_runtime._operation_receipts import (
-    IntentReceipt,
     NamespaceOperationReceipts,
     OperationReceipts,
+    RecordReceipt,
     ResultReceipt,
 )
 from vs_runtime._operation_requests import RegisteredOperationRequests
@@ -157,7 +157,7 @@ from vs_runtime._operation_wiring import (
     operation_roles,
     production_owners,
 )
-from vs_runtime._owed_submissions import OwedSubmissions
+from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._receipt_store import (
     BegunUnsealed,
     Conflict,
@@ -286,7 +286,6 @@ __all__ = [
     "Indeterminate",
     "Inspected",
     "Inspection",
-    "IntentReceipt",
     "InterpretEvidenceOwner",
     "IssueBoardOwner",
     "JobRecord",
@@ -315,6 +314,8 @@ __all__ = [
     "OperationReceipts",
     "OperationRole",
     "OrphanWaitError",
+    "OwedKey",
+    "OwedSubmission",
     "OwedSubmissions",
     "OwnerEvent",
     "OwnerEventRejectedError",
@@ -330,6 +331,7 @@ __all__ = [
     "ReceiptCorruptError",
     "ReceiptEvidenceLedger",
     "ReceiptStore",
+    "RecordReceipt",
     "RecordedRequestInspector",
     "RefusalReason",
     "RefusingRequestExecution",

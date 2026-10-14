@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.core_plugins import capability_plugin, failing_plugin
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.skeleton_strategy import SkeletonState, SkeletonStrategy
+from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 
 from entrypoints.run import supervise
@@ -32,6 +32,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -114,7 +115,10 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     assert await handle.result() == result
 
 
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@settings(
+    max_examples=examples(pr=8, nightly=100),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
 @given(identity=st.text())
 def test_preallocated_identity_uses_project_validation(
     request_template: RunRequest, identity: str
@@ -155,12 +159,9 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     request_template: RunRequest,
 ) -> None:
     registry = OrchestrationRegistry()
-    # A strategy that never proposes anything: only the operator's stop can end this run.
+    # A search that proposes nothing: only the operator's stop can end this run.
     registry.register_plugin(
-        capability_plugin(
-            "identity-test",
-            strategy=SkeletonStrategy(state=SkeletonState(schema_version=1, phase="done")),
-        )
+        capability_plugin("identity-test", strategy=SkeletonStrategy.cancelled())
     )
     runs = default_runs(
         LaunchSettings(

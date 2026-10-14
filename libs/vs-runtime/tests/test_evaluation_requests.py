@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import os
 import shlex
 import tempfile
 from contextlib import asynccontextmanager
@@ -36,6 +35,7 @@ from vs_core.api import (
     RevisionRef,
     SubmitMeasurement,
     TargetObservation,
+    Until,
 )
 from vs_core.api.proofs import Proven, fresh_observation
 from vs_evaluation.api import ExecutorPoll, PollPhase
@@ -65,7 +65,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
-from vs_sim.api.testing import swept
+from vs_sim.api.testing import examples, swept
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -81,9 +81,8 @@ if TYPE_CHECKING:
     )
     from vs_project.api import StateNamespace
 
-# Each example builds real workspaces. A pull request draws a sample; the nightly workflow
-# sets ``VIBESYS_FULL_PROPERTIES=1`` and searches deeper.
-_FULL = os.environ.get("VIBESYS_FULL_PROPERTIES") == "1"
+# Each example builds real workspaces. A pull request draws a sample; the nightly depth
+# (`--depth=nightly`) searches deeper.
 
 pytestmark = pytest.mark.asyncio
 
@@ -122,6 +121,7 @@ def context_for(
         now_at=now_at,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
         lease=lease or FakeLease(),
+        until=Until(at=100.0),
     )
 
 
@@ -180,7 +180,6 @@ def query[RequestT: ObserveOwnedJob | InspectOwnedJob | CollectEvidence | Cancel
         request_id=RequestId(root=name),
         scope=SCOPE,
         admission_id=ADMISSION,
-        deadline_at=100.0,
         resource_id=resource,
     )
 
@@ -190,7 +189,6 @@ def close_request(name: str = "close", admission: DecisionId = ADMISSION) -> Clo
         request_id=RequestId(root=name),
         scope=SCOPE,
         admission_id=admission,
-        deadline_at=100.0,
         attempt=AttemptRef(attempt_id=AttemptId(root="attempt"), generation=0),
     )
 
@@ -471,7 +469,6 @@ async def test_job_of_another_scope_is_not_owned() -> None:
             request_id=RequestId(root="other-scope"),
             scope=SCOPE.model_copy(update={"generation": SCOPE.generation + 1}),
             admission_id=ADMISSION,
-            deadline_at=100.0,
             resource_id=resource,
         )
         got = await run(w, other)
@@ -555,7 +552,7 @@ async def test_a_revision_the_workspace_named_is_measurable() -> None:
 
 
 @settings(
-    max_examples=25 if _FULL else 5,
+    max_examples=examples(pr=5, nightly=25),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -932,7 +929,7 @@ async def _failed_target(
 
 
 @settings(
-    max_examples=12 if _FULL else 2,
+    max_examples=examples(pr=2, nightly=12),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -952,7 +949,7 @@ async def test_a_benchmark_without_a_result_record_is_ambiguous_and_keeps_its_ev
 
 
 @settings(
-    max_examples=6 if _FULL else 2,
+    max_examples=examples(pr=2, nightly=6),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -996,7 +993,7 @@ async def test_a_server_that_never_became_ready_is_classified_from_its_log(
 
 
 @settings(
-    max_examples=6 if _FULL else 2,
+    max_examples=examples(pr=2, nightly=6),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -1078,3 +1075,65 @@ async def test_a_required_output_the_executor_cannot_supply_is_rejected_naming_t
         assert result.observation.observation.resource_id is None
         assert "stages.profile.required_outputs" in repr(result.observation)
         assert w.cluster.batches == []
+
+
+_AFTER_CANCEL = (
+    "unsubmitted",
+    "unknown",
+    "unreachable",
+    "queued",
+    "running",
+)
+
+
+def _poll_after_cancel(kind: str) -> ExecutorPoll:
+    match kind:
+        case "unsubmitted":
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        case "unknown":
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail="cannot tell")
+        case "unreachable":
+            raise ConnectionError(EXECUTOR_DOWN)
+        case "queued":
+            return ExecutorPoll(phase=PollPhase.QUEUED)
+        case _:
+            return ExecutorPoll(phase=PollPhase.RUNNING)
+
+
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(phases=st.lists(st.sampled_from(_AFTER_CANCEL), min_size=1, max_size=4))
+async def test_an_accepted_cancel_ends_a_job_the_executor_holds_no_record_of_and_only_that(
+    phases: list[str],
+) -> None:
+    """After the executor accepts a cancel, a poll that says UNSUBMITTED (no record) reports
+    the job cancelled and ended, because a submission is answered only once it is made. One
+    that says UNKNOWN, or cannot be made, or finds the job alive, reports no end: the job
+    may still be running, and calling it ended would release what is not.
+    """
+    cluster = ScenarioCluster()
+    cluster.states = (SlurmJobStatus.PENDING,)
+    async with world(cluster) as w:
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        for index, kind in enumerate(phases):
+            polls = _ScriptedPolls(
+                w.stack.executor, lambda _n, _polled, kind=kind: _poll_after_cancel(kind)
+            )
+            requests = _requests_over(w, polls)
+            cancel = query(CancelOwnedJob, f"cancel-{index}", resource)
+            got = await requests.execute(cancel, context_for(cancel))
+            seen = next(
+                event.observation for event in got.owner_events if isinstance(event, JobObserved)
+            )
+            if kind == "unsubmitted":
+                assert seen.status is ObservationStatus.CANCELLED
+                assert seen.terminal
+                assert seen.released
+                assert got.observation.observation.released
+            else:
+                assert not (seen.terminal and seen.released)
+                assert not got.observation.observation.released

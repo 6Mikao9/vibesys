@@ -81,7 +81,6 @@ def resume_state(
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="resume",
     )
     prior_turn = turn.model_copy(
@@ -92,6 +91,7 @@ def resume_state(
         }
     )
     prior = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=before,
         scope=scope,
         turn=prior_turn,
@@ -124,7 +124,6 @@ def resume_state(
                 decision_id=decision_id,
                 scope=scope,
                 request=RegisteredResume(turn=turn),
-                deadline_at=100.0,
             )
         )
         request = core.ExecuteRegisteredOperation(
@@ -132,7 +131,6 @@ def resume_state(
             scope=scope,
             admission_id=admission,
             decision_id=decision_id,
-            deadline_at=100.0,
             operation_id=core.OperationId(root="operation:resume"),
             operation=codec.encode(decision.request),
             retry_limit=0,
@@ -152,7 +150,6 @@ def resume_state(
             scope=scope,
             admission_id=admission,
             decision_id=decision_id,
-            deadline_at=100.0,
             turn=turn,
             continuation_id=continuation_id,
         )
@@ -163,13 +160,13 @@ def resume_state(
         feedback=core.Accepted(decision_id=decision_id, request_ids=(identity,)),
         request_ids=(identity,),
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=identity,
         request=request,
         payload_digest=digest(request),
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.PREPARED,
-        reconcile_deadline_at=100.0,
+        phase=core.RequestPhase.PREPARED,
+        until=core.Until(at=100.0),
     )
     owners = ()
     if attempt_owned:
@@ -206,7 +203,7 @@ def resume_state(
             "attempts": core.AttemptsState(attempts=owners),
             "evaluation": core.EvaluationState(continuations=(continuation,)),
             "sessions": core.SessionsState(invocations=(prior,), run_checkpoints=checkpoints),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     ), identity
 
@@ -243,7 +240,7 @@ def test_exact_resume_proofs_reach_dispatch_without_new_charges(
         state,
         event,
         core.ReducerTrace(
-            frames=(core.TraceFrame(signal=event, change=core.IntentsChange(state=state.intents)),)
+            frames=(core.TraceFrame(signal=event, change=core.RecordsChange(state=state.records)),)
         ),
     )
     assert result.requests == ()
@@ -257,7 +254,7 @@ def test_exact_resume_proofs_reach_dispatch_without_new_charges(
         core.ReducerTrace(
             frames=(
                 core.TraceFrame(
-                    signal=event, change=core.IntentsChange(state=result.state.intents)
+                    signal=event, change=core.RecordsChange(state=result.state.records)
                 ),
             )
         ),

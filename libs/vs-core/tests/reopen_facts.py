@@ -7,7 +7,7 @@ from .proof_digest import value_digest
 
 def released_job(
     owner: core.AttemptView,
-) -> tuple[core.RegisteredOwnedJob, core.Intent]:
+) -> tuple[core.RegisteredOwnedJob, core.RequestRecord]:
     """A continuation job whose release is proved against its source request."""
     assert owner.closure is not None
     attempt = core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation)
@@ -19,7 +19,6 @@ def released_job(
         scope=scope,
         attempt=attempt,
         admission_id=owner.closure.admission_id,
-        deadline_at=100.0,
     )
     proof = core.Observation(
         event_id=core.EventId(root="job-released"),
@@ -46,16 +45,16 @@ def released_job(
         released=True,
         observation=proof,
     )
-    intent = core.Intent(
+    record = core.RequestRecord(
         request_id=source_id,
         request=source,
         payload_digest=value_digest(source),
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=proof,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
-    return job, intent
+    return job, record
 
 
 def with_reopening_continuation(
@@ -94,6 +93,7 @@ def with_reopening_continuation(
         reopen_authority=reopen_authority,
     )
     suspended = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=continuation.invocation,
         scope=scope,
         turn=core.TurnSpec(
@@ -108,15 +108,14 @@ def with_reopening_continuation(
             workspace=scope,
             prompts=(),
             output_schema=core.SchemaRef(name="output", version=1),
-            deadline_at=100.0,
             charge_class="paid",
         ),
         phase=core.SessionPhase.SUSPENDED,
     )
-    job, intent = released_job(owner)
+    job, record = released_job(owner)
     return state.model_copy(
         update={
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
             "sessions": state.sessions.model_copy(update={"invocations": (suspended,)}),
             "evaluation": state.evaluation.model_copy(
                 update={"continuations": (continuation,), "registered_jobs": (job,)}

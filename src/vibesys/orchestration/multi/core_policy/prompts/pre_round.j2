@@ -15,11 +15,11 @@ objective and the candidate source, reading only enough to judge whether measure
 change the first plan.
 {% endif %}
 
-{% if profiler_kind == 'none' %}
+{% if profiler_id == 'none' %}
 Standalone profiling is disabled. Set `{{ reply.need_profile.name }}=false`; record any missing
 visibility as uncertainty for the design call rather than requesting capture.
 {% else %}
-The framework can run `{{ profiler_kind }}` profiling through its
+The framework can run `{{ profiler_id }}` profiling through its
 `{{ profile_execution }}` capture path. Request only evidence
 that path can observe. Do not request a different profiler. If the needed
 discriminator is outside its visibility, skip profiling and record that

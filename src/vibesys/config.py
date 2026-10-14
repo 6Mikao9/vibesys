@@ -22,7 +22,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
 from vs_agent.api import SHIPPED_PROVIDERS, validate_env_names
-from vs_runtime.api import AgentRoleId
+from vs_core.api import MAX_REQUEST_RETRIES, MAX_SUBMISSIONS_PER_MEASUREMENT, RequestRetries
+from vs_runtime.api import AgentRoleId, EvaluationRetries
 from vs_runtime.api.infrastructure import (
     BundledResources,
     FallbackTarget,
@@ -284,12 +285,69 @@ class EvaluationCfg(_Strict):
         ),
     )
 
+    infrastructure_attempts: int = Field(
+        default=3,
+        strict=True,
+        ge=1,
+        le=MAX_SUBMISSIONS_PER_MEASUREMENT,
+        description=(
+            "How many times the backend measures a candidate in all when a try fails for a "
+            "reason in the machinery (a node fault, a lost job). The search sees only the last."
+        ),
+    )
+    ambiguous_attempts: int = Field(
+        default=2,
+        strict=True,
+        ge=1,
+        le=MAX_SUBMISSIONS_PER_MEASUREMENT,
+        description=(
+            "How many times the backend measures a candidate in all when a try fails and the "
+            "evidence cannot say whose fault it is. At most infrastructure_attempts."
+        ),
+    )
+    request_retry_limit: int = Field(
+        default=3,
+        strict=True,
+        ge=0,
+        le=MAX_REQUEST_RETRIES,
+        description="How often a request the executor did not run is sent again.",
+    )
+    request_backoff_seconds: float = Field(
+        default=1.0,
+        gt=0,
+        description="Wait before the first re-send of a request; each further wait doubles.",
+    )
+    request_backoff_cap_seconds: float = Field(
+        default=30.0, gt=0, description="The longest wait between two sends of one request."
+    )
+
     @model_validator(mode="after")
     def _cap_covers_interval(self) -> Self:
         if self.observe_backoff_cap_seconds < self.observe_interval_seconds:
             message = "observe_backoff_cap_seconds must be at least observe_interval_seconds"
             raise ValueError(message)
+        if self.ambiguous_attempts > self.infrastructure_attempts:
+            message = "ambiguous_attempts must be at most infrastructure_attempts"
+            raise ValueError(message)
+        if self.request_backoff_cap_seconds < self.request_backoff_seconds:
+            message = "request_backoff_cap_seconds must be at least request_backoff_seconds"
+            raise ValueError(message)
         return self
+
+    def request_retries(self) -> RequestRetries:
+        """The backend's declaration for core's re-sends of requests the executor did not run."""
+        return RequestRetries(
+            limit=self.request_retry_limit,
+            backoff=self.request_backoff_seconds,
+            backoff_cap=self.request_backoff_cap_seconds,
+        )
+
+    def evaluation_retries(self) -> EvaluationRetries:
+        """The backend's declaration for measuring again after a failure that is not the candidate's."""
+        return EvaluationRetries(
+            infrastructure_attempts=self.infrastructure_attempts,
+            ambiguous_attempts=self.ambiguous_attempts,
+        )
 
 
 class RunCfg(_Strict):
@@ -303,6 +361,27 @@ class RunCfg(_Strict):
             "Optional wall-clock budget for one run, in seconds. When omitted the run is "
             "bounded only by its round budget."
         ),
+    )
+    cancellation_bound_seconds: int = Field(
+        default=60,
+        strict=True,
+        gt=0,
+        description="The longest core waits for a cancelled job to be confirmed gone.",
+    )
+    cleanup_bound_seconds: int = Field(
+        default=60,
+        strict=True,
+        gt=0,
+        description=(
+            "The least time core gives its own cleanup and inspection requests, even once "
+            "the run deadline has passed."
+        ),
+    )
+    reconciliation_bound_seconds: int = Field(
+        default=60,
+        strict=True,
+        gt=0,
+        description="The longest core waits to learn what became of a request it could not read.",
     )
 
 

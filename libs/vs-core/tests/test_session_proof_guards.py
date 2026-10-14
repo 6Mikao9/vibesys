@@ -6,6 +6,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 from .test_session_inputs import occurrence
@@ -19,7 +20,7 @@ from .test_session_turns import (
 )
 
 
-@settings(max_examples=3)
+@settings(max_examples=examples(pr=3, nightly=3))
 @given(sequence=st.integers(min_value=1, max_value=10))
 def test_input_delivery_optional_authority_guard_matrix(sequence: int) -> None:
     spec = turn()
@@ -44,10 +45,10 @@ def test_input_delivery_optional_authority_guard_matrix(sequence: int) -> None:
         record = dispatched.state.sessions.inputs[0].model_copy(
             update={"reserved_to": invocation(spec) if reserved else None}
         )
-        intents = (
+        records = (
             tuple(
                 row.model_copy(update={"payload_digest": row.payload_digest if digest else "wrong"})
-                for row in dispatched.state.intents.intents
+                for row in dispatched.state.records.records
             )
             if source
             else ()
@@ -57,7 +58,7 @@ def test_input_delivery_optional_authority_guard_matrix(sequence: int) -> None:
                 "sessions": dispatched.state.sessions.model_copy(
                     update={"invocations": (inv,), "inputs": (record,)}
                 ),
-                "intents": dispatched.state.intents.model_copy(update={"intents": intents}),
+                "records": dispatched.state.records.model_copy(update={"records": records}),
             }
         )
         result = reload_step(
@@ -77,7 +78,7 @@ def test_input_delivery_optional_authority_guard_matrix(sequence: int) -> None:
         )
 
 
-@settings(max_examples=3)
+@settings(max_examples=examples(pr=3, nightly=3))
 @given(generation=st.integers(min_value=0, max_value=3))
 def test_deferred_suspension_optional_authority_guard_matrix(generation: int) -> None:
     state, event = profiler_yield()
@@ -128,7 +129,7 @@ def test_deferred_suspension_optional_authority_guard_matrix(generation: int) ->
         from_values = state
         inv = from_values.sessions.invocations[0]
         spec = inv.turn.model_copy(update={"workspace": scope_value})
-        source = from_values.intents.intents[0]
+        source = from_values.records.records[0]
         request = source.request.model_copy(update={"scope": scope_value, "turn": spec})
         decision = core.RequestTurn(
             decision_id=from_values.run.receipts[0].decision_id, scope=scope_value, turn=spec
@@ -153,9 +154,9 @@ def test_deferred_suspension_optional_authority_guard_matrix(generation: int) ->
                         ),
                     }
                 ),
-                "intents": from_values.intents.model_copy(
+                "records": from_values.records.model_copy(
                     update={
-                        "intents": (
+                        "records": (
                             source.model_copy(
                                 update={
                                     "request": request,
@@ -188,7 +189,7 @@ def test_deferred_suspension_optional_authority_guard_matrix(generation: int) ->
     for retained, source, observation, session, resource in product([False, True], repeat=5):
         rows = tuple(
             row
-            for row in yielded.state.intents.intents
+            for row in yielded.state.records.records
             if source or row.request_id == request.request_id
         )
         inv = yielded.state.sessions.invocations[0].model_copy(
@@ -208,7 +209,7 @@ def test_deferred_suspension_optional_authority_guard_matrix(generation: int) ->
                         "sessions": (lease,) if session else (),
                     }
                 ),
-                "intents": yielded.state.intents.model_copy(update={"intents": rows}),
+                "records": yielded.state.records.model_copy(update={"records": rows}),
             }
         )
         result = reload_step(candidate, available)

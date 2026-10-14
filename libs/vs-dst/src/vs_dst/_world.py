@@ -10,18 +10,19 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import CoreState, Request, SchemaRef, Strategy
+    from vs_core.api import CoreState, Request, SchemaRef
     from vs_core.api.testing import Answer, Harness
     from vs_runtime.api.core import CoreRuntime, ExecutionResult
+    from vs_runtime.api.testing import Launch
     from vs_sim.api.testing import VirtualClock
 
 
 @dataclass(frozen=True)
 class RunSetup:
-    """Which strategy runs and what hosts it. Immutable, so a snapshot of a world shares it."""
+    """Which search runs and what hosts it. Immutable, so a snapshot of a world shares it."""
 
-    new_strategy: Callable[[], Strategy[Any]]
-    """A fresh strategy instance over its initial state; every call builds an equal one."""
+    new_launch: Callable[[], Launch[Any]]
+    """A fresh search with its config; every call builds an equal one."""
     harness: Harness
     """Registry, run facts, limits, envelope type and evidence requirements of the run."""
     schemas: Mapping[SchemaRef, type[BaseModel]]

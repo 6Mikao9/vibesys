@@ -47,11 +47,19 @@ from .types.evaluation import (
     ObservationsDue,
     RegisteredJobObserved,
     RegisteredJobRequested,
+    RunJobsCancelRequested,
     TurnSuspended,
 )
-from .types.intents import (
+from .types.kernel import (
+    CoreEvent,
+    DecisionCompleted,
+    DecisionSubmitted,
+    ProposalSubmitted,
+    RunControlEvent,
+    Signal,
+)
+from .types.records import (
     BlockedRecordStalled,
-    DecisionDependencyResolved,
     DispatchAuthorized,
     OperationRetireRequested,
     ReconciliationDeadline,
@@ -61,14 +69,6 @@ from .types.intents import (
     RequestPrepared,
     RequestUndispatchable,
     RetryDue,
-)
-from .types.kernel import (
-    CoreEvent,
-    DecisionCompleted,
-    DecisionSubmitted,
-    ProposalSubmitted,
-    RunControlEvent,
-    Signal,
 )
 from .types.scheduling import (
     AdmissionControl,
@@ -114,7 +114,6 @@ from .types.settlement import (
     AssessmentSubmitted,
     AttemptSettled,
     OwnershipSettled,
-    SettlementDependencyResolved,
     WinnerProposed,
 )
 
@@ -124,7 +123,7 @@ SIGNAL_ORDER = (
     Area.SESSIONS,
     Area.EVALUATION,
     Area.SETTLEMENT,
-    Area.INTENTS,
+    Area.RECORDS,
 )
 
 
@@ -203,6 +202,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             RegisteredJobObserved()
             | JobTerminationRequested()
             | JobsDrainRequested()
+            | RunJobsCancelRequested()
             | MeasurementSubmissionObserved()
             | ContinuationJobsChanged()
             | ContinuationRetireRequested()
@@ -218,8 +218,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.EVALUATION
         case (
-            SettlementDependencyResolved()
-            | AssessmentSubmitted()
+            AssessmentSubmitted()
             | OwnershipSettled()
             | WinnerProposed()
             | AdoptionObserved()
@@ -227,8 +226,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
         ):
             return Area.SETTLEMENT
         case (
-            DecisionDependencyResolved()
-            | RequestPrepared()
+            RequestPrepared()
             | DispatchAuthorized()
             | RequestObserved()
             | RecoveryStarted()
@@ -240,7 +238,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | OperationRetireRequested()
             | DecisionCompleted()
         ):
-            return Area.INTENTS
+            return Area.RECORDS
         case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent():
             raise ContractError(("event",), "kernel event requires translation")
         case _:

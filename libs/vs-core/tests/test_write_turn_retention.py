@@ -12,6 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_session_yield_completion import terminal_yield, yield_state
 
@@ -59,7 +60,7 @@ def write_turn_world(
         update={
             "run": state.run.model_copy(update={"receipts": (*state.run.receipts, started)}),
             "scheduling": core.SchedulingState(slots=(slot,)),
-            "intents": state.intents.model_copy(update={"recovery": ready}),
+            "records": state.records.model_copy(update={"recovery": ready}),
             "attempts": core.AttemptsState(attempts=(owner,)),
             "sessions": core.SessionsState(
                 sessions=(session.model_copy(update={"spec": spec}),),
@@ -107,7 +108,7 @@ def test_a_write_turn_that_ends_requests_one_wip_snapshot_of_its_invocation() ->
     assert snapshot.retention == "wip"
     assert snapshot.request_id == core.write_turn_authority(invocation)
     assert snapshot.request_id != request.request_id
-    assert snapshot.request_id in ended.state.attempts.attempts[0].pending_intents
+    assert snapshot.request_id in ended.state.attempts.attempts[0].pending_records
     assert ended.state.attempts.attempts[0].checkpoint_declines == ()
     replay = core.step(ended.state, terminal_yield(state, request, None))
     assert snapshots(replay) == []
@@ -126,7 +127,7 @@ def test_the_workspace_answer_becomes_the_attempts_checkpoint_the_strategy_can_s
     assert checkpoint.invocation == state.sessions.invocations[0].invocation
     assert checkpoint.retention == "wip"
     assert checkpoint.revision == revision
-    assert owner.pending_intents == ()
+    assert owner.pending_records == ()
     assert core.project(retained.state).attempts[0].checkpoint == revision
     assert retained.state.sessions.invocations[0].phase == core.SessionPhase.CHECKPOINTED
 
@@ -141,13 +142,17 @@ def test_a_failed_snapshot_releases_the_attempt_and_records_why(
     failed = answer(ended.state, snapshot, status, None)
     owner = failed.state.attempts.attempts[0]
     assert owner.checkpoints == ()
-    assert owner.pending_intents == ()
+    assert owner.pending_records == ()
     assert [row.reason for row in owner.checkpoint_declines] == [
         core.CheckpointDecline.SNAPSHOT_FAILED
     ]
+    # The decline is also published, so a search waiting for the checkpoint hears of it.
+    assert [
+        event.checkpoint for event in failed.events if isinstance(event, core.CheckpointResolved)
+    ] == [core.Declined(reason=core.CheckpointDecline.SNAPSHOT_FAILED)]
 
 
-@settings(max_examples=60, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=60), deadline=None)
 @given(
     access=st.sampled_from(list(core.Access)),
     status=st.sampled_from(
@@ -210,7 +215,7 @@ REVISIONS = (
 )
 
 
-@settings(max_examples=150, deadline=None)
+@settings(max_examples=examples(pr=5, nightly=150), deadline=None)
 @given(plan=st.lists(STEPS, min_size=1, max_size=12))
 def test_write_turns_never_fail_the_step_or_strand_a_closing_attempt(plan: list[Step]) -> None:
     """Write turns end with or without changes, the workspace answers any way, retire anywhere.
@@ -296,13 +301,13 @@ def test_write_turns_never_fail_the_step_or_strand_a_closing_attempt(plan: list[
             feed(seen[index % len(seen)])
     attempt = state.attempts.attempts[0]
     concluded = {
-        intent.request_id
-        for intent in state.intents.intents
-        if intent.observation is not None
-        and intent.observation.terminal
-        and intent.observation.status != core.ObservationStatus.UNKNOWN
+        record.request_id
+        for record in state.records.records
+        if record.observation is not None
+        and record.observation.terminal
+        and record.observation.status != core.ObservationStatus.UNKNOWN
     }
-    assert not set(attempt.pending_intents) & concluded
+    assert not set(attempt.pending_records) & concluded
     assert len({row.request_id for row in attempt.checkpoints}) == len(attempt.checkpoints)
 
 
@@ -337,4 +342,4 @@ def test_a_closing_attempt_stops_waiting_on_its_invocation_snapshot(
     revision = REVISIONS[1] if status == core.ObservationStatus.SUCCEEDED else None
     after = answer(retired.state, snapshot, status, revision).state.attempts.attempts[0]
     assert edge not in after.release_dependencies
-    assert after.pending_intents == ()
+    assert after.pending_records == ()

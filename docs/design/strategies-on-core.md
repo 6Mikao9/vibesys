@@ -35,7 +35,7 @@ Readers who know the product but not `vs-core` need these terms.
   the new strategy state) and `on_event(view, event) -> state`. No clock, I/O, asyncio or
   randomness: time comes from `view.run.now_at`, and any randomness is a seeded generator
   state stored in the strategy state.
-- **RunView**: the read-only projection of core state that a strategy sees (attempts,
+- **CoreView**: the read-only projection of core state that a strategy sees (attempts,
   sessions, measurements, settlements, controls, adoption).
 - **Decision**: what a strategy asks for: `RequestTurn`, `StartAttempt`, `Measure`,
   `Withdraw` (with a `Settle` disposition), `ProposeWinner`, `Stop`, `Operation`. Each has a
@@ -54,13 +54,13 @@ Readers who know the product but not `vs-core` need these terms.
   If the turn's workspace checkpoint is declined or fails, core instead ends the turn with
   `YieldPublicationFailed` (a named reason) and the strategy treats it as a failed turn.
 - **Shell**: the async host in `vs-runtime` that executes core's requests and feeds outcomes
-  back as events. **Durable boundary**: one atomic commit of state plus the intents it implies.
+  back as events. **Durable boundary**: one atomic commit of state plus the records it implies.
 
 Core events the strategies fold, with the consequence of each: `AttemptReady` (slot and
 workspace held, begin turns), `TurnResult` (reply or typed failure), `TurnSuspended`, `YieldPublicationFailed` and
 `ResumeAuthorized` (wait, failed wait, and resume), `MeasurementResult` (trusted evidence ids),
 `OperationResult`, `AttemptExhausted` (budget spent), `AttemptSettled`, `AdoptionResult`,
-`IntentBlocked` (effect unknown), `Rejected` (decision refused), `ControlChanged` (operator
+`RequestBlocked` (effect unknown), `Rejected` (decision refused), `ControlChanged` (operator
 stop), `RunEnded`.
 
 ### 1.3 Status
@@ -75,7 +75,7 @@ stop), `RunEnded`.
 | Exclusive-root executor fixes (B16, section 3.1) | built (`test_exclusive_root_attempts.py`); prerequisite of every port that runs without candidate sandboxes | 2 |
 | Shared building blocks B1 to B15 (section 3) | built, with `dynamic` moved onto each (section 3.6); B9 and B13 were built with the `single` port | 2, 3 |
 | Promoted runtime shell test kit (T1) and plugin-keyed loop harness (T2) | T1 built (`vs_runtime.api.testing`); T2 is a seam (3.6) | 2 |
-| Strategy conformance suite C1 to C9 (9.2) | built (`tests/composition/_loop`); `dynamic` and `single` are its subjects | 3 |
+| Strategy conformance suite C1 to C9 (9.2) | built (`tests/system`, on the skeleton search); `dynamic` and `single` are its subjects | 3 |
 | `CaptureCommand` operation (profile-guided attribution, B14) | contract and owner built; no strategy uses it yet | 3 |
 | Immutable hypothesis state, or the JSON-field bridge (8.4) | JSON-field bridge built (`vibesys.hypothesis.rounds`); immutable state is phase 6 | 3 |
 | `single` and `profile-guided single` strategy | built (section 9.3 records the outcome) | 3 |
@@ -91,11 +91,11 @@ stop), `RunEnded`.
 
 These restate `CLAUDE.md` and `software-design` for this work; the sections below apply them.
 
-1. `decide` and `on_event` are pure functions of strategy state, `RunView` and static config.
+1. `decide` and `on_event` are pure functions of strategy state, `CoreView` and static config.
    Config is an input, not state: restarting with the same options reproduces every decision.
 2. Strategy state holds only policy memory that core cannot know. Lifecycle and accounting
    facts (attempt phases, slot use, charges, session phases, the evidence ledger,
-   settlements) are read from `RunView`, never copied. Where a copy is unavoidable (a round
+   settlements) are read from `CoreView`, never copied. Where a copy is unavoidable (a round
    record keeps the metric rows it accepted) the copy is of a fact core already committed and
    a property test checks the two agree.
 3. One external fact is one event. Live execution, recovery inspection and replay all fold
@@ -117,9 +117,12 @@ These restate `CLAUDE.md` and `software-design` for this work; the sections belo
 
 ## 2. What `dynamic` already does
 
-`dynamic` is the worked example: `strategy/` holds the pure strategy, `core_policy/` holds
-limits, reply schemas, projection and prompts, and `src/vibesys/dynamic_core.py` plus
-`dynamic_roles.py` do the thin wiring. One workstream is one attempt.
+`dynamic` is the worked example. (Update: `dynamic` has since been rewritten as a flow in
+`search/`, with its state machine deleted; the pieces listed below describe the state-machine
+form the other ports started from. See `docs/contributing/flows.md`.) At the time of this
+analysis `strategy/` held the pure strategy, `core_policy/` held limits, reply schemas,
+projection and prompts, and `src/vibesys/dynamic_core.py` plus `dynamic_roles.py` did the thin
+wiring. One workstream is one attempt.
 
 | Step of one workstream | Decision or request | Answering event |
 |---|---|---|
@@ -134,7 +137,7 @@ limits, reply schemas, projection and prompts, and `src/vibesys/dynamic_core.py`
 | settle | `Withdraw(attempt, Settle(...))` | `AttemptSettled` |
 | select and finish | `ProposeWinner`, then `Stop(drain)` | `AdoptionResult`, `RunEnded` |
 
-The pieces the ports reuse, by file in `src/vibesys/orchestration/dynamic/strategy/`:
+The pieces the ports reuse, by file in `src/vibesys/orchestration/dynamic/search/`:
 
 - `_draft.py`: `Draft` (ordered decisions, state update, earliest wake time) and the pure
   builders `run_scope`, `attempt_scope`, `session_for`, `request_turn`, `measurement_plan`.
@@ -175,7 +178,7 @@ code sits in `dynamic`.
 
 | # | Block | Today | Owner | Users | `dynamic` must |
 |---|---|---|---|---|---|
-| B1 | Identity grammar: `component`, `IdScheme(namespace)` for decision, invocation, session, attempt and item ids, and the inverse of `operation:<decision>` | `dynamic/strategy/_ids.py` (hard-coded `dyn`) | `vs_core.api.ids` (core defines the identity rules and the `operation:` form) | dynamic, single, multi, evolve, issue_queue | use `IdScheme("dyn")`; a test pins that every id is byte-identical to today's |
+| B1 | Identity grammar: `component`, `IdScheme(namespace)` for decision, invocation, session, attempt and item ids, and the inverse of `operation:<decision>` | `dynamic/search/_ids.py` (hard-coded `dyn`) | `vs_core.api.ids` (core defines the identity rules and the `operation:` form) | dynamic, single, multi, evolve, issue_queue | use `IdScheme("dyn")`; a test pins that every id is byte-identical to today's |
 | B2 | Decision builders and `Draft[S]`: scopes, `TurnShape`, `request_turn`, `operation`, `session_for`, `workspace_for`, `due(turn)` and wake time | `_draft.py` | `vs_core.api.authoring` (pure, no policy) | all five | keep only its prompt-specific `render_request` |
 | B3 | `MeasurementRecipe`: evaluator, workload and environment digests, recipe artifact, ordered stages with budgets, queue allowance, submission limit; `plan(candidate, purpose, now_at)` | `_draft.measurement_plan` and `AgentEvaluationPolicy.plan` in `vs-runtime` (two copies of one fact) | `vs_core.api.evaluation` | dynamic, single, multi, evolve, and the runtime agent bridge | delete its copy; the bridge's `AgentEvaluationPolicy` wraps the same value |
 | B4 | `TurnChain[C]`: charge class, corrections, lost-turn re-ask with doubling backoff, yield, suspend, resume, `chain_length(...)` for limits. `C` is the strategy's prompt-context type, so core keeps no prompt knowledge | `TurnRecord` in `_state.py`; `_correct`, `_ask_again`, `_yielded`, `on_suspended`, `on_resume` in `_attempt_events.py`; `_planner.py` | `vs_core.api.authoring` (the protocol rules: a resume is asked once, a correction names its predecessor) | all five | replace its `TurnRecord` and handlers |
@@ -192,8 +195,8 @@ code sits in `dynamic`.
 | B14 | `CaptureCommand` operation: run a configured argv in a revision's workspace with a timeout and return bounded output | none; two copies of the legacy call in `single/attribution.py` and `multi/attribution.py` | contract in `vs_runtime.api.core`, owner in `vs_runtime` | single, multi (profile-guided) | none |
 | B15 | Stateless tool admission: a role may name a tool server that holds no run state (profiler diagnostics) | none; `_refuse_unbridged_tools` rejects all but `evaluation` | `vs_runtime.api.core` (`AgentTool` declares its class), `vibesys.run.core_services` | multi, evolve, issue_queue | none |
 | B16 | Exclusive-root executor: ending an exclusive-root attempt releases the root, and granting the root restores the plan's base while preserving the configured artifact directories (A2, A4) | none; `RuntimeWorkspaceRequests` rejects the discard of a root attempt and `_ensure_root` binds without restoring | `vs_runtime` workspace executor (`_workspace_requests.py`, `_workspace_receipts.py`) | single, multi, issue_queue (the serial strategies on a host without candidate sandboxes) | none (`dynamic` always uses isolated children) |
-| T1 | Runtime shell test kit: `ScriptedExecutors`, `run_shell`, restart-at-boundary | `tests/vibesys/orchestration/dynamic/strategy/_shell.py`, `_executors.py`, `_run.py` (about 1,000 lines) | `vs_runtime.api.testing` | all five | import it |
-| T2 | Whole-loop harness and invariants: `_harness.py`, `_chaos.py`, `loop_invariants.py`, smoke e2e | `tests/composition/dynamic/`, `tests/support/loop_invariants.py`, `tests/e2e/test_dynamic_loop_smoke_e2e.py` | `tests/composition/_loop/` and `tests/support/` parametrized by plugin id | all five | become one parametrization |
+| T1 | Runtime shell test kit: `ScriptedExecutors`, `run_shell`, restart-at-boundary | `tests/vibesys/orchestration/dynamic/search/_shell.py`, `_executors.py`, `_run.py` (about 1,000 lines) | `vs_runtime.api.testing` | all five | import it |
+| T2 | Whole-loop harness and invariants: `_harness.py`, `_chaos.py`, `loop_invariants.py`, smoke e2e | `tests/composition/dynamic/`, `tests/support/loop_invariants.py`, `tests/e2e/test_dynamic_loop_smoke_e2e.py` | `tests/system/` and `tests/support/` parametrized by plugin id | all five | become one parametrization |
 
 ### 3.2 Contracts of the blocks that carry new rules
 
@@ -282,7 +285,7 @@ transcript golden (3.4) at the commit that introduced it.
 | B15 | built | `AgentTool.stateless`; `StatelessToolServers`, `CombinedToolServers`; `CoreResources.stateless_tool_servers`; admission in `vibesys.run.core_services` | #1992 |
 | B16 | built | by the workspace executor change that preceded this list | n/a |
 | T1 | built | `vs_runtime.api.testing`: `ScriptedExecutors`, `drive_shell`, `Run`, `HostOptions`, `Script`, `request_executors`, on `vs_core.api.testing` | #1993 |
-| T2 | seam | `tests/composition/_loop/spec.py`: `LoopSpec` keyed by plugin id (CLI selection and envelope codec). The harness and chaos driver stay under `tests/composition/dynamic` until a second strategy draws the split | #1993 |
+| T2 | seam | `tests/support/loop_spec.py`: `LoopSpec` keyed by plugin id (CLI selection and envelope codec). The harness and chaos driver stay under `tests/composition/dynamic` until a second strategy draws the split | #1993 |
 
 Why B7 and B10 are in `vs-core`, not `vs-runtime` as the table in 3.1 first said: the pure strategy
 package may not import `vs-runtime` (the purity ratchet admits no new `io-import`), and these are
@@ -395,9 +398,9 @@ defaults the legacy `structured_turn` and runtime gave. `--max-rounds` growth on
 
 ### 4.7 Crash and replay
 
-Every transition is one event folded into state that commits atomically with its intents, so
+Every transition is one event folded into state that commits atomically with its records, so
 the legacy commit points (initialize, start hypothesis, checkpoint, close round) disappear.
-After a crash the shell replays unfinished intents under their recorded ids, the strategy is
+After a crash the shell replays unfinished records under their recorded ids, the strategy is
 rebound to the committed state, and `decide` re-proposes identical decisions, which core
 deduplicates. Two cases need care and have properties (section 9): a reply delivered before
 its checkpoint is visible is held (`RETAINING`) and must be acted on once; a designer plan
@@ -700,7 +703,7 @@ build differs from it, and why.
   than the last write (property Q3). `ApplyIssueChanges` therefore returns only where each
   change landed, not a snapshot. A blocked board request is sent again under a new decision
   identity and the same keys, read from the view (`OperationView.phase`), because a blocked
-  intent names its request, not its decision.
+  record names its request, not its decision.
 - **Progress is fire and forget.** `LogProgress` is proposed beside the write it records and its
   result is not awaited; replay is safe because the owner appends once per key.
 - **Idempotence lives in the tracker records.** `IssueTracker.create`, `update_status` and
@@ -752,7 +755,7 @@ from 4 to 12:
   state; core holds attempts, settlements and evidence; each individual row copies the
   settlement id, candidate revision and decoded metrics; admission is a pure fold in slot order.
 - **E2. The population is derived from core.** Individuals are the settlements in
-  `RunView.settlements`, metrics are read from the evidence ledger; strategy state keeps only
+  `CoreView.settlements`, metrics are read from the evidence ledger; strategy state keeps only
   lineage and selector state.
 - **E3. The population is an external store.** A `PopulationStore` behind an `Operation`;
   the strategy asks it to admit and to propose.
@@ -880,7 +883,7 @@ and before dispatch, and after dispatch and before the observation is committed.
 | C1 | `decide` is deterministic and idempotent; a replayed proposal is deduplicated and changes nothing | reachable (state, view) pairs |
 | C2 | Crash and replay: for every durable boundary k and every crash point, restart from the stored envelope with a new strategy instance and executors that keep their world; the run reaches the same terminal result, the same set of decision ids, equal final strategy state, and no request identity executes twice | executor answers (`Succeeded`, `Running`, `Unknown`, `Retryable`, `Failed`), agent replies, k, crash point |
 | C3 | Every reachable state round-trips the envelope codec and passes `validate_immutable_schema` | states reached by C1/C2 runs |
-| C4 | Liveness (`vs_core.testing.liveness`): terminal, no open intent, no orphan wait, bounded requests, no spin | answers with duplicate and reordered delivery (`Faults`) |
+| C4 | Liveness (`vs_core.testing.liveness`): terminal, no open record, no orphan wait, bounded requests, no spin | answers with duplicate and reordered delivery (`Faults`) |
 | C5 | An operator stop injected at any step ends `cancelled` with every attempt settled and nothing leaked | stop position |
 | C6 | The derived `Limits` are never exceeded: attempts, turns, retries, measurement submissions | whole scenarios |
 | C7 | An event for an unknown decision, attempt or invocation, or a duplicate, changes nothing | event streams with injected strays |
@@ -1067,7 +1070,7 @@ of the committed strategy state. Deviations from the mapping above, each deliber
   its recorded options.
 - Properties: E1 and E3 are the trajectory tests (`strategy/test_trajectory.py`, serial and with
   drawn completion orders, both selectors); E2 is the conformance crash sweep over the serial and the
-  concurrent subjects (`tests/composition/_loop`); E4 to E6 are `strategy/test_properties.py`.
+  concurrent subjects (`tests/system`); E4 to E6 are `strategy/test_properties.py`.
 
 ### 9.7 Phase 2 acceptance
 
@@ -1162,7 +1165,7 @@ until the next designer turn.
 
 | # | Result | Test | Consequence |
 |---|---|---|---|
-| A1 | true | `tests/vibesys/orchestration/test_serial_strategy_assumptions.py` (real core and shell, both workspace modes, `candidate` and `wip`); `libs/vs-runtime/tests/test_serial_strategy_workspaces.py::test_a_retained_candidate_is_a_base_for_the_next_attempt` (real Git) | none: the cadence design in 4.4 stands, and the `wip` fallback also works |
+| A1 | true | core's half tested the step/project API that the flows replaced and was removed with it; `libs/vs-runtime/tests/test_serial_strategy_workspaces.py::test_a_retained_candidate_is_a_base_for_the_next_attempt` (real Git) | none: the cadence design in 4.4 stands, and the `wip` fallback also works |
 | A2 | true since B16 (it was false: two gaps) | `libs/vs-runtime/tests/test_serial_strategy_workspaces.py`, `test_exclusive_root_attempts.py` | none: B16 is built |
 | A3 | true since B15 | `tests/vibesys/run/test_core_stateless_tools.py` | B15 as designed (built): the session resolver already takes any `ToolServerSource`, and the only gate is `_refuse_unbridged_tools`; the issue board stays refused (pinned by the second test in that file) |
 | A4 | true, including across a root restore that declares its artifact directories (`memory_paths`) | `libs/vs-runtime/tests/test_run_scoped_artifacts.py` | the roadmap written by a `WRITE_ARTIFACTS` run-scoped turn is kept and is visible at the next designer turn; the root restore keeps the plugin's declared `memory_paths` (`roadmap`, `progress`), and B16's grant restore uses it |

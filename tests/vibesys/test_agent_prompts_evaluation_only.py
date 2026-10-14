@@ -16,14 +16,13 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.vibesys.orchestration.dynamic.core_policy._contexts import CONTEXTS, FRESH_TURNS
 from tests.vibesys.orchestration.dynamic.core_policy.test_environment_notes import (
-    _FRESH_TURNS,
     _plan_variables,
     _render,
 )
-from tests.vibesys.orchestration.dynamic.core_policy.test_prompt_templates import _CONTEXTS
 
-from vibesys.orchestration.dynamic.strategy.api import PromptTemplate
+from vibesys.orchestration.dynamic.search.api import PromptTemplate
 from vibesys.prompts import PROMPTS_DIR, render_template
 
 if TYPE_CHECKING:
@@ -67,7 +66,7 @@ def test_the_dynamic_loops_environment_notes_describe_evaluation_only_through_th
 
 
 @pytest.mark.parametrize("environment", ["slurm", "slurm+gpu"])
-@pytest.mark.parametrize("template", _FRESH_TURNS, ids=lambda item: item.value)
+@pytest.mark.parametrize("template", FRESH_TURNS, ids=lambda item: item.value)
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=5)
 @given(data=st.data())
 def test_the_dynamic_loops_prompts_offer_the_evaluation_tool_only(
@@ -75,7 +74,7 @@ def test_the_dynamic_loops_prompts_offer_the_evaluation_tool_only(
 ) -> None:
     text = _render(
         template,
-        data.draw(_CONTEXTS[template]),
+        data.draw(CONTEXTS[template]),
         _plan_variables(tmp_path, _notes(environment)),
     )
 

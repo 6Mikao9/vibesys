@@ -26,13 +26,17 @@ JOB = ResourceId(root="job:1")
 
 def _collect(index: int) -> CollectEvidence:
     return CollectEvidence(
-        request_id=RequestId(root=f"collect:{index}"), scope=SCOPE, resource_id=JOB, deadline_at=1.0
+        request_id=RequestId(root=f"collect:{index}"),
+        scope=SCOPE,
+        resource_id=JOB,
     )
 
 
 def _observe(index: int) -> ObserveOwnedJob:
     return ObserveOwnedJob(
-        request_id=RequestId(root=f"observe:{index}"), scope=SCOPE, resource_id=JOB, deadline_at=1.0
+        request_id=RequestId(root=f"observe:{index}"),
+        scope=SCOPE,
+        resource_id=JOB,
     )
 
 

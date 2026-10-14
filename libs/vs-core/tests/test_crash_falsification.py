@@ -55,6 +55,7 @@ from vs_core.api import (
     TurnObserved,
     TurnResult,
     TurnSpec,
+    Until,
     initial_state,
     step,
 )
@@ -107,7 +108,6 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="result", version=1),
-        deadline_at=100.0,
         charge_class="free",
     )
     turn = TurnSpec(
@@ -117,7 +117,6 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         workspace=scope,
         prompts=(),
         output_schema=SchemaRef(name="result", version=1),
-        deadline_at=100.0,
         charge_class="resume",
     )
     resource = ResourceId(root="owned-job")
@@ -132,20 +131,23 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
-        deadline_at=10.0,
+        accuracy_gated=(),
     )
     # The paid measurement was authorized by a real accepted Measure decision.
     measured = step(
         state.model_copy(
             update={
-                "intents": core.IntentsState(
+                "records": core.RecordsState(
                     recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
                 )
             }
         ),
         DecisionSubmitted(
-            decision=core.Measure(
-                decision_id=DecisionId(root="measure-decision"), scope=scope, plan=plan
+            decision=core.Wait(
+                request=core.Measure(
+                    decision_id=DecisionId(root="measure-decision"), scope=scope, plan=plan
+                ),
+                until=core.Within(limit=100.0),
             ),
             expected_revision=0,
         ),
@@ -180,9 +182,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         released=True,
         resource_id=ResourceId(root="conversation"),
     )
-    dispatch = DispatchTurn(
-        request_id=yielded.request_id, scope=scope, deadline_at=100.0, turn=original_turn
-    )
+    dispatch = DispatchTurn(request_id=yielded.request_id, scope=scope, turn=original_turn)
     job = OwnedJob(
         resource_id=resource,
         scope=scope,
@@ -205,6 +205,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
             "sessions": SessionsState(
                 invocations=(
                     core.Invocation(
+                        until=Until(at=100.0),
                         invocation=invocation,
                         scope=scope,
                         turn=original_turn,
@@ -239,26 +240,26 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                     ),
                 ),
             ),
-            "intents": core.IntentsState(
+            "records": core.RecordsState(
                 recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
-                intents=(
-                    core.Intent(
+                records=(
+                    core.RequestRecord(
                         request_id=yielded.request_id,
                         request=dispatch,
                         payload_digest=_digest(dispatch),
                         lifecycle=core.LifecycleClass.SESSION_TURN,
-                        phase=core.IntentPhase.COMPLETED,
+                        phase=core.RequestPhase.COMPLETED,
                         sequence=yielded.sequence,
                         observation=yielded,
-                        reconcile_deadline_at=100.0,
+                        until=core.Until(at=100.0),
                     ),
-                    core.Intent(
+                    core.RequestRecord(
                         request_id=job_request,
                         request=submission,
                         payload_digest=_digest(submission),
                         lifecycle=core.LifecycleClass.OWNED_JOB,
-                        phase=core.IntentPhase.DISPATCHED,
-                        reconcile_deadline_at=10.0,
+                        phase=core.RequestPhase.DISPATCHED,
+                        until=core.Until(at=10.0),
                     ),
                 ),
             ),
@@ -368,7 +369,10 @@ def execute(
         scope=Scope(owner=current.core.run.run_id, generation=0),
         turn=turn,
     )
-    submitted = DecisionSubmitted(decision=decision, expected_revision=current.revision)
+    submitted = DecisionSubmitted(
+        decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+        expected_revision=current.revision,
+    )
     proposed = callback_commit(current, step(current.core, submitted))
     if boundary != CrashBoundary.BEFORE_COMMIT:
         durable = proposed.model_dump_json()
@@ -381,10 +385,10 @@ def execute(
         replay = step(current.core, submitted)
         assert replay.requests == replay.events == ()
     # Replay the durable outbox; stable invocation identity makes acceptance idempotent.
-    for intent in current.core.intents.intents:
-        request = intent.request
+    for record in current.core.records.records:
+        request = record.request
         # Completed work was acknowledged before the crash window and is never replayed.
-        if intent.phase != core.IntentPhase.COMPLETED and isinstance(
+        if record.phase != core.RequestPhase.COMPLETED and isinstance(
             request, DispatchTurn | ResumeSessionTurn
         ):
             payload = request.turn.model_dump_json()
@@ -392,9 +396,9 @@ def execute(
             assert prior == payload
     assert tuple(accepted) == (turn.invocation_id,)
     dispatch = next(
-        intent.request
-        for intent in current.core.intents.intents
-        if intent.request.kind in ("dispatch_turn", "resume_session_turn")
+        record.request
+        for record in current.core.records.records
+        if record.request.kind in ("dispatch_turn", "resume_session_turn")
     )
     assert dispatch.request_id is not None
     completed = TurnObserved(
@@ -435,10 +439,10 @@ def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
         ),
     )
     (submitted,) = (
-        row for row in ingress.state.intents.intents if row.request_id == job.observation.request_id
+        row for row in ingress.state.records.records if row.request_id == job.observation.request_id
     )
     assert submitted.observation == job.observation
-    assert submitted.phase == core.IntentPhase.COMPLETED
+    assert submitted.phase == core.RequestPhase.COMPLETED
     initial = RunEnvelope[CallbackState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="host"), epoch=1),

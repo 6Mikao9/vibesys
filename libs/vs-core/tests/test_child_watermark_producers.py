@@ -1,20 +1,21 @@
 """Recovery-produced source watermarks compose with kernel run finality."""
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
-from .test_intent_child_guards import pending_intent, recovering_state, reload
 from .test_proof_ownership_regressions import stopped
+from .test_request_child_guards import pending_record, recovering_state, reload
 
 
 def discovered_state(count: int = 1) -> core.CoreState:
     """Each conclusive parent independently discovers the same descendant."""
     parents = []
     for index in range(count):
-        parent = pending_intent(f"source:{index}", phase=core.IntentPhase.COMPLETED)
+        parent = pending_record(f"source:{index}", phase=core.RequestPhase.COMPLETED)
         observation = core.Observation(
             event_id=core.EventId(root=f"parent:{index}"),
             request_id=parent.request_id,
@@ -40,16 +41,16 @@ def inspect_child(
     *,
     query_epoch: int | None = None,
     **facts: object,
-) -> tuple[core.RequestObserved, core.IntentsChange]:
+) -> tuple[core.RequestObserved, core.RecordsChange]:
     """Feed the exact durable inspection's response to the public recovery leaf."""
     query = next(
         row
-        for row in state.intents.intents
+        for row in state.records.records
         if isinstance(row.request, core.InspectRequest)
         and row.request.resource_id == core.ResourceId(root="child")
         and row.request.target == core.RequestId(root=f"source:{source}")
         and row.request_id.root.startswith(
-            f"recovery:child:{state.intents.recovery.epoch if query_epoch is None else query_epoch}:"
+            f"recovery:child:{state.records.recovery.epoch if query_epoch is None else query_epoch}:"
         )
     )
     assert isinstance(query.request, core.InspectRequest)
@@ -85,20 +86,20 @@ def inspect_child(
             target_resource=query.request.resource_id, observation=target
         ),
     )
-    # Intents A is an explicit stub. Its committed query ledger is a boundary
-    # input; the real Intents B leaf owns the target watermark and barrier.
+    # Records A is an explicit stub. Its committed query ledger is a boundary
+    # input; the real Records B leaf owns the target watermark and barrier.
     query = query.model_copy(
-        update={"phase": core.IntentPhase.COMPLETED, "observation": event.observation}
+        update={"phase": core.RequestPhase.COMPLETED, "observation": event.observation}
     )
-    ledger = state.intents.model_copy(
+    ledger = state.records.model_copy(
         update={
-            "intents": tuple(
+            "records": tuple(
                 query if row.request_id == query.request_id else row
-                for row in state.intents.intents
+                for row in state.records.records
             )
         }
     )
-    context = core.IntentsContext(
+    context = core.RecordsContext(
         run=state.run,
         registry=state.registry,
         attempts=state.attempts,
@@ -106,11 +107,11 @@ def inspect_child(
         evaluation=state.evaluation,
     )
     change = core.recover(ledger, context, event)
-    return event, core.IntentsChange(**change.model_dump())
+    return event, core.RecordsChange(**change.model_dump())
 
 
 def apply_inspection(
-    state: core.CoreState, event: core.RequestObserved, change: core.IntentsChange
+    state: core.CoreState, event: core.RequestObserved, change: core.RecordsChange
 ) -> core.CoreState:
     """The kernel consumes real recovery output with only the stub peers scripted."""
     frames = [core.TraceFrame(signal=event, change=change)]
@@ -158,20 +159,20 @@ def drain(state: core.CoreState) -> core.Transition:
 
 def test_discovered_child_inspection_produces_finality_proof() -> None:
     state = discovered_state()
-    lease = state.intents.children[0]
+    lease = state.records.children[0]
     assert not lease.watermark_history_complete
     assert drain(state).state.run.status == core.RunStatus.CLOSING
     event, change = inspect_child(state, 0, 2)
     assert event.target is not None
     state = apply_inspection(state, event, change)
-    lease = state.intents.children[0]
+    lease = state.records.children[0]
     assert lease.watermark_history_complete
     assert lease.observation_watermarks == (
         core.ChildObservationWatermark(
             source_request=core.RequestId(root="source:0"), observation=event.target.observation
         ),
     )
-    assert state.intents.recovery.phase == core.RecoveryPhase.READY
+    assert state.records.recovery.phase == core.RecoveryPhase.READY
     closed = drain(state)
     assert closed.state.run.status == core.RunStatus.TERMINAL
     assert any(isinstance(event, core.RunEnded) for event in closed.events)
@@ -180,10 +181,10 @@ def test_discovered_child_inspection_produces_finality_proof() -> None:
 def test_legacy_aggregate_is_not_certified_without_source_inspection() -> None:
     state = discovered_state()
     source = next(
-        row for row in state.intents.intents if row.request_id == core.RequestId(root="source:0")
+        row for row in state.records.records if row.request_id == core.RequestId(root="source:0")
     )
     assert source.observation is not None
-    child = state.intents.children[0].model_copy(
+    child = state.records.children[0].model_copy(
         update={
             "observation": source.observation.model_copy(
                 update={"resource_id": core.ResourceId(root="child"), "children": ()}
@@ -191,11 +192,11 @@ def test_legacy_aggregate_is_not_certified_without_source_inspection() -> None:
         }
     )
     state = state.model_copy(
-        update={"intents": core.IntentsState(intents=(source,), children=(child,))}
+        update={"records": core.RecordsState(records=(source,), children=(child,))}
     )
     recovered = core.step(reload(state), core.RecoveryStarted(epoch=2, now_at=1.0))
-    assert recovered.state.intents.children == (child,)
-    assert recovered.state.intents.recovery.phase == core.RecoveryPhase.RECOVERING
+    assert recovered.state.records.children == (child,)
+    assert recovered.state.records.recovery.phase == core.RecoveryPhase.RECOVERING
     assert any(
         isinstance(request, core.InspectRequest) and request.resource_id == child.resource_id
         for request in recovered.requests
@@ -210,8 +211,8 @@ def test_new_discovery_source_invalidates_previously_complete_history(
     state = discovered_state()
     event, change = inspect_child(state, 0, sequence)
     state = apply_inspection(state, event, change)
-    assert state.intents.children[0].watermark_history_complete
-    source = pending_intent("source:1", phase=core.IntentPhase.COMPLETED)
+    assert state.records.children[0].watermark_history_complete
+    source = pending_record("source:1", phase=core.RequestPhase.COMPLETED)
     assert event.target is not None
     parent = event.target.observation.model_copy(
         update={
@@ -224,12 +225,12 @@ def test_new_discovery_source_invalidates_previously_complete_history(
     source = source.model_copy(update={"observation": parent})
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents, source)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, source)}
             )
         }
     )
-    context = core.IntentsContext(
+    context = core.RecordsContext(
         run=state.run,
         registry=state.registry,
         attempts=state.attempts,
@@ -237,9 +238,9 @@ def test_new_discovery_source_invalidates_previously_complete_history(
         evaluation=state.evaluation,
     )
     event = core.RequestObserved(observation=parent)
-    change = core.recover(state.intents, context, event)
-    state = apply_inspection(state, event, core.IntentsChange(**change.model_dump()))
-    lease = state.intents.children[0]
+    change = core.recover(state.records, context, event)
+    state = apply_inspection(state, event, core.RecordsChange(**change.model_dump()))
+    lease = state.records.children[0]
     assert lease.source_requests == (core.RequestId(root="source:0"), source.request_id)
     assert not lease.watermark_history_complete
     assert drain(state).state.run.status == core.RunStatus.CLOSING
@@ -247,19 +248,20 @@ def test_new_discovery_source_invalidates_previously_complete_history(
         state, 1, 1, children=(core.ResourceId(root="grandchild"),) if descendants else ()
     )
     state = apply_inspection(state, event, change)
-    assert state.intents.children[0].watermark_history_complete
+    assert state.records.children[0].watermark_history_complete
     assert drain(state).state.run.status == (
         core.RunStatus.CLOSING if descendants else core.RunStatus.TERMINAL
     )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(count=st.integers(min_value=1, max_value=5), inspected=st.integers(min_value=0, max_value=5))
 def test_authoritative_coverage_requires_every_discovery_source(count: int, inspected: int) -> None:
     state = discovered_state(count)
     for index in range(min(count, inspected)):
         event, change = inspect_child(state, index, 10 - index)
         state = apply_inspection(state, event, change)
-    lease = reload(state).intents.children[0]
+    lease = reload(state).records.children[0]
     assert lease.watermark_history_complete == (inspected >= count)
     assert len(lease.observation_watermarks) == min(count, inspected)
     assert drain(state).state.run.status == (
@@ -268,6 +270,7 @@ def test_authoritative_coverage_requires_every_discovery_source(count: int, insp
 
 
 @example(terminal=False, released=False, complete=True, status=core.ObservationStatus.PENDING)
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     terminal=st.booleans(),
     released=st.booleans(),
@@ -296,12 +299,13 @@ def test_produced_source_coverage_keeps_conservative_release(
         and complete
         and status not in (core.ObservationStatus.PENDING, core.ObservationStatus.UNKNOWN)
     )
-    assert state.intents.children[0].watermark_history_complete
+    assert state.records.children[0].watermark_history_complete
     assert drain(state).state.run.status == (
         core.RunStatus.TERMINAL if conclusive else core.RunStatus.CLOSING
     )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     sequence=st.integers(min_value=2, max_value=100),
     foreign=st.integers(min_value=1, max_value=100),
@@ -314,7 +318,7 @@ def test_watermarks_compare_only_with_their_own_source(sequence: int, foreign: i
     state = apply_inspection(state, event, change)
     event, change = inspect_child(state, 1, foreign)
     state = apply_inspection(state, event, change)
-    retained = state.intents.children[0]
+    retained = state.records.children[0]
     event, change = inspect_child(state, 0, sequence - 1)
     assert change.state.children == (retained,)
     event, change = inspect_child(
@@ -340,7 +344,7 @@ def test_identical_fresh_inspections_certify_incomplete_history_without_rewritin
     for index in range(count):
         event, change = inspect_child(state, index, sequence)
         state = apply_inspection(state, event, change)
-    certified = state.intents.children[0]
+    certified = state.records.children[0]
     incomplete = certified.model_copy(
         update={
             "observation_watermarks": certified.observation_watermarks[:1] if retained else (),
@@ -348,12 +352,12 @@ def test_identical_fresh_inspections_certify_incomplete_history_without_rewritin
         }
     )
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": (incomplete,)})}
+        update={"records": state.records.model_copy(update={"children": (incomplete,)})}
     )
     for index in range(count):
         event, change = inspect_child(state, index, sequence)
         state = apply_inspection(state, event, change)
-    restored = state.intents.children[0]
+    restored = state.records.children[0]
     assert restored == certified
     event, change = inspect_child(state, 0, sequence)
     assert change.state.children == (certified,)
@@ -361,13 +365,13 @@ def test_identical_fresh_inspections_certify_incomplete_history_without_rewritin
 
 
 @given(
-    phase=st.sampled_from(tuple(core.IntentPhase)),
+    phase=st.sampled_from(tuple(core.RequestPhase)),
     terminal=st.booleans(),
     accepted=st.booleans(),
     status=st.sampled_from(tuple(core.ObservationStatus)),
 )
 def test_only_exact_completed_successful_query_certifies_child_history(
-    phase: core.IntentPhase, *, terminal: bool, accepted: bool, status: core.ObservationStatus
+    phase: core.RequestPhase, *, terminal: bool, accepted: bool, status: core.ObservationStatus
 ) -> None:
     state = discovered_state()
     event, _ = inspect_child(state, 0, 2)
@@ -382,10 +386,10 @@ def test_only_exact_completed_successful_query_certifies_child_history(
         row.model_copy(update={"phase": phase, "observation": event.observation})
         if row.request_id == event.observation.request_id
         else row
-        for row in state.intents.intents
+        for row in state.records.records
     )
-    ledger = state.intents.model_copy(update={"intents": records})
-    context = core.IntentsContext(
+    ledger = state.records.model_copy(update={"records": records})
+    context = core.RecordsContext(
         run=state.run,
         registry=state.registry,
         attempts=state.attempts,
@@ -394,7 +398,7 @@ def test_only_exact_completed_successful_query_certifies_child_history(
     )
     change = core.recover(ledger, context, event)
     proved = (
-        phase == core.IntentPhase.COMPLETED
+        phase == core.RequestPhase.COMPLETED
         and terminal
         and accepted
         and status == core.ObservationStatus.SUCCEEDED
@@ -410,21 +414,21 @@ def test_foreign_refresh_cannot_erase_migrated_source_sequence_bound(sequence: i
         state, 1, sequence, terminal=False, released=False, status=core.ObservationStatus.PENDING
     )
     state = apply_inspection(state, event, change)
-    legacy = state.intents.children[0].model_copy(update={"observation_watermarks": ()})
+    legacy = state.records.children[0].model_copy(update={"observation_watermarks": ()})
     state = state.model_copy(
-        update={"intents": state.intents.model_copy(update={"children": (legacy,)})}
+        update={"records": state.records.model_copy(update={"children": (legacy,)})}
     )
     event, change = inspect_child(state, 0, 1)
     state = apply_inspection(state, event, change)
-    assert state.intents.children[0].observation == legacy.observation
+    assert state.records.children[0].observation == legacy.observation
     event, change = inspect_child(state, 1, sequence - 1)
-    assert change.state.children == state.intents.children
+    assert change.state.children == state.records.children
     assert not change.state.children[0].watermark_history_complete
     with pytest.raises(core.ContractError, match="conflicting ownership observation sequence"):
         inspect_child(state, 1, sequence)
     event, change = inspect_child(state, 1, sequence + 1)
     state = apply_inspection(state, event, change)
-    assert state.intents.children[0].watermark_history_complete
+    assert state.records.children[0].watermark_history_complete
     assert drain(state).state.run.status == core.RunStatus.TERMINAL
 
 
@@ -437,38 +441,39 @@ def test_cached_old_epoch_inspection_cannot_recertify_missing_history(
     state = discovered_state()
     old_event, change = inspect_child(state, 0, sequence)
     state = apply_inspection(state, old_event, change)
-    legacy = state.intents.children[0].model_copy(
+    legacy = state.records.children[0].model_copy(
         update={"observation_watermarks": (), "watermark_history_complete": False}
     )
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"children": (legacy,), "recovery": core.RecoveryBarrier(epoch=epoch - 1)}
             )
         }
     )
     state = core.step(reload(state), core.RecoveryStarted(epoch=epoch, now_at=1.0)).state
-    context = core.IntentsContext(
+    context = core.RecordsContext(
         run=state.run,
         registry=state.registry,
         attempts=state.attempts,
         sessions=state.sessions,
         evaluation=state.evaluation,
     )
-    replayed = core.recover(state.intents, context, old_event)
+    replayed = core.recover(state.records, context, old_event)
     assert replayed.state.children == (legacy,)
     assert replayed.state.recovery.phase == core.RecoveryPhase.RECOVERING
-    state = state.model_copy(update={"intents": replayed.state})
-    again = core.recover(state.intents, context, core.RecoveryStarted(epoch=epoch + 1, now_at=1.0))
+    state = state.model_copy(update={"records": replayed.state})
+    again = core.recover(state.records, context, core.RecoveryStarted(epoch=epoch + 1, now_at=1.0))
     assert again.state.recovery.phase == core.RecoveryPhase.RECOVERING
     assert any(
-        isinstance(request, core.InspectRequest) and request.resource_id == legacy.resource_id
-        for request in again.requests
+        isinstance(outbound.request, core.InspectRequest)
+        and outbound.request.resource_id == legacy.resource_id
+        for outbound in again.requests
     )
     # Correlate the real current-epoch query, preserving the same source fact.
     event, change = inspect_child(state, 0, sequence, query_epoch=epoch)
     state = apply_inspection(state, event, change)
-    assert state.intents.children[0].watermark_history_complete
+    assert state.records.children[0].watermark_history_complete
     assert drain(state).state.run.status == core.RunStatus.TERMINAL
 
 
@@ -483,14 +488,14 @@ def test_ambiguous_canonical_source_cannot_produce_child_watermark(
     selected = (
         event.observation.request_id if identity == "query" else event.target.observation.request_id
     )
-    record = next(row for row in change.state.intents if row.request_id == selected)
+    record = next(row for row in change.state.records if row.request_id == selected)
     ledger = change.state.model_copy(
         update={
-            "children": state.intents.children,
-            "intents": (*change.state.intents, *((record,) * duplicates)),
+            "children": state.records.children,
+            "records": (*change.state.records, *((record,) * duplicates)),
         }
     )
-    context = core.IntentsContext(
+    context = core.RecordsContext(
         run=state.run,
         registry=state.registry,
         attempts=state.attempts,

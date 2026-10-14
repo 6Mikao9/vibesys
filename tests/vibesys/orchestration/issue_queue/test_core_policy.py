@@ -1,96 +1,68 @@
-"""The core policy of an issue-queue run follows from its options and nothing else."""
+"""What an issue-queue run asks of core follows from its config and its roles and nothing else."""
 
 from __future__ import annotations
 
 import json
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vibesys.orchestration.issue_queue.core_policy.api import (
-    PolicyInputs,
-    RunBounds,
-    build_core_policy,
+from vibesys.orchestration.issue_queue.core_policy.api import project_run_snapshot, requirements_for
+from vibesys.orchestration.issue_queue.models import IssuePerfEvalResult
+from vibesys.orchestration.issue_queue.search.api import (
+    IssueBrief,
+    IssueQueueConfig,
+    QueueSnapshot,
+    budget,
+    issue_queue,
 )
-from vibesys.orchestration.issue_queue.models import GenericIssuePerfEvalResult, IssueQueueOptions
-from vibesys.orchestration.issue_queue.strategy.api import (
-    IMPLEMENTER_REPLY,
-    JUDGE_REPLY,
-    PERF_REPLY,
-    plain_operation_registry,
-    role_id,
-)
-from vs_core.api import ArtifactId, ArtifactRef, AssessmentKind, Capabilities, validate_startup
+from vibesys.run.contracts import IterationTree
+from vs_core.api import AssessmentKind, Capabilities, validate_startup
+from vs_sim.api.testing import examples
 
-BOUNDS = RunBounds(
-    queue_allowance_seconds=900, observe_interval_seconds=10, observe_backoff_cap_seconds=120
-)
-INPUTS = PolicyInputs(
-    objective="serve it",
-    baseline_commit="abc123",
-    evaluator_digest="e",
-    workload_digest="w",
-    environment_digest="env",
-    recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
-    accuracy_configured=True,
-    benchmark_configured=True,
-)
-GENERIC_INPUTS = INPUTS.model_copy(update={"domain_id": "generic"})
 OPTIONS = st.builds(
-    IssueQueueOptions,
+    IssueQueueConfig,
     max_rounds=st.integers(1, 6),
     max_attempts_per_issue=st.integers(1, 4),
     max_issues_per_perf_eval=st.integers(1, 4),
     max_issues_per_round=st.none() | st.integers(1, 8),
 )
+MINIMAL = {"max_rounds": 1, "max_attempts_per_issue": 1, "max_issues_per_perf_eval": 1}
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(options=OPTIONS)
 def test_the_attempt_bound_is_the_rounds_times_the_issues_per_round_and_an_evaluation(
-    options: IssueQueueOptions,
+    options: IssueQueueConfig,
 ) -> None:
-    policy = build_core_policy(options, BOUNDS, INPUTS)
-    per_round = options.issues_per_round
-    assert policy.limits.max_attempts == options.max_rounds * (per_round + 1)
-    assert policy.limits.max_parallel == 1
-    assert policy.limits.max_turns >= policy.limits.max_attempts
+    spent = budget(options)
+
+    assert spent.attempts == options.max_rounds * (options.issues_per_round + 1)
+    assert spent.parallel == 1
+    assert spent.turns >= spent.attempts
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(options=OPTIONS)
 def test_the_default_round_cap_is_twice_the_evaluators_cap_plus_two(
-    options: IssueQueueOptions,
+    options: IssueQueueConfig,
 ) -> None:
     default = options.model_copy(update={"max_issues_per_round": None})
+
     assert default.issues_per_round == 2 * options.max_issues_per_perf_eval + 2
 
 
-@given(options=OPTIONS)
-def test_every_declared_reply_schema_has_a_reply_type_and_the_evaluators_is_capped(
-    options: IssueQueueOptions,
-) -> None:
-    policy = build_core_policy(options, BOUNDS, INPUTS)
-    assert set(policy.reply_schemas) == {IMPLEMENTER_REPLY, JUDGE_REPLY, PERF_REPLY}
-    cap = options.max_issues_per_perf_eval
-    capped = policy.reply_schemas[PERF_REPLY]
-    schema = json.dumps(capped.model_json_schema())
-    assert f'"maxItems": {cap}' in schema
+def test_a_serving_performance_reply_is_read_with_its_load_levels_and_trends() -> None:
+    schema = json.dumps(IssuePerfEvalResult.model_json_schema())
+
+    for serving_field in ("load_levels", "token_throughput", "throughput_trend"):
+        assert serving_field in schema
 
 
-def test_the_performance_reply_schema_describes_domain_neutral_measurements() -> None:
-    policy = build_core_policy(
-        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
-        BOUNDS,
-        GENERIC_INPUTS,
-    )
-    reply = policy.reply_schemas[PERF_REPLY]
-    schema = json.dumps(reply.model_json_schema())
-
-    for serving_field in ("load_levels", "token_throughput", "ttft", "tpot"):
-        assert serving_field not in schema
-
-    parsed = reply.model_validate_json(
+def test_a_domain_neutral_performance_reply_names_measurements_and_a_primary_trend() -> None:
+    parsed = IssuePerfEvalResult.model_validate_json(
         json.dumps(
             {
                 "analysis": "The queue benchmark improved.",
@@ -106,97 +78,102 @@ def test_the_performance_reply_schema_describes_domain_neutral_measurements() ->
             }
         )
     )
-    assert isinstance(parsed, GenericIssuePerfEvalResult)
-    assert parsed.metrics.measurements[0].name == "operations_per_second"
+
+    assert parsed.primary_trend == "improved"
+    assert parsed.secondary_trend == "mixed"
 
 
-def test_an_in_flight_serving_performance_reply_remains_compatible() -> None:
-    policy = build_core_policy(
-        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
-        BOUNDS,
-        GENERIC_INPUTS,
-    )
-    reply = policy.reply_schemas[PERF_REPLY]
-    parsed = reply.model_validate_json(
-        json.dumps(
-            {
-                "analysis": "Measured the configured serving workload.",
-                "metrics": {
-                    "load_levels": [
-                        {
-                            "target_rate": 1.0,
-                            "actual_rate": 1.0,
-                            "num_requests": 1,
-                            "num_completed": 1,
-                            "num_failed": 0,
-                            "duration": 1.0,
-                            "throughput": {
-                                "request_throughput": 1.0,
-                                "token_throughput": 8.0,
-                            },
-                        }
-                    ]
-                },
-                "evaluator_feedback": [],
-                "new_issues": [],
-                "throughput_trend": "improved",
-                "latency_trend": "mixed",
-            }
+def test_a_reply_that_mixes_the_two_vocabularies_is_refused() -> None:
+    with pytest.raises(ValidationError, match="reported with"):
+        IssuePerfEvalResult.model_validate_json(
+            json.dumps(
+                {
+                    "analysis": "x",
+                    "metrics": {"measurements": []},
+                    "evaluator_feedback": [],
+                    "throughput_trend": "improved",
+                    "latency_trend": "mixed",
+                }
+            )
         )
-    )
-
-    assert isinstance(parsed, GenericIssuePerfEvalResult)
-    assert parsed.primary_metric_trend == "improved"
-    assert parsed.secondary_metric_trend == "mixed"
-    assert parsed.metrics.measurements == ()
-    normalized = json.dumps(parsed.model_dump(mode="json"))
-    assert "load_levels" not in normalized
-
-
-def test_the_llm_serving_performance_contract_retains_its_structured_metrics() -> None:
-    policy = build_core_policy(
-        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
-        BOUNDS,
-        INPUTS,
-    )
-    schema = json.dumps(policy.reply_schemas[PERF_REPLY].model_json_schema())
-
-    assert "load_levels" in schema
-    assert "token_throughput" in schema
-    assert "throughput_trend" in schema
-    assert '"measurements":' not in schema
 
 
 def test_the_judge_is_the_declared_authority_for_the_only_required_assessment() -> None:
-    policy = build_core_policy(
-        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
-        BOUNDS,
-        INPUTS,
-    )
-    (authority,) = policy.requirements.assessment_authorities
+    requirements = requirements_for()
+
+    (authority,) = requirements.assessment_authorities
     assert authority.kind is AssessmentKind.LOCAL_VALIDATION
-    assert authority.role_id == role_id("judge")
-    assert policy.requirements.required_assessments == (AssessmentKind.LOCAL_VALIDATION,)
+    assert authority.role_id == issue_queue.ids.role_id("judge")
+    assert requirements.required_assessments == (AssessmentKind.LOCAL_VALIDATION,)
 
 
 def test_the_declaration_is_served_by_the_operations_the_run_registers() -> None:
-    policy = build_core_policy(
-        IssueQueueOptions(max_rounds=1, max_attempts_per_issue=1, max_issues_per_perf_eval=1),
-        BOUNDS,
-        INPUTS,
-    )
-    offered = Capabilities(
-        lifecycle=frozenset({"suspend"}), operations=plain_operation_registry().descriptors
-    )
-    selected = validate_startup(policy.strategy.declaration, offered)
-    assert selected.operations == plain_operation_registry().descriptors
+    registry = issue_queue.registry()
+    assert registry is not None
+    offered = Capabilities(lifecycle=frozenset({"suspend"}), operations=registry.descriptors)
+
+    selected = validate_startup(issue_queue.declaration, offered)
+
+    assert selected.operations == registry.descriptors
 
 
-@pytest.mark.parametrize(
-    "field", ["max_rounds", "max_attempts_per_issue", "max_issues_per_perf_eval"]
-)
+@pytest.mark.parametrize("field", list(MINIMAL))
 def test_a_non_positive_budget_is_refused_naming_the_option(field: str) -> None:
-    values = {"max_rounds": 1, "max_attempts_per_issue": 1, "max_issues_per_perf_eval": 1}
-    values[field] = 0
     with pytest.raises(ValidationError, match=field):
-        IssueQueueOptions.model_validate(values)
+        IssueQueueConfig.model_validate({**MINIMAL, field: 0})
+
+
+def test_an_unknown_option_is_refused_naming_the_key() -> None:
+    with pytest.raises(ValidationError, match="turn_drop_backoff_seconds"):
+        IssueQueueConfig.model_validate({**MINIMAL, "turn_drop_backoff_seconds": 5})
+
+
+PROJECTED_KEYS = {
+    "version",
+    "round_idx",
+    "cursor",
+    "phase",
+    "current_issue_id",
+    "bootstrap_done",
+    "issues",
+    "performance",
+}
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    round_idx=st.integers(0, 4),
+    cursor=st.sampled_from(["drain", "assess", "finished"]),
+    current=st.none() | st.integers(1, 5),
+    titles=st.lists(st.text(min_size=1, max_size=5), max_size=4),
+)
+def test_the_projection_keeps_the_fields_clients_have_always_been_given(
+    round_idx: int, cursor: str, current: int | None, titles: list[str]
+) -> None:
+    snapshot = QueueSnapshot(
+        round_idx=round_idx,
+        cursor=cursor,  # ty: ignore[invalid-argument-type]
+        current_issue_id=current,
+        issues=tuple(
+            IssueBrief(id=n, type="task", status="open", title=title, attempts=0)
+            for n, title in enumerate(titles, start=1)
+        ),
+    )
+
+    payload = project_run_snapshot(snapshot, experiment_revision=0).payload
+
+    assert payload is not None
+    assert set(payload) == PROJECTED_KEYS
+    assert payload["bootstrap_done"] is bool(titles)
+    assert (payload["phase"] is not None) is (current is not None or cursor == "assess")
+
+
+def test_a_run_that_has_not_filed_its_first_issue_is_pending() -> None:
+    projected = project_run_snapshot(
+        QueueSnapshot(round_idx=0, cursor="drain"), experiment_revision=0
+    )
+
+    assert projected.payload is not None
+    assert projected.payload["bootstrap_done"] is False
+    assert isinstance(projected.iterations, IterationTree)
+    assert projected.iterations.nodes[0].status.value == "pending"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -16,20 +16,23 @@ from vibesys.api import (
     IterationTree,
     catalog,
 )
-from vibesys.orchestration.dynamic.core_policy.api import project_strategy_state
-from vibesys.orchestration.dynamic.strategy.api import (
-    AttemptRecord,
-    DynamicStrategyState,
+from vibesys.candidates.api import NotConfigured
+from vibesys.orchestration.dynamic.core_policy.api import project_run_snapshot
+from vibesys.orchestration.dynamic.search.api import (
+    FinishedWork,
+    HypothesisRecord,
+    RoundRecord,
+    Running,
+    RunSnapshot,
     WorkKind,
-    WorkPhase,
     WorkPlan,
 )
 from vibesys.orchestration.issue_queue.core_policy.api import (
-    project_strategy_state as project_issue_queue_state,
+    project_run_snapshot as project_issue_queue_snapshot,
 )
-from vibesys.orchestration.issue_queue.strategy.api import BoardState, IssueQueueStrategyState
+from vibesys.orchestration.issue_queue.search.api import IssueBrief, QueueSnapshot
 from vs_core.api import AttemptId, RevisionRef
-from vs_issue_tracker.api import IssueRow, IssueStatus, IssueType
+from vs_sim.api.testing import examples
 
 
 def _node(identifier: str, ordinal: int) -> IterationSummary:
@@ -42,6 +45,7 @@ def _node(identifier: str, ordinal: int) -> IterationSummary:
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(st.lists(st.text(min_size=1), min_size=1, max_size=20, unique=True))
 def test_revision_is_stable_for_identical_nodes(identifiers: list[str]) -> None:
     nodes = tuple(_node(identifier, ordinal) for ordinal, identifier in enumerate(identifiers))
@@ -95,7 +99,9 @@ def test_catalog_has_an_explicit_iteration_disposition_for_every_builtin() -> No
         for registration in registrations
     )
 
-    projection = project_issue_queue_state(IssueQueueStrategyState(), experiment_revision=0)
+    projection = project_issue_queue_snapshot(
+        QueueSnapshot(round_idx=0, cursor="drain"), experiment_revision=0
+    )
     assert isinstance(projection.iterations, IterationTree)
     assert projection.iterations.nodes == (
         IterationSummary(
@@ -109,33 +115,29 @@ def test_catalog_has_an_explicit_iteration_disposition_for_every_builtin() -> No
 
 
 def test_issue_queue_projects_board_items_in_stable_identity_order() -> None:
-    def issue(identifier: int, status: IssueStatus, *, attempts: int = 0) -> IssueRow:
-        return IssueRow(
+    def issue(identifier: int, status: str, *, attempts: int = 0) -> IssueBrief:
+        return IssueBrief(
             id=identifier,
-            type=IssueType.BUG,
+            type="bug",
             status=status,
             title=f"Issue {identifier}",
             attempts=attempts,
-            created_by="operator",
-            created_iter=1,
         )
 
-    state = IssueQueueStrategyState(
-        board=BoardState(
-            bootstrap_done=True,
-            issues=(
-                issue(4, IssueStatus.BLOCKED, attempts=2),
-                issue(1, IssueStatus.IN_PROGRESS, attempts=1),
-                issue(3, IssueStatus.CLOSED),
-                issue(2, IssueStatus.OPEN),
-            ),
-        )
+    state = QueueSnapshot(
+        round_idx=1,
+        cursor="drain",
+        issues=(
+            issue(4, "blocked", attempts=2),
+            issue(1, "in_progress", attempts=1),
+            issue(3, "closed"),
+            issue(2, "open"),
+        ),
     )
 
-    projected = project_issue_queue_state(state, experiment_revision=7).iterations
-    reopened = project_issue_queue_state(
-        IssueQueueStrategyState.model_validate_json(state.model_dump_json()),
-        experiment_revision=7,
+    projected = project_issue_queue_snapshot(state, experiment_revision=7).iterations
+    reopened = project_issue_queue_snapshot(
+        QueueSnapshot.model_validate_json(state.model_dump_json()), experiment_revision=7
     ).iterations
 
     assert isinstance(projected, IterationTree)
@@ -160,48 +162,41 @@ def test_issue_queue_projects_board_items_in_stable_identity_order() -> None:
 
 def test_dynamic_iterations_group_attempts_under_stable_workstreams() -> None:
     parent = RevisionRef.of_git_commit("parent")
-    attempts = (
-        AttemptRecord(
-            plan=WorkPlan(kind=WorkKind.IMPLEMENT, work_id="cache", title="Cache lookups"),
-            sequence=3,
-            attempt=AttemptId(root="attempt:cache:2"),
-            parent=parent,
-            phase=WorkPhase.DONE,
+    cache = WorkPlan(kind=WorkKind.IMPLEMENT, work_id="cache", title="Cache lookups")
+    parser = WorkPlan(kind=WorkKind.IMPLEMENT, work_id="parser", title="Parser")
+    snapshot = RunSnapshot(
+        baseline=NotConfigured(),
+        hypotheses=(
+            HypothesisRecord(
+                hypothesis_id="cache",
+                title="Cache lookups",
+                hypothesis="caching helps",
+                first_sequence=1,
+                rounds=(RoundRecord(sequence=1, attempt=AttemptId(root="attempt:cache:1")),),
+            ),
         ),
-        AttemptRecord(
-            plan=WorkPlan(kind=WorkKind.IMPLEMENT, work_id="parser", title="Parser"),
-            sequence=2,
-            attempt=AttemptId(root="attempt:parser:1"),
-            parent=parent,
-            phase=WorkPhase.REVIEW,
-        ),
-        AttemptRecord(
-            plan=WorkPlan(kind=WorkKind.IMPLEMENT, work_id="cache", title="Cache lookups"),
-            sequence=1,
-            attempt=AttemptId(root="attempt:cache:1"),
-            parent=parent,
-            phase=WorkPhase.DONE,
-        ),
+        # Finished out of the order they were scheduled in; the tree keeps schedule order.
+        finished=(FinishedWork(sequence=1, plan=cache, parent=parent),),
+        running=(Running(sequence=2, plan=parser),),
     )
 
-    tree = project_strategy_state(
-        DynamicStrategyState(attempts=attempts), experiment_revision=9
-    ).iterations
+    tree = project_run_snapshot(snapshot, experiment_revision=9).iterations
 
     assert isinstance(tree, IterationTree)
-    roots = [node for node in tree.nodes if node.parent_id is None]
-    assert [(node.id, node.ordinal, node.child_count) for node in roots] == [
-        ("workstream:cache", 1, 2),
-        ("workstream:parser", 2, 1),
-    ]
     assert [
-        (node.id, node.parent_id, node.kind, node.ordinal)
+        (node.id, node.parent_id, node.kind, node.ordinal, node.status, node.child_count)
         for node in tree.nodes
-        if node.parent_id is not None
     ] == [
-        ("attempt:cache:1", "workstream:cache", IterationKind.ATTEMPT, 1),
-        ("attempt:cache:2", "workstream:cache", IterationKind.ATTEMPT, 3),
-        ("attempt:parser:1", "workstream:parser", IterationKind.ATTEMPT, 2),
+        ("workstream:cache", None, IterationKind.WORKSTREAM, 1, IterationStatus.COMPLETED, 1),
+        ("workstream:parser", None, IterationKind.WORKSTREAM, 2, IterationStatus.ACTIVE, 0),
+        (
+            "attempt:cache:1",
+            "workstream:cache",
+            IterationKind.ATTEMPT,
+            1,
+            IterationStatus.COMPLETED,
+            0,
+        ),
     ]
 
 

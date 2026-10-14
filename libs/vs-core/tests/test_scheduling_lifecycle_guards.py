@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
 
 from .proof_digest import value_digest
 
@@ -69,7 +71,7 @@ def _queued_state(count: int, charge: int, generation: int) -> core.CoreState:
             "run": state.run.model_copy(
                 update={
                     "generation": generation,
-                    "limits": core.Limits(max_attempts=count * charge, max_parallel=1),
+                    "limits": sample_limits(max_attempts=count * charge, max_parallel=1),
                     "receipts": receipts,
                 }
             ),
@@ -133,6 +135,7 @@ def _assert_attempts_signal(state: core.CoreState, event: core.CoreEvent, event_
     assert state.model_dump_json() == before
 
 
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     count=st.integers(1, 6),
     charge=st.integers(1, 5),
@@ -148,7 +151,7 @@ def test_expired_accepted_fifo_requests_retirement_and_can_drain(
     state = _queued_state(count + 1, charge, generation)
     held, *queued = state.scheduling.queue
     assert isinstance(held, core.AttemptRequest)
-    stop = core.Stop(
+    stop = core.Finish(
         decision_id=core.DecisionId(root="drain-stop"),
         scope=core.Scope(owner=state.run.run_id, generation=generation),
         mode="drain",
@@ -254,6 +257,7 @@ def test_expired_accepted_fifo_requests_retirement_and_can_drain(
     assert state.scheduling.queue == state.scheduling.slots == ()
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     count=st.integers(1, 6),
     charge=st.integers(1, 5),
@@ -326,7 +330,7 @@ def test_closed_intake_keeps_pause_recovery_and_deadline_execution_guards(
                     "status": core.RunStatus.PAUSED if paused else core.RunStatus.RUNNING,
                 }
             ),
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"recovery": core.RecoveryBarrier(phase=phase)}
             ),
         }

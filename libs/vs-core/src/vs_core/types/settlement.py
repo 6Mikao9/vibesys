@@ -10,8 +10,6 @@ from pydantic import Field
 from .common import (
     AssessmentKind,
     AttemptRef,
-    CompletionStatus,
-    DecisionId,
     EvidenceId,
     EvidenceKey,
     EvidenceKind,
@@ -125,7 +123,7 @@ class AdoptionFailureReason(StrEnum):
     CONTENT_MISMATCH = "content-mismatch"
     """A verification succeeded but named another revision, or none."""
     RETRIES_EXHAUSTED = "retries-exhausted"
-    """Every allowed round ended unproven (``Limits.max_retries`` + 1 rounds)."""
+    """Every allowed round ended unproven (``Limits.max_adoption_rounds`` rounds)."""
 
 
 class Adoption(Value):
@@ -184,19 +182,6 @@ class AssessmentSubmitted(Value):
     settlement: Settlement
 
 
-class SettlementDependencyResolved(Value):
-    """Wake pending settlements after semantic prerequisite completion.
-
-    This is a notification, not acceptance proof. Settlement A rechecks the
-    exact accepted decision receipt and all prerequisites against its context;
-    duplicate notifications cannot create a second settlement.
-    """
-
-    kind: Literal["settlement_dependency_resolved"] = "settlement_dependency_resolved"
-    decision_id: DecisionId
-    status: CompletionStatus
-
-
 class OwnershipSettled(Value):
     """Ownership settled lifecycle contract."""
 
@@ -224,8 +209,8 @@ class AdoptionObserved(Value):
 class AdoptionFailed(Value):
     """An adoption ended for good without a verified result; emitted once.
 
-    The strategy may propose the winner again only while ``rounds`` is at most
-    ``Limits.max_retries``; core refuses a proposal past that bound.
+    The strategy may propose the winner again only while ``rounds`` is below
+    ``Limits.max_adoption_rounds``; core refuses a proposal past that bound.
     """
 
     kind: Literal["adoption_failed"] = "adoption_failed"
@@ -265,12 +250,7 @@ class VerifyAdoption(RequestBase):
 
 
 type SettlementEvent = Annotated[
-    AssessmentSubmitted
-    | SettlementDependencyResolved
-    | OwnershipSettled
-    | WinnerProposed
-    | AdoptionObserved
-    | AttemptSettled,
+    AssessmentSubmitted | OwnershipSettled | WinnerProposed | AdoptionObserved | AttemptSettled,
     Field(discriminator="kind"),
 ]
 type AdoptionRequest = Annotated[AdoptRevision | VerifyAdoption, Field(discriminator="kind")]

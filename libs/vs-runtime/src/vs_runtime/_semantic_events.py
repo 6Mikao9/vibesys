@@ -1,6 +1,6 @@
-"""Committed blocked-intent diagnostics, deduplicated by request identity.
+"""Committed blocked-record diagnostics, deduplicated by request identity.
 
-``BlockIntent`` reports that a target request is blocked and says why. The core
+``BlockRequest`` reports that a target request is blocked and says why. The core
 publication journal carries only strategy events and has no diagnostic variant,
 so these diagnostics go to a runtime-owned journal in the same Project namespace.
 Delivery is an exact replay: the same request identity with the same payload is
@@ -15,8 +15,9 @@ from typing import TYPE_CHECKING, assert_never
 from pydantic import BaseModel, ConfigDict, Field
 
 from vs_core.api import (
-    BlockIntent,
+    BlockRequest,
     ContractError,
+    FailureReason,
     ObservationStatus,
     RequestObserved,
     Scope,
@@ -52,7 +53,7 @@ class BlockDiagnostic(BaseModel):
     request_id: str = Field(min_length=1)
     target: str = Field(min_length=1)
     scope: Scope
-    diagnostic: str
+    reason: FailureReason
 
 
 # What every published (sealed) block reports; inspection reports the same facts.
@@ -86,7 +87,7 @@ class JournalSemanticEvents:
             for name in self._namespace.entries(_JOURNAL)
         )
 
-    async def execute(self, request: BlockIntent, context: ExecutionContext) -> ExecutionResult:
+    async def execute(self, request: BlockRequest, context: ExecutionContext) -> ExecutionResult:
         """Publish once per request identity, then acknowledge that command only."""
         if request.request_id is None:
             raise ContractError(("request_id",), "canonical identity required")
@@ -106,7 +107,7 @@ class JournalSemanticEvents:
                         request_id=request_id.root,
                         target=request.target.root,
                         scope=request.scope,
-                        diagnostic=request.diagnostic,
+                        reason=request.reason,
                     ),
                 )
                 return Settled(Published(sequence=sequence))

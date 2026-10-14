@@ -1,6 +1,11 @@
 # Orchestration strategies and the runtime
 
-Every VibeSys orchestration is a strategy on the `vs-core` lifecycle. A strategy is a pure
+Every VibeSys orchestration is a search on the `vs-core` lifecycle. `dynamic` and `issue_queue`
+are written as flows: one `@search(...)` function each that runs top to bottom, which the runtime
+journals and replays (see [flows.md](flows.md)). The other searches (`evolve`, `multi`,
+`single`) are still state-machine strategies and are being ported to flows one at a time; the
+rest of this page describes that older form wherever it says "strategy", and says "search" where
+both forms apply. A strategy is a pure
 object that decides the next step from a read-only view of the run; the runtime owns the
 loop that executes those steps (agent turns, workspaces, measurements, operations) and
 feeds the outcomes back as events. A plugin is the declaration that joins a strategy to its
@@ -12,7 +17,7 @@ The boundary is deliberate:
 
 | Owner | Holds |
 |---|---|
-| `src/vibesys/orchestration/<strategy>/` | The strategy (`strategy/`), its core policy (`core_policy/`), agent roles, prompts, reply schemas, options and plugin declaration |
+| `src/vibesys/orchestration/<search>/` | The search: a flow in `search/` (or, until ported, a state-machine strategy in `strategy/`), its core policy (`core_policy/`), prompts, options and plugin declaration |
 | `src/vibesys/*_core.py`, `core_wiring.py`, `core_roles.py` | Thin product wiring: build the plan from the run's facts, register the strategy's operations, and join it to the runtime |
 | `src/vibesys/plugin_catalog.py` | The product registry for declared plugin registrations |
 | `src/vibesys/run/`, `src/vibesys/composition.py` | Thin VibeSys composition: open the run's resources, adapt trusted evaluation, translate semantic events, and compose the core host |
@@ -58,7 +63,62 @@ disposition. Catalog construction rejects `UNMAPPED`, so a new built-in cannot s
 publish empty navigation. A policy whose required state is held outside its durable model
 returns typed unavailability instead of reconstructing or duplicating that external state.
 
-## What a strategy declares
+## What a flow search declares
+
+The dynamic search shows the layout. Everything about the search sits in
+`src/vibesys/orchestration/dynamic/search/`, whose public surface is `search/api.py`:
+
+- `_search.py`: the root flow, `dynamic = @search("dynamic", config=DynamicConfig,
+  operations=OPERATIONS, roles=ROLES)`. The remaining `_*.py` modules are flows for one
+  workstream (plan, implement, review, measure) and the pure helpers they share (run record,
+  plan validation, parent choice, prompt contexts). They are private to the package.
+- `_roles.py`: one `Role` per agent (`PLANNER`, `IMPLEMENTER`, `JUDGE`, `PROFILER`), beside the
+  search that asks them. A role holds the prompt template, the reply model, the workspace mode,
+  access, turn time, corrections, lost turns and charge. Role ids are `dynamic-<role name>`.
+  The host adds only what it alone can in `src/vibesys/dynamic_roles.py` (system prompts, tools,
+  capabilities).
+- `_config.py`: `DynamicConfig`, the search's own knobs: `max_rounds`, `max_in_flight`,
+  `judge_every`, `max_unmeasured_turns`, `max_continuation_rounds`, `profiling`.
+- `_budget.py`: `budget(config)`, what the run may spend, derived from the config in one place.
+- `_prompts.py`: the typed prompt contexts the search sends. The search never builds prompt
+  text; templates are rendered from `core_policy/prompts/`.
+- `_run_state.py`: the `RunRecord` the flow folds and the `RunSnapshot` it publishes with
+  `ctx.publish`; status views and tests read the snapshot, not a persisted state class.
+
+The old state-machine package `orchestration/dynamic/strategy/` is deleted, with
+`DynamicStrategyState`, `DynamicOptions` and `from_options`, the child-routing and fold code, and
+`dynamic_core.resolve_core_policy`. `DynamicStrategyState` is replaced by core's journaled
+`FlowState`, which the runtime replays.
+
+Where each setting lives now:
+
+| Setting | Before | Now |
+|---|---|---|
+| Rounds, width, review cadence, give-up rules, profiling | `DynamicOptions` (one model for the operator, the strategy and the task) | `DynamicConfig` in `search/_config.py` |
+| Operator keys at launch | `DynamicOptions` | `DynamicLaunch` in `dynamic/launch.py`: `DynamicConfig` plus the task's inputs (`interface`, `modality`, `operator_constraints`, `metric_space`, `profile_guided`), flat keys, unknown keys rejected |
+| Gates, metric space, stage limits, queue allowance | `CandidateConfig` and the dynamic options | `vs_core.api.TaskTerms` on the run's facts, built by `vibesys.candidates.api.terms_of` and read by flows as `ctx.task.terms` |
+| Turn time, corrections, lost turns, charge | per-role seconds and re-ask fields in the config | the `Role` |
+| Infrastructure retries (node faults, lost jobs) | the config and core | the backend |
+| Run budget | a formula copied into each search | `budget(config)` |
+
+Host wiring for `dynamic` is `src/vibesys/dynamic_core.py` (builds the run plan: the search, its
+config, the run facts and limits), `dynamic_roles.py`, and the dynamic `core_policy/` (prompt
+variables, evidence requirements, and the projection from `RunSnapshot`). Core, not the host,
+ends the run from the winner the flow chose with `ctx.choose`.
+
+`issue_queue` (search name `plain`) has the same layout in
+`src/vibesys/orchestration/issue_queue/search/`: the root `issue_queue` in `_search.py` reads the
+board, asks the pure `Queue` what the board calls for and runs each issue or performance job as a
+flow of its own (`_issue.py`, `_perf.py`); `_board.py`, `_writes.py`, `_queue.py` and the other
+helpers are pure. The board's operations belong to the tracker library: the search lists them in
+`owned=` and its flows ask their owner with `ctx.owners`. Its old `strategy/` package,
+`IssueQueueStrategyState` and `IssueQueueOptions` are gone; the operator's keys are
+`IssueQueueLaunch` (`issue_queue/launch.py`: `IssueQueueConfig` plus `modality` and `tracker`,
+unknown keys rejected).
+
+To add a search, follow [flows.md](flows.md) and the steps under "Adding a plugin" below.
+
+## What a strategy declares (state-machine form)
 
 A strategy declares its phases, its turn table and its settle policy, and the runtime
 handles corrections, lost turns, suspension, checkpoints, refunds, stop and exhaustion. The
@@ -80,7 +140,9 @@ Keep code near the strategy that owns the decision:
 
 - `roles` (or `*_roles.py`): immutable role declarations;
 - `plugin.py`: the plugin declaration and registration;
-- `strategy/`: the pure strategy, its state and its transitions;
+- `search/`: a search written as a flow, with its roles, config and pure helpers, exposed only
+  through `search/api.py`;
+- `strategy/`: for a search not yet ported, the pure strategy, its state and its transitions;
 - `core_policy/`: the plan, limits, projection and reply parsing the runtime joins to the
   strategy, with `prompts/` for the agent-visible templates;
 - `models.py` or focused policy modules: options, reply schemas, deterministic transitions.
@@ -93,24 +155,35 @@ Extract shared policy only when real callers need the same semantics.
 
 ## Adding a plugin
 
-1. Create `src/vibesys/orchestration/<plugin>/` with strict Pydantic options, role
-   declarations, prompts, the strategy and its core policy.
+1. Create `src/vibesys/orchestration/<plugin>/` with strict Pydantic options, prompts, its core
+   policy and a `search/` package: the `@search` flow, its `Role` declarations and an `api.py`
+   that lists the public surface. Flow code takes `ctx` first and uses only `ctx`; see
+   [flows.md](flows.md).
 2. Construct one `OrchestrationPlugin` with a `CorePolicy`; its `agents` tuple is
    authoritative.
 3. Export its product registration and add it to `launch.built_in_orchestrations` through
    the individual registration facade `vibesys.api.catalog`. Declare its iteration
    disposition and, when projected, map durable policy state to stable typed IDs, parent
    links, sibling ordinals, status, and bounded headline metrics.
-4. Add the strategy to the conformance suite and its pure-tier tests (see the `testing`
+4. Add the search to the conformance suite and its tests: flow stories with
+   `vs_core.api.testing.FlowRun` plus property tests of the pure helpers (see the `testing`
    skill), and wiring tests only when the boundary itself changes.
 5. Add any new module edge to `tach.toml` and run `uv run python scripts/check_tach.py`.
 
 A preset that shares an implementation but changes policy options should be a separate
 plugin with its own stable ID and options type.
 
-## Testing a strategy
+## Testing a flow search
 
-Drive the strategy as the shell does: build `RunView`s, feed `StrategyEvent`s, and assert on
+A flow search is tested with `vs_core.api.testing.FlowRun` (see "Testing a flow" in
+[flows.md](flows.md)); the dynamic stories are in `tests/vibesys/orchestration/dynamic/`.
+`tests/architecture/test_search_packages.py` checks that a search package imports `vs_core` only
+through `vs_core.api.search`, declares `api.py`, and that nothing outside imports its private
+modules; `tests/architecture/test_flow_code_is_restricted.py` checks the flow code's imports.
+
+## Testing a strategy (state-machine form)
+
+Drive the strategy as the shell does: build `CoreView`s, feed `StrategyEvent`s, and assert on
 the proposals. `vs_runtime.api.testing` offers the runtime shell kit (`ScriptedExecutors`,
 `drive_shell`, restart-at-boundary) for tests that run a strategy against scripted
 executors, and `tests/support/core_plugins.py` offers stub core plugins for tests of the

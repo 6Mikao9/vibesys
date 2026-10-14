@@ -1,1 +1,1 @@
-"""The multi core policy: limits, replies, projection and templates."""
+"""The multi core policy: evidence requirements, run prompt variables, projection and prompts; import through `api`."""

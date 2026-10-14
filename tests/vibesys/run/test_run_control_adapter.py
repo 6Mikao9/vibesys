@@ -9,6 +9,7 @@ import pytest
 
 from vibesys.api import CoreEventType, RunStopped
 from vibesys.run.integration import LocalRunIntegration
+from vs_core.api import StopMode
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,7 +33,7 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
         )
         integration.control.request_pause()
         integration.control.wait_while_paused()
-        integration.control.request_stop()
+        integration.control.request_stop(StopMode.DRAIN)
         with pytest.raises(RunStopped):
             integration.control.raise_if_stopped()
     finally:

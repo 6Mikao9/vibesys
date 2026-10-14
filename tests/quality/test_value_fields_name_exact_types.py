@@ -9,27 +9,18 @@ no field can hold a subclass that differs from its declared class, unless the fi
 rebuilds subclass instances as itself on validation (`revalidate_instances`).
 
 This walks every model reachable from the persisted envelope (core state and the registered
-strategy states) and fails on a field that could hold such a subclass. It costs nothing at
+strategy states: every search is a `FlowState`) and fails on a field that could hold such a subclass. It costs nothing at
 runtime: the mechanism is closed here instead of checked on every write.
 """
 
 from __future__ import annotations
 
-import importlib
 from types import UnionType
 from typing import Annotated, Literal, TypeAliasType, TypeVar, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
 from vs_core.api import CoreState, RunEnvelope, StrategyState
-
-STRATEGY_STATE_MODULES = (
-    "vibesys.orchestration.dynamic.strategy._state",
-    "vibesys.orchestration.evolve.strategy._state",
-    "vibesys.orchestration.issue_queue.strategy._state",
-    "vibesys.orchestration.multi.strategy._state",
-    "vibesys.orchestration.single.strategy._state",
-)
 
 
 def _product(model: type[BaseModel]) -> bool:
@@ -95,8 +86,6 @@ def _holds_exactly(model: type[BaseModel]) -> bool:
 
 
 def _roots() -> list[type[BaseModel]]:
-    for module in STRATEGY_STATE_MODULES:
-        importlib.import_module(module)
     return [CoreState, RunEnvelope, StrategyState, *_subclasses(StrategyState)]
 
 

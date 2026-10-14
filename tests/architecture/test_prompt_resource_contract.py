@@ -13,15 +13,18 @@ from typing import TYPE_CHECKING
 import pytest
 from jinja2 import Environment, meta
 
-from vs_core.api import EvidenceId, EvidenceKind, ObservationStatus, RevisionId, RevisionRef
+from vs_core.api import (
+    EvidenceId,
+    EvidenceKind,
+    ObservationStatus,
+    ReplyError,
+    ReplyErrorCode,
+    RevisionId,
+    RevisionRef,
+)
 
 if __name__ != "packaged_prompt_contract":
     from tests.support import run_test_command
-    from tests.support.distribution_build import (
-        PrivatePackagingSource,
-        build_distribution,
-        copy_private_packaging_source,
-    )
 
 from vibesys.constants import ComputeBackend
 from vibesys.hypothesis import (
@@ -33,15 +36,20 @@ from vibesys.hypothesis import (
     TerminalWorkspaceEdits,
 )
 from vibesys.metrics import Objective
-from vibesys.orchestration.dynamic.strategy.api import PlannerPrompt, ReviewEvaluation
+from vibesys.orchestration.dynamic.search.api import (
+    Blocker,
+    BlockerKind,
+    PlannerPrompt,
+    ReviewEvaluation,
+)
 from vibesys.orchestration.evolve.population import Individual
-from vibesys.orchestration.issue_queue.strategy.api import IssueBrief, PriorPerformance
+from vibesys.orchestration.issue_queue.search.api import IssueBrief, PriorPerformance
 from vibesys.orchestration.multi.models import (
     ImplementerResponse,
     JudgeResponse,
     PreRoundDecision,
 )
-from vibesys.orchestration.multi.strategy.api import (
+from vibesys.orchestration.multi.search.api import (
     GateFacts,
     ImplementerClaims,
     ValidationFailure,
@@ -83,9 +91,9 @@ from vs_runtime.api.testing import FakeProjectMaterializationEffects
 from vs_sandbox.api import DockerSandbox, HostResourceAccess, host_resource_for_mount
 
 if TYPE_CHECKING:
-    from vs_sandbox.api import HostResource
+    from tests.support.distribution_build import BuiltWheel, PrivatePackagingSource
 
-ROOT = Path(__file__).resolve().parents[2]
+    from vs_sandbox.api import HostResource
 
 
 @dataclass(frozen=True)
@@ -97,15 +105,14 @@ class _PackagedTree:
 
 
 @pytest.fixture(scope="module")
-def packaged_tree(tmp_path_factory: pytest.TempPathFactory) -> _PackagedTree:
-    """Build in private scratch so concurrent packaging checks share no build output."""
-    scratch = tmp_path_factory.mktemp("prompt-wheel")
-    source = copy_private_packaging_source(ROOT, scratch / "checkout")
-    build_distribution(source, scratch / "dist", artifact="wheel")
-    installed = scratch / "installed"
-    with zipfile.ZipFile(next((scratch / "dist").glob("vibesys-*.whl"))) as archive:
+def packaged_tree(
+    tmp_path_factory: pytest.TempPathFactory, built_wheel: BuiltWheel
+) -> _PackagedTree:
+    """The session's one wheel, unpacked in private scratch."""
+    installed = tmp_path_factory.mktemp("prompt-wheel") / "installed"
+    with zipfile.ZipFile(built_wheel.wheel) as archive:
         archive.extractall(installed)
-    return _PackagedTree(source=source, installed=installed)
+    return _PackagedTree(source=built_wheel.source, installed=installed)
 
 
 def assert_every_source_prompt_is_in_the_wheel(packaged_tree: _PackagedTree) -> None:
@@ -125,6 +132,7 @@ def assert_every_source_prompt_is_in_the_wheel(packaged_tree: _PackagedTree) -> 
     assert not missing, f"Prompts missing from wheel: {missing}"
 
 
+@pytest.mark.xdist_group("built_wheel")
 def test_every_packaged_prompt_renders_without_checkout_fallback(
     packaged_tree: _PackagedTree,
 ) -> None:
@@ -423,7 +431,7 @@ def render_packaged_prompts(installed: Path) -> int:
             resource_roots,
             frozenset(),
         )
-    selected_workspaces = stage_backend_workspaces(installed)
+    stage_pruned_backend_workspace(installed)
     environment = Environment(autoescape=True)
     templates = sorted(
         path
@@ -462,13 +470,8 @@ def render_packaged_prompts(installed: Path) -> int:
         values = template_context(path, template_inputs, mounted_context, free)
         rendered = render_template(path.relative_to(root).as_posix(), template_dir=root, **values)
         assert not re.search(r"{{|{%|{#", rendered), path
-        citation_workspace, citation_resources = workspace, resource_roots
-        if path.is_relative_to(common / "backend"):
-            backend = ComputeBackend(path.relative_to(common / "backend").parts[0])
-            citation_workspace, citation_resources = selected_workspaces[backend]
-        assert_resource_citations(
-            rendered, path, citation_workspace, citation_resources, runtime_paths
-        )
+        assert_resource_citations(rendered, path, workspace, resource_roots, runtime_paths)
+        assert_citations_survive_pruning(rendered, path, common)
         assert_mounted_citations(rendered, path, mounts, sandbox)
         for masked in hidden:
             assert str(masked.path) not in rendered, path
@@ -561,8 +564,14 @@ def core_policy_context() -> dict[str, object]:
         "required_fields": (),
         "prior_failure_tail": "AssertionError: fixture",
         "prior_failure_fence": "```",
-        "blocker": "tests/test_engine.py::test_decode fails to import",
-        "narrowed_step": "Make the import resolve first.",
+        "last_blocker": Blocker(
+            kind=BlockerKind.FAILED,
+            summary="tests/test_engine.py::test_decode fails to import",
+            next_step="Make the import resolve first.",
+        ),
+        "rejection": "The candidate removes the retry loop.",
+        # A correction names the request it repeats; the template only asks whether it is set.
+        "of": "planning request",
         "turns_without_candidate": 2,
         # The issue queue's typed contexts.
         "board": (
@@ -570,6 +579,7 @@ def core_policy_context() -> dict[str, object]:
         ),
         "analysis": "The health route is missing.",
         "max_new_issues": 2,
+        "named": 3,
         "prior": (
             PriorPerformance(
                 iteration=1,
@@ -612,9 +622,13 @@ def core_policy_context() -> dict[str, object]:
         "invariants": "fixture",
         "minimum_acceptance_criteria": "fixture",
         "no_valid_reply": None,
+        "problem": None,
+        "agent": "implementer",
+        "retained": revision,
+        "errors": (ReplyError(path=("reasoning",), code=ReplyErrorCode.MISSING),),
         "official_due": True,
         "official_reason": "cadence",
-        "profiler_id": "none",
+        "profiler_id": "linux_cpu",
         "title": "fixture title",
     }
 
@@ -813,6 +827,24 @@ def assert_resource_citations(
             assert_workspace_path(reference.rstrip("."), template, workspace)
 
 
+def assert_citations_survive_pruning(rendered: str, template: Path, common: Path) -> None:
+    """A backend's template must not cite a ``serving-systems`` path its workspace prunes."""
+    if not template.is_relative_to(common / "backend"):
+        return
+    backend = ComputeBackend(template.relative_to(common / "backend").parts[0])
+    excluded = tuple(Path(item) for item in platform_skill_excluded_paths(backend))
+    for citation in re.findall(
+        r"(?:resources/skills/|\.agents/skills/)?serving-systems/[\w./-]+", rendered
+    ):
+        inside = Path(citation.rstrip(".")).parts
+        inside = inside[inside.index("serving-systems") + 1 :]
+        assert not any(Path(*inside).is_relative_to(item) for item in excluded), (
+            template,
+            citation,
+            "missing workspace input",
+        )
+
+
 def runtime_path_context(context: dict[str, object]) -> frozenset[str]:
     """Collect known existing paths from actual artifact writers and typed receipts."""
     names = ("objective_location", "reference_path", "session_state_dir")
@@ -916,18 +948,22 @@ def assert_confinement_negative_controls(workspace: Path) -> None:
             assert_workspace_path(reference, Path("negative-control"), workspace)
 
 
-def stage_backend_workspaces(installed: Path) -> dict[ComputeBackend, tuple[Path, dict[str, Path]]]:
-    """Verify citations after the same foreign-platform pruning a real run applies."""
-    selected = {}
-    for backend in ComputeBackend:
-        workspace, resources = stage_prompt_workspace(installed, backend)
-        platforms = workspace / "serving-systems" / Path(*PLATFORMS_PARENT)
-        for filename in PLATFORM_SKELETON:
-            assert (platforms / backend.value / filename).is_file(), (backend, filename)
-        for excluded in platform_skill_excluded_paths(backend):
-            assert not (workspace / "serving-systems" / excluded).exists(), (backend, excluded)
-        selected[backend] = (workspace, resources)
-    return selected
+def stage_pruned_backend_workspace(installed: Path) -> tuple[ComputeBackend, Path]:
+    """Stage one backend's workspace with the real pruning, as proof the exclusions apply.
+
+    Staging copies the whole skill tree, which dominates this contract's cost, so only
+    one backend is staged for real. Every backend's exclusions come from the same product
+    function, and ``assert_resource_citations`` applies them to the citations of the
+    backend's own templates against the shared workspace.
+    """
+    backend = next(item for item in ComputeBackend if platform_skill_excluded_paths(item))
+    workspace, _ = stage_prompt_workspace(installed, backend)
+    platforms = workspace / "serving-systems" / Path(*PLATFORMS_PARENT)
+    for filename in PLATFORM_SKELETON:
+        assert (platforms / backend.value / filename).is_file(), (backend, filename)
+    for excluded in platform_skill_excluded_paths(backend):
+        assert not (workspace / "serving-systems" / excluded).exists(), (backend, excluded)
+    return backend, workspace
 
 
 def assert_mounted_negative_controls(

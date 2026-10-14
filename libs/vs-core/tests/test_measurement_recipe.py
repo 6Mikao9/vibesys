@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    EvidenceKind,
     MeasurementRecipe,
     RevisionId,
     RevisionRef,
@@ -30,6 +31,7 @@ def _recipe(seconds: tuple[float, float, float], queue: float) -> MeasurementRec
         ),
         queue_allowance=queue,
         accuracy_stage="accuracy",
+        accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
     )
 
 
@@ -45,13 +47,14 @@ _PICK = st.lists(st.sampled_from(_NAMES), unique=True, min_size=1).map(
     picked=_PICK,
     now=st.integers(0, 1_000_000).map(float),
 )
-def test_a_plan_orders_its_stages_and_ends_after_every_budget_and_the_queue(
+def test_a_plan_orders_its_stages_and_is_bounded_by_every_budget_and_the_queue(
     seconds: tuple[float, float, float], queue: float, picked: tuple[str, ...], now: float
 ) -> None:
     plan = _recipe(seconds, queue).plan(CANDIDATE, purpose="official", now_at=now, stages=picked)
     assert tuple(stage.stage_id for stage in plan.stages) == picked
     assert [stage.depends_on for stage in plan.stages] == [()] + [(name,) for name in picked[:-1]]
-    assert plan.deadline_at == now + sum(stage.execution_budget for stage in plan.stages) + queue
+    assert plan.time_bound == sum(stage.execution_budget for stage in plan.stages) + queue
+    assert plan.time_bound == _recipe(seconds, queue).budget(picked)
     assert plan.accuracy_stage == ("accuracy" if "accuracy" in picked else None)
 
 

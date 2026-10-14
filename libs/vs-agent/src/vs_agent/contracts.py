@@ -48,18 +48,31 @@ class AgentTurnTimeoutError(TimeoutError):
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
 
 
+@dataclass(frozen=True, slots=True)
+class SchemaViolation:
+    """One problem a reply has against its schema: the field it is at and what is wrong."""
+
+    path: tuple[str | int, ...]
+    """Where in the reply; empty when the reply as a whole is meant."""
+    message: str
+    """What is wrong, in the words of whoever validated the reply."""
+
+
 class AgentOutputSchemaError(RuntimeError):
     """The provider gave up producing output that matches the requested response schema.
 
     Raised instead of a provider exit error so a caller can treat it like any
     other invalid structured response. ``detail`` is the provider's last
-    validation errors. The conversation survives: the session keeps it, so a
+    validation errors and ``violations`` the same errors by field; a validator that
+    reports only text yields one violation of the whole reply that holds the text.
+    The conversation survives: the session keeps it, so a
     correction sent as the next turn continues the same work.
     """
 
-    def __init__(self, detail: str) -> None:
+    def __init__(self, detail: str, violations: tuple[SchemaViolation, ...] = ()) -> None:
         """Record the validation errors the provider reported last."""
         self.detail = detail
+        self.violations = violations or (SchemaViolation(path=(), message=detail),)
         super().__init__(f"agent output did not match the response schema: {detail}")
 
 

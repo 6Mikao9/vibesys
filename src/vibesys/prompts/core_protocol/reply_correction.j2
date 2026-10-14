@@ -1,4 +1,5 @@
+{% from '_reply_errors.j2' import reply_errors %}
 Your previous {{ role }} reply violated its output schema:
-{{ error }}
+{{ reply_errors(errors) }}
 
 Reply again with only schema-valid JSON.

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Concatenate, Literal, Self, TypeVar
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from vs_agent.cli_common import materialize_skills
 from vs_agent.contracts import (
@@ -37,7 +37,7 @@ from vs_agent.contracts import (
     session_spec_fingerprint,
 )
 from vs_agent.reply_limits import ReplyGuard, reply_breach
-from vs_agent.runner import validate_typed_response
+from vs_agent.runner import schema_error
 from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
@@ -523,6 +523,11 @@ class FakeAgentClient:
         self._update_session(reuse_session=True, session_key=session_key)
         if session_key is not None:
             self._raw_fingerprints[session_key] = fingerprint
+            # The provider hands out the conversation id with the turn, so it is on record
+            # even when the reply that follows is rejected: a restarted host continues it.
+            self._record_raw_checkpoint(
+                session_spec, session_key, fingerprint, self.provider_session_id(session_key)
+            )
         self._emit_stream(session_spec.role, invocation)
         text = (
             self._resolve_text(session_spec.role, invocation)
@@ -538,7 +543,6 @@ class FakeAgentClient:
                 None if session_key is None else self.provider_session_id(session_key)
             ),
         )
-        self._record_raw_checkpoint(session_spec, session_key, fingerprint, result)
         if observer is not None:
             for chunk in self._stream_chunks.get(session_spec.role) or [text]:
                 observer.on_event(AgentEvent(kind=AgentEventKind.TEXT, text=chunk))
@@ -578,17 +582,17 @@ class FakeAgentClient:
         session_spec: AgentSessionSpec,
         session_key: AgentSessionKey | None,
         fingerprint: str,
-        result: AgentTurnResult,
+        provider_session_id: str | None,
     ) -> None:
         """Persist the provider session id a raw turn produced."""
-        if session_key is None or result.provider_session_id is None:
+        if session_key is None or provider_session_id is None:
             return
         self._session_store.record(
             session_key,
             spec_fingerprint=fingerprint,
             provider=session_spec.provider,
             model=session_spec.model,
-            session_id=result.provider_session_id,
+            session_id=provider_session_id,
             role=session_spec.role,
         )
 
@@ -826,7 +830,10 @@ class FakeAgentClient:
             # exactly as the equivalent agent reply would.
             value = value.model_dump(mode="json")
         _refuse_flood(json.dumps(value))
-        return validate_typed_response(value, response_cls)
+        try:
+            return response_cls.model_validate_json(json.dumps(value))
+        except ValidationError as error:
+            raise schema_error(error) from error
 
     def _resolve_text(self, kind: str, invocation: FakeInvocation) -> str:
         source = _pop(self._text_queues, kind)

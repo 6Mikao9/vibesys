@@ -13,7 +13,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from vs_core.api import EvidenceRef, RevisionRef, Value
+from vs_core.api import Value
 
 
 class CoreProtocolTemplate(StrEnum):
@@ -22,25 +22,6 @@ class CoreProtocolTemplate(StrEnum):
     RESUME = "resume"
     REPLY_CORRECTION = "reply_correction"
     WAIT_UNRECORDED = "wait_unrecorded"
-
-
-class ResumePrompt(Value):
-    """Continuation of a suspended turn after its awaited evaluations settled."""
-
-    template: Literal[CoreProtocolTemplate.RESUME] = CoreProtocolTemplate.RESUME
-    role: Literal["implementer", "judge", "profiler"]
-    retained_revision: RevisionRef | None
-    timed_out: bool
-    cited_evidence: tuple[EvidenceRef, ...] = ()
-    repeated_failure: str | None = None
-
-
-class ReplyCorrectionPrompt(Value):
-    """Why the previous reply violated its output schema."""
-
-    template: Literal[CoreProtocolTemplate.REPLY_CORRECTION] = CoreProtocolTemplate.REPLY_CORRECTION
-    role: Literal["planner", "implementer", "judge", "profiler"]
-    error: str
 
 
 class WaitUnrecordedPrompt(Value):

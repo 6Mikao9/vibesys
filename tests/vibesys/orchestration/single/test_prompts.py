@@ -11,14 +11,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.prompt_context import context_variables
 from tests.vibesys.domain_sections import EMPTY_DOMAIN_SECTIONS
+from tests.vibesys.reply_variables import context_variables
 
 import vibesys.orchestration.single.core_policy.prompts as templates
-from vibesys.orchestration.single.core_policy.api import reply_schemas, run_prompt_variables
-from vibesys.orchestration.single.strategy.api import PlanPrompt, PromptTemplate, RoundPrompt
+from vibesys.orchestration.single.core_policy.api import run_prompt_variables
+from vibesys.orchestration.single.search.api import PromptTemplate, RoundPrompt, single
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vibesys.serial_search.api import (
     PROMPTS_DIR,
@@ -26,10 +26,13 @@ from vibesys.serial_search.api import (
     FrontierRow,
     LastProfile,
     PendingClaim,
+    PlanPrompt,
+    PlanTemplate,
     RoundRow,
 )
 from vs_core.api import RevisionId, RevisionRef
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import examples
 
 _ROOT = Path(templates.__file__).parent
 _OBJECTIVE = "Raise queue throughput."
@@ -105,37 +108,41 @@ _ROUND = st.builds(
     dominated_by_rounds=st.lists(st.integers(1, 5), max_size=2).map(tuple),
     official_due=st.booleans(),
     official_reason=st.none() | _TEXT,
-    profiler_id=st.sampled_from(("none", "torch_profiler")),
 )
 
 
 def _variables(
-    context: PlanPrompt | RoundPrompt, *, agent_evaluation: bool = False
+    context: PlanPrompt | RoundPrompt, *, agent_evaluation: bool = False, profiler_id: str = "none"
 ) -> dict[str, object]:
-    variables = context_variables(context, reply_schemas())
+    variables = context_variables(context, single.reply_schemas)
     return {
         **run_prompt_variables(
             domain_sections=EMPTY_DOMAIN_SECTIONS,
             objective=_OBJECTIVE,
             environment_notes="",
             agent_evaluation=agent_evaluation,
+            profiler_id=profiler_id,
         ),
         **variables,
     }
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(context=_PLAN)
 def test_the_plan_prompt_renders_for_every_context(context: PlanPrompt) -> None:
-    text = _RENDERER.render_template(f"{PromptTemplate.PLAN.value}.j2", **_variables(context))
+    text = _RENDERER.render_template(f"{PlanTemplate.PLAN.value}.j2", **_variables(context))
     assert _OBJECTIVE in text
     assert f"Round {context.round_number} of {context.max_rounds}" in text
     for row in context.history:
         assert row.hypothesis_id in text
 
 
-@given(context=_ROUND)
-def test_the_round_prompt_renders_for_every_context(context: RoundPrompt) -> None:
-    text = _RENDERER.render_template(f"{PromptTemplate.ROUND.value}.j2", **_variables(context))
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_ROUND, profiler_id=st.sampled_from(("none", "torch_profiler")))
+def test_the_round_prompt_renders_for_every_context(context: RoundPrompt, profiler_id: str) -> None:
+    text = _RENDERER.render_template(
+        f"{PromptTemplate.ROUND.value}.j2", **_variables(context, profiler_id=profiler_id)
+    )
     assert _OBJECTIVE in text
     assert context.task in text
     assert context.hypothesis_id in text
@@ -143,6 +150,7 @@ def test_the_round_prompt_renders_for_every_context(context: RoundPrompt) -> Non
 
 
 @pytest.mark.parametrize("template", [PromptTemplate.ROUND])
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data(), offered=st.booleans())
 def test_the_evaluation_tool_is_described_exactly_when_it_is_offered(
     template: PromptTemplate, data: st.DataObject, *, offered: bool

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from types import UnionType
-from typing import Annotated, Any, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, get_args, get_origin
 
 import pytest
 from hypothesis import given
@@ -12,16 +12,22 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
     Access,
     ClockAdvanced,
     CoreState,
+    Decision,
+    Event,
     EventCursor,
+    Flow,
+    FlowState,
     HostFence,
     HostId,
     OperationRegistry,
     Request,
     RoleId,
     RunEnvelope,
+    RunFacts,
     RunView,
     Scope,
     SessionId,
@@ -29,10 +35,11 @@ from vs_core.api import (
     SessionSpec,
     SessionsState,
     SessionView,
-    StrategyEvent,
     StrategyState,
     initial_state,
 )
+from vs_core.api.testing import FakeView
+from vs_core.flows import search
 from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope, StoreFence
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
@@ -44,11 +51,42 @@ from vs_runtime.api.core import (
     RuntimeRecord,
 )
 from vs_runtime.api.core_shell_fixtures import (
-    CounterState,
-    CounterStrategy,
+    CounterConfig,
     ShellTraceTransitions,
-    runtime,
+    counter,
 )
+
+if TYPE_CHECKING:
+    from vs_core.api import SearchDef
+    from vs_project.api import StateStore
+
+
+def declared(definition: SearchDef[CounterConfig]) -> CoreState:
+    """A new run whose declaration is the one ``definition`` makes."""
+    core = initial_state()
+    return core.model_copy(
+        update={
+            "run": core.run.model_copy(update={"declaration": definition.declaration}),
+        }
+    )
+
+
+def runtime(store: StateStore) -> CoreRuntime[FlowState]:
+    """The shell over the counter search, with the trace kernel."""
+    return CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
+
+
+def first_state(definition: SearchDef[CounterConfig]) -> FlowState:
+    """The state ``definition``'s flows start in."""
+    return definition.driver(CounterConfig()).init(
+        CounterConfig(), initial_state().run.facts, FakeView().current()
+    )[0]
 
 
 def request_variants(annotation: object) -> set[type]:
@@ -77,20 +115,20 @@ def test_every_committed_input_reloads_the_exact_envelope(times: list[int]) -> N
         assert shell.advance()
         stored = store.load()
         assert isinstance(stored, StoredEnvelope)
-        restored = RuntimeRecord[CounterState].model_validate_json(stored.payload)
+        restored = RuntimeRecord[FlowState].model_validate_json(stored.payload)
         assert restored == shell.record
         # The commit path no longer decodes what it wrote, so this is where the codec
         # properties live: the persisted bytes decode (through the registry codec, as a
         # resume does) to the committed record, and re-encoding gives the same bytes in
         # both the stored form and the canonical envelope form.
         registry = OperationRegistry()
-        decoded = RuntimeRecord[CounterState].decode(stored, registry)
+        decoded = RuntimeRecord[FlowState].decode(stored, registry)
         assert decoded == shell.record
         assert decoded.model_dump_json().encode() == stored.payload
         assert registry.encode_envelope(decoded.envelope) == registry.encode_envelope(
             shell.record.envelope
         )
-        assert restored.envelope.strategy.callbacks == index
+        assert len(restored.envelope.strategy.journal) == index + 1
         assert restored.envelope.event_cursor.sequence == index
         assert len(restored.pending_publications) == index
         assert shell.storage_revision == index
@@ -107,17 +145,35 @@ def test_unknown_startup_commit_reloads_but_grants_no_dispatch(fault: CommitFaul
         shell.start("host", now_at=0, lease_duration=100)
     assert error.value.candidate_visible == (fault != CommitFault.UNKNOWN_BEFORE)
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=1)
+        shell.flush(now_at=1)
 
 
-def test_proposed_state_commits_with_receipts_and_callbacks() -> None:
+@search("waking", config=CounterConfig)
+async def waking(ctx: Flow, config: CounterConfig) -> None:
+    """A search that asks to be woken at time 1 and decides nothing else."""
+    del config
+    await ctx.first(ctx.timer(1))
+    await ctx.first(ctx.stopped)
+
+
+def test_woken_search_state_commits_with_receipts_and_callbacks() -> None:
     store = FakeStateStore()
-    shell = runtime(store)
+    shell = CoreRuntime(
+        store,
+        waking.driver(CounterConfig()),
+        declared(waking),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
     shell.start("host", now_at=0, lease_duration=100)
-    shell.decide(now_at=1)
+    assert shell.next_wake_at == 1
+    revision = shell.storage_revision
+    assert revision is not None
+    shell.flush(now_at=1)
     assert shell.advance()
-    assert shell.record.envelope.strategy.proposals == 1
-    assert shell.record.envelope.core.revision == 2
+    assert shell.next_wake_at is None
+    assert len(shell.record.envelope.strategy.journal) == 2
+    assert shell.storage_revision == revision + 1
     assert shell.record.envelope.event_cursor == EventCursor(sequence=0)
 
 
@@ -125,18 +181,16 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
     store = FakeStateStore()
     fence = store.acquire("writer", now=0, duration=1)
     assert fence is not None
-    envelope = RunEnvelope[CounterState](
-        schema_version=3,
+    envelope = RunEnvelope[FlowState](
+        schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="writer"), epoch=1),
-        strategy_id=CounterStrategy().declaration.strategy_id,
-        state_schema=CounterStrategy().declaration.state_schema,
-        core=initial_state(),
-        strategy=CounterStrategy().state,
+        strategy_id=counter.declaration.strategy_id,
+        state_schema=counter.declaration.state_schema,
+        core=declared(counter),
+        strategy=first_state(counter),
         event_cursor=EventCursor(sequence=0),
     )
-    payload = (
-        RuntimeRecord[CounterState].fresh(envelope).model_dump_json()[:-1] + ',"unexpected":1}'
-    )
+    payload = RuntimeRecord[FlowState].fresh(envelope).model_dump_json()[:-1] + ',"unexpected":1}'
     store.commit(
         None, StoredEnvelope(revision=0, schema_version=1, payload=payload.encode()), fence, now=0
     )
@@ -148,7 +202,9 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
 def test_default_core_runs_scheduling_events_on_the_real_kernel() -> None:
     """Scheduling is implemented, so the default core starts and commits clock events."""
     store = FakeStateStore()
-    shell = CoreRuntime(store, CounterStrategy(), initial_state())
+    shell = CoreRuntime(
+        store, counter.driver(CounterConfig()), declared(counter), config=CounterConfig()
+    )
     shell.start("host", now_at=0, lease_duration=10)
     assert store.load() is not None
     started = shell.record
@@ -182,7 +238,7 @@ def test_failed_or_uncertain_renewal_grants_no_dispatch(fault: CommitFault) -> N
         shell.renew(now_at=1, lease_duration=10)
     assert store.load() == before
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=2)
+        shell.flush(now_at=2)
 
 
 def test_definite_startup_write_failure_never_admits() -> None:
@@ -192,7 +248,7 @@ def test_definite_startup_write_failure_never_admits() -> None:
         shell.start("host", now_at=0, lease_duration=10)
     assert store.load() is None
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=1)
+        shell.flush(now_at=1)
 
 
 def test_lost_fence_commit_reloads_and_never_admits() -> None:
@@ -206,7 +262,7 @@ def test_lost_fence_commit_reloads_and_never_admits() -> None:
         shell.advance()
     assert store.load() == before
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=1)
+        shell.flush(now_at=1)
 
 
 @pytest.mark.parametrize("version", [True, False, 1.0, "1", 0, 2])
@@ -216,7 +272,7 @@ def test_shell_schema_version_rejects_coercion_and_unknown_versions(version: obj
     value = json.loads(shell.record.model_dump_json())
     value["schema_version"] = version
     with pytest.raises(ValidationError, match="schema_version"):
-        RuntimeRecord[CounterState].model_validate_json(json.dumps(value))
+        RuntimeRecord[FlowState].model_validate_json(json.dumps(value))
 
 
 @given(
@@ -271,8 +327,9 @@ def test_a_commit_validates_once_and_never_round_trips_the_envelope(times: list[
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        CounterStrategy(),
-        initial_state(),
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(registry=registry, transitions=ShellTraceTransitions()),
     )
     shell.start("host", now_at=0, lease_duration=100)
@@ -287,7 +344,7 @@ def test_a_commit_validates_once_and_never_round_trips_the_envelope(times: list[
 
 
 def _closing_session_with_nothing_to_end_it() -> CoreState:
-    state = initial_state()
+    state = declared(counter)
     session = SessionView(
         spec=SessionSpec(
             session_id=SessionId(root="orphan"),
@@ -308,23 +365,25 @@ def test_a_host_that_starts_over_a_run_with_an_orphan_wait_refuses_it() -> None:
     store = FakeStateStore()
     fence = store.acquire("writer", now=0, duration=1)
     assert fence is not None
-    strategy = CounterStrategy()
-    envelope = RunEnvelope[CounterState](
-        schema_version=3,
+    strategy = counter
+    envelope = RunEnvelope[FlowState](
+        schema_version=ENVELOPE_SCHEMA_VERSION,
         fence=HostFence(host_id=HostId(root="writer"), epoch=1),
         strategy_id=strategy.declaration.strategy_id,
         state_schema=strategy.declaration.state_schema,
         core=_closing_session_with_nothing_to_end_it(),
-        strategy=strategy.state,
+        strategy=first_state(counter),
         event_cursor=EventCursor(sequence=0),
     )
-    payload = RuntimeRecord[CounterState].fresh(envelope).model_dump_json().encode()
+    payload = RuntimeRecord[FlowState].fresh(envelope).model_dump_json().encode()
     store.commit(None, StoredEnvelope(revision=0, schema_version=1, payload=payload), fence, now=0)
-    shell = CoreRuntime(store, CounterStrategy(), initial_state())
+    shell = CoreRuntime(
+        store, counter.driver(CounterConfig()), declared(counter), config=CounterConfig()
+    )
     with pytest.raises(OrphanWaitError):
         shell.start("reader", now_at=1, lease_duration=1)
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=2)
+        shell.flush(now_at=2)
 
 
 class _ReleaseFails(FakeStateStore):
@@ -366,18 +425,27 @@ def test_a_failed_lease_release_never_raises_and_ends_the_shell(error: Exception
     shell.release_lease(now_at=1)
 
     with pytest.raises(RuntimeCommitError):
-        shell.decide(now_at=2)
+        shell.flush(now_at=2)
 
 
-class _InvalidStateStrategy(CounterStrategy):
+class _InvalidStateSearch:
     """A strategy whose fold builds its state with `model_copy`, which skips validators."""
 
-    def bind(self, state: CounterState) -> _InvalidStateStrategy:
-        return _InvalidStateStrategy(state)
+    def __init__(self) -> None:
+        self._inner = counter.driver(CounterConfig())
+        self.declaration = self._inner.declaration
+        self.state_model = self._inner.state_model
 
-    def on_event(self, view: RunView, event: StrategyEvent) -> CounterState:
-        del view, event
-        return self.state.model_copy(update={"callbacks": "not a count"})
+    def init(
+        self, config: CounterConfig, facts: RunFacts, view: RunView
+    ) -> tuple[FlowState, list[Decision]]:
+        return self._inner.init(config, facts, view)
+
+    def update(
+        self, state: FlowState, event: Event, view: RunView
+    ) -> tuple[FlowState, list[Decision]]:
+        del event, view
+        return state.model_copy(update={"dropped": "not a tuple"}), []
 
 
 def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() -> None:
@@ -385,8 +453,9 @@ def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() 
     store = FakeStateStore()
     shell = CoreRuntime(
         store,
-        _InvalidStateStrategy(),
-        initial_state(),
+        _InvalidStateSearch(),
+        declared(counter),
+        config=CounterConfig(),
         bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
     )
     shell.start("host", now_at=0, lease_duration=100)

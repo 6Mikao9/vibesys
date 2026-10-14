@@ -27,7 +27,7 @@ from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profile
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
-from vs_runtime.api import PollingEvaluationExecutor
+from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -383,13 +383,22 @@ class _ProductHostFactory:
                 facts=resources.facts,
                 options=self.options,
                 workspaces=workspaces,
-                evaluation=(
+                evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces)
+                    else PollingEvaluationExecutor(evaluation, workspaces),
+                    self.request.config.evaluation.evaluation_retries(),
+                    project.project.state.local_namespace(
+                        project.state.run_id, "core-evaluation-tries"
+                    ),
                 ),
                 environment=self._core_environment(resources),
                 roles=self._offered_roles(resources),
+                role_models={
+                    role: spec.model
+                    for role, spec in specs.items()
+                    if spec.model and spec.model != base.model
+                },
                 agent_client=client,
                 invocation_slot=invocations,
                 configuration=configuration,
@@ -429,7 +438,11 @@ class _ProductHostFactory:
             queue_allowance_seconds=config.evaluation.queue_allowance_seconds,
             observe_interval_seconds=config.evaluation.observe_interval_seconds,
             observe_backoff_cap_seconds=config.evaluation.observe_backoff_cap_seconds,
+            request_retries=config.evaluation.request_retries(),
             max_run_seconds=config.run.max_run_seconds,
+            cancellation_bound_seconds=config.run.cancellation_bound_seconds,
+            cleanup_bound_seconds=config.run.cleanup_bound_seconds,
+            reconciliation_bound_seconds=config.run.reconciliation_bound_seconds,
             lifecycle=lifecycle,
         )
 
@@ -470,7 +483,7 @@ class _ProductHostFactory:
         Every core measurement, an agent's included, is a job of the run's evaluation
         executor. Core refuses new submissions once the stop is committed, and the executor
         cancels the jobs still on the cluster when ``close_core_services`` closes it as the
-        run exits (``tests/composition/test_agent_evaluation_stops_on_stop.py``). The legacy
+        run exits (``tests/system/agent_evaluation/test_stops_on_stop.py``). The legacy
         evaluation service this hook once cancelled was never installed on a core run.
         """
 

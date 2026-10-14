@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from .agents import Checkpoint
 from .common import (
     AttemptId,
     AttemptRef,
@@ -42,6 +43,7 @@ from .evaluation_history import (
 )
 from .scheduling import AttemptRequest
 from .sessions import SessionSpec
+from .until import Until
 
 
 class WorkspacePlan(Value):
@@ -57,7 +59,6 @@ class AttemptBudget(Value):
 
     admission_charge: Count = 1
     paid_invocation_limit: Count = 1
-    retry_limit: Count = 0
     refund_limit: Count = 0
 
 
@@ -84,6 +85,11 @@ class AttemptClosure(Value):
     requested_at: Seconds
     authority: RequestId
     admission_id: DecisionId
+    retention_refused: bool = False
+    """The owner conclusively refused the closure's retention: the attempt settles failed and
+    the workspace is discarded instead."""
+    discard_refused: bool = False
+    """The owner conclusively refused the closure's discard: there is nothing left to ask."""
 
 
 class AttemptCheckpoint(Value):
@@ -101,6 +107,14 @@ class CheckpointDeclined(Value):
     invocation: InvocationRef
     authority: RequestId
     reason: CheckpointDecline
+
+
+class CheckpointResolved(Value):
+    """Core recorded or declined the checkpoint of one invocation (a published fact)."""
+
+    kind: Literal["checkpoint_resolved"] = "checkpoint_resolved"
+    invocation: InvocationRef
+    checkpoint: Checkpoint
 
 
 class AttemptView(Value):
@@ -123,7 +137,7 @@ class AttemptView(Value):
     checkpoints: tuple[AttemptCheckpoint, ...] = ()
     charges: tuple[ChargeReceipt, ...] = ()
     parent: AttemptRef | None = None
-    pending_intents: tuple[RequestId, ...] = ()
+    pending_records: tuple[RequestId, ...] = ()
     sessions: tuple[SessionId, ...] = ()
     release_dependencies: tuple[ReleaseDependency, ...] = ()
     evaluation_history: AttemptEvaluationHistory = AttemptEvaluationHistory()
@@ -169,6 +183,7 @@ class RevisionOperationRequested(Value):
     kind: Literal["revision_operation_requested"] = "revision_operation_requested"
     request: ExecuteRegisteredOperation
     authority: RevisionAuthority
+    until: Until
 
 
 class RevisionOperationObserved(Value):

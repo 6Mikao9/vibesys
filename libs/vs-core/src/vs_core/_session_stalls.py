@@ -67,7 +67,7 @@ def advance_stalled_acquisitions(
         raise ContractValidationError("event.kind", "event is not an acquisition stall")
     invocation = _invocation(state, event.invocation)
     if invocation is None or event.invocation not in stalled_acquisitions(
-        state, context.intents.intents
+        state, context.records.records
     ):
         return AreaChange(state=state)
     observation = stalled_acquisition(invocation, context.run.now_at)

@@ -4,11 +4,14 @@ from itertools import product
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import assume, example, given
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
 import vs_core.api as core
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 
 class TurnOutcome(core.Value):
@@ -76,6 +79,8 @@ def operation_codec() -> core.OperationRegistry:
 
 
 def roundtrip(state: core.CoreState) -> core.CoreState:
+    if not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -199,10 +204,10 @@ def fixture(
         workspace=scope,
         prompts=(),
         output_schema=core.SchemaRef(name="output", version=1),
-        deadline_at=100.0,
         charge_class="paid",
     )
     record = core.Invocation(
+        until=core.Until(at=100.0),
         invocation=invocation,
         scope=scope,
         turn=turn,
@@ -261,7 +266,7 @@ def fixture(
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         submitted_at=0.0,
         queue_allowance=0.0,
-        deadline_at=20.0,
+        accuracy_gated=(),
     )
     jobs = tuple(
         core.OwnedJob(
@@ -304,26 +309,25 @@ def fixture(
         deadline_at=10.0,
         phase=core.ContinuationPhase.WAITING,
     )
-    intent = core.Intent(
+    request_record = core.RequestRecord(
         request_id=core.RequestId(root="turn"),
         request=core.DispatchTurn(
             request_id=core.RequestId(root="turn"),
             scope=scope,
-            deadline_at=100.0,
             admission_id=admission,
             turn=turn,
         ),
         payload_digest="canonical-turn",
         lifecycle=core.LifecycleClass.SESSION_TURN,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=record.observation,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=() if run_owned else (attempt,)),
             "sessions": core.SessionsState(sessions=(session,), invocations=(record,)),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (request_record,)}),
             "evaluation": core.EvaluationState(
                 jobs=() if registered else jobs,
                 registered_jobs=custom if registered else (),
@@ -350,8 +354,8 @@ def test_suspension_registers_owned_wait_and_replay_preserves_outbox(
     replay = persisted_step(result.state, core.TurnSuspended(continuation=continuation))
     assert replay.requests == ()
     assert replay.events == ()
-    assert core.pending_requests(replay.state.intents) == core.pending_requests(
-        result.state.intents
+    assert core.pending_requests(replay.state.records) == core.pending_requests(
+        result.state.records
     )
 
 
@@ -375,6 +379,10 @@ def test_already_settled_wait_authorizes_exact_successor_once(
 
 
 @pytest.mark.parametrize("registered", [False, True])
+@settings(max_examples=examples(pr=3, nightly=100))
+@example(order=(0, 1, 2), duplicates=[])
+@example(order=(2, 1, 0), duplicates=[0, 2, 1, 1])
+@example(order=(1, 2, 0), duplicates=[2, 0])
 @given(order=st.permutations((0, 1, 2)), duplicates=st.lists(st.integers(0, 2), max_size=10))
 def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
     *, registered: bool, order: tuple[int, ...], duplicates: list[int]
@@ -432,6 +440,7 @@ def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
     ("charge", "predecessor"),
     list(product(["paid", "correction", "resume", "free"], [False, True])),
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     accepted=st.booleans(),
     terminal=st.booleans(),
@@ -465,15 +474,15 @@ def test_admission_requires_conclusive_accepted_yield_for_every_turn_variant(
     state = state.model_copy(
         update={"sessions": state.sessions.model_copy(update={"invocations": (invocation,)})}
     )
-    intent = state.intents.intents[0]
+    record = state.records.records[0]
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={
-                    "intents": (
-                        intent.model_copy(
+                    "records": (
+                        record.model_copy(
                             update={
-                                "request": intent.request.model_copy(update={"turn": turn}),
+                                "request": record.request.model_copy(update={"turn": turn}),
                                 "observation": invocation.observation,
                             }
                         ),
@@ -511,7 +520,7 @@ def test_checkpoint_request_or_unrelated_retention_never_proves_yield(
             "checkpoints": ()
             if checkpoint is None
             else (retained.model_copy(update={"invocation": attributed}),),
-            "pending_intents": (core.RequestId(root="checkpoint"),),
+            "pending_records": (core.RequestId(root="checkpoint"),),
         }
     )
     state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
@@ -580,23 +589,22 @@ def test_retirement_records_exact_park_authority_without_resume(
         close = core.CloseAttemptScope(
             request_id=authority,
             scope=state.sessions.invocations[0].scope,
-            deadline_at=100.0,
             admission_id=owner.admission_id,
             attempt=core.AttemptRef(attempt_id=owner.attempt_id, generation=0),
         )
-        close_intent = core.Intent(
+        close_record = core.RequestRecord(
             request_id=authority,
             request=close,
             payload_digest="close",
             lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-            phase=core.IntentPhase.PREPARED,
-            reconcile_deadline_at=100.0,
+            phase=core.RequestPhase.PREPARED,
+            until=core.Until(at=100.0),
         )
         state = state.model_copy(
             update={
-                "intents": state.intents.model_copy(
+                "records": state.records.model_copy(
                     update={
-                        "intents": (*state.intents.intents, close_intent),
+                        "records": (*state.records.records, close_record),
                     }
                 )
             }
@@ -637,7 +645,6 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
         core.Operation(
             decision_id=core.DecisionId(root="reopen"),
             scope=core.Scope(owner=state.run.run_id, generation=0),
-            deadline_at=100.0,
             request=payload,
         )
     )
@@ -646,9 +653,8 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
         operation_id=core.OperationId(root="operation:reopen"),
         decision_id=decision.decision_id,
         scope=decision.scope,
-        deadline_at=decision.deadline_at,
         operation=codec.encode(payload),
-        retry_limit=state.run.limits.max_retries,
+        retry_limit=state.run.limits.request_retries.limit,
         admission_id=owner.admission_id,
     )
     assert request.request_id is not None
@@ -656,17 +662,17 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
         update={"admission_id": owner.admission_id}
     )
     outcome = core.ScopedAdmissionReopenOutcome(scope=scope, admission="reopened")
-    intent = core.Intent.model_validate(
+    record = core.RequestRecord.model_validate(
         {
             "request_id": request.request_id,
             "request": request,
             "payload_digest": "reopen-payload",
             "lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE,
-            "phase": core.IntentPhase.COMPLETED,
+            "phase": core.RequestPhase.COMPLETED,
             "observation": proof,
             "outcome_schema": request.operation.schema_ref.outcome_schema,
             "outcome_json": codec.encode_outcome(request.operation.schema_ref, outcome),
-            "reconcile_deadline_at": 100.0,
+            "until": core.Until(at=100.0),
         },
         context={"operation_registry": codec},
     )
@@ -711,8 +717,8 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
                     ),
                 }
             ),
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents, intent)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records, record)}
             ),
         }
     )
@@ -742,6 +748,7 @@ def test_positive_registered_reopen_proof_authorizes_same_conversation_once() ->
 
 
 @pytest.mark.parametrize("admission", ["reopened", "closed", "unknown"])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     status=st.sampled_from(tuple(core.ObservationStatus)),
     accepted=st.booleans(),
@@ -756,26 +763,26 @@ def test_reopen_requires_positive_typed_admission_and_inspects_every_unknown(
 ) -> None:
     state, continuation, event = reopened_fixture()
     codec = operation_codec()
-    intent = state.intents.intents[-1]
-    assert isinstance(intent.request, core.ExecuteRegisteredOperation)
+    record = state.records.records[-1]
+    assert isinstance(record.request, core.ExecuteRegisteredOperation)
     proof = event.observation.model_copy(
         update={"status": status, "accepted": accepted, "terminal": terminal}
     )
     outcome = core.ScopedAdmissionReopenOutcome(
         scope=state.sessions.invocations[0].scope, admission=admission
     )
-    intent = core.Intent.model_validate(
+    record = core.RequestRecord.model_validate(
         {
-            **intent.model_dump(),
+            **record.model_dump(),
             "observation": proof,
-            "outcome_json": codec.encode_outcome(intent.request.operation.schema_ref, outcome),
+            "outcome_json": codec.encode_outcome(record.request.operation.schema_ref, outcome),
         },
         context={"operation_registry": codec},
     )
     state = state.model_copy(
         update={
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents[:-1], intent)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records[:-1], record)}
             )
         }
     )
@@ -787,7 +794,7 @@ def test_reopen_requires_positive_typed_admission_and_inspects_every_unknown(
         request = result.requests[0]
         assert isinstance(request, core.InspectRequest)
         assert request.target == continuation.reopen_authority
-        assert request.scope == intent.request.scope
+        assert request.scope == record.request.scope
     elif (
         status == core.ObservationStatus.SUCCEEDED
         and accepted
@@ -861,9 +868,9 @@ def test_stale_reopen_observations_cannot_authorize_resume(guard: str) -> None:
             "session-generation",
             "session-invocation",
             "session-accepted",
-            "intent",
-            "intent-phase",
-            "intent-observation",
+            "record",
+            "record-phase",
+            "record-observation",
             "checkpoint",
         )
     )
@@ -880,8 +887,8 @@ def test_yield_proof_cannot_be_bypassed_by_optional_predecessor_or_charge_class(
         }
     )
     invocation = invocation.model_copy(update={"turn": turn})
-    intent = state.intents.intents[0]
-    intent = intent.model_copy(update={"request": intent.request.model_copy(update={"turn": turn})})
+    record = state.records.records[0]
+    record = record.model_copy(update={"request": record.request.model_copy(update={"turn": turn})})
     sessions = state.sessions.model_copy(update={"invocations": (invocation,)})
     session = sessions.sessions[0]
     if guard == "session":
@@ -904,15 +911,15 @@ def test_yield_proof_cannot_be_bypassed_by_optional_predecessor_or_charge_class(
         }
         session = session.model_copy(update=fields[guard])
         sessions = sessions.model_copy(update={"sessions": (session,)})
-    intents = () if guard == "intent" else (intent,)
-    if guard == "intent-phase":
-        intents = (intent.model_copy(update={"phase": core.IntentPhase.DISPATCHED}),)
-    elif guard == "intent-observation":
-        intents = (intent.model_copy(update={"observation": None}),)
+    records = () if guard == "record" else (record,)
+    if guard == "record-phase":
+        records = (record.model_copy(update={"phase": core.RequestPhase.DISPATCHED}),)
+    elif guard == "record-observation":
+        records = (record.model_copy(update={"observation": None}),)
     state = state.model_copy(
         update={
             "sessions": sessions,
-            "intents": state.intents.model_copy(update={"intents": intents}),
+            "records": state.records.model_copy(update={"records": records}),
         }
     )
     if guard == "checkpoint":
@@ -983,14 +990,14 @@ def test_run_owned_profiler_cannot_bypass_writable_checkpoint_guard(access: core
     turn = invocation.turn.model_copy(update={"session": spec})
     invocation = invocation.model_copy(update={"turn": turn})
     session = state.sessions.sessions[0].model_copy(update={"spec": spec})
-    intent = state.intents.intents[0]
-    intent = intent.model_copy(update={"request": intent.request.model_copy(update={"turn": turn})})
+    record = state.records.records[0]
+    record = record.model_copy(update={"request": record.request.model_copy(update={"turn": turn})})
     state = state.model_copy(
         update={
             "sessions": state.sessions.model_copy(
                 update={"sessions": (session,), "invocations": (invocation,)}
             ),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     if access == core.Access.WRITE_CANDIDATE:
@@ -1002,6 +1009,7 @@ def test_run_owned_profiler_cannot_bypass_writable_checkpoint_guard(access: core
         assert isinstance(result.events[0], core.ResumeAuthorized)
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(sequence=st.integers(min_value=2, max_value=100))
 def test_late_job_changes_cannot_rewrite_frozen_timeout_or_resume(sequence: int) -> None:
     state, continuation = fixture(settled=True)
@@ -1075,6 +1083,7 @@ def resume_history(
         "ancestry",
     ],
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(charge=st.sampled_from(("paid", "correction", "resume", "free")), predecessor=st.booleans())
 def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
     *, source: str, proof: str, charge: str, predecessor: bool
@@ -1097,21 +1106,19 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
     history = ()
     if source == "resume" and proof != "ancestry":
         state, history = resume_history(state, continuation, invocation, prior_invocation)
-    intent = state.intents.intents[0]
+    record = state.records.records[0]
     if source == "dispatch":
         request: core.Request = core.DispatchTurn(
-            request_id=intent.request_id,
+            request_id=record.request_id,
             scope=invocation.scope,
-            deadline_at=100.0,
-            admission_id=intent.request.admission_id,
+            admission_id=record.request.admission_id,
             turn=turn,
         )
     elif source == "resume":
         request = core.ResumeSessionTurn(
-            request_id=intent.request_id,
+            request_id=record.request_id,
             scope=invocation.scope,
-            deadline_at=100.0,
-            admission_id=intent.request.admission_id,
+            admission_id=record.request.admission_id,
             turn=turn,
             continuation_id=core.ContinuationId(root="prior-wait"),
         )
@@ -1122,19 +1129,17 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
             core.Operation(
                 decision_id=core.DecisionId(root="registered-turn"),
                 scope=invocation.scope,
-                deadline_at=100.0,
                 request=payload,
             )
         )
         request = core.ExecuteRegisteredOperation(
-            request_id=intent.request_id,
+            request_id=record.request_id,
             operation_id=core.OperationId(root="operation:registered-turn"),
             decision_id=decision.decision_id,
             scope=invocation.scope,
-            deadline_at=100.0,
-            admission_id=intent.request.admission_id,
+            admission_id=record.request.admission_id,
             operation=codec.encode(payload),
-            retry_limit=state.run.limits.max_retries,
+            retry_limit=state.run.limits.request_retries.limit,
         )
         invocation = invocation.model_copy(update={"registered_operation": request.operation_id})
         receipt = core.DecisionReceipt(
@@ -1142,7 +1147,7 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
             decision=decision,
             payload_digest="turn-extension",
             feedback=core.Accepted(decision_id=decision.decision_id),
-            request_ids=(intent.request_id,),
+            request_ids=(record.request_id,),
         )
         run = state.run.model_copy(
             update={
@@ -1151,19 +1156,19 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
             }
         )
         state = state.model_copy(update={"registry": codec.descriptors, "run": run})
-    intent = intent.model_copy(update={"request": request})
+    record = record.model_copy(update={"request": request})
     if proof in ("manifest-equal", "manifest-conflict"):
         manifest = (
             continuation
             if proof == "manifest-equal"
             else continuation.model_copy(update={"deadline_at": 9.0})
         )
-        intent = intent.model_copy(update={"suspension": manifest})
+        record = record.model_copy(update={"suspension": manifest})
     if proof == "attempt-admission":
         owner = state.attempts.attempts[0].model_copy(update={"admission_id": None})
         state = state.model_copy(update={"attempts": core.AttemptsState(attempts=(owner,))})
     elif proof == "request-admission":
-        intent = intent.model_copy(
+        record = record.model_copy(
             update={"request": request.model_copy(update={"admission_id": None})}
         )
     elif proof == "observation-admission":
@@ -1172,7 +1177,7 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
             update={"admission_id": None}
         )
         invocation = invocation.model_copy(update={"observation": observation_without_episode})
-        intent = intent.model_copy(update={"observation": observation_without_episode})
+        record = record.model_copy(update={"observation": observation_without_episode})
     elif proof == "closure":
         owner = state.attempts.attempts[0]
         assert owner.admission_id is not None
@@ -1190,7 +1195,7 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
     state = state.model_copy(
         update={
             "sessions": state.sessions.model_copy(update={"invocations": (*history, invocation)}),
-            "intents": state.intents.model_copy(update={"intents": (intent,)}),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     if proof not in ("matching", "manifest-equal"):
@@ -1252,6 +1257,7 @@ def test_duplicate_continuation_identity_rejects_changed_immutable_payload(field
 
 
 @pytest.mark.parametrize("phase", tuple(core.AttemptPhase))
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(run_status=st.sampled_from(tuple(core.RunStatus)), closing=st.booleans())
 def test_current_live_owner_guard_holds_at_admission_and_delayed_authorization(
     *, phase: core.AttemptPhase, run_status: core.RunStatus, closing: bool
@@ -1314,6 +1320,7 @@ def test_parking_published_authorization_cannot_erase_once_only_receipt(
 
 
 @pytest.mark.parametrize("registered", [False, True])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(status=st.sampled_from(tuple(core.ObservationStatus)), terminal=st.booleans())
 def test_only_conclusive_terminal_dependencies_complete_wait_all(
     *,
@@ -1444,7 +1451,6 @@ def parked_fixture() -> tuple[core.CoreState, core.ContinuationReopenRequested]:
     close = core.CloseAttemptScope(
         request_id=continuation.park_authority,
         scope=scope,
-        deadline_at=100.0,
         admission_id=admission,
         attempt=core.AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
     )
@@ -1454,14 +1460,14 @@ def parked_fixture() -> tuple[core.CoreState, core.ContinuationReopenRequested]:
             "admission_id": admission,
         }
     )
-    close_intent = core.Intent(
+    close_record = core.RequestRecord(
         request_id=continuation.park_authority,
         request=close,
         payload_digest="close",
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
-        phase=core.IntentPhase.COMPLETED,
+        phase=core.RequestPhase.COMPLETED,
         observation=close_proof,
-        reconcile_deadline_at=100.0,
+        until=core.Until(at=100.0),
     )
     continuation = continuation.model_copy(
         update={
@@ -1473,15 +1479,15 @@ def parked_fixture() -> tuple[core.CoreState, core.ContinuationReopenRequested]:
     assert isinstance(decision, core.Operation)
     normalization = decision.normalized_scope_reopen
     assert normalization is not None
-    reopen_request = state.intents.intents[-1].request
+    reopen_request = state.records.records[-1].request
     assert isinstance(reopen_request, core.ExecuteRegisteredOperation)
     reopen_request = reopen_request.model_copy(update={"admission_id": None})
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
             "evaluation": state.evaluation.model_copy(update={"continuations": (continuation,)}),
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents[:-1], close_intent)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records[:-1], close_record)}
             ),
         }
     )
@@ -1591,18 +1597,18 @@ def test_missing_park_closure_or_episode_never_grants_reopen(
             "admission_id": owner.admission_id if episode_present else None,
         }
     )
-    intent = state.intents.intents[-1]
+    record = state.records.records[-1]
     if not episode_present:
-        intent = intent.model_copy(
+        record = record.model_copy(
             update={
-                "request": intent.request.model_copy(update={"admission_id": None}),
+                "request": record.request.model_copy(update={"admission_id": None}),
             }
         )
     state = state.model_copy(
         update={
             "attempts": core.AttemptsState(attempts=(owner,)),
-            "intents": state.intents.model_copy(
-                update={"intents": (*state.intents.intents[:-1], intent)}
+            "records": state.records.model_copy(
+                update={"records": (*state.records.records[:-1], record)}
             ),
         }
     )
@@ -1718,6 +1724,7 @@ def test_current_session_phase_is_required_even_with_a_completed_yield(
 
 
 @pytest.mark.parametrize("frozen", [False, True])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     conflict=st.booleans(),
     duplicated=st.booleans(),
@@ -1808,6 +1815,7 @@ def test_feedback_deduplicates_equal_evidence_and_rejects_conflicting_identity(
         "wrong-scope",
     ],
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(recorded_on_parent=st.booleans(), nested=st.booleans(), parent_known=st.booleans())
 def test_parent_release_never_substitutes_for_independent_child_proof(
     *,
@@ -1880,7 +1888,7 @@ def test_parent_release_never_substitutes_for_independent_child_proof(
                     "jobs": (parent, *state.evaluation.jobs[1:]) + ((middle,) if middle else ())
                 }
             ),
-            "intents": state.intents.model_copy(
+            "records": state.records.model_copy(
                 update={"children": () if proof == "missing" else (child,)}
             ),
         }
@@ -1942,7 +1950,7 @@ def test_reopen_normalization_and_exact_cancelled_set_are_required_before_forwar
             }
         )
     elif guard == "wire":
-        request = event.request.model_copy(update={"deadline_at": 99.0})
+        request = event.request.model_copy(update={"retry_limit": event.request.retry_limit + 1})
         event = event.model_copy(update={"request": request})
     elif guard == "park-authority":
         event = event.model_copy(
@@ -1995,6 +2003,7 @@ def test_reopen_normalization_and_exact_cancelled_set_are_required_before_forwar
         core.step(state, event)
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(fragment=st.text(alphabet="abc", min_size=1, max_size=8))
 @example(fragment="b")
 def test_unknown_job_inspection_identity_frames_continuation_and_resource(fragment: str) -> None:

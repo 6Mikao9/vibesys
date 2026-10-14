@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import vs_core.api as core
 
-from .test_intent_recovery import fixture_digest, initial_state, pending_intent
 from .test_pending_suspension_contract import _invocation, _pending
+from .test_request_recovery import fixture_digest, initial_state, pending_record
 
 OWNER = core.AttemptId(root="attempt")
 
@@ -17,16 +17,15 @@ def _yielded() -> core.Invocation:
     )
 
 
-def _checkpoint(invocation: core.Invocation, phase: core.IntentPhase) -> core.Intent:
+def _checkpoint(invocation: core.Invocation, phase: core.RequestPhase) -> core.RequestRecord:
     request = core.SnapshotAndRetain(
         request_id=core.RequestId(root="checkpoint"),
         scope=invocation.scope,
-        deadline_at=100.0,
         attempt=core.AttemptRef(attempt_id=OWNER, generation=0),
         retention="wip",
         invocation=invocation.invocation,
     )
-    return pending_intent().model_copy(
+    return pending_record().model_copy(
         update={
             "request_id": request.request_id,
             "request": request,
@@ -36,12 +35,12 @@ def _checkpoint(invocation: core.Invocation, phase: core.IntentPhase) -> core.In
     )
 
 
-def _state(invocation: core.Invocation, *intents: core.Intent) -> core.CoreState:
+def _state(invocation: core.Invocation, *records: core.RequestRecord) -> core.CoreState:
     state = initial_state()
     return state.model_copy(
         update={
             "sessions": core.SessionsState(invocations=(invocation,)),
-            "intents": state.intents.model_copy(update={"intents": intents}),
+            "records": state.records.model_copy(update={"records": records}),
         }
     )
 
@@ -57,7 +56,7 @@ def test_a_yield_nothing_checkpoints_is_a_wait_nothing_will_end() -> None:
 
 def test_a_yield_is_produced_by_its_checkpoint_while_that_runs() -> None:
     invocation = _yielded()
-    running = _state(invocation, _checkpoint(invocation, core.IntentPhase.DISPATCHED))
+    running = _state(invocation, _checkpoint(invocation, core.RequestPhase.DISPATCHED))
 
     assert core.orphan_waits(running) == ()
     assert [wait.producer for wait in core.waits(running)] == [core.Producer.PENDING_REQUEST]
@@ -65,6 +64,6 @@ def test_a_yield_is_produced_by_its_checkpoint_while_that_runs() -> None:
 
 def test_a_yield_whose_checkpoint_ended_without_publishing_is_a_wait_nothing_will_end() -> None:
     invocation = _yielded()
-    ended = _state(invocation, _checkpoint(invocation, core.IntentPhase.COMPLETED))
+    ended = _state(invocation, _checkpoint(invocation, core.RequestPhase.COMPLETED))
 
     assert [wait.waiter for wait in core.orphan_waits(ended)] == [core.WaitKind.YIELD_PUBLICATION]
