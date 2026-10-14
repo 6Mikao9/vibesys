@@ -1,3 +1,20 @@
+"""``SkyPilotJobRunner``'s command construction and process handling over fake processes.
+
+Guarantees under test:
+
+* Task documents quote argv exactly once and apply the operator command prefix to
+  workload commands only; cluster names derive from effective resources.
+* Cluster status and job queue output is parsed strictly: unknown, truncated,
+  duplicated or malformed output is a typed failure, never a guess; a job the
+  queue reported finished never runs again.
+* Waiting on a cluster polls through any number of INIT reports, and honours the
+  per-operation deadline.
+* A timed-out subprocess is killed as a group, and every drain worker and pipe is
+  settled within bounded waits; output is delivered to the sink in full while the
+  returned result keeps only the exact bounded suffix.
+* Control failures name the operation and exit code and never expose process output.
+"""
+
 from __future__ import annotations
 
 import json
@@ -30,7 +47,7 @@ from vs_sandbox.api.skypilot import (
     stable_cluster_name,
 )
 from vs_sim.api import ProcessTimeoutError, Threads
-from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -489,7 +506,7 @@ def test_success_waits_for_slow_ordinary_sink_without_abandoning_a_delivery_work
 def test_subprocess_result_bounds_multiline_and_unterminated_output_while_sink_gets_all() -> None:
     threads = _RecordingThreads()
     stdout = "old\n" + ("x" * 150_000)
-    stderr = ("error\n" * 30_000) + "unterminated"
+    stderr = ("error\n" * 12_000) + "unterminated"
     process = _ExitedSkyPilotProcess(stdout, stderr)
     stdout_sink = _RecordingCancellableSink()
     stderr_sink = _RecordingCancellableSink()
@@ -523,7 +540,7 @@ def test_subprocess_result_bounds_multiline_and_unterminated_output_while_sink_g
     stderr=st.text(alphabet=("x", "y", "\n", "🙂"), max_size=100),
     cap=st.integers(min_value=0, max_value=32),
 )
-@settings(max_examples=50)
+@settings(max_examples=examples(pr=10, nightly=200))
 def test_subprocess_result_is_the_exact_bounded_suffix(stdout: str, stderr: str, cap: int) -> None:
     threads = _RecordingThreads()
     process = _ExitedSkyPilotProcess(stdout, stderr)
@@ -709,7 +726,7 @@ def test_ensure_waits_for_init_to_become_up() -> None:
     assert len(fake.calls) == 3
 
 
-@settings(deadline=None, max_examples=40)
+@settings(deadline=None, max_examples=examples(pr=10, nightly=200))
 @given(inits=st.integers(0, 12), seed=st.one_of(st.none(), st.integers(0, 2**32)))
 def test_ensure_polls_through_any_number_of_init_reports(inits: int, seed: int | None) -> None:
     def status(name: str) -> ProcessResult:

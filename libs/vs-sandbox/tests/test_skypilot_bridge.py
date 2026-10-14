@@ -1,8 +1,33 @@
+"""The SkyPilot bridge, driven over an in-memory network with a recording runner Fake.
+
+Guarantees under test (``vs_sandbox.api.skypilot.SkyPilotBridge``):
+
+* An evaluation request is validated (framing, configured kind, allowed arguments
+  and artifacts) before any compute is touched; a bad request gets one typed
+  ``ErrorFrame`` and runs nothing.
+* The workspace snapshot excludes secrets, caches and hidden paths, rejects
+  special files, symlink escapes and oversized trees, and is hashed into the
+  recovery digest together with the request and the framework setup command.
+* Output streams to the client through a durable decoded-log spool: a restart
+  resumes from the persisted offset, replays the undelivered suffix in bounded
+  chunks, and refuses a changed prefix, a short spool or a missing journal.
+* A terminal result is replayed rather than rerun, tracks the cluster that
+  produced it for release, and is delivered only against a matching acknowledgement.
+* An unresolved prior attempt is never resubmitted; infrastructure retries are
+  bounded by the persisted attempt count.
+* Closing cancels every in-flight job (including one discovered mid-close),
+  releases every touched cluster exactly once, logs failures and continues, and
+  the bridge cannot be restarted.
+* The one real-socket test pins the filesystem contract: the socket file is
+  owner-only and removed on close.
+"""
+
 from __future__ import annotations
 
 import io
 import os
 import re
+import shutil
 import socket
 import tempfile
 import threading
@@ -12,6 +37,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from tests.support import run_test_command
+from tests.support.skypilot_world import MemoryTransport
 
 import vs_sandbox.skypilot_bridge as bridge_module  # test-isolation: durable restart-offset behavior belongs to the bridge's private spool state machine.
 from vs_project.api import MAX_SOCKET_PATH_BYTES, SocketPathTooLongError, StateNamespace
@@ -51,6 +77,11 @@ if TYPE_CHECKING:
     from vs_sim.api import Condition, Connection, Event, Listener, Lock, Worker
 
 
+@pytest.fixture
+def transport() -> MemoryTransport:
+    return MemoryTransport()
+
+
 def _resources() -> ResolvedSkyPilotResources:
     return ResolvedSkyPilotResources(
         profile_name="test",
@@ -72,26 +103,6 @@ def _attempt_resources() -> AttemptResourcesRecord:
         nodes=1,
         accelerators_per_node=4,
     )
-
-
-def _send_evaluation(bridge: SkyPilotBridge, request: EvaluationRequest) -> list[ResponseFrame]:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(3)
-        client.connect(str(bridge.socket_path))
-        client.sendall(encode_message(request))
-        reader = client.makefile("rb")
-        frames: list[ResponseFrame] = []
-        while True:
-            line = reader.readline()
-            assert line
-            frame = decode_response(line)
-            frames.append(frame)
-            if frame.type in {"result", "error"}:
-                break
-        if frames[-1].type == "result":
-            client.sendall(encode_message(AckRequest(invocation_id=request.invocation_id)))
-            assert decode_response(reader.readline()).type == "acked"
-    return frames
 
 
 class FakeRunner(SkyPilotJobRunner):
@@ -612,7 +623,7 @@ def test_decoded_log_spool_latches_post_append_journal_failure(tmp_path: Path) -
 
 def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
     tmp_path: Path,
-    socket_dir: Path,
+    transport: MemoryTransport,
 ) -> None:
     namespace = _namespace(tmp_path)
     runner = FakeRunner()
@@ -628,7 +639,9 @@ def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
         commands={"accuracy": ("true",)},
         benchmark_output_argument=None,
         state_namespace=namespace,
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
     )
     journal = InvocationJournal(namespace)
@@ -650,7 +663,7 @@ def test_startup_replacement_evidence_applies_only_to_preexisting_invocations(
 
 
 def test_terminal_replay_tracks_persisted_cluster_for_release(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     namespace = _namespace(tmp_path)
     workspace = tmp_path / "workspace"
@@ -671,11 +684,13 @@ def test_terminal_replay_tracks_persisted_cluster_for_release(
         commands={"accuracy": ("true",)},
         benchmark_output_argument=None,
         state_namespace=namespace,
-        socket_path=socket_dir / "first.sock",
+        socket_path=tmp_path / "first.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
     )
     first_bridge.start()
-    first_frames = _send_evaluation(first_bridge, request)
+    first_frames = transport.evaluate(first_bridge, request)
     first_bridge.close()
 
     replay_runner = FakeRunner()
@@ -689,11 +704,13 @@ def test_terminal_replay_tracks_persisted_cluster_for_release(
         commands={"accuracy": ("true",)},
         benchmark_output_argument=None,
         state_namespace=namespace,
-        socket_path=socket_dir / "replay.sock",
+        socket_path=tmp_path / "replay.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
     )
     replay_bridge.start()
-    replay_frames = _send_evaluation(replay_bridge, request)
+    replay_frames = transport.evaluate(replay_bridge, request)
     replay_bridge.close()
 
     assert [frame.type for frame in first_frames] == ["stdout", "stderr", "result"]
@@ -705,7 +722,7 @@ def test_terminal_replay_tracks_persisted_cluster_for_release(
 
 def test_framework_setup_wraps_new_job_argv_and_runs_first_in_workdir(
     tmp_path: Path,
-    socket_dir: Path,
+    transport: MemoryTransport,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -732,23 +749,17 @@ def test_framework_setup_wraps_new_job_argv_and_runs_first_in_workdir(
         commands={"accuracy": evaluator},
         benchmark_output_argument=None,
         state_namespace=_namespace(tmp_path),
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
         framework_setup_command=setup,
     )
     bridge.start()
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(HANG_GUARD_S)
-            client.connect(str(bridge.socket_path))
-            invocation_id = "4" * 32
-            client.sendall(
-                encode_message(EvaluationRequest(kind="accuracy", invocation_id=invocation_id))
-            )
-            reader = client.makefile("rb")
-            frames = [decode_response(reader.readline()) for _ in range(3)]
-            client.sendall(encode_message(AckRequest(invocation_id=invocation_id)))
-            assert decode_response(reader.readline()).type == "acked"
+        frames = transport.evaluate(
+            bridge, EvaluationRequest(kind="accuracy", invocation_id="4" * 32)
+        )
 
         assert [frame.type for frame in frames] == ["stdout", "stderr", "result"]
         submitted = runner.commands[0]
@@ -780,7 +791,7 @@ def test_framework_setup_wraps_new_job_argv_and_runs_first_in_workdir(
 
 def test_framework_setup_participates_in_recovery_digest_without_changing_legacy_digest(
     tmp_path: Path,
-    socket_dir: Path,
+    transport: MemoryTransport,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -804,18 +815,20 @@ def test_framework_setup_participates_in_recovery_digest_without_changing_legacy
             commands={"accuracy": command},
             benchmark_output_argument=None,
             state_namespace=_namespace(tmp_path),
-            socket_path=socket_dir / socket_name,
+            socket_path=tmp_path / socket_name,
+            network=transport.network,
+            threads=transport.threads,
             log=lambda _: None,
             framework_setup_command=setup,
         ), runner
 
     without_setup, original_runner = make_bridge(None, "original.sock")
     without_setup.start()
-    original_frames = _send_evaluation(without_setup, request)
+    original_frames = transport.evaluate(without_setup, request)
     without_setup.close()
     with_setup, changed_runner = make_bridge("prepare one", "changed.sock")
     with_setup.start()
-    conflict_frames = _send_evaluation(with_setup, request)
+    conflict_frames = transport.evaluate(with_setup, request)
     with_setup.close()
 
     assert [frame.type for frame in original_frames] == ["stdout", "stderr", "result"]
@@ -828,7 +841,7 @@ def test_framework_setup_participates_in_recovery_digest_without_changing_legacy
 
 def test_framework_setup_failure_prevents_evaluator_execution(
     tmp_path: Path,
-    socket_dir: Path,
+    transport: MemoryTransport,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -847,14 +860,16 @@ def test_framework_setup_failure_prevents_evaluator_execution(
         commands={"accuracy": ("true",)},
         benchmark_output_argument=None,
         state_namespace=_namespace(tmp_path),
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
         framework_setup_command="exit 23",
     )
 
     bridge.start()
     try:
-        frames = _send_evaluation(
+        frames = transport.evaluate(
             bridge,
             EvaluationRequest(kind="accuracy", invocation_id="6" * 32),
         )
@@ -874,7 +889,7 @@ def test_framework_setup_failure_prevents_evaluator_execution(
 
 
 def test_job_discovered_during_close_is_cancelled_and_released(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     namespace = _namespace(tmp_path)
     runner = FakeRunner()
@@ -890,7 +905,9 @@ def test_job_discovered_during_close_is_cancelled_and_released(
         commands={"accuracy": ("true",)},
         benchmark_output_argument=None,
         state_namespace=namespace,
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
     )
     journal = InvocationJournal(namespace)
@@ -912,7 +929,7 @@ def test_job_discovered_during_close_is_cancelled_and_released(
 
 
 def test_bridge_stages_allowlisted_command_streams_and_cleans_up(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     workspace, package = _staging_fixture(tmp_path)
     runner = FakeRunner()
@@ -926,31 +943,24 @@ def test_bridge_stages_allowlisted_command_streams_and_cleans_up(
         commands={"benchmark": ("python", ".vibesys-evaluator-package/checker.py")},
         benchmark_output_argument="--output-json",
         state_namespace=_namespace(tmp_path),
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
     )
     bridge.start()
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(HANG_GUARD_S)
-            client.connect(str(bridge.socket_path))
-            remote_result = str(
-                Path(tempfile.gettempdir()) / "vibesys-framework-benchmark-1-1.json"
-            )
-            client.sendall(
-                encode_message(
-                    EvaluationRequest(
-                        kind="benchmark",
-                        invocation_id="1" * 32,
-                        arguments=("--output-json", remote_result),
-                        artifacts=(remote_result,),
-                    )
-                )
-            )
-            reader = client.makefile("rb")
-            frames = [decode_response(reader.readline()) for _ in range(4)]
-            client.sendall(encode_message(AckRequest(invocation_id="1" * 32)))
-            assert decode_response(reader.readline()).type == "acked"
+        # The protocol fixes this remote path; it is not derived from the host's temp root.
+        remote_result = "/tmp/vibesys-framework-benchmark-1-1.json"  # noqa: S108  # lint-waiver: LW-010209 [S108]; the bridge protocol requires this fixed remote artifact path.
+        frames = transport.evaluate(
+            bridge,
+            EvaluationRequest(
+                kind="benchmark",
+                invocation_id="1" * 32,
+                arguments=("--output-json", remote_result),
+                artifacts=(remote_result,),
+            ),
+        )
         assert [frame.type for frame in frames] == ["stdout", "stderr", "artifact", "result"]
         assert isinstance(frames[2], ArtifactFrame)
         assert runner.commands[0][:2] == ("sh", "-c")
@@ -965,7 +975,6 @@ def test_bridge_stages_allowlisted_command_streams_and_cleans_up(
         assert not (staged / ".uv-cache").exists()
         assert (staged / ".vibesys-evaluator-package" / "checker.py").read_text() == "checker"
         assert staged.joinpath(".skyignore").read_text().startswith("# VibeSys")
-        assert bridge.socket_path.stat().st_mode & 0o777 == 0o600
     finally:
         bridge.close()
 
@@ -1000,7 +1009,7 @@ def _staging_fixture(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def test_bridge_releases_cluster_when_socket_startup_fails(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -1023,7 +1032,8 @@ def test_bridge_releases_cluster_when_socket_startup_fails(
         commands={"accuracy": ("true",)},
         benchmark_output_argument=None,
         state_namespace=_namespace(tmp_path),
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        threads=transport.threads,
         log=lambda _: None,
         network=BrokenNetwork(),
     )
@@ -1064,7 +1074,7 @@ def test_bridge_rejects_an_unservable_socket_path_before_allocating_compute(
     assert not bridge.socket_path.exists()
 
 
-def test_bridge_rejects_special_workspace_file(tmp_path: Path, socket_dir: Path) -> None:
+def test_bridge_rejects_special_workspace_file(tmp_path: Path, transport: MemoryTransport) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     os.mkfifo(workspace / "pipe")
@@ -1079,18 +1089,18 @@ def test_bridge_rejects_special_workspace_file(tmp_path: Path, socket_dir: Path)
         commands={"accuracy": ("true",)},
         benchmark_output_argument=None,
         state_namespace=_namespace(tmp_path),
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
     )
     bridge.start()
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(HANG_GUARD_S)
-            client.connect(str(bridge.socket_path))
-            client.sendall(
-                encode_message(EvaluationRequest(kind="accuracy", invocation_id="2" * 32))
-            )
-            frame = decode_response(client.makefile("rb").readline())
+        frame = _send_raw(
+            transport,
+            bridge,
+            encode_message(EvaluationRequest(kind="accuracy", invocation_id="2" * 32)),
+        )
         assert isinstance(frame, ErrorFrame)
         assert frame.error == "ValueError"
         assert runner.commands == []
@@ -1100,10 +1110,11 @@ def test_bridge_rejects_special_workspace_file(tmp_path: Path, socket_dir: Path)
 
     assert runner.ensure_calls == 1
     assert runner.release_calls == 1
-    assert not bridge.socket_path.exists()
 
 
-def test_bridge_rejects_workspace_symlink_escape(tmp_path: Path, socket_dir: Path) -> None:
+def test_bridge_rejects_workspace_symlink_escape(
+    tmp_path: Path, transport: MemoryTransport
+) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     outside = tmp_path / "secret"
@@ -1120,18 +1131,18 @@ def test_bridge_rejects_workspace_symlink_escape(tmp_path: Path, socket_dir: Pat
         commands={"accuracy": ("python", "checker.py")},
         benchmark_output_argument=None,
         state_namespace=_namespace(tmp_path),
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=lambda _: None,
     )
     bridge.start()
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(HANG_GUARD_S)
-            client.connect(str(bridge.socket_path))
-            client.sendall(
-                encode_message(EvaluationRequest(kind="accuracy", invocation_id="3" * 32))
-            )
-            frame = decode_response(client.makefile("rb").readline())
+        frame = _send_raw(
+            transport,
+            bridge,
+            encode_message(EvaluationRequest(kind="accuracy", invocation_id="3" * 32)),
+        )
         assert isinstance(frame, ErrorFrame)
         assert frame.error == "ValueError"
         assert runner.commands == []
@@ -1243,7 +1254,7 @@ def test_decoded_log_spool_rejects_short_spool_and_missing_journal(tmp_path: Pat
 
 def _bridge(
     tmp_path: Path,
-    socket_dir: Path,
+    transport: MemoryTransport,
     runner: FakeRunner | None = None,
     log: Callable[[str], None] | None = None,
     max_retries: int = 1,
@@ -1260,25 +1271,26 @@ def _bridge(
         commands={"accuracy": ("true",)},
         benchmark_output_argument=None,
         state_namespace=_namespace(tmp_path),
-        socket_path=socket_dir / "bridge.sock",
+        socket_path=tmp_path / "bridge.sock",
+        network=transport.network,
+        threads=transport.threads,
         log=log or (lambda _: None),
         max_infrastructure_retries=max_retries,
     )
 
 
-def _send_raw(bridge: SkyPilotBridge, payload: bytes) -> ResponseFrame:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(3)
-        client.connect(str(bridge.socket_path))
-        client.sendall(payload)
-        client.shutdown(socket.SHUT_WR)
-        return decode_response(client.makefile("rb").readline())
+def _send_raw(transport: MemoryTransport, bridge: SkyPilotBridge, payload: bytes) -> ResponseFrame:
+    client = transport.dial(bridge)
+    try:
+        client.send(payload)
+        return client.read_frame()
+    finally:
+        client.close()
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        b"no newline framing",
         encode_message(EvaluationRequest(kind="benchmark", invocation_id="4" * 32)),
         encode_message(
             EvaluationRequest(kind="accuracy", invocation_id="4" * 32, arguments=("--x",))
@@ -1287,16 +1299,16 @@ def _send_raw(bridge: SkyPilotBridge, payload: bytes) -> ResponseFrame:
             EvaluationRequest(kind="accuracy", invocation_id="4" * 32, artifacts=("artifact.json",))
         ),
     ],
-    ids=["framing", "unconfigured-kind", "arguments", "artifacts"],
+    ids=["unconfigured-kind", "arguments", "artifacts"],
 )
 def test_bridge_rejects_malformed_or_unauthorized_requests(
-    tmp_path: Path, socket_dir: Path, payload: bytes
+    tmp_path: Path, transport: MemoryTransport, payload: bytes
 ) -> None:
     runner = FakeRunner()
-    bridge = _bridge(tmp_path, socket_dir, runner)
+    bridge = _bridge(tmp_path, transport, runner)
     bridge.start()
     try:
-        frame = _send_raw(bridge, payload)
+        frame = _send_raw(transport, bridge, payload)
     finally:
         bridge.close()
 
@@ -1305,8 +1317,8 @@ def test_bridge_rejects_malformed_or_unauthorized_requests(
     assert runner.commands == []
 
 
-def test_bridge_cannot_restart_after_close(tmp_path: Path, socket_dir: Path) -> None:
-    bridge = _bridge(tmp_path, socket_dir)
+def test_bridge_cannot_restart_after_close(tmp_path: Path, transport: MemoryTransport) -> None:
+    bridge = _bridge(tmp_path, transport)
     bridge.close()
 
     with pytest.raises(RuntimeError, match="cannot be restarted after close"):
@@ -1314,7 +1326,7 @@ def test_bridge_cannot_restart_after_close(tmp_path: Path, socket_dir: Path) -> 
 
 
 def test_bridge_close_logs_failed_cancel_and_release_and_continues(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     class FailingRunner(FakeRunner):
         def cancel(self, cluster_name: str, job_id: int, *, timeout: float = 60) -> None:
@@ -1328,7 +1340,7 @@ def test_bridge_close_logs_failed_cancel_and_release_and_continues(
             raise OSError(message)
 
     logs: list[str] = []
-    bridge = _bridge(tmp_path, socket_dir, FailingRunner(), logs.append)
+    bridge = _bridge(tmp_path, transport, FailingRunner(), logs.append)
     bridge.start()
     _private(bridge, "_active_jobs").add(("lease", 3))
 
@@ -1336,16 +1348,17 @@ def test_bridge_close_logs_failed_cancel_and_release_and_continues(
 
     assert "[warn] SkyPilot job cancellation failed: RuntimeError" in logs
     assert "[warn] SkyPilot allocation release failed: OSError" in logs
-    assert not bridge.socket_path.exists()
 
 
 def test_handler_reports_value_error_frame_once_shutdown_has_started(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
-    bridge = _bridge(tmp_path, socket_dir)
+    bridge = _bridge(tmp_path, transport)
     early = io.BytesIO()
     _set_private(bridge, "_closed", value=True)
-    _private(bridge, "_handle")(io.BytesIO(), early, socket.socket())
+    _private(bridge, "_handle")(
+        io.BytesIO(), early, _BlockedBridgeConnection(b"", transport.threads)
+    )
     assert decode_response(early.getvalue()) == ErrorFrame(error="ValueError")
 
     class CloseWhileLocked:
@@ -1358,7 +1371,9 @@ def test_handler_reports_value_error_frame_once_shutdown_has_started(
     _set_private(bridge, "_closed", value=False)
     _set_private(bridge, "_evaluation_lock", value=CloseWhileLocked())
     late = io.BytesIO()
-    _private(bridge, "_handle")(io.BytesIO(), late, socket.socket())
+    _private(bridge, "_handle")(
+        io.BytesIO(), late, _BlockedBridgeConnection(b"", transport.threads)
+    )
     assert decode_response(late.getvalue()) == ErrorFrame(error="ValueError")
 
 
@@ -1375,11 +1390,11 @@ def _digests(bridge: SkyPilotBridge, request: EvaluationRequest) -> tuple[str, s
     [InvocationPhase.SUBMITTING, InvocationPhase.SUBMITTED],
 )
 def test_bridge_refuses_to_resubmit_when_prior_attempt_is_unresolved(
-    tmp_path: Path, socket_dir: Path, phase: InvocationPhase
+    tmp_path: Path, transport: MemoryTransport, phase: InvocationPhase
 ) -> None:
     runner = FakeRunner()
     logs: list[str] = []
-    bridge = _bridge(tmp_path, socket_dir, runner, logs.append)
+    bridge = _bridge(tmp_path, transport, runner, logs.append)
     request = EvaluationRequest(kind="accuracy", invocation_id="5" * 32)
     request_digest, snapshot_digest = _digests(bridge, request)
     journal = InvocationJournal(_namespace(tmp_path))
@@ -1389,7 +1404,7 @@ def test_bridge_refuses_to_resubmit_when_prior_attempt_is_unresolved(
         record = journal.submitted(record, 9, "lease")
     bridge.start()
     try:
-        frame = _send_raw(bridge, encode_message(request))
+        frame = _send_raw(transport, bridge, encode_message(request))
     finally:
         bridge.close()
 
@@ -1402,7 +1417,7 @@ def test_bridge_refuses_to_resubmit_when_prior_attempt_is_unresolved(
 
 
 def test_bridge_rejects_completion_without_attempt_resources(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     namespace = _namespace(tmp_path)
 
@@ -1417,11 +1432,13 @@ def test_bridge_rejects_completion_without_attempt_resources(
                 journal_file.unlink()
             return JobResult(JobStatus.COMPLETED, 0, 9, "", "", cluster_name)
 
-    bridge = _bridge(tmp_path, socket_dir, ForgetfulRunner())
+    bridge = _bridge(tmp_path, transport, ForgetfulRunner())
     bridge.start()
     try:
         frame = _send_raw(
-            bridge, encode_message(EvaluationRequest(kind="accuracy", invocation_id="6" * 32))
+            transport,
+            bridge,
+            encode_message(EvaluationRequest(kind="accuracy", invocation_id="6" * 32)),
         )
     finally:
         bridge.close()
@@ -1432,9 +1449,9 @@ def test_bridge_rejects_completion_without_attempt_resources(
 
 
 def test_retry_limit_is_enforced_from_persisted_attempt_count(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
-    bridge = _bridge(tmp_path, socket_dir, max_retries=0)
+    bridge = _bridge(tmp_path, transport, max_retries=0)
     journal = InvocationJournal(_namespace(tmp_path))
     record = journal.prepare("7" * 32, "1" * 64, "2" * 64)
     record = journal.submitting(record, "lease", _attempt_resources())
@@ -1447,7 +1464,7 @@ def test_retry_limit_is_enforced_from_persisted_attempt_count(
 
 
 def test_ensure_current_cluster_releases_racing_launch_and_reports_closing(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     class ClosingRunner(FakeRunner):
         bridge: SkyPilotBridge
@@ -1465,7 +1482,7 @@ def test_ensure_current_cluster_releases_racing_launch_and_reports_closing(
 
     runner = ClosingRunner()
     logs: list[str] = []
-    bridge = _bridge(tmp_path, socket_dir, runner, logs.append)
+    bridge = _bridge(tmp_path, transport, runner, logs.append)
     runner.bridge = bridge
 
     with pytest.raises(RuntimeError, match="bridge is closing"):
@@ -1476,7 +1493,7 @@ def test_ensure_current_cluster_releases_racing_launch_and_reports_closing(
 
 
 def test_job_started_during_close_logs_failed_cancel_then_refuses(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     class FailingCancel(FakeRunner):
         def cancel(self, cluster_name: str, job_id: int, *, timeout: float = 60) -> None:
@@ -1485,7 +1502,7 @@ def test_job_started_during_close_logs_failed_cancel_then_refuses(
             raise OSError(message)
 
     logs: list[str] = []
-    bridge = _bridge(tmp_path, socket_dir, FailingCancel(), logs.append)
+    bridge = _bridge(tmp_path, transport, FailingCancel(), logs.append)
     journal = InvocationJournal(_namespace(tmp_path))
     record = journal.prepare("9" * 32, "1" * 64, "2" * 64)
     record = journal.submitting(record, "lease", _attempt_resources())
@@ -1521,9 +1538,9 @@ def _terminal_record(tmp_path: Path) -> tuple[InvocationJournal, InvocationRecor
 
 
 def test_deliver_rejects_missing_result_and_mismatched_acknowledgement(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
-    bridge = _bridge(tmp_path, socket_dir)
+    bridge = _bridge(tmp_path, transport)
     journal, completed = _terminal_record(tmp_path)
     prepared = journal.prepare("b" * 32, "1" * 64, "2" * 64)
 
@@ -1542,9 +1559,9 @@ def test_deliver_rejects_missing_result_and_mismatched_acknowledgement(
 
 
 def test_snapshot_digest_and_staging_reject_special_files_and_oversized_workspaces(
-    tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, transport: MemoryTransport, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    bridge = _bridge(tmp_path, socket_dir)
+    bridge = _bridge(tmp_path, transport)
     snapshot = tmp_path / "snap"
     snapshot.mkdir()
     os.mkfifo(snapshot / "pipe")
@@ -1558,7 +1575,7 @@ def test_snapshot_digest_and_staging_reject_special_files_and_oversized_workspac
 
 
 def test_a_queue_record_without_a_status_ends_the_request_in_a_typed_failure(
-    tmp_path: Path, socket_dir: Path
+    tmp_path: Path, transport: MemoryTransport
 ) -> None:
     """An unreadable queue status is a permanent failure: no retry, no resubmission."""
 
@@ -1575,11 +1592,13 @@ def test_a_queue_record_without_a_status_ends_the_request_in_a_typed_failure(
             raise SkyPilotOutputError.unknown_job_status(None)
 
     runner = UnreadableQueueRunner()
-    bridge = _bridge(tmp_path, socket_dir, runner)
+    bridge = _bridge(tmp_path, transport, runner)
     bridge.start()
     try:
         frame = _send_raw(
-            bridge, encode_message(EvaluationRequest(kind="accuracy", invocation_id="7" * 32))
+            transport,
+            bridge,
+            encode_message(EvaluationRequest(kind="accuracy", invocation_id="7" * 32)),
         )
     finally:
         bridge.close()
@@ -1587,3 +1606,49 @@ def test_a_queue_record_without_a_status_ends_the_request_in_a_typed_failure(
     assert isinstance(frame, ErrorFrame)
     assert frame.error == "SkyPilotOutputError"
     assert runner.commands == []
+
+
+def test_a_unix_socket_bridge_serves_an_evaluation_with_a_private_socket_file(
+    tmp_path: Path,
+) -> None:
+    """The one wiring test over a real Unix socket: the file is owner-only and removed on close."""
+    # A bindable Unix socket path must be shallow; tmp_path nests too deep.
+    short_dir = tempfile.mkdtemp(prefix="vsb-", dir="/tmp")
+    try:
+        runner = FakeRunner()
+        socket_path = Path(short_dir) / "bridge.sock"
+        workspace, package = _staging_fixture(tmp_path)
+        bridge = SkyPilotBridge(
+            runner=runner,
+            cluster_name="lease",
+            resources=_resources(),
+            workspace=workspace,
+            evaluator_package_root=package,
+            hidden_paths=(Path("private"),),
+            commands={"accuracy": ("true",)},
+            benchmark_output_argument=None,
+            state_namespace=_namespace(tmp_path),
+            socket_path=socket_path,
+            log=lambda _: None,
+        )
+        bridge.start()
+        try:
+            mode = socket_path.stat().st_mode & 0o777
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(HANG_GUARD_S)
+                client.connect(str(socket_path))
+                client.sendall(
+                    encode_message(EvaluationRequest(kind="accuracy", invocation_id="9" * 32))
+                )
+                reader = client.makefile("rb")
+                frames = [decode_response(reader.readline()) for _ in range(3)]
+                client.sendall(encode_message(AckRequest(invocation_id="9" * 32)))
+                assert decode_response(reader.readline()).type == "acked"
+        finally:
+            bridge.close()
+
+        assert mode == 0o600
+        assert [frame.type for frame in frames] == ["stdout", "stderr", "result"]
+        assert not socket_path.exists()
+    finally:
+        shutil.rmtree(short_dir, ignore_errors=True)

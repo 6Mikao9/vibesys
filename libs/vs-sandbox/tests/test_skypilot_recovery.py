@@ -1,3 +1,11 @@
+"""The invocation journal: durable, ordered, self-verifying records of one evaluation.
+
+Guarantees under test: a prepared record is restorable after a crash; phase
+transitions are ordered and field-consistent; delivery offsets never move
+backwards; a completed-but-unacknowledged payload verifies itself (digest and
+encoding) and replays; an infrastructure retry gets a new deterministic job name.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast

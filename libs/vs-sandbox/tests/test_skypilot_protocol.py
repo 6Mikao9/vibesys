@@ -1,3 +1,5 @@
+"""The bridge wire protocol: strict, versioned messages that reject version, operation and policy overrides."""
+
 import pytest
 from pydantic import ValidationError
 

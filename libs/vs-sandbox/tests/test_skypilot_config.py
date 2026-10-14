@@ -1,3 +1,11 @@
+"""SkyPilot profile loading and resource resolution.
+
+Guarantees under test: profile documents are strictly typed and every load error
+names the offending path; names are bounded safe identifiers; a portable request
+resolves against a profile without persisting profile policy, freezes the operator
+command prefix, and is rejected when it exceeds or mismatches the profile.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
