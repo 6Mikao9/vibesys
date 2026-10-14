@@ -177,17 +177,31 @@ def recall[Fact](model: BaseModel, slot: str) -> Fact | None:
         return None
 
 
+@cache
+def _memoizes(model_type: type[BaseModel]) -> bool:
+    """Whether instances of this class have the slots that hold remembered facts."""
+    return all(
+        isinstance(getattr(model_type, slot, None), MemberDescriptorType) for slot in _MEMO_SLOTS
+    )
+
+
 def keep(model: BaseModel, slot: str, fact: object) -> None:
     """Remember ``fact`` in ``slot`` of this instance, if its class has the slot."""
-    if slot in _MEMO_SLOTS and isinstance(getattr(type(model), slot, None), MemberDescriptorType):
+    if _memoizes(type(model)):
         _write_slot(model, slot, fact)
 
 
 def _frozen_model_is_deeply_immutable(model: BaseModel) -> bool:
     known = recall(model, "_immutable")
     if known is None:
-        known = _walk_immutable(getattr(model, name) for name in _field_names(type(model)))
-        keep(model, "_immutable", known)
+        known = _judge_immutable(model)
+    return known
+
+
+def _judge_immutable(model: BaseModel) -> bool:
+    """Walk a frozen model whose verdict is not yet kept, and keep the verdict."""
+    known = _walk_immutable(model.__dict__.values())
+    keep(model, "_immutable", known)
     return known
 
 
@@ -216,7 +230,7 @@ def _walk_immutable(values: Iterable[object]) -> bool:
                 continue
             return False
         if isinstance(node, BaseModel):
-            if not node.model_config.get("frozen") or not _frozen_model_is_deeply_immutable(node):
+            if not node.model_config.get("frozen") or not _judge_immutable(node):
                 return False
         elif isinstance(node, tuple | frozenset):
             pending.extend(node)
