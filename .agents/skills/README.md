@@ -1,10 +1,10 @@
 # Agent skills
 
 Skills for agents developing VibeSys. `.claude/skills` is a symlink to this
-directory. These are not the product skills in `resources/skills/`, which ship
-to optimization agents. The convention for writing and changing skills here is
-the [write-skills](write-skills/SKILL.md) skill, and `scripts/check_skills.py`
-checks it, including that this index lists every skill under its kind.
+directory. These are not the bundled product skills, which ship to
+optimization agents. The convention for writing and changing skills here is
+the [write-skills](write-skills/SKILL.md) skill, and the `check_skills` check
+enforces it, including that this index lists every skill under its kind.
 
 ## Generic
 
@@ -22,8 +22,8 @@ How to make one kind of change in this repository.
 - [add-agent-provider](add-agent-provider/SKILL.md): add or change an agent CLI
   provider, upgrade agentshim, or bump a pinned CLI version.
 - [add-bundled-skill](add-bundled-skill/SKILL.md): add or change a bundled
-  skill in `resources/skills/`, its sidecar selection rules, platform
-  references or `update.sh`.
+  product skill, its sidecar selection rules, platform references or its
+  vendoring update script.
 - [add-compute-backend](add-compute-backend/SKILL.md): add an accelerator
   platform (enum, sandbox implementation, prompt fragments, platform guidance).
 - [add-domain](add-domain/SKILL.md): add an optimization domain (enum,
