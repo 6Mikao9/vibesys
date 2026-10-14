@@ -9,9 +9,9 @@ A failing example prints the run as a timeline.
 
 from __future__ import annotations
 
-import pytest
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.evolve._host import (
     Host,
     assert_flow_closed,
@@ -21,7 +21,7 @@ from tests.vibesys.orchestration.evolve._host import (
 
 from vs_core.api import Finish, StartAttempt, Wait
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def _starts(host: Host) -> int:

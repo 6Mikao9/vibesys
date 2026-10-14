@@ -10,9 +10,9 @@ implementer linked it).
 
 from __future__ import annotations
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, begin, config
 from tests.vibesys.orchestration.dynamic._replies import implement, implemented, plan_reply
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import CONTEXTS, render
@@ -36,7 +36,7 @@ from vs_core.api import (
     StartAttempt,
 )
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 CANDIDATE = RevisionRef.of_git_commit("c1")
 THROUGHPUT = 123.0
 STATUSES = st.sampled_from([ObservationStatus.SUCCEEDED, ObservationStatus.FAILED])

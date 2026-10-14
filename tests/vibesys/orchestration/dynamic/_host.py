@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
+from tests.support.vibesys_flows import start_flow
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
@@ -115,7 +116,7 @@ def begin(
     **world: Unpack[World],
 ) -> Host:
     """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
-    run = FlowRun.start(
+    run = start_flow(
         dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting
     )
     return Host(run, cfg, **world)

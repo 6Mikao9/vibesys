@@ -14,6 +14,7 @@ from enum import StrEnum
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -41,7 +42,7 @@ from vs_core.api import (
     Withdraw,
 )
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 class Turn(StrEnum):

@@ -8,9 +8,9 @@ budget, never plan twice at once, never start work after the stop, and end in ex
 
 from __future__ import annotations
 
-import pytest
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -21,7 +21,7 @@ from tests.vibesys.orchestration.dynamic._host import (
 
 from vs_core.api import Finish, RequestTurn, StartAttempt, Wait
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def _starts(host: Host) -> int:

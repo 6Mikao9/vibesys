@@ -12,9 +12,9 @@ from __future__ import annotations
 import string
 from dataclasses import dataclass
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, begin
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
@@ -61,7 +61,7 @@ from vs_core.api import (
 )
 from vs_core.api.testing import FakeView
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 OUTPUT = string.ascii_letters + string.digits + " "
 PARENT = revision("parent")
 FIELDS = st.lists(st.sampled_from(["hip_api_timing", "decode_timing"]), unique=True, max_size=2)

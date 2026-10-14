@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
+from tests.support.vibesys_flows import start_flow
+
 from vibesys.metrics import EvidenceReading, MetricRow, MetricSpace
 from vibesys.orchestration.evolve.models import JudgeResponse, MutatorResponse
 from vibesys.orchestration.evolve.search.api import (
@@ -110,7 +112,7 @@ def begin(
     facts = (
         FACTS if metric_space is None else FACTS.model_copy(update={"task": terms_in(metric_space)})
     )
-    run = FlowRun.start(evolve, cfg, facts=facts, restarting=restarting, view=view)
+    run = start_flow(evolve, cfg, facts=facts, restarting=restarting, view=view)
     return (host_type or Host)(run, cfg, **world)
 
 

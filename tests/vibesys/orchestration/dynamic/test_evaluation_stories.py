@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import re
 
-import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._evidence_host import (
     EvidenceHost,
     begin_with_evidence,
@@ -41,7 +41,7 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vs_core.api import Finish, Measure, Wait
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 
 
 def _selection(host: EvidenceHost) -> str:

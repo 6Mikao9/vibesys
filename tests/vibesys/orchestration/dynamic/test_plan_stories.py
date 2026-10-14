@@ -12,9 +12,9 @@ from __future__ import annotations
 import json
 import unicodedata
 
-import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
+from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -54,7 +54,7 @@ from vs_core.api import (
 )
 from vs_core.api.search import ReplyError, ReplyErrorCode
 
-MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+MODES = across_restarts
 LOST_PLANNER_TURNS = 3
 """How often one planning ask is made before the planner is given up on: first ask and two more."""
 

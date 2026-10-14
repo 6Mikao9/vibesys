@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, Self, TypedDict, Unpack, cast
 
+from tests.support.vibesys_flows import start_flow
+
 from vibesys.hypothesis import HypothesisState
 from vibesys.metrics import EvidenceReading, MetricRow
 from vs_core.api import (
@@ -128,7 +130,7 @@ class SerialHost:
         **world: Unpack[World],
     ) -> Self:
         """Start ``search`` of ``config`` under a host; ``world`` sets how the far side behaves."""
-        run = FlowRun.start(search, config, facts=FACTS, restarting=restarting, view=view)
+        run = start_flow(search, config, facts=FACTS, restarting=restarting, view=view)
         return cls(cast("FlowRun[object]", run), **world)
 
     @property
