@@ -1382,7 +1382,7 @@ def _plant_every_claude_credential(home: Path, monkeypatch: pytest.MonkeyPatch) 
     (home / ".claude").mkdir(parents=True)
     (home / ".claude" / ".credentials.json").write_text('{"synthetic": "subscription"}\n')
     (home / ".claude.json").write_text('{"synthetic": "settings"}\n')
-    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-api-key")
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-oauth-token")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://stale.invalid")
@@ -1452,7 +1452,7 @@ def test_an_unmet_auth_policy_fails_before_any_container_starts(
 ) -> None:
     home = tmp_path / "synthetic-home"
     home.mkdir()
-    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    monkeypatch.setenv("HOME", str(home))
     backend = FakeBackend()
     request = _request(
         tmp_path,
