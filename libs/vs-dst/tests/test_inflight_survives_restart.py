@@ -17,9 +17,9 @@ from hypothesis import strategies as st
 from vs_core.api import EnsureWorkspace, FailureReason
 from vs_core.api.testing import Unknown
 from vs_dst.api import simulate
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import Depth, depth, examples
 
-from ._tiny import TinyWorld
+from ._tiny import TinyWorld, spread
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState, Request, RequestRecord
@@ -52,9 +52,9 @@ def _workspaces(run: SimulatedRun) -> list[RequestRecord]:
 @given(patience=LIMITS)
 def test_a_request_the_far_side_finished_is_not_timed_out_by_the_restart(patience: float) -> None:
     normal = simulate(TinyWorld(1, patience=patience))
-    points = normal.crash_points()  # a sample on a pull request, every boundary at nightly
+    points = normal.crash_points()
 
-    for crash in points:
+    for crash in points if depth() is Depth.NIGHTLY else spread(points, 3):
         recovered = normal.rerun_with_crash(crash)
         assert recovered.finished, crash
         assert recovered.result == normal.result, crash
@@ -73,7 +73,9 @@ def test_a_request_the_far_side_never_answers_ends_at_its_limit_after_a_restart(
     normal = simulate(SilentWorkspaces(1, patience=patience))
     points = normal.crash_points()
 
-    for crash in points[:: max(1, len(points) // 6)]:
+    for crash in (
+        points[:: max(1, len(points) // 6)] if depth() is Depth.NIGHTLY else spread(points, 3)
+    ):
         recovered = normal.rerun_with_crash(crash)
         for record in _workspaces(recovered):
             assert record.failure is not None, crash

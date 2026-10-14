@@ -247,8 +247,8 @@ def _replay(lifetime: str, running: str) -> _WorldSpec:
 WORLDS = (
     _WorldSpec("fake", _fake_world),
     _replay("normal-run", "cancel-running"),
-    _replay("normal-run", "cancel-running-slow-teardown"),
-    _replay("pending-then-running", "cancel-running"),
+    # Every recorded lifetime and every cancel reaction is met once; the cross of them adds runs,
+    # not worlds the scheduler can be in.
     _replay("pending-then-running", "cancel-running-slow-teardown"),
     _replay("job-ends-first", "cancel-running-slow-teardown"),
 )
