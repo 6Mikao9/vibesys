@@ -74,3 +74,25 @@ def test_parent_components_are_rejected_at_any_position(
             namespace.write_bytes(hostile, b"x")
         with pytest.raises(ProjectStateError):
             namespace.external_directory(hostile)
+
+
+@given(parts=_PARTS, data=st.data())
+@settings(max_examples=40)
+def test_a_dangling_symlink_at_any_depth_is_refused_and_a_missing_path_is_not(
+    parts: list[str], data: st.DataObject
+) -> None:
+    """A link to nothing is still a link; a path that simply is not there yet is a plain miss."""
+    with TemporaryDirectory() as scratch:
+        namespace = Project.open(Path(scratch)).state.state_store_namespace("run-1")
+        relative = "/".join(parts)
+        directory = namespace.external_directory()
+        depth = data.draw(st.integers(min_value=0, max_value=len(parts) - 1))
+        for part in parts[:depth]:
+            directory = directory / part
+            directory.mkdir()
+        (directory / parts[depth]).symlink_to(Path(scratch) / "nowhere")
+
+        with pytest.raises(ProjectStateError):
+            namespace.write_bytes(relative, b"planted")
+        with pytest.raises(ProjectStateError):
+            namespace.read_bytes(relative)
