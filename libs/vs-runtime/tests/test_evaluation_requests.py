@@ -1075,3 +1075,65 @@ async def test_a_required_output_the_executor_cannot_supply_is_rejected_naming_t
         assert result.observation.observation.resource_id is None
         assert "stages.profile.required_outputs" in repr(result.observation)
         assert w.cluster.batches == []
+
+
+_AFTER_CANCEL = (
+    "unsubmitted",
+    "unknown",
+    "unreachable",
+    "queued",
+    "running",
+)
+
+
+def _poll_after_cancel(kind: str) -> ExecutorPoll:
+    match kind:
+        case "unsubmitted":
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        case "unknown":
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail="cannot tell")
+        case "unreachable":
+            raise ConnectionError(EXECUTOR_DOWN)
+        case "queued":
+            return ExecutorPoll(phase=PollPhase.QUEUED)
+        case _:
+            return ExecutorPoll(phase=PollPhase.RUNNING)
+
+
+@settings(
+    max_examples=examples(pr=8, nightly=40),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(phases=st.lists(st.sampled_from(_AFTER_CANCEL), min_size=1, max_size=4))
+async def test_an_accepted_cancel_ends_a_job_the_executor_holds_no_record_of_and_only_that(
+    phases: list[str],
+) -> None:
+    """After the executor accepts a cancel, a poll that says UNSUBMITTED (no record) reports
+    the job cancelled and ended, because a submission is answered only once it is made. One
+    that says UNKNOWN, or cannot be made, or finds the job alive, reports no end: the job
+    may still be running, and calling it ended would release what is not.
+    """
+    cluster = ScenarioCluster()
+    cluster.states = (SlurmJobStatus.PENDING,)
+    async with world(cluster) as w:
+        resource = resource_of(await submit(w))
+        await settled(w, resource)
+        for index, kind in enumerate(phases):
+            polls = _ScriptedPolls(
+                w.stack.executor, lambda _n, _polled, kind=kind: _poll_after_cancel(kind)
+            )
+            requests = _requests_over(w, polls)
+            cancel = query(CancelOwnedJob, f"cancel-{index}", resource)
+            got = await requests.execute(cancel, context_for(cancel))
+            seen = next(
+                event.observation for event in got.owner_events if isinstance(event, JobObserved)
+            )
+            if kind == "unsubmitted":
+                assert seen.status is ObservationStatus.CANCELLED
+                assert seen.terminal
+                assert seen.released
+                assert got.observation.observation.released
+            else:
+                assert not (seen.terminal and seen.released)
+                assert not got.observation.observation.released
