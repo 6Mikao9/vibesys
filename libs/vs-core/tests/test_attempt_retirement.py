@@ -803,6 +803,25 @@ def test_typed_job_manifest_always_fences_unreleased_descendants(
     assert not any(isinstance(request, core.DiscardWorkspace) for request in result.requests)
 
 
+def test_an_outstanding_job_edge_blocks_disposal_after_a_positive_scope_fence() -> None:
+    state, ref = undisposed_fixture()
+    owner = state.attempts.attempts[0]
+    job_edge = core.ReleaseDependency(kind="job", identity=core.ResourceId(root="leftover"))
+    state = with_owner(
+        state, changed(owner, release_dependencies=(*owner.release_dependencies, job_edge))
+    )
+    proof = observation(ref, core.RequestId(root="withdraw"))
+    state = recorded_proof(state, proof)
+    result = checked_step(
+        state,
+        core.ReleaseDependencyObserved(
+            attempt=ref, dependency=owner.release_dependencies[0], observation=proof
+        ),
+    )
+    assert job_edge in result.state.attempts.attempts[0].release_dependencies
+    assert not any(isinstance(request, core.DiscardWorkspace) for request in result.requests)
+
+
 def normalize_reopen(request: core.OperationRequest) -> core.ScopeReopenNormalization:
     assert isinstance(request, core.ScopedAdmissionReopen)
     return core.ScopeReopenNormalization(

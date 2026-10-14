@@ -11,6 +11,7 @@ from vs_core.api import (
     AttemptBudget,
     AttemptChargeRefundRequested,
     AttemptCheckpoint,
+    AttemptExhausted,
     AttemptId,
     AttemptPhase,
     AttemptRef,
@@ -505,3 +506,55 @@ def test_ambiguous_charge_identity_never_refunds_multiple_receipts(copies: int) 
     assert result.state == state.attempts
     assert result.signals == ()
     assert result.events == ()
+
+
+@pytest.mark.parametrize("limit", [0, 1, 2, 3])
+@pytest.mark.parametrize("spent", [0, 1, 2, 3, 4])
+def test_a_paid_invocation_is_charged_exactly_while_the_attempt_has_paid_invocations_left(
+    limit: int, spent: int
+) -> None:
+    """The limit is the number of paid invocations an attempt may spend: no more, no fewer."""
+    state = invocation_fixture()
+    owner = state.attempts.attempts[0]
+    earlier = tuple(
+        ChargeReceipt(
+            charge_id=ChargeId(root=f"earlier-{index}"),
+            kind=ChargeKind.ATTEMPT,
+            charged=1,
+            invocation_id=InvocationId(root=f"earlier-{index}"),
+        )
+        for index in range(spent)
+    )
+    state = state.model_copy(
+        update={
+            "attempts": AttemptsState(
+                attempts=(
+                    owner.model_copy(
+                        update={
+                            "charges": earlier,
+                            "budget": owner.budget.model_copy(
+                                update={"paid_invocation_limit": limit}
+                            ),
+                        }
+                    ),
+                )
+            )
+        }
+    )
+    event = InvocationChargeRequested(
+        attempt=AttemptRef(attempt_id=owner.attempt_id, generation=0),
+        invocation=state.sessions.invocations[0].invocation,
+    )
+
+    result = advance_attempt(state.attempts, context(state), event)
+
+    paid = sum(
+        row.charged for row in result.state.attempts[0].charges if row.kind == ChargeKind.ATTEMPT
+    )
+    exhausted = [e for e in result.events if isinstance(e, AttemptExhausted)]
+    if spent < limit:
+        assert paid == spent + 1
+        assert exhausted == []
+    else:
+        assert paid == spent
+        assert [e.reason for e in exhausted] == ["paid-limit"]
