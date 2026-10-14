@@ -23,7 +23,7 @@ import string
 from pathlib import Path
 
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import assume, given
 from hypothesis import strategies as st
 from resources.profilers.rocprof import analyze_rocprof, remote_capture
 from resources.profilers.rocprof.analyze_rocprof import (
@@ -69,7 +69,6 @@ from tests.vibesys.loops.rocprof_strategies import (
 )
 
 from vs_sandbox.api.slurm import PROFILE_STATS_PREFIX
-from vs_sim.api.testing import examples
 
 _REAL_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "rocprof" / "rocprofv3_real"
 
@@ -1507,7 +1506,6 @@ def test_property_window_totals_are_monotone_in_window_size(
 # ---------------------------------------------------------------------------
 
 
-@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     kernels=st.lists(
         st.tuples(st.integers(0, 10_000), st.integers(1, 5_000)), min_size=1, max_size=8

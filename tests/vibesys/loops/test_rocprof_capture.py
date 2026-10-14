@@ -32,7 +32,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import HANG_GUARD_S, examples
+from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -47,7 +47,7 @@ _ROCPROF_FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
 # so the property-test slice stays fast, per test_capture_runtime.py's
 # PROC_SETTINGS precedent.
 PROC_SETTINGS = settings(max_examples=10, deadline=None)
-PURE_SETTINGS = settings(max_examples=examples(pr=10, nightly=20), deadline=None)
+PURE_SETTINGS = settings(max_examples=20, deadline=None)
 
 
 def _load_module(name: str, path: Path) -> ModuleType:

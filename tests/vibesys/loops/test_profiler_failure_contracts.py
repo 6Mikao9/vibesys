@@ -24,8 +24,6 @@ from resources.profilers.rocprof import analyze_rocprof, capture, counters
 from resources.profilers.rocprof.server import build_server as rocprof_server
 from resources.profilers.torch import capture_ops
 
-from vs_sim.api.testing import examples
-
 
 @pytest.mark.parametrize(
     "tool", ["tables", "kernels", "cpu_overhead", "idle_gaps", "memory", "graph_replays"]
@@ -45,7 +43,7 @@ def test_missing_nsys_export_is_a_tool_error(tmp_path: Path, suffix: str) -> Non
         )
 
 
-@settings(max_examples=examples(pr=10, nightly=32))
+@settings(max_examples=32)
 @given(code=st.integers(min_value=1, max_value=255))
 def test_every_nonzero_ncu_counter_set_exit_is_a_tool_error(code: int) -> None:
     with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
@@ -63,7 +61,7 @@ def test_every_nonzero_ncu_counter_set_exit_is_a_tool_error(code: int) -> None:
                 asyncio.run(ncu_server().call_tool("list_sections_and_sets", {}))
 
 
-@settings(max_examples=examples(pr=10, nightly=32))
+@settings(max_examples=32)
 @given(code=st.integers(min_value=1, max_value=255))
 def test_every_nonzero_neuron_analysis_exit_is_a_tool_error(code: int) -> None:
     with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
@@ -98,7 +96,6 @@ _INVALID_NUMBERS = st.one_of(
 @example(value="bogus", field="Counter_Value")
 @example(value="nan", field="Start_Timestamp")
 @example(value="inf", field="Grid_Size")
-@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     value=_INVALID_NUMBERS,
     field=st.sampled_from(
@@ -131,7 +128,6 @@ def test_invalid_rocprof_counter_values_are_not_zero(value: str, field: str) -> 
         assert type(failed.value).__name__ == "CaptureFailedError"
 
 
-@settings(max_examples=examples(pr=8, nightly=100))
 @given(value=_INVALID_NUMBERS)
 def test_invalid_rocprof_trace_timestamps_are_not_zero(value: str) -> None:
     with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
@@ -173,7 +169,6 @@ def test_corrupt_nsys_database_is_a_typed_failure(tmp_path: Path) -> None:
     assert type(failed.value).__name__ == "CaptureFailedError"
 
 
-@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     payload=st.one_of(
         st.text(alphabet="xyz{", min_size=1, max_size=20),
@@ -221,7 +216,6 @@ def test_counter_pass_setup_failure_is_a_typed_capture_error(
     assert type(failed.value).__name__ == "CaptureFailedError"
 
 
-@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     field=st.sampled_from(["start_timestamp", "end_timestamp"]),
     omit=st.booleans(),

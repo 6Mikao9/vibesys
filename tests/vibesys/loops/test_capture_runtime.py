@@ -31,7 +31,7 @@ from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, examples, start_thread
+from vs_sim.api.testing import HANG_GUARD_S, start_thread
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -42,9 +42,9 @@ _MODULE_PATH = _REPO / "resources" / "profilers" / "_common" / "capture_runtime.
 
 # Real subprocesses + signal round-trips: keep example counts tiny so the
 # whole property-test slice stays well under the ~20s budget.
-PROC_SETTINGS = settings(max_examples=examples(pr=1, nightly=5), deadline=None)
+PROC_SETTINGS = settings(max_examples=5, deadline=None)
 # Pure in-process logic (no subprocesses): can afford more examples.
-FAST = settings(max_examples=examples(pr=10, nightly=20), deadline=None)
+FAST = settings(max_examples=20, deadline=None)
 
 
 def _load_module(name: str, path: Path) -> ModuleType:

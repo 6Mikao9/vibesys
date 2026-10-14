@@ -21,12 +21,10 @@ import string
 from hypothesis import settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import examples
-
 # Bounded example counts, no wall-clock deadline: CI machines vary in speed
 # and a few tests build small CSV files on disk via tmp_path.
-FAST = settings(max_examples=examples(pr=10, nightly=20), deadline=None)
-FEWER = settings(max_examples=examples(pr=10, nightly=12), deadline=None)
+FAST = settings(max_examples=20, deadline=None)
+FEWER = settings(max_examples=12, deadline=None)
 
 ARCH_NAMES = ("gfx90a", "gfx942", "gfx950")
 arch_name = st.sampled_from(ARCH_NAMES)
