@@ -125,7 +125,7 @@ def test_the_dispatch_time_starts_the_limit_and_is_core_time(limit: float, queue
     record = state.records.records[0]
     assert state.run.now_at == queued
     assert record.until.at == queued + limit
-    assert record.limit_from_dispatch is None
+    assert record.dispatched_at == queued
 
 
 @given(limit=_LIMIT, queued=_QUEUED)

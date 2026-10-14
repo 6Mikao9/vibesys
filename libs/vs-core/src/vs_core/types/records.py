@@ -179,12 +179,14 @@ class RequestRecord(OutcomeValue):
     failure: Failed | None = None
     """Why core ended it without a result (limit passed, watch fired), else None."""
     limit_from_dispatch: Seconds | None = None
-    """The seconds the work may take from its dispatch, until it is dispatched, else None.
+    """The seconds the work may take from its dispatch, or None for a limit already absolute.
 
-    While it is set, ``until.at`` is the run deadline (a queued request spends nothing);
-    ``DispatchAuthorized`` replaces ``until`` with the dispatch time plus this limit and
-    clears it.
+    Until the request is dispatched ``until.at`` is the run deadline (a queued request spends
+    nothing); ``DispatchAuthorized`` then replaces ``until`` with the dispatch time plus this
+    limit, once, and records ``dispatched_at``.
     """
+    dispatched_at: Seconds | None = None
+    """When the shell first dispatched a request whose limit counts from then, else None."""
 
     @property
     def retry_wait_until(self) -> float | None:

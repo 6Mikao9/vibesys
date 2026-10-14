@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ._deadlines import started_until
+from ._deadlines import from_dispatch, started_until
 from ._dispatch_episode import episode_ended
 from ._outcomes import prove_outcome
 from ._proofs import (
@@ -34,6 +34,7 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._request_forward import declaration, owner_signals, records_own, success_without_reply
+from ._session_scope import lost_turn_cancellation
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
 from .types.common import (
@@ -79,6 +80,7 @@ from .types.sessions import (
     DispatchTurn,
     InspectTurn,
     RegisteredTurnRequested,
+    ResumeSessionTurn,
     TurnObserved,
 )
 from .types.strategy import Cancel, Withdraw
@@ -182,7 +184,10 @@ def _prepared(
                 raise ContractError(("request_id",), "request identity conflict")
             return AreaChange(state=state)
     if not isinstance(request, ExecuteRegisteredOperation):
-        return AreaChange(state=state, requests=(Outbound(request=request, until=event.until),))
+        return AreaChange(
+            state=state,
+            requests=(Outbound(request=request, until=from_dispatch(context.run, event.until)),),
+        )
     return _route_operation(state, context, event, request)
 
 
@@ -214,7 +219,10 @@ def _route_operation(
             expected_measurement=event.normalized_measurement,
         )
         return AreaChange(state=state, signals=(job,))
-    return AreaChange(state=state, requests=(Outbound(request=request, until=event.until),))
+    return AreaChange(
+        state=state,
+        requests=(Outbound(request=request, until=from_dispatch(context.run, event.until)),),
+    )
 
 
 def _dispatched(
@@ -238,13 +246,13 @@ def _dispatched(
         case _:
             raise ContractError(("phase",), f"{record.phase.value} request cannot be dispatched")
     updated = record.model_copy(update={"phase": RequestPhase.DISPATCHED})
-    if record.limit_from_dispatch is not None:
+    if record.limit_from_dispatch is not None and record.dispatched_at is None:
         updated = updated.model_copy(
             update={
                 "until": started_until(
                     context.run, record.limit_from_dispatch, record.until.watches
                 ),
-                "limit_from_dispatch": None,
+                "dispatched_at": context.run.now_at,
             }
         )
     return AreaChange(state=_replace(state, updated))
@@ -302,17 +310,27 @@ def _end_released_turn_pair(
 def _end_released_dispatch(
     state: RecordsState, context: RecordsContext, root: RequestRecord, event: RequestObserved
 ) -> AreaChange[RecordsState]:
-    """A cancellation that released an unresolved turn ends that turn's open dispatch.
+    """A cancellation that released a lost turn ends that turn's open dispatch.
 
-    The dispatch never learned its own outcome (the transport died after sending), so the
-    release is the only fact that can close it.
+    The dispatch never learned its own outcome (the transport died after sending, or its
+    limit passed), so the release is the only fact that can close it. The cancellation of a
+    lost turn (``lost_turn_authority``) that the executor conclusively refuses or fails closes it
+    too: there is no turn left to stop, so the turn is lost as well, as if it was cancelled.
     """
     request = root.request
     observation = event.observation
+    lost = isinstance(request, CancelTurn) and request.request_id == lost_turn_cancellation(
+        request.invocation
+    )
+    refused = lost and observation.status in (ObservationStatus.REJECTED, ObservationStatus.FAILED)
     if (
         not isinstance(request, CancelTurn)
-        or observation.status != ObservationStatus.CANCELLED
         or not observation.terminal
+        or not (
+            observation.status == ObservationStatus.CANCELLED
+            or (lost and observation.status == ObservationStatus.SUCCEEDED)
+            or refused
+        )
     ):
         return AreaChange(state=state)
     rows = tuple(
@@ -322,7 +340,7 @@ def _end_released_dispatch(
         (
             record
             for record in state.records
-            if isinstance(record.request, DispatchTurn)
+            if isinstance(record.request, DispatchTurn | ResumeSessionTurn)
             and record.phase in (RequestPhase.RECONCILING, RequestPhase.BLOCKED)
             and any(
                 record.request.turn == row.turn and record.request.scope == row.scope
@@ -331,13 +349,18 @@ def _end_released_dispatch(
         ),
         None,
     )
-    if dispatch is None or dispatch.observation is None:
+    if dispatch is None:
         return AreaChange(state=state)
+    answered = dispatch.observation
     ended = observation.model_copy(
         update={
             "request_id": dispatch.request_id,
-            "sequence": dispatch.observation.sequence + 1,
+            "sequence": 0 if answered is None else answered.sequence + 1,
+            "status": ObservationStatus.CANCELLED,
             "accepted": False,
+            # A refused cancellation says the executor holds no such turn: nothing runs.
+            "released": observation.released or refused,
+            "children_complete": observation.children_complete or refused,
         }
     )
     return _apply(state, context, dispatch, TargetObservation(observation=ended))

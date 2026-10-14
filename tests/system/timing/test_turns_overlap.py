@@ -126,3 +126,26 @@ def test_turns_in_flight_never_exceed_the_runs_parallelism(
         if isinstance(record.request, core.DispatchTurn)
     )
     assert limits == sorted(start + _TURN_TIME_S for start in timed.timeline.starts)
+
+
+@_SETTINGS
+@example(overrun=600.0)
+@given(overrun=st.integers(min_value=600, max_value=900).map(float))
+def test_a_turn_that_outlasts_its_limit_is_lost_at_the_limit_and_the_run_ends(
+    overrun: float,
+) -> None:
+    """One turn lasts longer than its limit: it is cancelled at the limit, not waited for.
+
+    Its dispatch ends unanswered, which once left the turn's session waiting for ever and halted
+    the run. Core now treats it as a lost turn: it is cancelled, the ask ends, and the run ends
+    well before the turn would have.
+    """
+    timed = run_timed(
+        StaggeredStrategy(config=StaggeredConfig(workers=1)),
+        Plan(duration=lambda _worker, _ordinal: overrun, max_parallel=1, control_poll_s=4 * LEASE),
+    )
+
+    assert timed.outcome is not None, "the run did not end by itself"
+    assert len(timed.timeline.starts) == 1
+    assert timed.wall_s < overrun
+    assert timed.holds_lease

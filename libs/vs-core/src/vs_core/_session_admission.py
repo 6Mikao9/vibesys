@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._deadlines import from_dispatch
 from ._evaluation_history import produce_history
 from ._proofs import (
     Proven,
@@ -452,7 +453,7 @@ def _turn_requested(
         phase=SessionPhase.ACQUIRING,
         evaluation_prefix=_evaluation_prefix(state, context, scope, turn),
         until=event.until,
-        limit=max(event.until.at - context.run.now_at, 0.0),
+        limit=from_dispatch(context.run, event.until).limit,
     )
     state = _replace_invocation(state, invocation)
     signals: list[Signal] = []

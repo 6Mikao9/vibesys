@@ -13,12 +13,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .types.records import Outbound, within
-from .types.until import Until, Within
+from .types.until import FromDispatch, Until, Within
 
 if TYPE_CHECKING:
     from .types.kernel import RunState
     from .types.records import Request
-    from .types.until import FromDispatch, Watch
+    from .types.until import Watch
 
 
 def resolve_until(run: RunState, within: Within) -> Until:
@@ -45,6 +45,11 @@ def queued_until(run: RunState, unstarted: FromDispatch) -> Until:
     if run.deadline_at > run.now_at:
         return Until(at=run.deadline_at, watches=unstarted.watches)
     return Until(at=run.now_at + max(unstarted.limit, 0.0), watches=unstarted.watches)
+
+
+def from_dispatch(run: RunState, until: Until) -> FromDispatch:
+    """``until`` as the duration a request accepted now may take once it is dispatched."""
+    return FromDispatch(limit=max(until.at - run.now_at, 0.0), watches=until.watches)
 
 
 def started_until(run: RunState, limit: float, watches: tuple[Watch, ...]) -> Until:

@@ -289,6 +289,18 @@ def _same_request(previous: RequestRecord, proposal: Request) -> bool:
     return digest(previous.request) == digest(proposal)
 
 
+def _started(state: CoreState, decision: DecisionId | None) -> RequestRecord | None:
+    """The first request of ``decision`` the shell dispatched, whose limit is running."""
+    return next(
+        (
+            row
+            for row in state.records.records
+            if row.request.decision_id == decision and row.dispatched_at is not None
+        ),
+        None,
+    )
+
+
 def _resolve(state: CoreState, outbound: Outbound, cause: DecisionId | None) -> Scheduled:
     """Resolve an outbound request's ``until`` to the absolute form stored on its record."""
     match outbound.until:
@@ -298,6 +310,16 @@ def _resolve(state: CoreState, outbound: Outbound, cause: DecisionId | None) -> 
             if receipt is None or receipt.until is None:
                 raise ContractError(("until",), "an inherited until needs its accepted decision")
             until = receipt.until
+            started = _started(state, owner)
+            if started is not None:
+                until = started.until
+            elif receipt.limit is not None:
+                unstarted = FromDispatch(limit=receipt.limit, watches=receipt.until.watches)
+                return Scheduled(
+                    request=outbound.request,
+                    until=queued_until(state.run, unstarted),
+                    limit_from_dispatch=receipt.limit,
+                )
         case Within() as within:
             until = resolve_until(state.run, within)
         case Until() as until:
@@ -1039,14 +1061,16 @@ def _submitted(
         return replay
     rejection = validate_decision(state, event, check_revision=check_revision)
     feedback = rejection or Accepted(decision_id=decision.decision_id)
+    until = (
+        resolve_until(state.run, submission.until)
+        if rejection is None and isinstance(submission, Wait)
+        else None
+    )
     receipt = DecisionReceipt(
         decision_id=decision.decision_id,
         decision=None if rejection is not None else decision,
-        until=(
-            resolve_until(state.run, submission.until)
-            if rejection is None and isinstance(submission, Wait)
-            else None
-        ),
+        until=until,
+        limit=None if until is None else max(until.at - state.run.now_at, 0.0),
         payload_digest=payload_digest,
         feedback=feedback,
     )
