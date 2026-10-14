@@ -7,17 +7,20 @@ coverage) for nothing. A fixture that needs the product lives in the test module
 uses it.
 """
 
+import os
 import shutil
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from filelock import FileLock
 from tests.support.distribution_build import (
     BuiltDistributions,
     BuiltWheel,
     build_distribution,
     copy_private_packaging_source,
+    reissue_private_packaging_source,
 )
 
 
@@ -68,16 +71,27 @@ def repo_root() -> Path:
 def built_distributions(
     tmp_path_factory: pytest.TempPathFactory, repo_root: Path
 ) -> BuiltDistributions:
-    """One sdist and one wheel of the current checkout, built once in private scratch.
+    """One sdist and one wheel of the current checkout, built once per run in private scratch.
 
-    A build takes tens of seconds, and every packaging check only inspects the result, so
-    they all share this one. Tests using it carry ``xdist_group("built_wheel")`` so one
-    worker builds it once.
+    A build takes tens of seconds of CPU, and every packaging check only inspects the result,
+    so they all share this one. Under xdist the workers share it too: the first to ask builds
+    it while holding a file lock in the run's common temp directory, and the others reuse it,
+    whichever ``--dist`` mode scheduled their tests.
     """
-    scratch = tmp_path_factory.mktemp("built-distributions")
-    source = copy_private_packaging_source(repo_root, scratch / "checkout")
-    build_distribution(source, scratch / "dist", artifact="all")
+    base = tmp_path_factory.getbasetemp()
+    scratch = (base.parent if os.environ.get("PYTEST_XDIST_WORKER") else base) / "built"
+    scratch.parent.mkdir(parents=True, exist_ok=True)
     dist = scratch / "dist"
+    with FileLock(str(scratch.parent / "built.lock")):
+        if not dist.is_dir():
+            staging = scratch.parent / "built-staging"
+            staging.mkdir()
+            source = copy_private_packaging_source(repo_root, staging / "checkout")
+            build_distribution(source, staging / "dist", artifact="all")
+            staging.rename(scratch)
+    # The snapshot's capability is process-local, so each worker re-issues it over the
+    # finished copy instead of sharing the first builder's object.
+    source = reissue_private_packaging_source(scratch / "checkout")
     return BuiltDistributions(
         source=source,
         sdist=next(dist.glob("vibesys-*.tar.gz")),

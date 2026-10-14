@@ -111,8 +111,30 @@ def copy_private_packaging_source(source_root: Path, destination: Path) -> Priva
         destination_path = destination / relative
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, destination_path, follow_symlinks=False)
-    private = PrivatePackagingSource(destination, _PRIVATE_SOURCE_OWNER)
-    _PRIVATE_SOURCE_ROOTS[private] = destination
+    _marker(destination).write_text("a test-owned copy of the checkout\n", encoding="utf-8")
+    return _issue(destination)
+
+
+def reissue_private_packaging_source(root: Path) -> PrivatePackagingSource:
+    """Issue this process's capability over a private copy another process already made.
+
+    xdist workers share one build of the checkout. The copy carries the marker only
+    ``copy_private_packaging_source`` writes, so the live checkout cannot be passed off as one.
+    """
+    root = root.resolve()
+    if not _marker(root).is_file():
+        raise PrivatePackagingSourceError.not_owned()
+    return _issue(root)
+
+
+def _marker(root: Path) -> Path:
+    """The file beside a private copy, outside it, that only its maker writes."""
+    return root.with_name(f"{root.name}.private-packaging-source")
+
+
+def _issue(root: Path) -> PrivatePackagingSource:
+    private = PrivatePackagingSource(root, _PRIVATE_SOURCE_OWNER)
+    _PRIVATE_SOURCE_ROOTS[private] = root
     return private
 
 
