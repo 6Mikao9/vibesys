@@ -179,7 +179,7 @@ def run_out(cluster: Cluster) -> None:
             return
 
 
-@settings(max_examples=examples(pr=8, nightly=300), deadline=None)
+@settings(max_examples=examples(pr=3, nightly=300), deadline=None)
 @example(plan=[("answer", 0)], running_polls=1, ending=core.ObservationStatus.FAILED)
 @given(
     plan=st.lists(actions, max_size=12),

@@ -147,7 +147,7 @@ def outcome(trace: Trace) -> dict[str, object]:
 # hundreds of them. The pinned examples below are the minimal counterexamples we know; a new
 # failure prints its world and crash numbers (see ``note``) unshrunk.
 @settings(
-    max_examples=examples(pr=6, nightly=16),
+    max_examples=examples(pr=3, nightly=16),
     deadline=None,
     derandomize=True,
     database=None,

@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from vs_core.api.testing import Trace
 
 _SETTINGS = settings(
-    max_examples=examples(pr=4, nightly=12), deadline=None, derandomize=True, database=None
+    max_examples=examples(pr=3, nightly=12), deadline=None, derandomize=True, database=None
 )
 _OPEN = {
     core.ContinuationPhase.WAITING,

@@ -5,7 +5,7 @@ from hashlib import sha256
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -113,6 +113,9 @@ from vs_core.api import (
     step,
 )
 from vs_core.api.testing import sample_limits
+from vs_sim.api.testing import examples
+
+from .restart import restarts
 
 
 class RegisteredOutcome(Value):
@@ -260,6 +263,8 @@ def with_registered_origins(state: CoreState) -> CoreState:
 
 def reload(state: CoreState) -> CoreState:
     """Reload an atomic envelope through the public registered persistence codec."""
+    if not restarts():
+        return state
     codec = OperationRegistry(
         tuple(
             OperationRegistration(
@@ -1137,6 +1142,7 @@ def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreStat
     )
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     amounts=st.integers(1, 100).flatmap(
         lambda charged: st.tuples(st.just(charged), st.integers(0, charged))

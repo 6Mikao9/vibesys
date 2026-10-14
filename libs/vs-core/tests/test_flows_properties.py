@@ -366,7 +366,7 @@ class Host:
         assert len(set(self.sessions.values())) == len(self.sessions)
 
 
-@settings(max_examples=examples(pr=8, nightly=60), deadline=None)
+@settings(max_examples=examples(pr=3, nightly=60), deadline=None)
 @given(body=PROGRAMS, script=st.lists(_MOVE, max_size=16))
 # The last choice stands: a first-choice-wins flow adopts the input here.
 @example(

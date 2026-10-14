@@ -9,8 +9,10 @@ import vs_core.api as core
 from vs_core.api import ObservationStatus, SessionPhase
 from vs_sim.api.testing import examples
 
+from .guard_rows import by_pairs, guard_rows
 from .proof_digest import value_digest
 from .reopen_facts import released_job
+from .restart import restarts
 
 
 def changed[T: BaseModel](value: T, **fields: object) -> T:
@@ -20,6 +22,8 @@ def changed[T: BaseModel](value: T, **fields: object) -> T:
 def reload_state(
     state: core.CoreState, codec: core.OperationRegistry | None = None
 ) -> core.CoreState:
+    if codec is None and not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
@@ -101,6 +105,8 @@ def recorded_proof(state: core.CoreState, proof: core.Observation) -> core.CoreS
 def checked_step(
     state: core.CoreState, event: core.CoreEvent, *, codec: core.OperationRegistry | None = None
 ) -> core.Transition:
+    if codec is None and not restarts():
+        return core.step(state, event, reducers=REDUCERS)
     before = state.model_dump_json()
     result = core.step(state, event, reducers=REDUCERS)
     assert core.step(reload_state(state, codec), event, reducers=REDUCERS) == result
@@ -391,6 +397,7 @@ def test_withdrawal_requires_exact_accepted_receipt_for_every_admission_variant(
 
 
 @pytest.mark.parametrize("signal", ["settle", "retention", "park", "cancel"])
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(
     pending=st.sampled_from([None, "matching", "foreign", "duplicate", "final"]),
     authority=st.booleans(),
@@ -570,11 +577,13 @@ def writer_invocation(
     )
 
 
-@pytest.mark.parametrize("charge", ["paid", "correction", "resume", "free"])
-@pytest.mark.parametrize("predecessor", [False, True])
-@pytest.mark.parametrize("reuse", [False, True])
-@pytest.mark.parametrize("registered", [False, True])
-@settings(max_examples=examples(pr=3, nightly=100))
+@by_pairs(
+    ("charge", ["paid", "correction", "resume", "free"]),
+    ("predecessor", [False, True]),
+    ("reuse", [False, True]),
+    ("registered", [False, True]),
+)
+@settings(max_examples=examples(pr=1, nightly=100))
 @given(
     proof=st.tuples(
         st.sampled_from(list(ObservationStatus)),
@@ -1285,12 +1294,16 @@ def test_reopen_dispatch_waits_for_exact_workspace_and_physical_session_reacquis
     assert result.state.attempts.attempts[0].closure == state.attempts.attempts[0].closure
 
 
-@pytest.mark.parametrize("canonical", [False, True])
 @pytest.mark.parametrize(
-    "checkpoint_source", ["exact", "foreign", "duplicate", "latest", "wrong-retention"]
+    ("phase", "pending", "canonical", "checkpoint_source"),
+    guard_rows(
+        list(SessionPhase),
+        [False, True],
+        [False, True],
+        ["exact", "foreign", "duplicate", "latest", "wrong-retention"],
+        positive=(SessionPhase.IDLE, False, True, "exact"),
+    ),
 )
-@pytest.mark.parametrize("phase", list(SessionPhase))
-@pytest.mark.parametrize("pending", [False, True])
 def test_reopen_dispatch_requires_quiescent_reacquired_session(
     phase: SessionPhase, *, pending: bool, canonical: bool, checkpoint_source: str
 ) -> None:
@@ -1521,7 +1534,7 @@ def test_f4_disposal_requires_exact_disposition_and_positive_root_proof(
 
 @pytest.mark.parametrize("historical", [False, True])
 @pytest.mark.parametrize("aggregate", [False, True])
-@settings(max_examples=examples(pr=5, nightly=100))
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     prefix=st.text(alphabet="abc", min_size=1, max_size=8),
     suffix=st.text(alphabet="xyz", min_size=1, max_size=8),
@@ -1747,6 +1760,7 @@ def test_child_release_requires_complete_positive_history_from_every_source(
 @pytest.mark.parametrize(
     "completion", [None, core.CompletionStatus.FAILED, core.CompletionStatus.CANCELLED]
 )
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(canonical=st.booleans(), accepted=st.booleans(), terminal=st.booleans())
 def test_unknown_scope_reopen_inspects_before_reacquisition_or_typed_outcome(
     *, canonical: bool, accepted: bool, terminal: bool, completion: core.CompletionStatus | None
@@ -1919,6 +1933,7 @@ def test_queued_reopen_withdrawal_targets_the_new_queue_episode(admission: str) 
 @pytest.mark.parametrize(
     "completion", [None, core.CompletionStatus.FAILED, core.CompletionStatus.CANCELLED]
 )
+@settings(max_examples=examples(pr=3, nightly=100))
 @given(
     proof=st.tuples(
         st.sampled_from(

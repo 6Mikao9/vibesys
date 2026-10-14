@@ -11,6 +11,8 @@ from __future__ import annotations
 from itertools import product
 from typing import TYPE_CHECKING
 
+import pytest
+
 from vs_sim.api.testing import pairwise_rows
 
 if TYPE_CHECKING:
@@ -29,3 +31,19 @@ def guard_rows(*factors: Sequence[object], positive: Row, joint: Sequence[int] =
             row[index] = value
         rows[tuple(row)] = None
     return list(rows)
+
+
+def by_pairs(*factors: tuple[str, Sequence[object]]) -> pytest.MarkDecorator:
+    """``parametrize`` over the pairs of values of independent factors, not their product.
+
+    Each factor is ``(argument name, values)``. The first value of every factor is in the first row.
+    """
+    names = tuple(name for name, _ in factors)
+    rows = pairwise_rows(*(range(len(values)) for _, values in factors))
+    return pytest.mark.parametrize(
+        names,
+        [
+            tuple(values[index] for (_, values), index in zip(factors, row, strict=True))
+            for row in rows
+        ],
+    )

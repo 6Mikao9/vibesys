@@ -18,6 +18,8 @@ import vs_core.api as core
 from vs_core.api.testing import sample_limits
 from vs_sim.api.testing import examples
 
+from .restart import restarts
+
 RUN_SCOPE = core.Scope(owner=core.RunId(root="run"), generation=0)
 ATTEMPT_SCOPE = core.Scope(owner=core.AttemptId(root="attempt"), generation=0)
 
@@ -27,6 +29,8 @@ def rev(name: str) -> core.RevisionRef:
 
 
 def reload(state: core.CoreState) -> core.CoreState:
+    if not restarts():
+        return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
         fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),

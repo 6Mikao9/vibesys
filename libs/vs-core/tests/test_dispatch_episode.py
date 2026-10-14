@@ -8,11 +8,12 @@ episode``). Without a resolver the shell met that refusal as an error and ended 
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api import ClockAdvanced, ObservationStatus, RequestPhase, WaitKind, orphan_waits, step
+from vs_sim.api.testing import examples
 
 from .test_attempt_retirement import changed, closing_fixture, proof_record, with_owner
 
@@ -45,6 +46,7 @@ def _with_prepared_mutation(
     return state, request.request_id
 
 
+@settings(max_examples=examples(pr=4, nightly=100))
 @given(phase=st.sampled_from(ENDED), current_admission=st.booleans())
 def test_a_prepared_mutation_of_an_ended_episode_is_cancelled_unsent(
     phase: core.AttemptPhase, *, current_admission: bool

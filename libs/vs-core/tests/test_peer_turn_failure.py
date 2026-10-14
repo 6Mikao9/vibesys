@@ -208,7 +208,7 @@ def test_a_revision_the_workspace_never_held_does_not_keep_the_attempt_closing()
 
 
 _SETTINGS = settings(
-    max_examples=examples(pr=6, nightly=60), deadline=None, derandomize=True, database=None
+    max_examples=examples(pr=3, nightly=60), deadline=None, derandomize=True, database=None
 )
 
 

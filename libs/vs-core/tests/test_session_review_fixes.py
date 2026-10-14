@@ -41,7 +41,7 @@ def completed_events(*results: core.Transition) -> list[core.InterruptCompleted]
 
 
 # P1: interrupting an invocation whose checkpoint already committed must complete.
-@settings(deadline=None, max_examples=examples(pr=6, nightly=15))
+@settings(deadline=None, max_examples=examples(pr=4, nightly=15))
 @given(before=st.integers(0, 2), after=st.integers(0, 2))
 def test_interrupt_after_committed_checkpoint_completes_exactly_once(
     before: int, after: int

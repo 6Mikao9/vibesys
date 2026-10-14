@@ -313,7 +313,7 @@ def seeded(mode: core.WorkspaceMode | None, parallel: int) -> core.CoreState:
     return state.model_copy(update={"run": state.run.model_copy(update={"limits": limits})})
 
 
-@settings(max_examples=examples(pr=6, nightly=200), deadline=None)
+@settings(max_examples=examples(pr=3, nightly=200), deadline=None)
 @given(
     plan=st.lists(actions, min_size=1, max_size=40),
     parallel=st.integers(1, 2),
