@@ -1,7 +1,20 @@
 {
   "protocol_version": 1,
-  "type": "run_interrupted",
-  "sequence": 24,
+  "sequence": 8,
   "run_id": "run-conformance",
-  "timestamp": "2026-01-01T00:00:00Z"
+  "timestamp": "2026-01-01T00:00:00Z",
+  "type": "run_interrupted",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "run_interrupted",
+    "reason": "value",
+    "signal": null
+  }
 }

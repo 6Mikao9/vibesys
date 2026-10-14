@@ -1,7 +1,23 @@
 {
   "protocol_version": 1,
-  "type": "provider_switched",
-  "sequence": 38,
+  "sequence": 37,
   "run_id": "run-conformance",
-  "timestamp": "2026-01-01T00:00:00Z"
+  "timestamp": "2026-01-01T00:00:00Z",
+  "type": "provider_switched",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "provider_switched",
+    "from_provider": "value",
+    "to_provider": "value",
+    "to_model": "value",
+    "reason": "policy",
+    "detail": "value"
+  }
 }

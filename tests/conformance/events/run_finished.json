@@ -1,7 +1,16 @@
 {
   "protocol_version": 1,
-  "type": "run_finished",
-  "sequence": 23,
+  "sequence": 26,
   "run_id": "run-conformance",
-  "timestamp": "2026-01-01T00:00:00Z"
+  "timestamp": "2026-01-01T00:00:00Z",
+  "type": "run_finished",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": null
 }

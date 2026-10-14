@@ -1,0 +1,9 @@
+{
+  "verified_at": "2026-10-14",
+  "issues": [
+    {"number": 284, "state": "open", "title": "Improve VibeSys TUI", "scope": "Remaining TUI presentation and visualization gaps."},
+    {"number": 891, "state": "open", "title": "Web UI features: operator surfaces, navigation, and parity", "scope": "Remaining Web run-viewer presentation and interaction gaps."},
+    {"number": 1761, "state": "open", "title": "Expose campaign workstreams and measurements as a versioned client projection", "scope": "Authoritative campaign-projection DTO and kind generation."},
+    {"number": 1763, "state": "open", "title": "Web: make the campaign trajectory workspace the live single-run overview", "scope": "Web campaign experiment and winner projection."}
+  ]
+}

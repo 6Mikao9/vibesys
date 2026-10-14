@@ -1,7 +1,26 @@
 {
   "protocol_version": 1,
-  "type": "quota_paused",
-  "sequence": 35,
+  "sequence": 34,
   "run_id": "run-conformance",
-  "timestamp": "2026-01-01T00:00:00Z"
+  "timestamp": "2026-01-01T00:00:00Z",
+  "type": "quota_paused",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "quota_paused",
+    "provider": "value",
+    "condition": "quota_exhausted",
+    "detail": "value",
+    "resets_at": null,
+    "resumes_at": null,
+    "policy": "pause",
+    "fallback_provider": null,
+    "fallback_model": null
+  }
 }

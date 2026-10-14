@@ -9,12 +9,40 @@ import {corpusErrors} from './check_conformance_corpus.mjs';
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const SCHEMA = {
+  properties: {
+    request: {
+      discriminator: {
+        mapping: {
+          'query.snapshot': '#/$defs/SnapshotQuery',
+          'query.history': '#/$defs/HistoryQuery',
+        },
+      },
+    },
+  },
   $defs: {
     EventType: {enum: ['run_started', 'run_finished']},
     RunEvent: {
       required: ['type', 'timestamp'],
-      properties: {protocol_version: {}, type: {}, timestamp: {}, sequence: {}, run_id: {}},
+      properties: {
+        protocol_version: {},
+        type: {},
+        timestamp: {},
+        sequence: {},
+        run_id: {},
+        data: {
+          anyOf: [
+            {
+              discriminator: {
+                propertyName: 'kind',
+                mapping: {run_started: '#/$defs/RunStartedData'},
+              },
+            },
+            {type: 'null'},
+          ],
+        },
+      },
     },
+    Response: {'x-vibesys-response-families': ['snapshot', 'events']},
     SubscribeRequest: {properties: {type: {const: 'subscribe'}}},
     SubscribedMessage: {properties: {type: {const: 'subscribed'}}},
     EventBatchMessage: {properties: {type: {const: 'event_batch'}}},
@@ -48,8 +76,16 @@ function helperScenario(id, steps) {
 
 const CONTRACT = '### WP-ALPHA: first decision\n\ntext\n\n### WP-BETA: second decision\n\ntext\n';
 
-function validEvent(type) {
-  return {protocol_version: 1, type, sequence: 1, run_id: 'r', timestamp: '2026-01-01T00:00:00Z'};
+function validEvent(type, data = undefined) {
+  const event = {
+    protocol_version: 1,
+    type,
+    sequence: 1,
+    run_id: 'r',
+    timestamp: '2026-01-01T00:00:00Z',
+  };
+  if (data !== undefined) event.data = data;
+  return event;
 }
 
 function validScenario(id, decisions) {
@@ -71,11 +107,64 @@ function runnerInventory(id, scenarios) {
   return {id, description: `${id} runner`, groups: {steps: scenarios}};
 }
 
+function renderedDispositions(frontend, kinds = SCHEMA.$defs.EventType.enum) {
+  return {
+    frontend,
+    events: kinds.map(kind => ({kind, disposition: 'rendered', surface: `${kind} surface`})),
+    queries: Object.keys(SCHEMA.properties.request.discriminator.mapping).map(kind => ({
+      kind,
+      disposition: 'used',
+      consumer: `${kind} consumer`,
+    })),
+    responses: SCHEMA.$defs.Response['x-vibesys-response-families'].map(family => ({
+      family,
+      disposition: 'rendered',
+      surface: `${family} surface`,
+    })),
+    extensions: [
+      {
+        contract: 'campaign-projection',
+        disposition: 'deferred',
+        issue: 1761,
+        reason: 'The generated campaign projection contract is not present yet.',
+      },
+    ],
+  };
+}
+
+function payloadFixtures(schema = SCHEMA) {
+  const mapping = schema.$defs.RunEvent.properties.data.anyOf[0].discriminator.mapping;
+  return Object.fromEntries(
+    Object.keys(mapping).map(kind => [
+      `${kind}.jsonl`,
+      [validEvent(kind, {kind}), validEvent(kind, {kind, detail: 'fully populated'})],
+    ]),
+  );
+}
+
+function ownerRegistry() {
+  return {
+    verified_at: '2026-10-14',
+    issues: [
+      {number: 1761, state: 'open', title: 'Campaign contract', scope: 'Campaign DTO generation'},
+      {number: 891, state: 'open', title: 'Web roadmap', scope: 'Web presentation gaps'},
+    ],
+  };
+}
+
+async function writeJsonFiles(directory, files) {
+  for (const [name, data] of Object.entries(files)) {
+    await writeFile(join(directory, name), JSON.stringify(data));
+  }
+}
+
 async function writeTree(spec) {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-corpus-'));
   await mkdir(join(root, 'clients', 'libs', 'contracts', 'src', 'generated'), {recursive: true});
   await mkdir(join(root, 'docs', 'contributing'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'events'), {recursive: true});
+  await mkdir(join(root, 'tests', 'conformance', 'event-payloads'), {recursive: true});
+  await mkdir(join(root, 'tests', 'conformance', 'rendering-dispositions'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'scenarios'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'runners'), {recursive: true});
   await writeFile(
@@ -90,17 +179,44 @@ async function writeTree(spec) {
     join(root, 'docs', 'contributing', 'wire-protocol.md'),
     spec.contract ?? CONTRACT,
   );
-  for (const [name, data] of Object.entries(spec.events ?? {})) {
-    await writeFile(join(root, 'tests', 'conformance', 'events', name), JSON.stringify(data));
+  await writeJsonFiles(join(root, 'tests', 'conformance', 'events'), spec.events ?? {});
+  for (const [name, lines] of Object.entries(
+    spec.payloads ?? payloadFixtures(spec.schema ?? SCHEMA),
+  )) {
+    await writeFile(
+      join(root, 'tests', 'conformance', 'event-payloads', name),
+      `${lines.map(line => JSON.stringify(line)).join('\n')}\n`,
+    );
   }
-  for (const [name, data] of Object.entries(spec.scenarios ?? {})) {
-    await writeFile(join(root, 'tests', 'conformance', 'scenarios', name), JSON.stringify(data));
-  }
+  await writeFile(
+    join(root, 'tests', 'conformance', 'deferred-issue-owners.json'),
+    JSON.stringify(spec.owners ?? ownerRegistry()),
+  );
+  const dispositions =
+    spec.dispositions ??
+    Object.fromEntries(
+      ['tui', 'web'].map(frontend => [
+        `${frontend}.json`,
+        {
+          ...renderedDispositions(frontend, (spec.schema ?? SCHEMA).$defs.EventType.enum),
+          queries: Object.keys(
+            (spec.schema ?? SCHEMA).properties.request.discriminator.mapping,
+          ).map(kind => ({kind, disposition: 'used', consumer: `${kind} consumer`})),
+          responses: (spec.schema ?? SCHEMA).$defs.Response['x-vibesys-response-families'].map(
+            family => ({
+              family,
+              disposition: 'rendered',
+              surface: `${family} surface`,
+            }),
+          ),
+        },
+      ]),
+    );
+  await writeJsonFiles(join(root, 'tests', 'conformance', 'rendering-dispositions'), dispositions);
+  await writeJsonFiles(join(root, 'tests', 'conformance', 'scenarios'), spec.scenarios ?? {});
   const scenarioIds = Object.keys(spec.scenarios ?? {}).map(name => name.replace(/\.json$/, ''));
   const runners = spec.runners ?? {'server.json': runnerInventory('server', scenarioIds)};
-  for (const [name, data] of Object.entries(runners)) {
-    await writeFile(join(root, 'tests', 'conformance', 'runners', name), JSON.stringify(data));
-  }
+  await writeJsonFiles(join(root, 'tests', 'conformance', 'runners'), runners);
   return root;
 }
 
@@ -174,6 +290,301 @@ test('a fixture missing a schema-required field is rejected', async () => {
   });
   const errors = await corpusErrors(root);
   assert.ok(errors.some(error => error.includes('missing required field "timestamp"')));
+});
+
+test('a new schema event kind needs a disposition in every frontend', async () => {
+  const schema = structuredClone(SCHEMA);
+  schema.$defs.EventType.enum.push('future_event');
+  const dispositions = {
+    'tui.json': renderedDispositions('tui'),
+    'web.json': renderedDispositions('web'),
+  };
+  const root = await writeTree({
+    schema,
+    events: {...fullEvents(), 'future_event.json': validEvent('future_event')},
+    dispositions,
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.deepEqual(
+    errors.filter(error => error.includes('future_event')),
+    [
+      'rendering-dispositions/tui.json: EventType "future_event" has no disposition',
+      'rendering-dispositions/web.json: EventType "future_event" has no disposition',
+    ],
+  );
+});
+
+test('a new schema query discriminant needs a disposition in every frontend', async () => {
+  const schema = structuredClone(SCHEMA);
+  schema.properties.request.discriminator.mapping['query.future'] = '#/$defs/FutureQuery';
+  const dispositions = {
+    'tui.json': renderedDispositions('tui'),
+    'web.json': renderedDispositions('web'),
+  };
+  const root = await writeTree({
+    schema,
+    events: fullEvents(),
+    dispositions,
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.deepEqual(
+    errors.filter(error => error.includes('query.future')),
+    [
+      'rendering-dispositions/tui.json: query discriminant "query.future" has no disposition',
+      'rendering-dispositions/web.json: query discriminant "query.future" has no disposition',
+    ],
+  );
+});
+
+test('a new schema response family needs a disposition in every frontend', async () => {
+  const schema = structuredClone(SCHEMA);
+  schema.$defs.Response['x-vibesys-response-families'].push('future_response');
+  const dispositions = {
+    'tui.json': renderedDispositions('tui'),
+    'web.json': renderedDispositions('web'),
+  };
+  const root = await writeTree({
+    schema,
+    events: fullEvents(),
+    dispositions,
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.deepEqual(
+    errors.filter(error => error.includes('future_response')),
+    [
+      'rendering-dispositions/tui.json: response family "future_response" has no disposition',
+      'rendering-dispositions/web.json: response family "future_response" has no disposition',
+    ],
+  );
+});
+
+test('a new EventData variant needs a payload-rich Python fixture', async () => {
+  const schema = structuredClone(SCHEMA);
+  schema.$defs.RunEvent.properties.data.anyOf[0].discriminator.mapping.future_data =
+    '#/$defs/FutureData';
+  const root = await writeTree({
+    schema,
+    events: fullEvents(),
+    payloads: payloadFixtures(),
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(errors.includes('event-payloads/: EventData "future_data" has no fixture'));
+});
+
+test('payload fixtures contain exactly default and fully populated typed RunEvents', async () => {
+  const root = await writeTree({
+    events: fullEvents(),
+    payloads: {'run_started.jsonl': [validEvent('run_started', {kind: 'wrong_data'})]},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(
+    errors.includes(
+      'event-payloads/run_started.jsonl: must contain exactly two RunEvents (defaults and fully populated)',
+    ),
+  );
+});
+
+test('payload fixture data discriminants match their schema-derived filename', async () => {
+  const wrong = validEvent('run_started', {kind: 'wrong_data'});
+  const root = await writeTree({
+    events: fullEvents(),
+    payloads: {'run_started.jsonl': [wrong, wrong]},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.deepEqual(
+    errors.filter(error => error.includes('data.kind must equal')),
+    [
+      'event-payloads/run_started.jsonl line 1: data.kind must equal the filename stem "run_started"',
+      'event-payloads/run_started.jsonl line 2: data.kind must equal the filename stem "run_started"',
+    ],
+  );
+});
+
+test('disposition tables are required for exactly the supported frontends', async () => {
+  const root = await writeTree({
+    events: fullEvents(),
+    dispositions: {
+      'tui.json': renderedDispositions('browser'),
+      'electron.json': renderedDispositions('electron'),
+    },
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(
+    errors.includes(
+      'rendering-dispositions/tui.json: "frontend" must equal the filename stem "tui"',
+    ),
+  );
+  assert.ok(errors.includes('rendering-dispositions/web.json: required table is missing'));
+  assert.ok(
+    errors.includes('rendering-dispositions/electron.json: unknown frontend table "electron"'),
+  );
+});
+
+test('disposition tables reject unknown and duplicate event kinds', async () => {
+  const tui = renderedDispositions('tui');
+  tui.events.push({...tui.events[0]});
+  tui.events[1] = {...tui.events[1], kind: 'ghost_event'};
+  const root = await writeTree({
+    events: fullEvents(),
+    dispositions: {'tui.json': tui, 'web.json': renderedDispositions('web')},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(
+    errors.includes(
+      'rendering-dispositions/tui.json events entry 1: kind "ghost_event" is not a member of EventType',
+    ),
+  );
+  assert.ok(
+    errors.includes(
+      'rendering-dispositions/tui.json events entry 2: EventType "run_started" is listed more than once',
+    ),
+  );
+  assert.ok(
+    errors.includes('rendering-dispositions/tui.json: EventType "run_finished" has no disposition'),
+  );
+});
+
+test('rendered and deferred dispositions have closed status-specific shapes', async () => {
+  const tui = renderedDispositions('tui');
+  tui.extra = true;
+  tui.events = [
+    {kind: 'run_started', disposition: 'rendered', surface: '', issue: 834},
+    {kind: 'run_finished', disposition: 'deferred', issue: 0, reason: '', surface: 'wrong'},
+  ];
+  const web = renderedDispositions('web');
+  web.events[0] = {kind: 'run_started', disposition: 'unknown', note: 'not closed'};
+  const root = await writeTree({
+    events: fullEvents(),
+    dispositions: {'tui.json': tui, 'web.json': web},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  for (const expected of [
+    'rendering-dispositions/tui.json: unknown field "extra"',
+    'rendering-dispositions/tui.json events entry 0: unknown field "issue"',
+    'rendering-dispositions/tui.json events entry 0: rendered disposition needs a non-empty "surface"',
+    'rendering-dispositions/tui.json events entry 1: unknown field "surface"',
+    'rendering-dispositions/tui.json events entry 1: deferred disposition needs a positive integer "issue"',
+    'rendering-dispositions/tui.json events entry 1: deferred disposition needs a non-empty "reason"',
+    'rendering-dispositions/web.json events entry 0: "disposition" must be one of rendered, deferred',
+    'rendering-dispositions/web.json events entry 0: unknown field "note"',
+  ]) {
+    assert.ok(errors.includes(expected), expected);
+  }
+});
+
+test('query and response dispositions have closed status-specific shapes', async () => {
+  const tui = renderedDispositions('tui');
+  tui.queries[0] = {
+    kind: 'query.snapshot',
+    disposition: 'used',
+    consumer: '',
+    surface: 'wrong',
+  };
+  tui.responses[0] = {
+    family: 'snapshot',
+    disposition: 'not_applicable',
+    reason: '',
+    consumer: 'wrong',
+  };
+  const root = await writeTree({
+    events: fullEvents(),
+    dispositions: {'tui.json': tui, 'web.json': renderedDispositions('web')},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  for (const expected of [
+    'rendering-dispositions/tui.json queries entry 0: unknown field "surface"',
+    'rendering-dispositions/tui.json queries entry 0: used disposition needs a non-empty "consumer"',
+    'rendering-dispositions/tui.json responses entry 0: unknown field "consumer"',
+    'rendering-dispositions/tui.json responses entry 0: not_applicable disposition needs a non-empty "reason"',
+  ]) {
+    assert.ok(errors.includes(expected), expected);
+  }
+});
+
+test('query and response sections reject unknown, duplicate, and invalid statuses', async () => {
+  const tui = renderedDispositions('tui');
+  tui.queries.push({...tui.queries[0]});
+  tui.queries[1] = {...tui.queries[1], kind: 'query.ghost'};
+  tui.responses.push({...tui.responses[0]});
+  tui.responses[1] = {...tui.responses[1], family: 'ghost_response'};
+  const web = renderedDispositions('web');
+  web.queries[0] = {kind: 'query.snapshot', disposition: 'rendered', surface: 'wrong'};
+  web.responses[0] = {family: 'snapshot', disposition: 'used', consumer: 'wrong'};
+  const root = await writeTree({
+    events: fullEvents(),
+    dispositions: {'tui.json': tui, 'web.json': web},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  for (const expected of [
+    'rendering-dispositions/tui.json queries entry 1: kind "query.ghost" is not a member of query discriminant',
+    'rendering-dispositions/tui.json queries entry 2: query discriminant "query.snapshot" is listed more than once',
+    'rendering-dispositions/tui.json: query discriminant "query.history" has no disposition',
+    'rendering-dispositions/tui.json responses entry 1: family "ghost_response" is not a member of response family',
+    'rendering-dispositions/tui.json responses entry 2: response family "snapshot" is listed more than once',
+    'rendering-dispositions/tui.json: response family "events" has no disposition',
+    'rendering-dispositions/web.json queries entry 0: "disposition" must be one of used, deferred, not_applicable',
+    'rendering-dispositions/web.json responses entry 0: "disposition" must be one of rendered, deferred, not_applicable',
+  ]) {
+    assert.ok(errors.includes(expected), expected);
+  }
+});
+
+test('the campaign extension disposition is mandatory and cannot be silently dropped', async () => {
+  const tui = renderedDispositions('tui');
+  tui.extensions = [];
+  const root = await writeTree({
+    events: fullEvents(),
+    dispositions: {'tui.json': tui, 'web.json': renderedDispositions('web')},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(
+    errors.includes(
+      'rendering-dispositions/tui.json: contract extension "campaign-projection" has no disposition',
+    ),
+  );
+});
+
+test('deferred dispositions require a locally verified open and unique issue owner', async () => {
+  const owners = ownerRegistry();
+  owners.issues.find(issue => issue.number === 891).state = 'closed';
+  owners.issues.push({...owners.issues[0]});
+  const web = renderedDispositions('web');
+  web.queries[0] = {
+    kind: 'query.snapshot',
+    disposition: 'deferred',
+    issue: 891,
+    reason: 'Tracked by the Web roadmap.',
+  };
+  const root = await writeTree({
+    events: fullEvents(),
+    owners,
+    dispositions: {'tui.json': renderedDispositions('tui'), 'web.json': web},
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(errors.includes('deferred-issue-owners.json issue entry 1: "state" must equal "open"'));
+  assert.ok(
+    errors.includes(
+      'deferred-issue-owners.json issue entry 2: issue #1761 is listed more than once',
+    ),
+  );
+  assert.ok(
+    errors.includes(
+      'rendering-dispositions/web.json queries entry 0: deferred issue #891 is not an open owner in deferred-issue-owners.json',
+    ),
+  );
 });
 
 test('a scenario tagging an unknown decision is rejected', async () => {

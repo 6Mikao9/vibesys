@@ -1,7 +1,21 @@
 {
   "protocol_version": 1,
-  "type": "usage_update",
-  "sequence": 34,
+  "sequence": 32,
   "run_id": "run-conformance",
-  "timestamp": "2026-01-01T00:00:00Z"
+  "timestamp": "2026-01-01T00:00:00Z",
+  "type": "usage_update",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "usage_update",
+    "input_tokens": 1,
+    "context_window": null,
+    "model": null
+  }
 }

@@ -11,14 +11,28 @@ import json
 import math
 import re
 import sys
+from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Never
+from types import UnionType
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Literal,
+    Never,
+    TypeAliasType,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import BaseModel
 
 from server.api.iterations import IterationSlice
 from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
-from server.events import RunEvent
+from server.control_envelope import ResponseEnvelope
+from server.events import EventData, EventType, RunEvent
 from server.host_api import (
     HELPER_REQUEST_FEATURES,
     ChannelEnd,
@@ -75,6 +89,7 @@ _RESPONSE_DESCRIPTOR_TYPES = frozenset(
 )
 _CLIENT_PATTERN_GROUP_PREFIXES = frozenset({"?:", "?=", "?!"})
 _CLIENT_PATTERN_SIMPLE_ESCAPES = frozenset(r"\.^$*+?{}[]()|/sSdDwWbBfnrtv")
+_FIXTURE_TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class UnsupportedResponsePayloadSchemaError(ValueError):
@@ -212,7 +227,14 @@ def protocol_json_schema() -> dict[str, Any]:
     ``protocol.schema.json`` artifact and every generated client come from
     here, not from ``ProtocolDocument.model_json_schema()`` directly.
     """
-    return require_tagged_union_discriminants(ProtocolDocument.model_json_schema())
+    document = require_tagged_union_discriminants(ProtocolDocument.model_json_schema())
+    # ``ack`` is an operation result even though the lightweight stop client
+    # needs its model on ResponseEnvelope. Every other envelope field is
+    # correlation or failure metadata shared by all operations.
+    envelope_metadata = set(ResponseEnvelope.model_fields) - {"ack"}
+    response_families = [name for name in Response.model_fields if name not in envelope_metadata]
+    document["$defs"]["Response"]["x-vibesys-response-families"] = response_families
+    return document
 
 
 def response_payload_json_schema() -> dict[str, Any]:
@@ -1168,6 +1190,192 @@ def _mark_required(member: dict[str, Any], property_name: str, path: str) -> Non
     member["required"] = [key for key in properties if key in required]
 
 
+def _origin_example_value(origin: object, arguments: tuple[object, ...], path: str) -> object:
+    """Build a populated value for a supported parameterized annotation."""
+    if origin is Annotated:
+        value = _example_value(arguments[0], path)
+    elif origin in {Union, UnionType}:
+        member = next((item for item in arguments if item is not type(None)), type(None))
+        value = _example_value(member, path)
+    elif origin is Literal:
+        value = arguments[0]
+    elif origin is list:
+        value = [_example_value(arguments[0], f"{path}[]")]
+    elif origin is tuple:
+        members = arguments[:-1] if arguments[-1:] == (Ellipsis,) else arguments
+        value = tuple(_example_value(member, f"{path}[]") for member in members)
+    elif origin is dict:
+        value = {"key": _example_value(arguments[1], f"{path}.key")}
+    else:
+        message = f"{path}: no deterministic fixture value for origin {origin!r}"
+        raise TypeError(message)
+    return value
+
+
+def _type_example_value(annotation: type[object], path: str) -> object:
+    """Build a populated value for a concrete class annotation."""
+    if issubclass(annotation, BaseModel):
+        value = annotation.model_validate(_model_example_values(annotation, populated=True))
+    elif issubclass(annotation, Enum):
+        value = next(iter(annotation))
+    elif annotation is datetime:
+        value = _FIXTURE_TIMESTAMP
+    elif annotation is str:
+        value = "value"
+    elif annotation is bool:
+        value = True
+    elif annotation is int:
+        value = 1
+    elif annotation is float:
+        value = 1.5
+    else:
+        message = f"{path}: no deterministic fixture value for {annotation!r}"
+        raise TypeError(message)
+    return value
+
+
+def _example_value(annotation: object, path: str) -> object:
+    """Build one deterministic populated value for a Pydantic field annotation."""
+    origin = get_origin(annotation)
+    if isinstance(annotation, TypeAliasType):
+        value = _example_value(annotation.__value__, path)
+    elif origin is not None:
+        value = _origin_example_value(origin, get_args(annotation), path)
+    elif annotation is Any:
+        value = {"example": "value"}
+    elif annotation is type(None):
+        value = None
+    elif isinstance(annotation, type):
+        value = _type_example_value(annotation, path)
+    else:
+        message = f"{path}: no deterministic fixture value for {annotation!r}"
+        raise TypeError(message)
+    return value
+
+
+def _model_example_values(model: type[BaseModel], *, populated: bool) -> dict[str, object]:
+    """Return required-only or fully populated deterministic model input."""
+    values: dict[str, object] = {}
+    for name, field in model.model_fields.items():
+        if populated or field.is_required():
+            values[name] = _example_value(field.annotation, f"{model.__name__}.{name}")
+    return values
+
+
+def _event_data_models() -> tuple[type[BaseModel], ...]:
+    """Return every member of the authoritative discriminated EventData union."""
+    union = get_args(EventData)[0]
+    models = get_args(union)
+    if not models or any(
+        not isinstance(model, type) or not issubclass(model, BaseModel) for model in models
+    ):
+        message = "EventData must be an Annotated union of Pydantic models"
+        raise TypeError(message)
+    return models
+
+
+def _event_data_examples(*, populated: bool) -> dict[str, BaseModel]:
+    """Build one deterministic Pydantic payload for every EventData tag."""
+    examples: dict[str, BaseModel] = {}
+    for model in _event_data_models():
+        payload = model.model_validate(_model_example_values(model, populated=populated))
+        kind = getattr(payload, "kind", None)
+        if not isinstance(kind, str) or kind in examples:
+            message = f"{model.__name__}: EventData kind must be a unique string"
+            raise ValueError(message)
+        examples[kind] = payload
+    return examples
+
+
+def _event_type_for_payload(kind: str) -> EventType:
+    """Map the one shared phase payload tag onto a concrete event envelope type."""
+    return EventType.PHASE_STARTED if kind == "phase" else EventType(kind)
+
+
+def _run_event(
+    event_type: EventType,
+    data: BaseModel | None,
+    sequence: int,
+    *,
+    populated: bool,
+) -> RunEvent:
+    values = _model_example_values(RunEvent, populated=populated)
+    values.update(
+        {
+            "sequence": sequence,
+            "run_id": "run-conformance",
+            "timestamp": _FIXTURE_TIMESTAMP,
+            "type": event_type,
+            "data": data,
+        }
+    )
+    return RunEvent.model_validate(values)
+
+
+def run_event_kind_fixtures() -> dict[str, RunEvent]:
+    """Generate one authoritative defaults-bearing RunEvent per EventType."""
+    payloads = _event_data_examples(populated=False)
+    fixtures: dict[str, RunEvent] = {}
+    for sequence, event_type in enumerate(EventType, start=1):
+        data_kind = (
+            "phase"
+            if event_type in {EventType.PHASE_STARTED, EventType.PHASE_FINISHED}
+            else event_type.value
+        )
+        fixtures[event_type.value] = _run_event(
+            event_type,
+            payloads.get(data_kind),
+            sequence,
+            populated=False,
+        )
+    return fixtures
+
+
+def run_event_payload_fixtures() -> dict[str, tuple[RunEvent, RunEvent]]:
+    """Generate defaults and fully-populated RunEvents for every EventData variant."""
+    defaults = _event_data_examples(populated=False)
+    populated = _event_data_examples(populated=True)
+    fixtures: dict[str, tuple[RunEvent, RunEvent]] = {}
+    for index, kind in enumerate(defaults, start=1):
+        event_type = _event_type_for_payload(kind)
+        fixtures[kind] = (
+            _run_event(event_type, defaults[kind], index * 2 - 1, populated=False),
+            _run_event(event_type, populated[kind], index * 2, populated=True),
+        )
+    return fixtures
+
+
+def run_event_payload_fixture_files() -> dict[str, str]:
+    """Serialize every authoritative EventData fixture pair as JSONL files."""
+    return {
+        f"{kind}.jsonl": "".join(f"{event.model_dump_json()}\n" for event in events)
+        for kind, events in run_event_payload_fixtures().items()
+    }
+
+
+def _write_generated_files(directory: Path, files: dict[str, str], pattern: str) -> None:
+    """Replace one generated fixture directory without retaining stale variants."""
+    directory.mkdir(parents=True, exist_ok=True)
+    expected = set(files)
+    for path in directory.glob(pattern):
+        if path.name not in expected:
+            path.unlink()
+    for name, document in files.items():
+        (directory / name).write_text(document)
+
+
+def _write_run_event_fixtures(directory: Path) -> None:
+    files = {
+        f"{kind}.json": event.model_dump_json(indent=2) + "\n"
+        for kind, event in run_event_kind_fixtures().items()
+    }
+    _write_generated_files(directory, files, "*.json")
+
+
+def _write_run_event_payload_fixtures(directory: Path) -> None:
+    _write_generated_files(directory, run_event_payload_fixture_files(), "*.jsonl")
+
+
 def main() -> None:
     """Write the public protocol JSON schema to the requested path."""
     arguments = sys.argv[1:]
@@ -1197,12 +1405,21 @@ def main() -> None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(run_event_typescript())
         return
+    elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--run-event-fixtures":
+        _write_run_event_fixtures(Path(arguments[1]))
+        return
+    elif (
+        len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--run-event-payload-fixtures"
+    ):
+        _write_run_event_payload_fixtures(Path(arguments[1]))
+        return
     else:
         message = (
             "usage: python -m server.api.schema "
             "[--host-helper-schema|--host-helper-module|--response-payload-schema|"
             "--response-payload-module|"
-            "--response-payload-fixture|--run-event-module] OUTPUT"
+            "--response-payload-fixture|--run-event-module|--run-event-fixtures|"
+            "--run-event-payload-fixtures] OUTPUT"
         )
         raise SystemExit(message)
     output.parent.mkdir(parents=True, exist_ok=True)

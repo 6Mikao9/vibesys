@@ -1,8 +1,23 @@
 {
   "protocol_version": 1,
-  "type": "tool_result",
-  "sequence": 33,
+  "sequence": 30,
   "run_id": "run-conformance",
   "timestamp": "2026-01-01T00:00:00Z",
-  "execution_id": "exec-1"
+  "type": "tool_result",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "tool_result",
+    "tool": "value",
+    "call_id": null,
+    "content": "value",
+    "is_error": false,
+    "payload": null
+  }
 }

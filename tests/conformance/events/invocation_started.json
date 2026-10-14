@@ -1,8 +1,20 @@
 {
   "protocol_version": 1,
-  "type": "invocation_started",
-  "sequence": 15,
+  "sequence": 14,
   "run_id": "run-conformance",
   "timestamp": "2026-01-01T00:00:00Z",
-  "invocation_id": "inv-1"
+  "type": "invocation_started",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "invocation_started",
+    "system_prompt": "value",
+    "user_prompt": "value"
+  }
 }

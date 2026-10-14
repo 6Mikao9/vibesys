@@ -1,7 +1,22 @@
 {
   "protocol_version": 1,
-  "type": "quota_abandoned",
-  "sequence": 37,
+  "sequence": 36,
   "run_id": "run-conformance",
-  "timestamp": "2026-01-01T00:00:00Z"
+  "timestamp": "2026-01-01T00:00:00Z",
+  "type": "quota_abandoned",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "quota_abandoned",
+    "provider": "value",
+    "condition": "quota_exhausted",
+    "detail": "value",
+    "reason": "value"
+  }
 }

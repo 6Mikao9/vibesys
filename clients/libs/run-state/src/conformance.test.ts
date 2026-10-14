@@ -1,10 +1,14 @@
 import {describe, expect, test} from 'bun:test';
 import {readdirSync, readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
-import type {RunEvent} from '@vibesys/contracts';
+import {type RunEvent, validateRunEvent} from '@vibesys/contracts';
 import {initialCoreState, reduceEventBatch} from './index.js';
 
 const EVENT_CORPUS = resolve(import.meta.dir, '../../../../tests/conformance/events');
+const EVENT_PAYLOAD_CORPUS = resolve(
+  import.meta.dir,
+  '../../../../tests/conformance/event-payloads',
+);
 
 function eventFixtures(): Array<{name: string; event: RunEvent}> {
   return readdirSync(EVENT_CORPUS)
@@ -12,8 +16,23 @@ function eventFixtures(): Array<{name: string; event: RunEvent}> {
     .sort()
     .map(name => ({
       name,
-      event: JSON.parse(readFileSync(resolve(EVENT_CORPUS, name), 'utf8')) as RunEvent,
+      event: validateRunEvent(JSON.parse(readFileSync(resolve(EVENT_CORPUS, name), 'utf8'))),
     }));
+}
+
+function eventPayloadFixtures(): Array<{name: string; event: RunEvent}> {
+  return readdirSync(EVENT_PAYLOAD_CORPUS)
+    .filter(name => name.endsWith('.jsonl'))
+    .sort()
+    .flatMap(name =>
+      readFileSync(resolve(EVENT_PAYLOAD_CORPUS, name), 'utf8')
+        .trimEnd()
+        .split('\n')
+        .map((line, index) => ({
+          name: `${name} case ${index + 1}`,
+          event: validateRunEvent(JSON.parse(line)),
+        })),
+    );
 }
 
 describe('shared conformance event corpus', () => {
@@ -33,4 +52,12 @@ describe('shared conformance event corpus', () => {
 
     expect(incremental).toEqual(batched);
   });
+});
+
+describe('authoritative event-payload corpus', () => {
+  for (const fixture of eventPayloadFixtures()) {
+    test(`${fixture.name} validates and folds through core state`, () => {
+      expect(() => reduceEventBatch(initialCoreState(), [fixture.event])).not.toThrow();
+    });
+  }
 });

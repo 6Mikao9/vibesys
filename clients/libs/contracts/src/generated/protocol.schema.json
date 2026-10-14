@@ -3758,7 +3758,26 @@
         "request_id"
       ],
       "title": "Response",
-      "type": "object"
+      "type": "object",
+      "x-vibesys-response-families": [
+        "ack",
+        "chat",
+        "chat_thread",
+        "chat_options",
+        "tui_defaults",
+        "snapshot",
+        "events",
+        "performance",
+        "performance_context",
+        "experiments",
+        "experiment_update",
+        "experiments_ready",
+        "iterations",
+        "iterations_ready",
+        "design",
+        "design_ready",
+        "design_patch"
+      ]
     },
     "ResumeCommand": {
       "additionalProperties": false,

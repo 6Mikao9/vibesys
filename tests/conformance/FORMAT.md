@@ -1,8 +1,9 @@
 # Corpus file formats
 
-Three file kinds live in this corpus: event fixtures under `events/`, connection scenarios under
-`scenarios/`, and runner inventories under `runners/`. All are plain JSON so any language can read
-them. The corpus gate
+Six file kinds live in this corpus: event fixtures under `events/`, payload fixtures under
+`event-payloads/`, frontend disposition tables under `rendering-dispositions/`, deferred-owner
+evidence, connection scenarios under `scenarios/`, and runner inventories under `runners/`. They
+are plain JSON or newline-delimited JSON so any language can read them. The corpus gate
 (`clients/tools/scripts/check_conformance_corpus.mjs`) validates every file against the rules below with no
 external schema library, so the rules are intentionally simple and structural. Deep payload
 validation happens when the runners fold a fixture through `run-state` (888b) or replay a scenario
@@ -10,7 +11,7 @@ against a live transport (#811); the gate's job is coverage and well-formedness.
 
 ## Event fixtures: `events/<kind>.json`
 
-Each file is a single `RunEvent` instance (the model in `src/server/api/protocol.py`, generated as
+Each file is a single `RunEvent` instance (the model in `src/server/events.py`, generated as
 `RunEvent` in `protocol.generated.ts`). The filename stem is the event's `type`.
 
 ```json
@@ -33,11 +34,81 @@ Rules the gate enforces:
 - No top-level field outside the `RunEvent` property set (the schema declares
   `additionalProperties: false`, so an unknown field would be rejected on the wire).
 
-Fixtures are minimal but valid: fields a kind does not need are omitted and take their schema
-default. A fixture may carry the fields its kind semantically uses (for example `execution_id` on an
-`agent_execution_started`), which makes it more useful to the fold runner, but the gate only requires
-a structurally valid envelope. There is one fixture per kind; richer per-kind fixtures and the
-rendering-disposition tables are #834, not here.
+The Python contract generator synthesizes representative semantic values (for example,
+`execution_id` on an `agent_execution_started`) from the authoritative Pydantic annotations and
+writes the exact `RunEvent.model_dump_json(indent=2)` output. That serialization includes the
+default, null, and compatibility fields the server sends. `tests/server/test_protocol_schema.py`
+rejects any committed fixture whose set or bytes differ from the Python generator. The Node gate
+separately checks schema-derived coverage and envelope structure.
+
+## Payload fixtures: `event-payloads/<kind>.jsonl`
+
+Each file corresponds to one discriminator tag in the authoritative `EventData` union. It contains
+exactly two complete `RunEvent` JSON values, one per line:
+
+1. a required-input case whose Pydantic serialization exposes every model default and nullable
+   field; and
+2. a fully populated case that supplies every optional field with a deterministic non-null value.
+
+The gate derives the tags from `$defs.RunEvent.properties.data` in the generated schema and rejects
+missing or unknown files, a line count other than two, mismatched `data.kind`, invalid event types,
+missing envelope fields, or unknown envelope fields. Python tests prove the committed bytes are
+direct Pydantic model dumps. TypeScript tests pass every line through public `validateRunEvent` and
+`reduceEventBatch`; the fixture corpus never asserts a private parser or reducer helper.
+
+## Frontend dispositions: `rendering-dispositions/<frontend>.json`
+
+There is exactly one table for each supported frontend, currently `tui.json` and `web.json`. The Web
+table also governs Electron because the desktop shell hosts the same Web renderer. Each table has
+this shape:
+
+```json
+{
+  "frontend": "web",
+  "events": [
+    {"kind": "run_started", "disposition": "rendered", "surface": "Run-status header"},
+    {"kind": "todo_update", "disposition": "deferred", "issue": 891, "reason": "The run viewer does not yet expose the folded todo list."}
+  ],
+  "queries": [
+    {"kind": "query.snapshot", "disposition": "used", "consumer": "Run bootstrap"},
+    {"kind": "query.history", "disposition": "not_applicable", "reason": "query.events supersedes the legacy request."}
+  ],
+  "responses": [
+    {"family": "snapshot", "disposition": "rendered", "surface": "Run summary"}
+  ],
+  "extensions": [
+    {"contract": "campaign-projection", "disposition": "deferred", "issue": 1761, "reason": "The generated contract does not exist yet."}
+  ]
+}
+```
+
+Rules the gate enforces:
+
+- `frontend` equals the filename stem, and only the `tui` and `web` tables exist.
+- `events` names every member of the schema-derived `EventType` enum exactly once.
+- `queries` names every `query.*` discriminant in the generated request union exactly once. `used`
+  names a non-empty `consumer`; `deferred` names an owner and reason; `not_applicable` names a reason.
+- `responses` names every operation payload family that the authoritative Python `Response` model
+  publishes in the generated schema. `rendered` names a surface, while `deferred` and
+  `not_applicable` use the same shapes as query entries.
+- `extensions` contains the declared `campaign-projection` extension. It remains explicitly
+  deferred to #1761 until that issue adds an authoritative generated DTO/kind set; that change must
+  extend the gate rather than adding Web-authored wire evidence.
+- Missing, unknown, and duplicate members in every section are errors.
+- A `rendered` entry has exactly `kind`, `disposition`, and a non-empty `surface` that names the
+  visible frontend surface.
+- A `deferred` entry has its section key, `disposition`, a positive integer `issue`, and a non-empty
+  `reason`. The issue must appear as open in `deferred-issue-owners.json`.
+- Unknown keys and unknown disposition statuses are errors. This closed union prevents a typo from
+silently behaving like a deferral.
+
+## Deferred owners: `deferred-issue-owners.json`
+
+This deterministic authoring record has an ISO `verified_at` date and an `issues` array. Every issue
+entry has exactly a positive integer `number`, `"state": "open"`, and non-empty `title` and `scope`.
+Numbers are unique. The gate rejects a deferred disposition unless its owner is present and open.
+Because CI does not query GitHub, authors must verify live issue status and refresh this file when
+adding or changing a deferral.
 
 ## Scenarios: `scenarios/<id>.json`
 

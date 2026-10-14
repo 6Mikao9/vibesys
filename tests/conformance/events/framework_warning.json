@@ -1,8 +1,22 @@
 {
   "protocol_version": 1,
-  "type": "framework_warning",
-  "sequence": 11,
+  "sequence": 42,
   "run_id": "run-conformance",
   "timestamp": "2026-01-01T00:00:00Z",
-  "text": "warning text"
+  "type": "framework_warning",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "framework_warning",
+    "summary": "value",
+    "detail": null,
+    "source": "other",
+    "source_label": null
+  }
 }

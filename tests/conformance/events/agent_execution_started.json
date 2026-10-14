@@ -1,9 +1,30 @@
 {
   "protocol_version": 1,
-  "type": "agent_execution_started",
-  "sequence": 3,
+  "sequence": 16,
   "run_id": "run-conformance",
   "timestamp": "2026-01-01T00:00:00Z",
-  "execution_id": "exec-1",
-  "agent_kind": "implementer"
+  "type": "agent_execution_started",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "agent_execution_started",
+    "stage": "value",
+    "attempt": null,
+    "system_prompt": "",
+    "user_prompt": "",
+    "activity": {
+      "kind": "agent_execution_activity_changed",
+      "mode": "thinking",
+      "summary": "value",
+      "tool": "value"
+    },
+    "provider": null,
+    "model": null
+  }
 }

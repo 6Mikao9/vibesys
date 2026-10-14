@@ -1,8 +1,22 @@
 {
   "protocol_version": 1,
-  "type": "subprocess_output",
-  "sequence": 30,
+  "sequence": 22,
   "run_id": "run-conformance",
   "timestamp": "2026-01-01T00:00:00Z",
-  "text": "line of output"
+  "type": "subprocess_output",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "subprocess_output",
+    "process_id": "value",
+    "process_kind": "value",
+    "stream": "stdout",
+    "content": "value"
+  }
 }

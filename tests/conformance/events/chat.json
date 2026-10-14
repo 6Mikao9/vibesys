@@ -1,8 +1,21 @@
 {
   "protocol_version": 1,
-  "type": "chat",
-  "sequence": 6,
+  "sequence": 10,
   "run_id": "run-conformance",
   "timestamp": "2026-01-01T00:00:00Z",
-  "chat_thread_id": "thread-1"
+  "type": "chat",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "chat",
+    "answer": "value",
+    "thread_title": null,
+    "invocation_id": null
+  }
 }

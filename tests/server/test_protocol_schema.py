@@ -22,9 +22,12 @@ from server.api.schema import (
     require_tagged_union_discriminants,
     response_payload_json_schema,
     response_payload_typescript,
+    run_event_kind_fixtures,
+    run_event_payload_fixture_files,
+    run_event_payload_fixtures,
     run_event_typescript,
 )
-from server.events import EventData
+from server.events import EventData, RunEvent
 from server.host_api import HelperFeature
 from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
 
@@ -40,6 +43,8 @@ RESPONSE_PAYLOAD_FIXTURE_PATH = Path(
     "clients/libs/contracts/src/generated/response-payload.fixture.json"
 )
 RUN_EVENT_MODULE_PATH = Path("clients/libs/contracts/src/generated/run-event.schema.ts")
+RUN_EVENT_FIXTURE_PATH = Path("tests/conformance/events")
+RUN_EVENT_PAYLOAD_FIXTURE_PATH = Path("tests/conformance/event-payloads")
 HOST_HELPER_MODULE_PATH = Path("clients/libs/contracts/src/generated/host-helper.schema.ts")
 
 # The public alias of every tagged union the protocol publishes. A member model
@@ -100,6 +105,37 @@ def test_committed_response_payload_fixture_is_a_real_server_model_dump() -> Non
 
 def test_committed_run_event_module_matches_python_contract() -> None:
     assert RUN_EVENT_MODULE_PATH.read_text() == run_event_typescript()
+
+
+def test_committed_run_event_fixtures_are_real_server_model_dumps() -> None:
+    expected = run_event_kind_fixtures()
+    paths = sorted(RUN_EVENT_FIXTURE_PATH.glob("*.json"))
+    assert {path.stem for path in paths} == set(expected)
+    for path in paths:
+        event = RunEvent.model_validate_json(path.read_text())
+        assert path.stem == event.type.value
+        assert path.read_text() == expected[path.stem].model_dump_json(indent=2) + "\n"
+
+
+def test_committed_run_event_payload_fixtures_cover_every_generated_variant() -> None:
+    expected = run_event_payload_fixture_files()
+    fixture_models = run_event_payload_fixtures()
+    paths = sorted(RUN_EVENT_PAYLOAD_FIXTURE_PATH.glob("*.jsonl"))
+    assert {path.name for path in paths} == set(expected)
+    for path in paths:
+        assert path.read_text() == expected[path.name]
+        events = [RunEvent.model_validate_json(line) for line in path.read_text().splitlines()]
+        assert len(events) == 2
+        assert all(event.data is not None and event.data.kind == path.stem for event in events)
+        default_event, populated_event = fixture_models[path.stem]
+        assert default_event.data is not None
+        assert populated_event.data is not None
+        data_model = type(populated_event.data)
+        assert populated_event.data.model_fields_set == set(data_model.model_fields)
+        for name, field in data_model.model_fields.items():
+            if not field.is_required() and field.default is None:
+                assert getattr(default_event.data, name) is None
+                assert getattr(populated_event.data, name) is not None
 
 
 def test_committed_host_helper_module_matches_python_contract() -> None:

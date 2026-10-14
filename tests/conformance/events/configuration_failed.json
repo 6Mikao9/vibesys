@@ -1,8 +1,23 @@
 {
   "protocol_version": 1,
-  "type": "configuration_failed",
-  "sequence": 8,
+  "sequence": 3,
   "run_id": "run-conformance",
   "timestamp": "2026-01-01T00:00:00Z",
-  "text": "warning text"
+  "type": "configuration_failed",
+  "text": "",
+  "diagnostic": null,
+  "status": null,
+  "round_label": null,
+  "agent_kind": null,
+  "invocation_id": null,
+  "execution_id": null,
+  "chat_thread_id": null,
+  "data": {
+    "kind": "configuration_failed",
+    "code": "value",
+    "stage": "value",
+    "message": "value",
+    "usage": null,
+    "exit_code": 1
+  }
 }

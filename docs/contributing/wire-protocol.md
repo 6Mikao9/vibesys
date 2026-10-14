@@ -335,14 +335,23 @@ closes the channel the relay reads end of stream on stdin.
 
 The framing decisions above are enforced by one shared fixture corpus at `tests/conformance/`, read
 by both conformance suites: the client-side fold suite (#812) and the server-side scenario suite
-(#811). Neither side keeps a private copy. The corpus has two parts:
+(#811). Neither side keeps a private copy. Its contract-parity parts are:
 
 - `tests/conformance/events/` holds one fixture per `EventType` (the event-kind enum in the generated
   schema). The corpus gate enumerates the enum from
   `clients/libs/contracts/src/generated/protocol.schema.json` and fails if a kind has no fixture, so
-  a new event kind cannot land without a fixture.
+  a new event kind cannot land without a fixture. Python contract generation creates each fixture
+  through the authoritative `RunEvent` serializer.
+- `tests/conformance/event-payloads/` holds Python-generated default/null and fully populated
+  `RunEvent` pairs for every member of the authoritative `EventData` union. Public client validation
+  and folding must accept every pair.
+- `tests/conformance/rendering-dispositions/` records exhaustive decisions for each event kind,
+  query discriminant, response payload family, and declared contract extension in the TUI and the
+  shared browser/Electron Web renderer. `deferred-issue-owners.json` records the open issue evidence
+  for every deferral without making CI depend on GitHub.
 - `tests/conformance/scenarios/` holds the connection scenarios (bootstrap, resume, rebootstrap,
   capability probes, protocol error, and so on), each tagging the framing decisions it exercises.
+- `tests/conformance/runners/` records which scenarios each executable conformance runner owns.
 
 See `tests/conformance/README.md` for the layout and how to run the gate, and
 `tests/conformance/FORMAT.md` for

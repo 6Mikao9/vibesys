@@ -17,6 +17,9 @@ tests/conformance/
   README.md                 this file
   FORMAT.md                 the fixture and scenario file formats
   events/<kind>.json        one RunEvent fixture per EventType enum member
+  event-payloads/<kind>.jsonl  default and populated RunEvents per EventData variant
+  rendering-dispositions/  exhaustive event/query/response tables per frontend
+  deferred-issue-owners.json  authoring-time evidence for deferred work
   scenarios/<id>.json       one connection scenario per file
   runners/<id>.json         runner-owned executable scenario inventory
 ```
@@ -26,12 +29,22 @@ tests/conformance/
   enumerates the enum and fails if a kind has no fixture, so a new event kind cannot land without
   one. Each file is a single valid `RunEvent` instance; the filename stem is its `type`.
 
-  These fixtures are not serialization goldens. Message shape is owned by the generated schema (and,
-  as protocol codegen matures, by the codegen source explored in #850): the gate reads the envelope
-  and its required fields from that schema rather than re-encoding them here, so the fixtures do not
-  duplicate what codegen owns. Their job is the two things codegen does not provide: a coverage
-  checklist that forces every event kind to exist, and one representative instance per kind for the
-  fold and scenario runners to replay.
+  The Python contract generator creates every fixture directly from the authoritative `RunEvent`
+  and `EventData` models and writes its exact `model_dump_json(indent=2)` output. A Python parity test
+  independently checks the committed bytes. Message shape remains owned by the generated schema:
+  the gate reads the envelope and its required fields from that schema rather than re-encoding them.
+- `event-payloads/` proves payload coverage. There is one JSONL file per member of the authoritative
+  `EventData` union. Its two full `RunEvent` lines exercise model defaults/nulls and every optional
+  field populated, respectively. The public TypeScript validator accepts both and the public
+  `run-state` reducer folds them. New payload variants cannot land without generated wire evidence.
+- `rendering-dispositions/` records the TUI and Web disposition of every schema-derived event kind,
+  query discriminant, and response payload family. Events are visibly rendered or deferred. Queries
+  and responses may also be explicitly inapplicable, and used queries name their consumer. The Web
+  table covers both browser and Electron because they share the same renderer. The closed arrays let
+  the gate reject missing, unknown, or duplicate contract members and misspelled status fields.
+- `deferred-issue-owners.json` records the open issues allowed to own a deferral and the date their
+  status was verified. The offline gate rejects unlisted, closed, duplicate, or malformed owners.
+  Maintainers still verify live GitHub status when changing a deferral, then update this evidence.
 - `scenarios/` holds the connection-level exchanges (bootstrap, resume, rebootstrap, capability
   probes, protocol error, and so on). Each scenario tags the wire-contract decisions it exercises,
   so every decision in the contract is covered by at least one scenario and no scenario references a
@@ -45,8 +58,8 @@ tests/conformance/
 
 | Reader | Language | Lands in | Uses |
 | --- | --- | --- | --- |
-| corpus gate | Node (`clients/tools/scripts/check_conformance_corpus.mjs`) | 888a (this) | validates coverage, structure, decision anchoring, and the execution partition |
-| event fold runner | TypeScript (`clients/libs/run-state/src/conformance.test.ts`) | follow-up to 888a | folds every shared event fixture through `run-state`, both batched and incrementally |
+| corpus gate | Node (`clients/tools/scripts/check_conformance_corpus.mjs`) | #888, #834 | validates event/payload and frontend contract coverage, structure, deferred owners, decision anchoring, and the execution partition |
+| event fold runner | TypeScript (`clients/libs/run-state/src/conformance.test.ts`) | follow-up to 888a | publicly validates and folds every generated event and payload fixture through `run-state` |
 | client scenario runner | TypeScript | 888b | replays connection scenarios through the client transport and `run-state` |
 | server scenario suite | Python (`tests/conformance/test_server_transports.py`) | follow-up to #811 | replays the bootstrap, control-path, and simultaneous two-client scenarios on every transport each declares |
 | relay runner | Python (`tests/e2e/test_relay.py`) | #1785 | replays the Unix bootstrap, control-path, and tail-overflow scenarios through a real host helper's run channel |
@@ -91,13 +104,26 @@ The gate checks, with no external dependency:
    that is not in the enum.
 2. Every event fixture is a structurally valid `RunEvent`: its `type` matches its filename and the
    enum, its required fields are present, and it carries no unknown top-level fields.
-3. Every scenario is structurally valid: its `id` matches its filename, its steps are well formed,
+3. Every `EventData` union member has exactly two authoritative Python-produced full-envelope
+   fixtures: a defaults/nulls case and a fully populated case.
+4. The TUI and Web disposition tables each contain every `EventType`, `query.*` request discriminant,
+   response payload family, and declared contract extension exactly once, using the closed
+   status-specific shape for that section.
+5. Every deferred entry names an issue recorded as open in `deferred-issue-owners.json`; malformed,
+   duplicate, closed, and unlisted owners fail deterministically without a network call.
+6. Every scenario is structurally valid: its `id` matches its filename, its steps are well formed,
    and every frame it names is a known protocol message type.
-4. Every wire-contract decision token (`WP-*` in `wire-protocol.md`) is exercised by at least one
+7. Every wire-contract decision token (`WP-*` in `wire-protocol.md`) is exercised by at least one
    scenario, and every decision a scenario tags exists in the contract. This is what keeps the
    document and the corpus from drifting apart.
-5. Every scenario is registered by at least one runner or declares the setup capability still
+8. Every scenario is registered by at least one runner or declares the setup capability still
    required, never both. Runner inventories may name only checked-in scenarios and cannot register
    one scenario twice within the same runner.
+
+Deferred issue references are checked live when the tables are authored or changed, and the result
+is recorded in `deferred-issue-owners.json`. CI validates that local evidence and intentionally
+performs no network calls, so builds remain deterministic and work offline.
+`pnpm --dir clients --filter @vibesys/contracts generate:protocol` regenerates both the client
+contracts and the authoritative event-fixture serialization.
 
 See [`FORMAT.md`](FORMAT.md) for the exact file shapes.
