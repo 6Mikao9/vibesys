@@ -10,6 +10,8 @@ the role that answered with it. So the bare union may be used only inside ``Wait
 import ast
 from pathlib import Path
 
+from tests.support.parsed_source import parse_source
+
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "src/vibesys/orchestration", REPO / "src/vibesys/run")
 BARE_UNION = "Waitable"
@@ -23,7 +25,7 @@ def _names(node: ast.AST) -> set[str]:
 def bare_union_decoders(source: str) -> list[int]:
     """Line numbers of a decoder or model base built directly on the bare ``Waitable`` union."""
     lines: list[int] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(parse_source(source)):
         if isinstance(node, ast.ClassDef):
             lines += [
                 base.lineno

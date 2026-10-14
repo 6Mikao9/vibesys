@@ -22,6 +22,9 @@ import os
 from pathlib import Path
 
 import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _ROOTS = ("src", "libs", "sdk", "tests", "scripts", "support")
 _SKIPPED_DIRS = frozenset({".venv", "node_modules", "build", "dist", "__pycache__"})
@@ -97,7 +100,7 @@ def _mutated_targets(node: ast.Call | ast.stmt) -> list[ast.expr]:
 
 def shared_state_mutations(source: str) -> list[tuple[int, str]]:
     """Return ``(line, target)`` for each outer-state mutation inside a ``given`` body."""
-    tree = ast.parse(source)
+    tree = parse_source(source)
     imported = _imported_names(tree)
     sites: set[tuple[int, str]] = set()
     for function in ast.walk(tree):

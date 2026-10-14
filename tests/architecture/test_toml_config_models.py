@@ -20,7 +20,11 @@ import inspect
 import pkgutil
 from pathlib import Path
 
+import pytest
 from pydantic import BaseModel
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TOML_READERS = frozenset({"load", "loads"})
@@ -108,7 +112,7 @@ def _toml_readers() -> dict[tuple[str, str], list[ast.expr]]:
     """Map each function that reads TOML to the models it validates against."""
     found: dict[tuple[str, str], list[ast.expr]] = {}
     for path in _source_files():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = parse_source(path.read_text(encoding="utf-8"))
         modules, readers = _toml_reader_names(tree)
         relative = path.relative_to(_ROOT).as_posix()
         for function in ast.walk(tree):

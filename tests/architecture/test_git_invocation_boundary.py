@@ -21,6 +21,9 @@ import ast
 from pathlib import Path
 
 import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _HELPER = Path("libs/vs-project/src/vs_project/_git_process.py")
 _SUBPROCESS_CALLS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
@@ -64,7 +67,7 @@ def _is_subprocess_call(node: ast.Call) -> bool:
 
 def git_invocation_sites(source: str) -> list[int]:
     """Return line numbers where ``source`` starts Git outside the helper."""
-    tree = ast.parse(source)
+    tree = parse_source(source)
     tracker_argv: set[int] = set()
     lines: set[int] = set()
     for node in ast.walk(tree):

@@ -26,6 +26,9 @@ from pathlib import Path
 
 import pytest
 from tests.support.light_imports import is_heavy
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = (REPO_ROOT / "src", *sorted((REPO_ROOT / "libs").glob("*/src")))
@@ -126,7 +129,7 @@ def direct_imports(name: str) -> tuple[str, ...]:
         return ()
     package = name if path.name == "__init__.py" else name.rpartition(".")[0]
     found: list[str] = []
-    for statement in _executed_statements(ast.parse(path.read_text(encoding="utf-8")).body):
+    for statement in _executed_statements(parse_source(path.read_text(encoding="utf-8")).body):
         if isinstance(statement, ast.Import):
             for alias in statement.names:
                 found.extend(_with_parents(alias.name))
@@ -231,7 +234,7 @@ try:
 except ImportError:
     import fallback
 """
-    executed = _executed_statements(ast.parse(source).body)
+    executed = _executed_statements(parse_source(source).body)
     names = {
         alias.name
         for statement in executed

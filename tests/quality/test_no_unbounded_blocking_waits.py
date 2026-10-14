@@ -18,6 +18,11 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
+
 REPO = Path(__file__).resolve().parents[2]
 SCAN_ROOTS = (REPO / "tests", *sorted((REPO / "libs").glob("*/tests")))
 SOCKET_NAME = re.compile(r"(server|listener|sock|socket)\w*", re.IGNORECASE)
@@ -108,7 +113,7 @@ def _unbounded(function: ast.AST) -> list[tuple[int, str]]:
 
 def unbounded_waits(source: str) -> list[tuple[int, str]]:
     """``(line, what)`` for each unbounded blocking wait in *source*."""
-    tree = ast.parse(source)
+    tree = parse_source(source)
     functions = [
         node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
     ]

@@ -27,9 +27,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -107,7 +110,7 @@ class _Scanner:
 
     def load(self, path: Path) -> _Module:
         if path not in self._modules:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            tree = parse_source(path.read_text(encoding="utf-8"), filename=str(path))
             relpath = path.relative_to(self.report_base).as_posix()
             self._modules[path] = _Module(path, relpath, tree)
         return self._modules[path]
@@ -447,7 +450,7 @@ def _minting_sites(path: Path, *, calls: bool) -> list[int]:
     # so a file without those words has none; skip parsing it.
     if not any(word in source for word in (*_MINTING_NAMES, "vs_prompts")):
         return lines
-    for node in ast.walk(ast.parse(source, filename=str(path))):
+    for node in ast.walk(parse_source(source, filename=str(path))):
         match node:
             case ast.Call(
                 func=ast.Name(id="RenderedPrompt") | ast.Attribute(attr="RenderedPrompt")
