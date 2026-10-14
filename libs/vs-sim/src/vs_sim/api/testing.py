@@ -39,6 +39,7 @@ from vs_sim.crash import (
     swept,
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
+from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
     FakeForegroundChild,
     FakeForegroundLauncher,
@@ -70,6 +71,12 @@ from vs_sim.seeds import (
     random_for,
     replay_hint,
     seed_for_test,
+)
+from vs_sim.signal_relay_contracts import (
+    MainThreadWakeContract,
+    MainThreadWakeUnderTest,
+    RelayUnderTest,
+    SignalRelayContract,
 )
 from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
 from vs_sim.sim_network import SimNetwork
@@ -116,11 +123,13 @@ __all__ = [
     "EventTrace",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
+    "FakeMainThreadWake",
     "FakeMergedOutputProcessLauncher",
     "FakePipedProcessLauncher",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
     "FakeProcesses",
+    "FakeSignalRelay",
     "FakeSignalSource",
     "ForegroundLauncherContract",
     "ForegroundScript",
@@ -130,6 +139,8 @@ __all__ = [
     "HostCrashedError",
     "IdleDriver",
     "InlineBlockingRunner",
+    "MainThreadWakeContract",
+    "MainThreadWakeUnderTest",
     "ManualClock",
     "NetworkContract",
     "NetworkUnderTest",
@@ -142,12 +153,14 @@ __all__ = [
     "ProcessUnderTest",
     "ProcessesContract",
     "ProcessesUnderTest",
+    "RelayUnderTest",
     "RestartLimitError",
     "Restarted",
     "RunnerUnderTest",
     "ScheduledRule",
     "ScriptedProbe",
     "ScriptedStreamingCommand",
+    "SignalRelayContract",
     "SignalSourceContract",
     "SignalSourceUnderTest",
     "Sim",

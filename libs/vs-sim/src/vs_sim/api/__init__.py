@@ -52,6 +52,12 @@ if TYPE_CHECKING:
         run_foreground,
     )
     from vs_sim.randomness import RandomSource, SeededRandom, SystemRandomSource, derive_seed
+    from vs_sim.signal_relay import (
+        MainThreadWake,
+        SignalMainThreadWake,
+        SignalRelay,
+        WakeupFdSignalRelay,
+    )
     from vs_sim.signals import (
         LoopSignalSource,
         PidfdProcessSignaller,
@@ -114,6 +120,10 @@ _MODULES: dict[str, str] = {
     "SystemRandomSource": "vs_sim.randomness",
     "derive_seed": "vs_sim.randomness",
     "LoopSignalSource": "vs_sim.signals",
+    "MainThreadWake": "vs_sim.signal_relay",
+    "SignalMainThreadWake": "vs_sim.signal_relay",
+    "SignalRelay": "vs_sim.signal_relay",
+    "WakeupFdSignalRelay": "vs_sim.signal_relay",
     "PidfdProcessSignaller": "vs_sim.signals",
     "ProcessSignaller": "vs_sim.signals",
     "SignalSource": "vs_sim.signals",
@@ -154,6 +164,7 @@ __all__ = [
     "Listener",
     "Lock",
     "LoopSignalSource",
+    "MainThreadWake",
     "MergedOutputProcess",
     "MergedOutputProcessLauncher",
     "MonotonicClock",
@@ -178,6 +189,8 @@ __all__ = [
     "RandomSource",
     "RunningProcess",
     "SeededRandom",
+    "SignalMainThreadWake",
+    "SignalRelay",
     "SignalSource",
     "Signals",
     "Sleeper",
@@ -194,6 +207,7 @@ __all__ = [
     "ThreadLocal",
     "Threads",
     "UnixNetwork",
+    "WakeupFdSignalRelay",
     "Worker",
     "derive_seed",
     "run_foreground",
