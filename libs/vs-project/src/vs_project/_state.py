@@ -26,6 +26,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, Self
 
@@ -1421,7 +1422,10 @@ def _validate_namespace(namespace: str) -> str:
 _MAX_STATE_NAME_BYTES = 255
 
 
+@lru_cache(maxsize=4096)
 def _validate_state_relative_path(raw_path: str | PurePosixPath) -> PurePosixPath:
+    # A pure function of its argument and run on every state read and write with the same few
+    # paths, so its verdict is remembered. A rejected path raises and is checked again.
     if isinstance(raw_path, str):
         value = raw_path
         if not value or "\\" in value or any(not part for part in value.split("/")):
