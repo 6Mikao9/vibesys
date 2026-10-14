@@ -206,14 +206,17 @@ def _walk_immutable(values: Iterable[object]) -> bool:
         node = pending.pop()
         if type(node) in _IMMUTABLE_LEAF_TYPES:
             continue
+        try:
+            # A verdict is only ever kept for a frozen model, so a kept one settles this node.
+            verdict = _read_slot(node, "_immutable")  # inlined: the hottest loop of a write
+        except AttributeError:
+            pass
+        else:
+            if verdict:
+                continue
+            return False
         if isinstance(node, BaseModel):
-            if not node.model_config.get("frozen"):
-                return False
-            try:
-                known = _read_slot(node, "_immutable")  # inlined: the hottest loop of a write
-            except AttributeError:
-                known = _frozen_model_is_deeply_immutable(node)
-            if not known:
+            if not node.model_config.get("frozen") or not _frozen_model_is_deeply_immutable(node):
                 return False
         elif isinstance(node, tuple | frozenset):
             pending.extend(node)
@@ -298,13 +301,14 @@ class _Fragments:
         self.pending: list[tuple[int, BaseModel, object]] = []
         self.used = 0
 
-    def emit(self, model: BaseModel, handler: Callable[[BaseModel], object]) -> str:
+    def emit_new(self, model: BaseModel, handler: Callable[[BaseModel], object]) -> object:
+        """A value whose text is not remembered: plain data in this call's tokens, or as it is."""
+        if not (model.model_config.get("frozen") and _text_is_position_independent(type(model))):
+            return handler(model)
         self.seen.append(model)
-        text: str | None = recall(model, "_text")
-        if text is None:
-            data = handler(model)  # children are tokens, so they were all emitted before this
-            self.pending.append((len(self.texts), model, data))
-        self.texts.append(text or "")
+        data = handler(model)  # children are tokens, so they were all emitted before this
+        self.pending.append((len(self.texts), model, data))
+        self.texts.append("")
         return f"\x00F{len(self.texts) - 1}\x00"
 
     def expand(self, template: str) -> str:
@@ -362,13 +366,15 @@ def emit_fragment(
     model: BaseModel, handler: Callable[[BaseModel], object], context: object
 ) -> object:
     """Serializer hook of every frozen value: a token inside `encode_json`, else plain data."""
-    if (
-        type(context) is _Fragments
-        and model.model_config.get("frozen")
-        and _text_is_position_independent(type(model))
-    ):
-        return context.emit(model, handler)
-    return handler(model)
+    if type(context) is not _Fragments:
+        return handler(model)
+    try:
+        text = _read_slot(model, "_text")  # inlined: one call per value of every durable write
+    except AttributeError:
+        return context.emit_new(model, handler)
+    context.seen.append(model)
+    context.texts.append(text)
+    return f"\x00F{len(context.texts) - 1}\x00"
 
 
 class EncodingMismatchError(ValueError):
@@ -449,11 +455,24 @@ def _share(old: object, new: object) -> object:
 
 
 def _share_model(old: BaseModel, new: BaseModel) -> BaseModel:
-    names = _field_names(type(new))
-    shared = {name: _share(getattr(old, name), getattr(new, name)) for name in names}
-    if all(shared[name] is getattr(old, name) for name in names):
+    before_fields = old.__dict__
+    after_fields = new.__dict__
+    every_part_is_old = True
+    changed: dict[str, object] | None = None
+    for name in _field_names(type(new)):
+        before = before_fields[name]
+        after = after_fields[name]
+        if before is after:
+            continue
+        part = _share(before, after)
+        if part is not before:
+            every_part_is_old = False
+        if part is not after:
+            if changed is None:
+                changed = {}
+            changed[name] = part
+    if every_part_is_old:
         return old
-    changed = {name: part for name, part in shared.items() if part is not getattr(new, name)}
     return new.model_copy(update=changed) if changed else new
 
 
