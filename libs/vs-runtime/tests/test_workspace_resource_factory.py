@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
     from vs_project.api import OrchestrationRunManifest
     from vs_runtime.api import OrchestrationResumeDecision
-    from vs_runtime.api.infrastructure import RunEnvironmentSession
+    from vs_runtime.api.infrastructure import RunEnvironmentSession, WorkspaceResourceEvent
     from vs_sandbox.api import CommandRunner
 
 
@@ -138,7 +138,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
         open_session,
         clock=ManualClock(),
     )
-    events: list[WorkspaceRestoreFailed] = []
+    events: list[WorkspaceResourceEvent] = []
     factory = WorkspaceResourceFactory(
         project,
         environment,
