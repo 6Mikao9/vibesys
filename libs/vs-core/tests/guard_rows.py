@@ -43,7 +43,7 @@ def by_pairs(*factors: tuple[str, Sequence[object]]) -> pytest.MarkDecorator:
     return pytest.mark.parametrize(
         names,
         [
-            tuple(values[cast(int, index)] for (_, values), index in zip(factors, row, strict=True))
+            tuple(values[cast("int", index)] for (_, values), index in zip(factors, row, strict=True))
             for row in rows
         ],
     )
