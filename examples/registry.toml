@@ -58,6 +58,10 @@ path = "examples/microservices/repositories/masa"
 external_repo = true
 
 [[example]]
+path = "examples/microservices/repositories/rpcstack"
+external_repo = true
+
+[[example]]
 path = "examples/microservices/repositories/train-ticket"
 external_repo = true
 
