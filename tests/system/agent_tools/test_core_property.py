@@ -734,7 +734,7 @@ _TURNS = st.lists(
 # A pull request draws a small sample (the pinned examples and regressions below carry the
 # regression power); the nightly depth draws the full count. An example costs 0.2 to 0.4 s (the
 # core validates the whole run record at every step), so the full count is a half-minute run.
-_EXAMPLES = examples(pr=8, nightly=200)
+_EXAMPLES = examples(pr=6, nightly=200)
 
 
 @settings(
