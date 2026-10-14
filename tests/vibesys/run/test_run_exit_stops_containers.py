@@ -243,11 +243,11 @@ def _execute(
 
 # Each exit path ends the run its own typed way: a stop and a failure return normally, a
 # terminating signal exits 128 + n. (Which signal maps to which code is `supervise`'s own rule,
-# tested where it lives; one terminating signal here shows the exit path removes containers.)
+# tested where it lives; the stop in the resume test shows a signalled exit removes containers.)
 # Budget: each case is a whole run over a fake Docker daemon, the point of the regression (#1521).
 @pytest.mark.parametrize(
     ("exit_path", "ends_with"),
-    [("failure", None), ("SIGTERM", SystemExit), ("start-lost", RuntimeError)],
+    [("failure", None), ("start-lost", RuntimeError)],
 )
 def test_an_exiting_run_leaves_no_container_and_every_container_carries_the_runs_id(
     tmp_path: Path,
