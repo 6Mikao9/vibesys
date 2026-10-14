@@ -265,7 +265,12 @@ def test_an_implementer_that_asks_to_continue_is_given_its_own_next_step_without
 
 
 @MODES
-@settings(max_examples=12, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=3, nightly=60), deadline=None, derandomize=True, database=None)
+# Pinned: a run reviewed only in its final round, one reviewed every round, and a nominated
+# candidate reviewed off the cadence.
+@example(judge_every=3, outcomes=["disproven", "disproven", "disproven"])
+@example(judge_every=1, outcomes=["inconclusive", "inconclusive", "inconclusive"])
+@example(judge_every=3, outcomes=["inconclusive", "nominated", "disproven"])
 @given(
     judge_every=st.integers(1, 3),
     outcomes=st.lists(
@@ -460,7 +465,7 @@ def test_a_round_whose_implementer_waited_adopts_the_candidate_it_then_checkpoin
 
 
 @MODES
-@settings(max_examples=examples(pr=20, nightly=80), deadline=None, database=None)
+@settings(max_examples=examples(pr=6, nightly=80), deadline=None, database=None)
 @example(throughputs=(30, 40), judged=(True, True))
 @example(throughputs=(90, 60), judged=(True, True))
 @example(throughputs=(90, 60), judged=(False, True))

@@ -9,7 +9,7 @@ budget, never plan twice at once, never start work after the stop, and end in ex
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, note, settings
+from hypothesis import example, given, note, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
@@ -20,6 +20,7 @@ from tests.vibesys.orchestration.dynamic._host import (
 )
 
 from vs_core.api import Finish, RequestTurn, StartAttempt, Wait
+from vs_sim.api.testing import examples
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
 
@@ -55,8 +56,11 @@ def _check_always(host: Host) -> None:
         assert len(record.running) <= rules.max_in_flight, f"too many running: {where}"
 
 
+# A pull request draws a sample of the run space, and the known counterexamples are pinned: the
+# smallest run that stops inside a shielded section (three steps, then the stop) is the one below.
 @MODES
-@settings(max_examples=60, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None, derandomize=True, database=None)
+@example(steps=[(0, 0)] * 3, stop_before=3, rounds=1, in_flight=1)
 @given(
     steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 11)), max_size=50),
     stop_before=st.none() | st.integers(0, 50),

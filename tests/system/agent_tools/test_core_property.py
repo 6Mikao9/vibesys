@@ -731,9 +731,11 @@ _TURNS = st.lists(
 ).map(tuple)
 
 
-# A pull request draws a sample; the nightly depth draws the full count. An example costs about 0.15 s (the core validates the whole
-# run record at every step), so the full count is a half-minute run.
-_EXAMPLES = examples(pr=30, nightly=200)
+# A pull request draws a sample; the nightly depth draws the full count. An example costs a few
+# tenths of a second (the core validates the whole run record at every step). The named tests
+# below pin the shapes of every past bug (each is an `@example` or a test of its own), so the
+# drawn examples of a pull request only add variety.
+_EXAMPLES = examples(pr=8, nightly=200)
 
 
 @settings(
@@ -901,6 +903,10 @@ _LOSSY_STEP = st.sampled_from((("submit",), ("lose",), ("timeout_retry",)))
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )
+@example(program=(("lose",), ("submit",)))
+@example(program=(("timeout_retry",), ("submit",)))
+@example(program=(("submit",), ("lose",)))
+@example(program=(("lose",), ("lose",)))
 @given(program=st.lists(_LOSSY_STEP, min_size=1, max_size=4).map(tuple))
 def test_a_repeated_submit_is_answered_with_the_one_evaluation_whatever_the_latency(
     program: Program,

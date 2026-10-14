@@ -59,7 +59,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import ProbedRunClock
-from vs_sim.api.testing import clock_from
+from vs_sim.api.testing import clock_from, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -171,7 +171,7 @@ async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) ->
 
 
 @settings(
-    max_examples=5,
+    max_examples=examples(pr=2, nightly=10),
     derandomize=True,
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
@@ -384,8 +384,9 @@ async def test_a_stalled_run_names_the_release_a_closing_attempt_waits_for(tmp_p
             await drive_core(host, _config())
 
 
-@settings(max_examples=5, derandomize=True, deadline=None)
+@settings(max_examples=examples(pr=2, nightly=12), derandomize=True, deadline=None)
 @example(until=7.0)
+@example(until=2.0)
 @given(until=st.floats(min_value=2.0, max_value=900.0))
 async def test_a_strategy_that_waits_for_a_time_is_woken_then_and_not_reported_stalled(
     until: float,

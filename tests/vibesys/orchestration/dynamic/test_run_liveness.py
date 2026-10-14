@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, TypedDict
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support.dynamic_world import DynamicWorld
 from tests.vibesys.orchestration.dynamic._replies import (
@@ -46,6 +46,7 @@ from vs_core.testing.drive import Failed, Retryable, Running, Succeeded, Unknown
 from vs_core.testing.liveness import Journal, spin_violations
 from vs_dst.api import SimulatedRun, simulate
 from vs_runtime.api.core import REQUEST_DISPATCH
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -265,7 +266,11 @@ class SlowCandidateJobs(Hosted):
         return super().__call__(request, core)
 
 
-@settings(max_examples=16, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=3, nightly=40), deadline=None, derandomize=True, database=None)
+# Pinned: the job ends at once, the job outlives its attempt and fails, and a stop meets it.
+@example(running_polls=0, ends_failed=False, stop_while_running=False, passed=True)
+@example(running_polls=3, ends_failed=True, stop_while_running=False, passed=True)
+@example(running_polls=3, ends_failed=False, stop_while_running=True, passed=False)
 @given(
     running_polls=st.integers(0, 6),
     ends_failed=st.booleans(),

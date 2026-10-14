@@ -10,7 +10,7 @@ A failing example prints the run as a timeline.
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, note, settings
+from hypothesis import example, given, note, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.evolve._host import (
     Host,
@@ -20,6 +20,7 @@ from tests.vibesys.orchestration.evolve._host import (
 )
 
 from vs_core.api import Finish, StartAttempt, Wait
+from vs_sim.api.testing import examples
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
 
@@ -65,8 +66,22 @@ def _check_at_the_end(host: Host) -> None:
     )
 
 
+# A pull request draws a sample of the run space, and the smallest run that stops after a few
+# steps (the shape that exposed a stop landing inside a shielded section) is pinned.
 @MODES
-@settings(max_examples=60, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None, derandomize=True, database=None)
+@example(
+    steps=[(0, 0)] * 3,
+    stop_before=3,
+    shape={
+        "max_generations": 1,
+        "children_per_generation": 1,
+        "max_parallelism": 1,
+        "search_policy": "vibesys",
+        "profiling": False,
+    },
+    throughputs={},
+)
 @given(
     steps=st.lists(st.tuples(st.integers(0, 7), st.integers(0, 11)), max_size=60),
     stop_before=st.none() | st.integers(0, 60),

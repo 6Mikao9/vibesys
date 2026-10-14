@@ -40,6 +40,7 @@ from vs_core.api import (
     Scope,
     StartAttempt,
 )
+from vs_sim.api.testing import examples
 
 MODES = pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
 CANDIDATE = RevisionRef.of_git_commit("abc123")
@@ -52,9 +53,22 @@ def judge_prompt(host: Host) -> ReviewPrompt:
     return context
 
 
+# Each filter of the shown evidence (own attempt, same candidate, purpose, provenance) is pinned
+# once in a record that fails only it, beside records that pass, so a pull request's few
+# generated examples only add variety.
 @MODES
 @example(records=[(True, True, "local-validation", "trusted")] * 2)
-@settings(max_examples=40, deadline=None, derandomize=True, database=None)
+@example(
+    records=[
+        (True, True, "local-validation", "trusted"),
+        (False, True, "local-validation", "trusted"),
+        (True, False, "local-validation", "trusted"),
+        (True, True, "official", "trusted"),
+        (True, True, "local-validation", "self-report"),
+        (True, True, "local-validation", "trusted"),
+    ]
+)
+@settings(max_examples=examples(pr=4, nightly=60), deadline=None, derandomize=True, database=None)
 @given(
     records=st.lists(
         st.tuples(
@@ -110,7 +124,9 @@ def test_the_judge_is_shown_each_trusted_evaluation_of_the_candidate_taken_in_it
 
 
 @MODES
-@settings(max_examples=30, deadline=None, derandomize=True, database=None)
+@settings(max_examples=examples(pr=6, nightly=40), deadline=None, derandomize=True, database=None)
+@example(passes=[True], hypotheses=1, in_flight=1)
+@example(passes=[False, True], hypotheses=2, in_flight=2)
 @given(
     passes=st.lists(st.booleans(), min_size=1, max_size=3),
     hypotheses=st.integers(1, 2),
