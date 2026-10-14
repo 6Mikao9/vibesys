@@ -1182,7 +1182,9 @@ def _real_substrings() -> list[st.SearchStrategy[str]]:
     ),
 )
 @settings(
-    max_examples=examples(pr=10, nightly=25), deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_workload_has_kernel_data_depends_only_on_row_count(  # noqa: ANN201  # LW-920307; tracked migration debt from the pre-manifest ratchet scheme
     tmp_path_factory,  # noqa: ANN001  # LW-920308; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
@@ -1214,7 +1216,9 @@ def test_workload_has_kernel_data_depends_only_on_row_count(  # noqa: ANN201  # 
     )
 )
 @settings(
-    max_examples=examples(pr=10, nightly=30), deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=30),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_empty_match_guard_fires_iff_filter_matches_no_real_kernel(  # noqa: ANN201  # LW-920313; tracked migration debt from the pre-manifest ratchet scheme
     tmp_path_factory,  # noqa: ANN001  # LW-920314; this parameter's type is intentionally left loose; annotating it now is separate cleanup work

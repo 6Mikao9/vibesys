@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from resources.profilers.rocprof import remote_capture, semantic_capture
 
@@ -19,6 +19,7 @@ from vs_sandbox.api.slurm import (
     profile_capture_descriptor,
     require_profile_fields,
 )
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -90,6 +91,7 @@ def test_real_semantic_producer_requires_hip_rows(
         assert not output.out
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(fields=st.lists(st.sampled_from(ProfileField), unique=True).map(tuple))
 def test_descriptor_never_silently_drops_requested_fields(fields: tuple[ProfileField, ...]) -> None:
     command = _command(Path("/candidate"))
@@ -126,6 +128,7 @@ def test_promised_hip_flag_without_timing_rows_is_failed(tmp_path: Path, body: s
     ]
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     start=st.integers(min_value=0, max_value=10**18),
     duration=st.integers(min_value=0, max_value=10**12),

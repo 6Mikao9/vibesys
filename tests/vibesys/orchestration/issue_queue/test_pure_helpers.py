@@ -61,7 +61,9 @@ queues = st.builds(
     assessed=st.booleans(),
     filed=st.booleans(),
 )
-SETTINGS = settings(max_examples=examples(pr=10, nightly=80), deadline=None, derandomize=True, database=None)
+SETTINGS = settings(
+    max_examples=examples(pr=10, nightly=80), deadline=None, derandomize=True, database=None
+)
 
 
 @SETTINGS

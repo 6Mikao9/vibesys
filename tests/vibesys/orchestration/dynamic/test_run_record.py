@@ -316,6 +316,7 @@ INPUTS = {
 }
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     given_input=st.sampled_from(sorted(INPUTS)),
     planner_gave_up=st.booleans(),

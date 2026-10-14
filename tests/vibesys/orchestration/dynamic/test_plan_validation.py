@@ -202,6 +202,7 @@ def test_every_violation_code_has_a_scenario() -> None:
     assert set(SCENARIOS) == set(ViolationCode)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(code=st.sampled_from(sorted(SCENARIOS, key=str)))
 def test_a_broken_rule_is_named_by_its_code_at_the_field_the_planner_must_fix(
     code: ViolationCode,

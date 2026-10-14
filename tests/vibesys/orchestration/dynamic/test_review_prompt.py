@@ -108,6 +108,7 @@ def fence_lines(text: str) -> list[int]:
     return [i for i, line in enumerate(lines) if line and set(line) == {"`"} and len(line) >= 3]
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(tail=st.text(alphabet="`ab\n ", max_size=60), data=st.data())
 def test_a_failure_text_cannot_close_its_fence(tail: str, data: st.DataObject) -> None:
     base = data.draw(CONTEXTS[Template.REVIEW])
@@ -131,6 +132,7 @@ def test_a_failure_text_cannot_close_its_fence(tail: str, data: st.DataObject) -
     assert "".join("".join(body).split()) == "".join(feedback.replace("`", "'").split())
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data())
 def test_the_judge_may_not_fail_a_claim_it_has_no_measurement_for(data: st.DataObject) -> None:
     """The rubric requires trusted evidence before a performance verdict (LIVE-2 finding 4)."""

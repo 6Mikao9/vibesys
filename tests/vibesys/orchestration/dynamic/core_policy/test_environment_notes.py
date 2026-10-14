@@ -64,7 +64,10 @@ def test_every_template_is_classified_as_a_fresh_turn_or_a_continuation() -> Non
 
 
 @pytest.mark.parametrize("template", FRESH_TURNS, ids=lambda item: item.value)
-@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=examples(pr=10, nightly=25))
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+    max_examples=examples(pr=10, nightly=25),
+)
 @given(data=st.data())
 def test_a_fresh_turn_prompt_shows_the_environment_notes_exactly_once(
     template: PromptTemplate, data: st.DataObject, tmp_path: Path

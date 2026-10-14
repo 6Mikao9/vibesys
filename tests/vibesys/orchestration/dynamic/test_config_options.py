@@ -8,7 +8,7 @@ is configured, never later. The operations are the persisted kind names the exec
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -19,6 +19,7 @@ from vibesys.orchestration.dynamic.search.api import (
     VERIFY_KIND,
     DynamicConfig,
 )
+from vs_sim.api.testing import examples
 
 VALID = {"max_rounds": 3}
 BOUNDS = {
@@ -30,6 +31,7 @@ BOUNDS = {
 }
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     key=st.text("abcdefghijklmnopqrstuvwxyz_", min_size=1, max_size=24).filter(
         lambda name: name not in DynamicConfig.model_fields
@@ -41,6 +43,7 @@ def test_an_unknown_option_is_rejected_by_name(key: str) -> None:
 
 
 @pytest.mark.parametrize("name", sorted(BOUNDS))
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data())
 def test_a_value_outside_its_bounds_is_rejected_naming_the_option_and_one_inside_is_kept(
     name: str, data: st.DataObject
@@ -53,6 +56,7 @@ def test_a_value_outside_its_bounds_is_rejected_naming_the_option_and_one_inside
     assert getattr(DynamicConfig.model_validate({**VALID, name: inside}), name) == inside
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     values=st.fixed_dictionaries(
         {name: st.integers(low, high) for name, (low, high) in BOUNDS.items()}

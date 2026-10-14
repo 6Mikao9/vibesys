@@ -40,7 +40,9 @@ if TYPE_CHECKING:
     from vs_runtime.api import CorePlan
 
 _SETTINGS = settings(
-    max_examples=examples(pr=10, nightly=25), deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 _SEARCH_KEYS = {
     "max_generations": st.integers(1, 4),
@@ -103,6 +105,7 @@ def test_the_limits_admit_exactly_the_attempts_the_config_schedules(
     _started(plan, root, run)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy=st.booleans(), benchmark=st.booleans())
 def test_the_judge_may_vouch_and_each_measured_gate_is_required(
     *, accuracy: bool, benchmark: bool

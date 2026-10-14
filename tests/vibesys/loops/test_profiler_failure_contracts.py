@@ -98,6 +98,7 @@ _INVALID_NUMBERS = st.one_of(
 @example(value="bogus", field="Counter_Value")
 @example(value="nan", field="Start_Timestamp")
 @example(value="inf", field="Grid_Size")
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     value=_INVALID_NUMBERS,
     field=st.sampled_from(
@@ -130,6 +131,7 @@ def test_invalid_rocprof_counter_values_are_not_zero(value: str, field: str) -> 
         assert type(failed.value).__name__ == "CaptureFailedError"
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(value=_INVALID_NUMBERS)
 def test_invalid_rocprof_trace_timestamps_are_not_zero(value: str) -> None:
     with tempfile.TemporaryDirectory(dir="/dev/shm") as directory:
@@ -171,6 +173,7 @@ def test_corrupt_nsys_database_is_a_typed_failure(tmp_path: Path) -> None:
     assert type(failed.value).__name__ == "CaptureFailedError"
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     payload=st.one_of(
         st.text(alphabet="xyz{", min_size=1, max_size=20),
@@ -218,6 +221,7 @@ def test_counter_pass_setup_failure_is_a_typed_capture_error(
     assert type(failed.value).__name__ == "CaptureFailedError"
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     field=st.sampled_from(["start_timestamp", "end_timestamp"]),
     omit=st.booleans(),

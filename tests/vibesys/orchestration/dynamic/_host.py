@@ -116,9 +116,7 @@ def begin(
     **world: Unpack[World],
 ) -> Host:
     """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
-    run = start_flow(
-        dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting
-    )
+    run = start_flow(dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting)
     return Host(run, cfg, **world)
 
 

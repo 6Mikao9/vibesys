@@ -9,9 +9,11 @@ from signal import Signals
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from resources.profilers.rocprof import capture
+
+from vs_sim.api.testing import examples
 
 runtime = capture.capture_runtime
 
@@ -106,6 +108,7 @@ class ScriptedCaptureProcessGroup:
         self.parent_alive = self.child_alive = False
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(flush_at=st.integers(min_value=1, max_value=20), writers=st.integers(1, 4))
 def test_finalized_trace_ends_grace_while_child_survives(flush_at: int, writers: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -313,6 +316,7 @@ def test_unreadable_writer_inventory_keeps_full_grace(tmp_path: Path, fault: str
     assert clock.now == 120
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     pid=st.integers(min_value=1, max_value=1_000_000),
     original_birth=st.integers(min_value=0, max_value=1_000_000),
@@ -367,6 +371,7 @@ class LateWriterGroup(ScriptedCaptureProcessGroup):
         self.fenced = False
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(birth_phase=st.integers(0, 1), finalize=st.booleans())
 def test_writer_born_between_inventory_and_cleanup_retains_grace(
     birth_phase: int, *, finalize: bool
@@ -388,6 +393,7 @@ def test_writer_born_between_inventory_and_cleanup_retains_grace(
         assert not group.fenced
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000), delta=st.integers(1, 1000))
 def test_reused_writer_pid_cannot_reuse_finalization(pid: int, birth: int, delta: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -500,6 +506,7 @@ def process_trees(draw: st.DrawFn) -> list[int]:
     return [draw(st.integers(0, index - 1)) for index in range(1, count + 1)]
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(parents=process_trees(), parent_index=st.integers(0, 8))
 def test_cleanup_rediscovers_detached_descendants_after_term(
     parents: list[int], parent_index: int
@@ -522,6 +529,7 @@ def test_cleanup_rediscovers_detached_descendants_after_term(
     assert (runtime.ProcessIdentity(1000, 10000), signal.SIGKILL) in table.signals
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(parents=process_trees(), stop_delay=st.integers(0, 8))
 def test_process_fence_requires_acknowledged_stops_and_resumes(
     parents: list[int], stop_delay: int
@@ -609,6 +617,7 @@ class ReusingWriterTable(FakeProcessTable):
         super().signal(identity, sig)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(during_fence=st.booleans(), birth=st.integers(0, 1_000_000))
 def test_stop_capture_inventories_owned_pid_reuse(*, during_fence: bool, birth: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -630,6 +639,7 @@ def test_stop_capture_inventories_owned_pid_reuse(*, during_fence: bool, birth: 
         assert not table.pending_stops
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(writers=st.integers(2, 5), missing_index=st.integers(0, 4))
 def test_finalized_writer_requires_its_own_complete_records(
     writers: int, missing_index: int
@@ -686,6 +696,7 @@ class InterleavedWriterGroup(ScriptedCaptureProcessGroup):
         return self.poll()
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(
     events=st.lists(
         st.tuples(st.sampled_from(["birth", "finalize", "exit"]), st.integers(0, 4)), max_size=20
@@ -768,6 +779,7 @@ class TransientWriterTable(ReusingWriterTable):
         super().signal(identity, sig)
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(during_fence=st.booleans(), pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000))
 def test_transient_unfinalized_writer_prevents_completion(
     *, during_fence: bool, pid: int, birth: int
@@ -819,6 +831,7 @@ class MissingWriterHistoryGroup(ScriptedCaptureProcessGroup):
         return self.history <= self.observed
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(hidden_pid=st.integers(101, 1_000_000))
 def test_unobserved_exited_writer_retains_grace(hidden_pid: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -835,6 +848,7 @@ def test_unobserved_exited_writer_retains_grace(hidden_pid: int) -> None:
         assert clock.now == 120
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(pid=st.integers(100, 1_000_000), birth=st.integers(0, 1_000_000))
 def test_new_writer_marker_cannot_reuse_pre_stop_csv(pid: int, birth: int) -> None:
     with TemporaryDirectory() as temporary:
@@ -860,6 +874,7 @@ def test_new_writer_marker_cannot_reuse_pre_stop_csv(pid: int, birth: int) -> No
         assert completion.complete({pid})
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(pid=st.integers(101, 1_000_000))
 def test_new_writer_disappearing_before_maps_read_keeps_proof_unproven(pid: int) -> None:
     with TemporaryDirectory() as temporary:

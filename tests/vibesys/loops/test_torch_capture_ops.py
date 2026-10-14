@@ -38,7 +38,9 @@ _REPO = Path(__file__).resolve().parents[3]
 _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
 
 FAST = settings(
-    max_examples=examples(pr=10, nightly=25), deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 # For property tests whose body sleeps real wall-clock time (bounded waits):
 # fewer examples keeps the suite fast without weakening the property itself.

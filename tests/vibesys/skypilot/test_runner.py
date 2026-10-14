@@ -1114,6 +1114,7 @@ _JOB_STATES = [
 ]
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(status=st.one_of(st.sampled_from(_JOB_STATES), st.text(max_size=14)))
 def test_query_job_accepts_exactly_the_documented_spellings(status: str) -> None:
     runner = SkyPilotJobRunner(
@@ -1129,6 +1130,7 @@ def test_query_job_accepts_exactly_the_documented_spellings(status: str) -> None
             runner.query_job("lease", job_name="j")
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(statuses=st.lists(st.sampled_from(_JOB_STATES), min_size=1, max_size=12))
 def test_a_job_the_queue_reported_finished_never_runs_again(statuses: list[str]) -> None:
     fake = FakeCommandRunner(

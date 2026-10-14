@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from resources.profilers.rocprof import remote_capture
 from resources.profilers.rocprof.remote_capture import capture_runtime
+
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,6 +27,7 @@ def _capture(profiles: Path, capture_id: str, status: capture_runtime.CaptureSta
     )
 
 
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(statuses=st.lists(st.sampled_from(list(_STATUS)), min_size=1, max_size=4))
 def test_a_trace_is_profile_evidence_only_when_every_workload_ran(
     tmp_path_factory: pytest.TempPathFactory, statuses: list[capture_runtime.CaptureStatus]

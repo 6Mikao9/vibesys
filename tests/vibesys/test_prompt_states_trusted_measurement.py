@@ -181,7 +181,9 @@ def _cases() -> dict[str, Callable[..., str]]:
 
 @pytest.mark.parametrize("name", sorted(_cases()))
 @settings(
-    max_examples=examples(pr=10, nightly=15), deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=10, nightly=15),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 @given(
     value=st.floats(0.1, 1e6, allow_nan=False).map(lambda x: round(x, 1)),
