@@ -9,7 +9,7 @@ conditions whose rule reads them together, the full cross of just those (``joint
 from __future__ import annotations
 
 from itertools import product
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -43,7 +43,7 @@ def by_pairs(*factors: tuple[str, Sequence[object]]) -> pytest.MarkDecorator:
     return pytest.mark.parametrize(
         names,
         [
-            tuple(values[index] for (_, values), index in zip(factors, row, strict=True))
+            tuple(values[cast(int, index)] for (_, values), index in zip(factors, row, strict=True))
             for row in rows
         ],
     )
