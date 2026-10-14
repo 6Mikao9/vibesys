@@ -314,15 +314,19 @@ def _end_released_dispatch(
 
     The dispatch never learned its own outcome (the transport died after sending, or its
     limit passed), so the release is the only fact that can close it. The cancellation of a
-    lost turn (``lost_turn_authority``) that the executor conclusively refuses or fails closes it
+    lost turn (``lost_turn_authority``) that the executor conclusively refuses (no such turn) closes it
     too: there is no turn left to stop, so the turn is lost as well, as if it was cancelled.
+    A cancellation that failed proves nothing about the writer, so it releases nothing: the
+    session keeps waiting and the run halts loudly (``WaitKind.SESSION``) rather than free a
+    workspace a live writer may still write to. (The workspace fence refuses snapshots of an
+    unjudged workspace; it does not stop a running writer.)
     """
     request = root.request
     observation = event.observation
     lost = isinstance(request, CancelTurn) and request.request_id == lost_turn_cancellation(
         request.invocation
     )
-    refused = lost and observation.status in (ObservationStatus.REJECTED, ObservationStatus.FAILED)
+    refused = lost and observation.status == ObservationStatus.REJECTED
     if (
         not isinstance(request, CancelTurn)
         or not observation.terminal

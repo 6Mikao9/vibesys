@@ -15,7 +15,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_core.api.testing import Answer, Running
+from vs_core.api.testing import Answer, Failed, Running
 
 from .test_agent_turn_runs import assert_ended_closed
 from .test_role_limits_through_core import implementer_turns
@@ -69,3 +69,35 @@ def test_a_turn_that_overruns_its_only_attempt_fails_the_ask_and_the_run_still_e
 
     assert_ended_closed(trace)
     assert summary(trace).done[0].failed == ("implementer",)
+
+
+@dataclass
+class UnstoppableHost(OverrunningHost):
+    """A host whose cancellation of the overrunning turn fails: it may still be running."""
+
+    def __call__(self, request: core.Request, state: core.CoreState) -> Answer:
+        if isinstance(request, core.CancelTurn) and request.request_id is not None
+            and not request.request_id.root.endswith("close"):
+            return Failed()
+        return super().__call__(request, state)
+
+
+@_SETTINGS
+@given(lost_turns=st.integers(0, core.MAX_LOST_TURNS))
+def test_a_failed_cancellation_never_releases_the_turn_and_the_run_halts_loudly(
+    lost_turns: int,
+) -> None:
+    """A cancel that failed proves nothing about the writer: nothing is released or re-asked."""
+    implementer = IMPLEMENTER.model_copy(update={"lost_turns": lost_turns})
+
+    trace = run_toy(UnstoppableHost(overruns=1), definition=toy_search(implementer=implementer))
+
+    assert not trace.finished
+    assert len(implementer_turns(trace)) == 1
+    [invocation] = [
+        row
+        for row in trace.core.sessions.invocations
+        if row.invocation.invocation_id.root.startswith("inv:implementer")
+    ]
+    assert invocation.phase == core.SessionPhase.UNKNOWN
+    assert core.WaitKind.SESSION in {w.waiter for w in core.orphan_waits(trace.core)}
