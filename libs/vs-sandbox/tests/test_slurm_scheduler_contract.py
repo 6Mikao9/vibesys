@@ -34,7 +34,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     CANCEL_REACTIONS,
     LIFETIMES,
@@ -309,11 +309,20 @@ def _stack(
 
 _OPS = st.lists(st.sampled_from(("snapshot", "inspect_only", "poll", "wait")), max_size=30)
 # Each example replays a whole job lifecycle through the connector, one subprocess per
-# remote command, so a few generated cases run beside the explicit boundary examples.
-_PROPERTY = settings(max_examples=4, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-# Which remote command is lost decides which recovery branch runs, and only a wide
-# draw of (delay, position) reaches all of them.
-_FAULTS = settings(max_examples=6, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+# remote command, so a pull request draws a couple beside the explicit boundary examples.
+_PROPERTY = settings(
+    max_examples=examples(pr=2, nightly=12),
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+# Which remote command is lost decides which recovery branch runs, and only a wide draw of
+# (delay, position) reaches all of them: every branch a past bug lived in is an explicit example
+# below, and the nightly depth draws widely.
+_FAULTS = settings(
+    max_examples=examples(pr=2, nightly=24),
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
 
 
 async def _publishes_monotonically(spec: _WorldSpec, operations: list[str]) -> None:
