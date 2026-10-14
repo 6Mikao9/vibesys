@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ._deadlines import started_until
 from ._dispatch_episode import episode_ended
 from ._outcomes import prove_outcome
 from ._proofs import (
@@ -114,7 +115,7 @@ def advance(
         case RequestPrepared():
             change = _prepared(state, context, event)
         case DispatchAuthorized():
-            change = _dispatched(state, event)
+            change = _dispatched(state, context, event)
         case RequestObserved():
             change = _observed(state, context, event)
         case OperationRetireRequested():
@@ -216,8 +217,14 @@ def _route_operation(
     return AreaChange(state=state, requests=(Outbound(request=request, until=event.until),))
 
 
-def _dispatched(state: RecordsState, event: DispatchAuthorized) -> AreaChange[RecordsState]:
-    """Record that I/O may start; the kernel already proved dependencies and recovery."""
+def _dispatched(
+    state: RecordsState, context: RecordsContext, event: DispatchAuthorized
+) -> AreaChange[RecordsState]:
+    """Record that I/O may start; the kernel already proved dependencies and recovery.
+
+    A request whose limit counts from its dispatch gets its deadline now, from the run
+    clock the event just advanced to the shell's time.
+    """
     record = _unique(state, event.request_id)
     if record is None:
         raise ContractError(("request_id",), "dispatch names no canonical request")
@@ -231,6 +238,15 @@ def _dispatched(state: RecordsState, event: DispatchAuthorized) -> AreaChange[Re
         case _:
             raise ContractError(("phase",), f"{record.phase.value} request cannot be dispatched")
     updated = record.model_copy(update={"phase": RequestPhase.DISPATCHED})
+    if record.limit_from_dispatch is not None:
+        updated = updated.model_copy(
+            update={
+                "until": started_until(
+                    context.run, record.limit_from_dispatch, record.until.watches
+                ),
+                "limit_from_dispatch": None,
+            }
+        )
     return AreaChange(state=_replace(state, updated))
 
 
