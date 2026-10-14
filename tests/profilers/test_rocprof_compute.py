@@ -3,7 +3,7 @@
 That module is a standalone, stdlib-only CLI (see its module docstring): no
 vibesys imports, staged verbatim into the agent workspace as
 ``rocprof_profiler/compute.py``. It is loaded here by file path, the same
-way ``tests/vibesys/loops/test_profiler_mcp.py`` loads the sibling nsys/torch
+way ``tests/profilers/test_profiler_mcp.py`` loads the sibling nsys/torch
 profiler modules, so these tests stay decoupled from sys.path/package state.
 
 Every external-tool interaction here goes through the module's injectable
@@ -11,6 +11,15 @@ Every external-tool interaction here goes through the module's injectable
 ``FakeToolRunner``), or (for ``run_with_timeout``'s process-group kill
 behavior) a real, sub-second child process -- never a real
 ``rocprof-compute``/``rocprofv3`` install.
+
+Guarantees under test:
+
+* The ``rocprof-compute`` binary, aqlprofile library and a dependency-satisfying interpreter are
+  found by documented precedence and rejected when unusable; pandas >= 3 is rejected.
+* ``doctor`` reports all checks passed, or the fixes needed with downstream checks skipped.
+* ``profile`` builds the documented command, fails loudly on a non-zero exit, a missing workload
+  or a run that matched no kernel, and succeeds against a real workload; a stuck child and its
+  subtree are killed on timeout.
 """
 
 from __future__ import annotations
@@ -28,13 +37,15 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import examples
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import ModuleType
 
 _MODULE_NAME = "rocprof_compute_under_test"
 _MODULE_PATH = (
-    Path(__file__).resolve().parents[3] / "resources" / "profilers" / "rocprof" / "compute.py"
+    Path(__file__).resolve().parents[2] / "resources" / "profilers" / "rocprof" / "compute.py"
 )
 # Real MI210 (gfx90a), rocprof-compute 3.1.0 output, trimmed -- see
 # amd-profiler-samples/FINDINGS.md ("3. rocprof-compute").
@@ -1180,7 +1191,9 @@ def _real_substrings() -> list[st.SearchStrategy[str]]:
     ),
 )
 @settings(
-    max_examples=25, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=6, nightly=100),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_workload_has_kernel_data_depends_only_on_row_count(  # noqa: ANN201  # LW-920307; tracked migration debt from the pre-manifest ratchet scheme
     tmp_path_factory,  # noqa: ANN001  # LW-920308; this parameter's type is intentionally left loose; annotating it now is separate cleanup work
@@ -1212,7 +1225,9 @@ def test_workload_has_kernel_data_depends_only_on_row_count(  # noqa: ANN201  # 
     )
 )
 @settings(
-    max_examples=30, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+    max_examples=examples(pr=6, nightly=100),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 def test_empty_match_guard_fires_iff_filter_matches_no_real_kernel(  # noqa: ANN201  # LW-920313; tracked migration debt from the pre-manifest ratchet scheme
     tmp_path_factory,  # noqa: ANN001  # LW-920314; this parameter's type is intentionally left loose; annotating it now is separate cleanup work

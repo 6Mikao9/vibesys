@@ -3,7 +3,7 @@
 That module is a standalone, stdlib-only CLI + library (see its module
 docstring): no vibesys imports, staged verbatim into the agent workspace as
 ``rocprof_profiler/kernel_bench.py``. It is loaded here by file path, the
-same way ``tests/vibesys/loops/test_profiler_mcp.py`` loads the sibling
+same way ``tests/profilers/test_profiler_mcp.py`` loads the sibling
 nsys/torch profiler modules, so these tests stay decoupled from
 sys.path/package state.
 
@@ -13,6 +13,15 @@ drive the same decision logic those two functions call into --
 ``summarize_series`` and ``assess_paired``/``assess_unpaired`` -- directly
 with fake, already-recorded ``wall_ms`` series, exactly the "record timings
 from any driver" path the module's CLI is built for.
+
+Guarantees under test:
+
+* The module imports without torch; percentiles interpolate; a series is converged only when it
+  is long enough and not monotonically rising.
+* Paired and unpaired assessments are antisymmetric under swapping the sides, within noise when
+  compared to themselves, and not converged when samples are too few or still climbing.
+* Sample files load or exit with a clear message; the CLI dispatches ``parse``, ``compare`` and
+  ``verdict``.
 """
 
 from __future__ import annotations
@@ -29,12 +38,14 @@ import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api.testing import examples
+
 if TYPE_CHECKING:
     from types import ModuleType
 
 _MODULE_NAME = "rocprof_kernel_bench_under_test"
 _MODULE_PATH = (
-    Path(__file__).resolve().parents[3] / "resources" / "profilers" / "rocprof" / "kernel_bench.py"
+    Path(__file__).resolve().parents[2] / "resources" / "profilers" / "rocprof" / "kernel_bench.py"
 )
 
 
@@ -472,7 +483,7 @@ _MONOTONIC_SERIES = st.lists(_POS, min_size=MIN_SAMPLES_FOR_TREND, max_size=15).
 # 1. Symmetric verdict: swapping A/B flips faster/slower.
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 @given(
     direction=st.sampled_from((1, -1)),
     magnitude=st.floats(min_value=DEFAULT_THRESHOLD_PCT + 2.0, max_value=90.0),
@@ -500,7 +511,7 @@ def test_assess_paired_swap_flips_faster_and_slower(direction, magnitude, a_valu
     assert (forward.median_delta_pct > 0) != (backward.median_delta_pct > 0)
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 @given(
     direction=st.sampled_from((1, -1)),
     magnitude=st.floats(min_value=DEFAULT_THRESHOLD_PCT + 2.0, max_value=90.0),
@@ -528,7 +539,7 @@ def test_assess_unpaired_swap_flips_faster_and_slower(direction, magnitude, samp
 # 2. within_noise for identical distributions.
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 @given(samples=st.lists(_POS, min_size=_SELF_PAIR_MIN, max_size=15))
 def test_assess_paired_within_noise_when_pairing_each_value_with_itself(samples):  # noqa: ANN001, ANN201  # LW-920378; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     assume(not _is_monotonic_increasing(samples))
@@ -541,7 +552,7 @@ def test_assess_paired_within_noise_when_pairing_each_value_with_itself(samples)
     assert all(delta == 0.0 for delta in verdict.deltas_pct)
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 @given(samples=st.lists(_POS, min_size=_SELF_PAIR_MIN, max_size=15))
 def test_assess_unpaired_within_noise_for_a_series_against_itself(samples):  # noqa: ANN001, ANN201  # LW-920379; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     assume(not _is_monotonic_increasing(samples))
@@ -556,7 +567,7 @@ def test_assess_unpaired_within_noise_for_a_series_against_itself(samples):  # n
 # 3. sign_disagreement when pair deltas' signs are genuinely mixed.
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 @given(
     threshold_pct=st.floats(min_value=0.1, max_value=30.0, allow_nan=False, allow_infinity=False),
     epsilon=st.floats(min_value=0.01, max_value=0.5, allow_nan=False, allow_infinity=False),
@@ -586,7 +597,7 @@ def test_assess_paired_sign_disagreement_from_mixed_pair_signs(  # noqa: ANN201 
 # 4. not_converged for a monotonic series.
 
 
-@settings(max_examples=20, deadline=None)
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 @given(series=_MONOTONIC_SERIES)
 def test_summarize_series_flags_strictly_increasing_series_as_not_converged(series):  # noqa: ANN001, ANN201  # LW-920385; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     result = summarize_series(series, warmup=0)
@@ -595,7 +606,7 @@ def test_summarize_series_flags_strictly_increasing_series_as_not_converged(seri
     assert result.reason == "monotonic_increasing"
 
 
-@settings(max_examples=20, deadline=None)
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 @given(data=st.data())
 def test_assess_paired_not_converged_when_either_side_is_monotonic(data):  # noqa: ANN001, ANN201  # LW-920386; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     monotonic = data.draw(_MONOTONIC_SERIES)
@@ -610,7 +621,7 @@ def test_assess_paired_not_converged_when_either_side_is_monotonic(data):  # noq
     assert monotonic_is_b.reason == "not_converged"
 
 
-@settings(max_examples=20, deadline=None)
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
 @given(data=st.data())
 def test_assess_unpaired_not_converged_when_either_side_is_monotonic(data):  # noqa: ANN001, ANN201  # LW-920387; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     monotonic = data.draw(_MONOTONIC_SERIES)

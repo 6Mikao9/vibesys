@@ -161,7 +161,7 @@ class ScriptedBridge:
         assert str(socket_path) == self._address
         return MemoryPeer(self._transport.network.connect(self._address, HANG_GUARD_S))
 
-    def join(self) -> None:
+    def finish(self) -> None:
         """Wait for the scripted conversation to finish."""
         self._worker.join(HANG_GUARD_S)
 

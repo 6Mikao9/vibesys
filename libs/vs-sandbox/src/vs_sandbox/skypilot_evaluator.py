@@ -16,7 +16,7 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, Protocol, TextIO
+from typing import TYPE_CHECKING, BinaryIO, Literal, Protocol, TextIO
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -38,7 +38,7 @@ class BridgePeer(Protocol):
         """Write all of ``data``."""
         ...
 
-    def makefile(self, mode: str, /) -> BinaryIO:
+    def makefile(self, mode: Literal["rb"], /) -> BinaryIO:
         """A buffered binary reader over the replies."""
         ...
 

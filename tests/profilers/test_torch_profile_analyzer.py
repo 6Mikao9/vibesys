@@ -3,7 +3,7 @@
 ``resources/profilers/torch/analyze_torch_profile.py`` is a standalone script
 (no ``vibesys`` imports — it is copied into the agent's workspace as
 ``torch_profiler/``), so it is loaded by file path here rather than imported
-as a package, mirroring ``tests/vibesys/loops/test_profiler_mcp.py``.
+as a package, mirroring ``tests/profilers/test_profiler_mcp.py``.
 
 These tests exercise the analyzer's own functions directly (certify,
 gemm-shapes, roofline, and the Chrome-trace -> summarized-report conversion
@@ -13,6 +13,15 @@ vLLM-captured MI210 traces were not available in this environment; these
 fixtures follow the documented ``torch.profiler`` Chrome-trace export shape
 (``traceEvents`` with ``cpu_op``/``kernel``/``hip_runtime``/``user_annotation``
 categories, linked by "External id" and "correlation").
+
+Guarantees under test:
+
+* Chrome traces index by category, link CPU ops to kernels by external id and correlation, and
+  compute self time per thread; busy time merges overlapping intervals.
+* ``certify`` passes a well-formed trace and fails with zero kernels, without shapes, with
+  graph replay or a mostly idle window; GEMM shapes are derived per op family and
+  deduplicated; roofline classifies memory- against compute-bound from the device peaks.
+* Analysis never raises on malformed input.
 """
 
 from __future__ import annotations
@@ -32,12 +41,12 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from tests.vibesys.loops.rocprof_strategies import FAST, FEWER
+from tests.support.profiler_strategies import FAST, FEWER
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-_REPO = Path(__file__).resolve().parents[3]
+_REPO = Path(__file__).resolve().parents[2]
 _TORCH_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "torch"
 
 

@@ -19,16 +19,27 @@ import base64
 import hashlib
 import io
 import json
+import uuid
 from pathlib import Path
 
 import pytest
 from tests.support.skypilot_world import MemoryTransport, ScriptedBridge
 
-from vs_sandbox.skypilot_evaluator import run_evaluator
+from vs_sandbox.skypilot_evaluator import (  # test-isolation: the remote helper is a standalone script run on the cluster; its entry point is not library API.
+    run_evaluator,
+)
 
 _MAX_FRAME_BYTES = 1024 * 1024
-_REMOTE_ARTIFACT = "/tmp/vibesys-framework-benchmark-frames.json"  # noqa: S108  # lint-waiver: LW-010213 [S108]; the bridge protocol requires this fixed remote artifact path.
-_ARTIFACT_ARGUMENTS = ("--output-json", _REMOTE_ARTIFACT)
+_REMOTE_ARTIFACT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-010213 [S108]; the bridge protocol requires this fixed remote artifact path.
+
+
+def _remote_artifact() -> str:
+    """A fresh artifact path under the protocol's prefix, so parallel tests never share one."""
+    return f"{_REMOTE_ARTIFACT_PREFIX}{uuid.uuid4().hex}.json"
+
+
+def _artifact_arguments(path: str) -> tuple[str, ...]:
+    return ("--output-json", path)
 
 
 def _line(frame: dict[str, object]) -> bytes:
@@ -79,7 +90,7 @@ def _run(
         stderr=stderr,
         connect=bridge.dial,
     )
-    bridge.join()
+    bridge.finish()
     return code, stderr.getvalue(), bridge
 
 
@@ -140,20 +151,24 @@ def test_an_untrustworthy_reply_is_a_transport_failure(
 def test_an_invalid_artifact_is_refused_and_leaves_nothing(
     tmp_path: Path, overrides: dict[str, object]
 ) -> None:
-    code, stderr, _ = _run(
-        tmp_path, [_artifact(_REMOTE_ARTIFACT, **overrides), _result()], _ARTIFACT_ARGUMENTS
-    )
+    path = _remote_artifact()
+    try:
+        code, stderr, _ = _run(
+            tmp_path, [_artifact(path, **overrides), _result()], _artifact_arguments(path)
+        )
 
-    assert code == 2
-    assert "invalid artifact" in stderr
-    assert not Path(_REMOTE_ARTIFACT).exists()
+        assert code == 2
+        assert "invalid artifact" in stderr
+        assert not Path(path).exists()
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 
 def test_a_repeated_or_unwritable_artifact_is_refused(tmp_path: Path) -> None:
-    path = _REMOTE_ARTIFACT
+    path = _remote_artifact()
     try:
         code, stderr, _ = _run(
-            tmp_path, [_artifact(path), _artifact(path), _result()], _ARTIFACT_ARGUMENTS
+            tmp_path, [_artifact(path), _artifact(path), _result()], _artifact_arguments(path)
         )
         assert (code, "invalid artifact" in stderr) == (2, True)
     finally:
@@ -161,23 +176,24 @@ def test_a_repeated_or_unwritable_artifact_is_refused(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("frames", "arguments"),
-    [
-        pytest.param([_result()], _ARTIFACT_ARGUMENTS, id="artifact-expected-but-missing"),
-        pytest.param(
-            [_artifact(_REMOTE_ARTIFACT), _result()],
-            (),
-            id="artifact-unrequested",
-        ),
-    ],
+    ("artifact_requested", "artifact_sent"),
+    [(True, False), (False, True)],
+    ids=["artifact-expected-but-missing", "artifact-unrequested"],
 )
 def test_a_result_must_match_the_artifacts_requested(
-    tmp_path: Path, frames: list[bytes], arguments: tuple[str, ...]
+    tmp_path: Path, *, artifact_requested: bool, artifact_sent: bool
 ) -> None:
-    code, stderr, _ = _run(tmp_path, frames, arguments)
+    path = _remote_artifact()
+    frames = [_artifact(path), _result()] if artifact_sent else [_result()]
+    try:
+        code, stderr, _ = _run(
+            tmp_path, frames, _artifact_arguments(path) if artifact_requested else ()
+        )
 
-    assert code == 2
-    assert "invalid" in stderr
+        assert code == 2
+        assert "invalid" in stderr
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 
 def test_the_pending_token_is_cleared_only_after_a_matching_acknowledgement(

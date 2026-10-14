@@ -505,8 +505,8 @@ def test_success_waits_for_slow_ordinary_sink_without_abandoning_a_delivery_work
 
 def test_subprocess_result_bounds_multiline_and_unterminated_output_while_sink_gets_all() -> None:
     threads = _RecordingThreads()
-    stdout = "old\n" + ("x" * 150_000)
-    stderr = ("error\n" * 12_000) + "unterminated"
+    stdout = "old\n" + ("x" * 66_000)
+    stderr = ("error\n" * 2_000) + "unterminated"
     process = _ExitedSkyPilotProcess(stdout, stderr)
     stdout_sink = _RecordingCancellableSink()
     stderr_sink = _RecordingCancellableSink()

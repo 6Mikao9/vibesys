@@ -41,15 +41,15 @@ from vs_sandbox.api.skypilot import (
     ResultFrame,
     encode_message,
 )
-from vs_sandbox.skypilot_evaluator import (
+from vs_sandbox.skypilot_evaluator import (  # test-isolation: the remote helper is a standalone script run on the cluster; its entry point is not library API.
     run_evaluator,
-)  # test-isolation: remote helper execution is tested directly.
+)
 
 if TYPE_CHECKING:
     from vs_sandbox.api.skypilot import ResponseFrame
 
 _SOCKET = Path("bridge.sock")
-_REMOTE_ARTIFACT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-010211 [S108]; the bridge protocol requires this fixed remote artifact path.
+_REMOTE_ARTIFACT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-010299 [S108]; the bridge protocol requires this fixed remote artifact path.
 _COMPLETED = ResultFrame(status=JobStatus.COMPLETED, sky_exit_code=0, remote_job_id=7)
 
 
@@ -76,7 +76,7 @@ def _run(
         stderr=stderr,
         connect=bridge.dial,
     )
-    bridge.join()
+    bridge.finish()
     return status, stdout.getvalue(), stderr.getvalue()
 
 

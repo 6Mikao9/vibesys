@@ -1,18 +1,23 @@
-"""Tests for the in-process torch.profiler injection.
+"""The torch.profiler injection (``resources/profilers/torch/inject/sitecustomize.py``) in real Python processes.
 
-``resources/profilers/torch/inject/sitecustomize.py`` is exercised end to
-end via real Python subprocesses (not imported in-process): its whole job is
-correct behavior around interpreter startup (``sitecustomize`` auto-import),
-signal delivery, and process exit, none of which an in-process
-``exec_module`` call reproduces faithfully. See
-``torch_inject_fixtures.py`` for the fake ``torch`` package these subprocess
-scripts import (this dev environment has no real torch installed) and the
-shared env-building/subprocess helpers.
+The injection's state machine runs in process in ``tests/profilers/test_torch_inject_state_machine.py``.
+What only real processes show is checked here: interpreter startup (``sitecustomize``
+auto-import and chaining), signal delivery and process exit.
 
-Every test keeps its sleeps small (well under a couple of seconds) so the
-whole suite stays fast; the one property test over delay/duration uses a
-small ``max_examples`` for the same reason, mirroring
-``tests/vibesys/loops/test_capture_runtime.py``'s ``PROC_SETTINGS``.
+Guarantees under test:
+
+* It chains to a pre-existing ``sitecustomize`` whatever the flag, is a no-op when disabled,
+  and never crashes the program when torch is absent or its profiler fails to start.
+* A self-triggered window starts after torch is imported and stops only after it started; the
+  trace is exported before the bounded device synchronize and an export never blocks exit.
+* In signal mode repeated windows each yield a trace; a GPU-less target reports "unavailable"
+  rather than "ready".
+* SIGINT exports and then still terminates the process, even when it arrives during a running
+  start handler (deferred, not deadlocked).
+* A multi-process program writes exactly one trace per process.
+
+Each program blocks on the fake torch's call log (``tests/support/profiler_torch_fixtures.py``)
+instead of sleeping a guessed time.
 """
 
 from __future__ import annotations
@@ -31,8 +36,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.vibesys.loops.torch_inject_fixtures import (
-    StderrTail,
+from tests.support.profiler_torch_fixtures import (
     base_env,
     parse_call_log,
     run_python,
@@ -54,7 +58,7 @@ PROC_SETTINGS = settings(
 
 
 # Child programs block on the fake torch's call log (see
-# torch_inject_fixtures.py) instead of sleeping a guessed time.
+# profiler_torch_fixtures.py) instead of sleeping a guessed time.
 _WAIT = "from torch._log import wait_for_event\n"
 # A failure bound only: children exit as soon as the event they wait on happens.
 _CHILD_TIMEOUT_S = 30.0
@@ -135,38 +139,6 @@ def test_no_crash_when_torch_profiler_start_fails(tmp_path: Path) -> None:
     assert not _trace_files(out_dir)
 
 
-def test_skips_gpu_less_process(tmp_path: Path) -> None:
-    """A process that imports torch but has no GPU never constructs a profiler."""
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    out_dir = tmp_path / "out"
-    call_log = tmp_path / "calls.log"
-    control_dir = tmp_path / "control"
-    env = base_env(
-        out_dir=out_dir,
-        fake_torch_root=fake_torch,
-        call_log=call_log,
-        VIBESYS_TORCH_PROFILE="1",
-        VIBESYS_TORCH_PROFILE_DELAY_S="0",
-        FAKE_TORCH_GPU="0",
-        VIBESYS_TORCH_PROFILE_CONTROL_DIR=str(control_dir),
-    )
-    # Exit only once the injector has reported its verdict. Exiting on the fake
-    # torch's own ``cuda.is_available`` event let the interpreter finalize while
-    # the injector's daemon watcher thread was still writing its diagnostic to
-    # stderr, which aborts the child ("could not acquire lock ... at interpreter
-    # shutdown", rc -6). The marker is written after that diagnostic line.
-    child = (
-        "import torch\nimport time\nfrom pathlib import Path\n"
-        f"marker = Path({str(control_dir / 'unavailable')!r})\n"
-        "while not marker.is_file():\n    time.sleep(0.01)\n"
-    )
-    result = run_python(child, env=env, timeout=_CHILD_TIMEOUT_S)
-    assert result.returncode == 0, result.stderr
-    assert not _trace_files(out_dir)
-    events = [name for _ts, name in parse_call_log(call_log)]
-    assert "profile.start" not in events
-
-
 # ---------------------------------------------------------------------------
 # Delay/duration scheduling
 # ---------------------------------------------------------------------------
@@ -209,28 +181,6 @@ def test_a_self_triggered_window_starts_after_import_and_stops_after_it_started(
     names = [name for _ts, name in parse_call_log(call_log)]
     ordered = ["torch.import_done", "profile.start", "profile.stop", "profile.export_chrome_trace"]
     assert [name for name in names if name in ordered] == ordered
-
-
-def test_trace_exported_when_duration_elapses(tmp_path: Path) -> None:
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    out_dir = tmp_path / "out"
-    env = base_env(
-        out_dir=out_dir,
-        fake_torch_root=fake_torch,
-        call_log=tmp_path / "calls.log",
-        VIBESYS_TORCH_PROFILE="1",
-        VIBESYS_TORCH_PROFILE_DELAY_S="0",
-        VIBESYS_TORCH_PROFILE_DURATION_S="0.1",
-    )
-    result = run_python(
-        "import torch\n" + _WAIT + "wait_for_event('profile.export_chrome_trace')", env=env
-    )
-    assert result.returncode == 0, result.stderr
-    traces = _trace_files(out_dir)
-    assert len(traces) == 1
-    data = _read_trace(traces[0])
-    assert "traceEvents" in data
-    assert data["traceEvents"]
 
 
 # ---------------------------------------------------------------------------
@@ -278,50 +228,6 @@ def test_export_happens_before_bounded_synchronize_and_never_blocks_exit(tmp_pat
 # ---------------------------------------------------------------------------
 # Signals: SIGUSR2 early-stop, SIGINT lifecycle
 # ---------------------------------------------------------------------------
-
-
-def test_sigusr2_toggles_stop_early_without_killing_process(tmp_path: Path) -> None:
-    fake_torch = write_fake_torch(tmp_path / "fake_torch")
-    out_dir = tmp_path / "out"
-    call_log = tmp_path / "calls.log"
-    env = base_env(
-        out_dir=out_dir,
-        fake_torch_root=fake_torch,
-        call_log=call_log,
-        VIBESYS_TORCH_PROFILE="1",
-        VIBESYS_TORCH_PROFILE_DELAY_S="0",
-    )
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "import torch\nfrom torch._log import wait_for_event\n"
-            "wait_for_event('profile.export_chrome_trace')\nprint('done')",
-        ],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        # No duration is set, so only the SIGUSR2 can produce the export the
-        # child is waiting for: the child exiting at all proves the early stop.
-        _wait_for_event(call_log, "profile.start", timeout=_CHILD_TIMEOUT_S)
-        os.kill(proc.pid, signal.SIGUSR2)
-        stdout, stderr = proc.communicate(timeout=_CHILD_TIMEOUT_S)
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate(timeout=HANG_GUARD_S)
-
-    assert proc.returncode == 0, stderr
-    assert "done" in stdout
-    traces = _trace_files(out_dir)
-    assert len(traces) == 1
-
-    events = [name for _ts, name in parse_call_log(call_log)]
-    assert events.count("profile.stop") == 1, f"stop must be idempotent (atexit too): {events}"
-    assert events.count("profile.export_chrome_trace") == 1
 
 
 # A failure bound only: every wait below ends as soon as the handshake file
@@ -432,70 +338,6 @@ def test_signal_mode_repeated_windows_produce_two_traces(tmp_path: Path) -> None
         assert len(traces) == 1, f"window {window}: {[p.name for p in traces]}"
         assert _read_trace(traces[0])["traceEvents"]
         assert (window_dir / "window.started").read_text() == str(window)
-
-
-def test_start_signal_during_torch_import_is_queued_not_dropped(tmp_path: Path) -> None:
-    """Regression test: a SIGUSR1 delivered mid-``import torch`` starts the window later.
-
-    Pre-fix, the handler ran on the importing thread, saw a half-initialized
-    torch, failed to start, and dropped the request: the window never
-    happened (a flaky test exposed it; a warm target signaled during its
-    startup would hit the same). The fake torch is held mid-import by a
-    gate file so the signal lands there deterministically.
-    """
-    gate = tmp_path / "import_gate"
-    proc, control_dir, call_log = _signal_mode_target(tmp_path, FAKE_TORCH_IMPORT_GATE=str(gate))
-    window_dir = tmp_path / "w1"
-    try:
-        _wait_for_file(control_dir / "armed", proc=proc)
-        _wait_for_event(call_log, "torch.imported", timeout=_HANDSHAKE_TIMEOUT_S)
-        (control_dir / "next_window").write_text(f"{window_dir}\n")
-        os.kill(proc.pid, signal.SIGUSR1)  # main thread is inside `import torch`
-        gate.write_text("")
-        _wait_for_file(control_dir / "ready", proc=proc)
-        _wait_for_file(window_dir / "window.started", proc=proc)
-        os.kill(proc.pid, signal.SIGUSR2)
-        _wait_for_file(window_dir / "window.exported", proc=proc)
-    finally:
-        _stdout, stderr = _finish(proc)
-
-    assert proc.returncode == 0, stderr
-    assert len(_trace_files(window_dir)) == 1
-    events = [name for _ts, name in parse_call_log(call_log)]
-    assert events.index("torch.import_done") < events.index("profile.start")
-
-
-def test_stop_before_ready_cancels_the_queued_start(tmp_path: Path) -> None:
-    """A SIGUSR2 while a start is still queued cancels it: no window opens later.
-
-    Each signal is sent only after the previous handler ran, and the import is
-    released only after both ran. ``kill()`` returns when the signal is queued,
-    not when its handler has run, and Python runs the handlers of signals that
-    are pending together in signal-number order. Releasing the import on a
-    timing guess let the watcher mark the capture ready first, so the queued
-    start fired and swallowed the later explicit window's start.
-    """
-    gate = tmp_path / "import_gate"
-    proc, control_dir, call_log = _signal_mode_target(tmp_path, FAKE_TORCH_IMPORT_GATE=str(gate))
-    assert proc.stderr is not None
-    log = StderrTail(proc.stderr)
-    try:
-        _wait_for_file(control_dir / "armed", proc=proc)
-        _wait_for_event(call_log, "torch.imported", timeout=_HANDSHAKE_TIMEOUT_S)
-        os.kill(proc.pid, signal.SIGUSR1)
-        log.wait_for_line(_START_QUEUED_LINE, guard_s=_HANDSHAKE_TIMEOUT_S)
-        os.kill(proc.pid, signal.SIGUSR2)
-        log.wait_for_line(_STOP_HANDLER_LINE, guard_s=_HANDSHAKE_TIMEOUT_S)
-        gate.write_text("")
-        _wait_for_file(control_dir / "ready", proc=proc)
-        # A later, explicit window still works: the queue was cleared, not wedged.
-        _run_window(proc, control_dir, tmp_path / "w1")
-    finally:
-        _finish_tailed(proc)
-
-    assert proc.returncode == 0, log.text()
-    events = [name for _ts, name in parse_call_log(call_log)]
-    assert events.count("profile.start") == 1
 
 
 def test_gpu_less_target_reports_unavailable_instead_of_ready(tmp_path: Path) -> None:

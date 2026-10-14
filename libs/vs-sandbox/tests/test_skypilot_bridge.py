@@ -24,6 +24,7 @@ Guarantees under test (``vs_sandbox.api.skypilot.SkyPilotBridge``):
 
 from __future__ import annotations
 
+import base64
 import io
 import os
 import re
@@ -41,6 +42,7 @@ from tests.support.skypilot_world import MemoryTransport
 
 import vs_sandbox.skypilot_bridge as bridge_module  # test-isolation: durable restart-offset behavior belongs to the bridge's private spool state machine.
 from vs_project.api import MAX_SOCKET_PATH_BYTES, SocketPathTooLongError, StateNamespace
+from vs_project.api.testing import scratch_state_directory
 from vs_sandbox.api.skypilot import (
     AckRequest,
     ArtifactFrame,
@@ -365,8 +367,7 @@ class _BlockingBridgeRunner(FakeRunner):
 
 
 def _namespace(tmp_path: Path) -> StateNamespace:
-    root = tmp_path / ".vibesys" / "state" / "skypilot"
-    root.mkdir(parents=True, exist_ok=True)
+    root = scratch_state_directory(tmp_path, "skypilot")
     return StateNamespace(project_root=tmp_path, root=root, portable=False)
 
 
@@ -1187,17 +1188,26 @@ def test_artifact_stream_rejects_missing_or_invalid_artifact(lines: str, message
         stream.result()
 
 
-def test_artifact_stream_decodes_and_bounds_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+_ARTIFACT_LIMIT_BYTES = 512 * 1024  # the bridge's documented artifact cap
+
+
+def test_artifact_stream_decodes_and_bounds_artifact() -> None:
     good = _artifact_stream()
     good.feed(f"out\n{_BEGIN}\ne30=\n{_END}\n")
     assert good.result() == b"{}"
     assert _artifact_stream(expected=False).result() is None
 
-    monkeypatch.setattr(bridge_module, "_MAX_ARTIFACT_BYTES", 2)
+    at_limit = _artifact_stream()
+    at_limit.feed(_framed_artifact(bytes(_ARTIFACT_LIMIT_BYTES)))
+    assert len(at_limit.result() or b"") == _ARTIFACT_LIMIT_BYTES
     big = _artifact_stream()
-    big.feed(f"{_BEGIN}\nAAAA\n{_END}\n")
+    big.feed(_framed_artifact(bytes(_ARTIFACT_LIMIT_BYTES + 1)))
     with pytest.raises(ValueError, match="too large"):
         big.result()
+
+
+def _framed_artifact(payload: bytes) -> str:
+    return f"{_BEGIN}\n{base64.b64encode(payload).decode('ascii')}\n{_END}\n"
 
 
 def _spool_fixture(
