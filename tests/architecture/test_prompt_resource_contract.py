@@ -41,6 +41,7 @@ from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.search.api import (
     Blocker,
     BlockerKind,
+    EvaluationQueueView,
     PlannerPrompt,
     ReviewEvaluation,
 )
@@ -312,6 +313,7 @@ def representative_context() -> dict[str, object]:
         "cap",
         "checkpoint",
         "input_failure",
+        "input_overdue",
         "invalid_type",
         "omitted",
         "portfolio_view",
@@ -652,6 +654,12 @@ def template_context(
     if path.parent.name == "_progress" and path.name == "profile.j2":
         values["summary"] = ProfilerSummary(
             analysis="Measured queue.", bottlenecks="Queue.", suggestions="Batch."
+        )
+    if path.name == "portfolio.j2":
+        # The portfolio template reads `evaluations` as the evaluation queue; the review
+        # templates read the same name as a candidate's evaluations.
+        values["evaluations"] = EvaluationQueueView(
+            pick="ranked", slots=1, input_holds_slot=True, ranking=("w1",)
         )
     if "response" in free:
         values["response"] = response_for(path)
