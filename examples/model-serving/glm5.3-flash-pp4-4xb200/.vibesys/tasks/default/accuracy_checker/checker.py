@@ -25,10 +25,14 @@ any one build within that build's own repeat noise:
   near tie  it differs, but it is in the reference's top 10 and the reference
             ranked it within NEAR_TIE_NATS of its own top token.
   mismatch  anything else. One mismatch fails the check.
-  logprob   the candidate's logprob of the reference's top token is within
-            MAX_ABS_DLOGPROB of the range the reference's repeats spanned, and
-            the mean over answers within MEAN_ABS_DLOGPROB. The reference token
-            missing from the candidate's top 10 is a mismatch.
+  logprob   the candidate's logprob of the reference's top token should be within
+            MAX_ABS_DLOGPROB of the range the reference's repeats spanned. A
+            matching token outside it is a "logprob-only miss": allowed for at
+            most MAX_LOGPROB_MISS_SHARE of the answers (cached-path answers are
+            not repeatable even on the reference build). The mean |dlogprob|
+            over all answers must stay within MEAN_ABS_DLOGPROB, so a server
+            whose logprobs are systematically shifted fails. The reference
+            token missing from the candidate's top 10 is a problem (fails).
 The report names the build each answer was judged against (`build`).
 The logprob requests of one checker run share a random `cache_salt`, so a
 cached round 1 resumes this run's round 0 and never a previous run's cache: the
@@ -77,6 +81,9 @@ NEAR_TIE_NATS = 0.3
 # At most this share of answers may be near-tie flips.
 MAX_NEAR_TIE_SHARE = 0.2
 MAX_ABS_DLOGPROB = 1.0
+# At most this share of answers may be logprob-only misses: the token matches a
+# trusted build's accepted tokens but a logprob is beyond MAX_ABS_DLOGPROB.
+MAX_LOGPROB_MISS_SHARE = 0.2
 MEAN_ABS_DLOGPROB = 0.25
 # Below this prefix a cache hit is not required: a hybrid model's prefix cache
 # may only resume at block boundaries of several thousand tokens.
@@ -98,6 +105,8 @@ class Verdict:
     cached_tokens: int | None
     seconds: float
     problems: list[str]
+    # Token matches, but the reference token's logprob is beyond MAX_ABS_DLOGPROB of the range.
+    logprob_miss: bool = False
 
 
 def judge(name: str, build: str, expect: dict, answer: Answer, prompt_len: int) -> Verdict:
@@ -120,11 +129,14 @@ def judge(name: str, build: str, expect: dict, answer: Answer, prompt_len: int) 
         kind = "mismatch"
         gap = ref_top[expected] - ref_top[answer.token] if answer.token in ref_top else None
     dlp = None
+    logprob_miss = False
     if expected in answer.top:
         # Distance to the range the reference's own repeats spanned (0 inside it).
         got = answer.top[expected]
         dlp = got - min(max(got, lo), hi)
-        if abs(dlp) > MAX_ABS_DLOGPROB:
+        if abs(dlp) > MAX_ABS_DLOGPROB and kind == "match":
+            logprob_miss = True
+        elif abs(dlp) > MAX_ABS_DLOGPROB:
             problems.append(f"logprob of the reference token differs by {dlp:+.3f} nats")
     else:
         problems.append("the reference's greedy token is not in the candidate's top logprobs")
@@ -139,6 +151,7 @@ def judge(name: str, build: str, expect: dict, answer: Answer, prompt_len: int) 
         answer.cached_tokens,
         answer.seconds,
         problems,
+        logprob_miss,
     )
 
 
@@ -149,7 +162,7 @@ def judge_builds(name: str, expects: dict[str, dict], answer: Answer, prompt_len
     """The answer judged against every trusted build; the verdict of the build it fits best.
 
     Best = passes (not a mismatch, no problem) first, then match before near
-    tie, then the smallest logprob distance to that build's repeat range.
+    tie, then within-tolerance before logprob-only miss, then the smallest logprob distance to that build's repeat range.
     """
     verdicts = [judge(name, build, expect, answer, prompt_len) for build, expect in expects.items()]
     return min(
@@ -157,6 +170,7 @@ def judge_builds(name: str, expects: dict[str, dict], answer: Answer, prompt_len
         key=lambda v: (
             v.kind == "mismatch" or bool(v.problems),
             KIND_RANK[v.kind],
+            v.logprob_miss,
             abs(v.dlogprob) if v.dlogprob is not None else float("inf"),
         ),
     )
@@ -239,8 +253,16 @@ def run(base_url: str, model: str, reference: dict, log=print) -> tuple[bool, di
         else:
             check(f"{case['name']}/round1_cold", case["expect_round1"], round1)
 
+    return summarize(verdicts, hit_problems, reference)
+
+
+def summarize(
+    verdicts: list[Verdict], hit_problems: list[str], reference: dict
+) -> tuple[bool, dict]:
+    """The run's verdict from its per-answer verdicts: the shares, the mean, the failures."""
     near = [v for v in verdicts if v.kind == "near_tie"]
     mismatches = [v for v in verdicts if v.kind == "mismatch"]
+    misses = [v for v in verdicts if v.logprob_miss]
     problems = [f"{v.name}: {p}" for v in verdicts for p in v.problems] + hit_problems
     dlps = [abs(v.dlogprob) for v in verdicts if v.dlogprob is not None]
     mean_dlp = sum(dlps) / len(dlps) if dlps else float("inf")
@@ -252,6 +274,11 @@ def run(base_url: str, model: str, reference: dict, log=print) -> tuple[bool, di
     if len(near) > MAX_NEAR_TIE_SHARE * len(verdicts):
         failures.append(
             f"{len(near)} near-tie flips of {len(verdicts)} answers, above {MAX_NEAR_TIE_SHARE:.0%}"
+        )
+    if len(misses) > MAX_LOGPROB_MISS_SHARE * len(verdicts):
+        failures.append(
+            f"{len(misses)} logprob-only misses of {len(verdicts)} answers, above "
+            f"{MAX_LOGPROB_MISS_SHARE:.0%}: " + ", ".join(v.name for v in misses)
         )
     if mean_dlp > MEAN_ABS_DLOGPROB:
         failures.append(f"mean |dlogprob| {mean_dlp:.3f} nats above {MEAN_ABS_DLOGPROB}")
@@ -267,6 +294,12 @@ def run(base_url: str, model: str, reference: dict, log=print) -> tuple[bool, di
         "matches": sum(v.kind == "match" for v in verdicts),
         "near_ties": len(near),
         "mismatches": len(mismatches),
+        "logprob_only_misses": len(misses),
+        "logprob_only_miss_names": [v.name for v in misses],
+        "max_logprob_miss_share": MAX_LOGPROB_MISS_SHARE,
+        "max_near_tie_share": MAX_NEAR_TIE_SHARE,
+        "max_abs_dlogprob_tolerance": MAX_ABS_DLOGPROB,
+        "mean_abs_dlogprob_limit": MEAN_ABS_DLOGPROB,
         "mean_abs_dlogprob": mean_dlp,
         "max_abs_dlogprob": max(dlps, default=float("inf")),
         "builds": {b["id"]: b.get("reference_build") for b in reference["builds"]},
