@@ -46,6 +46,7 @@ from vibesys.run.evaluation import trusted_evaluation_plan
 from vibesys.run.evaluation_socket import evaluation_socket_mount, remove_evaluation_socket
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
+from vibesys.run.gpu_events import CoreGpuContentionEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
 from vibesys.run.profilers import (
     ProfilerPreflight,
@@ -312,6 +313,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 log=buffered_logs.append,
                 image=environment.backend_image,
                 clock=clock,
+                events=CoreGpuContentionEvents(integration.events),
             )
             model_name = config.model.name
         with boot_trace.span("execution_record"):

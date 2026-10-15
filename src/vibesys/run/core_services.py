@@ -76,6 +76,7 @@ if TYPE_CHECKING:
         AgentConfigurationResolver,
         AgentExecutionEnvironment,
         AgentExecutionLifecycleSink,
+        LocalValidationEvents,
         RunEnvironmentView,
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
@@ -170,6 +171,8 @@ class CoreResources:
     """The server of each stateless tool a role may declare, keyed by tool id."""
     commands: Commands | None = None
     """Sandboxed process execution in a run workspace, which a command-capturing operation uses."""
+    local_validation_events: LocalValidationEvents | None = None
+    """Hears each recipe's start and settled result, for the host's event stream."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -417,6 +420,7 @@ def _catalog(
         validation_passes=StateValidationPasses(
             resources.project.state.local_namespace(resources.run_id, "validation")
         ),
+        local_validation_events=resources.local_validation_events,
     )
     owned = (
         ()
