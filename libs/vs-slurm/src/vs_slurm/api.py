@@ -41,8 +41,18 @@ from .config import (
 )
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
+from .fake_queue import FakeJob, FakeQueue
 from .identity import runtime_content_identity
+from .queue_read import (
+    OwnJob,
+    PartitionLoad,
+    QueueReading,
+    SchedulerReads,
+    checked_name,
+    read_queue,
+)
 from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
+from .remote_operations import operation_job_prefix
 from .runner import (
     SERVICE_NOT_READY_EXIT_CODE,
     SchedulerReading,
@@ -135,15 +145,21 @@ __all__ = [
     "Ended",
     "FakeCluster",
     "FakeConnector",
+    "FakeJob",
+    "FakeQueue",
     "IssuedCommand",
     "JobLife",
     "NoAccountingRow",
     "NotInQueue",
     "Notice",
+    "OwnJob",
+    "PartitionLoad",
+    "QueueReading",
     "QueueRow",
     "Queued",
     "Running",
     "SchedulerReading",
+    "SchedulerReads",
     "SchedulerTrace",
     "SecondsRange",
     "SlurmArtifactTarget",
@@ -181,14 +197,17 @@ __all__ = [
     "Unknown",
     "advance",
     "advance_with_notice",
+    "checked_name",
     "life_for_status",
     "load_slurm_config",
     "needs_accounting",
     "observe",
     "observe_with_notice",
+    "operation_job_prefix",
     "parse_accounting_row",
     "parse_queue_row",
     "phase_of",
+    "read_queue",
     "runtime_content_identity",
     "shell_join_with_port",
     "split_framed_scheduler_query",

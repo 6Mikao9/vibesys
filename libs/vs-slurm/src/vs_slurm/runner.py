@@ -1225,6 +1225,10 @@ class SlurmJobRunner:
         """The queue's line for the job."""
         return self._read_scheduler(f"squeue -h -j {job_id} -o '%T|%r|%S'")
 
+    def read_scheduler(self, command: str) -> str:
+        """The whole answer to a read-only scheduler query (`queue_read.SchedulerReads`)."""
+        return self._read_scheduler(command)
+
     def _read_scheduler(self, command: str) -> str:
         """Stdout of a read-only scheduler query; one lost read is retried, a second raises.
 

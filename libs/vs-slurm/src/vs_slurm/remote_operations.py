@@ -58,13 +58,18 @@ class RemoteOperationClaim(BaseModel):
     evidence: RemoteOperationEvidence
 
 
-def operation_job_name(config: SlurmConfig, operation_id: str) -> str:
-    """Use bounded scheduler names scoped to the remote workspace namespace."""
+def operation_job_prefix(config: SlurmConfig) -> str:
+    """What every scheduler name of ``config``'s operations starts with: its namespace."""
     namespace = hashlib.sha256(
         (config.remote_workspace_root + "\0" + config.name).encode()
     ).hexdigest()[:16]
+    return f"vs-{namespace}-"
+
+
+def operation_job_name(config: SlurmConfig, operation_id: str) -> str:
+    """Use bounded scheduler names scoped to the remote workspace namespace."""
     operation = hashlib.sha256(operation_id.encode()).hexdigest()[:32]
-    return f"vs-{namespace}-{operation}"
+    return operation_job_prefix(config) + operation
 
 
 class RemoteOperations:
