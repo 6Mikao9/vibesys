@@ -12,6 +12,13 @@ Parent revision: `{{ rev(parent_revision) }}`
 
 Evidence references:
 {{ citations(evidence) }}
+{% if baseline_pending %}
+
+The input's own trusted measurement is still queued or running. Write and test your change
+now, including your own runs; the framework's review of your candidate, its trusted
+measurement and its comparison with the input wait until the input's measurement lands,
+possibly after this turn ends.
+{% endif %}
 {% if worktree_revision %}
 
 This continues your earlier work on this hypothesis. The worktree is at the

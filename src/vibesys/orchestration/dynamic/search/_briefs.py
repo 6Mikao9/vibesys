@@ -67,11 +67,14 @@ def implement_prompt(
     parent: RevisionRef,
     prior: RoundRecord | None,
     blockers: tuple[Blocker, ...],
+    *,
+    baseline_pending: bool = False,
 ) -> ImplementPrompt:
     """One isolated implementation request for a scheduled workstream.
 
     ``prior`` is the previous round of the same hypothesis, when this workstream continues it;
-    ``blockers`` are the turns of this workstream that ended without a measurable candidate.
+    ``blockers`` are the turns of this workstream that ended without a measurable candidate;
+    ``baseline_pending`` says the input's own measurement has not landed yet.
     """
     latest = blockers[-1] if blockers else None
     stuck = next(
@@ -93,6 +96,7 @@ def implement_prompt(
             else None
         ),
         prior_failure_tail=prior_tail,
+        baseline_pending=baseline_pending,
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),

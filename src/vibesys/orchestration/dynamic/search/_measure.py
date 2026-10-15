@@ -1,9 +1,12 @@
 """The trusted measurement of a candidate, and what its evidence says."""
 
+from vibesys.candidates.api import Baseline
 from vibesys.metrics import AcceptedReading, accept_readings
+from vibesys.orchestration.dynamic.search._ids import INPUT_MEASURED
 from vibesys.orchestration.dynamic.search._operations import EvidenceReadings
 from vibesys.orchestration.dynamic.search._outcomes import (
     Evidence,
+    Work,
     WorkEndedError,
     WorkstreamStart,
     ended_by,
@@ -26,6 +29,25 @@ from vs_core.api.search import (
 
 PROFILE_STAGE = "profile"
 """The task's stage that captures a profile."""
+
+
+def input_pending(ctx: Flow, w: WorkstreamStart) -> bool:
+    """Whether the input's measurement has not landed yet, as an agent's prompt says."""
+    return w.baseline is None and ctx.latch(INPUT_MEASURED).value is None
+
+
+async def the_input(ctx: Flow, w: WorkstreamStart, work: Work) -> Baseline:
+    """The input's measurement: known when the workstream started, else waited for here.
+
+    A workstream may start while the input is still being measured: its agents plan, write code
+    and run their own jobs meanwhile. Only what compares the candidate with the input waits for
+    it: the trusted measurement (so the input's own measurement is never queued behind a
+    candidate's, and no candidate is measured against a benchmark the input shows broken), the
+    judge's review, and the settlement.
+    """
+    if work.baseline is None:
+        work.baseline = w.baseline if w.baseline is not None else await ctx.latch(INPUT_MEASURED)
+    return work.baseline
 
 
 async def measure_and_interpret(

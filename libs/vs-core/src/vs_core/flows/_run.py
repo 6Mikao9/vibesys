@@ -40,7 +40,7 @@ from vs_core.types.until import Within
 from ._defs import FlowDef, _adapter, _Task, definition_of
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
 from ._flow import Flow
-from ._sources import First, Pending, Signal, Task, Timer
+from ._sources import First, Latch, LatchCell, LatchKey, Pending, Signal, Task, Timer
 from ._state import Dropped, Issued, LiveFlow, LiveFlows, Recorded, RecordedOperation
 
 if TYPE_CHECKING:
@@ -95,6 +95,7 @@ class _Run:
         self._pendings: dict[DecisionId, Pending] = {}
         self._signals: list[Signal] = []
         self._timers: list[Timer] = []
+        self._latches: dict[str, LatchCell] = {}
         self._restorable: dict[str, LiveFlow] = {}
         self._issued: dict[tuple[str, str], int] = {}
         self._view: RunView | None = None
@@ -202,6 +203,10 @@ class _Run:
             for task in self._tasks
             if task.blocked is not None
         )
+
+    def latch[T](self, key: LatchKey[T]) -> Latch[T]:
+        """A new handle on the run's latch ``key``."""
+        return Latch(key, self._latches.setdefault(key.name, LatchCell()))
 
     # -- reading and naming ------------------------------------------------------------------
 

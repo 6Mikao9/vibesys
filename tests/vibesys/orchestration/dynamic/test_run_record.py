@@ -159,15 +159,11 @@ def _check(run: RunRecord, trace: Trace) -> None:
         gate.failed
         or run.capacity() == 0
         or (gate.blocked_at_done is not None and len(run.finished_work) <= gate.blocked_at_done)
-        or (run.baseline is None and run.accepted)
     ):
         assert not run.may_plan(stopping=False)
     else:
         assert run.may_plan(stopping=False)
 
-    # Nothing that settles against the input starts before it is measured.
-    if run.baseline is None:
-        assert not trace.handed_out
     for stopping in (True, False):
         assert not run.over(planning=True, measuring=False, stopping=stopping)
         assert not run.over(planning=False, measuring=True, stopping=stopping)

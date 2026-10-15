@@ -152,6 +152,7 @@ A **source** is anything a flow can wait on for a value:
 | `Group[T]` | each finished task's result (or `TaskStopped(key)`), once each, in finishing order |
 | `ctx.timer(at)` | `TimeUp(at)`, once |
 | `ctx.stopped` | `StopRequested`, once |
+| `ctx.latch(key)` | the value some flow `set` on the run-wide latch `key` (once per run), once per handle |
 
 **Every source yields each value once.** `await source` waits for its next value;
 `await ctx.first(a, b, c)` waits for the next value of whichever is ready first, and returns it
@@ -170,6 +171,15 @@ What a flow is waiting for is therefore always data: the runtime can say "ws-3 w
 implementer.2 or the stop" in logs and tests. A flow waiting only on sources that can never yield
 again (an empty group, a consumed stop, nothing pending) is a bug, raised as `Deadlock` with the
 flow and its sources named. Concurrent agent turns or measurements are tasks in a group.
+
+A **latch** carries a fact one flow learns to the flows beside it that need it, without passing
+it through their arguments (a registered flow takes only its snapshot). Declare its key once,
+typed by the value (`INPUT_MEASURED = LatchKey[Baseline]("input-measured")`); the flow that
+learns the fact calls `ctx.latch(INPUT_MEASURED).set(value)`, once (a second `set` is a
+`ContractError`), and a waiter calls `await ctx.latch(INPUT_MEASURED)`, which returns at once
+when it is already set. It is not journaled: flow code sets it, so replay sets it again, and a
+restart after a code change starts with it unset until the restarted flow sets it again. A
+latch that is never set is not a `Deadlock`; the waiter waits for its stop.
 
 ### Groups
 

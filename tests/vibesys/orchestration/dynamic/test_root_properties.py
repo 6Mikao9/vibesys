@@ -2,9 +2,10 @@
 
 A generated run is a list of steps (which open wait core answers, and how) and, maybe, a stop
 before one of them. The fake core never lies; the flow must never exceed its concurrency or its
-budget, never plan twice at once, never start work after the stop, never start a workstream
-before the input's measurement lands (planning does not wait for it, and core may answer it at
-any step or not before the stop), and end in exactly one `Finish` with every attempt settled. A
+budget, never plan twice at once, never start work after the stop, never compare a candidate
+with the input (measure it, have the judge review it, name it the winner) before the input's
+measurement lands (planning and workstreams do not wait for it, and core may answer it at any
+step or not before the stop), and end in exactly one `Finish` with every attempt settled. A
 failing example prints the run as a timeline.
 """
 
@@ -45,15 +46,18 @@ def _planning_calls(host: Host) -> int:
 
 
 def _before_the_input(host: Host) -> list[str]:
-    """What the run asked for that needs the input's measurement: a workstream's start, a
-    candidate's measurement, a candidate named the winner. (A stop before the measurement lands
-    leaves the input standing, which compares nothing with it.)"""
+    """What the run asked for that needs the input's measurement: a candidate's measurement, a
+    judge's review, a candidate named the winner. (A stop before the measurement lands leaves the
+    input standing, which compares nothing with it.)"""
     return [
         type(request).__name__
         for item in host.run.decisions
         if isinstance(item, Wait)
         and (
-            isinstance(request := item.request, StartAttempt)
+            (
+                isinstance(request := item.request, RequestTurn)
+                and "/judge." in request.decision_id.root
+            )
             or (isinstance(request, Measure) and request.plan.purpose != "baseline")
             or (
                 isinstance(request, ProposeWinner)

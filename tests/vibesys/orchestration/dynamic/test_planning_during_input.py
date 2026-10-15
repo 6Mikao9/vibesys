@@ -1,13 +1,14 @@
-"""The planner works while the input is measured; nothing compared with the input runs before it.
+"""The planner and the workstreams work while the input is measured; nothing compares with it before.
 
 On a shared cluster the input's trusted measurement may wait hours for a slot. The search asks the
-planner at once, telling it the measurement is pending, and holds what it schedules: no workstream
-starts, no candidate is measured and no candidate is named the winner before the input's
-measurement lands. A planning call that ends empty meanwhile is not a stuck planner: planning is
-asked again when the measurement lands. An input that fails its measurement drops what was
-planned without knowing it, and the planner is asked again with the failure in view. An input with
-nothing configured to measure it is never shown as pending. A stop before it lands drops the held
-plans and leaves the input standing. How each measurement outcome ends the run is unchanged
+planner at once, telling it the measurement is pending, and starts what it schedules: implementers
+write code meanwhile. What compares a candidate with the input waits for it: no candidate is
+reviewed, measured or named the winner before the input's measurement lands. A planning call that
+ends empty meanwhile is not a stuck planner: planning is asked again when the measurement lands.
+An input that fails its measurement drops a plan made without knowing it that has not started, and
+the planner is asked again with the failure in view; a workstream already running goes on. An
+input with nothing configured to measure it is never shown as pending. A stop before it lands
+leaves the input standing. How each measurement outcome ends the run is unchanged
 (`test_unmeasurable_input.py` plays it in both orders).
 """
 
@@ -21,13 +22,28 @@ from tests.vibesys.orchestration.dynamic._host import (
     begin,
     config,
 )
-from tests.vibesys.orchestration.dynamic._replies import implement, plan_reply
+from tests.vibesys.orchestration.dynamic._replies import implement, implemented, plan_reply
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
 from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts, start_flow
 
-from vibesys.orchestration.dynamic.search.api import PlannerPrompt, PromptTemplate, dynamic
-from vs_core.api import FailureReason, Finish, Measure, RequestTurn, StartAttempt, Wait
+from vibesys.orchestration.dynamic.models import ImplementerResult
+from vibesys.orchestration.dynamic.search.api import (
+    ImplementPrompt,
+    PlannerPrompt,
+    PromptTemplate,
+    dynamic,
+)
+from vs_core.api import (
+    FailureReason,
+    Finish,
+    Measure,
+    RequestTurn,
+    Retained,
+    RevisionRef,
+    StartAttempt,
+    Wait,
+)
 
 MODES = across_restarts
 MAX_EMPTY_ASKS = 8
@@ -65,24 +81,39 @@ def test_the_planner_is_asked_before_a_slow_input_measurement_lands(*, restartin
     assert first.input_failure is None
     assert "still being measured" in render(PromptTemplate.PORTFOLIO, first)
 
-    # What the planner schedules waits for the input, and no second call is made for its slots.
+    # What the planner schedules starts at once, built on the input, and the implementers work.
     host.run.reply_raw(
         host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h1"), implement("h2"))
     )
-    assert host.input_waits()
-    assert not host.open(StartAttempt)
-    assert not host.open(RequestTurn, label=PLANNER_LABEL)
-    assert _starts(host) == _candidate_measurements(host) == 0
-    assert host.run.finished is None
-
-    # When the measurement lands, the held plans start, built on the input.
-    host.measure_input()
     starts = host.open(StartAttempt)
     assert len(starts) == 2
     for item in starts:
         assert isinstance(item.request, StartAttempt)
         assert item.request.workspace.base == FACTS.baseline
+        host.answer(item)
+    for commit in ("c1", "c2"):
+        turn = host.run.expect_turn(role="implementer")
+        assert isinstance(turn.context, ImplementPrompt)
+        assert turn.context.baseline_pending  # told that its candidate's evaluation waits
+        assert "still queued or running" in render(PromptTemplate.IMPLEMENT, turn.context)
+        host.run.reply(
+            turn,
+            ImplementerResult.model_validate_json(implemented()),
+            checkpoint=Retained(revision=RevisionRef.of_git_commit(commit)),
+        )
+
+    # Nothing that compares a candidate with the input happens before it lands: no review, no
+    # trusted measurement of a candidate, no candidate named the winner.
+    assert host.input_waits()
+    assert not host.open(RequestTurn, label="judge")
+    assert _candidate_measurements(host) == 0
+    assert host.run.finished is None
+
+    # When the measurement lands, both candidates are reviewed, measured and settled against it.
+    host.measure_input()
+    assert len(host.open(RequestTurn, label="judge")) == 2
     host.drain()
+    assert _candidate_measurements(host) >= 2
     assert isinstance(host.run.finished, Finish)
     assert_flow_closed(host)
 
@@ -129,24 +160,25 @@ def test_a_stop_before_the_input_lands_starts_nothing_and_leaves_the_input_stand
 
 
 @MODES
-def test_plans_accepted_before_the_input_fails_its_measurement_are_planned_again(
+def test_a_workstream_started_before_the_input_fails_its_measurement_goes_on(
     *, restarting: bool
 ) -> None:
-    host = begin(config(), restarting=restarting, input_first=False, baseline="failed-workload")
+    host = begin(
+        config(max_rounds=2), restarting=restarting, input_first=False, baseline="failed-workload"
+    )
     host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h1")))
-    assert host.input_waits()
+    (start,) = host.open(StartAttempt)
 
     host.measure_input()
 
-    # Nothing planned blind starts: the planner is asked again, told why the input failed.
-    assert not host.open(StartAttempt)
+    # The work already paid for goes on; the next planner turn is told why the input failed.
+    assert host.open(StartAttempt) == [start]
+    host.drain_until_turn(PLANNER_LABEL)
+    assert _candidate_measurements(host) == 1
     again = host.run.expect_turn(role=PLANNER_LABEL).context
     assert isinstance(again, PlannerPrompt)
     assert not again.baseline_pending
     assert again.input_failure is not None
-    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h2")))
-    (start,) = host.open(StartAttempt)
-    assert isinstance(start.request, StartAttempt)
     host.drain()
     assert host.run.finished is not None
     assert_flow_closed(host)
