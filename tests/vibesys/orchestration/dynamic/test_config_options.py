@@ -14,7 +14,6 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
-
 from tests.vibesys.inputs.test_plan import plans
 
 from vibesys.inputs import PlanStep, StepEvaluation, TaskPlan
@@ -128,7 +127,9 @@ def test_following_a_plan_is_refused_when_the_task_declares_none_naming_the_sett
     config = launch.search_config(profiling=False)
     assert config.follows_plan
     assert config.plan is not None
-    assert config.plan == Outline.model_validate_json(TaskPlan.model_validate(plan).model_dump_json())
+    assert config.plan == Outline.model_validate_json(
+        TaskPlan.model_validate(plan).model_dump_json()
+    )
     assert DynamicConfig.model_validate_json(config.model_dump_json()) == config
 
 

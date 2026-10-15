@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from tests.vibesys.orchestration.dynamic._host import (
     OUTLINER_LABEL,
-    PLANNER_LABEL,
     PLAN_DOCUMENTS,
+    PLANNER_LABEL,
     Host,
     begin,
     plan_config,

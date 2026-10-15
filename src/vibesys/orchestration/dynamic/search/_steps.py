@@ -9,7 +9,7 @@ step's id, so a step's history is its hypothesis's rounds.
 
 A step's state is derived, never stored: running while a workstream of it runs, else what its
 latest workstream settled (`step_states`). A step is ready when every step it depends on is
-done (`ready_steps`), and builds on the latest revision those steps settled (`built_on`).
+done (`ready_steps`), and builds on the newest revision those steps settled (`built_on`).
 """
 
 from __future__ import annotations
@@ -145,9 +145,9 @@ def built_on(
 ) -> tuple[RevisionRef, str] | None:
     """The revision a step starts from and the step that settled it; None for the input.
 
-    That is the latest revision any of its dependencies settled: on a chain of steps, the
-    newest one, which holds all the work before it. Two dependencies on separate lines are not
-    merged: the step builds on the one that settled last.
+    That is the revision of the dependency whose settled workstream started last: on a chain
+    of steps, the newest one, which holds all the work before it. Two dependencies on separate
+    lines are not merged: the step builds on the later one only.
     """
     settled = [
         (row.sequence, row.candidate, needed)
