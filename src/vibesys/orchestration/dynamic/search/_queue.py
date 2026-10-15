@@ -133,7 +133,9 @@ class EvaluationQueue:
         """Queue ``submission``, and drop what it supersedes."""
         self.received += 1
         entry = Queued(submission=submission, order=self.received)
-        if submission.kind is WorkKind.IMPLEMENT:
+        if submission.kind is WorkKind.IMPLEMENT and submission.candidate != submission.parent:
+            # a candidate measured at its parent made no code: it continues no line, holds no
+            # other submission's work, and must not rewrite where its parent was built
             self.built_on[submission.candidate] = submission.parent
             for older in [item for item in self.pending if self._supersedes(entry, item)]:
                 self._drop(older, Dropped(reason=DropReason.SUPERSEDED, by=submission.work_id))

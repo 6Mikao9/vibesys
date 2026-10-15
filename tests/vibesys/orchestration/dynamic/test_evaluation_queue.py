@@ -41,6 +41,8 @@ class Submit:
     kind: WorkKind
     parent: int | None
     """Which earlier submission's candidate it is built on, modulo how many; None: the input."""
+    at_parent: bool = False
+    """It made no code of its own: the revision measured is its parent (a profile's always is)."""
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,7 @@ EVENTS = st.one_of(
         st.sampled_from(LINES),
         st.sampled_from([WorkKind.IMPLEMENT, WorkKind.IMPLEMENT, WorkKind.PROFILE]),
         st.none() | st.integers(0, 20),
+        st.booleans(),
     ),
     st.builds(End, st.integers(0, 10)),
     st.builds(Rank, st.permutations(LINES).map(tuple) | st.just(())),
@@ -88,7 +91,7 @@ def _ancestors(played: Played, revision: RevisionRef) -> set[RevisionRef]:
     parents = {
         item.candidate: item.parent
         for item in played.submitted.values()
-        if item.kind is WorkKind.IMPLEMENT
+        if item.kind is WorkKind.IMPLEMENT and item.candidate != item.parent
     }
     found: set[RevisionRef] = set()
     current: RevisionRef | None = revision
@@ -103,11 +106,12 @@ def _submission(played: Played, event: Submit, at: int) -> Submission:
     parent = BASE
     if event.parent is not None and earlier:
         parent = earlier[event.parent % len(earlier)].candidate
+    made = parent if event.at_parent or event.kind is WorkKind.PROFILE else None
     return Submission(
         key=f"{at:06d}.{event.line}",
         work_id=event.line,
         kind=event.kind,
-        candidate=RevisionRef.of_git_commit(f"c{at}"),
+        candidate=made or RevisionRef.of_git_commit(f"c{at}"),
         parent=parent,
         at=float(at),
     )
@@ -150,6 +154,8 @@ def _submit_checked(played: Played, event: Submit, at: int) -> None:
         assert verdict.by == submission.work_id
         assert submission.kind is WorkKind.IMPLEMENT
         assert older.kind is WorkKind.IMPLEMENT
+        # a candidate measured at its parent made no code, so it holds no other's work
+        assert submission.candidate != submission.parent
         assert older.work_id == submission.work_id or older.candidate in _ancestors(
             played, submission.parent
         )
@@ -176,6 +182,15 @@ def play(events: list[Event], *, slots: int, ranked: bool) -> Played:
 
 @settings(max_examples=examples(pr=60, nightly=1000))
 @given(events=st.lists(EVENTS, max_size=40), slots=st.integers(1, 3), ranked=st.booleans())
+@example(
+    events=[
+        Submit("a", WorkKind.IMPLEMENT, None),
+        Submit("b", WorkKind.IMPLEMENT, None),
+        Submit("c", WorkKind.IMPLEMENT, 1, at_parent=True),  # measured at b's waiting candidate
+    ],
+    slots=1,
+    ranked=False,
+)
 def test_any_order_of_submissions_and_ends_keeps_every_queue_property(
     events: list[Event], slots: int, *, ranked: bool
 ) -> None:
@@ -193,9 +208,13 @@ def test_any_order_of_submissions_and_ends_keeps_every_queue_property(
     assert holding <= bound
     assert bound - holding == played.measured & bound
 
-    # no waiting implement candidate holds the code of another waiting one of its line
+    # no waiting implement candidate holds the code of another waiting one of its line (one
+    # measured at its parent made no code of its own)
     pending = [
-        item.submission for item in queue.pending if item.submission.kind is WorkKind.IMPLEMENT
+        item.submission
+        for item in queue.pending
+        if item.submission.kind is WorkKind.IMPLEMENT
+        and item.submission.candidate != item.submission.parent
     ]
     for newer in pending:
         for older in pending:
