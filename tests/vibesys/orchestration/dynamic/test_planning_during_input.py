@@ -7,9 +7,10 @@ reviewed, measured or named the winner before the input's measurement lands; a w
 with a failure is never compared, so it settles at once and frees its slot. A planning call that
 ends empty meanwhile is not a stuck planner: planning is asked again when the measurement lands.
 An input that fails its measurement drops a plan made without knowing it that has not started, and
-the planner is asked again with the failure in view; a workstream already running goes on. An
-input with nothing configured to measure it is never shown as pending. A stop before it lands
-leaves the input standing. How each measurement outcome ends the run is unchanged
+the planner is asked again with the failure in view; a workstream already running goes on, and its
+implementer is told the failure. An input with nothing configured to measure it is never shown as
+pending. A stop before it lands leaves the input standing. How each measurement outcome ends the run
+is unchanged
 (`test_unmeasurable_input.py` plays it in both orders).
 """
 
@@ -173,8 +174,17 @@ def test_a_workstream_started_before_the_input_fails_its_measurement_goes_on(
 
     host.measure_input()
 
-    # The work already paid for goes on; the next planner turn is told why the input failed.
+    # The work already paid for goes on, and its implementer is told why the input failed.
     assert host.open(StartAttempt) == [start]
+    host.answer(start)
+    told = host.run.expect_turn(role="implementer").context
+    assert isinstance(told, ImplementPrompt)
+    assert not told.baseline_pending
+    assert told.input_failure is not None
+    text = render(PromptTemplate.IMPLEMENT, told)
+    assert "trusted measurement failed: the input's own benchmark failed" in text
+    assert "still queued or running" not in text
+    # The next planner turn is told too.
     host.drain_until_turn(PLANNER_LABEL)
     assert _candidate_measurements(host) == 1
     again = host.run.expect_turn(role=PLANNER_LABEL).context
