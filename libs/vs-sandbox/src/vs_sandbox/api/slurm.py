@@ -17,6 +17,7 @@ from vs_sandbox.agent_gpu import (
     GpuLauncher,
     choose_partition,
 )
+from vs_sandbox.agent_gpu_cap import CANCELLED_BEFORE_SUBMISSION, CappedGpuLauncher
 from vs_sandbox.host_command_broker import (
     BrokerTransport,
     GpuCommands,
@@ -95,6 +96,7 @@ from vs_sandbox.slurm_stage_output import SlurmStageOutputOpener
 HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
 
 __all__ = [
+    "CANCELLED_BEFORE_SUBMISSION",
     "COMMAND_BROKER_SOCKET_ENV",
     "COMMAND_BROKER_TOKEN_ENV",
     "GPU_ACTIVE_FRACTION_METRIC",
@@ -112,6 +114,7 @@ __all__ = [
     "BrokerReplyError",
     "BrokerTransport",
     "BrokeredProcesses",
+    "CappedGpuLauncher",
     "GpuCommand",
     "GpuCommands",
     "GpuJobRequest",
