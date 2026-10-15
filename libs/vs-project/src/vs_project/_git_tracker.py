@@ -6,10 +6,11 @@ import os
 import re
 import shutil
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
+from vs_project._state_io import STATE_DOCUMENT_MAX_BYTES
 from vs_project._workspace_tree import (
     EntryKind,
     NotRegularFileError,
@@ -337,9 +338,7 @@ class GitTracker:
         """
         plan = self._validated_framework_snapshot_plan(snapshot)
         self._add_all()
-        for state_file in plan.files:
-            state_file.destination.parent.mkdir(parents=True, exist_ok=True)
-            state_file.destination.write_bytes(state_file.contents)
+        self._write_framework_files(plan)
         if plan.files:
             self._git.stage_all([file.pathspec for file in plan.files], force=True)
         self._commit_staged(label)
@@ -352,9 +351,7 @@ class GitTracker:
         """Commit selected framework metadata without staging candidate edits."""
         plan = self._validated_framework_snapshot_plan(snapshot)
         pathspecs = [state_file.pathspec for state_file in plan.files]
-        for state_file in plan.files:
-            state_file.destination.parent.mkdir(parents=True, exist_ok=True)
-            state_file.destination.write_bytes(state_file.contents)
+        self._write_framework_files(plan)
         if pathspecs:
             self._git.stage_all(pathspecs, force=True)
         has_changes = bool(pathspecs) and self._git.has_staged_changes(pathspecs)
@@ -377,7 +374,7 @@ class GitTracker:
             state_file.pathspec
             for state_file in plan.files
             if state_file.pathspec in pending
-            and state_file.destination.read_bytes() != state_file.contents
+            and self._framework_bytes(state_file.destination) != state_file.contents
         ]
         if unexpected or mismatched:
             shown = ", ".join(sorted({*unexpected, *mismatched}))
@@ -400,34 +397,57 @@ class GitTracker:
             return FrameworkSnapshotStatus.EXACT
         return FrameworkSnapshotStatus.DIFFERENT
 
-    @staticmethod
-    def _replace_framework_namespace_contents(plan: GitSnapshotPlan) -> None:
+    def _framework_relative(self, destination: Path) -> str:
+        """``destination``, which the plan resolved below ``root``, relative to it."""
+        return destination.relative_to(self.root).as_posix()
+
+    def _framework_bytes(self, destination: Path) -> bytes:
+        """The committed framework file at ``destination``, read by descriptor."""
+        with open_workspace_tree(self.root) as tree:
+            return tree.read_bytes(
+                self._framework_relative(destination), max_bytes=STATE_DOCUMENT_MAX_BYTES
+            )
+
+    def _write_framework_files(self, plan: GitSnapshotPlan) -> None:
+        """Write the plan's files in place, by descriptor.
+
+        The plan checked its paths for symlinks, but the agent can plant one after that;
+        a descriptor walk refuses it instead of writing through it.
+        """
+        with open_workspace_tree(self.root) as tree:
+            for state_file in plan.files:
+                relative = self._framework_relative(state_file.destination)
+                tree.overwrite(relative, state_file.contents)
+
+    def _replace_framework_namespace_contents(self, plan: GitSnapshotPlan) -> None:
         """Reconcile one namespace without replacing retained file inodes."""
-        if plan.destination_root.exists():
-            if not plan.destination_root.is_dir():
+        namespace = self._framework_relative(plan.destination_root)
+        with open_workspace_tree(self.root) as tree:
+            kind = tree.kind(namespace)
+            if kind is not None and kind is not EntryKind.DIRECTORY:
                 message = f"framework state namespace is not a directory: {plan.destination_root}"
                 raise ValueError(message)
-            retained_files = {state_file.destination for state_file in plan.files}
-            retained_directories = {
-                parent
-                for destination in retained_files
-                for parent in destination.parents
-                if parent != plan.destination_root and parent.is_relative_to(plan.destination_root)
-            }
-            existing_paths = sorted(
-                plan.destination_root.rglob("*"),
-                key=lambda path: len(path.relative_to(plan.destination_root).parts),
-                reverse=True,
-            )
-            for path in existing_paths:
-                if path.is_symlink() or path.is_file():
-                    if path.is_symlink() or path not in retained_files:
-                        path.unlink()
-                elif path.is_dir() and path not in retained_directories:
-                    path.rmdir()
-        for state_file in plan.files:
-            state_file.destination.parent.mkdir(parents=True, exist_ok=True)
-            state_file.destination.write_bytes(state_file.contents)
+            if kind is not None:
+                retained_files = {
+                    self._framework_relative(state_file.destination) for state_file in plan.files
+                }
+                retained_directories = {
+                    parent.as_posix()
+                    for destination in retained_files
+                    for parent in PurePosixPath(destination).parents
+                }
+                deepest_first = sorted(
+                    _entries_below(tree, namespace),
+                    key=lambda entry: len(PurePosixPath(entry[0]).parts),
+                    reverse=True,
+                )
+                for relative, entry_kind in deepest_first:
+                    if entry_kind is EntryKind.DIRECTORY:
+                        if relative not in retained_directories:
+                            tree.remove(relative)
+                    elif entry_kind is EntryKind.SYMLINK or relative not in retained_files:
+                        tree.remove(relative)
+        self._write_framework_files(plan)
 
     def snapshot_framework_state(
         self,
@@ -1027,6 +1047,23 @@ def _matches(tree: WorkspaceTree, relative: str, content: bytes) -> bool:
     if tree.kind(relative) is not EntryKind.FILE:
         return False
     return tree.read_bytes(relative, max_bytes=len(content)) == content
+
+
+def _entries_below(tree: WorkspaceTree, relative: str) -> list[tuple[str, EntryKind]]:
+    """Every entry below the directory ``relative`` with its kind; no symlink is followed."""
+    found: list[tuple[str, EntryKind]] = []
+    pending = [relative]
+    while pending:
+        directory = pending.pop()
+        for name in tree.names(directory):
+            child = f"{directory}/{name}"
+            kind = tree.kind(child)
+            if kind is None:
+                continue
+            found.append((child, kind))
+            if kind is EntryKind.DIRECTORY:
+                pending.append(child)
+    return found
 
 
 def _wildcard_safe(path: str) -> str:

@@ -307,3 +307,25 @@ def test_a_limited_listing_is_the_full_listing_or_refused_past_the_limit(
                     tree.files_below("inputs", limit=limit)
             else:
                 assert tree.files_below("inputs", limit=limit) == full
+
+
+def test_an_overwrite_keeps_the_inode_and_never_writes_through_a_link(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / "state").mkdir(parents=True)
+    kept = workspace / "state" / "a.json"
+    kept.write_bytes(b"old contents\n")
+    inode = kept.stat().st_ino
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"host\n")
+    (workspace / "state" / "link.json").symlink_to(outside)
+
+    with open_workspace_tree(workspace) as tree:
+        tree.overwrite("state/a.json", b"new\n")
+        tree.overwrite("fresh/b.json", b"b\n")
+        with pytest.raises(WorkspacePathError):
+            tree.overwrite("state/link.json", b"agent\n")
+
+    assert kept.read_bytes() == b"new\n"
+    assert kept.stat().st_ino == inode
+    assert (workspace / "fresh" / "b.json").read_bytes() == b"b\n"
+    assert outside.read_bytes() == b"host\n"

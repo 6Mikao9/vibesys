@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+# No ``O_TRUNC``: the file is checked to be regular before it is truncated.
+_OVERWRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _TEMPORARY_ATTEMPTS = 64
 _READ_CHUNK_BYTES = 1024 * 1024
 
@@ -212,6 +214,23 @@ class WorkspaceTree:
         except (FileNotFoundError, NotADirectoryError):
             return
 
+    def overwrite(self, relative: str, contents: bytes) -> None:
+        """Write ``contents`` into the file at ``relative`` in place, creating it if missing.
+
+        Unlike :meth:`write_bytes` the file keeps its inode, for a reader that holds it
+        open. Missing directories are created. Raises ``WorkspacePathError`` for a symlink
+        and ``NotRegularFileError`` for anything but a regular file.
+        """
+        parts = _file_parts(relative)
+        with self._parent(parts, create=True) as parent:
+            descriptor = _open_component(parts[-1], _OVERWRITE_FLAGS, parent, relative)
+        with os.fdopen(descriptor, "wb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                message = f"{relative} is not a regular file"
+                raise NotRegularFileError(errno.EINVAL, message)
+            stream.truncate(0)
+            stream.write(contents)
+
     def symlink(self, relative: str, target: str) -> None:
         """Create the symlink ``relative`` with the contents ``target``; never followed here."""
         parts = _file_parts(relative)
@@ -364,10 +383,13 @@ def _copy_file(source: Path, directory: int, name: str) -> None:
             os.utime(writer.fileno(), ns=(status.st_atime_ns, status.st_mtime_ns))
 
 
-def _open_component(name: str, flags: int, directory: int, shown: str) -> int:
-    """Open one path component in ``directory``; a symlink there is refused."""
+def _open_component(name: str, flags: int, directory: int, shown: str, mode: int = 0o666) -> int:
+    """Open one path component in ``directory``; a symlink there is refused.
+
+    ``mode`` applies, under the umask, to a file ``O_CREAT`` creates.
+    """
     try:
-        return os.open(name, flags, dir_fd=directory)
+        return os.open(name, flags, mode, dir_fd=directory)
     except OSError as error:
         # ``O_NOFOLLOW`` refuses a symlink with ELOOP, or with ENOTDIR on Linux when
         # ``O_DIRECTORY`` is set too; either may also mean something else.
