@@ -51,14 +51,12 @@ class Outline(Value):
 
     @model_validator(mode="after")
     def _is_a_task_plan(self) -> Outline:
-        TaskPlan.model_validate_json(self.model_dump_json())
+        TaskPlan.model_validate(self.model_dump())
         return self
 
     def with_steps(self, steps: tuple[Step, ...]) -> Outline:
         """The same plan with ``steps``, checked by the same rules."""
-        return Outline.model_validate_json(
-            self.model_copy(update={"steps": steps}).model_dump_json()
-        )
+        return Outline.model_validate(self.model_copy(update={"steps": steps}).model_dump())
 
 
 class StepState(StrEnum):
