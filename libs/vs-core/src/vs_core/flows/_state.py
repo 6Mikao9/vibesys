@@ -37,7 +37,7 @@ from vs_core.types.search import (
     YieldFailed,
 )
 from vs_core.types.settlement import Selection
-from vs_core.types.strategy import Decision, Measure, Settle, StrategyState
+from vs_core.types.strategy import Decision, Measure, Settle, StrategyState, Withdraw
 from vs_core.types.until import Failed
 
 if TYPE_CHECKING:
@@ -114,7 +114,9 @@ class Held(Value):
     (``ctx.workspaces.reopen``). ``salvage`` is how the workspace settles if the restart cannot
     give it back to the flow (``ctx.workspaces.salvage``); without one it settles as cancelled
     and discarded. ``base`` and ``mode`` are how it was opened, so a reopened workspace is the
-    same one. A hold persisted before these fields existed is read as a bare attempt.
+    same one. ``settling`` is the settlement the flow asked for while it is in flight: a restart
+    leaves the workspace to it. A hold persisted before these fields existed is read as a bare
+    attempt.
     """
 
     attempt: AttemptRef
@@ -122,6 +124,7 @@ class Held(Value):
     mode: WorkspaceMode | None = None
     carried: bool = False
     salvage: Settle | None = None
+    settling: Settle | None = None
 
 
 class RestartSettleReason(StrEnum):
@@ -135,6 +138,8 @@ class RestartSettleReason(StrEnum):
     """The new code did not start the flow again in the step that restarted the run."""
     NOT_REOPENED = "not-reopened"
     """The flow was resumed, and ended without reopening it."""
+    SETTLING = "settling"
+    """Nothing was issued: the flow had asked for its settlement, which core goes on with."""
 
 
 class RestartSettled(Value):
@@ -147,14 +152,17 @@ class RestartSettled(Value):
 
 
 class InFlight(Value):
-    """A measurement a flow waited for when the run restarted, until a resumed flow takes it.
+    """A measurement or a settlement a flow waited for when the run restarted.
 
-    ``path`` and ``label`` are the flow and the id root it issued the measurement under.
+    It waits for a resumed flow that asks for it again (see ``_run.issue``). ``path`` and
+    ``label`` are the flow and the id root it issued the request under.
     """
 
     path: str
     label: str
-    request: Measure
+    request: Measure | Withdraw
+    closed: WorkspaceClosed | None = None
+    """For a settlement: core's answer, when it came before the resumed flow asked again."""
 
 
 class LiveFlow(Value):

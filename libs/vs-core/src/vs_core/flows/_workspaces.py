@@ -95,6 +95,9 @@ class Workspace:
     """Core's settlement of the workspace; None until it closes, or if core took none."""
     refused: Failed | None = None
     """Why core refused what ``keep`` asserted, when it did: the workspace then settled plainly."""
+    settling: Settle | None = None
+    """The settlement asked for before a restart, still in flight when the flow reopened the
+    workspace: the workspace only closes now, and its close takes that settlement."""
 
     @property
     def scope(self) -> Scope:
@@ -272,7 +275,13 @@ def _reopened(kit: Kit, attempt: AttemptRef) -> AsyncGenerator[Workspace | NotRe
             return NotReopened(attempt=attempt)
         task.carried.remove(held)
         task.holds.append(held)  # carried: the snapshot the flow resumed from names it
-        return Workspace(ref=held.attempt, base=held.base, mode=held.mode)
+        return Workspace(
+            ref=held.attempt,
+            base=held.base,
+            mode=held.mode,
+            keeping=held.settling,
+            settling=held.settling,
+        )
 
     return _holding(kit, acquire)
 
@@ -303,18 +312,24 @@ async def _holding[N](
 async def _settle(kit: Kit, workspace: Workspace, disposition: Settle) -> None:
     """Close the workspace, asserting ``disposition``; plainly, once, if core refuses that.
 
-    The flow stops holding it as the settlement is asked for: a restart from here on leaves the
-    workspace to that settlement instead of reopening or settling it again.
+    The hold records the settlement asked for while it is in flight: a restart then leaves the
+    workspace to it rather than settling it again, and a resumed flow that reopens and closes the
+    workspace waits for that same settlement (the run re-attaches the close to it).
     """
-    kit.task.holds = [held for held in kit.task.holds if held.attempt != workspace.ref]
     settled = await _withdraw(kit, workspace.ref, disposition)
     if isinstance(settled, Failed):
         workspace.refused = settled
         settled = await _withdraw(kit, workspace.ref, _plain("failed"))
     workspace.settlement = None if isinstance(settled, Failed) else settled
+    kit.task.holds = [held for held in kit.task.holds if held.attempt != workspace.ref]
 
 
 async def _withdraw(kit: Kit, target: AttemptRef, disposition: Settle) -> Settlement | Failed:
+    task = kit.task
+    task.holds = [
+        held.model_copy(update={"settling": disposition}) if held.attempt == target else held
+        for held in task.holds
+    ]
     request = Withdraw(
         decision_id=DecisionId(root="settle"),
         scope=THIS_RUN,

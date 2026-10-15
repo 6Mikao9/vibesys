@@ -125,7 +125,7 @@ class _Run:
         self._restorable: dict[str, LiveFlow] = {}
         self._carried: dict[str, list[Held]] = {}
         self._in_flight: list[InFlight] = []
-        self._measuring: dict[DecisionId, InFlight] = {}
+        self._awaited: dict[DecisionId, InFlight] = {}
         self._issued: dict[tuple[str, str], int] = {}
         self._view: RunView | None = None
         self._recorded: deque[str] | None = None
@@ -154,7 +154,8 @@ class _Run:
         A workspace a resumable flow held when it recorded its latest checkpoint stays open for
         it (``ctx.workspaces.reopen``); every other workspace is settled, by the salvage its flow
         recorded (``ctx.workspaces.salvage``) or else plainly, with the reason recorded. So is a
-        kept workspace whose flow the new code does not start again in this step. A measurement
+        kept workspace whose flow the new code does not start again in this step. A workspace
+        whose settlement the flow already asked for is left to it. A measurement or a settlement
         in flight goes to the resumed flow that asks for the same one again (``issue``).
         """
         self._begin(view, recorded)
@@ -170,7 +171,9 @@ class _Run:
         for live in base.flows:
             resumable = live.name is not None and live.checkpointed
             for held in live.holds:
-                if not resumable:
+                if held.settling is not None and not (resumable and held.carried):
+                    self._left_settling(live.path, held)
+                elif not resumable:
                     self._settle_held(live.path, held, RestartSettleReason.FLOW_NOT_RESUMABLE)
                 elif not held.carried:
                     self._settle_held(live.path, held, RestartSettleReason.OPENED_AFTER_CHECKPOINT)
@@ -182,7 +185,10 @@ class _Run:
         self._launch(self._tasks[0], self._root, self._snapshot_of(self._root, root))
         self._settle()
         for path, held in [(p, h) for p, kept in self._carried.items() for h in kept]:
-            self._settle_held(path, held, RestartSettleReason.NOT_RESTARTED)
+            if held.settling is not None:
+                self._left_settling(path, held)
+            else:
+                self._settle_held(path, held, RestartSettleReason.NOT_RESTARTED)
         self._carried = {}
         return self._end()
 
@@ -239,7 +245,7 @@ class _Run:
         issued = tuple(Issued(path=p, label=lb, count=n) for (p, lb), n in self._issued.items())
         measuring = tuple(
             item
-            for decision, item in self._measuring.items()
+            for decision, item in self._awaited.items()
             if decision in self._pendings and self._pendings[decision].alive()
         )
         return LiveFlows(
@@ -328,20 +334,22 @@ class _Run:
     def issue(self, task: _Task, pending: Pending, decision: Decision) -> Pending:
         """Send a decision out and register the ``Pending`` that its outcome will fill.
 
-        A measurement the flow already had in flight when the run restarted is not sent again:
-        the ``Pending`` waits for the old one's outcome instead (``_reattached``).
+        A measurement or a settlement the flow already had in flight when the run restarted is not
+        sent again: the ``Pending`` waits for the old one's outcome instead (``_reattached``).
         """
         if pending.decision in self._pendings:
             raise ContractError(
                 ("decision_id",), f"decision id {pending.decision.root} is not unique"
             )
         work = pending.work
-        if isinstance(work, Measure):
+        if isinstance(work, Measure | Withdraw):
             label = _label_of(task.path, work.decision_id)
             earlier = self._reattached(task.path, label, work)
             if earlier is not None:
                 pending = Pending(earlier.request)
-            self._measuring[pending.decision] = InFlight(
+                if earlier.closed is not None:  # core settled it already: that is the answer
+                    pending.set(earlier.closed)
+            self._awaited[pending.decision] = InFlight(
                 path=task.path, label=label, request=pending.work
             )
             if earlier is not None:
@@ -353,20 +361,24 @@ class _Run:
         self.out.append(decision)
         return pending
 
-    def _reattached(self, path: str, label: str, request: Measure) -> InFlight | None:
-        """The measurement in flight at the restart that ``request`` asks for again, if any.
+    def _reattached(self, path: str, label: str, request: Measure | Withdraw) -> InFlight | None:
+        """The request in flight at the restart that ``request`` asks for again, if any.
 
-        It is the same request when the same flow asks it under the same label, in the same
-        scope, with the same plan apart from the time it was submitted.
+        A measurement is the same when the same flow asks it under the same label, in the same
+        scope, with the same plan apart from the time it was submitted. A settlement is the same
+        when the same flow closes the same workspace: core settles a workspace once, as it was
+        first asked, so the resumed flow waits for that settlement whatever it asks now.
         """
         for item in self._in_flight:
             old = item.request
-            if (
-                item.path == path
-                and item.label == label
-                and old.scope == request.scope
-                and _same_plan(old, request)
-            ):
+            same = (
+                _same_plan(old, request)
+                if isinstance(old, Measure) and isinstance(request, Measure)
+                else isinstance(old, Withdraw)
+                and isinstance(request, Withdraw)
+                and old.target == request.target
+            )
+            if item.path == path and item.label == label and old.scope == request.scope and same:
                 self._in_flight.remove(item)
                 return item
         return None
@@ -375,7 +387,7 @@ class _Run:
         """Abandon a request's outcome: if it arrives later it is dropped and recorded."""
         pending.abandoned = True
         self._pendings.pop(pending.decision, None)
-        self._measuring.pop(pending.decision, None)
+        self._awaited.pop(pending.decision, None)
 
     def timer(self, at: Seconds) -> Timer:
         """A timer for ``at``, and the wake-up that makes core deliver the time."""
@@ -466,6 +478,21 @@ class _Run:
             )
         )
 
+    def _left_settling(self, path: str, held: Held) -> None:
+        """Leave a workspace whose settlement is in flight to it, and record that."""
+        disposition = held.settling
+        if disposition is None:
+            message = "only a workspace whose settlement is in flight is left to it"
+            raise ContractError(("restart",), message)
+        self.restart_settled.append(
+            RestartSettled(
+                attempt=held.attempt,
+                flow=path,
+                reason=RestartSettleReason.SETTLING,
+                retention=disposition.retention,
+            )
+        )
+
     @staticmethod
     def _snapshot_of(definition: FlowDef, live: LiveFlow) -> object:
         """The snapshot the old code recorded, as the current code's snapshot type."""
@@ -507,8 +534,14 @@ class _Run:
 
     def _ended(self, task: _Task, result: object) -> None:
         for held in task.carried:  # resumed, and ended without taking its workspace back
-            self._settle_held(task.path, held, RestartSettleReason.NOT_REOPENED)
+            if held.settling is not None:
+                self._left_settling(task.path, held)
+            else:
+                self._settle_held(task.path, held, RestartSettleReason.NOT_REOPENED)
         task.carried = []
+        self._in_flight = [
+            i for i in self._in_flight if i.path != task.path or i.closed is None
+        ]  # a settlement kept for the flow that no flow takes now
         self._tasks.remove(task)
         for pending in task.started:
             if pending.alive():
@@ -549,12 +582,36 @@ class _Run:
         if decision is None:
             return  # an event that answers nothing of ours (an agent's own measurement)
         pending = self._pendings.pop(decision, None)
-        self._measuring.pop(decision, None)
-        self._in_flight = [i for i in self._in_flight if i.request.decision_id != decision]
+        self._awaited.pop(decision, None)
+        if self._closed_early(item, pending):
+            return
+        self._in_flight = [i for i in self._in_flight if not _answers(item, decision, i.request)]
         if pending is None:
             self.dropped.append(Dropped(event=_kind_of(item), decision=decision))
         else:
             pending.set(self._rebuilt(item))
+
+    def _closed_early(self, item: Event | Recorded, pending: Pending | None) -> bool:
+        """Keep a settlement that came while the resumed flow that holds its workspace works on.
+
+        The flow reopened the workspace after a restart and will close it: its close then
+        takes this settlement (``issue``) rather than asking core for another.
+        """
+        if pending is not None or not isinstance(item, WorkspaceClosed):
+            return False
+        attempt = item.settlement.attempt.attempt_id
+        for index, entry in enumerate(self._in_flight):
+            request = entry.request
+            held = any(
+                h.attempt.attempt_id == attempt
+                for task in self._tasks
+                if task.path == entry.path
+                for h in (*task.holds, *task.carried)
+            )
+            if isinstance(request, Withdraw) and _answers(item, item.decision, request) and held:
+                self._in_flight[index] = entry.model_copy(update={"closed": item})
+                return True
+        return False
 
     def _answered_decision(self, item: Event | Recorded) -> DecisionId | None:
         """The request this event answers, by the table ``_ANSWER_RULES``.
@@ -619,6 +676,17 @@ def _same_plan(old: Measure, new: Measure) -> bool:
     """Whether two measurements measure the same thing (they may be asked at different times)."""
     when = {"submitted_at": 0.0}
     return old.plan.model_copy(update=when) == new.plan.model_copy(update=when)
+
+
+def _answers(
+    item: Event | Recorded, decision: DecisionId | None, request: Measure | Withdraw
+) -> bool:
+    """Whether ``item``, answering ``decision``, answers ``request`` (a close: by its workspace)."""
+    if isinstance(item, WorkspaceClosed) and isinstance(request, Withdraw):
+        target = request.target
+        attempt = item.settlement.attempt.attempt_id
+        return isinstance(target, AttemptRef) and target.attempt_id == attempt
+    return request.decision_id == decision
 
 
 def _kind_of(item: Event | Recorded) -> EventKind:

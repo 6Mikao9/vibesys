@@ -164,6 +164,27 @@ def test_a_workspace_the_restart_cannot_give_back_settles_by_its_salvage_with_it
     run.close_workspace(settle)
 
 
+def test_a_workspace_whose_settlement_is_in_flight_is_left_to_it() -> None:
+    run = FlowRun.start(parent(holder("v1")), Config())
+    opened, asked = _held(run, "v1")
+    run.reply(asked, Plan(n=1))
+    settle = run.expect(core.Withdraw, label="settle")
+    run.swap(parent(None))
+    run.advance_to(1.0)
+
+    assert not _settles(run, "restart-settle")
+    assert run.state.restart_settled == (
+        core.RestartSettled(
+            attempt=opened,
+            flow="w/",
+            reason=core.RestartSettleReason.SETTLING,
+            retention="candidate",
+        ),
+    )
+    run.close_workspace(settle)
+    assert run.state.live.in_flight == ()
+
+
 def test_a_workspace_without_a_salvage_settles_discarded_as_before() -> None:
     @core.flow(snapshot=Job, name="holder")
     async def bare(ctx: core.Flow, job: Job) -> int:
@@ -202,17 +223,23 @@ def _withdraws(decision: core.Wait) -> bool:
     return isinstance(decision.request, core.Withdraw)
 
 
+@pytest.mark.parametrize("oldest_first", [True, False], ids=["oldest-first", "newest-first"])
 @pytest.mark.parametrize("step", range(5))
 def test_a_held_workspace_settles_exactly_once_whatever_step_the_code_changes_at(
-    step: int,
+    step: int, *, oldest_first: bool
 ) -> None:
-    """The workspace opens once and is settled once, never discarded, wherever the change falls."""
+    """The workspace opens once and is settled once, never discarded, wherever the change falls.
+
+    Core answers what is open oldest first or newest first: a settlement in flight at the change
+    answers the resumed flow's close either way, before or after the flow asks for it.
+    """
     search = parent(holder("v1"))
     policy = RestartPolicy(steps=frozenset({step}), changes=(code_changed(search),))
     run = FlowRun.start(search, Config(), restarting=policy)
     opened = run.open_workspace(run.expect(core.StartAttempt))
     while run.finished is None:
-        asked = next(a for a in run.open if a.until is not None)
+        waits = [a for a in run.open if a.until is not None]
+        asked = waits[0] if oldest_first else waits[-1]
         if isinstance(asked.request, core.Withdraw):
             run.close_workspace(asked)
         else:
