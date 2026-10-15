@@ -17,10 +17,12 @@ from vibesys.candidates.api import InputReading, Measured
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import (
+    PlannerHandoff,
     PlannerHypothesisUpdate,
     PortfolioPlan,
     ProfileDecision,
     StrategyReason,
+    WorkstreamExpectation,
     WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.search.api import (
@@ -238,13 +240,26 @@ def portfolio(
     *entries: WorkstreamPlan | ProfileDecision,
     updates: tuple[PlannerHypothesisUpdate, ...] = (),
     order: tuple[str, ...] = (),
+    expected: tuple[str, ...] = (),
 ) -> PortfolioPlan:
-    """A planner reply of ``entries`` and ``updates``, ranking evaluations in ``order``."""
+    """A planner reply of ``entries`` and ``updates``, ranking evaluations in ``order``.
+
+    Its handoff expects something of each of ``expected``.
+    """
     return PortfolioPlan(
         reasoning="portfolio",
         workstreams=entries,
         hypothesis_updates=updates,
         evaluation_order=order,
+        handoff=PlannerHandoff(
+            expectations=tuple(
+                WorkstreamExpectation(
+                    work_id=item, expected="e", if_it_succeeds="s", if_it_fails="f"
+                )
+                for item in expected
+            ),
+            doubts=(),
+        ),
     )
 
 

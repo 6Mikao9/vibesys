@@ -196,6 +196,8 @@ class _Planning(RolePromptContext):
     """The trusted evaluation queue; None in a request built before the queue existed."""
     input_overdue: InputOverdueView | None = None
     """The input's measurement is overdue: workstreams wait for it to settle their candidates."""
+    handoff_paths: tuple[str, ...] = ()
+    """Where the earlier planning calls' handoff files are, newest first: paths, never contents."""
     problem: PlanProblem | None = None
     """Why the earlier reply, or the earlier planning call, was not accepted; None if it was lost."""
 

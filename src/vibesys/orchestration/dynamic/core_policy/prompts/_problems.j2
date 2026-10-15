@@ -51,6 +51,8 @@ cannot update incomplete hypothesis {{ quoted(item.subject) }}
 {{ quoted(item.subject) }} is not a hypothesis or profile of this run; rank only IDs from the history or this reply
 {%- elif item.code.value == 'ranking-duplicate' -%}
 {{ quoted(item.subject) }} is ranked twice; list each ID once
+{%- elif item.code.value == 'expectation-unknown' -%}
+{{ quoted(item.subject) }} is not a workstream of this reply; name only workstreams this reply schedules
 {%- else -%}
 {{ item.code.value }}
 {%- endif %}
