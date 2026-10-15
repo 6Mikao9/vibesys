@@ -7,6 +7,7 @@ the partition choice, and the blocking ``srun`` launch the host broker uses.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import secrets
 import shlex
@@ -25,11 +26,6 @@ from pydantic import (
 )
 
 from vs_decode.api import decode_json
-from vs_sim.api import (
-    OsThreads,
-    SubprocessPipedProcessLauncher,
-    SubprocessProbe,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -54,6 +50,10 @@ _CONFIRM_INTERVAL_SECONDS = 5
 _WATCHER_JOIN_SECONDS = _SCANCEL_ATTEMPTS * _SCANCEL_TIMEOUT_SECONDS + _CANCEL_GRACE_SECONDS
 _READ_CHARACTERS = 65_536
 _MAX_QUEUE_MINUTES = 60 * 24 * 365
+_MAX_PREFIX_CHARS = 32
+#: Hex characters of the run's digest in its job name prefix: 32 bits keeps two
+#: concurrent runs of one user apart and leaves the operator's prefix most of its room.
+_RUN_TAG_CHARS = 8
 
 
 def _is_normalized_absolute(path: str) -> bool:
@@ -107,6 +107,17 @@ class AgentGpuConfig(BaseModel):
     @classmethod
     def _normalize_arrays(cls, value: object) -> object:
         return tuple(value) if isinstance(value, list) else value
+
+    def for_run(self, run_id: str) -> AgentGpuConfig:
+        """This configuration with a job name prefix that only ``run_id``'s jobs carry.
+
+        The operator's prefix is kept (cut to leave room) and a digest of the run id is
+        appended, so the run's own GPU jobs can be told apart in the queue from another
+        run's of the same user. The result still satisfies the prefix pattern.
+        """
+        tag = hashlib.sha256(run_id.encode()).hexdigest()[:_RUN_TAG_CHARS]
+        kept = self.job_name_prefix[: _MAX_PREFIX_CHARS - len(tag) - 1]
+        return self.model_copy(update={"job_name_prefix": f"{kept}-{tag}"})
 
     @field_validator("partitions", "srun_arguments")
     @classmethod
@@ -238,15 +249,11 @@ def choose_partition(
     return fits[0] if fits else config.partitions[0]
 
 
-def read_windows(
-    config: AgentGpuConfig, probe: CommandProbe | None = None
-) -> Mapping[str, object] | None:
+def read_windows(config: AgentGpuConfig, probe: CommandProbe) -> Mapping[str, object] | None:
     """Run the operator's window report command, or return ``None`` if unavailable."""
     if config.windows_command is None:
         return None
-    completed = (probe or SubprocessProbe()).run(
-        config.windows_command, timeout_seconds=_WINDOWS_TIMEOUT_SECONDS
-    )
+    completed = probe.run(config.windows_command, timeout_seconds=_WINDOWS_TIMEOUT_SECONDS)
     if completed is None or completed.returncode != 0:
         return None
     report = decode_json(
@@ -314,8 +321,8 @@ class AgentGpuLauncher:
     ``srun`` and ``scancel`` run through *shell_command*, the local transport's
     shell (a login-container wrapper may precede ``bash -c``), so the operator
     names how to reach the Slurm binaries in one place. *processes* owns the
-    local process group and *probe* runs the scheduler report and ``scancel``;
-    tests inject both to drive the lifecycle without a cluster or OS process.
+    local process group, *probe* runs the scheduler report and ``scancel``, and
+    *threads* runs the output pump and bounds the waits.
     """
 
     def __init__(
@@ -323,16 +330,16 @@ class AgentGpuLauncher:
         config: AgentGpuConfig,
         shell_command: Sequence[str],
         *,
-        probe: CommandProbe | None = None,
-        processes: PipedProcessLauncher | None = None,
-        threads: Threads | None = None,
+        probe: CommandProbe,
+        processes: PipedProcessLauncher,
+        threads: Threads,
     ) -> None:
         """Bind the operator configuration and the process boundary."""
         self._config = config
         self._shell = tuple(shell_command)
-        self._probe: CommandProbe = probe or SubprocessProbe()
-        self._processes = processes or SubprocessPipedProcessLauncher()
-        self._threads = threads or OsThreads()
+        self._probe = probe
+        self._processes = processes
+        self._threads = threads
 
     def run(
         self,

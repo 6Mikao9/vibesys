@@ -9,7 +9,7 @@ gateways can provide a versioned JSON connector executable.
 
 from typing import Protocol
 
-from .cluster import SlurmCluster
+from .cluster import SlurmCluster, recorded_job_ids
 from .cluster_types import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -39,9 +39,32 @@ from .config import (
     load_slurm_config,
     shell_join_with_port,
 )
+from .connector_protocol import (
+    MAX_CONNECTOR_REQUEST_BYTES,
+    MAX_CONNECTOR_RESPONSE_BYTES,
+    MAX_TRANSPORT_STREAM_BYTES,
+    SLURM_CONNECTOR_REQUEST,
+    SlurmConnectorExecRequest,
+    SlurmConnectorGetRequest,
+    SlurmConnectorPutRequest,
+    SlurmConnectorRequest,
+    SlurmConnectorResponse,
+    SlurmConnectorSyncToRequest,
+)
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .identity import runtime_content_identity
+from .queue_view import (
+    NodeGpus,
+    OwnJob,
+    QueuedJob,
+    QueueSnapshot,
+    QueueViewError,
+    gpu_count,
+    parse_queue_snapshot,
+    queue_snapshot_command,
+    sbatch_partitions,
+)
 from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
 from .runner import (
     SERVICE_NOT_READY_EXIT_CODE,
@@ -104,16 +127,26 @@ from .trace_replay import (
     TraceConnector,
     TraceStep,
 )
+from .transport_broker import (
+    SlurmTransportBrokerPolicy,
+    SlurmTransportRequestError,
+    slurm_transport_broker_available,
+    slurm_transport_broker_policy,
+)
 
 __all__ = [
     "CANCEL_REACTIONS",
     "DEFAULT_COMMAND_SECONDS",
     "INITIAL_LIFE",
     "LIFETIMES",
+    "MAX_CONNECTOR_REQUEST_BYTES",
+    "MAX_CONNECTOR_RESPONSE_BYTES",
+    "MAX_TRANSPORT_STREAM_BYTES",
     "PORT_PLACEHOLDER",
     "REQUESTS_FILE",
     "SCHEDULER_READ_END",
     "SERVICE_NOT_READY_EXIT_CODE",
+    "SLURM_CONNECTOR_REQUEST",
     "AccountingRow",
     "Cluster",
     "ClusterCancelOutcome",
@@ -138,11 +171,17 @@ __all__ = [
     "IssuedCommand",
     "JobLife",
     "NoAccountingRow",
+    "NodeGpus",
     "NotInQueue",
     "Notice",
+    "OwnJob",
     "QueueRow",
+    "QueueSnapshot",
+    "QueueViewError",
     "Queued",
+    "QueuedJob",
     "Running",
+    "SchedulerQueue",
     "SchedulerReading",
     "SchedulerTrace",
     "SecondsRange",
@@ -156,6 +195,12 @@ __all__ = [
     "SlurmCluster",
     "SlurmConfig",
     "SlurmConfigError",
+    "SlurmConnectorExecRequest",
+    "SlurmConnectorGetRequest",
+    "SlurmConnectorPutRequest",
+    "SlurmConnectorRequest",
+    "SlurmConnectorResponse",
+    "SlurmConnectorSyncToRequest",
     "SlurmConnectorTransport",
     "SlurmError",
     "SlurmFileArtifact",
@@ -174,6 +219,8 @@ __all__ = [
     "SlurmSubmissionRejectedError",
     "SlurmTimingProfile",
     "SlurmTransport",
+    "SlurmTransportBrokerPolicy",
+    "SlurmTransportRequestError",
     "SlurmTreeArtifact",
     "Step",
     "TraceConnector",
@@ -181,6 +228,7 @@ __all__ = [
     "Unknown",
     "advance",
     "advance_with_notice",
+    "gpu_count",
     "life_for_status",
     "load_slurm_config",
     "needs_accounting",
@@ -188,15 +236,29 @@ __all__ = [
     "observe_with_notice",
     "parse_accounting_row",
     "parse_queue_row",
+    "parse_queue_snapshot",
     "phase_of",
+    "queue_snapshot_command",
+    "recorded_job_ids",
     "runtime_content_identity",
+    "sbatch_partitions",
     "shell_join_with_port",
+    "slurm_transport_broker_available",
+    "slurm_transport_broker_policy",
     "split_framed_scheduler_query",
     "status_of",
     "tree_content_identity",
     "unframed_output",
     "validate_cluster_operation_id",
 ]
+
+
+class SchedulerQueue(Protocol):
+    """Reads the queue this user's jobs wait in; ``SlurmJobRunner`` is the real one."""
+
+    def read_queue(self) -> QueueSnapshot:
+        """One read-only reading; raises ``SlurmError`` or ``QueueViewError`` when it fails."""
+        ...
 
 
 class Cluster(Protocol):

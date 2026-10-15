@@ -14,6 +14,7 @@ from vs_sandbox.agent_gpu import (
     AgentGpuRequestError,
     GpuCommand,
     GpuJobRequest,
+    GpuLauncher,
     choose_partition,
 )
 from vs_sandbox.host_command_broker import (
@@ -73,6 +74,11 @@ from vs_sandbox.slurm_profile import (
     split_profile_stats,
     trusted_profile_command,
 )
+from vs_sandbox.slurm_queue_status import (
+    SlurmQueueStatusReader,
+    queue_status_from_snapshot,
+    slurm_queue_status_reader,
+)
 from vs_sandbox.slurm_settings_toml import render_slurm_operator_toml, write_slurm_operator_toml
 
 #: The single-file, standard-library-only client an agent's container runs.
@@ -96,6 +102,7 @@ __all__ = [
     "GpuCommand",
     "GpuCommands",
     "GpuJobRequest",
+    "GpuLauncher",
     "HipApiTime",
     "HostCommandBroker",
     "HostCommandBrokerError",
@@ -119,6 +126,7 @@ __all__ = [
     "SlurmPolicyError",
     "SlurmProcessBroker",
     "SlurmProcessBrokerError",
+    "SlurmQueueStatusReader",
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
     "agent_gpu_capability",
@@ -129,9 +137,11 @@ __all__ = [
     "load_slurm_operator_settings",
     "load_slurm_policy",
     "profile_capture_descriptor",
+    "queue_status_from_snapshot",
     "read_slurm_capture_plan",
     "render_slurm_operator_toml",
     "require_profile_fields",
+    "slurm_queue_status_reader",
     "split_profile_stats",
     "translate_slurm_gpu",
     "trusted_profile_command",

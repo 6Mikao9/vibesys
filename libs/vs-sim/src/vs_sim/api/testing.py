@@ -65,6 +65,7 @@ from vs_sim.fakes import (
     ScriptedProbe,
     ScriptedStreamingCommand,
     StreamedRun,
+    refused_starts,
 )
 from vs_sim.faults import CallCounter, ScheduledRule, fault_stream, match_rule
 from vs_sim.file_effects import file_size_limit
@@ -88,12 +89,20 @@ from vs_sim.signal_relay_contracts import (
     SignalRelayContract,
 )
 from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
-from vs_sim.sim_network import End, FiredFault, LinkFault, LinkFaultKind, SimNetwork
+from vs_sim.sim_network import (
+    DEFAULT_BUFFER_BYTES,
+    End,
+    FiredFault,
+    LinkFault,
+    LinkFaultKind,
+    SimNetwork,
+)
 from vs_sim.sim_threads import (
     SimBlockingRunner,
     SimDeadlockError,
     SimMisuseError,
     SimThreads,
+    loop_threads,
     undriven_threads,
 )
 from vs_sim.states import Changes, wait_for_async_state, wait_for_state, yield_until
@@ -122,6 +131,7 @@ from vs_sim.waits import (
 
 __all__ = [
     "DEEP_NESTING",
+    "DEFAULT_BUFFER_BYTES",
     "HANG_GUARD_S",
     "NO_PROCESSES",
     "OVERSIZED_BYTES",
@@ -232,10 +242,12 @@ __all__ = [
     "get_or_fail",
     "hostile_json_frames",
     "join_or_fail",
+    "loop_threads",
     "match_rule",
     "non_main_thread_ids",
     "pairwise_rows",
     "random_for",
+    "refused_starts",
     "replay_hint",
     "restart_until_done",
     "run_in_child",

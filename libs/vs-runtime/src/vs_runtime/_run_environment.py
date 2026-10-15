@@ -125,7 +125,7 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
-from vs_sim.api import CloseOnce, OsProcesses, ReleaseStack, SubprocessPipedProcessLauncher
+from vs_sim.api import CloseOnce, ReleaseStack
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
@@ -143,6 +143,7 @@ if TYPE_CHECKING:
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
     from vs_evaluation.api import ProfileField
     from vs_project.api import StateNamespace
+    from vs_runtime._environment_system import EnvironmentSystem
     from vs_sandbox.api import (
         CommandRunner,
         ComputeBackendImpl,
@@ -150,7 +151,7 @@ if TYPE_CHECKING:
         WorkspaceSandbox,
     )
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
-    from vs_sim.api import Clock, Processes
+    from vs_sim.api import Clock
 
 
 @dataclass(frozen=True)
@@ -371,8 +372,8 @@ class RunEnvironmentRequest:
     framework_root: Path
     clock: Clock
     """Measures the agent image build budget."""
-    slurm_processes: Processes
-    """Starts the Slurm transport programs a host broker runs for the agent's container."""
+    system: EnvironmentSystem
+    """The host's threads, sockets and processes the environment's brokers and tools run on."""
     objective: str | None = None
     # Authored run state belongs to git_history_root, including when workspace
     # is a candidate revision that predates the objective's committed document.
@@ -614,7 +615,9 @@ class RunEnvironment(Protocol):
         """Remove a workspace-relative child and report whether it is absent."""
         ...
 
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
         """End the agent processes and containers a dead host left for *run_id*.
 
         Called when a run resumes, before anything else touches its workspace.
@@ -625,8 +628,10 @@ class RunEnvironment(Protocol):
 
 
 class _NoopWorkspaceRecovery:
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
-        del run_id, log
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
+        del run_id, system, log
 
     def repair_workspace(
         self,
@@ -929,12 +934,7 @@ class DockerEnvironment:
         if request.docker_in_docker:
             # Fail before the image build when the host has no Sysbox; nothing
             # falls back to the host socket.
-            require_sysbox_runtime(
-                self.config.docker
-                or SubprocessDockerCli(
-                    processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
-                )
-            )
+            require_sysbox_runtime(self._docker(request.system))
             toolchains.add(CONTAINER_RUNTIME_TOOLCHAIN)
             log(DOCKER_IN_DOCKER_NOTICE)
         # The task image, when a task has a Dockerfile, is built by the
@@ -1007,21 +1007,22 @@ class DockerEnvironment:
         log(f"[docker] starting container with image {container_image}")
         return sandbox
 
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
         """End the agents and containers a previous host process left for *run_id*."""
         reaper = (
             self.config.orphan_reaper
             if self.config.orphan_reaper is not None
             else reap_orphaned_agents
         )
-        reaper(
-            run_id,
-            docker=self.config.docker
-            or SubprocessDockerCli(
-                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
-            ),
-            log=log,
-        )
+        reaper(run_id, docker=self._docker(system), log=log)
+
+    def _docker(self, system: EnvironmentSystem) -> DockerCli:
+        """The configured ``docker`` client, or the host's own over *system*'s processes."""
+        if self.config.docker is not None:
+            return self.config.docker
+        return SubprocessDockerCli(processes=system.processes, launcher=system.launcher)
 
     def repair_workspace(
         self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
