@@ -120,12 +120,14 @@ from vs_evaluation.api.tools import (
     CORE_EVALUATION_TOOLS,
     core_evaluation_mcp_descriptor,
 )
+from vs_project.api import NestedRepositoryError
 from vs_runtime._agent_tool_errors import ToolRefusal, ToolRefusedError, render_tool_refusal
 from vs_runtime._core_loop import AdmissionBusyError
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
+from vs_sim.api import WorkerStartRefusedError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -145,6 +147,7 @@ EVALUATION_TOOL_ID = "evaluation"
 
 _FRAME_LIMIT = 65_536
 _SNAPSHOT_LABEL = "agent-evaluation"
+_ACCEPT_RETRY_SECONDS = 0.1
 _CALLS = TypeAdapter(AgentEvaluationCall)
 _REFUSALS = {
     AgentRejection.RUN_STOPPING: ToolRefusal.RUN_STOPPING,
@@ -512,9 +515,18 @@ class AgentEvaluationBridge:
             if closing:
                 connection.close()
                 return
-            self._threads.spawn(
-                partial(self._client, connection, loop), name="agent-evaluation-call"
-            )
+            try:
+                self._threads.spawn(
+                    partial(self._client, connection, loop), name="agent-evaluation-call"
+                )
+            except WorkerStartRefusedError as error:
+                with self._guard:
+                    self._open.discard(connection)
+                connection.close()
+                self._diagnostics(
+                    f"agent evaluation call worker did not start: {type(error).__name__}; retrying"
+                )
+                self._threads.sleep(_ACCEPT_RETRY_SECONDS)
 
     def _client(self, connection: Connection, loop: asyncio.AbstractEventLoop) -> None:
         try:
@@ -755,11 +767,14 @@ class AgentEvaluationBridge:
         would give every call a fresh identity and its own budget.
         """
         last = scoped.last_revision
-        if last is not None and await workspace.matches_revision(last):
-            return last
-        revision = await workspace.snapshot_and_retain(
-            _SNAPSHOT_LABEL, retention_label=_SNAPSHOT_LABEL
-        )
+        try:
+            if last is not None and await workspace.matches_revision(last):
+                return last
+            revision = await workspace.snapshot_and_retain(
+                _SNAPSHOT_LABEL, retention_label=_SNAPSHOT_LABEL
+            )
+        except NestedRepositoryError as error:
+            raise ToolRefusedError(ToolRefusal.NESTED_REPOSITORY) from error
         scoped.last_revision = revision
         return revision
 
