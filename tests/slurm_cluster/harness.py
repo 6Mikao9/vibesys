@@ -47,7 +47,6 @@ from vs_sim.api import (
     SubprocessPipedProcessLauncher,
     UnixNetwork,
 )
-from vs_sim.api.testing import NO_PROCESSES
 
 if TYPE_CHECKING:
     import threading
@@ -412,11 +411,16 @@ def open_candidates(
 
 
 def _real_system() -> EnvironmentSystem:
-    """The host's own threads, sockets and processes; this test runs no Slurm program."""
+    """The host's own threads, sockets and processes.
+
+    The agent GPU launcher checks and cancels its jobs with ``squeue`` and ``scancel``
+    through ``slurm_processes``, so they reach the real cluster too.
+    """
+    processes = OsProcesses()
     return EnvironmentSystem(
         threads=OsThreads(),
         network=UnixNetwork(),
-        processes=OsProcesses(),
+        processes=processes,
         launcher=SubprocessPipedProcessLauncher(),
-        slurm_processes=NO_PROCESSES,
+        slurm_processes=processes,
     )
