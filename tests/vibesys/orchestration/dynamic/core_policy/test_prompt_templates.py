@@ -209,6 +209,26 @@ def test_the_implementer_is_told_to_submit_early_and_not_to_repeat_a_passed_chec
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
+@given(data=st.data(), offered=st.booleans())
+def test_the_implementer_keeps_working_while_its_evaluation_is_queued(
+    data: st.DataObject, *, offered: bool
+) -> None:
+    # live run: implementers ended turns with `waiting_for_evaluation` just to wait, parking every
+    # workstream, or busy-waited on queued GPU jobs with 10-minute `sleep` loops.
+    context = data.draw(CONTEXTS[PromptTemplate.IMPLEMENT])
+
+    text = " ".join(render(PromptTemplate.IMPLEMENT, context, agent_evaluation=offered).split())
+
+    guidance = (
+        "do not end the turn only to wait: keep implementing the remaining work",
+        "validate it with tests that need no GPU",
+        "Do not poll with `sleep` loops",
+        "End the turn with `waiting_for_evaluation` only when nothing useful remains to implement",
+    )
+    assert all(line in text for line in guidance) is offered
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data(), summary=tokens("blk"), step=st.just("") | tokens("nxt"))
 def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
     data: st.DataObject, summary: str, step: str
