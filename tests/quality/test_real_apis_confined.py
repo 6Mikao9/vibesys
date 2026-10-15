@@ -77,6 +77,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
@@ -1610,8 +1611,9 @@ def test_product_code_parses_json_only_through_vs_decode() -> None:
 # only an entrypoint builds the real implementations. Any call that builds one counts, as does
 # a no-argument call to a wrapper class that builds one on its own (``transport or
 # BrokerTransport()``); the ``main`` of a module that runs as a program is an entrypoint.
-# ``REAL_DEFAULT_PENDING`` lists the files not yet converted, each with the work that
-# converts it. It may only shrink.
+# A call to such a wrapper that passes some arguments counts when it leaves a role out (an
+# interface or wrapper the class may build itself). ``REAL_DEFAULT_PENDING`` lists the sites not
+# yet converted, each with the work item that converts it. It may only shrink.
 
 ENTRYPOINT_PREFIXES = ("src/entrypoints/",)
 SYSTEM_INTERFACES = frozenset(
@@ -1632,29 +1634,100 @@ REAL_IMPLEMENTATION_LEAVES = frozenset(
     key.split(".")[-1] for key in REAL_IMPLEMENTATIONS if not key.endswith(".real")
 )
 
-_LANE_A = "lane A (Git, Slurm, Docker and the piped launcher, #2600 and #2607)"
-_LANE_B = "lane B (runtime, server and entrypoints)"
-_SANDBOX_WIRING = "the vs-sandbox GPU and SkyPilot wiring: thread Threads and Network down"
-REAL_DEFAULT_PENDING: dict[str, str] = {
-    "libs/vs-agent/src/vs_agent/images.py": _LANE_A,
-    "libs/vs-runtime/src/vs_runtime/_run_environment.py": f"{_LANE_A}: OsProcesses",
-    "libs/vs-runtime/src/vs_runtime/_semantic_slurm_evaluation.py": _LANE_A,
-    "libs/vs-runtime/src/vs_runtime/api/slurm_evaluation_stack.py": _LANE_B,
-    "libs/vs-sandbox/src/vs_sandbox/agent_gpu.py": _LANE_A,
-    "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": (
-        "the Fake takes its Threads from the test (75 call sites)"
-    ),
-    "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": _SANDBOX_WIRING,
-    "libs/vs-sandbox/src/vs_sandbox/host_command_broker.py": (
-        f"{_LANE_B}: SlurmEnvironment has no Threads or Network to hand the broker"
-    ),
-    "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py": _SANDBOX_WIRING,
-    "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py": _SANDBOX_WIRING,
-    "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py": _SANDBOX_WIRING,
-    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": _LANE_A,
-    "libs/vs-slurm/src/vs_slurm/fake_cluster.py": "the Fake takes its Clock from the test",
-    "src/launch/__init__.py": f"{_LANE_A}: slurm_processes",
-    "src/vibesys/run/slurm_evaluation.py": _LANE_A,
+
+class Owner(StrEnum):
+    """Who converts a pending real default; each is a live work item."""
+
+    LANE_A = "lane A: Git, Slurm, Docker and the piped launcher (#2600, system-tools injection)"
+    PURITY = "purity: runtime, server and Fake call sites take their Threads, Clock or Network"
+    CONFINEMENT = "confinement: the vs-sandbox GPU and SkyPilot wiring takes Threads and Network"
+
+
+# One entry per site: the file, then the site key (the enclosing scope and what it builds or
+# lets a caller omit, without a line number), then the owner. A new real default in a pending
+# file is a new site, so it fails the check.
+REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
+    "libs/vs-agent/src/vs_agent/images.py": {
+        "SubprocessDockerBuildRunner.__init__:threads=None": Owner.LANE_A,
+        "SubprocessDockerBuildRunner.__init__:processes=None": Owner.LANE_A,
+        "SubprocessDockerBuildRunner.__init__:OsThreads()": Owner.LANE_A,
+        "SubprocessDockerBuildRunner.__init__:SubprocessPipedProcessLauncher()": Owner.LANE_A,
+        "build_task_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
+        "agent_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
+        "push_agent_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
+        "agent_image_is_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
+        "ensure_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
+    },
+    "libs/vs-runtime/src/vs_runtime/_agent_gpu_commands.py": {
+        "agent_gpu_commands:AgentGpuLauncher(...)": Owner.LANE_A,
+    },
+    "libs/vs-runtime/src/vs_runtime/_run_environment.py": {
+        "DockerEnvironment.build_editor:OsProcesses()": Owner.LANE_A,
+        "DockerEnvironment.build_editor:SubprocessPipedProcessLauncher()": Owner.LANE_A,
+        "DockerEnvironment.reap_orphans:OsProcesses()": Owner.LANE_A,
+        "DockerEnvironment.reap_orphans:SubprocessPipedProcessLauncher()": Owner.LANE_A,
+        "SkyPilotEnvironment._open_skypilot:SkyPilotBridge(...)": Owner.CONFINEMENT,
+        "SkyPilotEnvironment._open_skypilot:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
+    },
+    "libs/vs-runtime/src/vs_runtime/_semantic_slurm_evaluation.py": {
+        "SemanticSlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
+    },
+    "libs/vs-runtime/src/vs_runtime/_slurm_environment.py": {
+        "SlurmEnvironment._start_command_broker:HostCommandBroker(...)": Owner.LANE_A,
+    },
+    "libs/vs-runtime/src/vs_runtime/api/slurm_evaluation_stack.py": {
+        "build_stack:clock=None": Owner.PURITY,
+    },
+    "libs/vs-sandbox/src/vs_sandbox/agent_gpu.py": {
+        "read_windows:SubprocessProbe()": Owner.LANE_A,
+        "AgentGpuLauncher.__init__:processes=None": Owner.LANE_A,
+        "AgentGpuLauncher.__init__:threads=None": Owner.LANE_A,
+        "AgentGpuLauncher.__init__:SubprocessProbe()": Owner.LANE_A,
+        "AgentGpuLauncher.__init__:SubprocessPipedProcessLauncher()": Owner.LANE_A,
+        "AgentGpuLauncher.__init__:OsThreads()": Owner.LANE_A,
+    },
+    "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": {
+        "FakeCommandRunner:default_factory=OsThreads": Owner.PURITY,
+    },
+    "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": {
+        "NvidiaSmiTelemetry.__init__:SubprocessProbe()": Owner.CONFINEMENT,
+        "GpuContentionMonitor.__init__:NvidiaSmiTelemetry()": Owner.CONFINEMENT,
+    },
+    "libs/vs-sandbox/src/vs_sandbox/host_command_broker.py": {
+        "BrokerTransport:default_factory=UnixNetwork": Owner.PURITY,
+        "BrokerTransport:default_factory=OsThreads": Owner.PURITY,
+        "HostCommandBroker.__init__:BrokerTransport()": Owner.PURITY,
+    },
+    "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py": {
+        "build:SubprocessProbe()": Owner.CONFINEMENT,
+    },
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py": {
+        "SkyPilotBridge.__init__:network=None": Owner.CONFINEMENT,
+        "SkyPilotBridge.__init__:threads=None": Owner.CONFINEMENT,
+        "SkyPilotBridge.__init__:UnixNetwork()": Owner.CONFINEMENT,
+        "SkyPilotBridge.__init__:OsThreads()": Owner.CONFINEMENT,
+    },
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py": {
+        "SubprocessCommandRunner.__init__:threads=None": Owner.CONFINEMENT,
+        "SubprocessCommandRunner.__init__:processes=None": Owner.CONFINEMENT,
+        "SubprocessCommandRunner.__init__:OsThreads()": Owner.CONFINEMENT,
+        "SubprocessCommandRunner.__init__:SubprocessPipedProcessLauncher()": Owner.CONFINEMENT,
+        "SkyPilotJobRunner.__init__:threads=None": Owner.CONFINEMENT,
+        "SkyPilotJobRunner.__init__:OsThreads()": Owner.CONFINEMENT,
+        "SkyPilotJobRunner.__init__:SubprocessCommandRunner(...)": Owner.CONFINEMENT,
+    },
+    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": {
+        "SlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
+    },
+    "libs/vs-slurm/src/vs_slurm/fake_cluster.py": {
+        "FakeCluster.__init__:clock=None": Owner.PURITY,
+    },
+    "src/launch/__init__.py": {
+        "LaunchSettings:slurm_processes=None": Owner.LANE_A,
+    },
+    "src/vibesys/run/slurm_evaluation.py": {
+        "SlurmSemanticEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
+    },
 }
 
 
@@ -1690,13 +1763,35 @@ def _inside_program_entry(tree: ast.Module) -> set[int]:
     }
 
 
+@dataclass(frozen=True)
+class Builder:
+    """A class that builds a real implementation when a caller leaves its roles out."""
+
+    parameters: tuple[str, ...]
+    """Positional parameters (or dataclass fields) in call order."""
+    roles: frozenset[str]
+    """The parameters a caller must give so that the class builds nothing real: a system
+    interface or another builder it may leave out, or one whose default builds a real one."""
+
+    def left_out(self, call: ast.Call) -> bool:
+        """Whether *call* leaves a role out. A starred argument may supply any."""
+        if any(isinstance(arg, ast.Starred) for arg in call.args) or any(
+            keyword.arg is None for keyword in call.keywords
+        ):
+            return False
+        given = {keyword.arg for keyword in call.keywords}
+        given.update(self.parameters[: len(call.args)])
+        return bool(self.roles - given)
+
+
 def _constructions(
-    root: ast.AST, builders: frozenset[str], skip: frozenset[int] | set[int] = frozenset()
+    root: ast.AST, builders: Mapping[str, Builder], skip: frozenset[int] | set[int] = frozenset()
 ) -> list[ast.expr]:
     """The expressions under *root* that build a real implementation.
 
-    A call to a real implementation, a call with no arguments to one of the *builders* (a class
-    whose fields or ``__init__`` build one on their own), or a ``default_factory`` naming either.
+    A call to a real implementation, a call to one of the *builders* (a class whose fields or
+    ``__init__`` build one on their own) that gives no argument or leaves one of its roles
+    out, or a ``default_factory`` naming either.
     """
     found: list[ast.expr] = []
 
@@ -1709,26 +1804,29 @@ def _constructions(
         if id(node) in skip:
             continue
         if isinstance(node, ast.Call):
-            bare = not node.args and not node.keywords
-            if _leaf(node.func) in REAL_IMPLEMENTATION_LEAVES or (
-                bare and isinstance(node.func, ast.Name) and node.func.id in builders
-            ):
+            if _leaf(node.func) in REAL_IMPLEMENTATION_LEAVES:
                 found.append(node)
+            elif isinstance(node.func, ast.Name) and node.func.id in builders:
+                builder = builders[node.func.id]
+                if (not node.args and not node.keywords) or builder.left_out(node):
+                    found.append(node)
         elif isinstance(node, ast.keyword) and node.arg == "default_factory" and builds(node.value):
             found.append(node.value)
     return found
 
 
-def real_builders(sources: Iterable[str]) -> frozenset[str]:
-    """Names of classes that build a real implementation when constructed without arguments.
+def real_builders(sources: Iterable[str]) -> dict[str, Builder]:
+    """The classes that build a real implementation when constructed without it, by name.
 
     A class builds one in a field's ``default_factory`` or in ``__init__``/``__post_init__``.
     A class that does so through another such class is found too, so ``BrokerTransport`` (whose
     fields default to real ``Network`` and ``Threads``) is a builder, and ``transport or
     BrokerTransport()`` is a real default. Names are matched without their module, so two
-    classes called alike share a verdict.
+    classes called alike share a verdict. A call that passes some arguments is a real default
+    when it leaves out a role (see :class:`Builder`).
     """
     parts: dict[str, list[tuple[ast.AST, set[int]]]] = {}
+    classes: dict[str, list[ast.ClassDef]] = {}
     for source in sources:
         tree = ast.parse(source)
         entry = _inside_program_entry(tree)
@@ -1741,26 +1839,74 @@ def real_builders(sources: Iterable[str]) -> frozenset[str]:
                     or (isinstance(stmt, ast.FunctionDef) and stmt.name in _SETUP_METHODS)
                 ]
                 parts.setdefault(node.name, []).extend((stmt, entry) for stmt in setup)
-    builders: frozenset[str] = frozenset()
+                classes.setdefault(node.name, []).append(node)
+    builders: dict[str, Builder] = {}
     while True:
-        found = frozenset(
-            name
+        found = {
+            name: _builder(classes[name], builders)
             for name, bodies in parts.items()
             if any(_constructions(body, builders, skip) for body, skip in bodies)
-        )
+        }
         if found == builders:
             return builders
         builders = found
 
 
-def _optional_interface(annotation: ast.expr | None, default: ast.expr | None) -> bool:
-    """``x: Threads | None = None``: a system interface a caller may leave out."""
+def _builder(definitions: list[ast.ClassDef], builders: Mapping[str, Builder]) -> Builder:
+    """The call order and roles of the class defined (possibly several times) as *definitions*."""
+    parameters: list[str] = []
+    roles: set[str] = set()
+    for definition in definitions:
+        init = next(
+            (
+                stmt
+                for stmt in definition.body
+                if isinstance(stmt, ast.FunctionDef) and stmt.name == "__init__"
+            ),
+            None,
+        )
+        if init is not None:
+            parameters = [arg.arg for arg in [*init.args.posonlyargs, *init.args.args][1:]]
+            candidates = [
+                (arg.arg, arg.annotation, default)
+                for arg, default in _parameter_defaults(init.args)
+                if arg.arg != "self"
+            ]
+        else:
+            fields = [
+                stmt
+                for stmt in definition.body
+                if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)
+            ]
+            parameters = [field.target.id for field in fields if isinstance(field.target, ast.Name)]
+            candidates = [
+                (field.target.id, field.annotation, field.value)
+                for field in fields
+                if isinstance(field.target, ast.Name)
+            ]
+        roles.update(
+            name
+            for name, annotation, default in candidates
+            if _optional_interface(annotation, default, builders)
+            or (default is not None and _constructions(default, builders))
+        )
+    return Builder(tuple(parameters), frozenset(roles))
+
+
+def _optional_interface(
+    annotation: ast.expr | None,
+    default: ast.expr | None,
+    builders: Mapping[str, Builder] | None = None,
+) -> bool:
+    """``x: Threads | None = None``: a system interface (or builder) a caller may leave out."""
     if not (isinstance(default, ast.Constant) and default.value is None):
         return False
     if not (isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr)):
         return False
     sides = (annotation.left, annotation.right)
-    return any(_leaf(side) in SYSTEM_INTERFACES for side in sides)
+    return any(
+        _leaf(side) in SYSTEM_INTERFACES or _leaf(side) in (builders or {}) for side in sides
+    )
 
 
 def _parameter_defaults(arguments: ast.arguments) -> Iterable[tuple[ast.arg, ast.expr | None]]:
@@ -1770,31 +1916,84 @@ def _parameter_defaults(arguments: ast.arguments) -> Iterable[tuple[ast.arg, ast
     yield from zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
 
 
-def real_defaults(source: str, builders: frozenset[str] = frozenset()) -> list[int]:
-    """The lines where *source* builds a real implementation or lets a caller omit one.
+@dataclass(frozen=True)
+class Site:
+    """One real default: where it is, and a key that stays the same when the file is edited."""
+
+    line: int
+    key: str
+    """``Class.method:what`` (``#2`` and up for a repeat in one function), without a line number."""
+
+
+def _sites(tree: ast.Module, labelled: Mapping[int, str]) -> list[Site]:
+    """The nodes of *labelled* (by ``id``) with the qualified name of the scope that holds each."""
+    found: list[tuple[int, str]] = []
+
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if id(child) in labelled:
+                found.append(
+                    (
+                        getattr(child, "lineno", 0),
+                        f"{'.'.join(scope) or '<module>'}:{labelled[id(child)]}",
+                    )
+                )
+            inner = (
+                (*scope, child.name)
+                if isinstance(child, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+                else scope
+            )
+            visit(child, inner)
+
+    visit(tree, ())
+    seen: dict[str, int] = {}
+    sites = []
+    for line, base in sorted(found):
+        seen[base] = seen.get(base, 0) + 1
+        sites.append(Site(line, base if seen[base] == 1 else f"{base}#{seen[base]}"))
+    return sites
+
+
+def _construction_label(node: ast.expr) -> str:
+    if isinstance(node, ast.Call):
+        return (
+            f"{_leaf(node.func)}()"
+            if not (node.args or node.keywords)
+            else f"{_leaf(node.func)}(...)"
+        )
+    return f"default_factory={_leaf(node)}"
+
+
+def real_defaults(source: str, builders: Mapping[str, Builder] | None = None) -> list[Site]:
+    """The sites where *source* builds a real implementation or lets a caller omit one.
 
     Every real construction counts, not only a fallback for a missing argument: outside an
     entrypoint, a component that builds its own ``OsThreads`` cannot be driven by a simulator
     either. *builders* are the wrappers :func:`real_builders` found.
     """
+    builders = builders or {}
     tree = ast.parse(source)
-    lines = {node.lineno for node in _constructions(tree, builders, _inside_program_entry(tree))}
+    labelled = {
+        id(node): _construction_label(node)
+        for node in _constructions(tree, builders, _inside_program_entry(tree))
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.arguments):
-            lines.update(
-                arg.lineno
+            labelled.update(
+                (id(arg), f"{arg.arg}=None")
                 for arg, default in _parameter_defaults(node)
                 if _optional_interface(arg.annotation, default)
             )
         elif isinstance(node, ast.ClassDef):
             # A field a caller may omit; ``self.x: Clock | None = None`` in a method is state.
-            lines.update(
-                stmt.lineno
+            labelled.update(
+                (id(stmt), f"{stmt.target.id}=None")
                 for stmt in node.body
                 if isinstance(stmt, ast.AnnAssign)
+                and isinstance(stmt.target, ast.Name)
                 and _optional_interface(stmt.annotation, stmt.value)
             )
-    return sorted(lines)
+    return _sites(tree, labelled)
 
 
 PLANTED_DEFAULTS = {
@@ -1808,10 +2007,16 @@ PLANTED_DEFAULTS = {
     "wrapper_default": "def f(t=None):\n    return t or Transport()\n",
     "wrapper_default_factory": "class A:\n    t: Transport = field(default_factory=Transport)\n",
     "wrapper_of_wrapper": "def f(t=None):\n    return t or Outer()\n",
+    "wrapper_some_arguments_no_roles": "def f(p):\n    return Wrapped(p)\n",
+    "wrapper_role_by_keyword_only": "def f(p, t):\n    return Wrapped(p, threads=t)\n",
+    "wrapper_role_by_position_only": "def f(p, c):\n    return Wrapped(p, c)\n",
 }
 WRAPPERS = (
     "@dataclass\nclass Transport:\n    threads: Threads = field(default_factory=OsThreads)\n"
     "class Outer:\n    def __init__(self):\n        self.t = Transport()\n"
+    "class Wrapped:\n"
+    "    def __init__(self, path, clock: Clock | None = None, *, threads: Threads | None = None):\n"
+    "        self.t = (clock, threads or OsThreads())\n"
 )
 ALLOWED_DEFAULTS = {
     "required": "def f(*, threads: Threads) -> None: ...\n",
@@ -1824,6 +2029,9 @@ ALLOWED_DEFAULTS = {
         'if __name__ == "__main__":\n    main()\n'
     ),
     "wrapper_given_its_parts": "def f() -> None:\n    Transport(threads=SimThreads())\n",
+    "wrapper_given_every_role": "def f(p, c, t):\n    return Wrapped(p, c, threads=t)\n",
+    "wrapper_given_roles_by_keyword": "def f(p, c, t):\n    return Wrapped(p, clock=c, threads=t)\n",
+    "wrapper_with_unpacked_arguments": "def f(*a, **k):\n    return Wrapped(*a, **k)\n",
 }
 
 
@@ -1838,20 +2046,30 @@ def test_a_required_or_fake_interface_is_not_a_real_default(case: str) -> None:
 
 
 def test_a_wrapper_that_builds_a_real_implementation_is_a_builder() -> None:
-    assert real_builders([WRAPPERS]) == {"Transport", "Outer"}
+    assert set(real_builders([WRAPPERS])) == {"Transport", "Outer", "Wrapped"}
 
 
 def test_a_class_that_only_stores_what_it_is_given_is_not_a_builder() -> None:
     source = "class A:\n    def __init__(self, threads):\n        self.t = threads\n"
-    assert real_builders([source]) == frozenset()
+    assert real_builders([source]) == {}
 
 
-def test_every_pending_real_default_is_a_product_file_with_its_owner() -> None:
-    for relative, owner in REAL_DEFAULT_PENDING.items():
+def test_every_pending_real_default_is_a_product_site_with_its_owner() -> None:
+    for relative, sites in REAL_DEFAULT_PENDING.items():
         assert _is_product(relative), relative
         assert not relative.startswith(ENTRYPOINT_PREFIXES), relative
         assert (REPO / relative).is_file(), relative
-        assert owner.strip(), relative
+        assert sites, relative
+        assert all(isinstance(owner, Owner) for owner in sites.values()), relative
+
+
+def test_a_site_key_does_not_move_with_its_line_and_counts_repeats() -> None:
+    source = "def f():\n    a = OsThreads()\n    b = OsThreads()\n"
+    moved = "\n\n# edit\n" + source
+    assert [site.key for site in real_defaults(source)] == ["f:OsThreads()", "f:OsThreads()#2"]
+    assert [site.key for site in real_defaults(moved)] == [
+        site.key for site in real_defaults(source)
+    ]
 
 
 def test_product_code_outside_entrypoints_has_no_real_defaults() -> None:
@@ -1860,21 +2078,21 @@ def test_product_code_outside_entrypoints_has_no_real_defaults() -> None:
         for path in _python_files(PRODUCT_ROOTS)
     }
     builders = real_builders(sources.values())
-    found: dict[str, list[int]] = {}
+    found: dict[str, set[str]] = {}
+    lines: dict[tuple[str, str], int] = {}
     for relative, source in sources.items():
         if relative.startswith((*EXEMPT_PREFIXES, *ENTRYPOINT_PREFIXES)):
             continue
-        if lines := real_defaults(source, builders):
-            found[relative] = lines
-    stale = sorted(set(REAL_DEFAULT_PENDING) - set(found))
-    assert not stale, (
-        f"these files no longer have a real default; remove them from REAL_DEFAULT_PENDING: {stale}"
-    )
-    new = {
-        relative: lines for relative, lines in found.items() if relative not in REAL_DEFAULT_PENDING
-    }
+        for site in real_defaults(source, builders):
+            found.setdefault(relative, set()).add(site.key)
+            lines[relative, site.key] = site.line
+    pending = {(relative, key) for relative, keys in REAL_DEFAULT_PENDING.items() for key in keys}
+    present = {(relative, key) for relative, keys in found.items() for key in keys}
+    stale = sorted(pending - present)
+    assert not stale, f"these sites are converted; remove them from REAL_DEFAULT_PENDING: {stale}"
+    new = sorted(present - pending)
     assert not new, (
         "product code takes its Threads, Processes, Clock and other vs_sim.api interfaces as "
         "required arguments; only an entrypoint (src/entrypoints) builds the real ones:\n"
-        + "\n".join(f"{relative}: lines {lines}" for relative, lines in sorted(new.items()))
+        + "\n".join(f"{relative}:{lines[relative, key]}: {key}" for relative, key in new)
     )
