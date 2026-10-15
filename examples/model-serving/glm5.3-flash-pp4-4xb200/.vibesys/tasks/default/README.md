@@ -15,7 +15,7 @@ same as the vLLM variant of this task (the vLLM repository's task
 | `/vibesys_serve.sh` (repository root) | candidate (agent-written) | the server launch; absent at the start |
 | `vibesys.input.toml`, `objectives.toml` | task | commands, timeouts, objectives |
 | `benchmark/` | task | `session_replay.py`, the handoff's `metrics.py`, the trace manifest pin, CPU smoke test |
-| `accuracy_checker/` | task | `checker.py`, `engine_scan.py` (+ its unit test), `make_reference.py`, `reference.json` (generated once on GPUs, operator-provided) |
+| `accuracy_checker/` | task | `checker.py`, `engine_scan.py` (+ its unit test), `make_reference.py` (`reference.json` is generated once on GPUs and kept at an operator path) |
 | `reference/` | task | the handoff's README, contract and pass-rule docs (4-7), small target files under `data/` |
 
 ## Interface
@@ -35,10 +35,11 @@ The checkpoint must be in the Hugging Face cache at revision
 `da920bb0b9f4a06727223a349e55468e38352348`.
 
 **Accuracy** (`accuracy_checker/checker.py`), operator appends:
-`--base-url http://127.0.0.1:PORT` (no `/v1`). Before any request it scans
-the candidate root for engine code (`engine_scan.py`) and fails on a finding. Needs
-`accuracy_checker/reference.json`, made once with `make_reference.py`
-(`accuracy_checker/README.md`).
+`--base-url http://127.0.0.1:PORT` (no `/v1`) and
+`--reference <operator path>/reference.json`, made once with
+`make_reference.py` on the reference build (`accuracy_checker/README.md`).
+Keep it outside the candidate tree. Before any request it scans the
+candidate root for engine code (`engine_scan.py`) and fails on a finding.
 
 **Benchmark** (`benchmark/session_replay.py`), operator appends:
 
@@ -49,7 +50,12 @@ the candidate root for engine code (`engine_scan.py`) and fails on a finding. Ne
 --text-file <enwik9, md5 e206c3450ac99950df65bf70ef61a12d>
 --asset-dir <dir with sessions_2ps.csv (sha256 a1a1e78b...eb3e72) and sessions_2ps.manifest.json>
 --preflight-probe-tokens 32768
+--replay-reference <operator path>/replay_reference.json
 ```
+
+`--replay-reference` is the reference build's replay answers, recorded once
+with `--record-replay-reference` on the TP4+EP reference server
+(`benchmark/README.md`, "Replay answers"). Keep it outside the candidate tree.
 
 and, when the tokenizer is not in the default Hugging Face cache,
 `--tokenizer <tokenizer.json>` or `HF_HUB_CACHE`/`HF_HOME` in the environment.

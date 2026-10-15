@@ -15,6 +15,18 @@ Runs the real session_runner on a tiny synthetic trace (16 sessions, a
   slow-screen every request takes 9 s, over the 8 s bound: rejected at screening
   big-block   prefix-cache blocks of 1,536 tokens: rejected at screening, before
               session_runner's 1,024-token preflight would abort
+  record      recording mode on a healthy server: writes the replay reference the
+              scored cases below are checked against
+  faked-replay streamed (replay-shaped) requests get a wrong token: rejected by the
+              replay-reference agreement check
+  truncation  prompts over 9,000 tokens are cut: rejected for usage.prompt_tokens
+  no-ids      text but no token ids after 40 requests (the client re-encodes, so no
+              shortfall shows): rejected for missing token ids
+  starvation  four requests never answer: they count in p99 as outstanding rounds,
+              which puts p99 over the 8 s bound: rejected, naming them
+  cross-eval  the replay twice on one server, cache kept: the second run is rejected
+              for cache hits from outside the evaluation
+  crash       an unexpected exception inside run(): an `error` record, not no outcome
   judge       a finished run with p99 7 s: scored, slo_met 0; with p99 9 s: rejected
               by the end-of-run gate (the 8 s smoke bound)
 
@@ -108,11 +120,21 @@ def smoke_workload(trace_sha: str) -> sr.Workload:
         # The real bound is 60 s; 8 s keeps the abort and screening cases short
         # while staying above the 6.5 s slow requests of the `slo` case.
         reject_p99_ttft_s=SMOKE_REJECT_S,
+        # 16 sessions: their round 0s alone match; 40 needs some later rounds too.
+        replay_min_agreement=0.95,
+        replay_min_matched_rounds=40,
+        round0_max_cached_tokens=16,  # the fake server's block
     )
 
 
 def run_case(
-    name: str, server_flags: list[str], ns: argparse.Namespace, root: Path, sha: str
+    name: str,
+    server_flags: list[str],
+    ns: argparse.Namespace,
+    root: Path,
+    sha: str,
+    mode: list[str] | None = None,
+    runs: int = 1,
 ) -> list[dict]:
     port = free_port()
     server = subprocess.Popen(
@@ -123,33 +145,46 @@ def run_case(
     try:
         assert server.stdout is not None
         server.stdout.readline()  # the "fake server on" line: listening
-        out = root / name / "vs_output.jsonl"
-        args = sr.parse_args(
-            [
-                "--base-url",
-                f"http://127.0.0.1:{port}/v1",
-                "--request-factory-engine",
-                ns.engine,
-                "--text-file",
-                ns.text_file,
-                "--asset-dir",
-                str(root),
-                "--tokenizer",
-                ns.tokenizer,
-                "--vs-output",
-                str(out),
-            ]
-        )
-        started = time.time()
-        code = sr.run(args, smoke_workload(sha), sr.ProtocolReport(out))
-        records = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
-        print(f"--- {name}: exit {code} in {time.time() - started:.0f} s; records:")
-        for record in records:
-            print("   ", json.dumps(record)[:600])
+        for run in range(runs):
+            records = run_one(f"{name}{'' if run == 0 else f'-{run}'}", port, ns, root, sha, mode)
         return records
     finally:
         server.terminate()
         server.wait()
+
+
+def run_one(
+    name: str, port: int, ns: argparse.Namespace, root: Path, sha: str, mode: list[str] | None
+) -> list[dict]:
+    out = root / name / "vs_output.jsonl"
+    args = sr.parse_args(
+        [
+            "--base-url",
+            f"http://127.0.0.1:{port}/v1",
+            "--request-factory-engine",
+            ns.engine,
+            "--text-file",
+            ns.text_file,
+            "--asset-dir",
+            str(root),
+            "--tokenizer",
+            ns.tokenizer,
+            "--vs-output",
+            str(out),
+            *(
+                mode
+                if mode is not None
+                else ["--replay-reference", str(root / "replay_reference.json")]
+            ),
+        ]
+    )
+    started = time.time()
+    code = sr.run(args, smoke_workload(sha), sr.ProtocolReport(out))
+    records = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    print(f"--- {name}: exit {code} in {time.time() - started:.0f} s; records:")
+    for record in records:
+        print("   ", json.dumps(record)[:600])
+    return records
 
 
 def expect_error(records: list[dict], *needles: str) -> None:
@@ -175,21 +210,33 @@ def case_judge() -> None:
         "ttft_s": {"p50": 0.1, "p90": 0.2, "p99": 7.0, "max": 9.0},
         "rounds_ttft_over_60s": 0,
     }
-    values = sr.judge(metrics, watch, facts, workload, screened)
+    agree = sr.Agreement(matched=100, agreed=99, first_disagreement=None)
+    values = sr.judge(metrics, watch, facts, workload, screened, agree)
     assert set(values) == set(sr.METRICS), set(sr.METRICS) ^ set(values)
     assert values["slo_met"] == 0.0 and abs(values["slo_margin_s"] + 1.0) < 1e-9, values
     metrics["ttft_s"]["p99"] = 5.0
-    values = sr.judge(metrics, watch, facts, workload, screened)
+    values = sr.judge(metrics, watch, facts, workload, screened, agree)
     assert values["slo_met"] == 1.0 and abs(values["slo_margin_s"] - 1.0) < 1e-9, values
     metrics["ttft_s"]["p99"] = 9.0
     try:
-        sr.judge(metrics, watch, facts, workload, screened)
+        sr.judge(metrics, watch, facts, workload, screened, agree)
     except sr.Rejected as exc:
         assert "p99 TTFT 9.00 s is over the 8 s rejection bound" in str(exc), exc
-        assert exc.partial["name"] == "p99_ttft_s" and exc.partial["target"] == 6.0
+        assert exc.partial["name"] == "p99_ttft_s" and exc.partial["target"] == SMOKE_REJECT_S
         print(f"--- judge: rejected as expected: {exc}")
     else:
         raise AssertionError("judge accepted a p99 over the rejection bound")
+    metrics["ttft_s"]["p99"] = 5.0
+    for bad, needle in (
+        (sr.Agreement(100, 94, "x"), "disagree with the reference build"),
+        (sr.Agreement(39, 39, None), "fewer than 40"),
+    ):
+        try:
+            sr.judge(metrics, watch, facts, workload, screened, bad)
+        except sr.Rejected as exc:
+            assert needle in str(exc), exc
+        else:
+            raise AssertionError(f"judge accepted {bad}")
     # The early-abort count is a property of the quantile and the ceiling, not of the bound.
     assert sr.rounds_over_bound_that_fail(41_444) == 416
     assert sr.WORKLOAD.reject_p99_ttft_s == 60.0
@@ -208,6 +255,13 @@ def main() -> int:
     ns = parser.parse_args()
     cases = ns.case or [
         "judge",
+        "record",
+        "faked-replay",
+        "truncation",
+        "no-ids",
+        "starvation",
+        "cross-eval",
+        "crash",
         "pass",
         "slo",
         "abort",
@@ -223,6 +277,62 @@ def main() -> int:
     for name in cases:
         if name == "judge":
             case_judge()
+        elif name == "record":
+            ref = root / "replay_reference.json"
+            records = run_case(name, [], ns, root, sha, ["--record-replay-reference", str(ref)])
+            assert [r["kind"] for r in records] == ["hello", "result"], records
+            rounds = json.loads(ref.read_text())["rounds"]
+            assert len(rounds) >= 100, len(rounds)
+            print(f"--- record: {len(rounds)} rounds in the replay reference")
+        elif name == "faked-replay":
+            expect_error(
+                run_case(name, ["--fake-replay"], ns, root, sha),
+                "disagree with the reference build",
+            )
+        elif name == "truncation":
+            expect_error(
+                run_case(name, ["--truncate-over", "9000"], ns, root, sha),
+                "usage.prompt_tokens differs",
+            )
+        elif name == "no-ids":
+            expect_error(
+                run_case(name, ["--text-only-after", "40"], ns, root, sha),
+                "streamed no generated token ids",
+            )
+        elif name == "starvation":
+            records = run_case(name, ["--hang-at", "40,45,50,55"], ns, root, sha)
+            expect_error(records, "rejection bound")
+            outstanding = int(
+                records[-1]["message"].split(" outstanding rounds")[0].rsplit(" ", 1)[-1]
+            )
+            assert outstanding >= 4, records[-1]
+        elif name == "cross-eval":
+            expect_error(
+                run_case(name, [], ns, root, sha, runs=2), "cache state carried in from outside"
+            )
+        elif name == "crash":
+            out = root / name / "vs_output.jsonl"
+            args = sr.parse_args(
+                [
+                    "--base-url",
+                    "http://127.0.0.1:1/v1",
+                    "--request-factory-engine",
+                    ns.engine,
+                    "--text-file",
+                    ns.text_file,
+                    "--asset-dir",
+                    str(root),
+                    "--vs-output",
+                    str(out),
+                    "--replay-reference",
+                    str(root / "replay_reference.json"),
+                ]
+            )
+            args.tokenizer = 12345  # Path(12345) raises TypeError inside run()
+            assert sr.run(args, smoke_workload(sha), sr.ProtocolReport(out)) == 1
+            records = [json.loads(line) for line in out.read_text().splitlines()]
+            expect_error(records, "benchmark error: TypeError")
+            print(f"--- crash: {records[-1]['message']}")
         elif name == "pass":
             records = run_case(name, [], ns, root, sha)
             assert [r["kind"] for r in records] == ["hello", "result"], records
@@ -231,6 +341,10 @@ def main() -> int:
             assert values["new_tokens_per_s"] > 0 and values["p99_ttft_s"] < 6
             assert values["slo_met"] == 1.0 and values["slo_margin_s"] > 0, values
             assert values["prefix_hit_share"] > 0.5, values
+            assert (
+                values["replay_token_agreement"] == 1.0 and values["replay_matched_rounds"] >= 40
+            ), values
+            assert values["outstanding_rounds"] <= 8, values
         elif name == "slo":
             records = run_case(name, ["--slow-every", "5", "--slow-ms", "6500"], ns, root, sha)
             assert [r["kind"] for r in records] == ["hello", "result"], records
@@ -245,9 +359,13 @@ def main() -> int:
         elif name == "failure":
             expect_error(run_case(name, ["--fail-after", "40"], ns, root, sha), "a request failed")
         elif name == "shortfall":
-            expect_error(
-                run_case(name, ["--drop-token-ids-after", "40"], ns, root, sha),
-                "prefix_shortfall_tokens > 0",
+            # The id-less round itself is caught (no token ids) unless its successor's
+            # shortfall lands in the same 2 s poll; either rejection is right.
+            records = run_case(name, ["--drop-token-ids-after", "40"], ns, root, sha)
+            expect_error(records)
+            assert any(
+                k in records[-1]["message"]
+                for k in ("prefix_shortfall_tokens > 0", "no generated token ids")
             )
         elif name == "no-cache":
             expect_error(run_case(name, ["--no-cache-report"], ns, root, sha), "cached_tokens")

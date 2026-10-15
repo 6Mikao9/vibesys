@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Accuracy gate: the candidate's greedy first tokens against the reference build.
 
-    python checker.py --base-url http://127.0.0.1:PORT [--model NAME] [--report report.json] [--workspace DIR]
+    python checker.py --base-url http://127.0.0.1:PORT --reference <operator path>/reference.json
+                      [--model NAME] [--report report.json] [--workspace DIR]
 
 Exit status 0 = PASS, 1 = FAIL, 2 = the checker could not run (no reference.json).
 
@@ -16,15 +17,23 @@ Cases (reference/1_contract.md §4, accuracy_checker/README.md): lone prompts of
 prefix; and round-1 prompts sent cold, without a prefix in the cache. Every
 prompt is enwik9 text as token ids, stored in reference.json.
 
-Per answer (the first generated token and its top-10 logprobs):
-  match     the candidate's greedy token is the reference's.
+Per answer (the first generated token and its top-10 logprobs; the reference
+asked each answer several times, reference format 2):
+  match     the candidate's greedy token is one the reference gave in a repeat.
   near tie  it differs, but it is in the reference's top 10 and the reference
             ranked it within NEAR_TIE_NATS of its own top token.
   mismatch  anything else. One mismatch fails the check.
   logprob   the candidate's logprob of the reference's top token is within
-            MAX_ABS_DLOGPROB of the reference's, and the mean over answers within
-            MEAN_ABS_DLOGPROB. The reference token missing from the candidate's
-            top 10 is a mismatch.
+            MAX_ABS_DLOGPROB of the range the reference's repeats spanned, and
+            the mean over answers within MEAN_ABS_DLOGPROB. The reference token
+            missing from the candidate's top 10 is a mismatch.
+The logprob requests of one checker run share a random `cache_salt`, so a
+cached round 1 resumes this run's round 0 and never a previous run's cache: the
+checker can run repeatedly on one server.
+Every prompt is also sent first as a request shaped exactly like a benchmark
+replay round (streamed, no logprobs, opaque id); its token must equal the
+logprob request's, so a server cannot serve the benchmark's request shape a
+cheaper, different answer (README.md, "Threat model").
 Also: the server must count every prompt token, return the generated token id,
 report a prefix-cache hit for each cached round 1 of at least 32k tokens of
 prefix, and its answers must vary with the prompt like the reference's do.
@@ -35,6 +44,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import secrets
 import sys
 from pathlib import Path
 
@@ -46,10 +56,13 @@ from common import (  # noqa: E402
     RequestError,
     complete,
     get_json,
+    replay_shaped_token,
     unpack_ids,
 )
 from engine_scan import scan as scan_for_engine_code  # noqa: E402
 
+# Fallback only: the operator passes --reference, a path outside the candidate
+# tree, so agents cannot read the expected answers.
 REFERENCE = Path(__file__).with_name("reference.json")
 # The candidate root: <root>/.vibesys/tasks/default/accuracy_checker/checker.py.
 WORKSPACE = Path(__file__).resolve().parents[4]
@@ -64,7 +77,8 @@ MEAN_ABS_DLOGPROB = 0.25
 # Below this prefix a cache hit is not required: a hybrid model's prefix cache
 # may only resume at block boundaries of several thousand tokens.
 MIN_PREFIX_FOR_REQUIRED_HIT = 32 * 1024
-REQUEST_TIMEOUT_S = 600.0
+# A cold 128k prompt on a slow or broken-but-honest candidate; 600 s was tight.
+REQUEST_TIMEOUT_S = 1200.0
 
 
 @dataclasses.dataclass
@@ -83,13 +97,15 @@ class Verdict:
 def judge(name: str, expect: dict, answer: Answer, prompt_len: int) -> Verdict:
     ref_top = {int(t): float(lp) for t, lp in expect["top"]}
     expected = int(expect["token"])
+    accepted = {int(t) for t in expect.get("tokens", [expected])}
+    lo, hi = expect.get("lp_range", [ref_top[expected], ref_top[expected]])
     problems: list[str] = []
     if answer.prompt_tokens != prompt_len:
         problems.append(
             f"usage.prompt_tokens {answer.prompt_tokens} for a {prompt_len}-token prompt"
         )
     gap = None
-    if answer.token == expected:
+    if answer.token in accepted:
         kind = "match"
     elif answer.token in ref_top and ref_top[expected] - ref_top[answer.token] <= NEAR_TIE_NATS:
         kind = "near_tie"
@@ -99,13 +115,30 @@ def judge(name: str, expect: dict, answer: Answer, prompt_len: int) -> Verdict:
         gap = ref_top[expected] - ref_top[answer.token] if answer.token in ref_top else None
     dlp = None
     if expected in answer.top:
-        dlp = answer.top[expected] - ref_top[expected]
+        # Distance to the range the reference's own repeats spanned (0 inside it).
+        got = answer.top[expected]
+        dlp = got - min(max(got, lo), hi)
         if abs(dlp) > MAX_ABS_DLOGPROB:
             problems.append(f"logprob of the reference token differs by {dlp:+.3f} nats")
     else:
         problems.append("the reference's greedy token is not in the candidate's top logprobs")
     return Verdict(
         name, expected, answer.token, kind, gap, dlp, answer.cached_tokens, answer.seconds, problems
+    )
+
+
+def replay_shaped_kind(expect: dict, token: int, logprob_token: int) -> str | None:
+    """None when the replay-shaped answer is acceptable: the logprob request's token,
+    a token the reference gave, or a near tie of the reference's top token."""
+    ref_top = {int(t): float(lp) for t, lp in expect["top"]}
+    expected = int(expect["token"])
+    if token == logprob_token or token in {int(t) for t in expect.get("tokens", [expected])}:
+        return None
+    if token in ref_top and ref_top[expected] - ref_top[token] <= NEAR_TIE_NATS:
+        return None
+    return (
+        f"the replay-shaped request answered {token}, the logprob request {logprob_token}: "
+        "neither the reference's answer nor a near tie"
     )
 
 
@@ -116,9 +149,26 @@ def run(base_url: str, model: str, reference: dict, log=print) -> tuple[bool, di
         return False, {"error": f"server serves {served}, not {model!r}"}
     verdicts: list[Verdict] = []
     hit_problems: list[str] = []
+    run_salt = secrets.token_hex(16)
 
     def check(name: str, expect: dict, prompt: list[int]) -> Verdict:
-        verdict = judge(name, expect, complete(base, model, prompt, REQUEST_TIMEOUT_S), len(prompt))
+        # The replay-shaped request carries no salt (the replay sends none), so on a
+        # server that already ran the checker it may resume an earlier run's cache:
+        # it is judged against the reference with the near-tie tolerance, not by
+        # equality. The salted logprob request's cached tokens are the ones checked.
+        shaped, shaped_prompt_tokens, _ = replay_shaped_token(
+            base, model, prompt, REQUEST_TIMEOUT_S
+        )
+        answer = complete(base, model, prompt, REQUEST_TIMEOUT_S, cache_salt=run_salt)
+        verdict = judge(name, expect, answer, len(prompt))
+        shaped_problem = replay_shaped_kind(expect, shaped, verdict.got)
+        if shaped_problem is not None:
+            verdict.problems.append(shaped_problem)
+        if shaped_prompt_tokens != len(prompt):
+            verdict.problems.append(
+                f"replay-shaped request: usage.prompt_tokens {shaped_prompt_tokens} for a "
+                f"{len(prompt)}-token prompt"
+            )
         verdicts.append(verdict)
         flag = (
             ""
@@ -196,7 +246,13 @@ def main() -> int:
         "--base-url", required=True, help="http://127.0.0.1:PORT of the candidate (no /v1)"
     )
     parser.add_argument("--model", default=MODEL)
-    parser.add_argument("--reference", type=Path, default=REFERENCE)
+    parser.add_argument(
+        "--reference",
+        type=Path,
+        default=None,
+        help="the reference build's answers (operator path, outside the candidate tree); "
+        "default: accuracy_checker/reference.json, with a warning",
+    )
     parser.add_argument(
         "--report", type=Path, default=None, help="write the per-answer report here"
     )
@@ -213,6 +269,13 @@ def main() -> int:
         for finding in findings:
             print(f"  - {finding}", file=sys.stderr)
         return 1
+    if args.reference is None:
+        args.reference = REFERENCE
+        print(
+            f"WARNING: no --reference; falling back to the in-tree {REFERENCE}, which agents can read. "
+            "Pass the operator's copy.",
+            file=sys.stderr,
+        )
     if not args.reference.is_file():
         print(
             f"FAIL: {args.reference} is missing; generate it with make_reference.py "

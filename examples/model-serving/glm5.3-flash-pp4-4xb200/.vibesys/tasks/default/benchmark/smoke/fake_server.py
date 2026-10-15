@@ -17,7 +17,12 @@ cached tokens the way vLLM does.
 Fault flags make the failure paths testable: --slow-every/--slow-ms (TTFT
 outliers), --fail-after (HTTP 500), --drop-token-ids-after (no generated ids:
 the client's next prompt comes up short), --canned (one fixed token for every
-prompt), --noise (perturbed logits), --no-cache-report.
+prompt), --noise (perturbed logits), --no-cache-report, --fake-replay (streamed
+requests, the replay's shape, get a wrong token; non-streamed ones the right one),
+--truncate-over N (keep only the first N prompt tokens and count those),
+--text-only-after N (stream text but no token ids), --hang-at N,M,... (those
+requests never answer), --cached-path-shift (a prompt that resumes a cached prefix
+gets a different answer than the same prompt computed cold, as on the GPU builds).
 """
 
 from __future__ import annotations
@@ -73,10 +78,12 @@ class Model:
             self.blocks.update(hashes)
         return min(hit, max(len(prompt) - 1, 0))
 
-    def logits(self, prompt: list[int]) -> dict[int, float]:
+    def logits(self, prompt: list[int], cached: int = 0) -> dict[int, float]:
         if self.args.canned:
             return {4242: 0.0, 4243: -3.0}
         seed = int.from_bytes(hashlib.sha256(json.dumps(prompt).encode()).digest()[:8], "big")
+        if self.args.cached_path_shift and cached > 0:
+            seed ^= 1
         rng = random.Random(seed)
         tokens = [rng.randrange(1_000, 150_000) for _ in range(CANDIDATES)]
         scores = [rng.gauss(0.0, 2.0) for _ in range(CANDIDATES)]
@@ -131,6 +138,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(500, {"error": "injected failure"})
             return
         prompt = body["prompt"]
+        if args.truncate_over is not None and len(prompt) > args.truncate_over:
+            prompt = prompt[: args.truncate_over]
+        if n in args.hang_at:
+            time.sleep(3600)
         if body.get("model") != args.model:
             self._json(404, {"error": f"model {body.get('model')!r} not served"})
             return
@@ -139,8 +150,11 @@ class Handler(BaseHTTPRequestHandler):
         if args.slow_every and n % args.slow_every == 0:
             delay_s += args.slow_ms / 1e3
         time.sleep(delay_s)
-        logits = self.model.logits(prompt)
+        logits = self.model.logits(prompt, cached)
         token = max(logits, key=logits.get)
+        if args.fake_replay and body.get("stream"):
+            # A gaming server: skip the work on the shape the replay sends.
+            token = 4242
         usage = {
             "prompt_tokens": len(prompt),
             "completion_tokens": 1,
@@ -149,13 +163,14 @@ class Handler(BaseHTTPRequestHandler):
         if not args.no_cache_report:
             usage["prompt_tokens_details"] = {"cached_tokens": cached}
         drop_ids = args.drop_token_ids_after is not None and n > args.drop_token_ids_after
+        text_only = args.text_only_after is not None and n > args.text_only_after
         if body.get("stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
             choice = {"index": 0, "text": "" if drop_ids else "x", "finish_reason": None}
-            if body.get("return_token_ids") and not drop_ids:
+            if body.get("return_token_ids") and not drop_ids and not text_only:
                 choice["token_ids"] = [token]
             events = [
                 {"choices": [choice]},
@@ -215,6 +230,11 @@ def main() -> None:
     parser.add_argument("--canned", action="store_true")
     parser.add_argument("--noise", type=float, default=0.0)
     parser.add_argument("--no-cache-report", action="store_true")
+    parser.add_argument("--fake-replay", action="store_true")
+    parser.add_argument("--cached-path-shift", action="store_true")
+    parser.add_argument("--truncate-over", type=int, default=None)
+    parser.add_argument("--text-only-after", type=int, default=None)
+    parser.add_argument("--hang-at", type=lambda v: {int(x) for x in v.split(",")}, default=set())
     args = parser.parse_args()
     Handler.model = Model(args)
     server = Server(("127.0.0.1", args.port), Handler)

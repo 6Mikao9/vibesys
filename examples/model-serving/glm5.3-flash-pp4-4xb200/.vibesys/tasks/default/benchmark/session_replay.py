@@ -21,7 +21,12 @@ Phases:
      The request log is read while it grows; the run stops early when failure
      is already certain (README.md "Early abort").
   4. Score. `metrics.py` on the request log, then the gates: no failed
-     request, `prefix_shortfall_tokens` 0 on every round, p99 TTFT <= 60 s.
+     request; on every successful round `prefix_shortfall_tokens` 0, streamed
+     token ids, `usage.prompt_tokens` equal to the prompt sent, and no cache
+     hit beyond the round's own prefix (none past one block on a round 0);
+     first-token agreement with the recorded reference replay
+     (`--replay-reference`); p99 TTFT <= 60 s, where rounds still unanswered at
+     the window's end count at least their wait (`outstanding_rounds`).
      The 6 s SLO is not a gate: `slo_met` (1/0) and `slo_margin_s` (6 s minus
      p99) report it, and p99 TTFT is the primary objective.
 
@@ -92,7 +97,18 @@ METRICS: dict[str, dict[str, Any]] = {
     "fraction_of_workload_ceiling": {"unit": "fraction", "direction": "max"},
     "screen_ttft_16k_s": {"unit": "s", "direction": "min"},
     "screen_ttft_32k_s": {"unit": "s", "direction": "min"},
+    "replay_token_agreement": {
+        "unit": "fraction of prompt-matched rounds whose first token equals the reference's",
+        "direction": "max",
+    },
+    "replay_matched_rounds": {"unit": "rounds"},
+    "outstanding_rounds": {
+        "unit": "rounds submitted before the window's end and not answered inside it",
+        "direction": "min",
+    },
 }
+
+REPLAY_REFERENCE_FORMAT = "glm53-session-replay-reference-v1"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -129,6 +145,14 @@ class Workload:
     # p99 TTFT over this rejects the run; the early abort fires once it is certain,
     # and screening rejects a lone 16k prompt slower than this.
     reject_p99_ttft_s: float
+    # The replay-reference check (README.md, "Replay answers"): over rounds whose
+    # exact prompt matches the reference run's, at least this share of first
+    # tokens must equal the reference's, and at least this many rounds must match.
+    replay_min_agreement: float = 0.95
+    replay_min_matched_rounds: int = 1_000
+    # A round 0 carries no prefix of its own session, so a cache hit on it is
+    # cache state carried in from outside this evaluation; one block of slack.
+    round0_max_cached_tokens: int = 8_576
 
 
 WORKLOAD = Workload(
@@ -148,6 +172,17 @@ WORKLOAD = Workload(
     stall_timeout_s=600.0,
     request_timeout_s=180.0,
     reject_p99_ttft_s=REJECT_P99_TTFT_S,
+    replay_min_agreement=0.95,
+    # Every admitted session's round 0 is built from the corpus alone, so its
+    # prompt matches the reference's whatever the server answered before; each
+    # later round matches until the session's first first-token flip. The
+    # zero-latency replay admits 1,679 sessions in the window and counts 41,444
+    # rounds, so an honest run matches tens of thousands; 1,000 still makes the
+    # 5% tolerance about 50 rounds, and a server that answers the replay wrongly
+    # matches little more than its round 0s.
+    replay_min_matched_rounds=1_000,
+    # vLLM's prefix-cache block for this model (KDA state plus attention), ~8.5k tokens.
+    round0_max_cached_tokens=8_576,
 )
 
 
@@ -483,7 +518,7 @@ def screen(base_url: str, model: str, workload: Workload) -> dict[str, float]:
                 "value": best_gate,
                 "direction": "min",
                 "unit": "s",
-                "target": SLO_P99_TTFT_S,
+                "target": bound,
             },
         )
     fourth = stream_completion(base_url, model, fresh_prompt(rng, info), timeout)
@@ -510,6 +545,14 @@ class LogWatch:
     first_failure: str | None = None
     first_shortfall: str | None = None
     new_tokens: int = 0
+    # "<session_id>/<round_idx>" -> (prompt hash, first output token id) of each
+    # successful round, for the replay-reference check and for recording one.
+    answers: dict[str, tuple[str, int]] = dataclasses.field(default_factory=dict)
+    # Successful rounds the patched session_runner should have hashed but did not.
+    unhashed_rounds: int = 0
+    # Successful rounds that break a correctness rule: reason -> (count, first example).
+    invalid: dict[str, list[Any]] = dataclasses.field(default_factory=dict)
+    round0_max_cached_tokens: int = 0
     _buffer: str = ""
     _offset: int = 0
 
@@ -542,6 +585,16 @@ class LogWatch:
         else:
             self.successes += 1
             self.new_tokens += int(source.get("input_len") or 0)
+            self._check_round(outcome, source)
+            prompt_hash = outcome.get("prompt_fnv1a64")
+            first_id = outcome.get("first_output_token_id")
+            if prompt_hash is None:
+                self.unhashed_rounds += 1
+            elif first_id is not None:
+                self.answers[f"{source.get('session_id')}/{source.get('round_idx')}"] = (
+                    prompt_hash,
+                    int(first_id),
+                )
             ttft_ms = outcome.get("first_token_id_ms")
             if ttft_ms is not None and outcome.get("post_timestamp") is not None:
                 first_token = outcome["post_timestamp"] + ttft_ms / 1e3
@@ -557,8 +610,57 @@ class LogWatch:
             if self.first_shortfall is None:
                 self.first_shortfall = f"{outcome.get('request_id')}: {shortfall} tokens"
 
+    def _invalid(self, reason: str, example: str) -> None:
+        entry = self.invalid.setdefault(reason, [0, example])
+        entry[0] += 1
+
+    def _check_round(self, outcome: dict[str, Any], source: dict[str, Any]) -> None:
+        """The per-round correctness rules of a successful round (README.md, "Scoring and gates")."""
+        rid = outcome.get("request_id")
+        if (
+            outcome.get("first_token_id_ms") is None
+            or outcome.get("first_output_token_id", 0) is None
+        ):
+            # session_runner then carries re-encoded text forward, so no shortfall shows.
+            self._invalid(
+                "streamed no generated token ids (`return_token_ids`); its TTFT is unmeasured",
+                f"{rid}",
+            )
+        usage = outcome.get("server_usage") or {}
+        expected = int(source.get("derived_prefix_len") or 0) + int(
+            source.get("derived_append_len") or 0
+        )
+        prompt_tokens = usage.get("prompt_tokens")
+        if prompt_tokens != expected:
+            self._invalid(
+                "usage.prompt_tokens differs from the prompt sent (truncated or miscounted)",
+                f"{rid}: {prompt_tokens}, sent {expected}",
+            )
+        cached = usage.get("cached_prompt_tokens") or 0
+        prefix = int(source.get("derived_prefix_len") or 0)
+        if int(source.get("round_idx") or 0) == 0:
+            if cached > self.round0_max_cached_tokens:
+                self._invalid(
+                    f"a session's round 0 hit more than {self.round0_max_cached_tokens} cached tokens: cache state "
+                    "carried in from outside this evaluation (each evaluation must start with an empty cache)",
+                    f"{rid}: {cached} cached",
+                )
+        elif cached > prefix + 1:
+            self._invalid(
+                "more cached tokens than the round's reusable prefix: cache state carried in from "
+                "outside this evaluation",
+                f"{rid}: {cached} cached, prefix {prefix}",
+            )
+
     def verdict(self) -> str | None:
         """Why the run has already failed, or None while it can still pass."""
+        for reason, (count, example) in self.invalid.items():
+            return f"{count} successful round(s) {reason}; first: {example}"
+        if self.unhashed_rounds:
+            return (
+                f"{self.unhashed_rounds} round(s) logged without `prompt_fnv1a64`: --request-factory-engine "
+                "must be built with benchmark/request-factory-preflight-probe.patch"
+            )
         if self.failures:
             return f"a request failed ({self.failures} so far); first: {self.first_failure}"
         if self.shortfall_rounds:
@@ -574,6 +676,111 @@ class LogWatch:
                 f"rounds put the p99 TTFT over the {self.ttft_bound_s:.0f} s rejection bound"
             )
         return None
+
+
+# ----------------------------------------------------------------------------- replay reference
+
+
+def write_replay_reference(path: Path, watch: LogWatch, workload: Workload, model: str) -> None:
+    """The reference run's answers: prompt hash and first token per session round."""
+    body = {
+        "format": REPLAY_REFERENCE_FORMAT,
+        "model": model,
+        "trace_sha256": workload.trace_sha256,
+        "recorded_at_unix_s": time.time(),
+        "rounds": {key: [h, token] for key, (h, token) in sorted(watch.answers.items())},
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(body) + "\n")
+    tmp.replace(path)
+    log(f"replay reference: {len(watch.answers)} rounds written to {path}")
+
+
+def load_replay_reference(path: Path, workload: Workload, model: str) -> dict[str, tuple[str, int]]:
+    if not path.is_file():
+        raise Rejected(
+            f"--replay-reference {path} does not exist (record it with --record-replay-reference "
+            "against the reference build; README.md, Replay answers)"
+        )
+    try:
+        body = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise Rejected(f"--replay-reference {path}: not JSON: {exc}") from exc
+    if body.get("format") != REPLAY_REFERENCE_FORMAT:
+        raise Rejected(
+            f"--replay-reference {path}: format {body.get('format')!r}, expected {REPLAY_REFERENCE_FORMAT!r}"
+        )
+    if body.get("trace_sha256") != workload.trace_sha256:
+        raise Rejected(
+            f"--replay-reference {path} was recorded on trace {body.get('trace_sha256')}, "
+            f"this workload is {workload.trace_sha256}"
+        )
+    if body.get("model") != model:
+        raise Rejected(
+            f"--replay-reference {path} was recorded for model {body.get('model')!r}, not {model!r}"
+        )
+    return {key: (str(h), int(token)) for key, (h, token) in body["rounds"].items()}
+
+
+@dataclasses.dataclass(frozen=True)
+class Agreement:
+    matched: int
+    agreed: int
+    first_disagreement: str | None
+
+    @property
+    def share(self) -> float:
+        return self.agreed / self.matched if self.matched else 0.0
+
+
+def replay_agreement(
+    answers: dict[str, tuple[str, int]], reference: dict[str, tuple[str, int]]
+) -> Agreement:
+    """First-token agreement over rounds whose exact prompt the reference run also sent.
+
+    One differing token changes every later prompt of that session, so those
+    rounds have no reference answer and are left out rather than counted wrong.
+    """
+    matched = agreed = 0
+    first: str | None = None
+    for key, (prompt_hash, token) in answers.items():
+        expected = reference.get(key)
+        if expected is None or expected[0] != prompt_hash:
+            continue
+        matched += 1
+        if token == expected[1]:
+            agreed += 1
+        elif first is None:
+            first = f"{key}: token {token}, reference {expected[1]}"
+    return Agreement(matched, agreed, first)
+
+
+def check_agreement(agreement: Agreement, workload: Workload) -> None:
+    detail = (
+        f"{agreement.agreed} of {agreement.matched} prompt-matched rounds gave the reference's first token "
+        f"({agreement.share:.1%}); first disagreement: {agreement.first_disagreement}"
+    )
+    partial = {
+        "name": "replay_token_agreement",
+        "value": agreement.share,
+        "direction": "max",
+        "unit": "fraction",
+        "target": workload.replay_min_agreement,
+    }
+    if agreement.share < workload.replay_min_agreement:
+        raise Rejected(
+            f"run rejected: replay answers disagree with the reference build: {detail}; at least "
+            f"{workload.replay_min_agreement:.0%} must agree (README.md, Replay answers)",
+            partial,
+        )
+    if agreement.matched < workload.replay_min_matched_rounds:
+        raise Rejected(
+            f"run rejected: only {agreement.matched} rounds sent the same prompt as the reference run, fewer "
+            f"than {workload.replay_min_matched_rounds}: the replay answers cannot be checked. {detail}",
+            partial,
+        )
+    log(f"replay reference: {detail}")
 
 
 def session_runner_argv(
@@ -658,15 +865,26 @@ def progress_partial(watch: LogWatch, facts: TraceFacts, elapsed_s: float) -> di
 
 
 def replay(
-    argv: list[str], work_dir: Path, workload: Workload, facts: TraceFacts, poll_s: float = 2.0
+    argv: list[str],
+    work_dir: Path,
+    workload: Workload,
+    facts: TraceFacts,
+    poll_s: float = 2.0,
+    early_abort: bool = True,
 ) -> LogWatch:
-    """Run session_runner for the window and return the folded request log."""
+    """Run session_runner for the window and return the folded request log.
+
+    `early_abort=False` (recording a reference) keeps running past a certain p99
+    rejection; correctness failures still stop the run.
+    """
     log_path = work_dir / "requests.jsonl"
     err_path = work_dir / "session_runner.stderr"
+    limit = rounds_over_bound_that_fail(facts.ceiling_rounds) if early_abort else sys.maxsize
     watch = LogWatch(
-        over_bound_limit=rounds_over_bound_that_fail(facts.ceiling_rounds),
+        over_bound_limit=limit,
         window_s=workload.window_s,
         ttft_bound_s=workload.reject_p99_ttft_s,
+        round0_max_cached_tokens=workload.round0_max_cached_tokens,
     )
     log(f"replay: {' '.join(argv)}")
     started = time.time()
@@ -723,6 +941,147 @@ def replay(
     return watch
 
 
+def percentile(values: list[float], q: float) -> float:
+    """numpy's default (linear interpolation) percentile, as metrics.py takes it."""
+    ordered = sorted(values)
+    h = (len(ordered) - 1) * q / 100
+    lo = int(h)
+    hi = min(lo + 1, len(ordered) - 1)
+    return ordered[lo] + (h - lo) * (ordered[hi] - ordered[lo])
+
+
+@dataclasses.dataclass(frozen=True)
+class SessionPlan:
+    session_id: str
+    arrival_ms: float
+    tool_waits_ms: tuple[float, ...]
+
+
+def session_plans(trace: Path) -> list[SessionPlan]:
+    """The trace's sessions in file order (session_runner's admission order)."""
+    rows: dict[str, list[tuple[int, float, float]]] = {}
+    with trace.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            rows.setdefault(row["session_id"], []).append(
+                (
+                    int(row["round_idx"]),
+                    float(row["arrival_time_ms"]),
+                    float(row["tool_wait_after_ms"]),
+                )
+            )
+    plans = []
+    for sid, steps in rows.items():
+        steps.sort()
+        plans.append(SessionPlan(sid, steps[0][1], tuple(wait for _, _, wait in steps)))
+    return plans
+
+
+def outstanding_waits(
+    records: list[dict[str, Any]], plans: list[SessionPlan], window_s: float, max_concurrency: int
+) -> list[float]:
+    """A lower bound on the TTFT of every round submitted before the window's end and not answered in it.
+
+    metrics.py counts only rounds whose first token is inside the window, so a
+    round still waiting at the end would vanish from the percentiles and a
+    server could starve its slowest rounds. Each such round counts at least
+    (window end - its submit), or its real TTFT when it was logged later:
+      - logged rounds submitted in the window whose first token came after it;
+      - a logged session's next round, submitted (estimate) at its last logged
+        round's completion plus that round's tool wait;
+      - a session with no logged round that session_runner had admitted by the
+        window's end: admission replayed in trace order over `max_concurrency`
+        slots from the logged sessions' real admissions and releases. An
+        unlogged session ahead of a logged one was admitted no later than it
+        (admission is first come, first served).
+    """
+    rounds = [r for r in records if (r.get("source") or {}).get("type") == "session_round"]
+    if not rounds:
+        return []
+    t0 = min(r["outcome"]["submit_timestamp"] for r in records)
+    end = t0 + window_s
+    waits: list[float] = []
+    by_session: dict[str, dict[int, dict[str, Any]]] = {}
+    for record in rounds:
+        source, outcome = record["source"]["data"], record["outcome"]
+        by_session.setdefault(str(source["session_id"]), {})[int(source["round_idx"])] = outcome
+        submit = outcome["submit_timestamp"]
+        post, ttft_ms = outcome.get("post_timestamp"), outcome.get("first_token_id_ms")
+        first = post + ttft_ms / 1e3 if post is not None and ttft_ms is not None else None
+        if submit < end and (first is None or first >= end):
+            waits.append(max(first - submit, end - submit) if first is not None else end - submit)
+    arrival0 = min((plan.arrival_ms for plan in plans), default=0.0)
+    # Each known session's admission (its round 0 submit) and slot release.
+    admission: dict[str, float] = {}
+    release: dict[str, float] = {}
+    for plan in plans:
+        logged = by_session.get(plan.session_id)
+        if not logged:
+            continue
+        admission[plan.session_id] = min(o["submit_timestamp"] for o in logged.values())
+        last = max(logged)
+        free_at = logged[last]["complete_timestamp"] + plan.tool_waits_ms[last] / 1e3
+        if last + 1 < len(plan.tool_waits_ms):
+            if free_at < end:
+                waits.append(end - free_at)
+            release[plan.session_id] = float("inf")
+        else:
+            release[plan.session_id] = free_at
+    # Latest admission any unlogged session ahead of index i can have had.
+    cap = [float("inf")] * (len(plans) + 1)
+    for i in range(len(plans) - 1, -1, -1):
+        cap[i] = min(cap[i + 1], admission.get(plans[i].session_id, float("inf")))
+    slots = [t0] * max_concurrency
+    for i, plan in enumerate(plans):
+        slot = heapq.heappop(slots)
+        if plan.session_id in admission:
+            heapq.heappush(slots, release[plan.session_id])
+            continue
+        admitted = min(max(t0 + (plan.arrival_ms - arrival0) / 1e3, slot), cap[i + 1])
+        if admitted >= end:
+            break
+        waits.append(end - admitted)
+        heapq.heappush(slots, float("inf"))
+    return waits
+
+
+def ttft_with_outstanding(
+    log_path: Path, plans: list[SessionPlan], workload: Workload, metrics: dict[str, Any]
+) -> tuple[dict[str, float], int]:
+    """TTFT p50/p90/p99/max over the counted rounds plus the outstanding ones, and their count.
+
+    With no outstanding round this is metrics.py's TTFT block, checked here.
+    """
+    records = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    t0 = min(r["outcome"]["submit_timestamp"] for r in records)
+    counted = []
+    for record in records:
+        o = record["outcome"]
+        if (
+            o.get("first_token_id_ms") is None
+            or o.get("post_timestamp") is None
+            or str(o.get("status")).upper() != "SUCCESS"
+        ):
+            continue
+        first = o["post_timestamp"] + o["first_token_id_ms"] / 1e3
+        if first - t0 < workload.window_s:
+            counted.append(first - o["submit_timestamp"])
+    waits = outstanding_waits(records, plans, workload.window_s, workload.max_concurrency)
+    every = counted + waits
+    ttft = {
+        "p50": percentile(every, 50),
+        "p90": percentile(every, 90),
+        "p99": percentile(every, 99),
+        "max": max(every),
+    }
+    if not waits:
+        for key, value in ttft.items():
+            if abs(value - metrics["ttft_s"][key]) > 1e-3:
+                raise Rejected(
+                    f"internal: TTFT {key} {value} differs from metrics.py's {metrics['ttft_s'][key]}"
+                )
+    return ttft, len(waits)
+
+
 def score(log_path: Path, workload: Workload) -> dict[str, Any]:
     result = subprocess.run(
         [sys.executable, str(METRICS_PY), str(log_path), "--minutes", str(workload.window_s / 60)],
@@ -741,32 +1100,39 @@ def judge(
     facts: TraceFacts,
     workload: Workload,
     screened: dict[str, float],
+    agreement: Agreement,
+    ttft: dict[str, float] | None = None,
+    outstanding: int = 0,
 ) -> dict[str, float]:
     """The run's result row, or `Rejected` when a gate fails.
 
     Gates: no failed request, `prefix_shortfall_tokens` 0 on every round, at
     least one counted round, and p99 TTFT within the rejection bound (60 s; the
     same rule the early abort enforces, so the outcome does not depend on when
-    it is detected). The 6 s SLO is reported, not gated.
+    it is detected). The 6 s SLO is reported, not gated. `ttft` (default:
+    metrics.py's) includes the `outstanding` rounds unanswered at the window's end.
     """
     why = watch.verdict()
     if why is not None:
         raise Rejected(f"run rejected: {why}", progress_partial(watch, facts, workload.window_s))
     if metrics["rounds"] == 0:
         raise Rejected("no round was counted in the window")
-    p99 = metrics["ttft_s"]["p99"]
+    check_agreement(agreement, workload)
+    ttft = ttft if ttft is not None else metrics["ttft_s"]
+    p99 = ttft["p99"]
     bound = workload.reject_p99_ttft_s
     if p99 > bound:
         raise Rejected(
             f"run rejected: p99 TTFT {p99:.2f} s is over the {bound:.0f} s rejection bound "
-            f"(new tokens/s {metrics['new_tokens_per_s']:.0f}, p50/p90 {metrics['ttft_s']['p50']:.2f}/"
-            f"{metrics['ttft_s']['p90']:.2f} s, {metrics['rounds']} rounds)",
+            f"(new tokens/s {metrics['new_tokens_per_s']:.0f}, p50/p90 {ttft['p50']:.2f}/"
+            f"{ttft['p90']:.2f} s, {metrics['rounds']} rounds counted, {outstanding} outstanding rounds "
+            "counted at least their wait at the window's end)",
             {
                 "name": "p99_ttft_s",
                 "value": p99,
                 "direction": "min",
                 "unit": "s",
-                "target": SLO_P99_TTFT_S,
+                "target": bound,
                 "progress": {
                     "completed": min(metrics["rounds"], facts.ceiling_rounds),
                     "required": max(facts.ceiling_rounds, 1),
@@ -779,9 +1145,9 @@ def judge(
         "p99_ttft_s": p99,
         "slo_met": 1.0 if p99 <= SLO_P99_TTFT_S else 0.0,
         "slo_margin_s": SLO_P99_TTFT_S - p99,
-        "p50_ttft_s": metrics["ttft_s"]["p50"],
-        "p90_ttft_s": metrics["ttft_s"]["p90"],
-        "max_ttft_s": metrics["ttft_s"]["max"],
+        "p50_ttft_s": ttft["p50"],
+        "p90_ttft_s": ttft["p90"],
+        "max_ttft_s": ttft["max"],
         "rounds_per_s": metrics["rounds_per_s"],
         "computed_tokens_per_s": metrics["computed_tokens_per_s"],
         "prefix_hit_share": metrics["prefix_hit_share"],
@@ -789,6 +1155,9 @@ def judge(
         "fraction_of_sim_target": metrics["new_tokens_per_s"] / SIM_TARGET_NEW_TOKENS_PER_S,
         "fraction_of_workload_ceiling": metrics["new_tokens_per_s"]
         / max(facts.ceiling_new_tokens / workload.window_s, 1.0),
+        "replay_token_agreement": agreement.share,
+        "replay_matched_rounds": float(agreement.matched),
+        "outstanding_rounds": float(outstanding),
         **screened,
     }
 
@@ -829,6 +1198,18 @@ def run(args: argparse.Namespace, workload: Workload, report: ProtocolReport) ->
         if args.model not in models:
             raise Rejected(f"the server serves {models}, not --model {args.model!r}")
 
+        recording = args.record_replay_reference is not None
+        if recording == (args.replay_reference is not None):
+            raise Rejected(
+                "pass exactly one of --replay-reference PATH (a scored run) and "
+                "--record-replay-reference OUT (recording on the reference build)"
+            )
+        reference = (
+            None
+            if recording
+            else load_replay_reference(Path(args.replay_reference), workload, args.model)
+        )
+
         screened = screen(args.base_url, args.model, workload)
 
         argv = session_runner_argv(
@@ -841,18 +1222,38 @@ def run(args: argparse.Namespace, workload: Workload, report: ProtocolReport) ->
             workload,
             work_dir,
         )
-        watch = replay(argv, work_dir, workload, facts)
+        watch = replay(argv, work_dir, workload, facts, early_abort=not recording)
+        if recording:
+            # Correctness gates only: a reference must not record broken rounds,
+            # but a slow reference build still records valid answers.
+            why = watch.verdict()
+            if why is not None:
+                raise Rejected(f"recording rejected, nothing written: {why}")
+            write_replay_reference(Path(args.record_replay_reference), watch, workload, args.model)
+            agreement = Agreement(len(watch.answers), len(watch.answers), None)
+            workload = dataclasses.replace(workload, replay_min_matched_rounds=0)
+        else:
+            assert reference is not None
+            agreement = replay_agreement(watch.answers, reference)
         metrics = score(work_dir / "requests.jsonl", workload)
         (work_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
         log(f"metrics.py: {json.dumps(metrics)}")
 
-        values = judge(metrics, watch, facts, workload, screened)
+        ttft, outstanding = ttft_with_outstanding(
+            work_dir / "requests.jsonl", session_plans(trace), workload, metrics
+        )
+        log(f"TTFT with {outstanding} outstanding rounds: {json.dumps(ttft)}")
+        values = judge(metrics, watch, facts, workload, screened, agreement, ttft, outstanding)
         report.emit(values)
         print(json.dumps(values, indent=2))
         return 0
     except Rejected as exc:
         log(f"REJECTED: {exc}")
         report.fail(str(exc), exc.partial)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - every exit must leave an outcome record (no NO_OUTCOME)
+        log(f"REJECTED (unexpected error): {exc!r}")
+        report.fail(f"benchmark error: {type(exc).__name__}: {exc}", None)
         return 1
 
 
@@ -893,6 +1294,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="probe length of the session_runner build: 8192 at rev 7f6aa9d (default), "
         "32768 with benchmark/request-factory-preflight-probe.patch",
+    )
+    parser.add_argument(
+        "--replay-reference",
+        default=None,
+        help="operator path of the reference build's replay answers (made with "
+        "--record-replay-reference); required for a scored run",
+    )
+    parser.add_argument(
+        "--record-replay-reference",
+        default=None,
+        metavar="OUT",
+        help="recording mode, on the reference build only: run the replay and write its "
+        "per-round prompt hashes and first tokens to OUT",
     )
     parser.add_argument(
         "--vs-output", type=Path, default=None, help="result protocol v2 stream (VibeSys)"
