@@ -49,9 +49,11 @@ from vs_core.api.search import INPUT, Input, Kept, NoWinner, RevisionRef, TaskTe
 
 @dataclass(frozen=True)
 class Scheduled:
-    """A planning call ended with a plan to schedule."""
+    """A planning call ended with a plan to schedule, and the handoff file it left."""
 
     check: PlanCheck
+    handoff: str | None = None
+    """The path of the call's handoff file; None when its write failed."""
 
 
 @dataclass(frozen=True)
@@ -128,6 +130,8 @@ class RunRecord:
     gate: PlannerGate = field(default_factory=PlannerGate)
     calls: int = 0
     """Planning calls begun; the next call's key is numbered by it."""
+    handoffs: list[str] = field(default_factory=list)
+    """The paths of the planning calls' handoff files, oldest first."""
     kept: dict[str, Kept] = field(default_factory=dict)
     """The candidates closed workspaces retained that were winner-eligible, by settlement."""
 
@@ -180,6 +184,7 @@ class RunRecord:
             finished=tuple(self.finished_work),
             refunded=self.refunded,
             offered=self.offered(),
+            handoffs=tuple(reversed(self.handoffs)),
             offer=ProfileOffer(
                 fields=tuple(ProfileField(item) for item in self.terms.profile_fields)
             )
@@ -190,7 +195,9 @@ class RunRecord:
     def planned(self, outcome: PlanOutcome) -> None:
         """Fold a finished planning call: park or abandon what it decided, queue what it accepted."""
         match outcome:
-            case Scheduled(check=check):
+            case Scheduled(check=check, handoff=handoff):
+                if handoff is not None:
+                    self.handoffs.append(handoff)
                 for change in check.updates:
                     known = self.hypotheses[change.hypothesis_id]
                     self.hypotheses[change.hypothesis_id] = _hypotheses.with_disposition(

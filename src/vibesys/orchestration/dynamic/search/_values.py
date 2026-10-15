@@ -81,6 +81,22 @@ class WorkPlan(Value):
     decision_impact: str = ""
 
 
+class Expectation(Value):
+    """What a planner expected of one workstream it scheduled, and what it meant to do next."""
+
+    work_id: str
+    expected: str
+    if_it_succeeds: str
+    if_it_fails: str
+
+
+class HandoffNote(Value):
+    """A planner's note to the planners after it, as its reply gave it."""
+
+    expectations: tuple[Expectation, ...] = ()
+    doubts: tuple[str, ...] = ()
+
+
 # -- why work ended -----------------------------------------------------------------------------
 
 

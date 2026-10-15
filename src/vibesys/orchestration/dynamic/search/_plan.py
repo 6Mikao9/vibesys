@@ -20,6 +20,8 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.search._parents import ParentOption
 from vibesys.orchestration.dynamic.search._values import (
     Alternative,
+    Expectation,
+    HandoffNote,
     HypothesisRecord,
     PlanViolation,
     ViolationCode,
@@ -49,8 +51,14 @@ class PlanUpdate(Value):
 
 
 class PlanCheck(Value):
-    """The schedulable part of a portfolio and the violations that excluded the rest."""
+    """The schedulable part of a portfolio and the violations that excluded the rest.
 
+    ``reasoning`` and ``handoff`` are the reply's own, kept with what was accepted of it so the
+    handoff file of a scheduled plan says what that reply said.
+    """
+
+    reasoning: str
+    handoff: HandoffNote
     accepted: tuple[WorkPlan, ...] = ()
     updates: tuple[PlanUpdate, ...] = ()
     violations: tuple[PlanViolation, ...] = ()
@@ -308,4 +316,15 @@ def validate(
             violations.append(violation)
         elif len(accepted) < capacity:
             accepted.append(_work_plan(entry))
-    return PlanCheck(accepted=tuple(accepted), updates=updates, violations=tuple(violations))
+    return PlanCheck(
+        reasoning=plan.reasoning,
+        handoff=HandoffNote(
+            expectations=tuple(
+                Expectation.model_validate(item.model_dump()) for item in plan.handoff.expectations
+            ),
+            doubts=plan.handoff.doubts,
+        ),
+        accepted=tuple(accepted),
+        updates=updates,
+        violations=tuple(violations),
+    )
