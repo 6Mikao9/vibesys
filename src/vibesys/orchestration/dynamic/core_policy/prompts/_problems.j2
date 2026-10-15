@@ -45,6 +45,8 @@ duplicate strategy update for hypothesis {{ quoted(item.subject) }}
 strategy update names unknown hypothesis {{ quoted(item.subject) }}
 {%- elif item.code.value == 'update-incomplete' -%}
 cannot update incomplete hypothesis {{ quoted(item.subject) }}
+{%- elif item.code.value == 'outside-plan' -%}
+{{ quoted(item.subject) }} is not a failed step of the task's plan; until every step is done, continue only failed steps
 {%- elif item.code.value == 'merge-id-used' -%}
 merge ID {{ quoted(item.subject) }} was already used; choose a new ID
 {%- elif item.code.value == 'merge-in-flight' -%}

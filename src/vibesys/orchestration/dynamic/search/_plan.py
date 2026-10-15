@@ -83,6 +83,9 @@ class PlanLedger:
     hypotheses: tuple[HypothesisRecord, ...]
     running: frozenset[str]
     profile_ids: frozenset[str]
+    repairable: frozenset[str] | None = None
+    """While the task's plan says what runs, the failed steps a reply may continue, and
+    nothing else; None when any workstream may be proposed."""
     merge_ids: frozenset[str] = frozenset()
     merging: bool = False
     merge_options: MergeOptions = field(default_factory=MergeOptions)
@@ -168,16 +171,18 @@ def _implement_identity(
         code = ViolationCode.HYPOTHESIS_ID_USED
     if code is not None:
         return PlanViolation(path=path, code=code, subject=identifier)
-    return None if prior is None else _continuation(position, plan, prior)
+    repairing = ledger.repairable is not None and identifier in ledger.repairable
+    return None if prior is None else _continuation(position, plan, prior, repairing=repairing)
 
 
 def _continuation(
-    position: int, plan: WorkstreamPlan, prior: HypothesisRecord
+    position: int, plan: WorkstreamPlan, prior: HypothesisRecord, *, repairing: bool
 ) -> PlanViolation | None:
+    """Why ``plan`` may not continue ``prior``; a failed plan step is never terminal."""
     last = prior.rounds[-1] if prior.rounds else None
     if last is None:
         return None
-    if last.outcome in _TERMINAL_OUTCOMES:
+    if last.outcome in _TERMINAL_OUTCOMES and not repairing:
         return PlanViolation(
             path=("workstreams", position, "hypothesis_id"),
             code=ViolationCode.HYPOTHESIS_TERMINAL,
@@ -334,6 +339,15 @@ def _work_plan(entry: WorkstreamPlan | ProfilePlan | MergePlan) -> WorkPlan:
     )
 
 
+def _repairs(entry: WorkstreamPlan | ProfilePlan | MergePlan, repairable: frozenset[str]) -> bool:
+    """Whether ``entry`` continues one of the failed plan steps; a merge never does."""
+    return (
+        isinstance(entry, WorkstreamPlan)
+        and entry.continue_hypothesis
+        and entry.hypothesis_id in repairable
+    )
+
+
 def validate(
     plan: PortfolioPlan,
     ledger: PlanLedger,
@@ -366,6 +380,10 @@ def validate(
                 path=("workstreams", position),
                 code=ViolationCode.DUPLICATE_ID,
                 subject=identifier,
+            )
+        elif ledger.repairable is not None and not _repairs(entry, ledger.repairable):
+            violation = PlanViolation(
+                path=("workstreams", position), code=ViolationCode.OUTSIDE_PLAN, subject=identifier
             )
         elif isinstance(entry, ProfilePlan):
             violation = _profile_violation(position, entry, ledger, offered, offer)

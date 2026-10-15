@@ -28,6 +28,7 @@ from vibesys.orchestration.dynamic.search._planner import plan
 from vibesys.orchestration.dynamic.search._roles import ROLES
 from vibesys.orchestration.dynamic.search._run_state import (
     NoPlan,
+    Outlined,
     PlanOutcome,
     RunRecord,
     Scheduled,
@@ -62,7 +63,7 @@ async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
                 case Measured() | Unmeasurable() | NotConfigured() as baseline:
                     run.measured(baseline)
                     ctx.latch(INPUT_MEASURED).set(baseline)  # the workstreams waiting for it go on
-                case Scheduled() | NoPlan() as outcome:
+                case Scheduled() | NoPlan() | Outlined() as outcome:
                     run.planned(outcome)
                 case WorkstreamDone() as done:
                     run.finished(done)

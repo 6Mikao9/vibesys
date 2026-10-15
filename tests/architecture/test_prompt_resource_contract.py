@@ -586,6 +586,8 @@ def core_policy_context() -> dict[str, object]:
         # A correction names the request it repeats; the template only asks whether it is set.
         "of": "planning request",
         "turns_without_candidate": 2,
+        # The outline turn of a plan-mode run cites the plan's documents (a staged input here).
+        "documents": ("reference/reference.py",),
         # The handoff file of one planning call (`WriteHandoff`'s fields).
         "handoff_paths": (".vibesys/state/runs/run-1/orchestrator-handoff/calls/call-0001.md",),
         "call": 1,

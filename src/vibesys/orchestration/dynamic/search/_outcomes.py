@@ -107,6 +107,11 @@ class WorkstreamStart(Value):
         return WorkspacePlan(mode=mode, base=self.parent)
 
     @property
+    def review_always(self) -> bool:
+        """Whether every candidate is reviewed: a plan step accepted on review alone."""
+        return not self.plan.measured
+
+    @property
     def turns(self) -> int:
         """How many paid agent turns the workstream may take: one, unless it implements."""
         return self.config.max_unmeasured_turns if self.implements else 1
@@ -357,6 +362,8 @@ def assertion(
             outcome="failed" if closing.cause is not None else "succeeded",
             candidate=None,
         )
+    if not w.plan.measured:
+        return _unmeasured_step(closing, terms)
     if closing.scored and baseline is None:
         message = "a candidate is scored only once the input's measurement is known"
         raise ValueError(message)
@@ -379,6 +386,27 @@ def assertion(
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """The implementer's own outcomes that make a candidate ineligible however it measured."""
+
+
+def _unmeasured_step(closing: Closing, terms: TaskTerms) -> Settle:
+    """The settlement of a plan step accepted on review alone (``evaluate = "none"``).
+
+    Its candidate is never measured, so never winner-eligible. When the judge accepted it and
+    nothing failed, it is retained as work in progress: the revision the steps that depend on it
+    build on. Anything else is discarded, as an unmeasured candidate is.
+    """
+    settled = settle_for(closing, gates=gates_of(terms), beats_input=False, unsettled=UNSETTLED)
+    accepted = (
+        closing.candidate is not None
+        and closing.cause is None
+        and closing.review_passed is True
+        and closing.outcome not in UNSETTLED
+    )
+    if not accepted:
+        return settled.model_copy(update={"eligible": False})
+    return settled.model_copy(
+        update={"retention": "wip", "candidate": closing.candidate, "eligible": False}
+    )
 
 
 # -- how a workstream ends ---------------------------------------------------------------------------

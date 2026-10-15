@@ -23,11 +23,13 @@ from vibesys.orchestration.dynamic.search.api import (
     IMPLEMENTER,
     JUDGE,
     MERGER,
+    OUTLINER,
     PLANNER,
     PROFILER,
     EvidenceCitation,
     ImplementPrompt,
     MergePrompt,
+    OutlinePrompt,
     PlannerCorrection,
     PlannerPrompt,
     ProfilePrompt,
@@ -74,6 +76,7 @@ TEMPLATE_FILES: dict[Template, str] = {
     PromptTemplate.IMPLEMENT: IMPLEMENTER.prompt,
     PromptTemplate.REVIEW: JUDGE.prompt,
     PromptTemplate.PROFILE_REQUEST: PROFILER.prompt,
+    PromptTemplate.OUTLINE: OUTLINER.prompt,
     PromptTemplate.MERGE: MERGER.prompt,
     CoreProtocolTemplate.RESUME: IMPLEMENTER.exchanges.resume or "",
     CoreProtocolTemplate.REPLY_CORRECTION: IMPLEMENTER.exchanges.correction or "",
@@ -87,6 +90,7 @@ FRESH_TURNS = (
     PromptTemplate.IMPLEMENT,
     PromptTemplate.REVIEW,
     PromptTemplate.PROFILE_REQUEST,
+    PromptTemplate.OUTLINE,
 )
 """The templates that open a fresh agent turn."""
 
@@ -336,6 +340,12 @@ PROFILE_PROMPTS = st.builds(
     ),
     target=REVISIONS,
 )
+OUTLINE_PROMPTS = st.builds(
+    OutlinePrompt,
+    documents=st.lists(tokens("doc").map(lambda name: f"reference/{name}.md"), min_size=1).map(
+        tuple
+    ),
+)
 ROLES = ("implementer", "judge", "profiler", "merger")
 CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
     PromptTemplate.PORTFOLIO: PLANNER_PROMPTS,
@@ -343,6 +353,7 @@ CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
     PromptTemplate.IMPLEMENT: IMPLEMENT_PROMPTS,
     PromptTemplate.REVIEW: REVIEW_PROMPTS,
     PromptTemplate.PROFILE_REQUEST: PROFILE_PROMPTS,
+    PromptTemplate.OUTLINE: OUTLINE_PROMPTS,
     PromptTemplate.MERGE: MERGE_PROMPTS,
     CoreProtocolTemplate.RESUME: st.one_of(
         st.builds(

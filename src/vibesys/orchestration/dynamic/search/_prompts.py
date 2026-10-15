@@ -40,6 +40,7 @@ class PromptTemplate(StrEnum):
     IMPLEMENT = "implement"
     REVIEW = "review"
     PROFILE_REQUEST = "profile_request"
+    OUTLINE = "outline"
     MERGE = "merge"
 
 
@@ -243,6 +244,16 @@ class ProfilePrompt(RolePromptContext):
     target: RevisionRef
 
 
+class OutlinePrompt(RolePromptContext):
+    """Request to outline the steps of the task's plan from its documents."""
+
+    reply_schema: ClassVar[SchemaRef | None] = roles.OUTLINER.reply_schema
+
+    template: Literal[PromptTemplate.OUTLINE] = PromptTemplate.OUTLINE
+    documents: tuple[str, ...]
+    """The plan's documents, as paths relative to the task directory."""
+
+
 class MergePrompt(RolePromptContext):
     """One merge of candidates into the run's main revision, on a checkout of main."""
 
@@ -262,6 +273,7 @@ type PromptContext = Annotated[
     | ImplementPrompt
     | ReviewPrompt
     | ProfilePrompt
+    | OutlinePrompt
     | MergePrompt,
     Field(discriminator="template"),
 ]

@@ -8,7 +8,7 @@ accepted fits the record, and the accepted entries alone always make a valid pla
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
@@ -64,6 +64,8 @@ class Record:
     profiles: list[str] = field(default_factory=list)
     parents: list[ParentSnapshot] = field(default_factory=list)
     offer: ProfileOffer | None = None
+    repairable: frozenset[str] | None = None
+    """The failed plan steps a reply may continue, in a run the task's plan decides."""
     merges: list[str] = field(default_factory=list)
     """The IDs of finished merges; a parent named by one is a merged main."""
     merged: list[tuple[str, str]] = field(default_factory=list)
@@ -97,8 +99,8 @@ def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> Plan
         row = MetricRow(name="throughput", value=record.main_value, direction="max")
         run.main.measurement = MainMeasurement(revision=BASE, merge_id="m0", metrics=(row,))
     run.parents = tuple(record.parents)
-    world = run.world()
-    return validate(plan, world.ledger, run.offered(), capacity=capacity, offer=record.offer)
+    ledger = replace(run.world().ledger, repairable=record.repairable)
+    return validate(plan, ledger, run.offered(), capacity=capacity, offer=record.offer)
 
 
 def codes(result: PlanCheck) -> list[ViolationCode]:
@@ -217,6 +219,11 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             Record(hypotheses=[hypothesis_record("a")]),
             "hypothesis_updates.0.hypothesis_id",
         ),
+        ViolationCode.OUTSIDE_PLAN: (
+            portfolio(implement_entry("n")),
+            Record(hypotheses=[FINISHED_A], repairable=frozenset({"a"})),
+            "workstreams.0",
+        ),
         ViolationCode.MERGE_ID_USED: (
             portfolio(merge_entry("a", "b")),
             Record(hypotheses=[FINISHED_A], parents=[GOOD_PARENT]),
@@ -287,6 +294,15 @@ def test_a_broken_rule_is_named_by_its_code_at_the_field_the_planner_must_fix(
     assert len(named) == 1, result.violations
     assert _where(named[0].path) == where
     assert not result.valid
+
+
+def test_a_merge_is_never_a_repair_of_a_failed_plan() -> None:
+    result = check(
+        portfolio(merge_entry("m", "b")),
+        Record(hypotheses=[FINISHED_A], parents=[GOOD_PARENT], repairable=frozenset({"a"})),
+    )
+    assert codes(result) == [ViolationCode.OUTSIDE_PLAN]
+    assert _where(result.violations[0].path) == "workstreams.0"
 
 
 def test_a_plan_that_breaks_no_rule_is_accepted_whole_in_order() -> None:

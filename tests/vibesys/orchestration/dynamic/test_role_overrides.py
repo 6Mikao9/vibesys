@@ -3,7 +3,7 @@
 Design question Q6 of `docs/design/strategies-on-core.md`. A role override in `agent.toml` is
 keyed by a role id the selected plugin declares, and any other key is refused before the run
 opens. `dynamic` declares `dynamic-orchestrator`, `dynamic-implementer`, `dynamic-judge`,
-`dynamic-profiler` and `dynamic-merger`, so those are the keys; the legacy ids of the loops it replaces
+`dynamic-profiler`, `dynamic-merger` and `dynamic-outliner`, so those are the keys; the legacy ids of the loops it replaces
 (`orchestrator`, `implementer`, `judge`, `profiler`) are not declared and are refused naming the
 key. The ported strategies follow the same rule with their own prefix.
 """
@@ -30,6 +30,7 @@ DYNAMIC_ROLES = (
     "dynamic-judge",
     "dynamic-profiler",
     "dynamic-merger",
+    "dynamic-outliner",
 )
 LEGACY_ROLES = ("orchestrator", "implementer", "judge", "profiler")
 

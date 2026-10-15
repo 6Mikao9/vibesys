@@ -8,6 +8,7 @@ and how (`step`). Nothing here has a clock or a thread: `FlowRun` is the whole w
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
@@ -17,8 +18,10 @@ from tests.vibesys.orchestration.dynamic._replies import (
     implemented,
     merge,
     merged,
+    outline_reply,
     plan_reply,
     reviewed,
+    step,
 )
 from tests.vibesys.vibesys_flows import start_flow
 
@@ -105,6 +108,7 @@ _KINDS = {
 }
 _REGISTRY = REGISTRY
 PLANNER_LABEL = "orchestrator"
+OUTLINER_LABEL = "outliner"
 INPUT_PATH = "input/"
 """Where the waits of the task that measures the input are asked from."""
 INPUT_THROUGHPUT = 50.0
@@ -119,6 +123,16 @@ def handoff_path(call: int) -> str:
 def config(**overrides: object) -> DynamicConfig:
     """A one-round, one-wide config, overridden by the test."""
     return DynamicConfig.model_validate({"max_rounds": 1, "max_in_flight": 1, **overrides})
+
+
+PLAN_DOCUMENTS = ["reference/README.md"]
+
+
+def plan_config(*steps: dict[str, object], **overrides: object) -> DynamicConfig:
+    """A config that follows a plan of ``steps`` (none: the run outlines them), as JSON parses it."""
+    plan = {"documents": PLAN_DOCUMENTS, "steps": list(steps)}
+    fields = {"max_rounds": 1, "max_in_flight": 1, "mode": "follow_plan", "plan": plan}
+    return DynamicConfig.model_validate_json(json.dumps({**fields, **overrides}))
 
 
 def begin(
@@ -302,6 +316,8 @@ class Host:
     def _agent(self, asked: Asked, variant: int) -> None:
         if asked.label == PLANNER_LABEL:
             self._planner(asked, variant)
+        elif asked.label == OUTLINER_LABEL:
+            self._outliner(asked, variant)
         elif asked.label == "implementer":
             self._implementer(asked, variant)
         elif asked.label == "merger":
@@ -325,6 +341,17 @@ class Host:
                 self.run.fail(asked, FailureReason.TIMED_OUT)
             case _:
                 self.run.lose(asked)
+
+    def _outliner(self, asked: Asked, variant: int) -> None:
+        """Outline two steps, the second building on the first; or fail the turn."""
+        match variant % 3:
+            case 0:
+                first, second = step("first"), step("second", "trusted", depends_on=("first",))
+                self.run.reply_raw(asked, outline_reply(first, second))
+            case 1:
+                self.run.reply_raw(asked, outline_reply(step("loop", depends_on=("loop",))))
+            case _:
+                self.run.fail(asked, FailureReason.TIMED_OUT)
 
     def _merge_entries(self, asked: Asked) -> list[dict[str, object]]:
         """A merge, when the host merges and no merge runs, of what ``merge_picks`` chooses."""

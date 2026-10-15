@@ -13,6 +13,7 @@ is then, so core's own corrections and re-asks are off for it.
 from vibesys.orchestration.dynamic.models import (
     ImplementerResult,
     MergeResult,
+    PlanOutline,
     PortfolioPlan,
     ProfilerResult,
     ReviewResult,
@@ -52,6 +53,25 @@ PLANNER = Role(
     charge=Charge.TURN,
 )
 """Plans the free slots of the run; works in no workspace."""
+
+OUTLINER = Role(
+    name=AgentName.OUTLINER.value,
+    prompt="outline.j2",
+    reply=PlanOutline,
+    workspace=None,
+    access=Access.READ_ONLY,
+    turn_time=minutes(30),
+    corrections=1,
+    lost_turns=2,
+    lost_turn_backoff=LOST_TURN_BACKOFF,
+    charge=Charge.TURN,
+    exchanges=Exchanges(correction=EXCHANGES.correction),
+)
+"""Outlines the steps of the task's plan from its documents, when the task declares none.
+
+Asked once, at the start of a run that follows the plan; core corrects a reply whose steps do
+not form a plan, and asks again after a lost turn.
+"""
 
 IMPLEMENTER = Role(
     name=AgentName.IMPLEMENTER.value,
@@ -117,4 +137,4 @@ MERGER = Role(
 )
 """Merges candidates into main on a checkout of main: a new session for every merge."""
 
-ROLES = (PLANNER, IMPLEMENTER, JUDGE, PROFILER, MERGER)
+ROLES = (PLANNER, IMPLEMENTER, JUDGE, PROFILER, MERGER, OUTLINER)

@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from vibesys.orchestration.dynamic.models import PortfolioPlan
 from vibesys.orchestration.dynamic.search._context import PlanWorld
 from vibesys.orchestration.dynamic.search._handoff import HandoffWritten, handoff_request
+from vibesys.orchestration.dynamic.search._outline import outline
 from vibesys.orchestration.dynamic.search._plan import PlanCheck, validate
 from vibesys.orchestration.dynamic.search._roles import LOST_TURN_BACKOFF, PLANNER
 from vibesys.orchestration.dynamic.search._run_state import (
@@ -91,7 +92,10 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
     """Ask the planner for a portfolio for the free slots, until one can be scheduled.
 
     A planning call is not restartable from a snapshot: after a code change the root plans again.
+    A run that follows a plan declaring no steps asks for its outline first (`outline`).
     """
+    if run.needs_outline:
+        return await outline(ctx, run)
     planner = ctx.agents.session(PLANNER)
     call = Call(number=run.calls, capacity=run.capacity(), problem=run.gate.last_error)
 
@@ -177,7 +181,7 @@ def _judge(call: Call, reply: Reply) -> PlanOutcome | None:
     # finished while it was answering frees another slot, and the next call fills that one;
     # judging the reply against the later capacity would spend a correction on a slot the
     # planner was never offered.
-    want = min(call.capacity, world.capacity) if call.capacity else world.capacity
+    want = min(call.capacity, world.wanted) if call.capacity else world.wanted
     if check is not None and check.valid and len(check.accepted) >= want:
         return Scheduled(check, blind=reply.blind)
     call.problem = _problem(check, reply.problem, want)
