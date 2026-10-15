@@ -60,6 +60,8 @@ class Call:
     fresh: int = 0
     held: PlanCheck | None = None
     """The first valid plan that left slots free, kept in case a correction does not improve it."""
+    held_blind: bool = False
+    """The held plan answered a prompt asked before the input's measurement landed."""
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,8 @@ class Reply:
     problem: PlanProblem | None
     turn: InvocationRef | None
     world: PlanWorld
+    blind: bool = False
+    """The prompt it answered was asked before the input's measurement landed."""
 
 
 async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
@@ -99,11 +103,12 @@ async def ask_planner(
 ) -> Reply | NoPlan | Again[Failed]:
     """One ask: the planner's reply, a plan-less end, or a lost turn to ask again."""
     asked_of = lost[-1].turn if lost else call.again
-    event = await planner.turn(run.world().prompt(call.problem, again=asked_of))
+    asked = run.world()
+    event = await planner.turn(asked.prompt(call.problem, again=asked_of))
     world = run.world()  # the run as it is when the reply arrives
     match event:
         case TurnFinished(reply=PortfolioPlan() as given, invocation=turn):
-            return Reply(_check(given, world), None, turn, world)
+            return Reply(_check(given, world), None, turn, world, blind=asked.baseline is None)
         case Failed(reason=FailureReason.INVALID_REPLY, errors=errors, turn=turn):
             unparsed = PlanProblem(kind=ProblemKind.UNPARSEABLE, errors=errors)
             return Reply(None, unparsed, turn, world)
@@ -128,16 +133,17 @@ def _judge(call: Call, reply: Reply) -> PlanOutcome | None:
     # planner was never offered.
     want = min(call.capacity, world.capacity) if call.capacity else world.capacity
     if check is not None and check.valid and len(check.accepted) >= want:
-        return Scheduled(check)
+        return Scheduled(check, blind=reply.blind)
     call.problem = _problem(check, reply.problem, want)
     if reply.turn is not None and call.corrections < MAX_CORRECTIONS:
         call.corrections += 1
-        call.held = _held(check) or call.held
+        if (held := _held(check)) is not None:
+            call.held, call.held_blind = held, reply.blind
         call.again = reply.turn
         return None
     chosen = _final_choice(call, world, check)
     if chosen is not None:
-        return Scheduled(chosen)
+        return Scheduled(chosen, blind=reply.blind if chosen is check else call.held_blind)
     if world.active == 0 and call.fresh < MAX_FRESH_ASKS:
         call.fresh += 1
         call.held = None

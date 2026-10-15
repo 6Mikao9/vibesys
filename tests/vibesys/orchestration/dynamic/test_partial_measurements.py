@@ -154,15 +154,17 @@ def test_no_candidate_is_adopted_for_a_benchmark_it_failed_however_far_it_got(
         reached_rounds={"c1": 14, "c2": 38},
         baseline="failed-workload",
     )
+    # The first plan was made while the input was being measured; the input missed the bar too,
+    # so that plan is dropped and the planner is told so rather than shown a baseline.
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("A")))
     for hypothesis, candidate in (("A", "c1"), ("B", "c2")):
+        told = planned(host)
+        assert told.input_failure is not None
+        assert told.baseline == ()
         host.run.reply_raw(
             host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement(hypothesis))
         )
         finish_workstream(host, hypothesis, candidate)
-        # The input misses the bar too, and the planner is told so rather than shown a baseline.
-        later = planned(host)
-        assert later.input_failure is not None
-        assert later.baseline == ()
     host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("C")))
     open_next_slot(host)
     blocked = ImplementerResult.model_validate_json(implemented("blocked"))

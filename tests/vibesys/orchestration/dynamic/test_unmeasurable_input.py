@@ -28,6 +28,7 @@ from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
+from vibesys.orchestration.dynamic.search.api import PlannerPrompt
 from vs_core.api import Finish, Measure, ProposeWinner, Retained, RevisionRef, StartAttempt, Wait
 
 MODES = across_restarts
@@ -38,12 +39,21 @@ MAX_INPUT_MEASUREMENTS = 3
 
 
 def run_to_its_end(host: Host, *, candidate_found: bool) -> None:
-    """Plan one hypothesis; its candidate passes review, or the judge rejects every turn."""
+    """Plan one hypothesis; its candidate passes review, or the judge rejects every turn.
+
+    The first plan answers a prompt asked while the input was being measured. An input that does
+    not pass its measurement drops it, and the planner, asked again with the failure in view,
+    plans the same hypothesis.
+    """
     host.drain_until_turn(PLANNER_LABEL)
     host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h1")))
-    assert host.input_waits() or host.open(StartAttempt)  # the plan waits for the input
-    assert not (host.input_waits() and host.open(StartAttempt))
+    assert not (host.input_waits() and host.open(StartAttempt))  # the plan waits for the input
     host.measure_input()
+    if not host.open(StartAttempt):
+        again = host.run.expect_turn(role=PLANNER_LABEL)
+        assert isinstance(again.context, PlannerPrompt)
+        assert again.context.input_failure is not None
+        host.run.reply_raw(again, plan_reply(implement("h1")))
     host.answer(host.run.expect(StartAttempt, label="start"))
     for _ in range(1 if candidate_found else 2):  # the default bound is two unmeasured turns
         result = ImplementerResult.model_validate_json(implemented())

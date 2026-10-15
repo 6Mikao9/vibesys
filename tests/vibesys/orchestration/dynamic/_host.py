@@ -86,6 +86,8 @@ TERMS = TaskTerms(
     accuracy_gated=(EvidenceKind.BENCHMARK,),
     operation_seconds=30,
 )
+UNMEASURED_TERMS = TERMS.model_copy(update={"measured": ()})
+"""A task with no stage configured to measure the input with."""
 FACTS = initial_state().run.facts.model_copy(update={"task": TERMS})
 """The run facts every story starts from: the core's sample facts plus a task that measures."""
 

@@ -49,9 +49,13 @@ from vs_core.api.search import INPUT, Input, Kept, NoWinner, RevisionRef, TaskTe
 
 @dataclass(frozen=True)
 class Scheduled:
-    """A planning call ended with a plan to schedule."""
+    """A planning call ended with a plan to schedule.
+
+    ``blind`` says the plan answered a prompt asked before the input's measurement landed.
+    """
 
     check: PlanCheck
+    blind: bool = False
 
 
 @dataclass(frozen=True)
@@ -182,11 +186,15 @@ class RunRecord:
     def measured(self, baseline: candidates.Baseline) -> None:
         """Fold the input's measurement, which planning did not wait for.
 
-        Plans accepted meanwhile start now (`ready_to_start`); a planning call that ended empty
-        while the input was pending is asked again, now with the measurement in view.
+        A trusted input lets the plans accepted meanwhile start now (`ready_to_start`). An input
+        that failed its measurement drops them, since they were made without knowing what the
+        benchmark requires: the planner is asked again with the failure in view (`planned` drops
+        a blind plan that arrives later). Either way a call that ended empty is asked again.
         """
         self.baseline = baseline
         self.gate.blocked_at_done = None
+        if not candidates.trusted(baseline):
+            self.accepted = []
 
     def world(self) -> PlanWorld:
         """What a planning call reads of the run now."""
@@ -207,8 +215,14 @@ class RunRecord:
         )
 
     def planned(self, outcome: PlanOutcome) -> None:
-        """Fold a finished planning call: park or abandon what it decided, queue what it accepted."""
+        """Fold a finished planning call: park or abandon what it decided, queue what it accepted.
+
+        A plan made before the input's measurement landed is dropped when the input turned out
+        untrusted (see `measured`); planning is asked again.
+        """
         match outcome:
+            case Scheduled(blind=True) if self._input_failed():
+                self.gate.blocked_at_done = None
             case Scheduled(check=check):
                 for change in check.updates:
                     known = self.hypotheses[change.hypothesis_id]
@@ -220,6 +234,9 @@ class RunRecord:
                 self.accepted.extend(check.accepted)
             case NoPlan(problem=problem, stuck=stuck, blocked_at_done=at_done):
                 self.gate = PlannerGate(failed=stuck, blocked_at_done=at_done, last_error=problem)
+
+    def _input_failed(self) -> bool:
+        return self.baseline is not None and not candidates.trusted(self.baseline)
 
     # -- workstreams ---------------------------------------------------------------------------
 

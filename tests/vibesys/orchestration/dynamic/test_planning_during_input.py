@@ -4,20 +4,29 @@ On a shared cluster the input's trusted measurement may wait hours for a slot. T
 planner at once, telling it the measurement is pending, and holds what it schedules: no workstream
 starts, no candidate is measured and no candidate is named the winner before the input's
 measurement lands. A planning call that ends empty meanwhile is not a stuck planner: planning is
-asked again when the measurement lands. A stop before it lands drops the held plans and leaves the
-input standing. How each measurement outcome ends the run is unchanged
+asked again when the measurement lands. An input that fails its measurement drops what was
+planned without knowing it, and the planner is asked again with the failure in view. An input with
+nothing configured to measure it is never shown as pending. A stop before it lands drops the held
+plans and leaves the input standing. How each measurement outcome ends the run is unchanged
 (`test_unmeasurable_input.py` plays it in both orders).
 """
 
 from __future__ import annotations
 
-from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, begin, config
+from tests.vibesys.orchestration.dynamic._host import (
+    FACTS,
+    PLANNER_LABEL,
+    UNMEASURED_TERMS,
+    Host,
+    begin,
+    config,
+)
 from tests.vibesys.orchestration.dynamic._replies import implement, plan_reply
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
 from tests.vibesys.search_faults import assert_flow_closed
-from tests.vibesys.vibesys_flows import across_restarts
+from tests.vibesys.vibesys_flows import across_restarts, start_flow
 
-from vibesys.orchestration.dynamic.search.api import PlannerPrompt, PromptTemplate
+from vibesys.orchestration.dynamic.search.api import PlannerPrompt, PromptTemplate, dynamic
 from vs_core.api import FailureReason, Finish, Measure, RequestTurn, StartAttempt, Wait
 
 MODES = across_restarts
@@ -117,3 +126,56 @@ def test_a_stop_before_the_input_lands_starts_nothing_and_leaves_the_input_stand
     assert finish.result.selection is not None
     assert finish.result.selection.kind == "trusted_baseline"
     assert_flow_closed(host)
+
+
+@MODES
+def test_plans_accepted_before_the_input_fails_its_measurement_are_planned_again(
+    *, restarting: bool
+) -> None:
+    host = begin(config(), restarting=restarting, input_first=False, baseline="failed-workload")
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h1")))
+    assert host.input_waits()
+
+    host.measure_input()
+
+    # Nothing planned blind starts: the planner is asked again, told why the input failed.
+    assert not host.open(StartAttempt)
+    again = host.run.expect_turn(role=PLANNER_LABEL).context
+    assert isinstance(again, PlannerPrompt)
+    assert not again.baseline_pending
+    assert again.input_failure is not None
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h2")))
+    (start,) = host.open(StartAttempt)
+    assert isinstance(start.request, StartAttempt)
+    host.drain()
+    assert host.run.finished is not None
+    assert_flow_closed(host)
+
+
+@MODES
+def test_a_planning_call_in_flight_when_the_input_fails_is_planned_again(
+    *, restarting: bool
+) -> None:
+    host = begin(config(), restarting=restarting, input_first=False, baseline="failed-workload")
+    blind = host.run.expect_turn(role=PLANNER_LABEL)
+
+    host.measure_input()
+    host.run.reply_raw(blind, plan_reply(implement("h1")))
+
+    assert not host.open(StartAttempt)
+    again = host.run.expect_turn(role=PLANNER_LABEL).context
+    assert isinstance(again, PlannerPrompt)
+    assert again.input_failure is not None
+
+
+@MODES
+def test_an_input_with_nothing_to_measure_is_never_shown_as_pending(*, restarting: bool) -> None:
+    cfg = config()
+    facts = FACTS.model_copy(update={"task": UNMEASURED_TERMS})
+    host = Host(start_flow(dynamic, cfg, facts=facts, restarting=restarting), cfg)
+
+    assert not host.input_waits()
+    first = host.run.expect_turn(role=PLANNER_LABEL).context
+    assert isinstance(first, PlannerPrompt)
+    assert not first.baseline_pending
+    assert "still being measured" not in render(PromptTemplate.PORTFOLIO, first)

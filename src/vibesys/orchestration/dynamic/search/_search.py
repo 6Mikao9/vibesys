@@ -5,13 +5,16 @@ are tasks in three groups, so they run concurrently; the root decides only when 
 when the search is over. Planning does not wait for the input's measurement (on a shared cluster
 it may wait hours for a slot): the planner reads the task and the code meanwhile, and is told the
 measurement is pending. Nothing that is compared with the input waits less: no workstream starts
-before it lands, so the plans accepted meanwhile wait for it (`RunRecord.ready_to_start`).
+before it lands, so the plans accepted meanwhile wait for it (`RunRecord.ready_to_start`); an
+input that fails its measurement drops them and planning is asked again (`RunRecord.measured`).
 `RunRecord` holds what the search knows, and the tasks' results are folded into it. An operator
 stop reaches every group (workstreams settle what they started; a planning call and the input's
 measurement are dropped, since nothing they would lead to would start); the root sees it as
 `StopRequested`, plans no more, and returns once nothing is in flight. The winner is named
 as the search goes (`ctx.choose`), so a stop or a deadline adopts what led at that moment.
 """
+
+from typing import assert_never
 
 from vibesys.candidates.api import Measured, NotConfigured, Unmeasurable, measure_input
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
@@ -43,7 +46,9 @@ async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
         ):
             for start in run.ready_to_start(workstreams.free):
                 workstreams.start(start.key, workstream, start)
-            if planning.free and run.may_plan(stopping=ctx.stop_requested):
+            # an input with nothing to measure has its result in at once: read it before planning
+            unread = run.baseline is None and measuring.free
+            if planning.free and not unread and run.may_plan(stopping=ctx.stop_requested):
                 planning.start(run.next_call(), plan, run)
             match await ctx.first(measuring, planning, workstreams, ctx.stopped):
                 case Measured() | Unmeasurable() | NotConfigured() as baseline:
@@ -57,5 +62,7 @@ async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
                     run.stopped_before_start(key)
                 case StopRequested():
                     pass  # the groups have stopped their tasks
+                case unexpected:
+                    assert_never(unexpected)
             ctx.publish(run.snapshot())
     return run.ending()
