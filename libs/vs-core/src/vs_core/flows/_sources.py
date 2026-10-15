@@ -6,6 +6,7 @@ runtime resumes it with the next value of the first source, in argument order, t
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -168,9 +169,24 @@ class LatchKey[T]:
     A key is its declaration: two keys are the same latch only if they are the same object. A
     run refuses a second key with a name already in use, since the two could hold different
     types under one name (the type parameter is not kept at run time, so it cannot be compared).
+    A fact learned once per item (a verdict for each of many tasks) is one declaration with a
+    latch per item: ``KEY.of(item)``.
     """
 
     name: str
+    declared: LatchKey[T] | None = None
+    """The declaration this key is an item of (`of`); None for a declaration itself."""
+
+    def of(self, item: str) -> LatchKey[T]:
+        """The key of this declaration's latch for ``item``: its own value, of the same type."""
+        if not item or "/" in item:
+            raise ContractError(("latch", self.name), "an item must be non-empty and contain no '/'")
+        return LatchKey(f"{self.name}/{item}", declared=self.declaration)
+
+    @property
+    def declaration(self) -> LatchKey[T]:
+        """The key that declares this latch: itself, or the one it is an item of."""
+        return self if self.declared is None else self.declared
 
 
 class LatchCell:
@@ -218,3 +234,52 @@ class Latch[T](Source[T]):
 
     def describe(self) -> str:
         return f"latch {self.key.name}"
+
+
+@dataclass(frozen=True, eq=False)
+class ChannelKey[T]:
+    """The name of a run-wide channel, typed by the values it carries. Declare one per stream.
+
+    Like a `LatchKey`, a key is its declaration: a run refuses a second key under a name in use.
+    """
+
+    name: str
+
+
+class ChannelCell:
+    """The run's one queue of a channel's values; every handle on the key shares it."""
+
+    def __init__(self, key: ChannelKey[Any]) -> None:
+        self.key = key
+        self.values: deque[object] = deque()
+
+
+class Channel[T](Source[T]):
+    """A run-wide stream of values: any flow may send, and the flow that reads takes each once.
+
+    For facts many flows report to one flow that keeps the record of them (tasks telling the root
+    what they reached). Values are read in the order they were sent, each once, by whichever
+    handle takes it first, so one flow reads a channel. Like a latch, it is not journaled: flow
+    code sends, so a replay sends again at the same points, and a restart after a code change
+    starts with it empty. A channel may always yield again, so waiting on it is never a deadlock.
+    """
+
+    def __init__(self, key: ChannelKey[T], cell: ChannelCell) -> None:
+        self.key = key
+        self._cell = cell
+
+    def send(self, value: T) -> None:
+        """Add ``value`` to the channel, after every value sent before it."""
+        self._cell.values.append(value)
+
+    def ready(self) -> bool:
+        return bool(self._cell.values)
+
+    def take(self) -> T:
+        return self._cell.values.popleft()  # ty: ignore[invalid-return-type]
+
+    def alive(self) -> bool:
+        return True
+
+    def describe(self) -> str:
+        return f"channel {self.key.name}"

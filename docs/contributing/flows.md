@@ -153,6 +153,7 @@ A **source** is anything a flow can wait on for a value:
 | `ctx.timer(at)` | `TimeUp(at)`, once |
 | `ctx.stopped` | `StopRequested`, once |
 | `ctx.latch(key)` | the value some flow `set` on the run-wide latch `key` (once per run), once per handle |
+| `ctx.channel(key)` | each value any flow `send`s on the run-wide channel `key`, in the order sent, once |
 
 **Every source yields each value once.** `await source` waits for its next value;
 `await ctx.first(a, b, c)` waits for the next value of whichever is ready first, and returns it
@@ -185,6 +186,18 @@ them again at the same point. A restart after a code change starts a fresh journ
 snapshots, and every latch starts empty: the flow that sets one must set it again, from its
 snapshot if it learned the value before the restart (`test_flows_restart.py` plays both orders).
 A latch that is never set is not a `Deadlock`; the waiter waits for its stop.
+
+A fact learned once per item (a verdict for each of many tasks) is one declaration with a latch
+per item: `ctx.latch(VERDICT.of(task_key))`. Every item key belongs to its declaration, so the
+flow that sets it and the flow that waits for it share the declared key, not an object.
+
+A **channel** carries facts the other way: many flows report, as they reach them, to the one flow
+that keeps their record (each workstream telling the root it waits for an evaluation slot).
+Declare its key once (`REPORTS = ChannelKey[Report]("reports")`); any flow calls
+`ctx.channel(REPORTS).send(value)`, and the reader waits on `ctx.channel(REPORTS)` in its
+`first`. Values are read in the order they were sent, each once, so one flow reads a channel.
+Like a latch it is not journaled (replay sends again at the same points; a restart after a code
+change starts it empty), and since it may always yield again, waiting on it is never a deadlock.
 
 ### Groups
 

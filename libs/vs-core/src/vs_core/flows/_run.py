@@ -40,7 +40,19 @@ from vs_core.types.until import Within
 from ._defs import FlowDef, _adapter, _Task, definition_of
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
 from ._flow import Flow
-from ._sources import First, Latch, LatchCell, LatchKey, Pending, Signal, Task, Timer
+from ._sources import (
+    Channel,
+    ChannelCell,
+    ChannelKey,
+    First,
+    Latch,
+    LatchCell,
+    LatchKey,
+    Pending,
+    Signal,
+    Task,
+    Timer,
+)
 from ._state import Dropped, Issued, LiveFlow, LiveFlows, Recorded, RecordedOperation
 
 if TYPE_CHECKING:
@@ -96,6 +108,7 @@ class _Run:
         self._signals: list[Signal] = []
         self._timers: list[Timer] = []
         self._latches: dict[str, LatchCell] = {}
+        self._channels: dict[str, ChannelCell] = {}
         self._restorable: dict[str, LiveFlow] = {}
         self._issued: dict[tuple[str, str], int] = {}
         self._view: RunView | None = None
@@ -207,10 +220,18 @@ class _Run:
     def latch[T](self, key: LatchKey[T]) -> Latch[T]:
         """A new handle on the run's latch ``key``; another key with its name is a bug."""
         cell = self._latches.setdefault(key.name, LatchCell(key))
-        if cell.key is not key:
+        if cell.key.declaration is not key.declaration:
             message = "another latch key has this name: declare each key once and share it"
             raise ContractError(("latch", key.name), message)
         return Latch(key, cell)
+
+    def channel[T](self, key: ChannelKey[T]) -> Channel[T]:
+        """A handle on the run's channel ``key``; another key with its name is a bug."""
+        cell = self._channels.setdefault(key.name, ChannelCell(key))
+        if cell.key is not key:
+            message = "another channel key has this name: declare each key once and share it"
+            raise ContractError(("channel", key.name), message)
+        return Channel(key, cell)
 
     # -- reading and naming ------------------------------------------------------------------
 

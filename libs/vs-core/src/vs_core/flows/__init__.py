@@ -40,7 +40,17 @@ from ._roles import (
     minutes,
     reply_errors,
 )
-from ._sources import Latch, LatchKey, Pending, Source, StopSource, Task, Timer
+from ._sources import (
+    Channel,
+    ChannelKey,
+    Latch,
+    LatchKey,
+    Pending,
+    Source,
+    StopSource,
+    Task,
+    Timer,
+)
 from ._state import Dropped, FlowState, JournaledEvent, Waiting
 from ._winner import INPUT, EndReason, Input, Kept, NoWinner
 from ._workspaces import Assessment, NotOpened, Workspace, Workspaces
@@ -69,6 +79,8 @@ __all__ = [
     "Input",
     "JournaledEvent",
     "Kept",
+    "Channel",
+    "ChannelKey",
     "Latch",
     "LatchKey",
     "NoWinner",
