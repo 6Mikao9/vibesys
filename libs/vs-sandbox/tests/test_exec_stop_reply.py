@@ -5,6 +5,7 @@ from __future__ import annotations
 from hypothesis import given
 from hypothesis import strategies as st
 
+# test-isolation: the stop script's reply protocol is internal to the Docker sandbox; this pins it directly.
 from vs_sandbox.docker_cli import ExecStopEvidence, ExecStopReply, parse_exec_stop_reply
 
 _ticks = st.integers(0, 2**62).map(str)
