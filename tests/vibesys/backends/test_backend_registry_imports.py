@@ -29,12 +29,13 @@ import sys
 
 from vs_sandbox.api import ComputeBackend, SubprocessDockerCli, create_compute_backend
 from vs_sim.api import OsProcesses, OsThreads, SystemClock
+from vs_sim.api import SubprocessPipedProcessLauncher
 
 create_compute_backend(
     ComputeBackend.{backend},
     log_dir={log_dir!r},
     clock=SystemClock(),
-    docker=SubprocessDockerCli(processes=OsProcesses()),
+    docker=SubprocessDockerCli(processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()),
     threads=OsThreads(),
 )
 print("vs_sandbox.docker_sandbox" in sys.modules)

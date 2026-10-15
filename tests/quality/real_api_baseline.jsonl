@@ -38,7 +38,7 @@
 {"path": "libs/vs-runtime/tests/test_trusted_evaluation_preparation.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/command_execution.py", "rule": "subprocess", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/container_runtime.py", "rule": "subprocess", "count": 2}
-{"path": "libs/vs-sandbox/src/vs_sandbox/docker_cli.py", "rule": "subprocess", "count": 5}
+{"path": "libs/vs-sandbox/src/vs_sandbox/docker_cli.py", "rule": "subprocess", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py", "rule": "signal", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_sandbox.py", "rule": "subprocess", "count": 7}
 {"path": "libs/vs-sandbox/src/vs_sandbox/docker_workspace.py", "rule": "subprocess", "count": 4}
@@ -47,7 +47,7 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_command.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py", "rule": "signal", "count": 3}
-{"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py", "rule": "subprocess", "count": 24}
+{"path": "libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py", "rule": "subprocess", "count": 23}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "signal", "count": 3}
 {"path": "libs/vs-sandbox/src/vs_sandbox/process_execution.py", "rule": "subprocess", "count": 5}
@@ -222,7 +222,7 @@
 {"path": "libs/vs-sandbox/tests/skypilot_world.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_path_contract.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_container_runtime.py", "rule": "real_impl", "count": 7}
-{"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "real_impl", "count": 6}
+{"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "real_impl", "count": 8}
 {"path": "libs/vs-sandbox/tests/test_docker_device_groups.py", "rule": "real_impl", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "real_impl", "count": 51}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox_exit_paths.py", "rule": "real_impl", "count": 1}
@@ -316,7 +316,7 @@
 {"path": "tests/vibesys/sandbox/test_docker_environment_startup.py", "rule": "real_impl", "count": 1}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "real_impl", "count": 4}
 {"path": "tests/vibesys/sandbox/test_run_environment_candidate_policy.py", "rule": "real_impl", "count": 1}
-{"path": "tests/vibesys/sandbox/test_slurm_environment.py", "rule": "real_impl", "count": 2}
+{"path": "tests/vibesys/sandbox/test_slurm_environment.py", "rule": "real_impl", "count": 13}
 {"path": "tests/vibesys/sandbox/test_slurm_parallel_candidates.py", "rule": "real_impl", "count": 3}
 {"path": "tests/vibesys/test_context.py", "rule": "real_impl", "count": 7}
 {"path": "tests/vibesys/test_evaluation_tool_offered.py", "rule": "real_impl", "count": 4}

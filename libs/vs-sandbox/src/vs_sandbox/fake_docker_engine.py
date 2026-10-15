@@ -21,10 +21,13 @@ from vs_sandbox.container_runtime import (
     NESTED_DAEMON_START_SCRIPT,
 )
 from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
-from vs_sandbox.process_execution import shell_exit_status, start_process_group
+from vs_sandbox.process_execution import shell_exit_status
+from vs_sim.api import SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from vs_sim.api import PipedProcess
 
 # The container program's parent, standing in for the ``docker exec`` client.
 # It starts the program in a session of its own (the daemon's side), records
@@ -316,7 +319,7 @@ class FakeDockerEngine:
                 message = f"FakeDockerEngine does not model `docker {other}`"
                 raise AssertionError(message)
 
-    def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:
+    def spawn(self, argv: Sequence[str]) -> PipedProcess:
         """Start a ``docker exec`` whose program survives its client's death."""
         arguments = tuple(argv)
         self.calls.append(arguments)
@@ -342,8 +345,9 @@ class FakeDockerEngine:
             "env": {**os.environ, **(container.env if container else {}), **request.env},
             "pidfile": str(pidfile),
         }
-        return start_process_group(
-            (sys.executable, "-c", _EXEC_CLIENT, json.dumps(spec)), env=None, cwd=None
+        # The engine models a daemon with host processes, so its exec clients are real.
+        return SubprocessPipedProcessLauncher().start(
+            (sys.executable, "-c", _EXEC_CLIENT, json.dumps(spec))
         )
 
     def _pidfile(self, marker: str) -> Path:

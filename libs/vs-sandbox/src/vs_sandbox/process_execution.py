@@ -16,14 +16,16 @@ import subprocess
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
+    from io import TextIOBase
 
-    from vs_sim.api import Threads
+    from vs_sim.api import PipedProcess, Threads
 
 type _TextProcess = subprocess.Popen[str]
 
@@ -86,7 +88,7 @@ class CancelSignal(Protocol):
 class StoppableProcess(Protocol):
     """A started process group leader that :func:`wait_stoppable` can wait for and stop.
 
-    :class:`PopenProcess` is the real one; ``FakeStoppableProcess`` in
+    :class:`PipedStoppableProcess` is the real one; ``FakeStoppableProcess`` in
     ``vs_sandbox.api.testing`` runs on a simulated clock. Both pass the cases in
     :class:`~vs_sandbox.process_contracts.StoppableProcessContract`.
     """
@@ -107,6 +109,76 @@ class StoppableProcess(Protocol):
     def signal_group(self, signal_number: StopSignal) -> None:
         """Send *signal_number* to the process group; a no-op once nothing is left in it."""
         ...
+
+
+class PipedStoppableProcess:
+    """A :class:`StoppableProcess` over a started ``vs_sim`` :class:`~vs_sim.api.PipedProcess`.
+
+    Two drain workers read stdout and stderr as the command writes them, so
+    neither pipe fills and blocks the command; a wait returns the output once
+    the leader exited and both pipes reached EOF. Like ``subprocess`` text
+    mode, CRLF and a lone CR become LF.
+    """
+
+    def __init__(self, process: PipedProcess, *, threads: Threads) -> None:
+        """Take ownership of *process* and start draining its pipes on *threads*."""
+        self._process = process
+        self._threads = threads
+        self._stdout: list[str] = []
+        self._stderr: list[str] = []
+        self._returncode: int | None = None
+        self._drains = (
+            threads.spawn(
+                partial(_drain, process.stdout, self._stdout), name="vibesys-command-stdout"
+            ),
+            threads.spawn(
+                partial(_drain, process.stderr, self._stderr), name="vibesys-command-stderr"
+            ),
+        )
+
+    @property
+    def returncode(self) -> int:
+        """The return code of the exited leader."""
+        if self._returncode is None:
+            message = "the process has not exited"
+            raise RuntimeError(message)
+        return self._returncode
+
+    def wait(self, timeout: float | None) -> tuple[str, str] | None:
+        """Wait for the leader and both pipes' EOF, within *timeout* seconds in total."""
+        deadline = None if timeout is None else self._threads.now() + timeout
+        if self._returncode is None:
+            try:
+                self._returncode = self._process.wait(timeout)
+            except ProcessTimeoutError:
+                return None
+        for drain in self._drains:
+            drain.join(None if deadline is None else max(0.0, deadline - self._threads.now()))
+            if drain.is_alive():
+                return None
+        return _universal_newlines(self._stdout), _universal_newlines(self._stderr)
+
+    def signal_group(self, signal_number: StopSignal) -> None:
+        """Send ``SIGTERM`` or ``SIGKILL`` to the group while its leader is unreaped."""
+        if signal_number == TERMINATE:
+            self._process.terminate_group()
+        elif signal_number == KILL:
+            self._process.kill_group()
+        else:
+            message = f"a stoppable process is stopped only with SIGTERM or SIGKILL, not {signal_number!r}"
+            raise ValueError(message)
+
+
+_DRAIN_CHARACTERS = 65_536
+
+
+def _drain(stream: TextIOBase, sink: list[str]) -> None:
+    while chunk := stream.read(_DRAIN_CHARACTERS):
+        sink.append(chunk)
+
+
+def _universal_newlines(chunks: list[str]) -> str:
+    return "".join(chunks).replace("\r\n", "\n").replace("\r", "\n")
 
 
 class PopenProcess:

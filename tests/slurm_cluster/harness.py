@@ -40,7 +40,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend, SubprocessDockerCli
 from vs_sandbox.api.slurm import load_slurm_operator_settings
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     import threading
@@ -306,7 +306,9 @@ def make_request(
             log_dir,
             log=lambda _: None,
             image="python:3.12-slim",
-            docker=SubprocessDockerCli(processes=OsProcesses()),
+            docker=SubprocessDockerCli(
+                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+            ),
             threads=OsThreads(),
         ),
         agent_backend="stub",

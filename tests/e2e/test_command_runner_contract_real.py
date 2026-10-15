@@ -36,7 +36,13 @@ from tests.support.command_runner_contract import (
 from vs_agent.api.images import agent_image
 from vs_sandbox.api import CommandRunner, DockerSandbox, LocalShellRunner, SubprocessDockerCli
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, Threads
+from vs_sim.api import (
+    MonotonicClock,
+    OsProcesses,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    Threads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -180,7 +186,9 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
                 _DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock()
             ),
             max_output_bytes=CAP,
-            docker=SubprocessDockerCli(processes=OsProcesses()),
+            docker=SubprocessDockerCli(
+                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+            ),
             threads=OsThreads(),
         )
         sandbox.start()
