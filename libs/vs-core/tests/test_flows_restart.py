@@ -400,6 +400,7 @@ def latch_search(label: str) -> SearchDef[Known]:
             ctx.latch(LEARNED).set(learned)
             results = [result async for result in workers]
         ctx.publish(Shared(result=results[0], latch_at_start=at_start))  # ty: ignore[invalid-argument-type]
+
     return root
 
 
