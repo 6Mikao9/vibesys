@@ -339,8 +339,6 @@ class ViolationCode(StrEnum):
     UPDATE_INCOMPLETE = "update-incomplete"
     OUTSIDE_PLAN = "outside-plan"
     """The run follows the task's plan, and the entry is not a repair of one of its failed steps."""
-    RANKING_NOT_OFFERED = "ranking-not-offered"
-    """The reply orders the evaluations, and the run picks the newest candidate itself."""
     RANKING_UNKNOWN = "ranking-unknown"
     RANKING_DUPLICATE = "ranking-duplicate"
 

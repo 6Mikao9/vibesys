@@ -259,12 +259,8 @@ def _ranking(
 ) -> tuple[tuple[str, ...] | None, tuple[PlanViolation, ...]]:
     """The reply's order of evaluations, when it gave one the run may take."""
     order = plan.evaluation_order
-    if not order:
-        return None, ()
-    if not ledger.ranks:
-        return None, (
-            PlanViolation(path=("evaluation_order",), code=ViolationCode.RANKING_NOT_OFFERED),
-        )
+    if not order or not ledger.ranks:
+        return None, ()  # a run that picks the newest reads no order, so none is wrong
     known = (
         {item.hypothesis_id for item in ledger.hypotheses}
         | ledger.profile_ids

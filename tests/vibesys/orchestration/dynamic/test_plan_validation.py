@@ -197,11 +197,6 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             Record(hypotheses=[FINISHED_A], repairable=frozenset({"a"})),
             "workstreams.0",
         ),
-        ViolationCode.RANKING_NOT_OFFERED: (
-            portfolio(implement_entry("n"), order=("a",)),
-            keep,
-            "evaluation_order",
-        ),
         ViolationCode.RANKING_UNKNOWN: (
             portfolio(implement_entry("n"), order=("n", "z")),
             Record(hypotheses=[FINISHED_A], ranks=True),
@@ -264,6 +259,19 @@ def test_a_run_that_ranks_evaluations_takes_the_replys_order_of_known_and_planne
     assert result.valid
     assert result.ranking == ("n", "a")
     assert check(portfolio(implement_entry("n")), Record(ranks=True)).ranking is None
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(order=st.lists(st.sampled_from(["a", "n", "z"]), max_size=4).map(tuple))
+def test_a_run_that_picks_the_newest_ignores_any_order_the_reply_gives(
+    order: tuple[str, ...],
+) -> None:
+    """The order is read only when the run lets the orchestrator rank; a reply that gives one
+    anyway, known IDs or not, is not sent back for it."""
+    result = check(portfolio(implement_entry("n"), order=order), Record(hypotheses=[FINISHED_A]))
+    assert result.valid, result.violations
+    assert result.ranking is None
+    assert [item.work_id for item in result.accepted] == ["n"]
 
 
 @st.composite
