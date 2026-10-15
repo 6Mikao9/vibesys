@@ -1518,6 +1518,58 @@ def test_docker_environment_forwards_host_cli_auth_environment(
     assert container_env["PYTHONPATH"] == "/opt/vibesys"
 
 
+@pytest.mark.parametrize("environment_name", ["docker", "modal"])
+@pytest.mark.parametrize("env_token", [None, "", "synthetic-gateway-token"])
+def test_a_container_gets_host_auth_files_only_when_no_env_credential_wins(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    env_token: str | None,
+) -> None:
+    """Without a policy, an env credential the CLI would use means no host login or settings.
+
+    A blank token is no credential, so the host's files are staged as before;
+    the run log names the source either way and never a value.
+    """
+    home = tmp_path / "synthetic-home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / ".credentials.json").write_text('{"synthetic": "subscription"}\n')
+    (home / ".claude.json").write_text('{"synthetic": "settings"}\n')
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gateway.invalid/claude")
+    if env_token is not None:
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", env_token)
+    backend = FakeBackend()
+    log: list[str] = []
+    request = _request(tmp_path, backend, agent_backend="cli", cli_provider="claude", log=log.append)
+
+    _open(build_run_environment(RunEnvironmentSpec(environment_name)), request)
+
+    kwargs = backend.calls[0][1]
+    delivered_env = {
+        name: value for name, value in kwargs["extra_env"].items() if name in _CLAUDE_AUTH_ENV
+    }
+    home_files = {
+        Path(host)
+        for host, _, _ in _as_mount_tuples(kwargs["resources"])
+        if Path(host).is_relative_to(home)
+    }
+    (auth_line,) = [line for line in log if line.startswith("[agent-auth]")]
+    if env_token:
+        assert delivered_env == {
+            "ANTHROPIC_AUTH_TOKEN": env_token,
+            "ANTHROPIC_BASE_URL": "https://gateway.invalid/claude",
+        }
+        assert home_files == set()
+        assert not kwargs.get("auth_files")
+        assert "ANTHROPIC_AUTH_TOKEN" in auth_line
+        assert env_token not in auth_line
+    else:
+        assert delivered_env == {"ANTHROPIC_BASE_URL": "https://gateway.invalid/claude"}
+        assert home_files == {home / ".claude" / ".credentials.json", home / ".claude.json"}
+        assert "auth files" in auth_line
+
+
 def test_docker_environment_rejects_a_cli_provider_without_any_auth_source(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
