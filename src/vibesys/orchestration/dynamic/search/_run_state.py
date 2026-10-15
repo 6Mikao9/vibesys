@@ -484,17 +484,14 @@ class RunRecord:
         return self.base, None
 
     def _own_last_round(self, plan: WorkPlan) -> tuple[RevisionRef, str | None] | None:
-        """What a continuation builds on: its newest waiting candidate, else its last round's.
+        """What a continuation builds on: its last round's candidate.
 
-        A candidate waiting for its evaluation is the newest code of its line, so the next
-        submission holds it and supersedes it in the queue.
+        A hypothesis whose candidate waits for its evaluation is still in flight, so it is never
+        continued before that round is recorded (`PlanLedger.submitted`).
         """
         prior = self.hypotheses.get(plan.work_id)
         if plan.kind is not WorkKind.IMPLEMENT or not plan.continue_hypothesis or prior is None:
             return None
-        waiting = [item for item in self.submitted.values() if item.work_id == plan.work_id]
-        if waiting:
-            return max(waiting, key=lambda item: item.at).candidate, prior.lineage_parent_id
         last = prior.rounds[-1] if prior.rounds else None
         if last is not None and last.candidate is not None:
             return last.candidate, prior.lineage_parent_id

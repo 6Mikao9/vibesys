@@ -76,8 +76,9 @@ class PlanLedger:
     ranks: bool = False
     """Whether the run lets the reply order its trusted evaluations."""
     submitted: frozenset[str] = frozenset()
-    """Work ids whose candidate waits for its trusted measurement while no agent works on them:
-    a reply may continue them (building on that candidate), but not park or abandon them."""
+    """Work ids whose candidate waits for its trusted measurement while no agent works on them.
+    They are still in flight: a reply may not continue, park or abandon them until the
+    measurement ends, so a hypothesis's records stay one round at a time."""
 
     def hypothesis(self, identifier: str) -> HypothesisRecord | None:
         """The record of a hypothesis ID, if one exists."""
@@ -152,7 +153,7 @@ def _implement_identity(
         prior is not None and prior.strategy is HypothesisStrategy.ABANDONED
     ):
         code = ViolationCode.HYPOTHESIS_ABANDONED
-    elif identifier in ledger.running:
+    elif identifier in ledger.running | ledger.submitted:
         code = ViolationCode.HYPOTHESIS_IN_FLIGHT
     elif prior is None and plan.continue_hypothesis:
         code = ViolationCode.HYPOTHESIS_UNKNOWN

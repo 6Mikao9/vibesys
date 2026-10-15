@@ -197,50 +197,46 @@ def test_agents_keep_working_and_a_freed_slot_measures_the_newest_candidate(
 
 
 @MODES
-def test_a_newer_candidate_of_the_same_hypothesis_drops_the_waiting_one_unmeasured(
+def test_a_hypothesis_whose_candidate_waits_is_continued_only_once_its_result_is_in(
     *, restarting: bool
 ) -> None:
-    host = begin(config(max_rounds=3, **QUEUED), restarting=restarting)
+    """A continuation records a new round of its hypothesis and builds on the last one, so it waits
+    for the round in flight: the planner sees a parked hypothesis as busy."""
+    host = begin(config(max_rounds=4, **QUEUED), restarting=restarting)
     _plan(host, implement("h1"))
     _work(host, "000001.h1", "c1")
     _plan(host, implement("h2"))
     _work(host, "000002.h2", "c2")
 
-    # h2 waits for the slot h1 holds; the orchestrator continues it, built on its waiting code.
+    # h2 waits for the slot h1 holds; the orchestrator tries to continue it.
     told = _plan(host, implement("h2", continue_hypothesis=True, task="next step"))
     (row,) = [item for item in told.history if getattr(item, "hypothesis_id", "") == "h2"]
     assert row.status == "submitted"
+    correction = host.run.expect_turn(role=PLANNER_LABEL).context
+    assert isinstance(correction, PlannerCorrection)
+    assert correction.problem is not None
+    assert [(item.code, item.subject) for item in correction.problem.violations] == [
+        ("hypothesis-in-flight", "h2")
+    ]
+    assert "hypothesis 'h2' is still in flight" in render(PromptTemplate.PORTFOLIO_CORRECTION, correction)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h3")))
     _answer_but_measurements(host)
-    (started,) = [
+    assert not [
         request
         for request in _issued(host, StartAttempt)
-        if _line_of(request.decision_id.root) == "000003.h2"
+        if _line_of(request.decision_id.root).endswith(".h2")
+        and _line_of(request.decision_id.root) != "000002.h2"
     ]
-    assert started.workspace.base == RevisionRef.of_git_commit("c2")
-    _work(host, "000003.h2", "c3")
 
-    # c3 holds c2's code: c2 is dropped, never measured, and kept as work in progress.
-    (dropped,) = [item for item in _record(host).finished if item.sequence == 2]
-    assert dropped.failure is not None
-    assert dropped.failure.kind is FailureKind.NOT_MEASURED
-    assert dropped.failure.dropped is DropReason.SUPERSEDED
-    assert dropped.failure.superseded_by == "h2"
-    (settled,) = [
-        request.disposition
-        for request in _issued(host, Withdraw)
-        if _line_of(request.decision_id.root) == "000002.h2"
-    ]
-    assert isinstance(settled, Settle)
-    assert settled.retention == "wip"
-    assert settled.candidate == RevisionRef.of_git_commit("c2")
-    assert not settled.eligible
-    queue = _record(host).evaluations
-    assert queue is not None
-    assert [entry.submission.work_id for entry, _ in queue.dropped] == ["h2"]
-
+    # Once h2's round is in, nothing of it was dropped: it was measured and settled.
     _end_measurement(host, "000001.h1")
     host.drain()
-    assert _measured(host) == ["000001.h1", "000003.h2"]
+    (h2,) = [item for item in _record(host).finished if item.sequence == 2]
+    assert h2.failure is None
+    assert "000002.h2" in _measured(host)
+    queue = _record(host).evaluations
+    assert queue is not None
+    assert not queue.dropped
     assert isinstance(host.run.finished, Finish)
     assert_flow_closed(host)
 
