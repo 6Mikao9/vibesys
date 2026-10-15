@@ -28,6 +28,7 @@ from vs_core.types.search import (
 from vs_core.types.strategy import (
     Decision,
     Finish,
+    Measure,
     ProposeWinner,
     Settle,
     Wait,
@@ -37,7 +38,7 @@ from vs_core.types.strategy import (
 )
 from vs_core.types.until import Within
 
-from ._defs import FlowDef, _adapter, _Task, definition_of
+from ._defs import FlowDef, _adapter, _Task, definition_of, snapshot_adapter
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
 from ._flow import Flow
 from ._sources import (
@@ -53,7 +54,18 @@ from ._sources import (
     Task,
     Timer,
 )
-from ._state import Dropped, Issued, LiveFlow, LiveFlows, Recorded, RecordedOperation
+from ._state import (
+    Dropped,
+    Held,
+    InFlight,
+    Issued,
+    LiveFlow,
+    LiveFlows,
+    Recorded,
+    RecordedOperation,
+    RestartSettled,
+    RestartSettleReason,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -100,6 +112,7 @@ class _Run:
         self.choice: Selection | None = None
         self.out: list[Decision] = []
         self.dropped: list[Dropped] = []
+        self.restart_settled: list[RestartSettled] = []
         self.checkpoints: dict[InvocationRef, Checkpoint] = {}
         self._root = root
         self._config = config
@@ -110,6 +123,9 @@ class _Run:
         self._latches: dict[str, LatchCell] = {}
         self._channels: dict[str, ChannelCell] = {}
         self._restorable: dict[str, LiveFlow] = {}
+        self._carried: dict[str, list[Held]] = {}
+        self._in_flight: list[InFlight] = []
+        self._measuring: dict[DecisionId, InFlight] = {}
         self._issued: dict[tuple[str, str], int] = {}
         self._view: RunView | None = None
         self._recorded: deque[str] | None = None
@@ -134,10 +150,17 @@ class _Run:
         latest snapshot of the flow that had that key, with its decision numbering kept. A task
         that is not a registered flow has no snapshot: it is dropped with the old code, and if
         its parent, restarted from its own snapshot, starts that key again, it starts afresh.
+
+        A workspace a resumable flow held when it recorded its latest checkpoint stays open for
+        it (``ctx.workspaces.reopen``); every other workspace is settled, by the salvage its flow
+        recorded (``ctx.workspaces.salvage``) or else plainly, with the reason recorded. So is a
+        kept workspace whose flow the new code does not start again in this step. A measurement
+        in flight goes to the resumed flow that asks for the same one again (``issue``).
         """
         self._begin(view, recorded)
         self.stop, self.published, self.choice = base.stop, base.published, base.choice
         self._issued = {(i.path, i.label): i.count for i in base.issued}
+        self._in_flight = list(base.in_flight)
         self._restorable = {
             live.path: live for live in base.flows if live.path and live.name is not None
         }
@@ -145,11 +168,22 @@ class _Run:
         if root.name != self._root.name or not root.checkpointed:
             raise FlowCodeChanged(0)  # the root resumes only from a snapshot it recorded
         for live in base.flows:
+            resumable = live.name is not None and live.checkpointed
             for held in live.holds:
-                self._settle_held(held)
+                if not resumable:
+                    self._settle_held(live.path, held, RestartSettleReason.FLOW_NOT_RESUMABLE)
+                elif not held.carried:
+                    self._settle_held(live.path, held, RestartSettleReason.OPENED_AFTER_CHECKPOINT)
+                else:
+                    self._carried.setdefault(live.path, []).append(held)
         if base.stop is not None:
             self._tasks[0].stop.set(base.stop)
+        self._tasks[0].carried = self._carried.pop("", [])
         self._launch(self._tasks[0], self._root, self._snapshot_of(self._root, root))
+        self._settle()
+        for path, held in [(p, h) for p, kept in self._carried.items() for h in kept]:
+            self._settle_held(path, held, RestartSettleReason.NOT_RESTARTED)
+        self._carried = {}
         return self._end()
 
     def feed(
@@ -191,26 +225,30 @@ class _Run:
         for task in self._tasks:
             definition = task.flow
             text = (
-                _adapter(definition.snapshot).dump_json(task.snapshot).decode()
-                if definition
-                else ""
+                snapshot_adapter(definition).dump_json(task.snapshot).decode() if definition else ""
             )
             flows.append(
                 LiveFlow(
                     path=task.path,
                     name=definition.name if definition else None,
                     snapshot_json=text,
-                    holds=tuple(task.holds),
+                    holds=(*task.holds, *task.carried),
                     checkpointed=task.checkpointed,
                 )
             )
         issued = tuple(Issued(path=p, label=lb, count=n) for (p, lb), n in self._issued.items())
+        measuring = tuple(
+            item
+            for decision, item in self._measuring.items()
+            if decision in self._pendings and self._pendings[decision].alive()
+        )
         return LiveFlows(
             flows=tuple(flows),
             issued=issued,
             stop=self.stop,
             published=self.published,
             choice=self.choice,
+            in_flight=(*self._in_flight, *measuring),
         )
 
     def waiting(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -288,20 +326,56 @@ class _Run:
         )
 
     def issue(self, task: _Task, pending: Pending, decision: Decision) -> Pending:
-        """Send a decision out and register the ``Pending`` that its outcome will fill."""
+        """Send a decision out and register the ``Pending`` that its outcome will fill.
+
+        A measurement the flow already had in flight when the run restarted is not sent again:
+        the ``Pending`` waits for the old one's outcome instead (``_reattached``).
+        """
         if pending.decision in self._pendings:
             raise ContractError(
                 ("decision_id",), f"decision id {pending.decision.root} is not unique"
             )
+        work = pending.work
+        if isinstance(work, Measure):
+            label = _label_of(task.path, work.decision_id)
+            earlier = self._reattached(task.path, label, work)
+            if earlier is not None:
+                pending = Pending(earlier.request)
+            self._measuring[pending.decision] = InFlight(
+                path=task.path, label=label, request=pending.work
+            )
+            if earlier is not None:
+                self._pendings[pending.decision] = pending
+                task.started.append(pending)
+                return pending
         self._pendings[pending.decision] = pending
         task.started.append(pending)
         self.out.append(decision)
         return pending
 
+    def _reattached(self, path: str, label: str, request: Measure) -> InFlight | None:
+        """The measurement in flight at the restart that ``request`` asks for again, if any.
+
+        It is the same request when the same flow asks it under the same label, in the same
+        scope, with the same plan apart from the time it was submitted.
+        """
+        for item in self._in_flight:
+            old = item.request
+            if (
+                item.path == path
+                and item.label == label
+                and old.scope == request.scope
+                and _same_plan(old, request)
+            ):
+                self._in_flight.remove(item)
+                return item
+        return None
+
     def forget(self, pending: Pending) -> None:
         """Abandon a request's outcome: if it arrives later it is dropped and recorded."""
         pending.abandoned = True
         self._pendings.pop(pending.decision, None)
+        self._measuring.pop(pending.decision, None)
 
     def timer(self, at: Seconds) -> Timer:
         """A timer for ``at``, and the wake-up that makes core deliver the time."""
@@ -353,10 +427,11 @@ class _Run:
                 raise FlowCodeChanged(
                     0
                 )  # something else under this key, or no checkpoint to resume
+            task.carried = self._carried.pop(path, [])
             self._launch(task, definition, self._snapshot_of(definition, restored))
         elif definition is not None:
             if len(args) != 1 or not isinstance(args[0], definition.snapshot):
-                message = f"{definition.name} takes its {definition.snapshot.__name__} snapshot"
+                message = f"{definition.name} takes its {definition.snapshot_name} snapshot"
                 raise ContractError(("group", "start"), message)
             self._launch(task, definition, args[0])
         else:
@@ -364,32 +439,38 @@ class _Run:
             self._resume(task, None, None)
         return task.handle
 
-    def _settle_held(self, held: AttemptRef) -> None:
-        """Settle a workspace a restarted flow had open, so the restart leaks none.
+    def _settle_held(self, path: str, held: Held, reason: RestartSettleReason) -> None:
+        """Settle a workspace a restart does not give back to a flow, so the restart leaks none.
 
-        The flow that held it starts over from its checkpoint and opens its workspaces again;
-        the old one is closed plainly as cancelled. Its answer reaches no waiting flow and is
-        recorded as dropped.
+        It settles as the flow's salvage asserts (``ctx.workspaces.salvage``), else plainly as
+        cancelled and discarded; the settlement and its reason are recorded. Core's answer
+        reaches no waiting flow and is recorded as dropped.
         """
+        disposition = held.salvage or Settle(
+            assessments=(), eligible=False, retention="discard", outcome="cancelled"
+        )
         limit = self.read(lambda view: view.limits.cleanup_bound, float)
         work = self.stamp(
             self._tasks[0],
             Withdraw(
                 decision_id=DecisionId(root="restart-settle"),
                 scope=THIS_RUN,
-                target=held,
-                disposition=Settle(
-                    assessments=(), eligible=False, retention="discard", outcome="cancelled"
-                ),
+                target=held.attempt,
+                disposition=disposition,
             ),
         )
         self.out.append(Wait(request=work, until=Within(limit=limit)))
+        self.restart_settled.append(
+            RestartSettled(
+                attempt=held.attempt, flow=path, reason=reason, retention=disposition.retention
+            )
+        )
 
     @staticmethod
     def _snapshot_of(definition: FlowDef, live: LiveFlow) -> object:
         """The snapshot the old code recorded, as the current code's snapshot type."""
         try:
-            return _adapter(definition.snapshot).validate_json(live.snapshot_json)
+            return snapshot_adapter(definition).validate_json(live.snapshot_json)
         except ValidationError as unreadable:
             raise FlowCodeChanged(0) from unreadable  # the snapshot type changed incompatibly
 
@@ -425,6 +506,9 @@ class _Run:
         task.blocked = block
 
     def _ended(self, task: _Task, result: object) -> None:
+        for held in task.carried:  # resumed, and ended without taking its workspace back
+            self._settle_held(task.path, held, RestartSettleReason.NOT_REOPENED)
+        task.carried = []
         self._tasks.remove(task)
         for pending in task.started:
             if pending.alive():
@@ -465,6 +549,8 @@ class _Run:
         if decision is None:
             return  # an event that answers nothing of ours (an agent's own measurement)
         pending = self._pendings.pop(decision, None)
+        self._measuring.pop(decision, None)
+        self._in_flight = [i for i in self._in_flight if i.request.decision_id != decision]
         if pending is None:
             self.dropped.append(Dropped(event=_kind_of(item), decision=decision))
         else:
@@ -522,6 +608,17 @@ class _Run:
             return False
         self._resume(task, ready.take(), None)
         return True
+
+
+def _label_of(path: str, decision: DecisionId) -> str:
+    """The id root a flow at ``path`` issued ``decision`` under: ``a/measure.2`` -> ``measure``."""
+    return decision.root.removeprefix(path).rpartition(".")[0]
+
+
+def _same_plan(old: Measure, new: Measure) -> bool:
+    """Whether two measurements measure the same thing (they may be asked at different times)."""
+    when = {"submitted_at": 0.0}
+    return old.plan.model_copy(update=when) == new.plan.model_copy(update=when)
 
 
 def _kind_of(item: Event | Recorded) -> EventKind:

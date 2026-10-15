@@ -34,6 +34,7 @@ from vs_core.testing.flows import (
     Render,
     RestartPolicy,
     Verify,
+    code_changed,
     fake_search,
 )
 from vs_core.testing.liveness import Budget, End, Journal, Violation, assert_live, liveness
@@ -66,6 +67,7 @@ __all__ = [
     "Violation",
     "assert_live",
     "assert_schema_pinned",
+    "code_changed",
     "drive",
     "fake_search",
     "liveness",

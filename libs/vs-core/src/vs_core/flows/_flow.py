@@ -182,10 +182,12 @@ class Flow:
             raise ContractError(("checkpoint",), "only a registered flow has checkpoints")
         if not isinstance(snapshot, definition.snapshot):
             raise ContractError(
-                ("checkpoint",), f"{definition.name} snapshots are {definition.snapshot.__name__}"
+                ("checkpoint",), f"{definition.name} snapshots are {definition.snapshot_name}"
             )
         task.snapshot = snapshot
         task.checkpointed = True
+        # what the flow holds now is part of the world this snapshot resumes into
+        task.holds = [held.model_copy(update={"carried": True}) for held in task.holds]
 
     # the run
 

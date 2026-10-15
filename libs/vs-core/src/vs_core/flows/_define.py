@@ -69,6 +69,8 @@ class SearchDef[C]:
     """The agents the search asks: the only ones ``ctx.agents.session`` accepts."""
     owned: tuple[OperationRegistration, ...] = ()
     """Operations other libraries' owners perform for the search (``ctx.owners.perform``)."""
+    snapshot: type[Any] | None = None
+    """What the root may checkpoint besides its config, and is restarted from (``search``)."""
 
     @property
     def ids(self) -> IdScheme:
@@ -121,13 +123,17 @@ class SearchDef[C]:
         return FlowDriver(self, config, registry)
 
 
-def search[C](
+# lint-waiver: LW-271015 [PLR0913]; every keyword is one independent part of a search's declaration.
+# > Packing them into an options object would make every registration build one and gain no
+# > invariant; a separate ``with_snapshot`` call after the decorator splits one declaration in two.
+def search[C](  # noqa: PLR0913
     name: str,
     *,
     config: type[C],
     operations: StrategyOperations | None = None,
     roles: tuple[Role, ...] = (),
     owned: tuple[OperationRegistration, ...] = (),
+    snapshot: type[Any] | None = None,
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """Register ``root`` as the search ``name``, run on a ``config`` model.
 
@@ -137,6 +143,11 @@ def search[C](
     types of the prompts. ``owned`` are the operations another library's owner performs
     for the search (an issue board, say): their codec is registered, the host must provide an
     owner for each, and a flow asks one with ``ctx.owners.perform``.
+
+    ``snapshot`` is a model the root may checkpoint besides its config: what it knows of the
+    run, so a restart after a code change resumes it with that knowledge. The root then takes
+    ``config | snapshot``: the config when the run starts, its latest checkpoint after a
+    restart. Neither model may decode the other's JSON (give the snapshot a ``kind``).
     """
     names = [role.name for role in roles]
     if len(set(names)) != len(names):
@@ -144,7 +155,7 @@ def search[C](
         raise ContractError(("roles",), message)
 
     def register(root: Root[C]) -> SearchDef[C]:
-        return SearchDef(name, config, root, operations, roles, owned)
+        return SearchDef(name, config, root, operations, roles, owned, snapshot)
 
     return register
 
@@ -177,7 +188,10 @@ class FlowDriver[C]:
         async def supervised(ctx: Flow, config: C) -> None:
             await conclude(kit_of(ctx), await root(ctx, config))
 
-        self._root = FlowDef("root", supervised, type(config))
+        resumes = (
+            type(config) if definition.snapshot is None else definition.snapshot | type(config)
+        )
+        self._root = FlowDef("root", supervised, resumes)
         self._cached: tuple[tuple[int, str], _Run] | None = None
 
     def close(self) -> None:
@@ -233,6 +247,7 @@ class FlowDriver[C]:
                 "journal": (*state.journal, step),
                 "live": run.checkpoint(),
                 "dropped": tuple(run.dropped),
+                "restart_settled": tuple(run.restart_settled),
             }
         )
         self._cached = (key(new), run)
@@ -270,6 +285,7 @@ class FlowDriver[C]:
             journal=(first,),
             live=run.checkpoint(),
             base=base,
+            restart_settled=tuple(run.restart_settled),
         )
         self._cached = (key(state), run)
         return state
