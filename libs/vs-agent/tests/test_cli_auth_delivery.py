@@ -18,6 +18,7 @@ import agentshim
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+
 from vs_agent.api import CredentialKind, cli_auth_delivery
 from vs_agent.api.testing import fake_profiles
 from vs_sim.api.testing import examples
@@ -25,17 +26,17 @@ from vs_sim.api.testing import examples
 # A stand-in CLI with the shape every classified provider has: environment
 # credentials ahead of a login file in the precedence order, an endpoint
 # variable with a companion, and settings files beside the login.
-_KEY = "FIXTURE_KEY"
-_TOKEN = "FIXTURE_TOKEN"
-_SUBSCRIPTION_TOKEN = "FIXTURE_SUBSCRIPTION_TOKEN"
+_API_VAR = "FIXTURE_API"
+_GATEWAY_VAR = "FIXTURE_GATEWAY"
+_PLAN_VAR = "FIXTURE_PLAN_VAR"
 _URL = "FIXTURE_BASE_URL"
 _HEADERS = "FIXTURE_HEADERS"
 _LOGIN = ".fixture/login.json"
 _SETTINGS = (".fixture/settings.json", ".fixture.json")
 _ENV_SOURCES = (
-    (_TOKEN, CredentialKind.API_KEY),
-    (_KEY, CredentialKind.API_KEY),
-    (_SUBSCRIPTION_TOKEN, CredentialKind.SUBSCRIPTION),
+    (_GATEWAY_VAR, CredentialKind.API_KEY),
+    (_API_VAR, CredentialKind.API_KEY),
+    (_PLAN_VAR, CredentialKind.SUBSCRIPTION),
 )
 _AUTH_ENV = (*(name for name, _ in _ENV_SOURCES), _URL, _HEADERS)
 

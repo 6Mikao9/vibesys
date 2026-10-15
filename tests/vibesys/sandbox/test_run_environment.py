@@ -1541,7 +1541,9 @@ def test_a_container_gets_host_auth_files_only_when_no_env_credential_wins(
         monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", env_token)
     backend = FakeBackend()
     log: list[str] = []
-    request = _request(tmp_path, backend, agent_backend="cli", cli_provider="claude", log=log.append)
+    request = _request(
+        tmp_path, backend, agent_backend="cli", cli_provider="claude", log=log.append
+    )
 
     _open(build_run_environment(RunEnvironmentSpec(environment_name)), request)
 
