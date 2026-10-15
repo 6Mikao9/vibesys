@@ -40,6 +40,7 @@ class AgentName(StrEnum):
     IMPLEMENTER = "implementer"
     JUDGE = "judge"
     PROFILER = "profiler"
+    MERGER = "merger"
 
 
 class WorkKind(StrEnum):
@@ -47,6 +48,7 @@ class WorkKind(StrEnum):
 
     IMPLEMENT = "implement"
     PROFILE = "profile"
+    MERGE = "merge"
 
 
 class UnreachableReason(StrEnum):
@@ -79,6 +81,12 @@ class WorkPlan(Value):
     question: str = ""
     required_fields: tuple[str, ...] = ()
     decision_impact: str = ""
+    candidates: tuple[str, ...] = ()
+    """For a merge: the hypotheses whose candidates it merges into main, in merge order."""
+    instructions: str = ""
+    """For a merge: how to combine the candidates."""
+    watch_for: str = ""
+    """For a merge: what the merger must check or be careful of."""
 
 
 class Expectation(Value):
@@ -162,6 +170,13 @@ class FailureKind(StrEnum):
     """Too many turns ended without a candidate that reached measurement."""
     REPEATED_TURN = "repeated-turn"
     """The last turn left nothing an earlier turn had not, so another would repeat it."""
+    MERGE_REFUSED = "merge-refused"
+    """The merger could not follow the merge instructions and stopped; its reply says why."""
+    MERGE_UNSOUND = "merge-unsound"
+    """The merged commit did not pass the trusted accuracy check, so main did not move to it."""
+    MERGE_REGRESSED = "merge-regressed"
+    """The merged commit measured worse than main, or failed a benchmark check main passed, so
+    main did not move to it."""
 
 
 _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
@@ -287,6 +302,69 @@ class FinishedWork(Value):
     """For a profile workstream: the evidence and decoded readings its history row shows."""
 
 
+# -- the run's main revision and its merges -------------------------------------------------------
+
+
+class MergeSource(Value):
+    """One candidate a merge applies: the hypothesis and the exact revision, fixed at scheduling."""
+
+    hypothesis_id: str
+    revision: RevisionRef
+
+
+class MergeOutcome(StrEnum):
+    """How a merge workstream ended. Closed."""
+
+    MERGED = "merged"
+    """The merged commit passed the trusted accuracy check, measured no worse than main, and main
+    advanced to it."""
+    REFUSED = "refused"
+    """The merger could not follow the instructions and stopped: main is unchanged."""
+    FAILED = "failed"
+    """The merge ended without a sound commit (a lost turn, a stop, a failed check, a regression):
+    main is unchanged; ``failure`` says why."""
+
+
+class MergeRecord(Value):
+    """A finished merge workstream, as the planner and the handoff files are told of it."""
+
+    merge_id: str
+    sequence: int = Field(gt=0)
+    candidates: tuple[MergeSource, ...]
+    base: RevisionRef
+    """The main revision the merge started from."""
+    outcome: MergeOutcome
+    summary: str = ""
+    """The merger's account of what it did."""
+    reason: str = ""
+    """Why the merger refused; empty unless it did."""
+    revision: RevisionRef | None = None
+    """The merger's commit, when it made one; the new main when the merge merged."""
+    accuracy_passed: bool | None = None
+    benchmark_passed: bool | None = None
+    metrics: tuple[MetricRow, ...] = ()
+    """What the trusted measurement of the commit read; empty when it was not measured."""
+    main_metrics: tuple[MetricRow, ...] = ()
+    """Main's headline the commit was compared with; empty when it was not compared."""
+    main_benchmark_passed: bool | None = None
+    """Whether main passed its benchmark check when the commit was compared with it."""
+    failure: Failure | None = None
+    """Why a failed merge ended."""
+
+
+class MainMeasurement(Value):
+    """The trusted measurement of the run's main, and how it compares with main before it."""
+
+    revision: RevisionRef
+    merge_id: str
+    """The merge that made this main."""
+    accuracy_passed: bool | None = None
+    benchmark_passed: bool | None = None
+    metrics: tuple[MetricRow, ...] = ()
+    previous: tuple[MetricRow, ...] = ()
+    """What main measured before this merge (the input's measurement before the first merge)."""
+
+
 # -- what the planner is told about a reply that cannot be scheduled -------------------------------
 
 
@@ -313,6 +391,13 @@ class ViolationCode(StrEnum):
     UPDATE_UNKNOWN = "update-unknown"
     UPDATE_INCOMPLETE = "update-incomplete"
     EXPECTATION_UNKNOWN = "expectation-unknown"
+    MERGE_ID_USED = "merge-id-used"
+    MERGE_IN_FLIGHT = "merge-in-flight"
+    MERGE_CANDIDATE_REPEATED = "merge-candidate-repeated"
+    MERGE_CANDIDATE_IS_MAIN = "merge-candidate-is-main"
+    MERGE_CANDIDATE_MERGED = "merge-candidate-merged"
+    MERGE_CANDIDATE_NOT_BETTER = "merge-candidate-not-better"
+    MERGE_UNCHECKABLE = "merge-uncheckable"
 
 
 class Alternative(Value):

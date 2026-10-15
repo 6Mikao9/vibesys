@@ -22,10 +22,12 @@ from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
 from vibesys.orchestration.dynamic.search.api import (
     IMPLEMENTER,
     JUDGE,
+    MERGER,
     PLANNER,
     PROFILER,
     EvidenceCitation,
     ImplementPrompt,
+    MergePrompt,
     PlannerCorrection,
     PlannerPrompt,
     ProfilePrompt,
@@ -72,6 +74,7 @@ TEMPLATE_FILES: dict[Template, str] = {
     PromptTemplate.IMPLEMENT: IMPLEMENTER.prompt,
     PromptTemplate.REVIEW: JUDGE.prompt,
     PromptTemplate.PROFILE_REQUEST: PROFILER.prompt,
+    PromptTemplate.MERGE: MERGER.prompt,
     CoreProtocolTemplate.RESUME: IMPLEMENTER.exchanges.resume or "",
     CoreProtocolTemplate.REPLY_CORRECTION: IMPLEMENTER.exchanges.correction or "",
     CoreProtocolTemplate.WAIT_UNRECORDED: IMPLEMENTER.exchanges.wait_unrecorded or "",
@@ -173,6 +176,39 @@ INPUT_FAILURES = (
 """Why the input is unmeasurable, or None: one kind with the evaluator's output, one without."""
 
 
+SOURCES = st.lists(
+    st.builds(dict, hypothesis_id=tokens("hid"), revision=REVISIONS), max_size=2
+).map(tuple)
+MAIN_MEASUREMENTS = st.builds(
+    dict,
+    revision=REVISIONS,
+    merge_id=tokens("m"),
+    accuracy_passed=st.none() | st.booleans(),
+    benchmark_passed=st.none() | st.booleans(),
+    metrics=METRICS,
+    previous=METRICS,
+)
+MERGEABLE = st.builds(
+    dict, hypothesis_id=tokens("hid"), revision=REVISIONS, metric=st.none() | METRIC
+)
+MERGES = st.builds(
+    dict,
+    merge_id=tokens("m"),
+    sequence=st.integers(1, 9),
+    candidates=SOURCES,
+    base=REVISIONS,
+    outcome=st.sampled_from(("merged", "refused", "failed")),
+    summary=st.just("") | tokens("sum"),
+    reason=st.just("") | tokens("why"),
+    revision=st.none() | REVISIONS,
+    accuracy_passed=st.none() | st.booleans(),
+    metrics=METRICS,
+    main_metrics=METRICS,
+    main_benchmark_passed=st.none() | st.booleans(),
+    failure=st.none() | st.sampled_from(({"kind": "merge-unsound"}, {"kind": "merge-regressed"})),
+)
+
+
 @st.composite
 def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, object]:
     """The fields a planning request and its correction share."""
@@ -193,6 +229,11 @@ def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, obje
         "input_failure": draw(INPUT_FAILURES),
         "profiling": draw(st.booleans()),
         "profile_fields": fields,
+        "main_revision": draw(REVISIONS),
+        "main_measurement": draw(st.none() | MAIN_MEASUREMENTS),
+        "merge_running": draw(st.none() | tokens("m")),
+        "mergeable": draw(st.lists(MERGEABLE, max_size=2)),
+        "merges": draw(st.lists(MERGES, max_size=2)),
         "problem": problem,
     }
 
@@ -254,6 +295,15 @@ IMPLEMENT_PROMPTS = st.builds(
     turns_without_candidate=st.integers(0, 3),
     baseline_pending=st.booleans(),
     input_failure=INPUT_FAILURES,
+    rebase_onto=st.none() | REVISIONS,
+)
+MERGE_PROMPTS = st.builds(
+    lambda **fields: MergePrompt.model_validate(fields, strict=False),
+    merge_id=tokens("m"),
+    main_revision=REVISIONS,
+    candidates=SOURCES,
+    instructions=tokens("how"),
+    watch_for=tokens("watch"),
 )
 EVALUATIONS = st.lists(
     st.builds(
@@ -286,13 +336,14 @@ PROFILE_PROMPTS = st.builds(
     ),
     target=REVISIONS,
 )
-ROLES = ("implementer", "judge", "profiler")
+ROLES = ("implementer", "judge", "profiler", "merger")
 CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
     PromptTemplate.PORTFOLIO: PLANNER_PROMPTS,
     PromptTemplate.PORTFOLIO_CORRECTION: PLANNER_CORRECTIONS,
     PromptTemplate.IMPLEMENT: IMPLEMENT_PROMPTS,
     PromptTemplate.REVIEW: REVIEW_PROMPTS,
     PromptTemplate.PROFILE_REQUEST: PROFILE_PROMPTS,
+    PromptTemplate.MERGE: MERGE_PROMPTS,
     CoreProtocolTemplate.RESUME: st.one_of(
         st.builds(
             ResumeFacts,

@@ -15,13 +15,15 @@ from tests.support.dynamic_script import REGISTRY
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
+    merge,
+    merged,
     plan_reply,
     reviewed,
 )
 from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.metrics import EvidenceReading
-from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
+from vibesys.orchestration.dynamic.models import ImplementerResult, MergeResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
     WRITE_HANDOFF_KIND,
     DynamicConfig,
@@ -30,6 +32,8 @@ from vibesys.orchestration.dynamic.search.api import (
     InterpretEvidence,
     MetricRow,
     ParentVerification,
+    PlannerCorrection,
+    PlannerPrompt,
     RunSnapshot,
     WriteHandoff,
     dynamic,
@@ -104,7 +108,7 @@ PLANNER_LABEL = "orchestrator"
 INPUT_PATH = "input/"
 """Where the waits of the task that measures the input are asked from."""
 INPUT_THROUGHPUT = 50.0
-_CANDIDATE_THROUGHPUT = 100.0
+CANDIDATE_THROUGHPUT = 100.0
 
 
 def handoff_path(call: int) -> str:
@@ -144,12 +148,22 @@ class World(TypedDict, total=False):
 
     throughputs: dict[str, float]
     """The benchmark throughput of a candidate, by its revision's id; the default is 100."""
+    failing_benchmarks: set[str]
+    """The revision ids of candidates whose benchmark check fails."""
     verified: bool
     """Whether a parent revision still reproduces its retained content."""
     baseline: Literal["measured", "failed-workload", "no-evidence", "lost"]
     """How the measurement of the input ends."""
     handoff_writes_open: bool
     """Leave each handoff write open for the story to answer; else the owner writes it at once."""
+    merging: bool
+    """The planner merges the mergeable candidates whenever no merge runs."""
+    merger_answers: list[int]
+    """How the merger answers its turns, in order (merged, merged, refused, failed); then any."""
+    merge_picks: list[int]
+    """Where each merge the planner asks for starts in the buildable hypotheses, the mergeable
+    ones first, taking two in turn: a merge may name one the prompt did not list as mergeable.
+    Once these run out, the planner merges the first two mergeable ones."""
 
 
 @dataclass
@@ -175,9 +189,18 @@ class Host:
     """For a kind of wait (its label), how many times core still refuses it."""
     refusal_code: RejectionCode = RejectionCode.BUDGET
     throughputs: dict[str, float] = field(default_factory=dict)
+    failing_benchmarks: set[str] = field(default_factory=set)
     verified: bool = True
     baseline: Literal["measured", "failed-workload", "no-evidence", "lost"] = "measured"
     handoff_writes_open: bool = False
+    merging: bool = False
+    merger_answers: list[int] = field(default_factory=list)
+    merge_picks: list[int] = field(default_factory=list)
+    unlisted_merges: int = 0
+    """The merges asked for that named a candidate the prompt did not list as mergeable."""
+    merger_sessions: dict[str, set[str]] = field(default_factory=dict)
+    """The sessions the merger turns ran in, by merge ID."""
+    _merges: int = 0
 
     def __post_init__(self) -> None:
         """Have the handoff owner write each file at once, unless the story answers the writes."""
@@ -281,6 +304,8 @@ class Host:
             self._planner(asked, variant)
         elif asked.label == "implementer":
             self._implementer(asked, variant)
+        elif asked.label == "merger":
+            self._merger(asked, variant)
         else:
             self._judge(asked, variant)
 
@@ -289,8 +314,8 @@ class Host:
         match variant % 5:
             case 0 | 1:
                 size = self._portfolio_size() if variant % 5 == 0 else 1
-                entries = []
-                for _ in range(size):
+                entries = self._merge_entries(asked)
+                for _ in range(size - len(entries)):
                     self._hypotheses += 1
                     entries.append(implement(f"h{self._hypotheses}"))
                 self.run.reply_raw(asked, plan_reply(*entries))
@@ -300,6 +325,42 @@ class Host:
                 self.run.fail(asked, FailureReason.TIMED_OUT)
             case _:
                 self.run.lose(asked)
+
+    def _merge_entries(self, asked: Asked) -> list[dict[str, object]]:
+        """A merge, when the host merges and no merge runs, of what ``merge_picks`` chooses."""
+        context = asked.context
+        assert isinstance(context, PlannerPrompt | PlannerCorrection)
+        if not self.merging or context.merge_running is not None:
+            return []
+        listed = [row.hypothesis_id for row in context.mergeable]
+        pool = list(dict.fromkeys([*listed, *(row.hypothesis_id for row in context.buildable)]))
+        if self.merge_picks and pool:
+            start = self.merge_picks.pop(0)
+            chosen = list(dict.fromkeys(pool[(start + n) % len(pool)] for n in range(2)))
+        else:
+            chosen = listed[:2]
+        if not chosen:
+            return []
+        self._merges += 1
+        self.unlisted_merges += int(not set(chosen) <= set(listed))
+        return [merge(f"m{self._merges}", *chosen)]
+
+    def _merger(self, asked: Asked, variant: int) -> None:
+        request = asked.request
+        assert isinstance(request, RequestTurn)
+        merge_id = str(getattr(asked.context, "merge_id", ""))
+        self.merger_sessions.setdefault(merge_id, set()).add(request.turn.session.session_id.root)
+        if self.merger_answers:
+            variant = self.merger_answers.pop(0)
+        match variant % 4:
+            case 0 | 1:
+                result = MergeResult.model_validate_json(merged())
+                self.run.reply(asked, result, checkpoint=self._retained())
+            case 2:
+                result = MergeResult.model_validate_json(merged("refused", "they conflict"))
+                self.run.reply(asked, result)
+            case _:
+                self.run.fail_turn(asked, TurnFailureKind.PROVIDER_FAILED)
 
     def _portfolio_size(self) -> int:
         """How many workstreams fill the slots free now, within the budget left."""
@@ -390,7 +451,9 @@ class Host:
                     workload_digest=plan.workload_digest,
                     environment_digest=plan.environment_digest,
                     provenance="trusted",
-                    status=self._status_of(stage.stage_id, is_input=is_input),
+                    status=ObservationStatus.FAILED
+                    if self._benchmark_fails(stage.stage_id, candidate, is_input=is_input)
+                    else self._status_of(stage.stage_id, is_input=is_input),
                 )
                 for index, stage in enumerate(plan.stages)
             )
@@ -402,6 +465,11 @@ class Host:
             status=ObservationStatus.FAILED if failed else ObservationStatus.SUCCEEDED,
         )
         self.run.answer(asked, MeasurementFinished(decision=asked.decision, result=result))
+
+    def _benchmark_fails(self, stage: str, candidate: RevisionRef, *, is_input: bool) -> bool:
+        """Whether the benchmark of a candidate the world was told fails it does."""
+        failing = candidate.revision_id.root in self.failing_benchmarks
+        return not is_input and failing and stage == "benchmark"
 
     def _status_of(self, stage: str, *, is_input: bool) -> ObservationStatus:
         broken = is_input and self.baseline == "failed-workload" and stage == "benchmark"
@@ -437,7 +505,7 @@ class Host:
             value = (
                 INPUT_THROUGHPUT
                 if ref.purpose == "baseline"
-                else self.throughputs.get(ref.candidate.revision_id.root, _CANDIDATE_THROUGHPUT)
+                else self.throughputs.get(ref.candidate.revision_id.root, CANDIDATE_THROUGHPUT)
             )
             metrics = (MetricRow(name="throughput", value=value, direction="max", unit="tokens/s"),)
         return EvidenceReading(
