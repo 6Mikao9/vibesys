@@ -23,6 +23,7 @@ from vs_agent.auth_policy import (
     AgentAuthPolicy,
     CliAuthPlan,
     CredentialKind,
+    HostAuthUnplannable,
     PlannedCredentialFile,
 )
 from vs_agent.container_python import containerize_server
@@ -195,30 +196,14 @@ def plan_auth(
     return _cli_auth_plan(plan)
 
 
-def plan_host_env_auth(
+def plan_host_auth(
     profile: agentshim.ProviderProfile, *, env: Mapping[str, str], home: Path
-) -> CliAuthPlan | None:
-    """Ask agentshim which credential *profile*'s CLI uses on this host, if it is an env one.
-
-    Any credential kind is allowed and the endpoint is the one *env* already
-    points the CLI at, so the choice is the CLI's own precedence. ``None`` when
-    the choice is a file, or agentshim cannot plan for this host at all (no
-    classified credential sources, no credential present, or a host endpoint
-    the CLI cannot take or that is not a URL).
-    """
-    endpoint = profile.endpoint
-    base_url = env.get(endpoint.base_url_env, "").strip() if endpoint is not None else ""
+) -> CliAuthPlan | HostAuthUnplannable:
+    """Ask agentshim how *profile*'s CLI logs in on this host, as a plan."""
     try:
-        plan = agentshim.plan_auth(
-            profile,
-            agentshim.AuthPolicy(frozenset(agentshim.CredentialKind), base_url or None),
-            env=env,
-            home=home,
-        )
-    except (agentshim.AuthUnavailableError, ValueError):
-        return None
-    if plan.files:
-        return None
+        plan = agentshim.host_auth_plan(profile, env=env, home=home)
+    except agentshim.HostAuthUnplannableError as error:
+        return HostAuthUnplannable(profile.name, str(error))
     return _cli_auth_plan(plan)
 
 

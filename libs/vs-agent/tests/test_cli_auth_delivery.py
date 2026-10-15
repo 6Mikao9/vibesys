@@ -1,25 +1,24 @@
 """What a CLI agent's container is given to log in with when the run has no auth policy.
 
-The CLI logs in the way the launching shell configured it. When that is an
-environment credential, the container gets that credential (and the endpoint
-the shell set) and none of the operator's auth files: not their login, and not
-their settings, whose hooks, plugins and helper commands name host paths and
-can carry credentials of their own. When the CLI would log in from a file, the
-host's auth files are staged as before.
+The CLI logs in the way the launching shell configured it, and agentshim
+plans exactly what a confined copy needs to do the same. The container gets
+that plan and nothing else of the operator's auth state: not their other
+logins, and not their settings, whose hooks, plugins and helper commands name
+host paths and can carry credentials of their own. Only a host whose login
+agentshim cannot plan gets its auth state forwarded as it is.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import agentshim
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_agent.api import CredentialKind, cli_auth_delivery
+from vs_agent.api import CliAuthPlan, CredentialKind, HostAuthUnplannable, cli_auth_delivery
 from vs_agent.api.testing import fake_profiles
 from vs_sim.api.testing import examples
 
@@ -84,77 +83,61 @@ def _hosts(draw: st.DrawFn) -> _Host:
     return _Host(env, files, classified=draw(st.booleans()))
 
 
-def _set(env: dict[str, str], name: str) -> bool:
-    return bool(env.get(name, "").strip())
-
-
-def _expected_env_credential(host: _Host) -> str | None:
-    """The environment credential the CLI logs in with on *host*, or ``None`` for files."""
-    if not host.classified:
-        return None
-    endpoint = host.env.get(_URL, "").strip()
-    if endpoint:
-        parts = urlsplit(endpoint)
-        if parts.scheme not in {"http", "https"} or not parts.hostname:
-            return None
-        # A custom endpoint takes only API keys.
-        allowed = {CredentialKind.API_KEY}
-    else:
-        allowed = set(CredentialKind)
-    for name, kind in _ENV_SOURCES:
-        if kind in allowed and _set(host.env, name):
-            return name
-    return None
-
-
 def _plant(home: Path, files: frozenset[str]) -> None:
     for leaf in files:
         (home / leaf).parent.mkdir(parents=True, exist_ok=True)
         (home / leaf).write_text("{}")
 
 
+def _isolate(monkeypatch: pytest.MonkeyPatch, home: Path, names: tuple[str, ...]) -> None:
+    """Make *home* the host home and clear every auth variable the test does not set."""
+    monkeypatch.setenv("HOME", str(home))
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+
+
 @settings(max_examples=examples(pr=60, nightly=600), deadline=None)
 @given(host=_hosts())
-def test_an_env_credential_the_cli_would_use_is_delivered_alone(
+def test_a_host_login_agentshim_can_plan_is_delivered_alone(
     tmp_path_factory: pytest.TempPathFactory, host: _Host
 ) -> None:
     home = tmp_path_factory.mktemp("home")
     _plant(home, host.files)
+    profile = _fixture_profile(classified=host.classified)
+    forwarded = {name: value for name, value in host.env.items() if value.strip()}
+    try:
+        expected: agentshim.AuthPlan | None = agentshim.host_auth_plan(
+            profile, env=host.env, home=home
+        )
+    except agentshim.HostAuthUnplannableError:
+        expected = None
     with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setenv("HOME", str(home))
-        for name in _AUTH_ENV:
-            monkeypatch.delenv(name, raising=False)
+        _isolate(monkeypatch, home, _AUTH_ENV)
         for name, value in host.env.items():
             monkeypatch.setenv(name, value)
-        fake_profiles.install(
-            monkeypatch, {"fixture": _fixture_profile(classified=host.classified)}
-        )
-        chosen = _expected_env_credential(host)
-        forwarded = {name: value for name, value in host.env.items() if value.strip()}
-        if chosen is None and not host.files and not forwarded:
+        fake_profiles.install(monkeypatch, {"fixture": profile})
+        if expected is None and not host.files and not forwarded:
             with pytest.raises(ValueError, match="no 'fixture' CLI authentication"):
                 cli_auth_delivery("fixture", None)
             return
         delivery = cli_auth_delivery("fixture", None)
 
     staged = {Path(host_path) for host_path, _, _ in delivery.bind_mounts}
-    if chosen is not None:
-        expected_env = {chosen: host.env[chosen]}
-        if _set(host.env, _URL):
-            expected_env[_URL] = host.env[_URL].strip()
-            if _set(host.env, _HEADERS):
-                expected_env[_HEADERS] = host.env[_HEADERS]
-        assert dict(delivery.env) == expected_env
-        assert staged == set()
-        assert delivery.copy_paths == ()
-        assert chosen in delivery.describe()
+    if expected is not None:
+        assert isinstance(delivery.login, CliAuthPlan)
+        assert dict(delivery.env) == dict(expected.env)
+        assert staged == {staged_file.host_path for staged_file in expected.files}
+        # Exactly one credential, and never a settings file beside it.
+        assert not staged & {home / leaf for leaf in _SETTINGS}
+        assert expected.source in delivery.describe()
     else:
+        assert isinstance(delivery.login, HostAuthUnplannable)
         assert dict(delivery.env) == forwarded
         assert staged == {home / leaf for leaf in host.files}
+    # The endpoint is named on purpose; credentials and headers never are.
     description = delivery.describe()
-    for value in host.env.values():
-        if value.strip():
-            assert value not in description
+    for name, value in forwarded.items():
+        assert name == _URL or value not in description
 
 
 _SHIPPED = ("claude", "codex", "gemini", "opencode")
@@ -173,15 +156,13 @@ def _env_sources(provider: str) -> list[tuple[str, str]]:
     ("provider", "variable"),
     [pair for provider in _SHIPPED for pair in _env_sources(provider)],
 )
-def test_no_shipped_provider_stages_host_files_beside_an_env_credential(
+def test_no_shipped_provider_stages_a_host_login_beside_an_env_credential(
     provider: str, variable: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every shipped CLI whose env credential would win gets no host auth file at all."""
     profile = agentshim.get_provider(provider).profile
-    _plant(tmp_path, frozenset(profile.auth_files))
-    monkeypatch.setenv("HOME", str(tmp_path))
-    for name in profile.auth_env_vars:
-        monkeypatch.delenv(name, raising=False)
+    _plant(tmp_path, frozenset(profile.credential_files))
+    _isolate(monkeypatch, tmp_path, profile.auth_env_vars)
     monkeypatch.setenv(variable, "synthetic-credential")
 
     delivery = cli_auth_delivery(provider, None)
@@ -191,45 +172,74 @@ def test_no_shipped_provider_stages_host_files_beside_an_env_credential(
     assert dict(delivery.env) == {variable: "synthetic-credential"}
 
 
-def test_a_claude_gateway_token_gets_no_host_login_or_settings(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+_CLAUDE = agentshim.get_provider("claude").profile
+
+
+@pytest.mark.parametrize(
+    ("variable", "base_url"),
+    [
+        # The reported case: a gateway token plus base URL on a host also logged in by OAuth.
+        ("ANTHROPIC_AUTH_TOKEN", "https://gateway.invalid/anthropic"),
+        # The CLI sends a subscription token to a custom endpoint too.
+        ("CLAUDE_CODE_OAUTH_TOKEN", "https://gateway.invalid/anthropic"),
+        # A base URL the CLI cannot use reaches the container as it is, so the
+        # agent fails the way the host CLI would instead of using the host login.
+        ("ANTHROPIC_API_KEY", "not-a-url"),
+    ],
+)
+def test_a_claude_env_credential_gets_no_host_login_or_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variable: str, base_url: str
 ) -> None:
-    """The reported case: a gateway token plus base URL on a host also logged in by OAuth."""
-    profile = agentshim.get_provider("claude").profile
-    _plant(tmp_path, frozenset(profile.auth_files))
-    monkeypatch.setenv("HOME", str(tmp_path))
-    for name in profile.auth_env_vars:
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "synthetic-gateway-token")
-    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://gateway.invalid/anthropic")
+    _plant(tmp_path, frozenset(_CLAUDE.auth_files))
+    _isolate(monkeypatch, tmp_path, _CLAUDE.auth_env_vars)
+    monkeypatch.setenv(variable, "synthetic-credential")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", base_url)
 
     delivery = cli_auth_delivery("claude", None)
 
     assert delivery.bind_mounts == ()
     assert delivery.copy_paths == ()
-    assert dict(delivery.env) == {
-        "ANTHROPIC_AUTH_TOKEN": "synthetic-gateway-token",
-        "ANTHROPIC_BASE_URL": "https://gateway.invalid/anthropic",
-    }
-    assert "ANTHROPIC_AUTH_TOKEN" in delivery.describe()
-    assert ".claude/.credentials.json" in delivery.describe()
-    assert "synthetic-gateway-token" not in delivery.describe()
+    assert dict(delivery.env) == {variable: "synthetic-credential", "ANTHROPIC_BASE_URL": base_url}
+    description = delivery.describe()
+    assert variable in description
+    assert ".claude/.credentials.json" in description
+    assert "synthetic-credential" not in description
 
 
-def test_a_claude_file_login_stages_the_host_files_as_before(
+def test_a_claude_file_login_shares_only_the_login_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With no env credential, the login is shared writable and settings are copied."""
-    profile = agentshim.get_provider("claude").profile
-    _plant(tmp_path, frozenset(profile.auth_files))
-    monkeypatch.setenv("HOME", str(tmp_path))
-    for name in profile.auth_env_vars:
-        monkeypatch.delenv(name, raising=False)
+    """The login is shared writable at its final path; the host's settings stay home."""
+    _plant(tmp_path, frozenset(_CLAUDE.auth_files))
+    _isolate(monkeypatch, tmp_path, _CLAUDE.auth_env_vars)
 
     delivery = cli_auth_delivery("claude", None)
 
+    assert delivery.bind_mounts == (
+        (
+            str(tmp_path / ".claude/.credentials.json"),
+            "/home/agent/.claude/.credentials.json",
+            False,
+        ),
+    )
+    assert delivery.copy_paths == ()
+    assert dict(delivery.env) == {}
+
+
+def test_a_host_login_agentshim_cannot_plan_forwards_the_host_state_and_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _plant(tmp_path, frozenset(_CLAUDE.auth_files))
+    (tmp_path / ".claude/settings.json").write_text('{"apiKeyHelper": "synthetic-helper"}')
+    _isolate(monkeypatch, tmp_path, _CLAUDE.auth_env_vars)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-credential")
+
+    delivery = cli_auth_delivery("claude", None)
+
+    assert isinstance(delivery.login, HostAuthUnplannable)
     assert {Path(host) for host, _, _ in delivery.bind_mounts} == {
-        tmp_path / leaf for leaf in profile.auth_files
+        tmp_path / leaf for leaf in _CLAUDE.auth_files
     }
-    assert delivery.plan is None
-    assert "host's auth files" in delivery.describe()
+    assert dict(delivery.env) == {"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-credential"}
+    assert "apiKeyHelper" in delivery.describe()
+    assert "synthetic" not in delivery.describe()

@@ -1467,7 +1467,7 @@ def test_an_unmet_auth_policy_fails_before_any_container_starts(
     assert backend.calls == []
 
 
-def test_docker_environment_shares_credentials_writable_and_copies_settings(
+def test_docker_environment_shares_the_login_writable_and_keeps_settings_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     backend = FakeBackend()
@@ -1478,7 +1478,9 @@ def test_docker_environment_shares_credentials_writable_and_copies_settings(
     credentials.write_text('{"synthetic": true}\n')
     settings_file = home / ".claude.json"
     settings_file.write_text('{"synthetic": true}\n')
-    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    monkeypatch.setenv("HOME", str(home))
+    for name in _CLAUDE_AUTH_ENV:
+        monkeypatch.delenv(name, raising=False)
 
     _open(env, _request(tmp_path, backend, agent_backend="cli", cli_provider="claude"))
 
@@ -1487,12 +1489,11 @@ def test_docker_environment_shares_credentials_writable_and_copies_settings(
     # The credential file is the host's file at its final path, writable, so a
     # token refresh in the container reaches the host login.
     assert (str(credentials), "/home/agent/.claude/.credentials.json", False) in mounts
-    # Settings are staged read-only and copied as a start-time DockerSandbox
-    # step, not via extra_init_commands.
-    assert (str(settings_file), "/opt/vibesys-auth/1", True) in mounts
-    assert not any(container == "/opt/vibesys-auth/0" for _, container, _ in mounts)
+    # The CLI logs in from that file alone, so the host's settings (hooks,
+    # plugins, helper commands naming host paths) do not reach the agent.
+    assert not any(host == str(settings_file) for host, _, _ in mounts)
     assert "extra_init_commands" not in kwargs
-    assert kwargs["auth_files"] == [("/opt/vibesys-auth/1", "/home/agent/.claude.json")]
+    assert not kwargs.get("auth_files")
 
 
 def test_docker_environment_forwards_host_cli_auth_environment(
@@ -1520,16 +1521,17 @@ def test_docker_environment_forwards_host_cli_auth_environment(
 
 @pytest.mark.parametrize("environment_name", ["docker", "modal"])
 @pytest.mark.parametrize("env_token", [None, "", "synthetic-gateway-token"])
-def test_a_container_gets_host_auth_files_only_when_no_env_credential_wins(
+def test_a_container_gets_only_the_credential_its_cli_logs_in_with(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     environment_name: str,
     env_token: str | None,
 ) -> None:
-    """Without a policy, an env credential the CLI would use means no host login or settings.
+    """Without a policy, the container gets the one credential the CLI would use, and no settings.
 
-    A blank token is no credential, so the host's files are staged as before;
-    the run log names the source either way and never a value.
+    A blank token is no credential, so the CLI logs in from its login file and
+    only that file is staged; the run log names the source either way and
+    never a value.
     """
     home = tmp_path / "synthetic-home"
     (home / ".claude").mkdir(parents=True)
@@ -1568,8 +1570,8 @@ def test_a_container_gets_host_auth_files_only_when_no_env_credential_wins(
         assert env_token not in auth_line
     else:
         assert delivered_env == {"ANTHROPIC_BASE_URL": "https://gateway.invalid/claude"}
-        assert home_files == {home / ".claude" / ".credentials.json", home / ".claude.json"}
-        assert "auth files" in auth_line
+        assert home_files == {home / ".claude" / ".credentials.json"}
+        assert ".claude/.credentials.json" in auth_line
 
 
 def test_docker_environment_rejects_a_cli_provider_without_any_auth_source(
