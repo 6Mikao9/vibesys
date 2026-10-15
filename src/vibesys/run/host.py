@@ -21,8 +21,10 @@ from vibesys.run.core_services import (
     build_core_services,
 )
 from vibesys.run.evaluation import create_evaluation
+from vibesys.run.evaluation_socket import prepare_queue_status_socket
 from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
+from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
@@ -90,12 +92,19 @@ def _profiler_tool_offer(resources: _PreparedRun) -> ProfilerToolOffer:
     )
 
 
-def _tool_context(resources: _PreparedRun) -> AgentToolContext:
+def _tool_context(resources: _PreparedRun, queue_status_socket: Path) -> AgentToolContext:
     env = resources.environment_resources.view.profiler_mcp_env
     withheld = _profiler_tool_offer(resources).withheld
     if withheld:
         env = (*env, (WITHHELD_TOOLS_ENV, ",".join(withheld)))
-    return AgentToolContext(resources.facts.profiler_id, env)
+    return AgentToolContext(
+        resources.facts.profiler_id, env, queue_status_socket=str(queue_status_socket)
+    )
+
+
+def _slurm_handle_root(namespace: StateNamespace) -> Path:
+    """Where the run's cluster evaluation executor keeps its handles and cluster records."""
+    return namespace.external_directory() / "slurm-provider-handles"
 
 
 _NO_PROFILE_CAPTURE_NOTE = (
@@ -266,14 +275,13 @@ class _ProductHostFactory:
             reasoning_effort=spec.reasoning_effort,
         )
 
-    def _offered_roles(self, resources: _PreparedRun) -> tuple[AgentRole, ...]:
+    def _offered_roles(self, context: AgentToolContext) -> tuple[AgentRole, ...]:
         """The plugin's roles, without a stateless tool whose provider declines for this run.
 
         A provider that declines (the selected profiler is ``none``) says the run has no such
         tool, and a strategy only runs the turns that use it when the run offers it. A stateless
         tool with no provider at all is a wiring mistake and stays for composition to refuse.
         """
-        context = _tool_context(resources)
         declined = frozenset(
             tool
             for tool, server in (self.stateless_tool_servers or {}).items()
@@ -292,9 +300,8 @@ class _ProductHostFactory:
             for role in self.plugin.agents
         )
 
-    def _stateless_tool_servers(self, resources: _PreparedRun) -> dict[str, ToolServerDescriptor]:
+    def _stateless_tool_servers(self, context: AgentToolContext) -> dict[str, ToolServerDescriptor]:
         """The server of each stateless tool this run's environment can serve, by tool id."""
-        context = _tool_context(resources)
         served = {
             tool: server(context) for tool, server in (self.stateless_tool_servers or {}).items()
         }
@@ -386,8 +393,12 @@ class _ProductHostFactory:
             project.state, AgentSessionKey.for_member("core", "run")
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
+        handle_root = _slurm_handle_root(namespace)
         executor = self._semantic_executor(
             self.integration, resources, workspaces, namespace, self.timing.clock
+        )
+        tool_context = _tool_context(
+            resources, self._serve_queue_status(resources, handle_root, ownership)
         )
         configuration = partial(self._agent_configuration, resources)
         return build_core_services(
@@ -408,7 +419,7 @@ class _ProductHostFactory:
                     ),
                 ),
                 environment=self._core_environment(resources),
-                roles=self._offered_roles(resources),
+                roles=self._offered_roles(tool_context),
                 role_models={
                     role: spec.model
                     for role, spec in specs.items()
@@ -424,7 +435,7 @@ class _ProductHostFactory:
                 network=self.network,
                 agent_lifecycle=self.integration.agent_execution_event,
                 evaluation_diagnostics=self._evaluation_diagnostic,
-                stateless_tool_servers=self._stateless_tool_servers(resources),
+                stateless_tool_servers=self._stateless_tool_servers(tool_context),
                 commands=agent_runtime.commands,
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
                 commit_observer=self.integration.core_commit_observer(
@@ -439,6 +450,33 @@ class _ProductHostFactory:
                 ),
             ),
         )
+
+    def _serve_queue_status(
+        self, resources: _PreparedRun, handle_root: Path, ownership: ReleaseStack
+    ) -> Path:
+        """Serve the run's read-only queue status to its agents; return the socket path.
+
+        The service stops when ``ownership`` releases; its socket sits in the run's private
+        socket directory, which every agent container mounts.
+        """
+        project = resources.project_resources
+        socket_path = prepare_queue_status_socket(project.project.root, project.state.run_id)
+        service = queue_status_service(
+            queue_status_reader(
+                resources.environment_resources.view,
+                run_id=project.state.run_id,
+                handle_root=handle_root,
+                processes=self.integration.system.slurm_processes,
+                clock=self.timing.clock,
+            ),
+            socket_path,
+            network=self.network,
+            threads=self.integration.threads,
+            clock=self.timing.clock,
+        )
+        ownership.callback(service.close)
+        service.start()
+        return socket_path
 
     def _core_environment(self, resources: _PreparedRun) -> CoreEnvironment:
         """The evaluation environment and product bounds as facts: capacity, pacing, lifecycle."""
@@ -493,7 +531,7 @@ class _ProductHostFactory:
             resources.evaluation_plan,
             workspaces,
             namespace,
-            namespace.external_directory() / "slurm-provider-handles",
+            _slurm_handle_root(namespace),
             clock=clock,
             sleeper=clock,
             processes=integration.system.slurm_processes,
