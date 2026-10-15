@@ -30,6 +30,7 @@ from vs_evaluation.models import (
     StoredEvaluation,
 )
 from vs_evaluation.ports import ExecutorRejectedError, ExecutorSubmissionError
+from vs_evaluation.queue_status import QueueStatus
 from vs_project.api import ProjectStateError, StateModelNotFoundError
 
 if TYPE_CHECKING:
@@ -459,3 +460,16 @@ __all__ = [
     "InMemoryEvaluationNamespace",
     "InMemoryEvaluationStore",
 ]
+
+
+@dataclass
+class FakeQueueStatus:
+    """A ``QueueStatusReader`` that reports the status a test sets, and counts its reads."""
+
+    status: QueueStatus = field(default_factory=QueueStatus.unreadable)
+    reads: int = 0
+
+    def read(self) -> QueueStatus:
+        """The status the test set."""
+        self.reads += 1
+        return self.status

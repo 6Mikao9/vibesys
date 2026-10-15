@@ -10,6 +10,7 @@ and turns a lost answer into unknown fields rather than an error.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 import pytest
 from hypothesis import given
@@ -20,6 +21,7 @@ from vs_slurm.api import FakeJob, FakeQueue, SlurmError, read_queue
 PREFIX = "vs-run-"
 PARTITIONS = ("gpu", "debug")
 ME = "me"
+STATES: tuple[Literal["PENDING", "RUNNING"], ...] = ("PENDING", "RUNNING")
 
 
 @st.composite
@@ -29,7 +31,7 @@ def queues(draw: st.DrawFn) -> FakeQueue:
     jobs = []
     for job_id in range(100, 100 + count):
         owner = draw(st.sampled_from(["run", "other-run", "other-user"]))
-        state = draw(st.sampled_from(["PENDING", "RUNNING"]))
+        state = draw(st.sampled_from(STATES))
         jobs.append(
             FakeJob(
                 job_id=job_id,

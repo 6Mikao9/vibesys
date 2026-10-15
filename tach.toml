@@ -516,17 +516,17 @@ depends_on = []
 [[modules]]
 path = "vs_evaluation.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.semantic_stage", "vs_evaluation.state_namespace"]
+depends_on = ["vs_evaluator_protocol", "vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.failure_signature", "vs_evaluation.filesystem_store", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.queue_status", "vs_evaluation.semantic_stage", "vs_evaluation.state_namespace"]
 
 [[modules]]
 path = "vs_evaluation.api.tools"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_core_mcp", "vs_evaluation.agent_wire"]
+depends_on = ["vs_evaluation.agent_core_mcp", "vs_evaluation.agent_wire", "vs_evaluation.queue_status_mcp"]
 
 [[modules]]
 path = "vs_evaluation.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.started_operation", "vs_evaluation.testing"]
+depends_on = ["vs_evaluation.queue_status_contracts", "vs_evaluation.started_operation", "vs_evaluation.testing"]
 
 [[modules]]
 path = "vs_evaluation.agent_evidence"
@@ -594,7 +594,22 @@ depends_on = ["vs_evaluation.lifecycle", "vs_evaluation.ports", "vs_sim.api", "v
 [[modules]]
 path = "vs_evaluation.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.state_namespace", "vs_project", "vs_sim.api.testing"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.agent_models", "vs_evaluation.coordinator", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_evaluation.ports", "vs_evaluation.queue_status", "vs_evaluation.state_namespace", "vs_project", "vs_sim.api.testing"]
+
+[[modules]]
+path = "vs_evaluation.queue_status"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_evaluation.queue_status_contracts"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.queue_status"]
+
+[[modules]]
+path = "vs_evaluation.queue_status_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.queue_status", "vs_mcp"]
 
 [[modules]]
 path = "vs_prompts"

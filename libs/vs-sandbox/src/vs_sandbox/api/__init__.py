@@ -114,6 +114,7 @@ if TYPE_CHECKING:
     from vs_sandbox.local_compute_backend import LocalBackend
     from vs_sandbox.local_shell import LocalShellRunner
     from vs_sandbox.modal_model_setup import ensure_model_volume
+    from vs_sandbox.queue_status import LocalQueueStatus, ModalQueueStatus, SlurmQueueStatus
     from vs_sandbox.rocm_backend import RocmBackend
     from vs_sandbox.toolchain_features import (
         CONTAINER_RUNTIME_TOOLCHAIN,
@@ -191,7 +192,9 @@ __all__ = [
     "LinuxBackend",
     "LocalBackend",
     "LocalFeature",
+    "LocalQueueStatus",
     "LocalShellRunner",
+    "ModalQueueStatus",
     "NestedDaemonError",
     "NvidiaSmiTelemetry",
     "ProjectPathPolicy",
@@ -206,6 +209,7 @@ __all__ = [
     "SandboxSession",
     "SandboxUnavailableError",
     "SeatbeltSandbox",
+    "SlurmQueueStatus",
     "SubprocessDockerCli",
     "SystemAcceleratorDiscovery",
     "TrainiumBackend",
@@ -345,6 +349,9 @@ _LAZY_EXPORTS = {
     "linked_worktree_git_paths": ("linked_worktree", "linked_worktree_git_paths"),
     "LocalShellRunner": ("local_shell", "LocalShellRunner"),
     "ensure_model_volume": ("modal_model_setup", "ensure_model_volume"),
+    "LocalQueueStatus": ("queue_status", "LocalQueueStatus"),
+    "ModalQueueStatus": ("queue_status", "ModalQueueStatus"),
+    "SlurmQueueStatus": ("queue_status", "SlurmQueueStatus"),
 }
 
 

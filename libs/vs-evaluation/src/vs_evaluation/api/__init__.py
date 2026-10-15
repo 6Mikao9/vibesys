@@ -73,6 +73,14 @@ from vs_evaluation.ports import (
     ExecutorSubmissionError,
     PollingEvaluationExecutor,
 )
+from vs_evaluation.queue_status import (
+    QueueItem,
+    QueueItemKind,
+    QueueItemState,
+    QueueLoad,
+    QueueStatus,
+    QueueStatusReader,
+)
 from vs_evaluation.semantic_stage import (
     EvidenceResultIdentity,
     SemanticEvaluationStage,
@@ -127,6 +135,12 @@ __all__ = [
     "PollPhase",
     "PollingEvaluationExecutor",
     "ProfileField",
+    "QueueItem",
+    "QueueItemKind",
+    "QueueItemState",
+    "QueueLoad",
+    "QueueStatus",
+    "QueueStatusReader",
     "ResourceRequirements",
     "ReuseStatus",
     "RunStoppingReply",
