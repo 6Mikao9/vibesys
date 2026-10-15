@@ -290,6 +290,29 @@ def test_the_profiler_follows_the_capability_not_the_environment_name(tmp_path: 
         (tmp_path / "logs" / "slurm-capture-plan.json").unlink(missing_ok=True)
 
 
+def test_connector_transport_offers_the_remote_profiler_capability(tmp_path: Path) -> None:
+    """Regression: connector runs offered no ROCprof capability at composition time."""
+    config = tmp_path / "slurm-connector.toml"
+    config.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "connector"
+command = ["site-slurm-connector"]
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+""",
+        encoding="utf-8",
+    )
+    environment = SlurmEnvironment(load_slurm_operator_settings(config))
+
+    assert environment.default_profiler_id == "rocprof"
+    assert environment.supported_profiler_ids == frozenset({"auto", "none", "rocprof"})
+
+
 @pytest.mark.parametrize("transport", ["ssh", "connector"])
 def test_agent_gpu_commands_are_rejected_without_the_local_transport(
     tmp_path: Path, transport: str
