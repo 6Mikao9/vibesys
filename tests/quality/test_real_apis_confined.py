@@ -1634,6 +1634,7 @@ REAL_IMPLEMENTATION_LEAVES = frozenset(
     key.split(".")[-1] for key in REAL_IMPLEMENTATIONS if not key.endswith(".real")
 )
 
+
 class Owner(StrEnum):
     """Who converts a pending real default; each is a live work item."""
 
@@ -1931,7 +1932,12 @@ def _sites(tree: ast.Module, labelled: Mapping[int, str]) -> list[Site]:
     def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
         for child in ast.iter_child_nodes(node):
             if id(child) in labelled:
-                found.append((getattr(child, "lineno", 0), f"{'.'.join(scope) or '<module>'}:{labelled[id(child)]}"))
+                found.append(
+                    (
+                        getattr(child, "lineno", 0),
+                        f"{'.'.join(scope) or '<module>'}:{labelled[id(child)]}",
+                    )
+                )
             inner = (
                 (*scope, child.name)
                 if isinstance(child, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
@@ -1950,7 +1956,11 @@ def _sites(tree: ast.Module, labelled: Mapping[int, str]) -> list[Site]:
 
 def _construction_label(node: ast.expr) -> str:
     if isinstance(node, ast.Call):
-        return f"{_leaf(node.func)}()" if not (node.args or node.keywords) else f"{_leaf(node.func)}(...)"
+        return (
+            f"{_leaf(node.func)}()"
+            if not (node.args or node.keywords)
+            else f"{_leaf(node.func)}(...)"
+        )
     return f"default_factory={_leaf(node)}"
 
 
@@ -2057,7 +2067,9 @@ def test_a_site_key_does_not_move_with_its_line_and_counts_repeats() -> None:
     source = "def f():\n    a = OsThreads()\n    b = OsThreads()\n"
     moved = "\n\n# edit\n" + source
     assert [site.key for site in real_defaults(source)] == ["f:OsThreads()", "f:OsThreads()#2"]
-    assert [site.key for site in real_defaults(moved)] == [site.key for site in real_defaults(source)]
+    assert [site.key for site in real_defaults(moved)] == [
+        site.key for site in real_defaults(source)
+    ]
 
 
 def test_product_code_outside_entrypoints_has_no_real_defaults() -> None:
