@@ -41,6 +41,10 @@ class Source[T]:
         """What this source is, for logs and ``Deadlock``."""
         raise NotImplementedError
 
+    def waited_by(self, flow: str) -> None:
+        """The flow at path ``flow`` waits on this source; a source that allows one reader checks."""
+        del flow
+
     def __await__(self) -> Generator[First, Any, T]:
         """Wait for this source's next value."""
         return First((self,)).__await__()
@@ -249,21 +253,29 @@ class ChannelKey[T]:
 
 
 class ChannelCell:
-    """The run's one queue of a channel's values; every handle on the key shares it."""
+    """The run's one queue of a channel's values; every handle on the key shares it.
 
-    def __init__(self, key: ChannelKey[Any]) -> None:
+    ``live`` counts the run's live flows, the reader's included: with no other, nobody can send.
+    """
+
+    def __init__(self, key: ChannelKey[Any], live: Callable[[], int]) -> None:
         self.key = key
         self.values: deque[object] = deque()
+        self.reader: str | None = None
+        """The path of the one flow that reads the channel, once it first waits on it."""
+        self.live = live
 
 
 class Channel[T](Source[T]):
-    """A run-wide stream of values: any flow may send, and the flow that reads takes each once.
+    """A run-wide stream of values: any flow may send, and the one flow that reads takes each once.
 
     For facts many flows report to one flow that keeps the record of them (tasks telling the root
-    what they reached). Values are read in the order they were sent, each once, by whichever
-    handle takes it first, so one flow reads a channel. Like a latch, it is not journaled: flow
-    code sends, so a replay sends again at the same points, and a restart after a code change
-    starts with it empty. A channel may always yield again, so waiting on it is never a deadlock.
+    what they reached). Values are read in the order they were sent, each once. One flow reads a
+    channel: a second flow that waits on it is a `ContractError`, since the two would split its
+    values between them by scheduling order. Like a latch, it is not journaled: flow code sends,
+    so a replay sends again at the same points, and a restart after a code change starts with it
+    empty. A flow that waits on an empty channel while no other flow is live waits for a value
+    nobody can send, which counts toward a `Deadlock`.
     """
 
     def __init__(self, key: ChannelKey[T], cell: ChannelCell) -> None:
@@ -281,7 +293,17 @@ class Channel[T](Source[T]):
         return self._cell.values.popleft()  # ty: ignore[invalid-return-type]
 
     def alive(self) -> bool:
-        return True
+        return self.ready() or self._cell.live() > 1
 
     def describe(self) -> str:
         return f"channel {self.key.name}"
+
+    def waited_by(self, flow: str) -> None:
+        """Make ``flow`` the channel's reader, or refuse it when another flow reads it."""
+        cell = self._cell
+        if cell.reader is None:
+            cell.reader = flow
+        elif cell.reader != flow:
+            where = repr(cell.reader or "the root")
+            message = f"a channel has one reader, and {where} reads it"
+            raise ContractError(("channel", self.key.name), message)

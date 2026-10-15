@@ -394,6 +394,36 @@ def test_two_channel_keys_with_one_name_are_refused(begin: Begin) -> None:
         begin(mixes)
 
 
+def test_a_second_flow_that_reads_a_channel_is_refused(begin: Begin) -> None:
+    """Two readers would split the channel's values between them by scheduling order."""
+
+    async def listener(ctx: core.Flow, _name: str) -> str:
+        return await ctx.channel(REPORTS)
+
+    async def two_readers(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as listeners:
+            listeners.start("a", listener, "a")
+            await ctx.first(ctx.channel(REPORTS), listeners)
+
+    with pytest.raises(core.ContractError, match="a channel has one reader"):
+        begin(two_readers)
+
+
+def test_a_flow_that_waits_only_on_a_channel_nobody_can_send_to_is_a_deadlock(
+    begin: Begin,
+) -> None:
+    async def alone(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as workers:
+            await workers.start("a", worker)
+        await ctx.channel(REPORTS)  # every other flow has ended: no value can come
+
+    run = begin(alone)
+    with pytest.raises(core.Deadlock) as caught:
+        answer(run, "work", 1)
+    assert caught.value.flow == ""
+    assert caught.value.sources == ("channel reports",)
+
+
 # -- stops, resources ---------------------------------------------------------------------------
 
 

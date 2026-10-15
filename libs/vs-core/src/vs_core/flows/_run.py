@@ -227,7 +227,9 @@ class _Run:
 
     def channel[T](self, key: ChannelKey[T]) -> Channel[T]:
         """A handle on the run's channel ``key``; another key with its name is a bug."""
-        cell = self._channels.setdefault(key.name, ChannelCell(key))
+        cell = self._channels.get(key.name)
+        if cell is None:
+            cell = self._channels[key.name] = ChannelCell(key, lambda: len(self._tasks))
         if cell.key is not key:
             message = "another channel key has this name: declare each key once and share it"
             raise ContractError(("channel", key.name), message)
@@ -392,6 +394,8 @@ class _Run:
     def _suspend(self, task: _Task, block: object) -> None:
         if not isinstance(block, First):
             raise ContractError(("await",), "a flow may await only ctx operations and sources")
+        for source in block.sources:
+            source.waited_by(task.path)
         if not any(source.alive() for source in block.sources):
             raise Deadlock(task.path, tuple(s.describe() for s in block.sources))
         task.blocked = block

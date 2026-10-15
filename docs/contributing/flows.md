@@ -153,7 +153,7 @@ A **source** is anything a flow can wait on for a value:
 | `ctx.timer(at)` | `TimeUp(at)`, once |
 | `ctx.stopped` | `StopRequested`, once |
 | `ctx.latch(key)` | the value some flow `set` on the run-wide latch `key` (once per run), once per handle |
-| `ctx.channel(key)` | each value any flow `send`s on the run-wide channel `key`, in the order sent, once |
+| `ctx.channel(key)` | each value any flow `send`s on the run-wide channel `key`, in the order sent, once; one flow reads it |
 
 **Every source yields each value once.** `await source` waits for its next value;
 `await ctx.first(a, b, c)` waits for the next value of whichever is ready first, and returns it
@@ -195,9 +195,22 @@ A **channel** carries facts the other way: many flows report, as they reach them
 that keeps their record (each workstream telling the root it waits for an evaluation slot).
 Declare its key once (`REPORTS = ChannelKey[Report]("reports")`); any flow calls
 `ctx.channel(REPORTS).send(value)`, and the reader waits on `ctx.channel(REPORTS)` in its
-`first`. Values are read in the order they were sent, each once, so one flow reads a channel.
-Like a latch it is not journaled (replay sends again at the same points; a restart after a code
-change starts it empty), and since it may always yield again, waiting on it is never a deadlock.
+`first`. Values are read in the order they were sent, each once. **A channel has one reader**:
+the first flow that waits on it reads it for the run, and a second flow that waits on it is a
+`ContractError`, since two readers would split its values by scheduling order. A flow that waits
+on an empty channel while no other flow is live waits for a value nobody can send, so the channel
+counts as unable to yield again toward a `Deadlock`; while another flow lives, it may still send.
+
+Like a latch, a channel is not journaled: replay sends again at the same points, and a restart
+after a code change starts it empty. **So never record a checkpoint between a send and the
+reader's receipt of what it implies.** A sender that checkpoints after its send resumes past it
+on a restart, so the reader, whose channel starts empty, never hears it; a reader that
+checkpoints after it read the value but before it folded it in loses the fact the same way. Send
+after the last checkpoint that a restart resumes from, as the dynamic search's workstreams do
+(they checkpoint only at their start, and every send is redone after a restart). Unenforced: a
+checkpoint and a send are ordinary calls in flow code, and which pairs matter depends on what the
+reader does with the value; `test_flows.py` plays every channel story restarted after each
+step, which catches a lost send in the flows it covers.
 
 ### Groups
 
