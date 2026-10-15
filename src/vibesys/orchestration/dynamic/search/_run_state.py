@@ -317,9 +317,15 @@ class RunRecord:
         """A workstream's candidate waits for its trusted measurement.
 
         Within the backlog its workstream is parked, and its agent slot is free.
+
+        A key submits once per run of this record. Its verdict is set on a latch that is set
+        once per run (``VERDICTS.of(key)``), so a second submission would read the first
+        verdict. None can come: workstream keys are not reused, and a restart starts every
+        flow again together, so the root rebuilds this record and every latch starts empty.
         """
-        if submission.key in self.submitted:  # the workstream was redone from its start
-            self.evaluations.forget(submission.key)
+        if submission.key in self.submitted:
+            msg = f"workstream {submission.key!r} submitted twice: its verdict latch is already set"
+            raise RuntimeError(msg)
         self.submitted[submission.key] = submission
         self.evaluations.submit(submission)
         if submission.key in self.parked:
