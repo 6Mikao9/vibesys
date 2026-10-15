@@ -13,6 +13,7 @@ import signal
 from pathlib import Path
 
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api import SubprocessPipedProcessLauncher
 from vs_sim.api.testing import HANG_GUARD_S
 
 
@@ -23,7 +24,7 @@ def test_a_stop_delivers_output_written_before_the_client_read_it(tmp_path: Path
     os.mkfifo(workspace / "started")
     os.mkfifo(workspace / "go")
     os.mkfifo(workspace / "written")
-    engine = FakeDockerEngine(tmp_path / "state")
+    engine = FakeDockerEngine(tmp_path / "state", launcher=SubprocessPipedProcessLauncher())
     created = engine.run(
         ("docker", "run", "-d", "-v", f"{workspace}:/w", "--workdir", "/w", "image"),
         timeout_seconds=30,

@@ -16,6 +16,7 @@ from vs_agent.api import reap_orphaned_agents
 from vs_agent.api.testing import FakeConfinement, FakeDockerBuildRunner
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
 from vs_sim.api import OsThreads
+from vs_sim.api.testing import FakePipedProcessLauncher
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
 
 def fake_docker_environment(docker: FakeDockerEngine | None = None) -> RunEnvironmentSpec:
     """Return a Docker environment spec whose host effects are in-memory fakes."""
-    engine = docker if docker is not None else FakeDockerEngine()
+    engine = docker if docker is not None else FakeDockerEngine(launcher=FakePipedProcessLauncher())
     return RunEnvironmentSpec(
         "docker",
         {
@@ -50,4 +51,10 @@ def host_container_backend(
 ) -> HostExecutedContainerBackend:
     """Build the ``backend_factory`` product: a CPU backend with host-executing containers."""
     del clock  # the fake backend records no timestamps
-    return HostExecutedContainerBackend(log_dir, log=log, image=image, threads=OsThreads())
+    return HostExecutedContainerBackend(
+        log_dir,
+        log=log,
+        image=image,
+        threads=OsThreads(),
+        launcher=FakePipedProcessLauncher(),
+    )

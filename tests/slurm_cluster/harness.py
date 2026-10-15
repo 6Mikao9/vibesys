@@ -310,6 +310,7 @@ def make_request(
                 processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
             ),
             threads=OsThreads(),
+            launcher=SubprocessPipedProcessLauncher(),
         ),
         agent_backend="stub",
         cli_provider=None,

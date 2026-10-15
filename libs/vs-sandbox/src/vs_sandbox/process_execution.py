@@ -10,10 +10,7 @@ period.
 
 from __future__ import annotations
 
-import os
 import signal
-import subprocess
-from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import partial
@@ -22,13 +19,10 @@ from typing import TYPE_CHECKING, Protocol
 from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable
     from io import TextIOBase
 
     from vs_sim.api import PipedProcess, Threads
-
-type _TextProcess = subprocess.Popen[str]
-
 
 #: The signals a stop sends, named here so only this adapter module refers to ``signal``.
 type StopSignal = signal.Signals
@@ -145,16 +139,25 @@ class PipedStoppableProcess:
         return self._returncode
 
     def wait(self, timeout: float | None) -> tuple[str, str] | None:
-        """Wait for the leader and both pipes' EOF, within *timeout* seconds in total."""
+        """Wait for both pipes' EOF and then the leader, within *timeout* seconds in total.
+
+        The pipes come first: reaping the leader ends the group's signals, so a
+        descendant that still holds a pipe open after the leader exited stays
+        reachable by a stop until the pipes close.
+        """
         deadline = None if timeout is None else self._threads.now() + timeout
+
+        def remaining() -> float | None:
+            return None if deadline is None else max(0.0, deadline - self._threads.now())
+
+        for drain in self._drains:
+            drain.join(remaining())
+            if drain.is_alive():
+                return None
         if self._returncode is None:
             try:
-                self._returncode = self._process.wait(timeout)
+                self._returncode = self._process.wait(remaining())
             except ProcessTimeoutError:
-                return None
-        for drain in self._drains:
-            drain.join(None if deadline is None else max(0.0, deadline - self._threads.now()))
-            if drain.is_alive():
                 return None
         return _universal_newlines(self._stdout), _universal_newlines(self._stderr)
 
@@ -179,99 +182,6 @@ def _drain(stream: TextIOBase, sink: list[str]) -> None:
 
 def _universal_newlines(chunks: list[str]) -> str:
     return "".join(chunks).replace("\r\n", "\n").replace("\r", "\n")
-
-
-class PopenProcess:
-    """A ``subprocess.Popen`` started with :func:`start_process_group`."""
-
-    def __init__(self, process: _TextProcess, *, stdin: str | None = None) -> None:
-        """Wrap *process*, the leader of its own process group."""
-        self._process = process
-        self._stdin = stdin
-        self._communication_started = False
-
-    @property
-    def returncode(self) -> int:
-        """The return code of the exited leader."""
-        code = self._process.returncode
-        if code is None:
-            message = "the process has not exited"
-            raise RuntimeError(message)
-        return code
-
-    def wait(self, timeout: float | None) -> tuple[str, str] | None:
-        """Wait with ``communicate``, retaining partial output after timeout."""
-        try:
-            stdin = None if self._communication_started else self._stdin
-            self._communication_started = True
-            return self._process.communicate(input=stdin, timeout=timeout)
-        except ProcessTimeoutError:
-            return None
-
-    def signal_group(self, signal_number: StopSignal) -> None:
-        """Signal the group; it outlives its leader while any descendant remains in it."""
-        with suppress(ProcessLookupError, PermissionError):
-            os.killpg(self._process.pid, signal_number)
-
-    def close(self) -> None:
-        """Release all pipes and reap an already-exited leader without blocking."""
-        failures: list[BaseException] = []
-        for stream in (self._process.stdin, self._process.stdout, self._process.stderr):
-            if stream is not None:
-                try:
-                    stream.close()
-                except BaseException as failure:  # noqa: BLE001  # lint-waiver: LW-194305 [BLE001]; all three owned pipes must be attempted even when cancellation or an injected stream failure interrupts an earlier close.
-                    # > Catching only I/O errors would let cancellation skip later
-                    # > resources; a context manager would retain only its last
-                    # > failure instead of reporting the complete cleanup.
-                    failures.append(failure)
-        self._process.poll()
-        raise_pipe_close_failures(failures)
-
-
-def raise_pipe_close_failures(failures: list[BaseException]) -> None:
-    """Raise one close failure unchanged or group several in attempt order."""
-    if len(failures) == 1:
-        raise failures[0]
-    if failures:
-        message = "captured process pipes could not be closed"
-        raise BaseExceptionGroup(message, failures)
-
-
-def _open_process(
-    argv: Sequence[str],
-    *,
-    env: Mapping[str, str] | None,
-    cwd: str | None,
-    stdin: int | None,
-    start_new_session: bool = False,
-) -> _TextProcess:
-    return subprocess.Popen(  # noqa: S603  # lint-waiver: LW-731001 [S603]; the sandbox boundary intentionally executes its caller's command.
-        # > Each sandbox assembles its own argv (a shell command is ``sh -c``);
-        # > validating argv here would duplicate each sandbox's command contract.
-        argv,
-        env=dict(env) if env is not None else None,
-        cwd=cwd,
-        stdin=stdin,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=start_new_session,
-        process_group=-1 if start_new_session else 0,
-    )
-
-
-def start_process_group(
-    argv: Sequence[str],
-    *,
-    env: Mapping[str, str] | None,
-    cwd: str | None,
-) -> _TextProcess:
-    """Start *argv* as the leader of a new process group with piped output.
-
-    Launch failures raise the ``subprocess`` error unchanged.
-    """
-    return _open_process(argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL)
 
 
 def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the stop policy is five independent keywords (timeout, cancel, grace, remote signal, clock) and bundling them would only rename them.

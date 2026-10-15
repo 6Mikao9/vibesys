@@ -83,6 +83,7 @@ def candidate(tmp_path: Path) -> Iterator[tuple[RunEnvironmentSession, Path, Pat
                 processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
             ),
             threads=OsThreads(),
+            launcher=SubprocessPipedProcessLauncher(),
         ),
         agent_backend="stub",
         cli_provider=None,

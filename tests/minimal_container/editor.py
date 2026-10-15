@@ -191,6 +191,7 @@ def make_backend(base: Base, log_dir: Path) -> ComputeBackendImpl:
             processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
         ),
         threads=OsThreads(),
+        launcher=SubprocessPipedProcessLauncher(),
     )
 
 

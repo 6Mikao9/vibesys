@@ -135,7 +135,13 @@ class TestLocalShellRunner(CommandRunnerContract):
     @pytest.fixture
     def harness(self, tmp_path: Path) -> Iterator[Harness]:
         harness = _ShellHarness(
-            LocalShellRunner(tmp_path, max_output_chars=CAP, threads=OsThreads()), tmp_path
+            LocalShellRunner(
+                tmp_path,
+                max_output_chars=CAP,
+                threads=OsThreads(),
+                launcher=SubprocessPipedProcessLauncher(),
+            ),
+            tmp_path,
         )
         try:
             yield harness
@@ -156,7 +162,9 @@ class TestDockerSandboxOnFakeDaemon(CommandRunnerContract):
             agent_uid=os.getuid(),
             agent_gid=os.getgid(),
             docker=FakeDockerEngine(
-                tmp_path / "engine-state", agent_ids=(os.getuid(), os.getgid())
+                tmp_path / "engine-state",
+                agent_ids=(os.getuid(), os.getgid()),
+                launcher=SubprocessPipedProcessLauncher(),
             ),
             threads=OsThreads(),
         )

@@ -41,6 +41,7 @@ from vs_sim.crash import (
     swept,
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
+from vs_sim.fake_piped_process import ScriptedPipedProcess
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
     FakeForegroundChild,
@@ -175,6 +176,7 @@ __all__ = [
     "Restarted",
     "RunnerUnderTest",
     "ScheduledRule",
+    "ScriptedPipedProcess",
     "ScriptedProbe",
     "ScriptedStreamingCommand",
     "SignalRelayContract",

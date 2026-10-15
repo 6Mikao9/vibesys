@@ -104,6 +104,7 @@ def create_session(
                 processes=settings.processes, launcher=settings.piped_processes
             ),
             threads=timing.threads,
+            launcher=settings.piped_processes,
         )
         if settings.backend_factory is None
         else settings.backend_factory
