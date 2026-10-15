@@ -12,7 +12,8 @@ free does the queue decide which submission it measures, by the run's pick polic
   after those, newest first.
 
 A submission is dropped, with the reason recorded, when a newer submission supersedes it (the
-same workstream line, or a candidate built on it: its code is in the newer one). Each decision
+same workstream line, or a candidate built on it: its code is in the newer one), or when the run
+stops before a slot measures it. Each decision
 is a `SlotVerdict` for the workstream that submitted (`verdicts`), which the root hands over. How
 many submissions may wait is not the queue's to bound: a waiting workstream past the run's
 backlog keeps its agent slot instead (`RunRecord.working`), so the backlog applies backpressure
@@ -141,6 +142,11 @@ class EvaluationQueue:
             self.holding.append(chosen.submission.key)
             self.last_bound = chosen
             self._verdicts.append((chosen.submission.key, Bound()))
+
+    def stop(self) -> None:
+        """The run is stopping: drop every waiting submission, none is bound any more."""
+        for entry in list(self.pending):
+            self._drop(entry, Dropped(reason=DropReason.STOPPED))
 
     def release(self, key: str) -> None:
         """The measurement of ``key`` is over (or it never ran): its slot is free."""

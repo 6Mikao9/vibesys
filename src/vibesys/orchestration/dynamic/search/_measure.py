@@ -24,6 +24,7 @@ from vibesys.orchestration.dynamic.search._reports import (
     Released,
 )
 from vibesys.orchestration.dynamic.search._values import (
+    DropReason,
     Failure,
     FailureKind,
     Proof,
@@ -35,6 +36,7 @@ from vs_core.api.search import (
     MeasurementPurpose,
     MeasurementRecipe,
     RevisionRef,
+    Stopped,
     TimeUp,
     Workspace,
     trusted_keys,
@@ -87,7 +89,7 @@ async def a_slot(ctx: Flow, w: WorkstreamStart, revision: RevisionRef) -> None:
     """Submit ``revision`` for its trusted measurement and wait until a slot is bound to it.
 
     The root answers with the queue's verdict: measure now, or never (superseded by a newer
-    candidate of the same line, or the queue was full), which ends the work unmeasured.
+    candidate of the same line, or the run stopped), which ends the work unmeasured.
     """
     ctx.channel(REPORTS).send(
         Submission(
@@ -115,7 +117,8 @@ async def measure_and_interpret(
 
     The measurement is dispatched only once a slot is bound to it and the input's measurement
     has landed (`the_input`): the workstream waits for both parked, so its agent slot may go to
-    new work meanwhile.
+    new work meanwhile. A stop while it waits ends it unmeasured (`FailureKind.NOT_MEASURED`),
+    so its reviewed code is kept as work in progress, as a superseded candidate's is.
 
     The backend measures again after an infrastructure failure, so a result that reaches here
     is the candidate's own; a measurement that ended without one is a failure of the workstream.
@@ -125,8 +128,13 @@ async def measure_and_interpret(
     recipe = MeasurementRecipe.of(ctx.facts)
     if w.plan.kind is WorkKind.PROFILE and w.plan.required_fields:
         recipe = recipe.requiring(PROFILE_STAGE, w.plan.required_fields)
-    await a_slot(ctx, w, revision)
-    await the_input(ctx, w, work)  # until a backend binds a slot at its job's start (#2662)
+    try:
+        await a_slot(ctx, w, revision)
+        await the_input(ctx, w, work)  # until a backend binds a slot at its job's start (#2662)
+    except Stopped:
+        # a reviewed candidate the stop kept from its measurement is kept, as a dropped one is
+        stopped = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.STOPPED)
+        raise WorkEndedError(stopped) from None
     plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=names)
     found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
     ctx.channel(REPORTS).send(Released(key=w.key))

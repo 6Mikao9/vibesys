@@ -146,6 +146,8 @@ class DropReason(StrEnum):
     SUPERSEDED = "superseded"
     """A newer submission of the same line holds its work: the same workstream line, or a
     candidate built on it."""
+    STOPPED = "stopped"
+    """The run stopped (the operator, or its deadline) before the candidate was measured."""
 
 
 class FailureKind(StrEnum):

@@ -332,9 +332,12 @@ class RunRecord:
     def verdicts(self, *, stopping: bool) -> list[tuple[str, SlotVerdict]]:
         """Bind the waiting candidates to the free slots: the verdicts for their workstreams.
 
-        After a stop nothing is bound: the waiting workstreams are stopped instead.
+        After a stop nothing is bound: every waiting candidate is dropped as stopped, so its
+        workstream keeps its reviewed code as work in progress.
         """
-        if not stopping:
+        if stopping:
+            self.evaluations.stop()
+        else:
             self.evaluations.bind()
         return self.evaluations.verdicts()
 

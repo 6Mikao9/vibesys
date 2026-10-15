@@ -309,3 +309,39 @@ def test_a_step_accepted_on_its_own_checks_settles_before_the_input_lands(
     host.drain()
     assert isinstance(host.run.finished, Finish)
     assert_flow_closed(host)
+
+
+@MODES
+def test_a_stop_keeps_the_reviewed_candidates_that_were_never_measured(*, restarting: bool) -> None:
+    """A stop (or the run's deadline) before a reviewed candidate is measured does not throw away
+    its code: it settles unmeasured with the reason, kept as work in progress."""
+    host = begin(config(max_rounds=3, **QUEUED), restarting=restarting)
+    _plan(host, implement("h1"))
+    _work(host, "000001.h1", "c1")
+    _plan(host, implement("h2"))
+    _work(host, "000002.h2", "c2")
+    assert _measuring(host) == ["000001.h1"]  # h2 waits for the slot h1 holds
+
+    host.run.stop()
+    host.drain()
+
+    (waited,) = [item for item in _record(host).finished if item.plan.work_id == "h2"]
+    assert waited.failure is not None
+    assert (waited.failure.kind, waited.failure.dropped) == ("not-measured", "stopped")
+    (settled,) = [
+        request.disposition
+        for request in _issued(host, Withdraw)
+        if _line_of(request.decision_id.root) == "000002.h2"
+    ]
+    assert isinstance(settled, Settle)
+    assert settled.retention == "wip"
+    assert settled.candidate == RevisionRef.of_git_commit("c2")
+    assert not settled.eligible
+    queue = _record(host).evaluations
+    assert queue is not None
+    assert [(entry.submission.work_id, why.reason) for entry, why in queue.dropped] == [
+        ("h2", "stopped")
+    ]
+    assert _measured(host) == ["000001.h1"]
+    assert isinstance(host.run.finished, Finish)
+    assert_flow_closed(host)
