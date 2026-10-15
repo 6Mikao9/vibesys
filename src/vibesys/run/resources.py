@@ -3,7 +3,6 @@
 import shlex
 import sys
 from collections.abc import Callable, Mapping
-from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import overload
@@ -119,7 +118,7 @@ from vs_sandbox.api import (
     ComputeBackendImpl,
     HostResource,
 )
-from vs_sim.api import utc_datetime
+from vs_sim.api import ReleaseStack, utc_datetime
 
 
 def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
@@ -152,7 +151,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     request: RunRequest,
     integration: LocalRunIntegration,
     *,
-    ownership: ExitStack,
+    ownership: ReleaseStack,
     agent_specs: Mapping[str, AgentSpec],
     resume_policy: (
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
@@ -185,7 +184,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
 
 def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered product setup and ownership registration share mutable lifecycle state, which helper boundaries would obscure.
     *,
-    ownership: ExitStack,
+    ownership: ReleaseStack,
     request: RunRequest,
     integration: LocalRunIntegration,
     agent_specs: Mapping[str, AgentSpec],
@@ -422,7 +421,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         def recover_existing_run() -> None:
             """Recover external resources while the project-run owner holds its host lock."""
             with boot_trace.span("reap_orphans"):
-                environment.reap_orphans(run_id, log=buffered_logs.append)
+                environment.reap_orphans(
+                    run_id, system=integration.system, log=buffered_logs.append
+                )
             with boot_trace.span("workspace_repair"):
                 workspace_files.repair()
 
@@ -588,7 +589,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 cli_provider=resolved_cli_provider,
                 run_id=run_id,
                 clock=clock,
-                slurm_processes=integration.slurm_processes,
+                system=integration.system,
                 objective=agent_objective,
                 objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,

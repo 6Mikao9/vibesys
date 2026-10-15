@@ -89,11 +89,10 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
 )
 from vs_runtime.api.observation_contracts import assert_core_accepts
-from vs_runtime.api.testing import MemoryValidationPasses
+from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api.testing import (
-    NO_PROCESSES,
     InlineBlockingRunner,
     ManualClock,
     Sim,
@@ -234,7 +233,7 @@ def _env(
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=FakeComputeBackend(),
+                backend=FakeComputeBackend(threads=SimThreads()),
                 agent_backend="stub",
                 cli_provider="codex",
                 run_id="workspace-requests",
@@ -242,7 +241,7 @@ def _env(
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
                 clock=ManualClock(),
-                slurm_processes=NO_PROCESSES,
+                system=idle_environment_system(),
             ),
             lambda _request: _Session(),
             clock=ManualClock(),
@@ -451,6 +450,39 @@ def test_snapshot_replay_makes_one_commit_and_binds_the_receipt(tmp_path: Path) 
         restarted, _ = _executor(workspaces)
         assert await _run(restarted, request, epoch=2) == first
         assert await _run(executor, request, epoch=2) == first
+        assert _commits(workspaces) == commits
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+@pytest.mark.parametrize("kind", ["directory", "file"])
+def test_a_snapshot_of_a_workspace_holding_a_nested_repository_fails_and_names_it(
+    tmp_path: Path, kind: str
+) -> None:
+    """Host Git never reads a nested repository the agent made; the snapshot says why."""
+
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        attempt = _attempt()
+        await _run(executor, _ensure(workspaces, attempt, "ensure-1"))
+        candidate_path = _candidate_path(workspaces)
+        commits = _commits(workspaces)
+        nested = candidate_path / "vendor" / "lib" / ".git"
+        nested.parent.mkdir(parents=True)
+        if kind == "directory":
+            nested.mkdir()
+        else:
+            nested.write_text("gitdir: /elsewhere\n", encoding="utf-8")
+        request = SnapshotAndRetain(**_common(attempt, "snap-1"), attempt=attempt, retention="wip")
+
+        refused = await _run(executor, request)
+
+        observation = refused.observation.observation
+        assert observation.status is ObservationStatus.FAILED
+        assert observation.terminal
+        assert "vendor/lib/.git" in observation.diagnostic
+        assert refused.observation.revision is None
         assert _commits(workspaces) == commits
 
     with _workspaces(tmp_path) as workspaces:
