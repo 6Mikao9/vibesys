@@ -16,16 +16,21 @@ as the search goes (`ctx.choose`), so a stop or a deadline adopts what led at th
 
 from typing import assert_never
 
-from vibesys.candidates.api import Measured, NotConfigured, Unmeasurable, measure_input
+from vibesys.candidates.api import Baseline, Measured, NotConfigured, Unmeasurable, measure_input
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY
 from vibesys.orchestration.dynamic.search._operations import OPERATIONS
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
 from vibesys.orchestration.dynamic.search._planner import plan
 from vibesys.orchestration.dynamic.search._roles import ROLES
-from vibesys.orchestration.dynamic.search._run_state import NoPlan, RunRecord, Scheduled
+from vibesys.orchestration.dynamic.search._run_state import (
+    NoPlan,
+    PlanOutcome,
+    RunRecord,
+    Scheduled,
+)
 from vibesys.orchestration.dynamic.search._workstream import workstream
-from vs_core.api.search import Flow, NoWinner, StopRequested, TaskStopped, search
+from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped, search
 
 
 @search("dynamic", config=DynamicConfig, operations=OPERATIONS, roles=ROLES)
@@ -33,11 +38,11 @@ async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
     """Measure the input while planning, run workstreams in the free slots, name the best."""
     ctx.checkpoint(config)
     run = RunRecord(config, ctx.facts.baseline, None, ctx.task.terms)
-    async with (
-        ctx.group(limit=config.max_in_flight) as workstreams,
-        ctx.group(limit=1) as planning,
-        ctx.group(limit=1) as measuring,
-    ):
+    # typed, so the match on what they yield below is checked exhaustive
+    workstreams: Group[WorkstreamDone] = ctx.group(limit=config.max_in_flight)
+    planning: Group[PlanOutcome] = ctx.group(limit=1)
+    measuring: Group[Baseline] = ctx.group(limit=1)
+    async with workstreams, planning, measuring:
         measuring.start(INPUT_KEY, measure_input)
         while not run.over(
             planning=not planning.free,
