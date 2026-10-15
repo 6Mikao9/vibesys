@@ -165,7 +165,7 @@ def check_plan_documents(task: TaskDirectory, plan: TaskPlan) -> None:
             raise ValueError(message)
 
 
-def render_plan(plan: TaskPlan) -> list[str]:
+def plan_toml_lines(plan: TaskPlan) -> list[str]:
     """The ``[plan]`` table as TOML lines, in the order the manifest renders its tables."""
     lines = [
         "",
