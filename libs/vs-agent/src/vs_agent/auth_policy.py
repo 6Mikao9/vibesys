@@ -121,3 +121,28 @@ def plan_cli_auth(
     return shim_translation.plan_auth(
         provider_profiles.provider_profile(provider), policy, env=env, home=home
     )
+
+
+def plan_host_cli_auth(provider: str, *, env: Mapping[str, str], home: Path) -> CliAuthPlan | None:
+    """Return the plan for the credential *provider*'s CLI picks on its own, if it is an env one.
+
+    A run without ``[agent.auth]`` lets the CLI log in the way the launching
+    shell configured it. agentshim knows the CLI's precedence: asked for any
+    credential kind at the endpoint *env* points the CLI at, it names the
+    credential the CLI would use. When that is an environment variable, the
+    container needs nothing else, so the caller delivers exactly this plan and
+    stages none of the operator's login, settings or hooks files.
+
+    Returns ``None`` when the CLI would log in from a file, when agentshim
+    cannot classify the provider's credentials, or when no credential fits the
+    host's endpoint; the caller then stages the host's auth files as before.
+    """
+    # lint-waiver: LW-994812 [PLC0415]; load agentshim only when a run plans its auth.
+    # > Same constraint as plan_cli_auth above: vs_agent.api must import without
+    # > agentshim and shim_translation imports it at module scope. A shared loader
+    # > returning the module would erase its types at both call sites.
+    from vs_agent import shim_translation  # noqa: PLC0415
+
+    return shim_translation.plan_host_env_auth(
+        provider_profiles.provider_profile(provider), env=env, home=home
+    )

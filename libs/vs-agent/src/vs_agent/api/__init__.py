@@ -19,6 +19,7 @@ from vs_agent.auth_policy import (
     CredentialKind,
     PlannedCredentialFile,
     plan_cli_auth,
+    plan_host_cli_auth,
 )
 from vs_agent.cli_docker import (
     DOCKER_PROVIDER_ENV,
@@ -283,6 +284,7 @@ __all__ = [
     "native_schema_problems",
     "parse_typed_response",
     "plan_cli_auth",
+    "plan_host_cli_auth",
     "reap_orphaned_agents",
     "reply_breach",
     "session_env_allowlist",

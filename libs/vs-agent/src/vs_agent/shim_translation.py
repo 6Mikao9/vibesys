@@ -192,6 +192,37 @@ def plan_auth(
     except (agentshim.AuthUnavailableError, ValueError) as error:
         message = f"agent.auth cannot be met: {error}"
         raise AgentAuthError(message) from error
+    return _cli_auth_plan(plan)
+
+
+def plan_host_env_auth(
+    profile: agentshim.ProviderProfile, *, env: Mapping[str, str], home: Path
+) -> CliAuthPlan | None:
+    """Ask agentshim which credential *profile*'s CLI uses on this host, if it is an env one.
+
+    Any credential kind is allowed and the endpoint is the one *env* already
+    points the CLI at, so the choice is the CLI's own precedence. ``None`` when
+    the choice is a file, or agentshim cannot plan for this host at all (no
+    classified credential sources, no credential present, or a host endpoint
+    the CLI cannot take or that is not a URL).
+    """
+    endpoint = profile.endpoint
+    base_url = env.get(endpoint.base_url_env, "").strip() if endpoint is not None else ""
+    try:
+        plan = agentshim.plan_auth(
+            profile,
+            agentshim.AuthPolicy(frozenset(agentshim.CredentialKind), base_url or None),
+            env=env,
+            home=home,
+        )
+    except (agentshim.AuthUnavailableError, ValueError):
+        return None
+    if plan.files:
+        return None
+    return _cli_auth_plan(plan)
+
+
+def _cli_auth_plan(plan: agentshim.AuthPlan) -> CliAuthPlan:
     return CliAuthPlan(
         provider=plan.provider,
         credential=_CREDENTIAL_KIND[plan.credential],
