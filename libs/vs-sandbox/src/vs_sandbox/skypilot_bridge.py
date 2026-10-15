@@ -46,7 +46,7 @@ from vs_sandbox.skypilot_states import (
     allocation_gone,
     is_driver_failure,
 )
-from vs_sim.api import OsThreads, UnixNetwork
+from vs_sim.api import CloseOnce, NothingLeft, OsThreads, Released, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -409,7 +409,7 @@ class SkyPilotBridge:
         self._threads: Threads = threads or OsThreads()
         self._listener: Listener | None = None
         self._acceptor: Worker | None = None
-        self._closed = False
+        self._close = CloseOnce()
         self._active_jobs: set[tuple[str, int]] = set()
         self._active_lock = self._threads.lock()
         self._handler_condition = self._threads.condition()
@@ -424,7 +424,7 @@ class SkyPilotBridge:
         """Allocate or reuse compute, then start accepting requests."""
         if self._listener is not None:
             return
-        if self._closed:
+        if self._close.started:
             message = "SkyPilot bridge cannot be restarted after close"
             raise RuntimeError(message)
         validate_socket_path(self.socket_path)
@@ -443,15 +443,24 @@ class SkyPilotBridge:
                 lambda: self._accept_loop(listener),
                 name=f"skypilot-bridge-{self._cluster_name}",
             )
-        except BaseException:
-            self.close()
+        except BaseException as start_error:
+            try:
+                self.close()
+            except Exception as close_error:  # noqa: BLE001  # lint-waiver: LW-008199 [BLE001]; the start failure is the error to raise, and any failed teardown is attached to it.
+                # > Narrowing to NotReleasedError would let a failed listener close replace the
+                # > start failure; letting close raise loses the reason start failed.
+                start_error.add_note(f"closing the bridge also failed: {close_error!r}")
             raise
 
     def close(self) -> None:
-        """Stop serving, release the allocation, and remove the socket."""
-        if self._closed:
-            return
-        self._closed = True
+        """Stop serving, release the allocation, and remove the socket.
+
+        A cluster whose release failed stays tracked: close raises naming it, and the
+        next call releases it again.
+        """
+        self._close.run(self._release)
+
+    def _release(self) -> Released:
         self._closing.set()
         if self._listener is not None:
             self._listener.close()
@@ -469,7 +478,15 @@ class SkyPilotBridge:
                 self._runner.release(cluster_name)
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008192 [BLE001]; teardown must continue after any runner failure and reports each failed release.
                 self._log(f"[warn] SkyPilot allocation release failed: {type(exc).__name__}")
+            else:
+                with self._active_lock:
+                    self._touched_clusters.discard(cluster_name)
         self.socket_path.unlink(missing_ok=True)
+        with self._active_lock:
+            unreleased = sorted(self._touched_clusters)
+        return Released.shown_by(
+            NothingLeft(unreleased, f"unreleased SkyPilot clusters {unreleased}")
+        )
 
     def _accept_loop(self, listener: Listener) -> None:
         while True:
@@ -519,7 +536,7 @@ class SkyPilotBridge:
 
     def _report_closing(self, writer: _Wire) -> bool:
         """Write the existing wire error when shutdown has started."""
-        if not self._closed:
+        if not self._close.started:
             return False
         self._write(writer, ErrorFrame(error=ValueError.__name__))
         return True

@@ -3,7 +3,7 @@
 import shutil
 import sys
 from collections.abc import Iterator
-from contextlib import AbstractContextManager, ExitStack, contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Literal, TypedDict, Unpack
 from unittest.mock import patch
@@ -54,6 +54,7 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import ReleaseStack
 from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 
@@ -214,7 +215,7 @@ def _create_context(
     registration = built_in_orchestrations().resolve(descriptor.id)
     plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
-    ownership = ExitStack()
+    ownership = ReleaseStack()
     try:
         prepared = open_run_resources(
             request,
@@ -249,11 +250,13 @@ def _create_context(
 @contextmanager
 def _owned_prepared_run(
     prepared: _PreparedRun,
-    ownership: ExitStack,
+    ownership: ReleaseStack,
 ) -> Iterator[_PreparedRun]:
     """Close resources opened by the direct composition helper."""
-    with ownership:
+    try:
         yield prepared
+    finally:
+        ownership.close()
 
 
 def _git(project: Path, *args: str) -> str:

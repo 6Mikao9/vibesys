@@ -3,7 +3,6 @@
 import shlex
 import sys
 from collections.abc import Callable, Mapping
-from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import overload
@@ -119,7 +118,7 @@ from vs_sandbox.api import (
     ComputeBackendImpl,
     HostResource,
 )
-from vs_sim.api import utc_datetime
+from vs_sim.api import ReleaseStack, utc_datetime
 
 
 def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
@@ -152,7 +151,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     request: RunRequest,
     integration: LocalRunIntegration,
     *,
-    ownership: ExitStack,
+    ownership: ReleaseStack,
     agent_specs: Mapping[str, AgentSpec],
     resume_policy: (
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
@@ -185,7 +184,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
 
 def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered product setup and ownership registration share mutable lifecycle state, which helper boundaries would obscure.
     *,
-    ownership: ExitStack,
+    ownership: ReleaseStack,
     request: RunRequest,
     integration: LocalRunIntegration,
     agent_specs: Mapping[str, AgentSpec],
