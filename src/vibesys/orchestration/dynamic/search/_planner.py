@@ -162,7 +162,13 @@ def _no_reply(event: Failed) -> PlanProblem:
 
 
 def _no_plan(world: PlanWorld, problem: PlanProblem | None) -> NoPlan:
-    return NoPlan(problem=problem, stuck=world.active == 0, blocked_at_done=world.done)
+    """A call that ended empty; it is stuck only when nothing is in flight to wait for.
+
+    The input's measurement still running is something to wait for: planning is asked again
+    when it lands.
+    """
+    stuck = world.active == 0 and world.baseline is not None
+    return NoPlan(problem=problem, stuck=stuck, blocked_at_done=world.done)
 
 
 def _problem(check: PlanCheck | None, found: PlanProblem | None, wanted: int) -> PlanProblem:
