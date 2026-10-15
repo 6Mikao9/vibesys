@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Literal
 
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic._host import HELD_AGENTS, TERMS
+from tests.vibesys.orchestration.dynamic._host import TERMS
 
 from vibesys.candidates.api import InputReading, Measured
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
@@ -275,7 +275,7 @@ portfolios = st.builds(
 
 def config(**changes: object) -> DynamicConfig:
     """A search config of a few rounds, overridden by the test."""
-    fields = {"max_rounds": 3, "max_in_flight": 2, **HELD_AGENTS}
+    fields = {"max_rounds": 3, "max_in_flight": 2}
     return DynamicConfig.model_validate({**fields, **changes})
 
 

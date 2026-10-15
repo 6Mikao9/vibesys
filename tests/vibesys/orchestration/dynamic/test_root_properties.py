@@ -90,7 +90,7 @@ def _check_always(host: Host) -> None:
     where = host.run.timeline()
     if record is None or record.baseline is None:
         assert not _before_the_input(host), f"work before the input was measured: {where}"
-    held = rules.max_in_flight + rules.backlog
+    held = rules.max_in_flight + rules.max_backlog
     assert len(host.unsettled) <= held, f"too many attempts open: {where}"
     measuring = _candidates_measuring(host) + bool(host.input_waits())
     assert measuring <= rules.slots, f"more trusted measurements than slots: {where}"

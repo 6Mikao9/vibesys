@@ -249,7 +249,7 @@ class RunRecord:
 
         These are the earliest submitted, up to the run's backlog; any later one keeps its slot.
         """
-        return frozenset(list(self.submitted)[: self.config.backlog])
+        return frozenset(list(self.submitted)[: self.config.max_backlog])
 
     @property
     def working(self) -> tuple[WorkstreamStart, ...]:

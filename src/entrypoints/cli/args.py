@@ -600,12 +600,12 @@ def _build_agent_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-backlog",
         type=int,
-        default=None,
+        default=0,
         metavar="N",
         help=(
             "Dynamic loop: workstreams whose candidate waits for or holds a trusted evaluation "
             "without holding an agent slot, so new work starts meanwhile; 0 keeps each agent "
-            "slot until its workstream ends (default: --max-in-flight)."
+            "slot until its workstream ends (default: 0)."
         ),
     )
     parser.add_argument(

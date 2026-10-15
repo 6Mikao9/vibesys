@@ -108,15 +108,9 @@ INPUT_THROUGHPUT = 50.0
 _CANDIDATE_THROUGHPUT = 100.0
 
 
-HELD_AGENTS = {"max_backlog": 0}
-"""A workstream keeps its agent slot while its candidate is measured, so the next plan is asked
-once the measurement is in, as the stories written before parked workstreams expect. The stories
-of the evaluation queue (`test_evaluation_queue_stories`) override it."""
-
-
 def config(**overrides: object) -> DynamicConfig:
     """A one-round, one-wide config, overridden by the test."""
-    fields = {"max_rounds": 1, "max_in_flight": 1, **HELD_AGENTS}
+    fields = {"max_rounds": 1, "max_in_flight": 1}
     return DynamicConfig.model_validate({**fields, **overrides})
 
 
@@ -127,7 +121,6 @@ def plan_config(*steps: dict[str, object], **overrides: object) -> DynamicConfig
     """A config that follows a plan of ``steps`` (none: the run outlines them), as JSON parses it."""
     plan = {"documents": PLAN_DOCUMENTS, "steps": list(steps)}
     fields = {"max_rounds": 1, "max_in_flight": 1, "mode": "follow_plan", "plan": plan}
-    fields |= HELD_AGENTS
     return DynamicConfig.model_validate_json(json.dumps({**fields, **overrides}))
 
 

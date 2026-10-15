@@ -36,11 +36,11 @@ class DynamicConfig(Value):
     evaluation executor admits at once, which the launch fills in (`DynamicLaunch.search_config`);
     1 when no launch did. More slots than the executor admits would dispatch a measurement that
     waits in the executor's queue while its deadline runs."""
-    max_backlog: Annotated[int, Field(ge=0, le=32)] | None = None
+    max_backlog: Annotated[int, Field(ge=0, le=MAX_WIDTH)] = 0
     """Workstreams whose candidate waits for, or holds, an evaluation slot without holding one of
-    the ``max_in_flight`` agent slots; None: ``max_in_flight``. Past it, a waiting workstream keeps
-    its agent slot, so no new work starts until a measurement ends; 0 keeps every agent slot
-    held until its workstream ends."""
+    the ``max_in_flight`` agent slots. Past it, a waiting workstream keeps its agent slot, so no
+    new work starts until a measurement ends. The default, 0, keeps every agent slot held until
+    its workstream ends, as a run did before workstreams could park: the operator opts in."""
     pick: PickPolicy = "newest"
     """Which waiting candidate a free evaluation slot measures: ``newest`` (the latest submitted),
     or ``ranked`` (the orchestrator's order, then the newest)."""
@@ -81,11 +81,6 @@ class DynamicConfig(Value):
     def slots(self) -> int:
         """Trusted measurements the run holds at once."""
         return self.evaluation_slots or 1
-
-    @property
-    def backlog(self) -> int:
-        """Workstreams that may wait on a trusted measurement without holding an agent slot."""
-        return self.max_in_flight if self.max_backlog is None else self.max_backlog
 
     @property
     def start_budget(self) -> int:

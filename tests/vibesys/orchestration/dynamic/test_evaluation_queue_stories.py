@@ -33,6 +33,7 @@ from tests.vibesys.vibesys_flows import across_restarts
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
     DropReason,
+    DynamicConfig,
     FailureKind,
     PlannerCorrection,
     PlannerPrompt,
@@ -138,6 +139,29 @@ def _record(host: Host) -> RunSnapshot:
     record = host.record
     assert record is not None
     return record
+
+
+@MODES
+def test_a_run_launched_without_the_queue_options_keeps_each_agent_slot_until_its_workstream_ends(
+    *, restarting: bool
+) -> None:
+    """The run an operator launched before the evaluation queue existed behaves as it did then."""
+    host = begin(DynamicConfig(max_rounds=2), restarting=restarting)
+    _plan(host, implement("h1"), implement("h2"))
+    _work(host, "000001.h1", "c1")
+    _work(host, "000002.h2", "c2")
+
+    # Both candidates are reviewed and wait for, or hold, their measurement: neither workstream
+    # gives up its agent slot, so the planner is not asked for more work meanwhile.
+    assert _measuring(host)
+    assert not host.open(RequestTurn, label=PLANNER_LABEL)
+    assert len(_record(host).running) == 2
+
+    host.drain()
+    assert {"000001.h1", "000002.h2"} <= set(_measured(host))
+    assert all(item.failure is None for item in _record(host).finished[:2])
+    assert isinstance(host.run.finished, Finish)
+    assert_flow_closed(host)
 
 
 @MODES
