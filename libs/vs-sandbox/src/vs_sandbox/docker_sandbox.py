@@ -26,6 +26,8 @@ from vs_sandbox.docker_cli import (
     EXEC_MARKER_ENV,
     SIGNAL_EXEC_SCRIPT,
     DockerCli,
+    ExecStopEvidence,
+    parse_exec_stop_reply,
 )
 from vs_sandbox.docker_states import (
     INITIAL_CONTAINER_LIFE,
@@ -575,13 +577,19 @@ class DockerSandbox(WorkspaceSandbox):
         cmd = self._start_command()
 
         self._log_cmd(cmd)
+        # Tracked by name before the daemon can create it: a client lost after
+        # the container exists leaves the name as the only handle, and the exit
+        # sweep must know it if every removal below fails too.
+        _live_containers[self._container_name] = self._docker
         try:
             result = self._docker.run(cmd, timeout_seconds=self._start_timeout)
         except BaseException as exc:
             # The daemon may have created the container before the client
             # died, timed out, or was interrupted; its name is the only handle.
-            self._remove_container_named(self._container_name)
+            unreleased = self._remove_container_named(self._container_name)
             if not isinstance(exc, subprocess.TimeoutExpired):
+                if unreleased is not None:
+                    exc.add_note(unreleased)
                 raise
             self._log_cmd(
                 cmd,
@@ -593,27 +601,32 @@ class DockerSandbox(WorkspaceSandbox):
                 f"the image with `docker pull {self._image}`; otherwise check "
                 "Docker daemon health and GPU runtime configuration."
             )
-            raise RuntimeError(message) from exc
+            error = RuntimeError(message)
+            if unreleased is not None:
+                error.add_note(unreleased)
+            raise error from exc
         self._log_cmd(cmd, result)
+        container_id = result.stdout.strip()
         if result.returncode != 0:
-            container_id = result.stdout.strip()
+            unreleased = None
             if container_id:
-                self._container_id = container_id
-                _live_containers[container_id] = self._docker
+                self._track_by_id(container_id)
                 self._discard_started_container()
             else:
                 # A client that failed after the daemon created the container
                 # prints no id; remove it by the name this sandbox chose.
-                self._remove_container_named(self._container_name)
+                unreleased = self._remove_container_named(self._container_name)
             message = (
                 f"Failed to start Docker container (exit {result.returncode}):\n"
                 f"  stdout: {result.stdout.strip()}\n"
                 f"  stderr: {result.stderr.strip()}\n"
                 f"  cmd: {' '.join(_redacted_command(cmd))}"
             )
-            raise RuntimeError(message)
-        self._container_id = result.stdout.strip()
-        _live_containers[self._container_id] = self._docker
+            error = RuntimeError(message)
+            if unreleased is not None:
+                error.add_note(unreleased)
+            raise error
+        self._track_by_id(container_id)
 
         try:
             self._initialize_started_container()
@@ -787,10 +800,28 @@ class DockerSandbox(WorkspaceSandbox):
             self._container_id = None
             _live_containers.pop(container_id, None)
 
-    def _remove_container_named(self, name: str) -> None:
-        """Best-effort ``docker rm -f`` of a container known only by its name."""
-        _remove_container(
+    def _track_by_id(self, container_id: str) -> None:
+        """Hold the started container by the id Docker printed instead of by its name."""
+        self._container_id = container_id
+        _live_containers[container_id] = self._docker
+        _live_containers.pop(self._container_name, None)
+
+    def _remove_container_named(self, name: str) -> str | None:
+        """``docker rm -f`` a container known only by *name*; say why it may remain.
+
+        Released, the name is no longer tracked. Otherwise it stays tracked, so
+        the exit sweep removes it, and the returned note names the container and
+        the last failure for the error that ends the start.
+        """
+        failure = _remove_container(
             self._docker, name, timeout_seconds=_NAMED_REMOVE_TIMEOUT_S, log=self._log_cmd
+        )
+        if failure is None:
+            _live_containers.pop(name, None)
+            return None
+        return (
+            f"the Docker container named {name} may still exist and is left to the "
+            f"exit sweep: {failure}"
         )
 
     def _stop_and_remove_container(self, container_id: str, *, suppress_errors: bool) -> bool:
@@ -1009,7 +1040,7 @@ class DockerSandbox(WorkspaceSandbox):
             launch=lambda: PipedStoppableProcess(
                 self._docker.spawn(exec_cmd), threads=self._threads
             ),
-            signal_remote=lambda number: self._signal_exec(container_id, exec_id, number),
+            signal_remote=_ExecStop(self._docker, container_id, exec_id, user).send,
             threads=self._threads,
         )
         self._log_cmd(
@@ -1020,37 +1051,6 @@ class DockerSandbox(WorkspaceSandbox):
         )
         return result
 
-    def _signal_exec(
-        self, container_id: str, exec_id: str, number: signal.Signals
-    ) -> RemoteProcesses:
-        """Signal every container process tagged with *exec_id* and count those left.
-
-        A signal request whose client fails, times out, or answers outside the
-        script's protocol is retried; after the last attempt nothing is known.
-        """
-        settle = _KILL_SETTLE_TENTHS if number == KILL else _TERM_SETTLE_TENTHS
-        argv = [
-            "docker",
-            "exec",
-            container_id,
-            "sh",
-            "-c",
-            SIGNAL_EXEC_SCRIPT,
-            "sh",
-            f"{EXEC_MARKER_ENV}={exec_id}",
-            str(number.value),
-            str(settle),
-        ]
-        for _ in range(_SIGNAL_ATTEMPTS):
-            try:
-                result = self._docker.run(argv, timeout_seconds=_EXEC_STOP_TIMEOUT_S)
-            except (OSError, subprocess.SubprocessError):
-                continue
-            survivors = result.stdout.strip()
-            if result.returncode == 0 and survivors.isdigit():
-                return RemoteProcesses(int(survivors))
-        return RemoteProcesses(None)
-
     def __enter__(self) -> DockerSandbox:
         """Start the sandbox and return it as a context manager."""
         self.start()
@@ -1059,3 +1059,56 @@ class DockerSandbox(WorkspaceSandbox):
     def __exit__(self, *exc: object) -> None:
         """Stop the sandbox when leaving its context."""
         self.stop()
+
+
+class _ExecStop:
+    """Signal one ``docker exec`` command's processes inside its container.
+
+    Each request runs :data:`~vs_sandbox.docker_cli.SIGNAL_EXEC_SCRIPT` as the
+    command's own user and passes on what earlier requests learned, so a
+    later request still finds a session whose marked processes have exited.
+    """
+
+    def __init__(
+        self, docker: DockerCli, container_id: str, exec_id: str, user: str | None
+    ) -> None:
+        self._docker = docker
+        self._container_id = container_id
+        self._marker = f"{EXEC_MARKER_ENV}={exec_id}"
+        self._user = user
+        self._evidence = ExecStopEvidence()
+
+    def send(self, number: signal.Signals) -> RemoteProcesses:
+        """Signal the command's processes and count those left.
+
+        A request whose client fails, times out, or answers outside the
+        script's protocol is retried; after the last attempt nothing is known.
+        An ``unknown`` answer is not retried: the script already waited.
+        """
+        settle = _KILL_SETTLE_TENTHS if number == KILL else _TERM_SETTLE_TENTHS
+        for _ in range(_SIGNAL_ATTEMPTS):
+            sessions, since = self._evidence.operands()
+            argv = [
+                "docker",
+                "exec",
+                *(("-u", self._user) if self._user is not None else ()),
+                self._container_id,
+                "sh",
+                "-c",
+                SIGNAL_EXEC_SCRIPT,
+                "sh",
+                self._marker,
+                str(number.value),
+                str(settle),
+                sessions,
+                since,
+            ]
+            try:
+                result = self._docker.run(argv, timeout_seconds=_EXEC_STOP_TIMEOUT_S)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            reply = parse_exec_stop_reply(result.stdout) if result.returncode == 0 else None
+            if reply is not None:
+                self._evidence = reply.evidence
+                return RemoteProcesses(reply.survivors)
+        return RemoteProcesses(None)
