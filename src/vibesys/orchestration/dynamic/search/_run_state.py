@@ -155,15 +155,9 @@ class RunRecord:
         return free_slots(self.config, active=len(self.running), left=left)
 
     def may_plan(self, *, stopping: bool) -> bool:
-        """Whether a planning call should start: a slot is free and planning is not held off.
-
-        While the input is being measured, a plan the planner already gave waits for it (see
-        `ready_to_start`), and no further call starts: the accepted plans hold the free slots.
-        """
+        """Whether a planning call should start: a slot is free and planning is not held off."""
         gate = self.gate
         if stopping or gate.failed or not self.capacity():
-            return False
-        if self.baseline is None and self.accepted:
             return False
         return gate.blocked_at_done is None or len(self.finished_work) > gate.blocked_at_done
 
@@ -191,10 +185,11 @@ class RunRecord:
     def measured(self, baseline: candidates.Baseline) -> None:
         """Fold the input's measurement, which planning did not wait for.
 
-        A trusted input lets the plans accepted meanwhile start now (`ready_to_start`). An input
-        that failed its measurement drops them, since they were made without knowing what the
-        benchmark requires: the planner is asked again with the failure in view (`planned` drops
-        a blind plan that arrives later). Either way a call that ended empty is asked again.
+        An input that failed its measurement drops the plans accepted meanwhile and not yet
+        started, since they were made without knowing what the benchmark requires: the planner is
+        asked again with the failure in view (`planned` drops a blind plan that arrives later).
+        Workstreams already running go on: their work is paid for, and their own measurement
+        shows them the failure. Either way a call that ended empty is asked again.
         """
         self.baseline = baseline
         self.gate.blocked_at_done = None
@@ -278,12 +273,9 @@ class RunRecord:
     def ready_to_start(self, free: int) -> list[WorkstreamStart]:
         """A workstream for each accepted plan that fits in ``free`` slots, now running.
 
-        None starts before the input is measured: a workstream settles against it, so accepted
-        plans wait in ``accepted`` until it lands.
+        A workstream may start before the input is measured; what in it compares a candidate
+        with the input waits for the measurement (`_measure.the_input`).
         """
-        baseline = self.baseline
-        if baseline is None:
-            return []
         starts = []
         ready, self.accepted = self.accepted[:free], self.accepted[free:]
         for plan in ready:
@@ -301,7 +293,7 @@ class RunRecord:
                 parent_hypothesis_id=lineage,
                 prior=prior,
                 config=self.config,
-                baseline=baseline,
+                baseline=self.baseline,
             )
             self.running[start.key] = start
             starts.append(start)
@@ -359,7 +351,7 @@ class RunRecord:
 
         That is a workstream before it had a workspace, a planning call, or the input's measurement.
         A planning call leaves nothing to record: after a stop nothing it planned would start.
-        Without the input's measurement no accepted plan can start either, so they are dropped.
+        The plans accepted and not yet started are dropped with the input's measurement.
         """
         if key == INPUT_KEY:
             self.accepted = []

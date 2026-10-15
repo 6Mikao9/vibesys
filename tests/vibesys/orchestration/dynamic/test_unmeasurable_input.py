@@ -41,13 +41,12 @@ MAX_INPUT_MEASUREMENTS = 3
 def run_to_its_end(host: Host, *, candidate_found: bool) -> None:
     """Plan one hypothesis; its candidate passes review, or the judge rejects every turn.
 
-    The first plan answers a prompt asked while the input was being measured. An input that does
-    not pass its measurement drops it, and the planner, asked again with the failure in view,
-    plans the same hypothesis.
+    The first plan answers a prompt asked while the input was being measured, and starts at once.
+    When the input fails its measurement before that plan arrives, the plan is dropped and the
+    planner, asked again with the failure in view, plans the same hypothesis.
     """
     host.drain_until_turn(PLANNER_LABEL)
     host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h1")))
-    assert not (host.input_waits() and host.open(StartAttempt))  # the plan waits for the input
     host.measure_input()
     if not host.open(StartAttempt):
         again = host.run.expect_turn(role=PLANNER_LABEL)
