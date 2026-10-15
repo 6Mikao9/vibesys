@@ -19,8 +19,8 @@ from tests.support import run_test_command
 from tests.support.real_git import REAL_GIT
 
 from vs_project.api import CliGitRepository, GitTracker, NullGitTrackerEvents
+from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import ScriptedDockerCli, docker_result
-from vs_sandbox.docker_sandbox import DockerSandbox
 from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:
