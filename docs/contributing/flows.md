@@ -177,9 +177,14 @@ it through their arguments (a registered flow takes only its snapshot). Declare 
 typed by the value (`INPUT_MEASURED = LatchKey[Baseline]("input-measured")`); the flow that
 learns the fact calls `ctx.latch(INPUT_MEASURED).set(value)`, once (a second `set` is a
 `ContractError`), and a waiter calls `await ctx.latch(INPUT_MEASURED)`, which returns at once
-when it is already set. It is not journaled: flow code sets it, so replay sets it again, and a
-restart after a code change starts with it unset until the restarted flow sets it again. A
-latch that is never set is not a `Deadlock`; the waiter waits for its stop.
+when it is already set. A key is its declaration: a second key with a name already in use is a
+`ContractError`, since the two could hold different types under one name.
+
+Latches belong to one journal and are not journaled. Replay runs the flow code again, so it sets
+them again at the same point. A restart after a code change starts a fresh journal from the flows'
+snapshots, and every latch starts empty: the flow that sets one must set it again, from its
+snapshot if it learned the value before the restart (`test_flows_restart.py` plays both orders).
+A latch that is never set is not a `Deadlock`; the waiter waits for its stop.
 
 ### Groups
 

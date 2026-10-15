@@ -205,8 +205,12 @@ class _Run:
         )
 
     def latch[T](self, key: LatchKey[T]) -> Latch[T]:
-        """A new handle on the run's latch ``key``."""
-        return Latch(key, self._latches.setdefault(key.name, LatchCell()))
+        """A new handle on the run's latch ``key``; another key with its name is a bug."""
+        cell = self._latches.setdefault(key.name, LatchCell(key))
+        if cell.key is not key:
+            message = "another latch key has this name: declare each key once and share it"
+            raise ContractError(("latch", key.name), message)
+        return Latch(key, cell)
 
     # -- reading and naming ------------------------------------------------------------------
 
