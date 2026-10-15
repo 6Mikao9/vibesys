@@ -84,6 +84,9 @@ path = "examples/model-serving/deepseek-v3.2-8xb200"
 path = "examples/model-serving/glm-5.2-8xb200"
 
 [[example]]
+path = "examples/model-serving/glm5.3-flash-pp4-4xb200"
+
+[[example]]
 path = "examples/model-serving/kimi-k3-8xb200"
 
 [[example]]

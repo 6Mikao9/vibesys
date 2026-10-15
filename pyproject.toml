@@ -238,6 +238,9 @@ extend-exclude = [
     # Verbatim transformers modeling code shipped as a bundle reference.
     "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/.vibesys/tasks/default/reference/modeling_qwen3_5_moe.py",
     "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/.vibesys/tasks/default/reference/configuration_qwen3_5_moe.py",
+    # The ServingStudioSim handoff's scorer, copied verbatim: the score must be
+    # the handoff's own computation, so it is not reformatted.
+    "examples/model-serving/glm5.3-flash-pp4-4xb200/.vibesys/tasks/default/benchmark/metrics.py",
 ]
 
 [tool.ruff.lint]

@@ -1,0 +1,9 @@
+# The starting environment of the candidate server. The evaluation environment
+# also provides a vLLM install, used only for its compiled ops and kernel
+# wrappers (OBJECTIVE.md, "Rules"); do not add vllm or sglang here.
+torch
+transformers
+safetensors
+numpy
+triton
+flashinfer-python
