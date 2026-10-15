@@ -318,6 +318,8 @@ class RunRecord:
 
         Within the backlog its workstream is parked, and its agent slot is free.
         """
+        if submission.key in self.submitted:  # the workstream was redone from its start
+            self.evaluations.forget(submission.key)
         self.submitted[submission.key] = submission
         self.evaluations.submit(submission)
         if submission.key in self.parked:

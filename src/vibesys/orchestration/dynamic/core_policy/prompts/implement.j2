@@ -16,9 +16,9 @@ Evidence references:
 {% if baseline_pending %}
 
 The input's own trusted measurement is still queued or running. Write and test your change
-now, including your own runs; the framework's review of your candidate, its trusted
-measurement and its comparison with the input wait until the input's measurement lands,
-possibly after this turn ends.
+now, including your own runs; the framework reviews your candidate and queues its trusted
+measurement as usual, and only its comparison with the input waits until the input's
+measurement lands, possibly after this turn ends.
 {% endif %}
 {% if input_failure %}
 
