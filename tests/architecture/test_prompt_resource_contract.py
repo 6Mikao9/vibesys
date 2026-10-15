@@ -579,7 +579,7 @@ def core_policy_context() -> dict[str, object]:
         "of": "planning request",
         "turns_without_candidate": 2,
         # The handoff file of one planning call (`WriteHandoff`'s fields).
-        "handoff_paths": (".vibesys/state/runs/run-1/orchestrator-handoff/call-0001.md",),
+        "handoff_paths": (".vibesys/state/runs/run-1/orchestrator-handoff/calls/call-0001.md",),
         "call": 1,
         "reasoning": "Batch the decode loop first.",
         "scheduled": (),

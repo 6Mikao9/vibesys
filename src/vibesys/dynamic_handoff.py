@@ -13,6 +13,7 @@ same bytes, so a replay is safe, and `inspect` says the write landed when the fi
 
 from __future__ import annotations
 
+import re
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -49,10 +50,25 @@ class HandoffDocuments(Protocol):
         """The document's path relative to the project, as an agent's prompt names it."""
         ...
 
+    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
+        """The names of the documents in one directory of the namespace, sorted."""
+        ...
+
+
+_FILENAME = re.compile(r"call-[0-9]{4,}\.md")
+
+
+_DIRECTORY = "calls"
+"""The namespace's directory of handoff files, which the owner lists."""
+
 
 def handoff_filename(call: int) -> str:
-    """The file of the ``call``-th planning call; names sort in call order."""
-    return f"call-{call:04d}.md"
+    """The file of the ``call``-th planning call, within the namespace."""
+    return f"{_DIRECTORY}/call-{call:04d}.md"
+
+
+def _call_of(name: str) -> int:
+    return int(name.removeprefix("call-").removesuffix(".md"))
 
 
 def render_handoff(request: WriteHandoff) -> str:
@@ -98,7 +114,17 @@ class HandoffOwner:
         return self._written(name)
 
     def _written(self, name: str) -> HandoffWritten:
-        return HandoffWritten(path=self._documents.agent_visible_path(name))
+        """The file just written, with every handoff file the namespace holds, oldest first."""
+        held = sorted(
+            (item for item in self._documents.entries(_DIRECTORY) if _FILENAME.fullmatch(item)),
+            key=_call_of,
+        )
+        return HandoffWritten(
+            path=self._documents.agent_visible_path(name),
+            listed=tuple(
+                self._documents.agent_visible_path(f"{_DIRECTORY}/{item}") for item in held
+            ),
+        )
 
 
 def handoff_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, ...]:

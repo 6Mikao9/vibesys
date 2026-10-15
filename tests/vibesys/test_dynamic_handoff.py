@@ -9,6 +9,7 @@ said, a reopened project still holds it, and `observe` says the write landed onl
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
@@ -23,6 +24,7 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkPlan,
     WriteHandoff,
 )
+from vibesys.run.project_policy import build_project_path_policy
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import Applied, NotApplied
@@ -131,7 +133,7 @@ def test_the_file_carries_the_reply_at_the_named_path_and_survives_reopening(
 
     assert isinstance(written, HandoffWritten)
     assert written.path == (
-        f".vibesys/state/runs/{RUN}/{HANDOFF_NAMESPACE}/call-{request.call:04d}.md"
+        f".vibesys/state/runs/{RUN}/{HANDOFF_NAMESPACE}/calls/call-{request.call:04d}.md"
     )
     text = (root / written.path).read_text(encoding="utf-8")
     assert text == render_handoff(request)
@@ -142,6 +144,43 @@ def test_the_file_carries_the_reply_at_the_named_path_and_survives_reopening(
     assert reopened.observe(request) == Applied(written)
     assert reopened.perform(request) == written
     assert (root / written.path).read_text(encoding="utf-8") == text
+
+
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+@given(calls=st.lists(st.integers(1, 9999), min_size=1, max_size=5, unique=True), base=_requests())
+def test_every_write_lists_every_file_the_run_holds_oldest_call_first(
+    tmp_path_factory: pytest.TempPathFactory, calls: list[int], base: WriteHandoff
+) -> None:
+    """A file whose own write was reported failed after its bytes landed is listed by the next."""
+    root = tmp_path_factory.mktemp("handoff") / "project"
+    owner = _owner(_project(root))
+    for call in calls:
+        written = owner.perform(base.model_copy(update={"call": call}))
+        assert written.listed[-1] == written.path or written.path in written.listed
+    paths = [
+        f".vibesys/state/runs/{RUN}/{HANDOFF_NAMESPACE}/calls/call-{call:04d}.md"
+        for call in sorted(calls)
+    ]
+    assert list(written.listed) == paths
+    assert all((root / path).is_file() for path in paths)
+
+
+def test_the_planner_sees_the_file_through_its_confinement_and_cannot_change_it(
+    tmp_path: Path,
+) -> None:
+    """The project's path policy for agents leaves the handoff files readable and read-only.
+
+    The planner works in the run's project checkout; its confinement hides the run's local
+    state and makes the framework state read-only. The file must be in neither hidden part.
+    """
+    root = tmp_path / "project"
+    project = _project(root)
+    request = WriteHandoff(call=1, reasoning="why", scheduled=(), handoff=HandoffNote())
+    written = _owner(project).perform(request)
+    policy = build_project_path_policy(root, evaluator_source=None)
+    path = PurePosixPath(written.path)
+    assert not any(path.is_relative_to(hidden.as_posix()) for hidden in policy.hidden_paths)
+    assert any(path.is_relative_to(guarded.as_posix()) for guarded in policy.read_only_paths)
 
 
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None)

@@ -22,6 +22,7 @@ from vibesys.orchestration.dynamic.models import (
     PortfolioPlan,
     ProfileDecision,
     StrategyReason,
+    WorkstreamExpectation,
     WorkstreamPlan,
 )
 from vibesys.orchestration.dynamic.search.api import (
@@ -236,14 +237,24 @@ def update_entry(
 
 
 def portfolio(
-    *entries: WorkstreamPlan | ProfileDecision, updates: tuple[PlannerHypothesisUpdate, ...] = ()
+    *entries: WorkstreamPlan | ProfileDecision,
+    updates: tuple[PlannerHypothesisUpdate, ...] = (),
+    expected: tuple[str, ...] = (),
 ) -> PortfolioPlan:
-    """A planner reply of ``entries`` and ``updates``."""
+    """A planner reply of ``entries`` and ``updates``, expecting something of ``expected``."""
     return PortfolioPlan(
         reasoning="portfolio",
         workstreams=entries,
         hypothesis_updates=updates,
-        handoff=PlannerHandoff(expectations=(), doubts=()),
+        handoff=PlannerHandoff(
+            expectations=tuple(
+                WorkstreamExpectation(
+                    work_id=item, expected="e", if_it_succeeds="s", if_it_fails="f"
+                )
+                for item in expected
+            ),
+            doubts=(),
+        ),
     )
 
 

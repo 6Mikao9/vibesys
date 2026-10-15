@@ -105,7 +105,7 @@ _CANDIDATE_THROUGHPUT = 100.0
 
 def handoff_path(call: int) -> str:
     """Where the host keeps the handoff file of the ``call``-th planning call."""
-    return f".vibesys/state/runs/run/orchestrator-handoff/call-{call:04d}.md"
+    return f".vibesys/state/runs/run/orchestrator-handoff/calls/call-{call:04d}.md"
 
 
 def config(**overrides: object) -> DynamicConfig:
@@ -399,7 +399,8 @@ class Host:
         path = handoff_path(request.call)
         self.handoffs[path] = request
         self.handoff_writes += 1
-        return HandoffWritten(path=path)
+        held = sorted(self.handoffs.items(), key=lambda item: item[1].call)
+        return HandoffWritten(path=path, listed=tuple(name for name, _ in held))
 
     def _reading_of(self, ref: EvidenceRef) -> EvidenceReading:
         """What the evidence owner decodes of a record: the host's idea of how it measured."""

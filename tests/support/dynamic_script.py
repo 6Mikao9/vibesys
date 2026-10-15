@@ -161,6 +161,10 @@ def lease(session_id: SessionId) -> ResourceId:
     return ResourceId(root=f"lease:{session_id.root}")
 
 
+def _handoff_path(call: int) -> str:
+    return f".vibesys/state/runs/run/orchestrator-handoff/calls/call-{call:04d}.md"
+
+
 @dataclass
 class Executors:
     """Scripted answers for one run, popped in the order requests are authorized.
@@ -181,6 +185,8 @@ class Executors:
     exhausted: str | None = None
     jobs: int = 0
     readings: dict[EvidenceId, EvidenceReading] = field(default_factory=dict)
+    handoffs: set[int] = field(default_factory=set)
+    """The planning calls whose handoff file the owner wrote."""
 
     def headline(self, commit: str) -> float | None:
         """What the candidate of ``commit`` measures (a pure function of its commit)."""
@@ -357,8 +363,9 @@ class Executors:
     def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
         typed = REGISTRY.decode(request.operation)
         if isinstance(typed, WriteHandoff):
-            path = f".vibesys/state/runs/run/orchestrator-handoff/call-{typed.call:04d}.md"
-            return Succeeded(outcome=HandoffWritten(path=path))
+            self.handoffs.add(typed.call)
+            listed = tuple(_handoff_path(call) for call in sorted(self.handoffs))
+            return Succeeded(outcome=HandoffWritten(path=_handoff_path(typed.call), listed=listed))
         if isinstance(typed, VerifyParentRevision):
             return Succeeded(outcome=ParentVerification(status="succeeded", verified=True))
         if isinstance(typed, InterpretEvidence):

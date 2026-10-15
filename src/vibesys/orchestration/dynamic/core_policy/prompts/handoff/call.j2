@@ -38,6 +38,10 @@ none
 none recorded
 {% endfor %}
 
+{% if handoff.dropped %}
+Expectations left out, because these workstreams were not scheduled: {% for work_id in handoff.dropped %}`{{ work_id }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+
+{% endif %}
 ## Open doubts
 {% for doubt in handoff.doubts %}
 - {{ doubt }}

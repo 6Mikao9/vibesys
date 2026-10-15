@@ -164,6 +164,13 @@ class MemoryDocuments:
         """The document's project-relative path."""
         return self.root if relative_path is None else f"{self.root}/{relative_path}"
 
+    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
+        """The names of the documents, sorted; the store has one directory."""
+        prefix = f"{relative_directory}/"
+        return tuple(
+            sorted(name.removeprefix(prefix) for name in self.files if name.startswith(prefix))
+        )
+
 
 def handoff() -> tuple[OperationEntry, ...]:
     """The handoff write, owned by the production owner over in-memory documents."""
