@@ -9,7 +9,8 @@ documents, as paths relative to the task directory:
 {{ domain_section(domain_sections, 'orchestrator') }}
 Read the documents and outline the plan as ordered implementation steps. Give each step
 a short unique id, a title, the documents (or document sections) it implements, a
-`done_when` condition its implementer and a reviewer can check, and the steps it builds
-on. Mark a step `evaluate = "trusted"` only when it reaches a milestone the task's trusted
-evaluation can measure; every other step is `"none"` and is accepted on its own tests.
+`{{ reply.done_when }}` condition its implementer and a reviewer can check, and the steps it
+builds on. Set `{{ reply.evaluate }}` to `"trusted"` only for a step that reaches a milestone
+the task's trusted evaluation can measure; every other step is `"none"` and is accepted on its
+own tests.
 Return only the requested structured response.
