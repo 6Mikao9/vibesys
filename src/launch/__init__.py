@@ -64,6 +64,8 @@ class LaunchSettings:
     """Runs the run's blocking calls off the event loop."""
     network: Network
     """Opens the run's sockets."""
+    slurm_processes: Processes
+    """Starts the Slurm transport's programs; often the same object as ``processes``."""
     registry: OrchestrationRegistry | None = None
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
@@ -75,8 +77,6 @@ class LaunchSettings:
     )
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
-    slurm_processes: Processes | None = None
-    """Starts the Slurm transport's programs; ``None`` starts them with ``processes``."""
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
     profiler_preflight: ProfilerPreflight | None = None
@@ -150,11 +150,7 @@ def create_session(
                 network=settings.network,
                 processes=settings.processes,
                 launcher=settings.piped_processes,
-                slurm_processes=(
-                    settings.processes
-                    if settings.slurm_processes is None
-                    else settings.slurm_processes
-                ),
+                slurm_processes=settings.slurm_processes,
             ),
             state_stores=settings.state_stores,
             agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),

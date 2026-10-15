@@ -139,6 +139,7 @@ container path, so this constant and the resource declaration are the single
 source of truth an environment consults."""
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import ModuleType
 
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
     from vs_evaluation.api import ProfileField
@@ -943,7 +944,7 @@ class DockerEnvironment:
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
             features=image_features(toolchains),
-            command_runner=self.config.build_runner,
+            command_runner=_build_runner(image_helpers, request.system, self.config.build_runner),
             timeout=(
                 image_helpers.DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS
                 if self.config.image_build_timeout_seconds is None
@@ -1223,16 +1224,17 @@ class SkyPilotEnvironment(DockerEnvironment):
             bridge.start()
 
             image_helpers = import_module("vs_agent.api.images")
-
+            build_runner = _build_runner(image_helpers, request.system, None)
             container_image = image_helpers.agent_image(
                 _docker_backend_image(request),
                 features=image_features(evaluator_agent_toolchains(requirements)),
+                command_runner=build_runner,
                 on_progress=_image_build_progress(request),
                 clock=request.clock,
             )
             container_image = _ensure_pushed_for_remote_backend(
                 container_image,
-                ensure_pushed=image_helpers.ensure_pushed,
+                ensure_pushed=partial(image_helpers.ensure_pushed, command_runner=build_runner),
                 backend_label="SkyPilot",
             )
 
@@ -1398,19 +1400,20 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         self._ensure_draft_volume(request)
 
         image_helpers = import_module("vs_agent.api.images")
-
+        build_runner = _build_runner(image_helpers, request.system, None)
         requirements = request.evaluator_requirements
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
             features=image_features(
                 evaluator_agent_toolchains(requirements), _MODAL_EDITOR_PIP_EXTRAS
             ),
+            command_runner=build_runner,
             on_progress=_image_build_progress(request),
             clock=request.clock,
         )
         container_image = _ensure_pushed_for_remote_backend(
             container_image,
-            ensure_pushed=image_helpers.ensure_pushed,
+            ensure_pushed=partial(image_helpers.ensure_pushed, command_runner=build_runner),
             backend_label="Modal",
         )
 
@@ -1874,6 +1877,17 @@ def _cli_provider_env_and_auth_files(
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
     """Return the container env and staged auth copies for a CLI provider, if any."""
     return cli_provider_env_and_auth_files(request.agent_backend, request.cli_provider)
+
+
+def _build_runner(
+    image_helpers: ModuleType, system: EnvironmentSystem, configured: DockerBuildRunner | None
+) -> DockerBuildRunner:
+    """The configured image build runner, or the host's ``docker`` over *system*."""
+    if configured is not None:
+        return configured
+    return image_helpers.SubprocessDockerBuildRunner(
+        threads=system.threads, processes=system.launcher
+    )
 
 
 def _ensure_pushed_for_remote_backend(

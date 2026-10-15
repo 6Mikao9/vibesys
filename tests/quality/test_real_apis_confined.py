@@ -1919,23 +1919,9 @@ PROGRAM_ENTRIES: dict[str, str] = {
 # lets a caller omit, without a line number), then the owner. A new real default in a pending
 # file is a new site, so it fails the check.
 REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
-    "libs/vs-agent/src/vs_agent/images.py": {
-        "SubprocessDockerBuildRunner.__init__:threads=None": Owner.LANE_A,
-        "SubprocessDockerBuildRunner.__init__:processes=None": Owner.LANE_A,
-        "SubprocessDockerBuildRunner.__init__:OsThreads()": Owner.LANE_A,
-        "SubprocessDockerBuildRunner.__init__:SubprocessPipedProcessLauncher()": Owner.LANE_A,
-        "build_task_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
-        "agent_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
-        "push_agent_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
-        "agent_image_is_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
-        "ensure_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
-    },
     "libs/vs-runtime/src/vs_runtime/_run_environment.py": {
         "SkyPilotEnvironment._open_skypilot:SkyPilotBridge(...)": Owner.CONFINEMENT,
         "SkyPilotEnvironment._open_skypilot:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
-    },
-    "libs/vs-runtime/src/vs_runtime/_semantic_slurm_evaluation.py": {
-        "SemanticSlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
     },
     "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": {
         "FakeCommandRunner:default_factory=OsThreads": Owner.PURITY,
@@ -1957,15 +1943,6 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
         "SkyPilotJobRunner.__init__:threads=None": Owner.CONFINEMENT,
         "SkyPilotJobRunner.__init__:OsThreads()": Owner.CONFINEMENT,
         "SkyPilotJobRunner.__init__:SubprocessCommandRunner(...)": Owner.CONFINEMENT,
-    },
-    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": {
-        "SlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
-    },
-    "src/launch/__init__.py": {
-        "LaunchSettings:slurm_processes=None": Owner.LANE_A,
-    },
-    "src/vibesys/run/slurm_evaluation.py": {
-        "SlurmSemanticEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
     },
 }
 

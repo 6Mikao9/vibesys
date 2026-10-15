@@ -75,6 +75,7 @@ from vs_sandbox.slurm_profile import (
     trusted_profile_command,
 )
 from vs_sandbox.slurm_settings_toml import render_slurm_operator_toml, write_slurm_operator_toml
+from vs_sandbox.slurm_wiring import make_cluster
 
 #: The single-file, standard-library-only client an agent's container runs.
 HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
@@ -130,6 +131,7 @@ __all__ = [
     "load_slurm_gpu_alias_settings",
     "load_slurm_operator_settings",
     "load_slurm_policy",
+    "make_cluster",
     "profile_capture_descriptor",
     "read_slurm_capture_plan",
     "render_slurm_operator_toml",

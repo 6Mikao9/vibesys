@@ -164,7 +164,7 @@
 {"path": "libs/vs-runtime/tests/test_workspace_requests.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-sandbox/tests/skypilot_world.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_path_contract.py", "rule": "real_impl", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "real_impl", "count": 8}
+{"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "real_impl", "count": 10}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "real_impl", "count": 5}
 {"path": "libs/vs-sandbox/tests/test_local_shell.py", "rule": "real_impl", "count": 20}
 {"path": "libs/vs-sandbox/tests/test_slurm_broker.py", "rule": "real_impl", "count": 4}
