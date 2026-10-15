@@ -18,6 +18,7 @@ from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import (
     PlannerHypothesisUpdate,
+    PlannerHandoff,
     PortfolioPlan,
     ProfileDecision,
     StrategyReason,
@@ -238,7 +239,12 @@ def portfolio(
     *entries: WorkstreamPlan | ProfileDecision, updates: tuple[PlannerHypothesisUpdate, ...] = ()
 ) -> PortfolioPlan:
     """A planner reply of ``entries`` and ``updates``."""
-    return PortfolioPlan(reasoning="portfolio", workstreams=entries, hypothesis_updates=updates)
+    return PortfolioPlan(
+        reasoning="portfolio",
+        workstreams=entries,
+        hypothesis_updates=updates,
+        handoff=PlannerHandoff(expectations=(), doubts=()),
+    )
 
 
 @st.composite

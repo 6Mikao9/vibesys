@@ -52,8 +52,8 @@ from vibesys.api import (
 )
 from vibesys.candidates import api as candidates
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from tests.support.dynamic_script import REGISTRY
 from vibesys.orchestration.dynamic.search.api import (
-    OPERATIONS,
     FinishedWork,
     HypothesisRecord,
     RunSnapshot,
@@ -761,7 +761,7 @@ class CoreRecords:
         envelope = load_envelope(self.project, run_id)
         assert envelope is not None, f"no committed record for {run_id}"
         self.envelope: dict[str, Any] = envelope
-        decoded = OPERATIONS.registry().decode_envelope(
+        decoded = REGISTRY.decode_envelope(
             RunEnvelope[FlowState], json.dumps(envelope)
         )
         published = FlowDriver.published(decoded.strategy, RunSnapshot)

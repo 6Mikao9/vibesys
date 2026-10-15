@@ -17,12 +17,12 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.support.dynamic_script import REGISTRY
 from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.metrics import EvidenceReading
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
-    OPERATIONS,
     DynamicConfig,
     EvidenceReadings,
     HandoffWritten,
@@ -97,7 +97,7 @@ _KINDS = {
     "benchmark": EvidenceKind.BENCHMARK,
     "profile": EvidenceKind.PROFILING,
 }
-_REGISTRY = OPERATIONS.registry()
+_REGISTRY = REGISTRY
 PLANNER_LABEL = "orchestrator"
 INPUT_THROUGHPUT = 50.0
 _CANDIDATE_THROUGHPUT = 100.0
@@ -123,11 +123,7 @@ def begin(
 ) -> Host:
     """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
     run = start_flow(dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting)
-    host = Host(run, cfg, **world)
-    if host.handoff_writes_open:
-        return host
-    run.own(WRITE_HANDOFF_KIND, host.write_handoff)
-    return host
+    return Host(run, cfg, **world)
 
 
 class World(TypedDict, total=False):
@@ -169,6 +165,11 @@ class Host:
     verified: bool = True
     baseline: Literal["measured", "failed-workload", "no-evidence", "lost"] = "measured"
     handoff_writes_open: bool = False
+
+    def __post_init__(self) -> None:
+        """Have the handoff owner write each file at once, unless the story answers the writes."""
+        if not self.handoff_writes_open:
+            self.run.own(WRITE_HANDOFF_KIND, self.write_handoff)
 
     @property
     def record(self) -> RunSnapshot | None:
