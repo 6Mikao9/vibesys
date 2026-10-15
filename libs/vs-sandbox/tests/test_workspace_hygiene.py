@@ -15,29 +15,15 @@ from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support import run_test_command
-from tests.support.real_git import REAL_GIT
 
-from vs_project.api import CliGitRepository, GitTracker, NullGitTrackerEvents
+from vs_project.api import GitTracker, NullGitTrackerEvents
+from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import ScriptedDockerCli, docker_result
 from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
-
-
-def _committed_files(root: Path) -> list[str]:
-    result = run_test_command(
-        ["git", "ls-tree", "-r", "--name-only", "HEAD"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return sorted(result.stdout.splitlines())
 
 
 @settings(max_examples=examples(pr=5, nightly=20), deadline=None)
@@ -53,11 +39,12 @@ def test_snapshot_after_sandbox_run_commits_only_project_files(
     workspace.mkdir()
     (workspace / "a.txt").write_text("1\n")
     events = NullGitTrackerEvents()
+    repository = FakeGitRepositories().repository(workspace, events)
     tracker = GitTracker(
         workspace,
         run_id="run",
         events=events,
-        repository=CliGitRepository(workspace, git=REAL_GIT, faults=events),
+        repository=repository,
     )
     tracker.init(existing=False)
 
@@ -82,4 +69,4 @@ def test_snapshot_after_sandbox_run_commits_only_project_files(
 
     tracker.snapshot("candidate")
 
-    assert _committed_files(workspace) == ["a.txt"]
+    assert repository.reachable_paths() == frozenset({"a.txt"})
