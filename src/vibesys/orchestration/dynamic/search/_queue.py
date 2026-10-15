@@ -11,6 +11,13 @@ free does the queue decide which submission it measures, by the run's pick polic
 - ``ranked``: the order the orchestrator last gave (`rank`), and the submissions it did not rank
   after those, newest first.
 
+Either policy alone could starve a submission: under ``newest``, each new submission is bound
+before the older ones, so a run that keeps submitting never binds its oldest, and the oldest are
+the ones that hold the backlog's places (`RunRecord.parked`). So a submission is overtaken (a
+submission received after it is bound while it waits) at most ``slots`` times: after that it is
+due, and due submissions are bound before any other, oldest first. Every waiting submission is
+therefore bound after at most ``slots`` newer ones, or superseded, or dropped at a stop.
+
 A submission is dropped, with the reason recorded, when a newer submission supersedes it (the
 same workstream line, or a candidate built on it: its code is in the newer one), or when the run
 stops before a slot measures it. Each decision
@@ -108,6 +115,8 @@ class EvaluationQueue:
     received: int = 0
     built_on: dict[RevisionRef, RevisionRef] = field(default_factory=dict)
     """Each submitted candidate's parent: the lines a newer submission continues."""
+    overtaken: dict[str, int] = field(default_factory=dict)
+    """For each waiting submission, by key, how many submissions received after it were bound."""
     _verdicts: list[tuple[str, SlotVerdict]] = field(default_factory=list)
 
     @property
@@ -139,6 +148,11 @@ class EvaluationQueue:
         while self.free and self.pending:
             chosen = self.in_order()[0]
             self.pending.remove(chosen)
+            self.overtaken.pop(chosen.submission.key, None)
+            for older in self.pending:
+                if older.order < chosen.order:
+                    key = older.submission.key
+                    self.overtaken[key] = self.overtaken.get(key, 0) + 1
             self.holding.append(chosen.submission.key)
             self.last_bound = chosen
             self._verdicts.append((chosen.submission.key, Bound()))
@@ -157,6 +171,7 @@ class EvaluationQueue:
         """The workstream of ``key`` ended: free its slot and take back what it submitted."""
         self.release(key)
         self.pending = [item for item in self.pending if item.submission.key != key]
+        self.overtaken.pop(key, None)
         self._verdicts = [item for item in self._verdicts if item[0] != key]
 
     def verdicts(self) -> list[tuple[str, SlotVerdict]]:
@@ -165,12 +180,22 @@ class EvaluationQueue:
         return decided
 
     def in_order(self) -> list[Queued]:
-        """The waiting submissions in the order the policy picks them."""
-        newest = sorted(self.pending, key=lambda item: -item.order)
+        """The waiting submissions in the order they are bound: the due ones, then the policy's."""
+        due = sorted(
+            (
+                item
+                for item in self.pending
+                if self.overtaken.get(item.submission.key, 0) >= self.slots
+            ),
+            key=lambda item: item.order,
+        )
+        rest = [item for item in self.pending if item not in due]
+        newest = sorted(rest, key=lambda item: -item.order)
         if self.policy == "newest":
-            return newest
+            return [*due, *newest]
         rank = {work_id: position for position, work_id in enumerate(self.ranking)}
-        return sorted(newest, key=lambda item: rank.get(item.submission.work_id, len(rank)))
+        ranked = sorted(newest, key=lambda item: rank.get(item.submission.work_id, len(rank)))
+        return [*due, *ranked]
 
     def snapshot(self) -> QueueSnapshot:
         """The queue as it is published."""
@@ -203,5 +228,6 @@ class EvaluationQueue:
 
     def _drop(self, entry: Queued, dropped: Dropped) -> None:
         self.pending.remove(entry)
+        self.overtaken.pop(entry.submission.key, None)
         self.dropped.append((entry, dropped))
         self._verdicts.append((entry.submission.key, dropped))

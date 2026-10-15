@@ -39,7 +39,7 @@ The input's measurement is overdue: a workstream has waited {% if input_overdue.
 {% endif %}
 {% if evaluations %}
 
-Trusted evaluations ({{ evaluations.slots }} at once{% if evaluations.input_holds_slot %}; the input's measurement holds one{% endif %}). Agents keep implementing while candidates wait; a free slot measures {% if evaluations.pick == 'ranked' %}the candidates in your {{ reply.evaluation_order }} first, then the rest newest first{% else %}the newest waiting candidate first{% endif %}. A newer candidate of the same hypothesis, or one built on a waiting candidate, replaces it.
+Trusted evaluations ({{ evaluations.slots }} at once{% if evaluations.input_holds_slot %}; the input's measurement holds one{% endif %}). Agents keep implementing while candidates wait; a free slot measures {% if evaluations.pick == 'ranked' %}the candidates in your {{ reply.evaluation_order }} first, then the rest newest first{% else %}the newest waiting candidate first{% endif %}, except that a candidate passed over by {{ evaluations.slots }} newer ones goes next. A newer candidate of the same hypothesis, or one built on a waiting candidate, replaces it.
 {% for item in evaluations.measuring %}
 - measuring: `{{ item.work_id }}` ({{ item.kind.value }}) at `{{ rev(item.revision) }}`
 {% endfor %}

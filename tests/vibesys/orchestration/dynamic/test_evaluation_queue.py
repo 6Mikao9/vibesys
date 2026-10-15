@@ -3,16 +3,18 @@
 The queue is pure: workstreams submit candidates, measurements end and free their slots, the
 orchestrator ranks. Whatever the order of those events, the properties hold: the queue never holds
 more measurements than it has slots and never leaves a slot free while a candidate waits; each
-bind takes the newest waiting candidate (or the orchestrator's ranked ones first); a candidate is
-dropped only when a newer one of its line holds its code; and every submission is in exactly one
-place (waiting, measuring or measured, or dropped) with at most one verdict.
+bind takes the newest waiting candidate (or the orchestrator's ranked ones first) unless an older
+one is due; a candidate is dropped only when a newer one of its line holds its code; and every
+submission is in exactly one place (waiting, measuring or measured, or dropped) with at most one verdict. No submission waits
+forever behind newer ones: each is overtaken at most once per slot, and a stop drops every one
+still waiting, so each is bound, superseded or dropped at the stop.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vibesys.orchestration.dynamic.search.api import (
@@ -77,6 +79,8 @@ class Played:
     submitted: dict[str, Submission] = field(default_factory=dict)
     verdicts: dict[str, list[SlotVerdict]] = field(default_factory=dict)
     measured: set[str] = field(default_factory=set)
+    overtaken: dict[str, int] = field(default_factory=dict)
+    """For each submission, how many submissions made after it were bound while it waited."""
 
 
 def _ancestors(played: Played, revision: RevisionRef) -> set[RevisionRef]:
@@ -110,15 +114,23 @@ def _submission(played: Played, event: Submit, at: int) -> Submission:
 
 
 def _bind_checked(played: Played) -> None:
-    """Bind, and check the slots went to the policy's first picks, every free slot filled."""
+    """Bind, and check the first free slot went to the first pick, every free slot filled."""
     queue = played.queue
-    expected = [item.submission.key for item in queue.in_order()][: queue.free]
+    waiting = {item.submission.key: item.submission.at for item in queue.pending}
+    expected = [item.submission.key for item in queue.in_order()][:1]
+    free = queue.free
     queue.bind()
     decided = queue.verdicts()
     bound = [key for key, verdict in decided if isinstance(verdict, Bound)]
-    assert bound == expected
+    assert bound[:1] == (expected if free else [])
+    assert len(bound) == min(free, len(waiting))
+    assert set(bound) <= set(waiting)
     assert len(queue.holding) <= queue.slots
     assert not queue.pending or queue.free == 0
+    for position, key in enumerate(bound):
+        for other, at in waiting.items():
+            if other not in bound[: position + 1] and at < waiting[key]:
+                played.overtaken[other] = played.overtaken.get(other, 0) + 1
     for key, verdict in decided:
         played.verdicts.setdefault(key, []).append(verdict)
 
@@ -230,3 +242,53 @@ def test_a_free_slot_measures_the_newest_or_the_first_ranked_candidate(
         first = min(lines, key=order.index)
         last_of_first = max(at for at, line in enumerate(lines, 1) if line == first)
         assert key == f"{last_of_first:06d}.{first}"
+
+
+ARRIVALS = st.one_of(
+    st.builds(Submit, st.sampled_from(LINES), st.just(WorkKind.PROFILE), st.none()),
+    st.builds(End, st.integers(0, 10)),
+)
+"""Submissions that are never superseded, and measurements that end: a run that keeps submitting."""
+
+
+@settings(max_examples=examples(pr=60, nightly=1000))
+@given(
+    events=st.lists(ARRIVALS, max_size=60) | st.lists(EVENTS, max_size=60),
+    slots=st.integers(1, 3),
+    ranked=st.booleans(),
+)
+@example(
+    events=[Submit("a", WorkKind.PROFILE, None)]
+    + [Submit("b", WorkKind.PROFILE, None)] * 2
+    + [End(0), Submit("c", WorkKind.PROFILE, None)] * 3,
+    slots=1,
+    ranked=False,
+)
+def test_no_waiting_submission_is_overtaken_more_than_once_per_slot(
+    events: list[Event], slots: int, *, ranked: bool
+) -> None:
+    """The oldest submissions hold the backlog's places, so none may wait forever behind newer
+    ones: each is bound after at most ``slots`` submissions made after it."""
+    played = play(events, slots=slots, ranked=ranked)
+
+    assert all(count <= slots for count in played.overtaken.values()), played.overtaken
+
+
+@settings(max_examples=examples(pr=60, nightly=1000))
+@given(events=st.lists(EVENTS, max_size=40), slots=st.integers(1, 3), ranked=st.booleans())
+def test_every_submission_is_bound_superseded_or_dropped_at_the_stop(
+    events: list[Event], slots: int, *, ranked: bool
+) -> None:
+    played = play(events, slots=slots, ranked=ranked)
+    waiting = {item.submission.key for item in played.queue.pending}
+
+    played.queue.stop()
+    for key, verdict in played.queue.verdicts():
+        played.verdicts.setdefault(key, []).append(verdict)
+        assert key in waiting
+        assert isinstance(verdict, Dropped)
+        assert verdict.reason is DropReason.STOPPED
+
+    assert not played.queue.pending
+    assert set(played.verdicts) == set(played.submitted)
+    assert all(len(made) == 1 for made in played.verdicts.values())
