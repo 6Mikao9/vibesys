@@ -223,6 +223,7 @@ def test_the_implementer_keeps_working_while_its_evaluation_is_queued(
         "do not end the turn only to wait: keep implementing the remaining work",
         "validate it with tests that need no GPU",
         "Do not poll with `sleep` loops",
+        "check `read_queue_status` instead of polling",
         "End the turn with `waiting_for_evaluation` only when nothing useful remains to implement",
     )
     assert all(line in text for line in guidance) is offered

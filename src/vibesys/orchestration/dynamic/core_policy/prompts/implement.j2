@@ -98,6 +98,6 @@ review and framework gates), {{ reply.evidence }} and, when the outcome is
 While an evaluation or GPU job you submitted is queued, do not end the turn only to wait: keep
 implementing the remaining work and validate it with tests that need no GPU. Do not poll with
 `sleep` loops; if a job has been queued for more than a few minutes, move to other work and
-check back later. End the turn with `waiting_for_evaluation` only when nothing useful remains
+check `read_queue_status` instead of polling to see how soon it will run. End the turn with `waiting_for_evaluation` only when nothing useful remains
 to implement.
 {% endif %}
