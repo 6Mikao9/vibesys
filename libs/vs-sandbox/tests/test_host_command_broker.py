@@ -27,6 +27,7 @@ from vs_sandbox.api.slurm import (
     HOST_COMMAND_CLIENT,
     AgentGpuConfig,
     BrokerTransport,
+    CappedGpuLauncher,
     GpuCommand,
     GpuCommands,
     GpuJobRequest,
@@ -368,6 +369,40 @@ class TestGpuOperation:
             return cancelled
 
         assert _simulate(sim, program)
+
+    def test_an_agent_that_kills_a_command_waiting_for_the_cap_never_has_it_submitted(
+        self, sim: Sim, tmp_path: Path, workspace: Path
+    ) -> None:
+        """With a cap of one, a second command waits; closing it while it waits leaves the line."""
+
+        def program(net: _Network) -> tuple[list[str], str]:
+            launcher = _RecordingLauncher(net.threads, block=True)
+            capped = CappedGpuLauncher(launcher, 1, net.threads)
+            gpu = GpuCommands(_config(), _PrefixConfinement(), {}, launcher=capped)
+            with _serving(net, tmp_path, workspace, gpu=gpu) as broker:
+                first = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["first"])
+                )
+                _read_frame(first)  # submitted, and holding the run's only slot
+                waiting = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["second"])
+                )
+                notice = base64.b64decode(_read_frame(waiting)["output"]).decode()
+                waiting.close()  # the agent kills its command while it waits
+                first.close()  # the slot frees
+                third = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["third"])
+                )
+                # It may wait until the first job has wound down, then it is submitted.
+                while base64.b64decode(_read_frame(third)["output"]) != b"started\n":
+                    pass
+                third.close()
+            return [command.argv[-1] for command in launcher.commands], notice
+
+        submitted, notice = _simulate(sim, program)
+
+        assert submitted == ["first", "third"]
+        assert notice.startswith("[vibesys-gpu] waiting: 1 of this run's GPU jobs are active")
 
     def test_an_operation_the_run_does_not_offer_is_refused_by_name(
         self, sim: Sim, tmp_path: Path, workspace: Path
