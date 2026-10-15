@@ -130,5 +130,6 @@ for the exact replay.
 python benchmark/smoke/smoke_test.py --engine <session_runner> --tokenizer <tokenizer.json> --text-file <text>
 python benchmark/test_session_replay.py
 python accuracy_checker/smoke_test.py --text-file <enwik9>
+python accuracy_checker/test_trusted_builds.py
 uv run pytest accuracy_checker/test_engine_scan.py -q --no-cov -p no:tach   # from the VibeSys repo root, full path
 ```

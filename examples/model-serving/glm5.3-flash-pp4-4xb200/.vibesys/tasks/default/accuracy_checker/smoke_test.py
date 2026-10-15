@@ -10,7 +10,12 @@
   7. fails a server that answers replay-shaped (streamed) requests differently,
   8. passes two checker runs on one server (per-run cache_salt),
   9. passes a server whose cached-prefix resume changes the answer, with a reference
-     made through the cached path, and fails it with a reference made cold.
+     made through the cached path, and fails it with a reference made cold,
+ 10. trusted builds: a second honest layout (--alt-numerics 3: a confident flip on
+     one prompt in three) fails against the first build's reference alone, and
+     passes once make_reference.py --merge adds its answers; the first build still
+     passes the merged reference; a constant-token server, a shuffled-answer server
+     and large noise all fail it.
 
 usage: smoke_test.py --text-file <enwik9>
 """
@@ -18,6 +23,7 @@ usage: smoke_test.py --text-file <enwik9>
 from __future__ import annotations
 
 import argparse
+import json
 import socket
 import subprocess
 import sys
@@ -72,6 +78,8 @@ def main() -> int:
             "{URL}",
             "--text-file",
             ns.text_file,
+            "--build-id",
+            "a",
             "--output",
             str(reference),
         ],
@@ -126,6 +134,8 @@ def main() -> int:
             "{URL}",
             "--text-file",
             ns.text_file,
+            "--build-id",
+            "a",
             "--output",
             str(shifted),
         ],
@@ -137,6 +147,68 @@ def main() -> int:
     stale = with_server(["--cached-path-shift"], checker)
     print(f"--- cached-path-shift against a cold-path reference: exit {stale.returncode}")
     assert stale.returncode == 1, stale.stdout[-2000:]
+    # Trusted builds: a second honest layout added with --merge.
+    alt = ["--alt-numerics", "3"]
+    alone = with_server(alt, checker)
+    print(f"--- alt-numerics against build a alone: exit {alone.returncode}")
+    assert alone.returncode == 1 and "mismatch" in alone.stdout, alone.stdout[-2000:]
+    merged = root / "reference_merged.json"
+    made = with_server(
+        alt,
+        [
+            sys.executable,
+            str(HERE / "make_reference.py"),
+            "--base-url",
+            "{URL}",
+            "--build-id",
+            "b",
+            "--merge",
+            str(reference),
+            "--output",
+            str(merged),
+        ],
+    )
+    assert made.returncode == 0, (made.stdout[-1000:], made.stderr[-1000:])
+    body = json.loads(merged.read_text())
+    assert [b["id"] for b in body["builds"]] == ["a", "b"], body["builds"]
+    base = json.loads(reference.read_text())
+    assert [c.get("prompt", c.get("round0")) for c in body["cases"]] == [
+        c.get("prompt", c.get("round0")) for c in base["cases"]
+    ], "--merge changed the prompts"
+    duplicate = with_server(
+        alt,
+        [
+            sys.executable,
+            str(HERE / "make_reference.py"),
+            "--base-url",
+            "{URL}",
+            "--build-id",
+            "a",
+            "--merge",
+            str(reference),
+            "--output",
+            str(root / "dup.json"),
+        ],
+    )
+    assert duplicate.returncode != 0 and "already has build" in duplicate.stderr, duplicate.stderr[
+        -500:
+    ]
+    on_merged = [*checker[:-1], str(merged)]
+    for name, flags, expected in (
+        ("alt-numerics", alt, 0),
+        ("clean", [], 0),
+        ("canned", ["--canned"], 1),
+        ("shuffled", ["--shuffled"], 1),
+        ("large-noise", ["--noise", "1.5"], 1),
+    ):
+        result = with_server(flags, on_merged)
+        print(f"--- {name} against builds a+b: exit {result.returncode}")
+        assert result.returncode == expected, (name, result.stdout[-2000:])
+        if name == "alt-numerics":
+            report = json.loads(
+                result.stdout[result.stdout.rindex("\n{\n") : result.stdout.rindex("}") + 1]
+            )
+            assert report["answers_by_build"]["b"] > 0, report["answers_by_build"]
     print("ALL CHECKER SMOKE CASES PASSED")
     return 0
 
