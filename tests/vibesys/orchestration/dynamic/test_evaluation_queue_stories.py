@@ -289,6 +289,53 @@ def test_a_wait_for_the_input_past_the_limit_reaches_the_orchestrators_next_turn
 
 
 @MODES
+def test_a_wait_for_the_input_past_the_limit_is_reported_while_the_input_holds_the_only_slot(
+    *, restarting: bool
+) -> None:
+    """With one evaluation slot the input's measurement holds it, so no candidate is bound before
+    the input lands: the overdue wait counts from the candidate's submission, not from a slot."""
+    limit = 600.0
+    cfg = config(
+        max_rounds=2,
+        max_in_flight=1,
+        evaluation_slots=1,
+        max_backlog=1,
+        input_wait_seconds=limit,
+    )
+    host = begin(cfg, restarting=restarting, input_first=False)
+    _plan(host, implement("h1"))
+    _work(host, "000001.h1", "c1")
+
+    # h1 is submitted but not bound: the input's measurement holds the only slot.
+    assert host.input_waits()
+    assert not _measuring(host)
+    first = host.run.expect_turn(role=PLANNER_LABEL)
+    assert isinstance(first.context, PlannerPrompt)
+    assert first.context.input_overdue is None
+
+    # The limit passes with the input still unmeasured: the orchestrator's next turn says so.
+    host.run.advance_to(min(host.run.sleeping_until))
+    record = _record(host)
+    assert record.input_overdue is not None
+    assert record.input_overdue.limit == limit
+    host.run.reply_raw(first, "not json")
+    again = host.run.expect_turn(role=PLANNER_LABEL).context
+    assert isinstance(again, PlannerCorrection)
+    assert again.input_overdue is not None
+    assert again.input_overdue.limit_seconds == int(limit)
+    assert again.input_overdue.waited_seconds is not None
+    assert again.input_overdue.waited_seconds >= int(limit)
+    assert "measurement is overdue" in render(PromptTemplate.PORTFOLIO_CORRECTION, again)
+
+    # Once the input lands, h1 takes the slot and the run ends as usual.
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h2")))
+    host.measure_input()
+    host.drain()
+    assert isinstance(host.run.finished, Finish)
+    assert_flow_closed(host)
+
+
+@MODES
 def test_a_step_accepted_on_its_own_checks_settles_before_the_input_lands(
     *, restarting: bool
 ) -> None:

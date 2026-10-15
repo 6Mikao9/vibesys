@@ -230,6 +230,10 @@ class Work:
     """The workspace once it opened; None before, and when the workstream never got one."""
     baseline: Baseline | None = None
     """The input's measurement once the workstream has it (see `_measure.the_input`)."""
+    input_wait_since: float | None = None
+    """When, on the run clock, the workstream first waited on something that needs the input."""
+    overdue_reported: bool = False
+    """Whether its wait for the input has passed the run's limit (`_measure.while_input_pending`)."""
 
     def ended(self, ended: "WorkEndedError") -> Closing:
         """The closing of work that did not finish: what it carried, with the failure."""
