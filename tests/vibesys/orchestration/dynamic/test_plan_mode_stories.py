@@ -12,12 +12,10 @@ every step is done, to explore.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from tests.vibesys.orchestration.dynamic._host import (
-    FACTS,
     OUTLINER_LABEL,
     PLANNER_LABEL,
+    PLAN_DOCUMENTS,
     Host,
     begin,
     plan_config,
@@ -42,6 +40,7 @@ from vibesys.orchestration.dynamic.search.api import (
 )
 from vs_core.api import (
     Finish,
+    Measure,
     RequestTurn,
     Retained,
     RevisionRef,
@@ -51,50 +50,53 @@ from vs_core.api import (
     Withdraw,
 )
 
-if TYPE_CHECKING:
-    from vs_core.api.testing import Asked
-
 MODES = across_restarts
 
 
-def _starts(host: Host) -> list[StartAttempt]:
-    """Every workspace the run asked to open, in order."""
+def _step_of(decision: str) -> str:
+    """The step a workstream decision belongs to: ``000002.b/start.1`` is of step ``b``."""
+    return decision.split("/", 1)[0].split(".", 1)[1]
+
+
+def _issued[R](host: Host, kind: type[R]) -> list[R]:
+    """Every request of ``kind`` the run issued, in order."""
     return [
         item.request
         for item in host.run.decisions
-        if isinstance(item, Wait) and isinstance(item.request, StartAttempt)
+        if isinstance(item, Wait) and isinstance(item.request, kind)
     ]
 
 
 def _started_ids(host: Host) -> list[str]:
-    return [request.item_id.root.rsplit(".", 1)[0] for request in _starts(host)]
+    return [_step_of(request.decision_id.root) for request in _issued(host, StartAttempt)]
 
 
 def _base_of(host: Host, step_id: str) -> RevisionRef:
     """The revision the latest workstream of ``step_id`` started from."""
-    found = [r for r in _starts(host) if r.item_id.root.rsplit(".", 1)[0] == step_id]
+    found = [
+        request.workspace.base
+        for request in _issued(host, StartAttempt)
+        if _step_of(request.decision_id.root) == step_id
+    ]
     assert found, host.run.timeline()
-    return found[-1].workspace.base
+    return found[-1]
 
 
 def _settlements(host: Host, step_id: str) -> list[Settle]:
-    """What each workspace of ``step_id`` asked to settle with."""
+    """What each workspace of ``step_id`` asked to settle with, in order."""
     return [
-        item.request.disposition
-        for item in host.run.decisions
-        if isinstance(item, Wait)
-        and isinstance(item.request, Withdraw)
-        and isinstance(item.request.disposition, Settle)
-        and f".{step_id}/" in item.request.decision_id.root
+        request.disposition
+        for request in _issued(host, Withdraw)
+        if isinstance(request.disposition, Settle) and _step_of(request.decision_id.root) == step_id
     ]
 
 
-def _planner_asked(host: Host) -> bool:
-    return any(
-        isinstance(item, Wait)
-        and isinstance(item.request, RequestTurn)
-        and f"/{PLANNER_LABEL}." in item.request.decision_id.root
-        for item in host.run.decisions
+def _turns_of(host: Host, label: str) -> int:
+    """How many turns of ``label`` the run asked for."""
+    return sum(
+        1
+        for request in _issued(host, RequestTurn)
+        if request.decision_id.root.rpartition("/")[2].rpartition(".")[0] == label
     )
 
 
@@ -104,52 +106,47 @@ def _states(host: Host) -> dict[str, StepState]:
     return dict(record.step_states)
 
 
-def _implement(host: Host, asked: Asked, commit: str) -> None:
-    host.run.reply(
-        asked,
-        ImplementerResult.model_validate_json(implemented()),
-        checkpoint=Retained(revision=RevisionRef.of_git_commit(commit)),
-    )
+def _answer_the_host(host: Host) -> None:
+    """Answer every open wait that is not an agent's turn: workspaces, measurements, checks."""
+    while waits := [item for item in host.run.open if not isinstance(item.request, RequestTurn)]:
+        host.answer(waits[0])
 
 
 def _work_on(host: Host, step_id: str, commit: str, *, passed: bool = True) -> None:
-    """Open the step's workspace if asked, implement it as ``commit``, and have the judge rule."""
-    for asked in host.open(StartAttempt):
-        if asked.decision.root.split("/")[0].endswith(f".{step_id}"):
-            host.answer(asked)
+    """Implement the running step as ``commit`` and have the judge rule on it."""
+    _answer_the_host(host)
     implementer = next(
         item
         for item in host.open(RequestTurn, label="implementer")
-        if item.decision.root.startswith(asked_path(host, step_id))
+        if _step_of(item.decision.root) == step_id
     )
-    _implement(host, implementer, commit)
-    judge = host.run.expect_turn(role="judge")
+    host.run.reply(
+        implementer,
+        ImplementerResult.model_validate_json(implemented()),
+        checkpoint=Retained(revision=RevisionRef.of_git_commit(commit)),
+    )
+    _answer_the_host(host)
+    judge = next(
+        item
+        for item in host.open(RequestTurn, label="judge")
+        if _step_of(item.decision.root) == step_id
+    )
     host.run.reply(judge, ReviewResult.model_validate_json(reviewed(passed=passed)))
-
-
-def asked_path(host: Host, step_id: str) -> str:
-    """The decision-id prefix of the running workstream of ``step_id``."""
-    record = host.record
-    assert record is not None
-    (running,) = [item for item in record.running if item.plan.work_id == step_id]
-    return f"{running.sequence:06d}.{step_id}/"
+    _answer_the_host(host)
 
 
 @MODES
 def test_plan_steps_start_in_declared_order_with_no_planner_turn(*, restarting: bool) -> None:
-    cfg = plan_config(
-        step("a"), step("b", "trusted", depends_on=("a",)), step("c"), max_rounds=3
-    )
+    cfg = plan_config(step("a"), step("b", "trusted", depends_on=("a",)), step("c"), max_rounds=3)
     host = begin(cfg, restarting=restarting)
 
     # The first step starts at once: nobody is asked what to do.
-    assert not host.open(RequestTurn, label=PLANNER_LABEL)
     assert _started_ids(host) == ["a"]
     host.drain()
 
     # b is declared before c and ready once a is checked, so it goes before c.
     assert _started_ids(host) == ["a", "b", "c"]
-    assert not _planner_asked(host)
+    assert _turns_of(host, PLANNER_LABEL) == 0
     assert _states(host) == {
         "a": StepState.CHECKED,
         "b": StepState.EVALUATED,
@@ -162,24 +159,28 @@ def test_plan_steps_start_in_declared_order_with_no_planner_turn(*, restarting: 
 @MODES
 def test_a_dependent_step_waits_for_its_parent_and_builds_on_it(*, restarting: bool) -> None:
     cfg = plan_config(
-        step("a"), step("b", depends_on=("a",)), step("c"), max_in_flight=2, max_rounds=2
+        step("a"), step("b", depends_on=("a",)), step("c"), max_in_flight=2, max_rounds=3
     )
     host = begin(cfg, restarting=restarting)
-    assert sorted(_started_ids(host)) == ["a", "c"]
+    assert _started_ids(host) == ["a", "c"]
+    the_input = _base_of(host, "a")
 
-    # c finishes first and frees a slot, but b's parent is still running: nothing starts.
+    # c is checked first and frees a slot, but b's parent is still running: nothing starts.
     _work_on(host, "c", "c-rev")
-    host.drain_until_turn("implementer")
-    assert sorted(_started_ids(host)) == ["a", "c"]
+    assert _started_ids(host) == ["a", "c"]
     assert _states(host)["b"] is StepState.PENDING
-    assert not host.open(RequestTurn, label=PLANNER_LABEL)
+    assert _turns_of(host, PLANNER_LABEL) == 0
 
     # Once a is checked, b starts from a's revision, not from the input or from c's.
     _work_on(host, "a", "a-rev")
-    assert _started_ids(host) == ["a", "c", "b"] or _started_ids(host) == ["c", "a", "b"]
-    assert _base_of(host, "a") == FACTS.baseline
+    assert _started_ids(host) == ["a", "c", "b"]
+    assert _base_of(host, "c") == the_input
     assert _base_of(host, "b") == RevisionRef.of_git_commit("a-rev")
+
+    # With every step done and slots left in the budget, the planner explores from there.
     host.drain()
+    timeline = host.run.timeline()
+    assert timeline.index("000003.b/settle") < timeline.index(f"/{PLANNER_LABEL}.1")
     assert_flow_closed(host)
 
 
@@ -194,12 +195,8 @@ def test_an_unevaluated_step_is_kept_as_work_in_progress_and_never_wins(
     assert settled.retention == "wip"
     assert settled.candidate is not None
     assert not settled.eligible
-    # nothing measured it: the only measurement is the input's
-    assert not [
-        item
-        for item in host.run.decisions
-        if isinstance(item, Wait) and "/measure." in item.request.decision_id.root
-    ]
+    # the only measurement is the input's
+    assert [request.plan.purpose for request in _issued(host, Measure)] == ["baseline"]
     finish = host.run.finished
     assert isinstance(finish, Finish)
     assert finish.result.selection is not None
@@ -219,13 +216,11 @@ def test_a_trusted_step_on_an_unevaluated_one_is_measured_and_may_win(*, restart
     assert milestone.retention == "candidate"
     assert milestone.eligible
     assert _base_of(host, "b") == unevaluated.candidate
-    record = host.record
-    assert record is not None
-    assert record.leading == "b"
     finish = host.run.finished
     assert isinstance(finish, Finish)
     assert finish.result.selection is not None
     assert finish.result.selection.kind == "retained_candidate"
+    assert finish.result.selection.revision == milestone.candidate
     assert_flow_closed(host)
 
 
@@ -237,19 +232,20 @@ def test_a_plan_without_steps_is_outlined_by_one_turn_before_anything_starts(
 
     turn = host.run.expect_turn(role=OUTLINER_LABEL)
     assert isinstance(turn.context, OutlinePrompt)
-    assert turn.context.documents == ("reference/README.md",)
-    assert not host.open(RequestTurn, label=PLANNER_LABEL)
-    assert not _starts(host)
+    assert turn.context.documents == tuple(PLAN_DOCUMENTS)
+    assert _turns_of(host, PLANNER_LABEL) == 0
+    assert _started_ids(host) == []
 
     # A reply whose steps form a cycle is corrected; the corrected outline is followed.
-    host.run.reply_raw(turn, outline_reply(step("x", depends_on=("y",)), step("y", depends_on=("x",))))
+    cycle = outline_reply(step("x", depends_on=("y",)), step("y", depends_on=("x",)))
+    host.run.reply_raw(turn, cycle)
     again = host.run.expect_turn(role=OUTLINER_LABEL)
     host.run.reply_raw(again, outline_reply(step("x"), step("y", "trusted", depends_on=("x",))))
     assert _started_ids(host) == ["x"]
     host.drain()
 
     assert _started_ids(host) == ["x", "y"]
-    assert not _planner_asked(host)
+    assert _turns_of(host, PLANNER_LABEL) == 0
     assert _states(host) == {"x": StepState.CHECKED, "y": StepState.EVALUATED}
     assert_flow_closed(host)
 
@@ -258,15 +254,13 @@ def test_a_plan_without_steps_is_outlined_by_one_turn_before_anything_starts(
 def test_a_failed_step_is_repaired_by_the_planner_which_may_schedule_nothing_else(
     *, restarting: bool
 ) -> None:
-    cfg = plan_config(
-        step("a"), step("b", depends_on=("a",)), max_rounds=3, max_unmeasured_turns=1
-    )
+    cfg = plan_config(step("a"), step("b", depends_on=("a",)), max_rounds=3, max_unmeasured_turns=1)
     host = begin(cfg, restarting=restarting)
     _work_on(host, "a", "a-rejected", passed=False)
 
-    # The step failed; nothing depends-free is left, so the planner is asked to repair it.
-    planner = host.run.expect_turn(role=PLANNER_LABEL)
+    # The step failed and b cannot start without it, so the planner is asked to repair it.
     assert _states(host) == {"a": StepState.FAILED, "b": StepState.PENDING}
+    planner = host.run.expect_turn(role=PLANNER_LABEL)
     host.run.reply_raw(planner, plan_reply(implement("fresh-idea")))
 
     # An exploration hypothesis is not a repair: it is corrected, naming the rule.
