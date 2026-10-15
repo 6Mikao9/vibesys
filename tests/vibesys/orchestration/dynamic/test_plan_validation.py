@@ -8,7 +8,7 @@ accepted fits the record, and the accepted entries alone always make a valid pla
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -54,6 +54,8 @@ class Record:
     profiles: list[str] = field(default_factory=list)
     parents: list[ParentSnapshot] = field(default_factory=list)
     offer: ProfileOffer | None = None
+    repairable: frozenset[str] | None = None
+    """The failed plan steps a reply may continue, in a run the task's plan decides."""
 
 
 def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> PlanCheck:
@@ -69,8 +71,8 @@ def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> Plan
         finished_profile(identifier, index) for index, identifier in enumerate(record.profiles, 90)
     )
     run.parents = tuple(record.parents)
-    world = run.world()
-    return validate(plan, world.ledger, run.offered(), capacity=capacity, offer=record.offer)
+    ledger = replace(run.world().ledger, repairable=record.repairable)
+    return validate(plan, ledger, run.offered(), capacity=capacity, offer=record.offer)
 
 
 def codes(result: PlanCheck) -> list[ViolationCode]:
@@ -187,6 +189,11 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             portfolio(implement_entry("n"), updates=(update_entry("a"),)),
             Record(hypotheses=[hypothesis_record("a")]),
             "hypothesis_updates.0.hypothesis_id",
+        ),
+        ViolationCode.OUTSIDE_PLAN: (
+            portfolio(implement_entry("n")),
+            Record(hypotheses=[FINISHED_A], repairable=frozenset({"a"})),
+            "workstreams.0",
         ),
     }
 

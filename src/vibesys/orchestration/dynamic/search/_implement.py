@@ -173,7 +173,9 @@ def _review_due(w: WorkstreamStart, result: Result) -> bool:
         max_retries_per_round=max(1, w.turns),
         max_continuation_rounds=config.max_continuation_rounds,
     )
-    return result.candidate.outcome is not HypothesisOutcome.BLOCKED and review_due(
+    if result.candidate.outcome is HypothesisOutcome.BLOCKED:
+        return False
+    return w.review_always or review_due(
         hypothesis, round_number=w.sequence, outcome=result.candidate.outcome
     )
 

@@ -7,6 +7,7 @@ a later prompt and never written by the search.
 """
 
 from enum import StrEnum
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
@@ -40,6 +41,7 @@ class AgentName(StrEnum):
     IMPLEMENTER = "implementer"
     JUDGE = "judge"
     PROFILER = "profiler"
+    OUTLINER = "outliner"
 
 
 class WorkKind(StrEnum):
@@ -63,6 +65,26 @@ class Unreachable(Value):
     subject: str
 
 
+type StepId = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,39}$")]
+"""A plan step's id, as the task's ``[plan]`` table allows it; it names the step's workstreams."""
+
+
+class Step(Value):
+    """One step of the task's plan, as the search holds it (`vibesys.inputs.PlanStep`).
+
+    The fields are the table's own; a test keeps the two equal.
+    """
+
+    id: StepId
+    title: str = Field(min_length=1, max_length=200)
+    documents: tuple[str, ...] = ()
+    done_when: str = Field(min_length=1, max_length=2000)
+    evaluate: Literal["none", "trusted"]
+    """``none``: accepted on the judge's review of the implementer's own checks, never
+    measured; ``trusted``: a milestone the trusted evaluation measures."""
+    depends_on: tuple[StepId, ...] = ()
+
+
 class WorkPlan(Value):
     """The planner's validated choice for one workstream, in immutable form."""
 
@@ -79,6 +101,13 @@ class WorkPlan(Value):
     question: str = ""
     required_fields: tuple[str, ...] = ()
     decision_impact: str = ""
+    step: Step | None = None
+    """The plan step the workstream implements, in a run that follows the task's plan."""
+
+    @property
+    def measured(self) -> bool:
+        """Whether its candidate gets a trusted measurement: all but an unevaluated plan step."""
+        return self.step is None or self.step.evaluate == "trusted"
 
 
 # -- why work ended -----------------------------------------------------------------------------
@@ -290,6 +319,8 @@ class ViolationCode(StrEnum):
     UPDATE_DUPLICATE = "update-duplicate"
     UPDATE_UNKNOWN = "update-unknown"
     UPDATE_INCOMPLETE = "update-incomplete"
+    OUTSIDE_PLAN = "outside-plan"
+    """The run follows the task's plan, and the entry is not a repair of one of its failed steps."""
 
 
 class Alternative(Value):

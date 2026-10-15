@@ -54,6 +54,7 @@ from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
+    OutlinePrompt,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -66,18 +67,21 @@ from vibesys.orchestration.dynamic.search._prompts import (
 from vibesys.orchestration.dynamic.search._roles import (
     IMPLEMENTER,
     JUDGE,
+    OUTLINER,
     PLANNER,
     PROFILER,
     ROLES,
 )
 from vibesys.orchestration.dynamic.search._run_state import (
     NoPlan,
+    Outlined,
     Running,
     RunRecord,
     RunSnapshot,
     Scheduled,
 )
 from vibesys.orchestration.dynamic.search._search import dynamic
+from vibesys.orchestration.dynamic.search._steps import Outline, PlanMode, StepState
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
@@ -88,6 +92,7 @@ from vibesys.orchestration.dynamic.search._values import (
     HypothesisRecord,
     Proof,
     RoundRecord,
+    Step,
     ViolationCode,
     WorkKind,
     WorkPlan,
@@ -99,6 +104,7 @@ __all__ = [
     "INTERPRET_KIND",
     "JUDGE",
     "OPERATIONS",
+    "OUTLINER",
     "PLANNER",
     "PROFILER",
     "RENDER_KIND",
@@ -124,12 +130,16 @@ __all__ = [
     "InterpretEvidence",
     "MetricRow",
     "NoPlan",
+    "Outline",
+    "OutlinePrompt",
+    "Outlined",
     "ParentConflictError",
     "ParentOption",
     "ParentSnapshot",
     "ParentVerification",
     "PartialRow",
     "PlanCheck",
+    "PlanMode",
     "PlanUpdate",
     "PlanViolation",
     "PlannerCorrection",
@@ -150,6 +160,8 @@ __all__ = [
     "RunSnapshot",
     "Running",
     "Scheduled",
+    "Step",
+    "StepState",
     "Verdict",
     "VerifyParentRevision",
     "ViolationCode",

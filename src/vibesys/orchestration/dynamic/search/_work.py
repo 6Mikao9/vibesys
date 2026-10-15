@@ -38,8 +38,14 @@ async def implement_and_measure(
         judge=ctx.agents.session(JUDGE, workspace=ws),
     )
     result = await implement_until_measurable(ctx, w, ws, work, sessions)
-    if result.candidate.outcome is HypothesisOutcome.BLOCKED or not ctx.task.terms.measured:
-        return Closing(result=result)  # nothing was made, or nothing is configured to measure
+    if (
+        result.candidate.outcome is HypothesisOutcome.BLOCKED
+        or not ctx.task.terms.measured
+        or not w.plan.measured
+    ):
+        # nothing was made, nothing is configured to measure, or a plan step is accepted on
+        # the judge's review of its own checks
+        return Closing(result=result)
     await the_input(ctx, w, work)
     evidence = await measure_and_interpret(ctx, w, ws, result.candidate.revision or w.parent)
     return Closing(result=result, evidence=evidence)

@@ -36,6 +36,7 @@ from vibesys.inputs._objectives import (
     load_objectives,
 )
 from vibesys.inputs._plan import (
+    MAX_STEPS,
     DeviationPolicy,
     PlanStep,
     StepEvaluation,
@@ -52,6 +53,7 @@ from vibesys.inputs._synthesis import (
 __all__ = [
     "EVALUATOR_SRC_DIRNAME",
     "MANIFEST_NAME",
+    "MAX_STEPS",
     "OBJECTIVES_NAME",
     "PROTOCOL_OUTPUT_FLAG",
     "AgentInput",

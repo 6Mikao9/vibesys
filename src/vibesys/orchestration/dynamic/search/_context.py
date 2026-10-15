@@ -200,6 +200,9 @@ class PlanWorld:
     offered: tuple[ParentOption, ...]
     offer: ProfileOffer | None = None
     """What the planner may ask of a profile workstream; None when the run does not profile."""
+    repairable: frozenset[str] | None = None
+    """While the task's plan decides what runs, the failed steps the planner may continue (and
+    nothing else); None when the planner may propose any workstream."""
 
     @property
     def active(self) -> int:
@@ -222,6 +225,13 @@ class PlanWorld:
         return free_slots(self.config, active=self.active, left=self.remaining)
 
     @property
+    def wanted(self) -> int:
+        """How many workstreams a reply should schedule: the free slots, or the failed steps."""
+        if self.repairable is None:
+            return self.capacity
+        return min(self.capacity, len(self.repairable))
+
+    @property
     def ledger(self) -> PlanLedger:
         """What plan validation reads: hypotheses, what runs and which IDs are profiles."""
         profiles = {
@@ -234,6 +244,7 @@ class PlanWorld:
             hypotheses=self.hypotheses,
             running=frozenset(item.plan.work_id for item in self.running),
             profile_ids=frozenset(profiles),
+            repairable=self.repairable,
         )
 
     def prompt(

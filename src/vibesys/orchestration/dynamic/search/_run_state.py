@@ -36,10 +36,19 @@ from vibesys.orchestration.dynamic.search._parents import (
     resolve,
 )
 from vibesys.orchestration.dynamic.search._plan import PlanCheck
+from vibesys.orchestration.dynamic.search._steps import (
+    DONE,
+    StepState,
+    built_on,
+    ready_steps,
+    step_plan,
+    step_states,
+)
 from vibesys.orchestration.dynamic.search._values import (
     FinishedWork,
     HypothesisRecord,
     PlanProblem,
+    Step,
     Unreachable,
     WorkKind,
     WorkPlan,
@@ -71,7 +80,14 @@ class NoPlan:
     blocked_at_done: int
 
 
-type PlanOutcome = Scheduled | NoPlan
+@dataclass(frozen=True)
+class Outlined:
+    """The outline call ended with the steps of the plan the run follows."""
+
+    steps: tuple[Step, ...]
+
+
+type PlanOutcome = Scheduled | NoPlan | Outlined
 
 
 @dataclass
@@ -106,6 +122,10 @@ class RunSnapshot(Value):
     unreachable: tuple[Unreachable, ...] = ()
     leading: str | None = None
     """The hypothesis whose candidate leads now; None while the input does."""
+    steps: tuple[Step, ...] = ()
+    """The outline of the plan the run follows; empty while exploring or not yet outlined."""
+    step_states: tuple[tuple[str, StepState], ...] = ()
+    """Each step's state, in the outline's order."""
 
 
 @dataclass
@@ -136,6 +156,51 @@ class RunRecord:
     """Planning calls begun; the next call's key is numbered by it."""
     kept: dict[str, Kept] = field(default_factory=dict)
     """The candidates closed workspaces retained that were winner-eligible, by settlement."""
+    outline: tuple[Step, ...] | None = None
+    """The steps of the plan the run follows: the task's own, or the outline call's; None
+    while a run that follows a plan has yet to outline it, and in a run that explores."""
+
+    def __post_init__(self) -> None:
+        """Take the task's steps, when it declares them, as the outline."""
+        plan = self.config.plan
+        if self.config.follows_plan and plan is not None and plan.steps:
+            self.outline = plan.steps
+
+    # -- the plan the run follows --------------------------------------------------------------
+
+    @property
+    def needs_outline(self) -> bool:
+        """Whether the run follows a plan whose steps are still to be outlined."""
+        return self.config.follows_plan and self.outline is None
+
+    def step_states(self) -> dict[str, StepState]:
+        """Each step's state, by id; empty while the run explores or has no outline yet."""
+        if self.outline is None:
+            return {}
+        running = {start.plan.work_id for start in self.running.values()}
+        return step_states(self.outline, self.finished_work, self.hypotheses, running)
+
+    def following(self) -> bool:
+        """Whether the plan decides what runs: the run follows one and a step is not done."""
+        if not self.config.follows_plan:
+            return False
+        states = self.step_states()
+        return not states or any(state not in DONE for state in states.values())
+
+    def repairable(self) -> frozenset[str] | None:
+        """While the plan decides, the failed steps the planner may continue; else None (any)."""
+        if not self.following():
+            return None
+        states = self.step_states()
+        return frozenset(key for key, state in states.items() if state is StepState.FAILED)
+
+    def _due_steps(self, room: int) -> list[WorkPlan]:
+        """Plans for the ready steps, in declared order, that fit in ``room`` slots."""
+        if self.outline is None or room <= 0:
+            return []
+        queued = {plan.work_id for plan in self.accepted}
+        ready = [s for s in ready_steps(self.outline, self.step_states()) if s.id not in queued]
+        return [step_plan(step) for step in ready[:room]]
 
     # -- what the run has left -----------------------------------------------------------------
 
@@ -154,6 +219,8 @@ class RunRecord:
         gate = self.gate
         if stopping or gate.failed or not self.capacity():
             return False
+        if self.following() and not self.needs_outline and not self.repairable():
+            return False  # the plan says what runs; only a failed step needs the planner
         return gate.blocked_at_done is None or len(self.finished_work) > gate.blocked_at_done
 
     def over(self, *, planning: bool, measuring: bool, stopping: bool) -> bool:
@@ -207,6 +274,7 @@ class RunRecord:
             )
             if self.config.profiling
             else None,
+            repairable=self.repairable(),
         )
 
     def planned(self, outcome: PlanOutcome) -> None:
@@ -218,6 +286,9 @@ class RunRecord:
         match outcome:
             case Scheduled(blind=True) if self._input_failed():
                 self.gate.blocked_at_done = None
+            case Outlined(steps=steps):
+                self.outline = steps
+                self.gate.last_error = None
             case Scheduled(check=check):
                 for change in check.updates:
                     known = self.hypotheses[change.hypothesis_id]
@@ -226,9 +297,19 @@ class RunRecord:
                     )
                 self.gate.last_error = None
                 self.gate.blocked_at_done = None
-                self.accepted.extend(check.accepted)
+                self.accepted.extend(self._as_steps(check.accepted))
             case NoPlan(problem=problem, stuck=stuck, blocked_at_done=at_done):
                 self.gate = PlannerGate(failed=stuck, blocked_at_done=at_done, last_error=problem)
+
+    def _as_steps(self, plans: tuple[WorkPlan, ...]) -> list[WorkPlan]:
+        """The planner's plans, each repair of a plan step carrying the step it repairs."""
+        steps = {step.id: step for step in self.outline or ()}
+        return [
+            plan.model_copy(update={"step": steps[plan.work_id]})
+            if plan.work_id in steps and plan.step is None
+            else plan
+            for plan in plans
+        ]
 
     def _input_failed(self) -> bool:
         return self.baseline is not None and not candidates.trusted(self.baseline)
@@ -244,6 +325,9 @@ class RunRecord:
         continued = self._own_last_round(plan)
         if continued is not None:
             return continued
+        if plan.step is not None and not plan.continue_hypothesis:
+            found_step = built_on(plan.step, self.finished_work, self.hypotheses)
+            return found_step if found_step is not None else (self.base, None)
         if plan.parent_hypothesis_id is not None:
             found = resolve(self.parents, plan.parent_hypothesis_id, plan.parent_revision)
             if found is not None:
@@ -267,6 +351,9 @@ class RunRecord:
         with the input waits for the measurement (`_measure.the_input`).
         """
         starts = []
+        if self.following():
+            room = min(free, self.capacity()) - len(self.accepted)
+            self.accepted = [*self._due_steps(room), *self.accepted]
         ready, self.accepted = self.accepted[:free], self.accepted[free:]
         for plan in ready:
             sequence = self.started + 1
@@ -416,4 +503,6 @@ class RunRecord:
             parents=self.parents,
             unreachable=tuple(self.unreachable),
             leading=self.winner().hypothesis_id,
+            steps=self.outline or (),
+            step_states=tuple(self.step_states().items()),
         )

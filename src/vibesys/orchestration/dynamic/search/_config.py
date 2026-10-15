@@ -6,10 +6,11 @@ its infrastructure is the backend's. A config is an input of the search, never p
 running the search again with the same config and the same events reproduces every decision.
 """
 
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
+from vibesys.orchestration.dynamic.search._steps import Outline, PlanMode
 from vs_core.api.search import Value
 
 type Positive = Annotated[int, Field(gt=0, le=1000)]
@@ -32,6 +33,27 @@ class DynamicConfig(Value):
     """Times one hypothesis may be continued after its first round."""
     profiling: bool = False
     """Whether the planner may schedule profile workstreams. Launch fails without the capability."""
+    mode: PlanMode = "explore"
+    """``explore``: the planner proposes hypotheses. ``follow_plan``: the run implements the
+    task's plan step by step, and the planner is asked only to repair a failed step and, once
+    every step is done, to explore from there."""
+    plan: Outline | None = None
+    """The task's plan (its ``[plan]`` table); read only when ``mode`` is ``follow_plan``."""
+
+    @model_validator(mode="after")
+    def _a_plan_to_follow(self) -> Self:
+        if self.mode == "follow_plan" and self.plan is None:
+            message = (
+                "mode 'follow_plan' needs the task's plan, and the task declares none: add a "
+                "[plan] table to its vibesys.input.toml, or launch with mode 'explore'"
+            )
+            raise ValueError(message)
+        return self
+
+    @property
+    def follows_plan(self) -> bool:
+        """Whether the run follows the task's plan."""
+        return self.mode == "follow_plan"
 
     @property
     def start_budget(self) -> int:

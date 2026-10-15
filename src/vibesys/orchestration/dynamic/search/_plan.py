@@ -68,6 +68,9 @@ class PlanLedger:
     hypotheses: tuple[HypothesisRecord, ...]
     running: frozenset[str]
     profile_ids: frozenset[str]
+    repairable: frozenset[str] | None = None
+    """While the task's plan says what runs, the failed steps a reply may continue, and
+    nothing else; None when any workstream may be proposed."""
 
     def hypothesis(self, identifier: str) -> HypothesisRecord | None:
         """The record of a hypothesis ID, if one exists."""
@@ -265,6 +268,15 @@ def _work_plan(entry: WorkstreamPlan | ProfilePlan) -> WorkPlan:
     )
 
 
+def _repairs(entry: WorkstreamPlan | ProfilePlan, repairable: frozenset[str]) -> bool:
+    """Whether ``entry`` continues one of the failed plan steps."""
+    return (
+        isinstance(entry, WorkstreamPlan)
+        and entry.continue_hypothesis
+        and entry.hypothesis_id in repairable
+    )
+
+
 def validate(
     plan: PortfolioPlan,
     ledger: PlanLedger,
@@ -296,6 +308,10 @@ def validate(
                 path=("workstreams", position),
                 code=ViolationCode.DUPLICATE_ID,
                 subject=identifier,
+            )
+        elif ledger.repairable is not None and not _repairs(entry, ledger.repairable):
+            violation = PlanViolation(
+                path=("workstreams", position), code=ViolationCode.OUTSIDE_PLAN, subject=identifier
             )
         elif isinstance(entry, ProfilePlan):
             violation = _profile_violation(position, entry, ledger, offered, offer)

@@ -33,6 +33,7 @@ class PromptTemplate(StrEnum):
     IMPLEMENT = "implement"
     REVIEW = "review"
     PROFILE_REQUEST = "profile_request"
+    OUTLINE = "outline"
 
 
 class EvidenceCitation(Value):
@@ -214,8 +215,23 @@ class ProfilePrompt(RolePromptContext):
     target: RevisionRef
 
 
+class OutlinePrompt(RolePromptContext):
+    """Request to outline the steps of the task's plan from its documents."""
+
+    reply_schema: ClassVar[SchemaRef | None] = roles.OUTLINER.reply_schema
+
+    template: Literal[PromptTemplate.OUTLINE] = PromptTemplate.OUTLINE
+    documents: tuple[str, ...]
+    """The plan's documents, as paths relative to the task directory."""
+
+
 type PromptContext = Annotated[
-    PlannerPrompt | PlannerCorrection | ImplementPrompt | ReviewPrompt | ProfilePrompt,
+    PlannerPrompt
+    | PlannerCorrection
+    | ImplementPrompt
+    | ReviewPrompt
+    | ProfilePrompt
+    | OutlinePrompt,
     Field(discriminator="template"),
 ]
 """The union the render operation carries; the exchanges core starts are core's own contexts."""
