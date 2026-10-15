@@ -63,6 +63,7 @@ _agent_gpus = st.builds(
         st.from_regex(r"/[a-z]{1,6}(/[a-z]{1,6}){0,2}", fullmatch=True), max_size=3, unique=True
     ).map(tuple),
     windows_command=st.none() | _argv,
+    max_concurrent_jobs=st.none() | st.integers(1, 16),
 )
 _services = st.builds(
     SlurmService,
