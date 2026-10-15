@@ -51,6 +51,9 @@ from .types.common import (
 )
 from .types.evaluation import (
     CancelOwnedJob,
+    InspectOwnedJob,
+    JobTerminationRequested,
+    ObserveOwnedJob,
     OwnedJob,
     RegisteredOwnedJob,
     SubmitMeasurement,
@@ -1601,6 +1604,7 @@ def _deadline(
     state, events = _end_open_record(
         state, record, event.reason, lost=bool(signals), first=previous_block is None
     )
+    signals = (*signals, *_orphaned_jobs(state, context, record, event.reason))
     observation = record.observation
     resources = []
     if (
@@ -1703,7 +1707,14 @@ def _end_open_record(
     if not is_open(record):
         return state, ()
     failed = None if lost else record.failure or _failure(record, reason)
-    heard = (failed,) if failed is not None and first and not _decision_ended(state, record) else ()
+    heard = (
+        (failed,)
+        if failed is not None
+        and first
+        and not _job_step(record)
+        and not _decision_ended(state, record)
+        else ()
+    )
     blocked = record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
     return _replace_record(state, blocked), heard
 
@@ -1730,15 +1741,58 @@ def _lost_turn(
     )
 
 
+def _orphaned_jobs(
+    state: RecordsState, context: RecordsContext, record: RequestRecord, reason: FailureReason
+) -> tuple[JobTerminationRequested, ...]:
+    """The termination of every unfinished job a submission started, when core ends it.
+
+    A strategy's ``Measure`` waits on its submission's record. Once that record ends at its
+    limit or a watch, nothing waits on the job any longer: evaluation cancels it rather than
+    leave it in the scheduler's queue, holding nodes nobody will read. A job an agent
+    submitted is its wait's to end (``_continuations``), and a job evaluation is already
+    cancelling (an attempt's retirement, a run's stop) keeps that cancel and its retry limit.
+    """
+    if not isinstance(record.request, SubmitMeasurement) or any(
+        call.request_id == record.request_id for call in context.evaluation.agent_calls
+    ):
+        return ()
+    cause = "deadline" if reason == FailureReason.TIMED_OUT else "retirement"
+    return tuple(
+        JobTerminationRequested(resource_id=job.resource_id, cause=cause)
+        for job in context.evaluation.jobs
+        if job.submission_id == record.request_id
+        and job.resource_id is not None
+        and not job.terminal
+        and not any(
+            isinstance(row.request, CancelOwnedJob) and row.request.resource_id == job.resource_id
+            for row in state.records
+        )
+    )
+
+
+def _job_step(record: RequestRecord) -> bool:
+    """Whether the record is a step core takes on a job it owns: a poll, inspection or cancel.
+
+    A step carries the decision of the submission that started the job, but it is not the
+    decision's work: evaluation owns it and takes it again when it ends at its own short bound
+    (``_measurements``: a poll backs off and polls again). The decision hears only of its own
+    request, the submission, whose limit counts from the job's start (``_wait_clock``). A
+    status query that outlasts its bound on a busy scheduler therefore never ends a
+    measurement, nor leaves its job running with nothing waiting on it.
+    """
+    return isinstance(record.request, ObserveOwnedJob | InspectOwnedJob | CancelOwnedJob)
+
+
 def _decision_ended(state: RecordsState, record: RequestRecord) -> bool:
     """Whether another request of the record's decision already ended with a failure.
 
-    A decision hears of its ending once. Its later requests (the submission a measurement
-    still holds open after its observation timed out) end quietly: the owner has moved on.
+    A decision hears of its ending once; its later requests end quietly, as the owner has
+    moved on.
     """
     decision = record.request.decision_id
     return decision is not None and any(
         row.failure is not None
+        and not _job_step(row)
         and row.request.decision_id == decision
         and row.request_id != record.request_id
         for row in state.records
