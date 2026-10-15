@@ -15,8 +15,11 @@ Runs the real session_runner on a tiny synthetic trace (16 sessions, a
   slow-screen every request takes 9 s, over the 8 s bound: rejected at screening
   big-block   prefix-cache blocks of 1,536 tokens: rejected at screening, before
               session_runner's 1,024-token preflight would abort
-  record      recording mode on a healthy server: writes the replay reference the
-              scored cases below are checked against
+  record      recording mode on a healthy server: replays the seeded session sample
+              (8 of the 15 reachable sessions, at most 12 rounds each) through a
+              derived trace and writes the replay reference the scored cases below
+              are checked against; their prompts match it only if the derived
+              trace keeps session_runner's prompts (session ordinals, token pool)
   faked-replay streamed (replay-shaped) requests get a wrong token: rejected by the
               replay-reference agreement check
   truncation  prompts over 9,000 tokens are cut: rejected for usage.prompt_tokens
@@ -120,9 +123,12 @@ def smoke_workload(trace_sha: str) -> sr.Workload:
         # The real bound is 60 s; 8 s keeps the abort and screening cases short
         # while staying above the 6.5 s slow requests of the `slo` case.
         reject_p99_ttft_s=SMOKE_REJECT_S,
-        # 16 sessions: their round 0s alone match; 40 needs some later rounds too.
+        # 8 sampled sessions: their round 0s alone match; 30 needs some later rounds too.
         replay_min_agreement=0.95,
-        replay_min_matched_rounds=40,
+        replay_min_matched_rounds=30,
+        replay_sample=sr.ReplaySample(
+            seed=11, sessions=8, round_cap=12, concurrency=4, time_limit_s=60.0
+        ),
         round0_max_cached_tokens=16,  # the fake server's block
     )
 
@@ -210,7 +216,7 @@ def case_judge() -> None:
         "ttft_s": {"p50": 0.1, "p90": 0.2, "p99": 7.0, "max": 9.0},
         "rounds_ttft_over_60s": 0,
     }
-    agree = sr.Agreement(matched=100, agreed=99, first_disagreement=None)
+    agree = sr.Agreement(reached=110, matched=100, agreed=99, first_disagreement=None)
     values = sr.judge(metrics, watch, facts, workload, screened, agree)
     assert set(values) == set(sr.METRICS), set(sr.METRICS) ^ set(values)
     assert values["slo_met"] == 0.0 and abs(values["slo_margin_s"] + 1.0) < 1e-9, values
@@ -228,8 +234,8 @@ def case_judge() -> None:
         raise AssertionError("judge accepted a p99 over the rejection bound")
     metrics["ttft_s"]["p99"] = 5.0
     for bad, needle in (
-        (sr.Agreement(100, 94, "x"), "disagree with the reference build"),
-        (sr.Agreement(39, 39, None), "fewer than 40"),
+        (sr.Agreement(100, 100, 94, "x"), "disagree with the reference build"),
+        (sr.Agreement(29, 29, 29, None), "fewer than 30"),
     ):
         try:
             sr.judge(metrics, watch, facts, workload, screened, bad)
@@ -280,10 +286,22 @@ def main() -> int:
         elif name == "record":
             ref = root / "replay_reference.json"
             records = run_case(name, [], ns, root, sha, ["--record-replay-reference", str(ref)])
-            assert [r["kind"] for r in records] == ["hello", "result"], records
-            rounds = json.loads(ref.read_text())["rounds"]
-            assert len(rounds) >= 100, len(rounds)
-            print(f"--- record: {len(rounds)} rounds in the replay reference")
+            assert [r["kind"] for r in records] == ["hello"], records  # not a scored run
+            body = json.loads(ref.read_text())
+            sample = smoke_workload(sha).replay_sample
+            assert body["sampling"] == sample.describe(), body["sampling"]
+            chosen = sr.sample_rounds(
+                sr.ceiling_depths(sr.trace_sessions(root / "smoke.csv"), smoke_workload(sha)),
+                sample,
+            )
+            planned = {f"{sid}/{r}" for sid, n in chosen.items() for r in range(n)}
+            assert set(body["rounds"]) == planned, sorted(set(body["rounds"]) ^ planned)
+            assert body["recording"]["complete"] and body["recording"]["recorded_rounds"] == len(
+                planned
+            )
+            print(
+                f"--- record: {len(planned)} rounds of {len(chosen)} sampled sessions in the replay reference"
+            )
         elif name == "faked-replay":
             expect_error(
                 run_case(name, ["--fake-replay"], ns, root, sha),
@@ -342,7 +360,11 @@ def main() -> int:
             assert values["slo_met"] == 1.0 and values["slo_margin_s"] > 0, values
             assert values["prefix_hit_share"] > 0.5, values
             assert (
-                values["replay_token_agreement"] == 1.0 and values["replay_matched_rounds"] >= 40
+                values["replay_token_agreement"] == 1.0 and values["replay_matched_rounds"] >= 30
+            ), values
+            assert (
+                values["replay_agreement_gate"] == 0.95
+                and values["replay_min_matched_rounds"] == 30
             ), values
             assert values["outstanding_rounds"] <= 8, values
         elif name == "slo":

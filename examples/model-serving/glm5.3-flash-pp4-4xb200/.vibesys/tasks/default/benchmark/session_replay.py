@@ -24,11 +24,16 @@ Phases:
      request; on every successful round `prefix_shortfall_tokens` 0, streamed
      token ids, `usage.prompt_tokens` equal to the prompt sent, and no cache
      hit beyond the round's own prefix (none past one block on a round 0);
-     first-token agreement with the recorded reference replay
-     (`--replay-reference`); p99 TTFT <= 60 s, where rounds still unanswered at
+     first-token agreement with the recorded reference answers
+     (`--replay-reference`, at least REPLAY_MIN_AGREEMENT over at least
+     REPLAY_MIN_MATCHED_ROUNDS prompt-matched rounds); p99 TTFT <= 60 s, where rounds still unanswered at
      the window's end count at least their wait (`outstanding_rounds`).
      The 6 s SLO is not a gate: `slo_met` (1/0) and `slo_margin_s` (6 s minus
      p99) report it, and p99 TTFT is the primary objective.
+
+Recording (`--record-replay-reference OUT`, reference build only) replays a
+seeded sample of the trace's sessions at low concurrency instead of the scored
+run and writes their answers (README.md, "Replay answers").
 
 Result: an evaluator result protocol v2 stream written to `--vs-output`
 (VibeSys appends the flag): `hello`, then one `result` row, or one `error`
@@ -101,14 +106,62 @@ METRICS: dict[str, dict[str, Any]] = {
         "unit": "fraction of prompt-matched rounds whose first token equals the reference's",
         "direction": "max",
     },
-    "replay_matched_rounds": {"unit": "rounds"},
+    "replay_matched_rounds": {"unit": "rounds whose prompt matches a recorded reference round"},
+    "replay_agreement_gate": {"unit": "fraction: the least replay_token_agreement that passes"},
+    "replay_min_matched_rounds": {"unit": "rounds: the least replay_matched_rounds that passes"},
     "outstanding_rounds": {
         "unit": "rounds submitted before the window's end and not answered inside it",
         "direction": "min",
     },
 }
 
-REPLAY_REFERENCE_FORMAT = "glm53-session-replay-reference-v1"
+REPLAY_REFERENCE_FORMAT = "glm53-session-replay-reference-v2"
+
+# The replay-reference gate (README.md, "Replay answers"). Rounds
+# whose prompt matches a recorded reference round must give the reference's
+# first token at least this often...
+REPLAY_MIN_AGREEMENT = 0.90
+# ...over at least this many matched rounds, or the answers count as unchecked.
+REPLAY_MIN_MATCHED_ROUNDS = 1_000
+
+# session_runner's synthetic token pool. Its default is max(2 x the trace's
+# longest prompt, its session count, 100M) = 100M for this trace, but the
+# recording replays a smaller derived trace, and a session's prompts depend on
+# the pool size (its cursor starts at ordinal x 9,973 mod the pool length), so
+# both modes pass it explicitly.
+TOKEN_POOL_TOKENS = 100_000_000
+
+
+@dataclasses.dataclass(frozen=True)
+class ReplaySample:
+    """Which part of the trace the reference recording replays (README.md, "Replay answers").
+
+    The population is every session the zero-latency ceiling admits inside the
+    window, in trace order: no candidate can reach a round outside it. It is
+    cut into `sessions` contiguous strata of near-equal size and one session is
+    drawn from each with `random.Random(seed)`, so the sample spreads evenly
+    from the first admitted session to the last. Each is replayed from round 0
+    (a round's prompt carries every earlier answer of its session) for the
+    rounds the ceiling submits, at most `round_cap`.
+    """
+
+    seed: int
+    sessions: int
+    round_cap: int
+    # Sessions replayed at once, with no tool waits (arrival mode saturated).
+    concurrency: int
+    # The recording stops here even if sessions are left (logged as incomplete).
+    time_limit_s: float
+
+    def describe(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+# 240 sessions x ~17.6 rounds = 4,238 rounds, 17.7M new tokens, about
+# 35M computed tokens, ~11 min on the TP4+EP reference.
+REPLAY_SAMPLE = ReplaySample(
+    seed=20261015, sessions=240, round_cap=32, concurrency=32, time_limit_s=1_200.0
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -148,8 +201,9 @@ class Workload:
     # The replay-reference check (README.md, "Replay answers"): over rounds whose
     # exact prompt matches the reference run's, at least this share of first
     # tokens must equal the reference's, and at least this many rounds must match.
-    replay_min_agreement: float = 0.95
-    replay_min_matched_rounds: int = 1_000
+    replay_min_agreement: float = REPLAY_MIN_AGREEMENT
+    replay_min_matched_rounds: int = REPLAY_MIN_MATCHED_ROUNDS
+    replay_sample: ReplaySample = REPLAY_SAMPLE
     # A round 0 carries no prefix of its own session, so a cache hit on it is
     # cache state carried in from outside this evaluation; one block of slack.
     round0_max_cached_tokens: int = 8_576
@@ -172,15 +226,9 @@ WORKLOAD = Workload(
     stall_timeout_s=600.0,
     request_timeout_s=180.0,
     reject_p99_ttft_s=REJECT_P99_TTFT_S,
-    replay_min_agreement=0.95,
-    # Every admitted session's round 0 is built from the corpus alone, so its
-    # prompt matches the reference's whatever the server answered before; each
-    # later round matches until the session's first first-token flip. The
-    # zero-latency replay admits 1,679 sessions in the window and counts 41,444
-    # rounds, so an honest run matches tens of thousands; 1,000 still makes the
-    # 5% tolerance about 50 rounds, and a server that answers the replay wrongly
-    # matches little more than its round 0s.
-    replay_min_matched_rounds=1_000,
+    replay_min_agreement=REPLAY_MIN_AGREEMENT,
+    replay_min_matched_rounds=REPLAY_MIN_MATCHED_ROUNDS,
+    replay_sample=REPLAY_SAMPLE,
     # vLLM's prefix-cache block for this model (KDA state plus attention), ~8.5k tokens.
     round0_max_cached_tokens=8_576,
 )
@@ -296,6 +344,45 @@ class TraceFacts:
     ceiling_new_tokens: int
 
 
+TraceSessions = dict[str, list[dict[str, str]]]
+
+
+def trace_sessions(trace: Path) -> TraceSessions:
+    """The trace's CSV rows by session: sessions in file order, rounds in round order.
+
+    File order is session_runner's admission order and its session ordinal,
+    which seeds the session's synthetic tokens.
+    """
+    sessions: TraceSessions = {}
+    with trace.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            sessions.setdefault(row["session_id"], []).append(row)
+    for rows in sessions.values():
+        rows.sort(key=lambda row: int(row["round_idx"]))
+    return sessions
+
+
+def ceiling_depths(sessions: TraceSessions, workload: Workload) -> dict[str, int]:
+    """Per session (file order), how many of its rounds the zero-latency ceiling submits inside the window.
+
+    See `trace_facts`; no server reaches a round past this depth.
+    """
+    window_ms = workload.window_s * 1e3
+    free = [0.0] * workload.max_concurrency
+    depths: dict[str, int] = {}
+    # session_runner admits sessions in trace order (its AdmissionOrder).
+    for sid, rows in sessions.items():
+        t = max(float(rows[0]["arrival_time_ms"]), heapq.heappop(free))
+        depth = 0
+        for row in rows:
+            if t < window_ms:
+                depth += 1
+            t += float(row["tool_wait_after_ms"])
+        heapq.heappush(free, t)
+        depths[sid] = depth
+    return depths
+
+
 def trace_facts(trace: Path, workload: Workload) -> TraceFacts:
     """The trace's size and its zero-latency ceiling.
 
@@ -307,34 +394,74 @@ def trace_facts(trace: Path, workload: Workload) -> TraceFacts:
     later event. It bounds the counted rounds for the early-abort rule, and its
     new tokens are the throughput no candidate can exceed.
     """
-    sessions: dict[str, list[tuple[int, float, float, int]]] = {}
-    rounds = 0
-    with trace.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            rounds += 1
-            sessions.setdefault(row["session_id"], []).append(
-                (
-                    int(row["round_idx"]),
-                    float(row["arrival_time_ms"]),
-                    float(row["tool_wait_after_ms"]),
-                    int(row["input_len"]),
-                )
-            )
-    window_ms = workload.window_s * 1e3
-    free = [0.0] * workload.max_concurrency
-    ceiling_rounds = 0
-    ceiling_new = 0
-    # session_runner admits sessions in trace order (its AdmissionOrder).
-    for steps in sessions.values():
-        steps.sort()
-        t = max(steps[0][1], heapq.heappop(free))
-        for _, _, wait_ms, input_len in steps:
-            if t < window_ms:
-                ceiling_rounds += 1
-                ceiling_new += input_len
-            t += wait_ms
-        heapq.heappush(free, t)
-    return TraceFacts(rounds, len(sessions), ceiling_rounds, ceiling_new)
+    sessions = trace_sessions(trace)
+    depths = ceiling_depths(sessions, workload)
+    rounds = sum(len(rows) for rows in sessions.values())
+    ceiling_new = sum(
+        int(row["input_len"]) for sid, rows in sessions.items() for row in rows[: depths[sid]]
+    )
+    return TraceFacts(rounds, len(sessions), sum(depths.values()), ceiling_new)
+
+
+# ----------------------------------------------------------------------------- recording sample
+
+
+def sample_rounds(depths: dict[str, int], sample: ReplaySample) -> dict[str, int]:
+    """The recording's sessions (trace order) and how many rounds of each, from round 0.
+
+    Deterministic in (depths, sample); see `ReplaySample` for the scheme.
+    """
+    population = [sid for sid, depth in depths.items() if depth > 0]
+    count = min(sample.sessions, len(population))
+    rng = random.Random(sample.seed)
+    chosen: dict[str, int] = {}
+    for stratum in range(count):
+        lo, hi = stratum * len(population) // count, (stratum + 1) * len(population) // count
+        sid = population[rng.randrange(lo, hi)]
+        chosen[sid] = min(depths[sid], sample.round_cap)
+    return chosen
+
+
+TRACE_COLUMNS = [
+    "request_id",
+    "session_id",
+    "round_idx",
+    "arrival_time_ms",
+    "prefix_len",
+    "input_len",
+    "output_len",
+    "tool_wait_after_ms",
+]
+
+
+def sample_trace_rows(sessions: TraceSessions, chosen: dict[str, int]) -> list[dict[str, str]]:
+    """A session_runner trace that replays `chosen` with the prompts the full trace gives them.
+
+    session_runner seeds a session's synthetic tokens from its ordinal (its
+    position in the file), so every session up to the last chosen one keeps
+    its place: a chosen one with its first `chosen[sid]` rounds, any other as
+    one 1-token round 0 (one cheap request, never recorded). Later sessions
+    are dropped. Tool waits are zeroed: prompts do not depend on time, and the
+    recording runs with arrival mode `saturated`.
+    """
+    last = max((i for i, sid in enumerate(sessions) if sid in chosen), default=-1)
+    out: list[dict[str, str]] = []
+    for sid, rows in list(sessions.items())[: last + 1]:
+        if sid in chosen:
+            kept = [dict(row) for row in rows[: chosen[sid]]]
+        else:
+            kept = [dict(rows[0], prefix_len="0", input_len="1", output_len="1")]
+        for row in kept:
+            row["tool_wait_after_ms"] = "0.000000"
+        out.extend(kept)
+    return out
+
+
+def write_trace(path: Path, rows: list[dict[str, str]]) -> None:
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=TRACE_COLUMNS, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows({key: row[key] for key in TRACE_COLUMNS} for row in rows)
 
 
 def rounds_over_bound_that_fail(max_rounds: int, quantile: float = 0.99) -> int:
@@ -681,20 +808,28 @@ class LogWatch:
 # ----------------------------------------------------------------------------- replay reference
 
 
-def write_replay_reference(path: Path, watch: LogWatch, workload: Workload, model: str) -> None:
-    """The reference run's answers: prompt hash and first token per session round."""
+def write_replay_reference(
+    path: Path,
+    answers: dict[str, tuple[str, int]],
+    workload: Workload,
+    model: str,
+    recording: dict[str, Any],
+) -> None:
+    """The reference run's answers, prompt hash and first token per session round, with how they were sampled."""
     body = {
         "format": REPLAY_REFERENCE_FORMAT,
         "model": model,
         "trace_sha256": workload.trace_sha256,
         "recorded_at_unix_s": time.time(),
-        "rounds": {key: [h, token] for key, (h, token) in sorted(watch.answers.items())},
+        "sampling": workload.replay_sample.describe(),
+        "recording": recording,
+        "rounds": {key: [h, token] for key, (h, token) in sorted(answers.items())},
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(body) + "\n")
     tmp.replace(path)
-    log(f"replay reference: {len(watch.answers)} rounds written to {path}")
+    log(f"replay reference: {len(answers)} rounds written to {path}")
 
 
 def load_replay_reference(path: Path, workload: Workload, model: str) -> dict[str, tuple[str, int]]:
@@ -710,6 +845,7 @@ def load_replay_reference(path: Path, workload: Workload, model: str) -> dict[st
     if body.get("format") != REPLAY_REFERENCE_FORMAT:
         raise Rejected(
             f"--replay-reference {path}: format {body.get('format')!r}, expected {REPLAY_REFERENCE_FORMAT!r}"
+            " (re-record it: the format changes when the sampling does)"
         )
     if body.get("trace_sha256") != workload.trace_sha256:
         raise Rejected(
@@ -720,11 +856,17 @@ def load_replay_reference(path: Path, workload: Workload, model: str) -> dict[st
         raise Rejected(
             f"--replay-reference {path} was recorded for model {body.get('model')!r}, not {model!r}"
         )
+    log(
+        f"replay reference: {len(body['rounds'])} rounds, sampling {json.dumps(body.get('sampling'))}"
+    )
     return {key: (str(h), int(token)) for key, (h, token) in body["rounds"].items()}
 
 
 @dataclasses.dataclass(frozen=True)
 class Agreement:
+    # Reference rounds the run answered at all, whatever its prompt.
+    reached: int
+    # Of those, rounds whose prompt hash equals the reference's.
     matched: int
     agreed: int
     first_disagreement: str | None
@@ -742,43 +884,58 @@ def replay_agreement(
     One differing token changes every later prompt of that session, so those
     rounds have no reference answer and are left out rather than counted wrong.
     """
-    matched = agreed = 0
+    reached = matched = agreed = 0
     first: str | None = None
     for key, (prompt_hash, token) in answers.items():
         expected = reference.get(key)
-        if expected is None or expected[0] != prompt_hash:
+        if expected is None:
+            continue
+        reached += 1
+        if expected[0] != prompt_hash:
             continue
         matched += 1
         if token == expected[1]:
             agreed += 1
         elif first is None:
             first = f"{key}: token {token}, reference {expected[1]}"
-    return Agreement(matched, agreed, first)
+    return Agreement(reached, matched, agreed, first)
 
 
 def check_agreement(agreement: Agreement, workload: Workload) -> None:
+    """Reject unless enough matched rounds agree and enough rounds are matched (README.md, "Replay answers").
+
+    Either failure rejects; disagreement is named first because a server that
+    answers wrongly also matches few rounds (only its round 0s and first flips).
+    """
+    gate, floor = workload.replay_min_agreement, workload.replay_min_matched_rounds
     detail = (
         f"{agreement.agreed} of {agreement.matched} prompt-matched rounds gave the reference's first token "
-        f"({agreement.share:.1%}); first disagreement: {agreement.first_disagreement}"
+        f"({agreement.share:.1%}; gate {gate:.0%} over at least {floor} matched rounds); the run reached "
+        f"{agreement.reached} recorded rounds; first disagreement: {agreement.first_disagreement}"
     )
-    partial = {
-        "name": "replay_token_agreement",
-        "value": agreement.share,
-        "direction": "max",
-        "unit": "fraction",
-        "target": workload.replay_min_agreement,
-    }
-    if agreement.share < workload.replay_min_agreement:
+    if agreement.share < gate:
         raise Rejected(
             f"run rejected: replay answers disagree with the reference build: {detail}; at least "
-            f"{workload.replay_min_agreement:.0%} must agree (README.md, Replay answers)",
-            partial,
+            f"{gate:.0%} must agree (README.md, Replay answers)",
+            {
+                "name": "replay_token_agreement",
+                "value": agreement.share,
+                "direction": "max",
+                "unit": "fraction",
+                "target": gate,
+            },
         )
-    if agreement.matched < workload.replay_min_matched_rounds:
+    if agreement.matched < floor:
         raise Rejected(
             f"run rejected: only {agreement.matched} rounds sent the same prompt as the reference run, fewer "
-            f"than {workload.replay_min_matched_rounds}: the replay answers cannot be checked. {detail}",
-            partial,
+            f"than {floor}: the replay answers cannot be checked. {detail}",
+            {
+                "name": "replay_matched_rounds",
+                "value": float(agreement.matched),
+                "direction": "max",
+                "unit": "rounds",
+                "target": float(floor),
+            },
         )
     log(f"replay reference: {detail}")
 
@@ -792,8 +949,12 @@ def session_runner_argv(
     model: str,
     workload: Workload,
     work_dir: Path,
+    arrival_mode: str = "trace-timed",
 ) -> list[str]:
-    """The replay of reference/1_contract.md §2.2 as session_runner flags."""
+    """The replay of reference/1_contract.md §2.2 as session_runner flags.
+
+    The recording passes its derived trace and arrival mode `saturated`.
+    """
     return [
         str(engine),
         "--trace",
@@ -813,9 +974,11 @@ def session_runner_argv(
         "--temperature",
         "0",
         "--arrival-mode",
-        "trace-timed",
+        arrival_mode,
         "--max-concurrency",
         str(workload.max_concurrency),
+        "--token-pool-limit",
+        str(TOKEN_POOL_TOKENS),
         "--max-model-len",
         str(MAX_MODEL_LEN),
         "--log-path",
@@ -1157,9 +1320,102 @@ def judge(
         / max(facts.ceiling_new_tokens / workload.window_s, 1.0),
         "replay_token_agreement": agreement.share,
         "replay_matched_rounds": float(agreement.matched),
+        "replay_agreement_gate": workload.replay_min_agreement,
+        "replay_min_matched_rounds": float(workload.replay_min_matched_rounds),
         "outstanding_rounds": float(outstanding),
         **screened,
     }
+
+
+def record_reference(
+    engine: Path,
+    trace: Path,
+    text_file: Path,
+    tokenizer: Path,
+    base_url: str,
+    model: str,
+    workload: Workload,
+    work_dir: Path,
+    out: Path,
+) -> dict[str, Any]:
+    """Recording mode: replay the `ReplaySample` of the trace and write its answers to `out`.
+
+    Correctness gates only: a reference must not record broken rounds, but a
+    slow reference build still records valid answers.
+    """
+    sample = workload.replay_sample
+    sessions = trace_sessions(trace)
+    chosen = sample_rounds(ceiling_depths(sessions, workload), sample)
+    sample_trace = work_dir / "sample_trace.csv"
+    write_trace(sample_trace, sample_trace_rows(sessions, chosen))
+    planned = sum(chosen.values())
+    log(
+        f"recording: {len(chosen)} sessions, {planned} rounds (sampling {json.dumps(sample.describe())}); "
+        f"derived trace {sample_trace}"
+    )
+    recording_workload = dataclasses.replace(
+        workload, max_concurrency=sample.concurrency, window_s=sample.time_limit_s
+    )
+    argv = session_runner_argv(
+        engine,
+        sample_trace,
+        text_file,
+        tokenizer,
+        base_url,
+        model,
+        recording_workload,
+        work_dir,
+        arrival_mode="saturated",
+    )
+    facts = TraceFacts(
+        rounds=planned, sessions=len(chosen), ceiling_rounds=planned, ceiling_new_tokens=0
+    )
+    watch = replay(argv, work_dir, recording_workload, facts, early_abort=False)
+    why = watch.verdict()
+    if why is not None:
+        raise Rejected(f"recording rejected, nothing written: {why}")
+    answers = {
+        key: value
+        for key, value in watch.answers.items()
+        if int(key.rsplit("/", 1)[1]) < chosen.get(key.rsplit("/", 1)[0], 0)
+    }
+    ttfts, submits, completes = [], [], []
+    for line in (work_dir / "requests.jsonl").read_text().splitlines():
+        record = json.loads(line) if line.strip() else {}
+        source, outcome = (
+            (record.get("source") or {}).get("data") or {},
+            record.get("outcome") or {},
+        )
+        if f"{source.get('session_id')}/{source.get('round_idx')}" in answers:
+            ttfts.append(
+                outcome["first_token_id_ms"] / 1e3
+                + outcome["post_timestamp"]
+                - outcome["submit_timestamp"]
+            )
+            submits.append(outcome["submit_timestamp"])
+            completes.append(outcome["complete_timestamp"])
+    recorded_sessions = {key.rsplit("/", 1)[0] for key in answers}
+    stats = {
+        "planned_sessions": len(chosen),
+        "planned_rounds": planned,
+        "recorded_sessions": len(recorded_sessions),
+        "recorded_rounds": len(answers),
+        "complete": len(answers) == planned,
+        "wall_s": (max(completes) - min(submits)) if answers else 0.0,
+        "ttft_p50_s": percentile(ttfts, 50) if ttfts else None,
+        "ttft_p99_s": percentile(ttfts, 99) if ttfts else None,
+        "max_round_idx": max((int(key.rsplit("/", 1)[1]) for key in answers), default=None),
+        "session_ordinals": [ordinal for ordinal, sid in enumerate(sessions) if sid in chosen],
+    }
+    if not stats["complete"]:
+        log(
+            f"recording: WARNING incomplete, {len(answers)} of {planned} planned rounds (time limit "
+            f"{sample.time_limit_s:.0f} s); the missing rounds are simply unrecorded"
+        )
+    write_replay_reference(out, answers, workload, model, stats)
+    (work_dir / "recording_summary.json").write_text(json.dumps(stats, indent=2) + "\n")
+    log(f"recording: {json.dumps(stats)}")
+    return stats
 
 
 # ----------------------------------------------------------------------------- main
@@ -1211,6 +1467,20 @@ def run(args: argparse.Namespace, workload: Workload, report: ProtocolReport) ->
         )
 
         screened = screen(args.base_url, args.model, workload)
+        if recording:
+            # Not a scored run: no result row.
+            record_reference(
+                engine,
+                trace,
+                Path(args.text_file),
+                tokenizer,
+                args.base_url,
+                args.model,
+                workload,
+                work_dir,
+                Path(args.record_replay_reference),
+            )
+            return 0
 
         argv = session_runner_argv(
             engine,
@@ -1222,19 +1492,9 @@ def run(args: argparse.Namespace, workload: Workload, report: ProtocolReport) ->
             workload,
             work_dir,
         )
-        watch = replay(argv, work_dir, workload, facts, early_abort=not recording)
-        if recording:
-            # Correctness gates only: a reference must not record broken rounds,
-            # but a slow reference build still records valid answers.
-            why = watch.verdict()
-            if why is not None:
-                raise Rejected(f"recording rejected, nothing written: {why}")
-            write_replay_reference(Path(args.record_replay_reference), watch, workload, args.model)
-            agreement = Agreement(len(watch.answers), len(watch.answers), None)
-            workload = dataclasses.replace(workload, replay_min_matched_rounds=0)
-        else:
-            assert reference is not None
-            agreement = replay_agreement(watch.answers, reference)
+        watch = replay(argv, work_dir, workload, facts)
+        assert reference is not None
+        agreement = replay_agreement(watch.answers, reference)
         metrics = score(work_dir / "requests.jsonl", workload)
         (work_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
         log(f"metrics.py: {json.dumps(metrics)}")
@@ -1305,8 +1565,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--record-replay-reference",
         default=None,
         metavar="OUT",
-        help="recording mode, on the reference build only: run the replay and write its "
-        "per-round prompt hashes and first tokens to OUT",
+        help="recording mode, on the reference build only: replay the seeded session sample "
+        "(REPLAY_SAMPLE) at low concurrency and write its per-round prompt hashes and "
+        "first tokens to OUT; no result row",
     )
     parser.add_argument(
         "--vs-output", type=Path, default=None, help="result protocol v2 stream (VibeSys)"

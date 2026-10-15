@@ -53,9 +53,10 @@ candidate root for engine code (`engine_scan.py`) and fails on a finding.
 --replay-reference <operator path>/replay_reference.json
 ```
 
-`--replay-reference` is the reference build's replay answers, recorded once
-with `--record-replay-reference` on the TP4+EP reference server
-(`benchmark/README.md`, "Replay answers"). Keep it outside the candidate tree.
+`--replay-reference` is the reference build's answers on a seeded sample of
+the trace's sessions, recorded once with `--record-replay-reference` on the
+TP4+EP reference server (`benchmark/README.md`, "Replay answers"). Keep it
+outside the candidate tree.
 
 and, when the tokenizer is not in the default Hugging Face cache,
 `--tokenizer <tokenizer.json>` or `HF_HUB_CACHE`/`HF_HOME` in the environment.
@@ -127,6 +128,7 @@ for the exact replay.
 
 ```bash
 python benchmark/smoke/smoke_test.py --engine <session_runner> --tokenizer <tokenizer.json> --text-file <text>
+python benchmark/test_session_replay.py
 python accuracy_checker/smoke_test.py --text-file <enwik9>
 uv run pytest accuracy_checker/test_engine_scan.py -q --no-cov -p no:tach   # from the VibeSys repo root, full path
 ```
