@@ -11,10 +11,14 @@ def plan_reply(
     handoff: dict[str, object] | None = None,
 ) -> str:
     """A planner reply of implement or profile entries, with a handoff note for each entry."""
-    note = handoff if handoff is not None else {
-        "expectations": [expectation(_entry_id(entry)) for entry in entries],
-        "doubts": ["doubt"],
-    }
+    note = (
+        handoff
+        if handoff is not None
+        else {
+            "expectations": [expectation(_entry_id(entry)) for entry in entries],
+            "doubts": ["doubt"],
+        }
+    )
     return json.dumps({"reasoning": reasoning, "workstreams": list(entries), "handoff": note})
 
 

@@ -1328,6 +1328,17 @@ depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibe
 from = ["vibesys.orchestration.dynamic.core_policy"]
 expose = ["api", "api\\..*"]
 
+[[modules]]
+# The dynamic search's handoff files: renders each planning call's file and writes it into the
+# run's portable state through `Project`.
+path = "vibesys.dynamic_handoff"
+layer = "loops"
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.search"]
+
+[[interfaces]]
+from = ["vibesys.dynamic_handoff"]
+expose = ["HANDOFF_NAMESPACE", "HandoffDocuments", "HandoffOwner", "handoff_entries", "handoff_filename", "render_handoff"]
+
 [[interfaces]]
 from = ["vibesys.dynamic_core"]
 expose = ["dynamic_core_registration", "dynamic_operation_catalog", "dynamic_projector"]
@@ -1337,7 +1348,7 @@ expose = ["dynamic_core_registration", "dynamic_operation_catalog", "dynamic_pro
 # place that stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.dynamic_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.launch", "vibesys.orchestration.dynamic.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.run.evaluation_identity"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.dynamic_handoff", "vibesys.dynamic_roles", "vibesys.errors", "vibesys.orchestration.dynamic.core_policy", "vibesys.orchestration.dynamic.launch", "vibesys.orchestration.dynamic.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.run.evaluation_identity"]
 
 [[interfaces]]
 from = ["vibesys.dynamic_roles"]

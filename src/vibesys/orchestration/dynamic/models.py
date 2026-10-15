@@ -278,7 +278,9 @@ class WorkstreamExpectation(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    work_id: AgentId = Field(description="The hypothesis or profile ID of a workstream of this reply.")
+    work_id: AgentId = Field(
+        description="The hypothesis or profile ID of a workstream of this reply."
+    )
     expected: str = Field(min_length=1, description="What you expect this workstream to show.")
     if_it_succeeds: str = Field(
         min_length=1, description="What you would plan next if it shows what you expect."

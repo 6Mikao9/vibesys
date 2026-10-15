@@ -17,8 +17,8 @@ from vibesys.candidates.api import InputReading, Measured
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import (
-    PlannerHypothesisUpdate,
     PlannerHandoff,
+    PlannerHypothesisUpdate,
     PortfolioPlan,
     ProfileDecision,
     StrategyReason,

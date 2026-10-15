@@ -19,14 +19,14 @@ from typing import TYPE_CHECKING, Protocol, cast
 from vibesys.orchestration.dynamic.core_policy.api import prompts
 from vibesys.orchestration.dynamic.search.api import HANDOFF, HandoffWritten, WriteHandoff
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api.core import Applied, NotApplied, OperationEntry
+from vs_runtime.api.core import Applied, Inspection, NotApplied, OperationEntry
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import OperationRequest
     from vs_runtime.api import OwnedOperationResources
-    from vs_runtime.api.core import ExecutionContext, Inspection
+    from vs_runtime.api.core import ExecutionContext
 
 HANDOFF_NAMESPACE = "orchestrator-handoff"
 """The run-state namespace that holds the handoff files."""
@@ -82,9 +82,12 @@ class HandoffOwner:
     async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection:
         """Applied when the file already holds exactly what the request renders."""
         del context
-        typed = cast("WriteHandoff", request)
-        name = handoff_filename(typed.call)
-        if self._documents.read_bytes(name) == render_handoff(typed).encode("utf-8"):
+        return self.observe(cast("WriteHandoff", request))
+
+    def observe(self, request: WriteHandoff) -> Inspection:
+        """Whether the file holds what ``request`` renders now: the body of `inspect`."""
+        name = handoff_filename(request.call)
+        if self._documents.read_bytes(name) == render_handoff(request).encode("utf-8"):
             return Applied(self._written(name))
         return NotApplied()
 

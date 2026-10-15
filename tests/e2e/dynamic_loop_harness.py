@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 from tests.support.docker_environment import host_container_backend
+from tests.support.dynamic_script import REGISTRY
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
 from tests.support.real_git import REAL_PROCESSES
@@ -52,7 +53,6 @@ from vibesys.api import (
 )
 from vibesys.candidates import api as candidates
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from tests.support.dynamic_script import REGISTRY
 from vibesys.orchestration.dynamic.search.api import (
     FinishedWork,
     HypothesisRecord,
@@ -761,9 +761,7 @@ class CoreRecords:
         envelope = load_envelope(self.project, run_id)
         assert envelope is not None, f"no committed record for {run_id}"
         self.envelope: dict[str, Any] = envelope
-        decoded = REGISTRY.decode_envelope(
-            RunEnvelope[FlowState], json.dumps(envelope)
-        )
+        decoded = REGISTRY.decode_envelope(RunEnvelope[FlowState], json.dumps(envelope))
         published = FlowDriver.published(decoded.strategy, RunSnapshot)
         assert published is not None, "the search published no record"
         self.snapshot: RunSnapshot = published

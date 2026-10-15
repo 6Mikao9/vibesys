@@ -584,7 +584,9 @@ class FlowRun[C]:
         return isinstance(request, Operation) and request.request.kind in self._owners
 
     def _perform(self, request: object) -> BaseModel:
-        assert isinstance(request, Operation)
+        if not isinstance(request, Operation):
+            message = f"{type(request).__name__} is not an operation"
+            raise TypeError(message)
         return self._owners[request.request.kind](request.request)
 
     def _renders(self, request: object) -> bool:
