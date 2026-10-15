@@ -587,6 +587,16 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--dynamic-mode",
+        choices=("explore", "follow_plan"),
+        default="explore",
+        help=(
+            "Dynamic loop: 'explore' proposes and tests hypotheses; 'follow_plan' implements "
+            "the task's [plan] steps in order and is refused when the task declares no plan "
+            "(default: explore)."
+        ),
+    )
+    parser.add_argument(
         "--turn-drop-backoff-seconds",
         type=float,
         default=5.0,

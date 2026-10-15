@@ -45,3 +45,22 @@ def reviewed(*, passed: bool = True) -> str:
     return json.dumps(
         {"passed": passed, "analysis": "analysis", "feedback": "" if passed else "fix"}
     )
+
+
+def step(
+    identifier: str, evaluate: str = "none", depends_on: tuple[str, ...] = ()
+) -> dict[str, object]:
+    """One step of a task's plan, as its ``[plan]`` table or an outline reply writes it."""
+    return {
+        "id": identifier,
+        "title": f"title {identifier}",
+        "documents": [],
+        "done_when": f"the tests of {identifier} pass",
+        "evaluate": evaluate,
+        "depends_on": list(depends_on),
+    }
+
+
+def outline_reply(*steps: dict[str, object]) -> str:
+    """An outliner reply of plan steps."""
+    return json.dumps({"steps": list(steps)})

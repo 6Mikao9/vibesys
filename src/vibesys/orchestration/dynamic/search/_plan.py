@@ -153,16 +153,18 @@ def _implement_identity(
         code = ViolationCode.HYPOTHESIS_ID_USED
     if code is not None:
         return PlanViolation(path=path, code=code, subject=identifier)
-    return None if prior is None else _continuation(position, plan, prior)
+    repairing = ledger.repairable is not None and identifier in ledger.repairable
+    return None if prior is None else _continuation(position, plan, prior, repairing=repairing)
 
 
 def _continuation(
-    position: int, plan: WorkstreamPlan, prior: HypothesisRecord
+    position: int, plan: WorkstreamPlan, prior: HypothesisRecord, *, repairing: bool
 ) -> PlanViolation | None:
+    """Why ``plan`` may not continue ``prior``; a failed plan step is never terminal."""
     last = prior.rounds[-1] if prior.rounds else None
     if last is None:
         return None
-    if last.outcome in _TERMINAL_OUTCOMES:
+    if last.outcome in _TERMINAL_OUTCOMES and not repairing:
         return PlanViolation(
             path=("workstreams", position, "hypothesis_id"),
             code=ViolationCode.HYPOTHESIS_TERMINAL,
