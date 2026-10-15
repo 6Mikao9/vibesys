@@ -97,7 +97,7 @@ async def the_input(ctx: Flow, w: WorkstreamStart, work: Work) -> Baseline:
     admits jobs in its own order and counts a measurement's deadline from its dispatch: a
     candidate dispatched while the input's job still waits for admission would spend its
     deadline in that queue and settle as failed. It waits once its slot is bound
-    (`measure_and_interpret`) until binding moves into the backend (#2662, steps 2 to 4). A wait
+    (`measurement_of`) until binding moves into the backend (#2662, steps 2 to 4). A wait
     longer than the run's ``input_wait_seconds``, counted from the workstream's first wait that
     needs the input (`while_input_pending`), is reported to the root once, which tells the
     orchestrator on its next turn; the workstream goes on waiting. An input that comes
@@ -165,10 +165,10 @@ async def a_slot(ctx: Flow, w: WorkstreamStart, work: Work, revision: RevisionRe
             )
 
 
-async def measure_and_interpret(
+async def measurement_of(
     ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work, revision: RevisionRef
-) -> Evidence:
-    """Measure ``revision`` with the trusted evaluations and decode what the evidence says.
+) -> MeasurementResult:
+    """Measure ``revision`` with the trusted evaluations; what the evidence says is `evidence_of`.
 
     The measurement is dispatched only once a slot is bound to it and the input's measurement
     has landed (`the_input`): the workstream waits for both parked, so its agent slot may go to
@@ -177,6 +177,9 @@ async def measure_and_interpret(
 
     The backend measures again after an infrastructure failure, so a result that reaches here
     is the candidate's own; a measurement that ended without one is a failure of the workstream.
+    One that ended with a result still holds its slot until `evidence_of` releases it, so the
+    workstream can checkpoint the result first: a restart then resumes it with the result in
+    hand, and it releases the slot then.
     """
     purpose = purpose_of(w)
     names = (PROFILE_STAGE,) if w.plan.kind is WorkKind.PROFILE else ctx.task.terms.measured
@@ -192,9 +195,21 @@ async def measure_and_interpret(
         raise WorkEndedError(stopped) from None
     plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=names)
     found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
-    ctx.channel(REPORTS).send(Released(key=w.key))
     if isinstance(found, Failed):
+        ctx.channel(REPORTS).send(Released(key=w.key))
         raise ended_by(found, None)
+    return found
+
+
+async def evidence_of(
+    ctx: Flow, w: WorkstreamStart, ws: Workspace, revision: RevisionRef, found: MeasurementResult
+) -> Evidence:
+    """Release the slot ``found`` held and decode what its trusted evidence says of ``revision``.
+
+    Releasing a slot is idempotent, so a workstream resumed with its measurement releases it again.
+    """
+    ctx.channel(REPORTS).send(Released(key=w.key))
+    purpose = purpose_of(w)
     keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose=purpose)
     if not keys:
         none = Failure(

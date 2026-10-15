@@ -29,6 +29,7 @@ from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    DropReason,
     Failure,
     FailureKind,
     Proof,
@@ -42,6 +43,7 @@ from vs_core.api.search import (
     AssessmentKind,
     AttemptBudget,
     AttemptId,
+    AttemptRef,
     EvidenceKind,
     Failed,
     FailureReason,
@@ -268,6 +270,8 @@ class WorkEndedError(Exception):
 
 STOPPED = Failure(kind=FailureKind.STOPPED)
 """How an operator stop ends a workstream."""
+RESTARTED = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.RESTARTED)
+"""How a workstream ends whose workspace a restart after a code change could not give back."""
 
 
 @dataclass(frozen=True)
@@ -300,6 +304,17 @@ class WorkstreamDone:
     ) -> "WorkstreamDone":
         """No workspace was admitted: the slot is refunded."""
         return cls(start, failure=failure, refunded=True, withheld=withheld)
+
+    @classmethod
+    def lost(
+        cls, start: WorkstreamStart, workspace: AttemptRef, result: Result | None
+    ) -> "WorkstreamDone":
+        """Resumed after a code change without its workspace: the restart settled it.
+
+        The restart settled it as the workstream's salvage said: a candidate's code is kept as
+        work in progress, unmeasured (`salvage_of`); its settlement reached no flow.
+        """
+        return cls(start, failure=RESTARTED, generation=workspace.generation, result=result)
 
     @classmethod
     def closed(
@@ -366,6 +381,14 @@ def assertion(
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """The implementer's own outcomes that make a candidate ineligible however it measured."""
+
+
+def salvage_of(result: Result, terms: TaskTerms) -> Settle:
+    """How a candidate's workspace settles if a restart cannot give it back to its workstream.
+
+    As a candidate dropped unmeasured: never eligible, its code kept as work in progress.
+    """
+    return _not_measured(Closing(result=result, cause=RESTARTED), terms)
 
 
 def _unmeasured_step(closing: Closing, terms: TaskTerms) -> Settle:

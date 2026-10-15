@@ -48,7 +48,7 @@ Trusted evaluations ({{ evaluations.slots }} at once{% if evaluations.input_hold
 
 {% endfor %}
 {% for item in evaluations.dropped %}
-- dropped unmeasured: `{{ item.work_id }}` at `{{ rev(item.revision) }}`, {% if item.reason.value == 'superseded' %}replaced by {% if item.superseded_by %}`{{ item.superseded_by }}`{% else %}a newer candidate{% endif %}{% else %}the run stopped first{% endif %}
+- dropped unmeasured: `{{ item.work_id }}` at `{{ rev(item.revision) }}`, {% if item.reason.value == 'superseded' %}replaced by {% if item.superseded_by %}`{{ item.superseded_by }}`{% else %}a newer candidate{% endif %}{% elif item.reason.value == 'restarted' %}the run restarted first{% else %}the run stopped first{% endif %}
 
 {% endfor %}
 {% if evaluations.pick == 'ranked' %}
