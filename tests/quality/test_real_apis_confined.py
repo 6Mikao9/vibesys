@@ -1693,33 +1693,15 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
         "agent_image_is_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
         "ensure_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
     },
-    "libs/vs-runtime/src/vs_runtime/_agent_gpu_commands.py": {
-        "agent_gpu_commands:AgentGpuLauncher(...)": Owner.LANE_A,
-    },
     "libs/vs-runtime/src/vs_runtime/_run_environment.py": {
-        "DockerEnvironment.build_editor:OsProcesses()": Owner.LANE_A,
-        "DockerEnvironment.build_editor:SubprocessPipedProcessLauncher()": Owner.LANE_A,
-        "DockerEnvironment.reap_orphans:OsProcesses()": Owner.LANE_A,
-        "DockerEnvironment.reap_orphans:SubprocessPipedProcessLauncher()": Owner.LANE_A,
         "SkyPilotEnvironment._open_skypilot:SkyPilotBridge(...)": Owner.CONFINEMENT,
         "SkyPilotEnvironment._open_skypilot:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
     },
     "libs/vs-runtime/src/vs_runtime/_semantic_slurm_evaluation.py": {
         "SemanticSlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
     },
-    "libs/vs-runtime/src/vs_runtime/_slurm_environment.py": {
-        "SlurmEnvironment._start_command_broker:HostCommandBroker(...)": Owner.LANE_A,
-    },
     "libs/vs-runtime/src/vs_runtime/api/slurm_evaluation_stack.py": {
         "build_stack:clock=None": Owner.PURITY,
-    },
-    "libs/vs-sandbox/src/vs_sandbox/agent_gpu.py": {
-        "read_windows:SubprocessProbe()": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:processes=None": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:threads=None": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:SubprocessProbe()": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:SubprocessPipedProcessLauncher()": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:OsThreads()": Owner.LANE_A,
     },
     "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": {
         "FakeCommandRunner:default_factory=OsThreads": Owner.PURITY,
@@ -1727,11 +1709,6 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
     "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": {
         "NvidiaSmiTelemetry.__init__:SubprocessProbe()": Owner.CONFINEMENT,
         "GpuContentionMonitor.__init__:NvidiaSmiTelemetry()": Owner.CONFINEMENT,
-    },
-    "libs/vs-sandbox/src/vs_sandbox/host_command_broker.py": {
-        "BrokerTransport:default_factory=UnixNetwork": Owner.PURITY,
-        "BrokerTransport:default_factory=OsThreads": Owner.PURITY,
-        "HostCommandBroker.__init__:BrokerTransport()": Owner.PURITY,
     },
     "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py": {
         "build:SubprocessProbe()": Owner.CONFINEMENT,
