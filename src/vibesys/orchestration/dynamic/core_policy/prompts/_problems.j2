@@ -45,6 +45,12 @@ duplicate strategy update for hypothesis {{ quoted(item.subject) }}
 strategy update names unknown hypothesis {{ quoted(item.subject) }}
 {%- elif item.code.value == 'update-incomplete' -%}
 cannot update incomplete hypothesis {{ quoted(item.subject) }}
+{%- elif item.code.value == 'outside-plan' -%}
+{{ quoted(item.subject) }} is not a failed step of the task's plan; until every step is done, continue only failed steps
+{%- elif item.code.value == 'ranking-unknown' -%}
+{{ quoted(item.subject) }} is not a hypothesis or profile of this run; rank only IDs from the history or this reply
+{%- elif item.code.value == 'ranking-duplicate' -%}
+{{ quoted(item.subject) }} is ranked twice; list each ID once
 {%- else -%}
 {{ item.code.value }}
 {%- endif %}

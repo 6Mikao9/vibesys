@@ -152,6 +152,8 @@ A **source** is anything a flow can wait on for a value:
 | `Group[T]` | each finished task's result (or `TaskStopped(key)`), once each, in finishing order |
 | `ctx.timer(at)` | `TimeUp(at)`, once |
 | `ctx.stopped` | `StopRequested`, once |
+| `ctx.latch(key)` | the value some flow `set` on the run-wide latch `key` (once per run), once per handle |
+| `ctx.channel(key)` | each value any flow `send`s on the run-wide channel `key`, in the order sent, once; one flow reads it |
 
 **Every source yields each value once.** `await source` waits for its next value;
 `await ctx.first(a, b, c)` waits for the next value of whichever is ready first, and returns it
@@ -170,6 +172,47 @@ What a flow is waiting for is therefore always data: the runtime can say "ws-3 w
 implementer.2 or the stop" in logs and tests. A flow waiting only on sources that can never yield
 again (an empty group, a consumed stop, nothing pending) is a bug, raised as `Deadlock` with the
 flow and its sources named. Concurrent agent turns or measurements are tasks in a group.
+
+A **latch** carries a fact one flow learns to the flows beside it that need it, without passing
+it through their arguments (a registered flow takes only its snapshot). Declare its key once,
+typed by the value (`INPUT_MEASURED = LatchKey[Baseline]("input-measured")`); the flow that
+learns the fact calls `ctx.latch(INPUT_MEASURED).set(value)`, once (a second `set` is a
+`ContractError`), and a waiter calls `await ctx.latch(INPUT_MEASURED)`, which returns at once
+when it is already set. A key is its declaration: a second key with a name already in use is a
+`ContractError`, since the two could hold different types under one name.
+
+Latches belong to one journal and are not journaled. Replay runs the flow code again, so it sets
+them again at the same point. A restart after a code change starts a fresh journal from the flows'
+snapshots, and every latch starts empty: the flow that sets one must set it again, from its
+snapshot if it learned the value before the restart (`test_flows_restart.py` plays both orders).
+A latch that is never set is not a `Deadlock`; the waiter waits for its stop.
+
+A fact learned once per item (a verdict for each of many tasks) is one declaration with a latch
+per item: `ctx.latch(VERDICT.of(task_key))`. Every item key belongs to its declaration, so the
+flow that sets it and the flow that waits for it share the declared key, not an object.
+
+A **channel** carries facts the other way: many flows report, as they reach them, to the one flow
+that keeps their record (each workstream telling the root it waits for an evaluation slot).
+Declare its key once (`REPORTS = ChannelKey[Report]("reports")`); any flow calls
+`ctx.channel(REPORTS).send(value)`, and the reader waits on `ctx.channel(REPORTS)` in its
+`first`. Values are read in the order they were sent, each once. **A channel has one reader**:
+the first flow that waits on it reads it for the run, and a second flow that waits on it is a
+`ContractError`, since two readers would split its values by scheduling order. A flow that waits
+on an empty channel while no other flow is live waits for a value nobody can send, so the channel
+counts as unable to yield again toward a `Deadlock`; while another flow lives, it may still send.
+
+Like a latch, a channel is not journaled: replay sends again at the same points, and a restart
+after a code change starts it empty. **So never record a checkpoint between a send and the
+reader's receipt of what it implies.** A sender that checkpoints after its send resumes past it
+on a restart, so the reader, whose channel starts empty, never hears it; a reader that
+checkpoints after it read the value but before it folded it in loses the fact the same way. Send
+after the last checkpoint that a restart resumes from, as the dynamic search's workstreams do
+(each send of theirs follows the checkpoint it is redone from: a workstream that resumes past the
+input's measurement holds the baseline in its own snapshot, and the root sets `INPUT_MEASURED`
+again from its own). Unenforced: a
+checkpoint and a send are ordinary calls in flow code, and which pairs matter depends on what the
+reader does with the value; `test_flows.py` plays every channel story restarted after each
+step, which catches a lost send in the flows it covers.
 
 ### Groups
 
@@ -249,7 +292,12 @@ async def worker(ctx: Flow, job: Job) -> Done:
     ctx.checkpoint(job.after(step))  # later, a newer resume point
 ```
 
-The root's snapshot type is the config (`ctx.checkpoint(config)`). The restart resolves each flow
+The root may declare its own snapshot (`search(..., snapshot=S)`); it then takes `config | S`
+and resumes from its latest `ctx.checkpoint(S(...))`, holding what it had learned (the dynamic
+search's `DynamicResume`: its record and the input's measurement once it landed). A root without
+one resumes from its config. A snapshot type may be a union of versions (`snapshot=V1 | V2`):
+give each model a `version` literal, and a checkpoint that decodes as none of them raises
+`FlowCodeChanged` as any other unresumable change does. The restart resolves each flow
 through `group.start(key, fn, ...)`, which resumes the flow that had that key from its snapshot if
 the new code starts a flow of the same name there (otherwise `FlowCodeChanged`). Work since the
 last checkpoint is redone, and the results of requests in flight at the change are dropped when
@@ -261,10 +309,22 @@ Replay notices a code change when the new code issues different decisions, makes
 number of reads, or reads a recorded value as a type it no longer decodes as (the old code read
 the clock where the new code reads `ctx.task`). Each of these restarts the flows as above.
 
-**Resources do not leak across a restart.** A workspace a flow opened after its checkpoint is
-settled as part of the restart: the restart's first decisions withdraw each such attempt plainly
-as `cancelled` (decision ids `restart-settle.<n>`), and the restarted flow opens its workspaces
-again.
+**Resources do not leak across a restart, and work in them is not discarded silently.** A
+workspace a flow held at its latest checkpoint is carried across the restart: the resumed flow
+takes it back with `ctx.workspaces.reopen(attempt)` (a `Workspace`, or `NotReopened` when the
+attempt is not one this flow carried), and keeps working in it. Every other held workspace is
+settled as part of the restart (decision ids `restart-settle.<n>`), and the reason is recorded in
+`FlowState.restart_settled` (`RestartSettleReason`): opened after the checkpoint, flow not
+resumable, flow not restarted, not reopened, already settling, or unclaimed. The settlement is a
+plain `cancelled` discard unless the flow said otherwise with `ctx.workspaces.salvage(ws,
+revision, assessment)`, which names how the workspace settles if the restart cannot give it back
+(the dynamic search salvages its latest candidate as unmeasured work in progress).
+
+Requests in flight at the change are not asked twice. A resumed flow that asks again for a
+measurement of the same plan, a settlement of the same workspace, or the opening of the same
+workspace is attached to the request already in flight (`LiveFlows.in_flight`) and gets its
+answer. A workspace whose settlement was in flight is left to it (`ws.settling` on reopen, reason
+`settling`); a workspace that opens with no flow left to claim it is settled as `unclaimed`.
 
 ## The winner
 
@@ -320,6 +380,10 @@ def test_a_lost_turn_is_asked_again(begin: Begin) -> None:
 ```
 
 - `begin` runs every story twice: live, and with a save-and-restart after every step.
+- `RestartPolicy(steps=..., changes=(changed, original))` changes the code at those steps instead
+  of only saving: `code_changed(definition)` is the same search under code that no longer
+  replays, so every flow restarts from its checkpoint. Change at sampled steps, not every step:
+  a change at every step restarts the run before it can progress.
 - `run.waiting()` says what each flow waits for (its sources), so a test can assert it.
 - `run.timeline()` prints the run as a timeline (`worker.1:Plan stop t=30`); property tests print
   their shrunk counterexamples this way.

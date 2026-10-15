@@ -18,6 +18,7 @@ from pydantic.json_schema import GenerateJsonSchema
 
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.plan import HypothesisStrategyUpdate
+from vibesys.inputs import MAX_STEPS, PlanStep, outline_problems
 from vs_core.api import RevisionReply, Value
 from vs_runtime.api import (
     AgentId,
@@ -292,6 +293,15 @@ class PortfolioPlan(BaseModel):
         max_length=32,
         description="Parks and abandonments of completed hypotheses; empty when there are none.",
     )
+    evaluation_order: tuple[str, ...] = Field(
+        default=(),
+        max_length=64,
+        description=(
+            "The hypothesis or profile IDs whose waiting candidates a free trusted evaluation "
+            "slot measures first, first to measure first; empty to leave the order as it is. "
+            "Only read when the run lets the orchestrator rank its evaluations; ignored otherwise."
+        ),
+    )
 
     @field_validator("reasoning")
     @classmethod
@@ -487,6 +497,33 @@ class ProfilerResult(WorkResult):
     """What a profiler answers: it measures a revision and never produces one."""
 
 
+class PlanOutline(BaseModel):
+    """The steps of the task's plan, as the planner outlines them from the plan's documents.
+
+    The steps are checked by the rules a ``[plan]`` table's own steps are (`outline_problems`):
+    a reply that breaks one is corrected with the rule named.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    steps: tuple[PlanStep, ...] = Field(
+        min_length=1,
+        max_length=MAX_STEPS,
+        description=(
+            "The plan's steps in the order they should be implemented; each names the steps it "
+            "builds on."
+        ),
+    )
+
+    @field_validator("steps")
+    @classmethod
+    def _steps_form_a_plan(cls, steps: tuple[PlanStep, ...]) -> tuple[PlanStep, ...]:
+        problems = outline_problems(steps)
+        if problems:
+            raise ValueError("; ".join(problems))
+        return steps
+
+
 class ReviewResult(BaseModel):
     """Independent decision over one candidate and its linked evidence."""
 
@@ -503,6 +540,7 @@ __all__ = [
     "EvidenceReference",
     "ImplementPortfolioPlan",
     "ImplementerResult",
+    "PlanOutline",
     "PlannedWorkstream",
     "PlannerHypothesisUpdate",
     "PlannerWorkstream",

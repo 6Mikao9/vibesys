@@ -8,14 +8,17 @@ and how (`step`). Nothing here has a clock or a thread: `FlowRun` is the whole w
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
+    outline_reply,
     plan_reply,
     reviewed,
+    step,
 )
 from tests.vibesys.vibesys_flows import start_flow
 
@@ -86,6 +89,8 @@ TERMS = TaskTerms(
     accuracy_gated=(EvidenceKind.BENCHMARK,),
     operation_seconds=30,
 )
+UNMEASURED_TERMS = TERMS.model_copy(update={"measured": ()})
+"""A task with no stage configured to measure the input with."""
 FACTS = initial_state().run.facts.model_copy(update={"task": TERMS})
 """The run facts every story starts from: the core's sample facts plus a task that measures."""
 
@@ -96,13 +101,27 @@ _KINDS = {
 }
 _REGISTRY = OPERATIONS.registry()
 PLANNER_LABEL = "orchestrator"
+OUTLINER_LABEL = "outliner"
+INPUT_PATH = "input/"
+"""Where the waits of the task that measures the input are asked from."""
 INPUT_THROUGHPUT = 50.0
 _CANDIDATE_THROUGHPUT = 100.0
 
 
 def config(**overrides: object) -> DynamicConfig:
     """A one-round, one-wide config, overridden by the test."""
-    return DynamicConfig.model_validate({"max_rounds": 1, "max_in_flight": 1, **overrides})
+    fields = {"max_rounds": 1, "max_in_flight": 1}
+    return DynamicConfig.model_validate({**fields, **overrides})
+
+
+PLAN_DOCUMENTS = ["reference/README.md"]
+
+
+def plan_config(*steps: dict[str, object], **overrides: object) -> DynamicConfig:
+    """A config that follows a plan of ``steps`` (none: the run outlines them), as JSON parses it."""
+    plan = {"documents": PLAN_DOCUMENTS, "steps": list(steps)}
+    fields = {"max_rounds": 1, "max_in_flight": 1, "mode": "follow_plan", "plan": plan}
+    return DynamicConfig.model_validate_json(json.dumps({**fields, **overrides}))
 
 
 def begin(
@@ -111,11 +130,20 @@ def begin(
     restarting: bool,
     view: FakeView | None = None,
     adopting: bool = True,
+    input_first: bool = True,
     **world: Unpack[World],
 ) -> Host:
-    """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
+    """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves.
+
+    The search plans while it measures the input. With ``input_first`` (the default) the host
+    answers the input's measurement before anything else, so a story starts from a measured input
+    with the first planner turn open; a story about the overlap passes False.
+    """
     run = start_flow(dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting)
-    return Host(run, cfg, **world)
+    host = Host(run, cfg, **world)
+    if input_first:
+        host.measure_input()
+    return host
 
 
 class World(TypedDict, total=False):
@@ -141,6 +169,8 @@ class Host:
     settled: set[str] = field(default_factory=set)
     """The attempts whose workspace the host closed."""
     planner_calls: int = 0
+    made: list[tuple[Asked, RevisionRef]] = field(default_factory=list)
+    """Every candidate revision the implementer replied with, and the turn it answered."""
     _hypotheses: int = 0
     _commits: int = 0
     _events: int = 0
@@ -209,6 +239,32 @@ class Host:
             return True
         return False
 
+    def input_waits(self) -> list[Asked]:
+        """The open waits of the task that measures the input."""
+        return [item for item in self.run.open if item.path == INPUT_PATH]
+
+    def measure_input(self, *, limit: int = 10) -> None:
+        """Answer the input's measurement, and the decoding of its evidence, the ordinary way."""
+        for _ in range(limit):
+            waits = self.input_waits()
+            if not waits:
+                return
+            self.answer(waits[0])
+        message = f"the input's measurement did not end in {limit} steps: {self.run.timeline()}"
+        raise AssertionError(message)
+
+    def drain_beside_input(self, *, limit: int = 100) -> None:
+        """Answer every open wait but the input's the ordinary way, without moving the clock."""
+        for _ in range(limit):
+            others = [
+                item for item in self.run.open if item.until is not None and item.path != INPUT_PATH
+            ]
+            if not others:
+                return
+            self.answer(others[0])
+        message = f"waits beside the input's did not end in {limit} steps: {self.run.timeline()}"
+        raise AssertionError(message)
+
     def drain_until_turn(self, role: str, *, limit: int = 50) -> None:
         """Answer the ordinary way until a turn of ``role`` is open."""
         for _ in range(limit):
@@ -232,6 +288,8 @@ class Host:
     def _agent(self, asked: Asked, variant: int) -> None:
         if asked.label == PLANNER_LABEL:
             self._planner(asked, variant)
+        elif asked.label == OUTLINER_LABEL:
+            self._outliner(asked, variant)
         elif asked.label == "implementer":
             self._implementer(asked, variant)
         else:
@@ -254,6 +312,17 @@ class Host:
             case _:
                 self.run.lose(asked)
 
+    def _outliner(self, asked: Asked, variant: int) -> None:
+        """Outline two steps, the second building on the first; or fail the turn."""
+        match variant % 3:
+            case 0:
+                first, second = step("first"), step("second", "trusted", depends_on=("first",))
+                self.run.reply_raw(asked, outline_reply(first, second))
+            case 1:
+                self.run.reply_raw(asked, outline_reply(step("loop", depends_on=("loop",))))
+            case _:
+                self.run.fail(asked, FailureReason.TIMED_OUT)
+
     def _portfolio_size(self) -> int:
         """How many workstreams fill the slots free now, within the budget left."""
         record = self.record
@@ -267,7 +336,9 @@ class Host:
             case 0 | 2:
                 outcome = "supported" if variant % 6 == 0 else "implementation_failed"
                 result = ImplementerResult.model_validate_json(implemented(outcome))
-                self.run.reply(asked, result, checkpoint=self._retained())
+                retained = self._retained()
+                self.made.append((asked, retained.revision))
+                self.run.reply(asked, result, checkpoint=retained)
             case 1:
                 self.run.reply(asked, ImplementerResult.model_validate_json(implemented("blocked")))
             case 3:

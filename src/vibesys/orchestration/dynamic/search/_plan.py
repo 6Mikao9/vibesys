@@ -54,6 +54,8 @@ class PlanCheck(Value):
     accepted: tuple[WorkPlan, ...] = ()
     updates: tuple[PlanUpdate, ...] = ()
     violations: tuple[PlanViolation, ...] = ()
+    ranking: tuple[str, ...] | None = None
+    """The order to measure waiting candidates in; None when the reply gave none."""
 
     @property
     def valid(self) -> bool:
@@ -68,6 +70,15 @@ class PlanLedger:
     hypotheses: tuple[HypothesisRecord, ...]
     running: frozenset[str]
     profile_ids: frozenset[str]
+    repairable: frozenset[str] | None = None
+    """While the task's plan says what runs, the failed steps a reply may continue, and
+    nothing else; None when any workstream may be proposed."""
+    ranks: bool = False
+    """Whether the run lets the reply order its trusted evaluations."""
+    submitted: frozenset[str] = frozenset()
+    """Work ids whose candidate waits for its trusted measurement while no agent works on them.
+    They are still in flight: a reply may not continue, park or abandon them until the
+    measurement ends, so a hypothesis's records stay one round at a time."""
 
     def hypothesis(self, identifier: str) -> HypothesisRecord | None:
         """The record of a hypothesis ID, if one exists."""
@@ -142,7 +153,7 @@ def _implement_identity(
         prior is not None and prior.strategy is HypothesisStrategy.ABANDONED
     ):
         code = ViolationCode.HYPOTHESIS_ABANDONED
-    elif identifier in ledger.running:
+    elif identifier in ledger.running | ledger.submitted:
         code = ViolationCode.HYPOTHESIS_IN_FLIGHT
     elif prior is None and plan.continue_hypothesis:
         code = ViolationCode.HYPOTHESIS_UNKNOWN
@@ -150,16 +161,18 @@ def _implement_identity(
         code = ViolationCode.HYPOTHESIS_ID_USED
     if code is not None:
         return PlanViolation(path=path, code=code, subject=identifier)
-    return None if prior is None else _continuation(position, plan, prior)
+    repairing = ledger.repairable is not None and identifier in ledger.repairable
+    return None if prior is None else _continuation(position, plan, prior, repairing=repairing)
 
 
 def _continuation(
-    position: int, plan: WorkstreamPlan, prior: HypothesisRecord
+    position: int, plan: WorkstreamPlan, prior: HypothesisRecord, *, repairing: bool
 ) -> PlanViolation | None:
+    """Why ``plan`` may not continue ``prior``; a failed plan step is never terminal."""
     last = prior.rounds[-1] if prior.rounds else None
     if last is None:
         return None
-    if last.outcome in _TERMINAL_OUTCOMES:
+    if last.outcome in _TERMINAL_OUTCOMES and not repairing:
         return PlanViolation(
             path=("workstreams", position, "hypothesis_id"),
             code=ViolationCode.HYPOTHESIS_TERMINAL,
@@ -218,7 +231,7 @@ def _updates(
     for position, update in enumerate(plan.hypothesis_updates):
         path = ("hypothesis_updates", position, "hypothesis_id")
         record = ledger.hypothesis(update.hypothesis_id)
-        if update.hypothesis_id in ledger.running:
+        if update.hypothesis_id in ledger.running | ledger.submitted:
             code = ViolationCode.UPDATE_RUNNING
         elif update.hypothesis_id in seen:
             code = ViolationCode.UPDATE_DUPLICATE
@@ -239,6 +252,34 @@ def _updates(
             continue
         bad.append(PlanViolation(path=path, code=code, subject=update.hypothesis_id))
     return tuple(kept), tuple(bad)
+
+
+def _ranking(
+    plan: PortfolioPlan, ledger: PlanLedger
+) -> tuple[tuple[str, ...] | None, tuple[PlanViolation, ...]]:
+    """The reply's order of evaluations, when it gave one the run may take."""
+    order = plan.evaluation_order
+    if not order or not ledger.ranks:
+        return None, ()  # a run that picks the newest reads no order, so none is wrong
+    known = (
+        {item.hypothesis_id for item in ledger.hypotheses}
+        | ledger.profile_ids
+        | {planned_id(entry) for entry in plan.workstreams}
+    )
+    bad: list[PlanViolation] = []
+    seen: set[str] = set()
+    for position, identifier in enumerate(order):
+        path = ("evaluation_order", position)
+        if identifier in seen:
+            bad.append(
+                PlanViolation(path=path, code=ViolationCode.RANKING_DUPLICATE, subject=identifier)
+            )
+        elif identifier not in known:
+            bad.append(
+                PlanViolation(path=path, code=ViolationCode.RANKING_UNKNOWN, subject=identifier)
+            )
+        seen.add(identifier)
+    return (None, tuple(bad)) if bad else (order, ())
 
 
 def _work_plan(entry: WorkstreamPlan | ProfilePlan) -> WorkPlan:
@@ -265,6 +306,15 @@ def _work_plan(entry: WorkstreamPlan | ProfilePlan) -> WorkPlan:
     )
 
 
+def _repairs(entry: WorkstreamPlan | ProfilePlan, repairable: frozenset[str]) -> bool:
+    """Whether ``entry`` continues one of the failed plan steps."""
+    return (
+        isinstance(entry, WorkstreamPlan)
+        and entry.continue_hypothesis
+        and entry.hypothesis_id in repairable
+    )
+
+
 def validate(
     plan: PortfolioPlan,
     ledger: PlanLedger,
@@ -275,8 +325,9 @@ def validate(
 ) -> PlanCheck:
     """Split ``plan`` into schedulable entries and typed violations, never raising."""
     updates, bad = _updates(plan, ledger)
+    ranking, misranked = _ranking(plan, ledger)
     abandoned = frozenset(item.hypothesis_id for item in updates if item.disposition == "abandoned")
-    violations = list(bad)
+    violations = [*bad, *misranked]
     if len(plan.workstreams) > capacity:
         violations.append(
             PlanViolation(
@@ -297,6 +348,10 @@ def validate(
                 code=ViolationCode.DUPLICATE_ID,
                 subject=identifier,
             )
+        elif ledger.repairable is not None and not _repairs(entry, ledger.repairable):
+            violation = PlanViolation(
+                path=("workstreams", position), code=ViolationCode.OUTSIDE_PLAN, subject=identifier
+            )
         elif isinstance(entry, ProfilePlan):
             violation = _profile_violation(position, entry, ledger, offered, offer)
         else:
@@ -308,4 +363,6 @@ def validate(
             violations.append(violation)
         elif len(accepted) < capacity:
             accepted.append(_work_plan(entry))
-    return PlanCheck(accepted=tuple(accepted), updates=updates, violations=tuple(violations))
+    return PlanCheck(
+        accepted=tuple(accepted), updates=updates, violations=tuple(violations), ranking=ranking
+    )

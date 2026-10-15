@@ -40,10 +40,27 @@ from ._roles import (
     minutes,
     reply_errors,
 )
-from ._sources import Pending, Source, StopSource, Task, Timer
-from ._state import Dropped, FlowState, JournaledEvent, Waiting
+from ._sources import (
+    Channel,
+    ChannelKey,
+    Latch,
+    LatchKey,
+    Pending,
+    Source,
+    StopSource,
+    Task,
+    Timer,
+)
+from ._state import (
+    Dropped,
+    FlowState,
+    JournaledEvent,
+    RestartSettled,
+    RestartSettleReason,
+    Waiting,
+)
 from ._winner import INPUT, EndReason, Input, Kept, NoWinner
-from ._workspaces import Assessment, NotOpened, Workspace, Workspaces
+from ._workspaces import Assessment, NotOpened, NotReopened, Workspace, Workspaces
 
 __all__ = [
     "INPUT",
@@ -55,6 +72,8 @@ __all__ = [
     "Agents",
     "Assessment",
     "CaptureSpec",
+    "Channel",
+    "ChannelKey",
     "Clock",
     "Deadlock",
     "Dropped",
@@ -69,10 +88,15 @@ __all__ = [
     "Input",
     "JournaledEvent",
     "Kept",
+    "Latch",
+    "LatchKey",
     "NoWinner",
     "NotOpened",
+    "NotReopened",
     "Owners",
     "Pending",
+    "RestartSettleReason",
+    "RestartSettled",
     "RetryPolicy",
     "RevisionReply",
     "Role",

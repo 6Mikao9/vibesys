@@ -7,6 +7,7 @@ a later prompt and never written by the search.
 """
 
 from enum import StrEnum
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
@@ -40,6 +41,7 @@ class AgentName(StrEnum):
     IMPLEMENTER = "implementer"
     JUDGE = "judge"
     PROFILER = "profiler"
+    OUTLINER = "outliner"
 
 
 class WorkKind(StrEnum):
@@ -63,6 +65,26 @@ class Unreachable(Value):
     subject: str
 
 
+type StepId = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,39}$")]
+"""A plan step's id, as the task's ``[plan]`` table allows it; it names the step's workstreams."""
+
+
+class Step(Value):
+    """One step of the task's plan, as the search holds it (`vibesys.inputs.PlanStep`).
+
+    The fields are the table's own; a test keeps the two equal.
+    """
+
+    id: StepId
+    title: str = Field(min_length=1, max_length=200)
+    documents: tuple[str, ...] = ()
+    done_when: str = Field(min_length=1, max_length=2000)
+    evaluate: Literal["none", "trusted"]
+    """``none``: accepted on the judge's review of the implementer's own checks, never
+    measured; ``trusted``: a milestone the trusted evaluation measures."""
+    depends_on: tuple[StepId, ...] = ()
+
+
 class WorkPlan(Value):
     """The planner's validated choice for one workstream, in immutable form."""
 
@@ -79,6 +101,13 @@ class WorkPlan(Value):
     question: str = ""
     required_fields: tuple[str, ...] = ()
     decision_impact: str = ""
+    step: Step | None = None
+    """The plan step the workstream implements, in a run that follows the task's plan."""
+
+    @property
+    def measured(self) -> bool:
+        """Whether its candidate gets a trusted measurement: all but an unevaluated plan step."""
+        return self.step is None or self.step.evaluate == "trusted"
 
 
 # -- why work ended -----------------------------------------------------------------------------
@@ -111,6 +140,19 @@ class Blocker(Value):
     turn_failure: TurnFailureKind | None = None
 
 
+class DropReason(StrEnum):
+    """Why a candidate waiting for an evaluation slot was dropped without being measured. Closed."""
+
+    SUPERSEDED = "superseded"
+    """A newer submission of the same line holds its work: the same workstream line, or a
+    candidate built on it."""
+    STOPPED = "stopped"
+    """The run stopped (the operator, or its deadline) before the candidate was measured."""
+    RESTARTED = "restarted"
+    """The run restarted after a code change and could not give the workstream its workspace
+    back: the candidate's code is kept as work in progress, unmeasured."""
+
+
 class FailureKind(StrEnum):
     """Why a workstream ended without a measured candidate. Closed."""
 
@@ -140,6 +182,9 @@ class FailureKind(StrEnum):
     """Too many turns ended without a candidate that reached measurement."""
     REPEATED_TURN = "repeated-turn"
     """The last turn left nothing an earlier turn had not, so another would repeat it."""
+    NOT_MEASURED = "not-measured"
+    """The candidate waited for an evaluation slot and was dropped unmeasured; ``dropped`` says
+    why, and ``superseded_by`` names the newer submission that holds its work."""
 
 
 _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
@@ -154,6 +199,7 @@ _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
     FailureKind.NO_TRUSTED_EVIDENCE: (frozenset({"status"}), frozenset({"output"})),
     FailureKind.TURN_LIMIT: (frozenset({"turns", "limit", "blocker"}), frozenset()),
     FailureKind.REPEATED_TURN: (frozenset({"blocker"}), frozenset()),
+    FailureKind.NOT_MEASURED: (frozenset({"dropped"}), frozenset({"superseded_by"})),
 }
 
 
@@ -174,6 +220,8 @@ class Failure(Value):
     limit: int | None = None
     blocker: Blocker | None = None
     revision: RevisionRef | None = None
+    dropped: DropReason | None = None
+    superseded_by: str | None = None
 
     @model_validator(mode="after")
     def fields_match_kind(self) -> "Failure":
@@ -193,6 +241,8 @@ class Failure(Value):
                 "limit",
                 "blocker",
                 "revision",
+                "dropped",
+                "superseded_by",
             )
             if getattr(self, name) is not None
         } | ({"output"} if self.output else set())
@@ -290,6 +340,10 @@ class ViolationCode(StrEnum):
     UPDATE_DUPLICATE = "update-duplicate"
     UPDATE_UNKNOWN = "update-unknown"
     UPDATE_INCOMPLETE = "update-incomplete"
+    OUTSIDE_PLAN = "outside-plan"
+    """The run follows the task's plan, and the entry is not a repair of one of its failed steps."""
+    RANKING_UNKNOWN = "ranking-unknown"
+    RANKING_DUPLICATE = "ranking-duplicate"
 
 
 class Alternative(Value):

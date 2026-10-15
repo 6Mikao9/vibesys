@@ -2,13 +2,16 @@
 
 A generated run plans, starts and ends workstreams in any order, with every ending the flow can
 produce: failed, stopped before it started, never opened (refunded), parent unverifiable
-(withheld), closed with a kept candidate that is or is not winner-eligible. After every step the
-record's answers must agree with the facts: the budget the config states, the slots free, when
-planning may start again, when the search is over, who leads and why a search may have no winner.
+(withheld), closed with a kept candidate that is or is not winner-eligible. The input's measurement
+may land at any step, since planning does not wait for it. After every step the record's answers
+must agree with the facts: the budget the config states, the slots free, when planning may start
+again, when the search is over, that no workstream starts before the input is measured, who leads
+and why a search may have no winner.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -35,11 +38,14 @@ from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
 from vibesys.orchestration.dynamic.search.api import (
     Candidate,
+    EvaluationQueue,
     Failure,
     FailureKind,
     NoPlan,
     PlanCheck,
     PlanUpdate,
+    QueueState,
+    RecordState,
     Result,
     RunRecord,
     RunSnapshot,
@@ -66,7 +72,7 @@ ENDINGS: tuple[Ending, ...] = (
 type Step = tuple[str, int]
 WEIGHTED_KINDS = (
     *("plan", "plan", "start", "start", "end", "end", "end"),
-    *("continue", "child", "retire", "no-plan"),
+    *("continue", "child", "retire", "no-plan", "measured"),
 )
 STEPS = st.lists(
     st.tuples(
@@ -162,14 +168,16 @@ def _check(run: RunRecord, trace: Trace) -> None:
     else:
         assert run.may_plan(stopping=False)
 
-    assert not run.over(planning=True, stopping=True)
-    assert not run.over(planning=True, stopping=False)
+    for stopping in (True, False):
+        assert not run.over(planning=True, measuring=False, stopping=stopping)
+        assert not run.over(planning=False, measuring=True, stopping=stopping)
     if run.running or run.accepted:
-        assert not run.over(planning=False, stopping=True)
-        assert not run.over(planning=False, stopping=False)
+        assert not run.over(planning=False, measuring=False, stopping=True)
+        assert not run.over(planning=False, measuring=False, stopping=False)
     else:
-        assert run.over(planning=False, stopping=True)
-        assert run.over(planning=False, stopping=False) == (gate.failed or left == 0)
+        assert run.over(planning=False, measuring=False, stopping=True)
+        over = run.over(planning=False, measuring=False, stopping=False)
+        assert over == (gate.failed or left == 0)
 
     offered = {item.snapshot.revision.revision_id.root for item in run.offered()}
     assert not offered & trace.withheld
@@ -186,6 +194,12 @@ def _check(run: RunRecord, trace: Trace) -> None:
         assert run.ending() is None
     snapshot = run.snapshot()
     assert RunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
+    # resumed after a code change from what it checkpoints, the record is the same record
+    state = run.state()
+    assert RecordState.model_validate_json(state.model_dump_json()) == state
+    resumed = RunRecord.resumed(run.config, run.base, run.terms, state)
+    assert resumed.state() == state
+    assert resumed.snapshot() == snapshot
     assert [item.plan.work_id for item in snapshot.running] == [
         item.plan.work_id for item in run.running.values()
     ]
@@ -219,7 +233,7 @@ def _end(run: RunRecord, trace: Trace, pick: int) -> None:
 
 
 def _no_plan(run: RunRecord, _trace: Trace, pick: int) -> None:
-    stuck = pick == 0 and not run.running
+    stuck = pick == 0 and not run.running and run.baseline is not None
     run.planned(NoPlan(problem=None, stuck=stuck, blocked_at_done=len(run.finished_work)))
 
 
@@ -255,6 +269,12 @@ def _retire(run: RunRecord, _trace: Trace, pick: int) -> None:
     assert (retired.strategy, retired.reason_kind) == (update.disposition, update.reason_kind)
 
 
+def _measured(run: RunRecord, _trace: Trace, pick: int) -> None:
+    if run.baseline is None:
+        run.measured(INPUTS[sorted(INPUTS)[pick % len(INPUTS)]])
+        assert run.gate.blocked_at_done is None  # planning is asked again with the measurement
+
+
 ACTIONS: dict[str, Callable[[RunRecord, Trace, int], None]] = {
     "plan": _plan,
     "start": _start,
@@ -263,6 +283,7 @@ ACTIONS: dict[str, Callable[[RunRecord, Trace, int], None]] = {
     "continue": _continue,
     "child": _child,
     "retire": _retire,
+    "measured": _measured,
 }
 
 
@@ -273,8 +294,12 @@ def _step(run: RunRecord, trace: Trace, action: Step) -> None:
     ACTIONS[kind](run, trace, pick)
 
 
-def play(cfg: DynamicConfig, steps: list[Step]) -> tuple[RunRecord, Trace]:
+def play(
+    cfg: DynamicConfig, steps: list[Step], *, input_pending: bool = False
+) -> tuple[RunRecord, Trace]:
     run, trace = run_record(cfg), Trace()
+    if input_pending:
+        run.baseline = None
     for action in steps:
         before = dict(run.running)
         _step(run, trace, action)
@@ -290,11 +315,12 @@ def play(cfg: DynamicConfig, steps: list[Step]) -> tuple[RunRecord, Trace]:
     steps=STEPS,
     rounds=st.integers(1, 3),
     width=st.integers(1, 3),
+    input_pending=st.booleans(),
 )
 def test_the_record_keeps_its_budget_slots_gate_and_leader_whatever_order_things_happen_in(
-    steps: list[Step], rounds: int, width: int
+    steps: list[Step], rounds: int, width: int, *, input_pending: bool
 ) -> None:
-    play(config(max_rounds=rounds, max_in_flight=width), steps)
+    play(config(max_rounds=rounds, max_in_flight=width), steps, input_pending=input_pending)
 
 
 # -- how the search ends without a candidate --------------------------------------------------------
@@ -345,3 +371,17 @@ def test_a_search_ends_without_a_winner_only_when_no_candidate_stands_and_the_in
         assert isinstance(ending, NoWinner)
         if not trusted(baseline):
             assert ending.reason.startswith("no trusted result")
+
+
+def test_the_record_checkpoints_every_field_it_holds() -> None:
+    """A field added to the record or its queue is resumed after a code change, or is the run's.
+
+    What the run fixes (config, input revision, task terms; the queue's slots and policy) is
+    given again on resume; verdicts not yet handed over are handed again (`decided_verdicts`).
+    """
+    record = run_record()
+    gate = {f"gate_{item.name}" for item in dataclasses.fields(type(record.gate))}
+    held = {item.name for item in dataclasses.fields(RunRecord)} - {"config", "base", "terms"}
+    assert (held - {"gate"}) | gate == set(RecordState.model_fields)
+    queue = {item.name for item in dataclasses.fields(EvaluationQueue)}
+    assert queue - {"slots", "policy", "_verdicts"} == set(QueueState.model_fields)

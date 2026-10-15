@@ -22,10 +22,12 @@ from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
 from vibesys.orchestration.dynamic.search.api import (
     IMPLEMENTER,
     JUDGE,
+    OUTLINER,
     PLANNER,
     PROFILER,
     EvidenceCitation,
     ImplementPrompt,
+    OutlinePrompt,
     PlannerCorrection,
     PlannerPrompt,
     ProfilePrompt,
@@ -72,6 +74,7 @@ TEMPLATE_FILES: dict[Template, str] = {
     PromptTemplate.IMPLEMENT: IMPLEMENTER.prompt,
     PromptTemplate.REVIEW: JUDGE.prompt,
     PromptTemplate.PROFILE_REQUEST: PROFILER.prompt,
+    PromptTemplate.OUTLINE: OUTLINER.prompt,
     CoreProtocolTemplate.RESUME: IMPLEMENTER.exchanges.resume or "",
     CoreProtocolTemplate.REPLY_CORRECTION: IMPLEMENTER.exchanges.correction or "",
     CoreProtocolTemplate.WAIT_UNRECORDED: IMPLEMENTER.exchanges.wait_unrecorded or "",
@@ -84,6 +87,7 @@ FRESH_TURNS = (
     PromptTemplate.IMPLEMENT,
     PromptTemplate.REVIEW,
     PromptTemplate.PROFILE_REQUEST,
+    PromptTemplate.OUTLINE,
 )
 """The templates that open a fresh agent turn."""
 
@@ -165,6 +169,14 @@ def _buildable(draw: st.DrawFn) -> list[dict[str, object]]:
     ]
 
 
+INPUT_FAILURES = (
+    st.none()
+    | st.just({"kind": "benchmark-failed", "output": "bench-output"})
+    | st.just({"kind": "readings-undecodable"})
+)
+"""Why the input is unmeasurable, or None: one kind with the evaluator's output, one without."""
+
+
 @st.composite
 def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, object]:
     """The fields a planning request and its correction share."""
@@ -182,11 +194,7 @@ def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, obje
         "history": draw(_history()),
         "older_ids": tuple(draw(st.lists(tokens("old"), max_size=2, unique=True))),
         "baseline": draw(METRICS),
-        "input_failure": draw(
-            st.none()
-            | st.just({"kind": "benchmark-failed", "output": "bench-output"})
-            | st.just({"kind": "readings-undecodable"})
-        ),
+        "input_failure": draw(INPUT_FAILURES),
         "profiling": draw(st.booleans()),
         "profile_fields": fields,
         "problem": problem,
@@ -248,6 +256,8 @@ IMPLEMENT_PROMPTS = st.builds(
     prior_failure_tail=st.just("") | tokens("tail"),
     last_blocker=st.none() | BLOCKERS,
     turns_without_candidate=st.integers(0, 3),
+    baseline_pending=st.booleans(),
+    input_failure=INPUT_FAILURES,
 )
 EVALUATIONS = st.lists(
     st.builds(
@@ -280,6 +290,12 @@ PROFILE_PROMPTS = st.builds(
     ),
     target=REVISIONS,
 )
+OUTLINE_PROMPTS = st.builds(
+    OutlinePrompt,
+    documents=st.lists(tokens("doc").map(lambda name: f"reference/{name}.md"), min_size=1).map(
+        tuple
+    ),
+)
 ROLES = ("implementer", "judge", "profiler")
 CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
     PromptTemplate.PORTFOLIO: PLANNER_PROMPTS,
@@ -287,6 +303,7 @@ CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
     PromptTemplate.IMPLEMENT: IMPLEMENT_PROMPTS,
     PromptTemplate.REVIEW: REVIEW_PROMPTS,
     PromptTemplate.PROFILE_REQUEST: PROFILE_PROMPTS,
+    PromptTemplate.OUTLINE: OUTLINE_PROMPTS,
     CoreProtocolTemplate.RESUME: st.one_of(
         st.builds(
             ResumeFacts,

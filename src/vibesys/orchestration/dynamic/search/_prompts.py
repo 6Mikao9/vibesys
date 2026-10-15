@@ -14,7 +14,14 @@ from pydantic import Field
 from vibesys.candidates.api import InputFailure, ReviewEvaluation
 from vibesys.metrics import MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search import _roles as roles
-from vibesys.orchestration.dynamic.search._values import Blocker, Failure, PlanProblem
+from vibesys.orchestration.dynamic.search._queue import PickPolicy
+from vibesys.orchestration.dynamic.search._values import (
+    Blocker,
+    DropReason,
+    Failure,
+    PlanProblem,
+    WorkKind,
+)
 from vs_core.api.search import (
     Correction,
     EvidenceId,
@@ -33,6 +40,7 @@ class PromptTemplate(StrEnum):
     IMPLEMENT = "implement"
     REVIEW = "review"
     PROFILE_REQUEST = "profile_request"
+    OUTLINE = "outline"
 
 
 class EvidenceCitation(Value):
@@ -119,6 +127,50 @@ class ProfileHistoryRow(Value):
 type WorkstreamHistoryRow = HistoryRow | ProfileHistoryRow
 
 
+class QueuedEvaluation(Value):
+    """A trusted measurement a workstream asked for: holding a slot, or waiting for one."""
+
+    work_id: str
+    kind: WorkKind
+    revision: RevisionRef
+    waited_seconds: int | None = None
+    """Seconds since it was submitted; None when the request was built without the clock."""
+
+
+class DroppedEvaluation(Value):
+    """A candidate dropped from the queue without being measured."""
+
+    work_id: str
+    revision: RevisionRef
+    reason: DropReason
+    superseded_by: str | None = None
+
+
+class EvaluationQueueView(Value):
+    """The run's trusted evaluations as the orchestrator sees them."""
+
+    pick: PickPolicy
+    slots: int = Field(gt=0)
+    input_holds_slot: bool
+    """The input's own measurement holds a slot (it always goes first)."""
+    measuring: tuple[QueuedEvaluation, ...] = ()
+    waiting: tuple[QueuedEvaluation, ...] = ()
+    """In the order free slots will take them."""
+    dropped: tuple[DroppedEvaluation, ...] = ()
+    """The latest candidates dropped unmeasured."""
+    ranking: tuple[str, ...] = ()
+    """The order the orchestrator last gave (``ranked`` only)."""
+
+
+class InputOverdueView(Value):
+    """The input's measurement has kept a workstream waiting longer than the run allows."""
+
+    waited_seconds: int | None = None
+    """How long the first workstream has waited; None when the request was built without the
+    clock."""
+    limit_seconds: int
+
+
 class _Planning(RolePromptContext):
     """What a planning request says; the request and its correction share it."""
 
@@ -135,9 +187,15 @@ class _Planning(RolePromptContext):
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
     input_failure: InputFailure | None = None
+    baseline_pending: bool = False
+    """The input is still being measured: what is scheduled now starts when its reading lands."""
     profiling: bool = False
     profile_fields: tuple[str, ...] = ()
     """The measurement fields a profile workstream may require: what the capture supplies."""
+    evaluations: EvaluationQueueView | None = None
+    """The trusted evaluation queue; None in a request built before the queue existed."""
+    input_overdue: InputOverdueView | None = None
+    """The input's measurement is overdue: workstreams wait for it to settle their candidates."""
     problem: PlanProblem | None = None
     """Why the earlier reply, or the earlier planning call, was not accepted; None if it was lost."""
 
@@ -179,6 +237,10 @@ class ImplementPrompt(RolePromptContext):
     last_blocker: Blocker | None = None
     """The latest turn of this workstream that ended without a candidate."""
     turns_without_candidate: int = Field(default=0, ge=0)
+    baseline_pending: bool = False
+    """The input's own measurement had not landed when the turn was asked."""
+    input_failure: InputFailure | None = None
+    """Why the input's own measurement failed, when it had when the turn was asked."""
 
 
 class ReviewPrompt(RolePromptContext):
@@ -208,8 +270,23 @@ class ProfilePrompt(RolePromptContext):
     target: RevisionRef
 
 
+class OutlinePrompt(RolePromptContext):
+    """Request to outline the steps of the task's plan from its documents."""
+
+    reply_schema: ClassVar[SchemaRef | None] = roles.OUTLINER.reply_schema
+
+    template: Literal[PromptTemplate.OUTLINE] = PromptTemplate.OUTLINE
+    documents: tuple[str, ...]
+    """The plan's documents, as paths relative to the task directory."""
+
+
 type PromptContext = Annotated[
-    PlannerPrompt | PlannerCorrection | ImplementPrompt | ReviewPrompt | ProfilePrompt,
+    PlannerPrompt
+    | PlannerCorrection
+    | ImplementPrompt
+    | ReviewPrompt
+    | ProfilePrompt
+    | OutlinePrompt,
     Field(discriminator="template"),
 ]
 """The union the render operation carries; the exchanges core starts are core's own contexts."""

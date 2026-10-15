@@ -29,6 +29,7 @@ from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    DropReason,
     Failure,
     FailureKind,
     Proof,
@@ -42,6 +43,7 @@ from vs_core.api.search import (
     AssessmentKind,
     AttemptBudget,
     AttemptId,
+    AttemptRef,
     EvidenceKind,
     Failed,
     FailureReason,
@@ -75,7 +77,8 @@ class WorkstreamStart(Value):
     prior: RoundRecord | None
     """The previous round of the same hypothesis, when this workstream continues it."""
     config: DynamicConfig
-    baseline: Baseline
+    baseline: Baseline | None
+    """The input's measurement when the workstream started; None while it was still being measured."""
 
     @property
     def attempt(self) -> AttemptId:
@@ -97,6 +100,11 @@ class WorkstreamStart(Value):
         """An implementer works in an isolated child of the parent; others only read it."""
         mode = WorkspaceMode.ISOLATED_CHILD if self.implements else WorkspaceMode.READ_ONLY_REVISION
         return WorkspacePlan(mode=mode, base=self.parent)
+
+    @property
+    def review_always(self) -> bool:
+        """Whether every candidate is reviewed: a plan step accepted on review alone."""
+        return not self.plan.measured
 
     @property
     def turns(self) -> int:
@@ -180,6 +188,15 @@ class Closing(Value):
         """The revision the attempt retained, if any."""
         return None if self.result is None else self.result.candidate.revision
 
+    def scored(self, plan: WorkPlan) -> bool:
+        """Whether settling it compares a candidate with the input, so needs its measurement.
+
+        Only a measured candidate is compared. A plan step accepted on its own checks
+        (``evaluate = "none"``) never is, and a closing with a failure cause is ineligible however
+        its candidate measured: both settle at once, without waiting for the input's measurement.
+        """
+        return plan.measured and self.candidate is not None and self.cause is None
+
     @property
     def review_passed(self) -> bool | None:
         """The judge's verdict, or None when no review ran."""
@@ -213,6 +230,12 @@ class Work:
     """The latest candidate the implementer made, reviewed or not."""
     workspace: Workspace | None = None
     """The workspace once it opened; None before, and when the workstream never got one."""
+    baseline: Baseline | None = None
+    """The input's measurement once the workstream has it (see `_measure.the_input`)."""
+    input_wait_since: float | None = None
+    """When, on the run clock, the workstream first waited on something that needs the input."""
+    overdue_reported: bool = False
+    """Whether its wait for the input has passed the run's limit (`_measure.while_input_pending`)."""
 
     def ended(self, ended: "WorkEndedError") -> Closing:
         """The closing of work that did not finish: what it carried, with the failure."""
@@ -247,6 +270,8 @@ class WorkEndedError(Exception):
 
 STOPPED = Failure(kind=FailureKind.STOPPED)
 """How an operator stop ends a workstream."""
+RESTARTED = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.RESTARTED)
+"""How a workstream ends whose workspace a restart after a code change could not give back."""
 
 
 @dataclass(frozen=True)
@@ -281,6 +306,17 @@ class WorkstreamDone:
         return cls(start, failure=failure, refunded=True, withheld=withheld)
 
     @classmethod
+    def lost(
+        cls, start: WorkstreamStart, workspace: AttemptRef, result: Result | None
+    ) -> "WorkstreamDone":
+        """Resumed after a code change without its workspace: the restart settled it.
+
+        The restart settled it as the workstream's salvage said: a candidate's code is kept as
+        work in progress, unmeasured (`salvage_of`); its settlement reached no flow.
+        """
+        return cls(start, failure=RESTARTED, generation=workspace.generation, result=result)
+
+    @classmethod
     def closed(
         cls, start: WorkstreamStart, workspace: Workspace | None, closing: Closing
     ) -> "WorkstreamDone":
@@ -301,11 +337,14 @@ class WorkstreamDone:
 # -- what a workstream asserts when it closes ----------------------------------------------------------
 
 
-def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
+def assertion(
+    w: WorkstreamStart, closing: Closing, terms: TaskTerms, baseline: Baseline | None
+) -> Settle:
     """The assessments, eligibility and retention the closing proposes for the workspace.
 
     A profile workstream measures a revision without proposing one, so it settles as ineligible
-    and discarded. A candidate is eligible when it passed the task's gates and beats the input.
+    and discarded. A candidate is eligible when it passed the task's gates and beats the input,
+    so a closing that is scored (`Closing.scored`) needs the input's measurement (``baseline``).
     """
     if w.plan.kind is WorkKind.PROFILE:
         profile = reading_of(closing.readings, EvidenceKind.PROFILING)
@@ -316,9 +355,16 @@ def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
             outcome="failed" if closing.cause is not None else "succeeded",
             candidate=None,
         )
+    if not w.plan.measured:
+        return _unmeasured_step(closing, terms)
+    if closing.cause is not None and closing.cause.kind is FailureKind.NOT_MEASURED:
+        return _not_measured(closing, terms)
+    if closing.scored(w.plan) and baseline is None:
+        message = "a candidate is scored only once the input's measurement is known"
+        raise ValueError(message)
     space = space_of(terms)
     benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
-    seen = w.baseline.reading if isinstance(w.baseline, Measured) else None
+    seen = baseline.reading if isinstance(baseline, Measured) else None
     beats = improves_on(
         measurement(None if benchmark is None else benchmark.headline()),
         measurement(seen.metrics[0] if seen is not None and seen.metrics else None),
@@ -335,6 +381,54 @@ def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """The implementer's own outcomes that make a candidate ineligible however it measured."""
+
+
+def salvage_of(result: Result, terms: TaskTerms) -> Settle:
+    """How a candidate's workspace settles if a restart cannot give it back to its workstream.
+
+    As a candidate dropped unmeasured: never eligible, its code kept as work in progress.
+    """
+    return _not_measured(Closing(result=result, cause=RESTARTED), terms)
+
+
+def _unmeasured_step(closing: Closing, terms: TaskTerms) -> Settle:
+    """The settlement of a plan step accepted on review alone (``evaluate = "none"``).
+
+    Its candidate is never measured, so never winner-eligible. When the judge accepted it and
+    nothing failed, it is retained as work in progress: the revision the steps that depend on it
+    build on. Anything else is discarded, as an unmeasured candidate is.
+    """
+    settled = settle_for(closing, gates=gates_of(terms), beats_input=False, unsettled=UNSETTLED)
+    accepted = (
+        closing.candidate is not None
+        and closing.cause is None
+        and closing.review_passed is True
+        and closing.outcome not in UNSETTLED
+    )
+    if not accepted:
+        return settled.model_copy(update={"eligible": False})
+    return settled.model_copy(
+        update={"retention": "wip", "candidate": closing.candidate, "eligible": False}
+    )
+
+
+def _not_measured(closing: Closing, terms: TaskTerms) -> Settle:
+    """The settlement of a candidate dropped from the evaluation queue unmeasured.
+
+    It is never eligible, but the code is kept as work in progress: a newer candidate that
+    superseded it was built on it, and a plan step may still build on it.
+    """
+    settled = settle_for(closing, gates=gates_of(terms), beats_input=False, unsettled=UNSETTLED)
+    if closing.candidate is None:
+        return settled.model_copy(update={"eligible": False, "outcome": "cancelled"})
+    return settled.model_copy(
+        update={
+            "retention": "wip",
+            "candidate": closing.candidate,
+            "eligible": False,
+            "outcome": "cancelled",
+        }
+    )
 
 
 # -- how a workstream ends ---------------------------------------------------------------------------

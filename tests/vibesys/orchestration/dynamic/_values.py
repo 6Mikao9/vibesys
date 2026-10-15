@@ -235,10 +235,17 @@ def update_entry(
 
 
 def portfolio(
-    *entries: WorkstreamPlan | ProfileDecision, updates: tuple[PlannerHypothesisUpdate, ...] = ()
+    *entries: WorkstreamPlan | ProfileDecision,
+    updates: tuple[PlannerHypothesisUpdate, ...] = (),
+    order: tuple[str, ...] = (),
 ) -> PortfolioPlan:
-    """A planner reply of ``entries`` and ``updates``."""
-    return PortfolioPlan(reasoning="portfolio", workstreams=entries, hypothesis_updates=updates)
+    """A planner reply of ``entries`` and ``updates``, ranking evaluations in ``order``."""
+    return PortfolioPlan(
+        reasoning="portfolio",
+        workstreams=entries,
+        hypothesis_updates=updates,
+        evaluation_order=order,
+    )
 
 
 @st.composite
@@ -268,7 +275,8 @@ portfolios = st.builds(
 
 def config(**changes: object) -> DynamicConfig:
     """A search config of a few rounds, overridden by the test."""
-    return DynamicConfig.model_validate({"max_rounds": 3, "max_in_flight": 2, **changes})
+    fields = {"max_rounds": 3, "max_in_flight": 2}
+    return DynamicConfig.model_validate({**fields, **changes})
 
 
 def round_record(

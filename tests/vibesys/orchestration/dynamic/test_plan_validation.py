@@ -8,7 +8,7 @@ accepted fits the record, and the accepted entries alone always make a valid pla
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -54,6 +54,10 @@ class Record:
     profiles: list[str] = field(default_factory=list)
     parents: list[ParentSnapshot] = field(default_factory=list)
     offer: ProfileOffer | None = None
+    repairable: frozenset[str] | None = None
+    """The failed plan steps a reply may continue, in a run the task's plan decides."""
+    ranks: bool = False
+    """Whether the run lets the reply order its evaluations."""
 
 
 def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> PlanCheck:
@@ -69,8 +73,8 @@ def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> Plan
         finished_profile(identifier, index) for index, identifier in enumerate(record.profiles, 90)
     )
     run.parents = tuple(record.parents)
-    world = run.world()
-    return validate(plan, world.ledger, run.offered(), capacity=capacity, offer=record.offer)
+    ledger = replace(run.world().ledger, repairable=record.repairable, ranks=record.ranks)
+    return validate(plan, ledger, run.offered(), capacity=capacity, offer=record.offer)
 
 
 def codes(result: PlanCheck) -> list[ViolationCode]:
@@ -188,6 +192,21 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             Record(hypotheses=[hypothesis_record("a")]),
             "hypothesis_updates.0.hypothesis_id",
         ),
+        ViolationCode.OUTSIDE_PLAN: (
+            portfolio(implement_entry("n")),
+            Record(hypotheses=[FINISHED_A], repairable=frozenset({"a"})),
+            "workstreams.0",
+        ),
+        ViolationCode.RANKING_UNKNOWN: (
+            portfolio(implement_entry("n"), order=("n", "z")),
+            Record(hypotheses=[FINISHED_A], ranks=True),
+            "evaluation_order.1",
+        ),
+        ViolationCode.RANKING_DUPLICATE: (
+            portfolio(implement_entry("n"), order=("a", "n", "a")),
+            Record(hypotheses=[FINISHED_A], ranks=True),
+            "evaluation_order.2",
+        ),
     }
 
 
@@ -232,6 +251,27 @@ def test_a_plan_that_breaks_no_rule_is_accepted_whole_in_order() -> None:
     assert [(item.hypothesis_id, item.disposition) for item in result.updates] == [
         ("c", HypothesisStrategy.ABANDONED)
     ]
+
+
+def test_a_run_that_ranks_evaluations_takes_the_replys_order_of_known_and_planned_ids() -> None:
+    plan = portfolio(implement_entry("n"), order=("n", "a"))
+    result = check(plan, Record(hypotheses=[FINISHED_A], ranks=True))
+    assert result.valid
+    assert result.ranking == ("n", "a")
+    assert check(portfolio(implement_entry("n")), Record(ranks=True)).ranking is None
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(order=st.lists(st.sampled_from(["a", "n", "z"]), max_size=4).map(tuple))
+def test_a_run_that_picks_the_newest_ignores_any_order_the_reply_gives(
+    order: tuple[str, ...],
+) -> None:
+    """The order is read only when the run lets the orchestrator rank; a reply that gives one
+    anyway, known IDs or not, is not sent back for it."""
+    result = check(portfolio(implement_entry("n"), order=order), Record(hypotheses=[FINISHED_A]))
+    assert result.valid, result.violations
+    assert result.ranking is None
+    assert [item.work_id for item in result.accepted] == ["n"]
 
 
 @st.composite

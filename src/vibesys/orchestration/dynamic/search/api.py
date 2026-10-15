@@ -5,7 +5,7 @@ from vibesys.candidates.api import review_evaluations as evaluations
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
 from vibesys.orchestration.dynamic.search._budget import budget
-from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._config import MAX_WIDTH, DynamicConfig
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
 from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
@@ -52,8 +52,11 @@ from vibesys.orchestration.dynamic.search._plan import (
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._prompts import (
+    EvaluationQueueView,
     EvidenceCitation,
     ImplementPrompt,
+    InputOverdueView,
+    OutlinePrompt,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -63,31 +66,50 @@ from vibesys.orchestration.dynamic.search._prompts import (
     PromptTemplate,
     ReviewPrompt,
 )
+from vibesys.orchestration.dynamic.search._queue import (
+    Bound,
+    Dropped,
+    EvaluationQueue,
+    PickPolicy,
+    QueueSnapshot,
+    QueueState,
+    SlotVerdict,
+    Submission,
+)
+from vibesys.orchestration.dynamic.search._reports import InputOverdue, Released
+from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume
 from vibesys.orchestration.dynamic.search._roles import (
     IMPLEMENTER,
     JUDGE,
+    OUTLINER,
     PLANNER,
     PROFILER,
     ROLES,
 )
 from vibesys.orchestration.dynamic.search._run_state import (
+    DynamicResume,
     NoPlan,
+    Outlined,
+    RecordState,
     Running,
     RunRecord,
     RunSnapshot,
     Scheduled,
 )
 from vibesys.orchestration.dynamic.search._search import dynamic
+from vibesys.orchestration.dynamic.search._steps import Outline, PlanMode, StepState
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    DropReason,
     Failure,
     FailureKind,
     FinishedWork,
     HypothesisRecord,
     Proof,
     RoundRecord,
+    Step,
     ViolationCode,
     WorkKind,
     WorkPlan,
@@ -98,7 +120,9 @@ __all__ = [
     "IMPLEMENTER",
     "INTERPRET_KIND",
     "JUDGE",
+    "MAX_WIDTH",
     "OPERATIONS",
+    "OUTLINER",
     "PLANNER",
     "PROFILER",
     "RENDER_KIND",
@@ -109,9 +133,15 @@ __all__ = [
     "AgentName",
     "Blocker",
     "BlockerKind",
+    "Bound",
     "Candidate",
     "Closing",
+    "DropReason",
+    "Dropped",
     "DynamicConfig",
+    "DynamicResume",
+    "EvaluationQueue",
+    "EvaluationQueueView",
     "Evidence",
     "EvidenceCitation",
     "EvidenceReading",
@@ -121,15 +151,22 @@ __all__ = [
     "FinishedWork",
     "HypothesisRecord",
     "ImplementPrompt",
+    "InputOverdue",
+    "InputOverdueView",
     "InterpretEvidence",
     "MetricRow",
     "NoPlan",
+    "Outline",
+    "OutlinePrompt",
+    "Outlined",
     "ParentConflictError",
     "ParentOption",
     "ParentSnapshot",
     "ParentVerification",
     "PartialRow",
+    "PickPolicy",
     "PlanCheck",
+    "PlanMode",
     "PlanUpdate",
     "PlanViolation",
     "PlannerCorrection",
@@ -140,9 +177,14 @@ __all__ = [
     "PromptContext",
     "PromptTemplate",
     "Proof",
+    "QueueSnapshot",
+    "QueueState",
+    "RecordState",
+    "Released",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
     "Result",
+    "ResumeStage",
     "ReviewEvaluation",
     "ReviewPrompt",
     "RoundRecord",
@@ -150,6 +192,10 @@ __all__ = [
     "RunSnapshot",
     "Running",
     "Scheduled",
+    "SlotVerdict",
+    "Step",
+    "StepState",
+    "Submission",
     "Verdict",
     "VerifyParentRevision",
     "ViolationCode",
@@ -157,6 +203,7 @@ __all__ = [
     "WorkKind",
     "WorkPlan",
     "WorkstreamDone",
+    "WorkstreamResume",
     "WorkstreamStart",
     "assertion",
     "blocked_failure",

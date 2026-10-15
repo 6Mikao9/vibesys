@@ -264,7 +264,14 @@ def _agent_policy_descriptor(
             "max_in_flight": args.max_in_flight,
             "judge_every": args.judge_every,
             "max_unmeasured_turns": args.max_unmeasured_turns,
+            "evaluation_slots": args.evaluation_slots,
+            "max_backlog": args.max_backlog,
+            "pick": args.evaluation_pick,
+            "input_wait_seconds": args.input_wait_seconds,
+            "mode": args.dynamic_mode,
         }
+        if bundle.plan is not None:
+            options["plan"] = bundle.plan.model_dump(mode="json")
     else:
         # The serial searches read only their own knobs; their agents' retries and timeouts are
         # the roles'. Only the multi search has a judge to ask every so often.

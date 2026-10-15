@@ -16,7 +16,17 @@ from ._evaluation import Evaluation
 from ._kit import Kit
 from ._owners import Owners
 from ._retry import Again, GaveUp, RetryPolicy, Tries
-from ._sources import First, Source, StopSource, Task, Timer
+from ._sources import (
+    Channel,
+    ChannelKey,
+    First,
+    Latch,
+    LatchKey,
+    Source,
+    StopSource,
+    Task,
+    Timer,
+)
 from ._winner import INPUT, Input, Kept
 from ._workspaces import Workspaces
 
@@ -88,6 +98,23 @@ class Flow:
         self, a: Source[A], b: Source[B], c: Source[C], d: Source[D], /
     ) -> A | B | C | D: ...
 
+    @overload
+    async def first[A, B, C, D, E](
+        self, a: Source[A], b: Source[B], c: Source[C], d: Source[D], e: Source[E], /
+    ) -> A | B | C | D | E: ...
+
+    @overload
+    async def first[A, B, C, D, E, F](
+        self,
+        a: Source[A],
+        b: Source[B],
+        c: Source[C],
+        d: Source[D],
+        e: Source[E],
+        f: Source[F],
+        /,
+    ) -> A | B | C | D | E | F: ...
+
     async def first(self, *sources: Source[object]) -> object:
         """The next value of whichever source is ready first; ties go to the earliest."""
         self._kit.stop_point()
@@ -96,6 +123,23 @@ class Flow:
     def timer(self, at: Seconds) -> Timer:
         """A source that fires once, when the run clock reaches ``at``."""
         return self._kit.timer(at)
+
+    def latch[T](self, key: LatchKey[T]) -> Latch[T]:
+        """A handle on the run-wide latch ``key``: ``set`` it once, or wait for its value.
+
+        For a fact one flow learns and the flows beside it wait for, such as a measurement every
+        later step builds on. Each handle yields the value once; take one per wait.
+        """
+        return self._run.latch(key)
+
+    def channel[T](self, key: ChannelKey[T]) -> Channel[T]:
+        """A handle on the run-wide channel ``key``: ``send`` to it, or wait for its next value.
+
+        For facts several flows report, as they reach them, to the one flow that keeps their
+        record (each workstream telling the root it waits for an evaluation slot). Values are
+        read in the order sent, each once.
+        """
+        return self._run.channel(key)
 
     @property
     def path(self) -> str:
@@ -138,10 +182,12 @@ class Flow:
             raise ContractError(("checkpoint",), "only a registered flow has checkpoints")
         if not isinstance(snapshot, definition.snapshot):
             raise ContractError(
-                ("checkpoint",), f"{definition.name} snapshots are {definition.snapshot.__name__}"
+                ("checkpoint",), f"{definition.name} snapshots are {definition.snapshot_name}"
             )
         task.snapshot = snapshot
         task.checkpointed = True
+        # what the flow holds now is part of the world this snapshot resumes into
+        task.holds = [held.model_copy(update={"carried": True}) for held in task.holds]
 
     # the run
 

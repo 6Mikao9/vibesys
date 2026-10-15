@@ -1050,7 +1050,7 @@ expose = ["IssueQueueLaunch", "PLUGIN", "REGISTRATION"]
 from = ["vibesys.orchestration.issue_queue"]
 
 [[interfaces]]
-expose = ["AgentInput", "BenchmarkCommand", "BenchmarkResult", "EnvironmentInput", "EVALUATOR_SRC_DIRNAME", "EvaluatorInput", "InputBundle", "InputCommand", "InputManifest", "InputManifestParseError", "InputSynthesisError", "MANIFEST_NAME", "ModalEnvironmentInput", "OBJECTIVES_NAME", "ObjectiveAxisInput", "ObjectivesInput", "PROTOCOL_OUTPUT_FLAG", "ParetoInput", "ProfileGuidedInput", "SynthesizedInputSpec", "WorkspaceInput", "WorkspaceSource", "benchmark_output_argument", "load_input_manifest", "load_objectives", "load_project_task", "load_task", "render_input_manifest", "synthesize_input_bundle", "with_operator_constraints"]
+expose = ["AgentInput", "BenchmarkCommand", "BenchmarkResult", "EnvironmentInput", "EVALUATOR_SRC_DIRNAME", "EvaluatorInput", "InputBundle", "InputCommand", "InputManifest", "InputManifestParseError", "InputSynthesisError", "MANIFEST_NAME", "ModalEnvironmentInput", "OBJECTIVES_NAME", "ObjectiveAxisInput", "ObjectivesInput", "PROTOCOL_OUTPUT_FLAG", "ParetoInput", "ProfileGuidedInput", "SynthesizedInputSpec", "WorkspaceInput", "WorkspaceSource", "benchmark_output_argument", "load_input_manifest", "load_objectives", "load_project_task", "load_task", "render_input_manifest", "synthesize_input_bundle", "with_operator_constraints", "MAX_STEPS", "PlanStep", "TaskPlan", "outline_problems"]
 from = ["vibesys.inputs"]
 
 [[interfaces]]
@@ -1198,7 +1198,7 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.models"
 layer = "roles_search"
-depends_on = ["vs_core", "vs_evaluation.api", "vibesys.hypothesis", "vibesys.orchestration.agent_options", "vs_runtime"]
+depends_on = ["vs_core", "vs_evaluation.api", "vibesys.hypothesis", "vibesys.inputs", "vibesys.orchestration.agent_options", "vs_runtime"]
 
 [[interfaces]]
 expose = ["[A-Za-z][A-Za-z0-9_]*"]
@@ -1360,7 +1360,7 @@ expose = ["api", "api\\..*"]
 # The dynamic search as one flow: its roles, its values and the pure helpers its flows share.
 path = "vibesys.orchestration.dynamic.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.metrics"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.inputs", "vibesys.metrics"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.search"]

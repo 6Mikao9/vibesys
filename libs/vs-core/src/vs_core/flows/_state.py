@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from hashlib import sha256
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, field_validator
 
 from vs_core._registry import ContractError
-from vs_core.types.common import AttemptRef, DecisionId, RunFacts, Value
+from vs_core.types.common import (
+    AttemptRef,
+    DecisionId,
+    RevisionRef,
+    RunFacts,
+    Value,
+    WorkspaceMode,
+)
 from vs_core.types.kinds import EventKind
 from vs_core.types.search import (
     AdoptionFinished,
@@ -29,7 +37,14 @@ from vs_core.types.search import (
     YieldFailed,
 )
 from vs_core.types.settlement import Selection
-from vs_core.types.strategy import Decision, StrategyState
+from vs_core.types.strategy import (
+    Decision,
+    Measure,
+    Settle,
+    StartAttempt,
+    StrategyState,
+    Withdraw,
+)
 from vs_core.types.until import Failed
 
 if TYPE_CHECKING:
@@ -98,6 +113,68 @@ class Issued(Value):
     count: int
 
 
+class Held(Value):
+    """A workspace a flow holds open, and what a restart does with it.
+
+    ``carried`` says the flow's latest checkpoint was recorded while it held the workspace: a
+    restart that resumes the flow from that checkpoint keeps the workspace open for it
+    (``ctx.workspaces.reopen``). ``salvage`` is how the workspace settles if the restart cannot
+    give it back to the flow (``ctx.workspaces.salvage``); without one it settles as cancelled
+    and discarded. ``base`` and ``mode`` are how it was opened, so a reopened workspace is the
+    same one. ``settling`` is the settlement the flow asked for while it is in flight: a restart
+    leaves the workspace to it. A hold persisted before these fields existed is read as a bare
+    attempt.
+    """
+
+    attempt: AttemptRef
+    base: RevisionRef | None = None
+    mode: WorkspaceMode | None = None
+    carried: bool = False
+    salvage: Settle | None = None
+    settling: Settle | None = None
+
+
+class RestartSettleReason(StrEnum):
+    """Why a restart settled a workspace instead of giving it back to the flow that held it."""
+
+    OPENED_AFTER_CHECKPOINT = "opened-after-checkpoint"
+    """The flow opened it after its latest checkpoint: the flow resumes before it opened it."""
+    FLOW_NOT_RESUMABLE = "flow-not-resumable"
+    """The flow that held it is not a registered flow with a checkpoint, so it starts afresh."""
+    NOT_RESTARTED = "not-restarted"
+    """The new code did not start the flow again in the step that restarted the run."""
+    NOT_REOPENED = "not-reopened"
+    """The flow was resumed, and ended without reopening it."""
+    SETTLING = "settling"
+    """Nothing was issued: the flow had asked for its settlement, which core goes on with."""
+    UNCLAIMED = "unclaimed"
+    """It opened after the flow that asked for it stopped waiting for it (a restart dropped the
+    request, or the flow ended first): no flow holds it."""
+
+
+class RestartSettled(Value):
+    """A workspace a restart settled itself: the flow that held it, why, and what was kept."""
+
+    attempt: AttemptRef
+    flow: str
+    reason: RestartSettleReason
+    retention: Literal["discard", "wip", "candidate"]
+
+
+class InFlight(Value):
+    """A workspace, a measurement or a settlement a flow waited for when the run restarted.
+
+    It waits for a resumed flow that asks for it again (see ``_run.issue``). ``path`` and
+    ``label`` are the flow and the id root it issued the request under.
+    """
+
+    path: str
+    label: str
+    request: Measure | Withdraw | StartAttempt
+    closed: WorkspaceClosed | None = None
+    """For a settlement: core's answer, when it came before the resumed flow asked again."""
+
+
 class LiveFlow(Value):
     """A flow that is running, with the latest snapshot it can be restarted from.
 
@@ -107,10 +184,26 @@ class LiveFlow(Value):
     path: str
     name: str | None
     snapshot_json: str
-    holds: tuple[AttemptRef, ...] = ()
-    """Workspaces the flow had open: a restart settles them, so none leaks."""
+    holds: tuple[Held, ...] = ()
+    """Workspaces the flow had open: a restart gives each back or settles it, so none leaks."""
+
     checkpointed: bool = False
     """Whether the flow recorded a snapshot with ``ctx.checkpoint`` (its start is not one)."""
+
+    @field_validator("holds", mode="before")
+    @classmethod
+    def _legacy_holds(cls, value: object) -> object:
+        """Read a hold persisted as a bare attempt (before ``Held``) as a hold of that attempt."""
+        if not isinstance(value, list | tuple):
+            return value
+        # A before-validator hands JSON over as Python lists, which a strict tuple refuses:
+        # decode each hold here, leniently, from what ``Held`` itself wrote.
+        return tuple(
+            Held.model_validate(item if "attempt" in item else {"attempt": item}, strict=False)
+            if isinstance(item, dict)
+            else item
+            for item in value
+        )
 
 
 class LiveFlows(Value):
@@ -124,6 +217,9 @@ class LiveFlows(Value):
     """The flow's published record as JSON (``ctx.publish``), kept beside the journal."""
     choice: Selection | None = None
     """The winner named so far (``ctx.choose``): restarted flows keep it."""
+    in_flight: tuple[InFlight, ...] = ()
+    """The measurements the flows wait for: a restart gives each to the resumed flow that asks
+    for it again, instead of measuring twice."""
 
 
 class Waiting(Value):
@@ -147,6 +243,8 @@ class FlowState(StrategyState):
     base: LiveFlows | None = None
     dropped: tuple[Dropped, ...] = ()
     """Results since the last restart that reached no waiting flow (abandoned or unknown)."""
+    restart_settled: tuple[RestartSettled, ...] = ()
+    """The workspaces the restarts since this journal began settled themselves, with why."""
 
 
 _DECISIONS = TypeAdapter(list[Decision])

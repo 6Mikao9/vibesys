@@ -12,7 +12,7 @@ from vibesys.orchestration.dynamic.search._planner import (
     MAX_CORRECTIONS,
     MAX_FRESH_ASKS,
 )
-from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, PROFILER
+from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, OUTLINER, PROFILER
 from vs_core.api.search import MAX_SUBMISSIONS_PER_MEASUREMENT
 
 ADOPTION_ROUNDS = 3
@@ -30,9 +30,15 @@ def budget(config: DynamicConfig) -> RunBudget:
     # An implementer asked until a candidate reaches measurement, then once per resumed
     # measurement submission, and the judge once for each review.
     per_workstream = chain * (config.max_unmeasured_turns + 1 + MAX_SUBMISSIONS_PER_MEASUREMENT)
+    # A run that follows a plan declaring no steps asks once for its outline.
+    outlining = (
+        turn_chain(corrections=OUTLINER.corrections, lost_turns=OUTLINER.lost_turns)
+        if config.follows_plan and config.plan is not None and not config.plan.steps
+        else 0
+    )
     return RunBudget(
         attempts=starts,
-        turns=(starts + 1) * planning + starts * per_workstream,
+        turns=(starts + 1) * planning + starts * per_workstream + outlining,
         parallel=config.max_in_flight,
         refunds=starts,
         adoption_rounds=ADOPTION_ROUNDS,
