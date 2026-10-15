@@ -1,13 +1,14 @@
 """Agents keep working while candidates wait for a trusted evaluation, bound only when a slot frees.
 
-A workstream whose candidate is reviewed submits it to the run's evaluation queue and parks: its
-agent slot goes to new work at once, whether or not an evaluation slot is free. Which candidate an
-evaluation slot measures is decided only when the slot frees: the newest waiting one. A newer
-candidate of the same hypothesis (built on the waiting one, so it holds its code) drops the older
-one unmeasured, with the reason recorded and shown to the orchestrator. A workstream that waits
-longer than the run allows for the input's measurement is not left hanging silently: the
-orchestrator is told on its next turn. A plan step accepted on its own checks never waits for the
-input at all.
+A run launched without the queue options behaves as before: a workstream keeps its agent slot
+until it ends. With a backlog, a workstream whose candidate is reviewed submits it to the run's
+evaluation queue and parks: its agent slot goes to new work at once, whether or not an evaluation
+slot is free. Which candidate an evaluation slot measures is decided only when the slot frees: the
+newest waiting one. A parked hypothesis is still in flight, so it is not continued until its
+result is in. A stop keeps the reviewed code of what it kept from its measurement. A workstream
+that waits longer than the run allows for the input's measurement is not left hanging silently:
+the orchestrator is told on its next turn. A plan step accepted on its own checks never waits for
+the input at all.
 """
 
 from __future__ import annotations
@@ -32,9 +33,7 @@ from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
-    DropReason,
     DynamicConfig,
-    FailureKind,
     PlannerCorrection,
     PlannerPrompt,
     PromptTemplate,
@@ -218,7 +217,9 @@ def test_a_hypothesis_whose_candidate_waits_is_continued_only_once_its_result_is
     assert [(item.code, item.subject) for item in correction.problem.violations] == [
         ("hypothesis-in-flight", "h2")
     ]
-    assert "hypothesis 'h2' is still in flight" in render(PromptTemplate.PORTFOLIO_CORRECTION, correction)
+    assert "hypothesis 'h2' is still in flight" in render(
+        PromptTemplate.PORTFOLIO_CORRECTION, correction
+    )
     host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h3")))
     _answer_but_measurements(host)
     assert not [
