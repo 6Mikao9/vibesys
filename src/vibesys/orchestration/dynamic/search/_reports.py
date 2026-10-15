@@ -4,10 +4,10 @@ A workstream reports on the `REPORTS` channel, in the order things happen to it:
 candidate for its trusted measurement (`Submission`), its measurement no longer holds a slot
 (`Released`), it has waited for the input's measurement longer than the run allows
 (`InputOverdue`). The root folds each report into its record and answers a submission on the
-workstream's own `VERDICTS` latch: measure now, or never (`_queue.Verdict`).
+workstream's own `VERDICTS` latch: measure now, or never (`_queue.SlotVerdict`).
 """
 
-from vibesys.orchestration.dynamic.search._queue import Submission, Verdict
+from vibesys.orchestration.dynamic.search._queue import SlotVerdict, Submission
 from vs_core.api.search import ChannelKey, LatchKey, Value
 
 
@@ -31,5 +31,5 @@ type Report = Submission | Released | InputOverdue
 REPORTS = ChannelKey[Report]("workstream-reports")
 """Every workstream reports here; the root reads it."""
 
-VERDICTS = LatchKey[Verdict]("evaluation-verdict")
+VERDICTS = LatchKey[SlotVerdict]("evaluation-verdict")
 """The root's answer to a submission, one latch per workstream key (``VERDICTS.of(key)``)."""

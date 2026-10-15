@@ -78,7 +78,14 @@ The dynamic search shows the layout. Everything about the search sits in
   The host adds only what it alone can in `src/vibesys/dynamic_roles.py` (system prompts, tools,
   capabilities).
 - `_config.py`: `DynamicConfig`, the search's own knobs: `max_rounds`, `max_in_flight`,
-  `judge_every`, `max_unmeasured_turns`, `max_continuation_rounds`, `profiling`.
+  `evaluation_slots`, `max_backlog`, `pick`, `input_wait_seconds`, `judge_every`,
+  `max_unmeasured_turns`, `max_continuation_rounds`, `profiling`.
+- `_queue.py` and `_reports.py`: the run's trusted evaluations. A workstream submits its
+  candidate on the `REPORTS` channel and parks (within `max_backlog`, its agent slot goes to new
+  work); the root's `EvaluationQueue` binds a free evaluation slot to the candidate the pick
+  policy chooses (the newest, or the orchestrator's `evaluation_order`) and answers each
+  workstream on its own `VERDICTS.of(key)` latch. A newer candidate of the same line drops the
+  waiting one as superseded.
 - `_budget.py`: `budget(config)`, what the run may spend, derived from the config in one place.
 - `_prompts.py`: the typed prompt contexts the search sends. The search never builds prompt
   text; templates are rendered from `core_policy/prompts/`.

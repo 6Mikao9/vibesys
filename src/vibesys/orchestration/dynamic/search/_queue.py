@@ -13,7 +13,7 @@ free does the queue decide which submission it measures, by the run's pick polic
 
 A submission is dropped, with the reason recorded, when a newer submission supersedes it (the
 same workstream line, or a candidate built on it: its code is in the newer one). Each decision
-is a `Verdict` for the workstream that submitted (`verdicts`), which the root hands over. How
+is a `SlotVerdict` for the workstream that submitted (`verdicts`), which the root hands over. How
 many submissions may wait is not the queue's to bound: a waiting workstream past the run's
 backlog keeps its agent slot instead (`RunRecord.working`), so the backlog applies backpressure
 on new work rather than dropping finished work.
@@ -73,7 +73,7 @@ class Dropped(Value):
     """For a superseded submission, the work id of the submission that superseded it."""
 
 
-type Verdict = Annotated[Bound | Dropped, Field(discriminator="kind")]
+type SlotVerdict = Annotated[Bound | Dropped, Field(discriminator="kind")]
 """What the queue decided for a submission: measured now, or never."""
 
 
@@ -107,7 +107,7 @@ class EvaluationQueue:
     received: int = 0
     built_on: dict[RevisionRef, RevisionRef] = field(default_factory=dict)
     """Each submitted candidate's parent: the lines a newer submission continues."""
-    _verdicts: list[tuple[str, Verdict]] = field(default_factory=list)
+    _verdicts: list[tuple[str, SlotVerdict]] = field(default_factory=list)
 
     @property
     def free(self) -> int:
@@ -153,7 +153,7 @@ class EvaluationQueue:
         self.pending = [item for item in self.pending if item.submission.key != key]
         self._verdicts = [item for item in self._verdicts if item[0] != key]
 
-    def verdicts(self) -> list[tuple[str, Verdict]]:
+    def verdicts(self) -> list[tuple[str, SlotVerdict]]:
         """The verdicts decided since the last call, in the order they were decided."""
         decided, self._verdicts = self._verdicts, []
         return decided

@@ -45,8 +45,8 @@ from vibesys.orchestration.dynamic.search._prompts import (
 from vibesys.orchestration.dynamic.search._queue import (
     EvaluationQueue,
     QueueSnapshot,
+    SlotVerdict,
     Submission,
-    Verdict,
 )
 from vibesys.orchestration.dynamic.search._reports import InputOverdue
 from vibesys.orchestration.dynamic.search._steps import (
@@ -327,7 +327,7 @@ class RunRecord:
         """The trusted measurement of ``key`` no longer holds its slot."""
         self.evaluations.release(key)
 
-    def verdicts(self, *, stopping: bool) -> list[tuple[str, Verdict]]:
+    def verdicts(self, *, stopping: bool) -> list[tuple[str, SlotVerdict]]:
         """Bind the waiting candidates to the free slots: the verdicts for their workstreams.
 
         After a stop nothing is bound: the waiting workstreams are stopped instead.

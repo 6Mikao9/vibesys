@@ -37,6 +37,8 @@ BOUNDS = {
     "judge_every": (1, 1000),
     "max_unmeasured_turns": (1, 32),
     "max_continuation_rounds": (0, 1000),
+    "evaluation_slots": (1, 32),
+    "max_backlog": (0, 32),
 }
 
 
