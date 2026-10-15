@@ -54,7 +54,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
-from vs_sim.api import MonotonicClock, OsThreads
+from vs_sim.api import MonotonicClock, OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock, SimNetwork
 
 if TYPE_CHECKING:
@@ -237,7 +237,10 @@ async def scenario(
         bridges.append(bridge)
         return bridge if yields_over is None else yields_over(bridge)
 
-    with open_skeleton_world(tmp_path, strategy, agents=host) as world:
+    # The scripted agent calls the bridge from a real worker thread.
+    with open_skeleton_world(
+        tmp_path, strategy, agents=host, blocking=ThreadBlockingRunner()
+    ) as world:
         world.yields = yields
         world.limits = limits
         yield Scenario(world, agents[0], bridges)

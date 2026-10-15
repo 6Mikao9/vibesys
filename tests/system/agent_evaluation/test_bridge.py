@@ -68,7 +68,7 @@ from vs_runtime.api.core import (
     handle_for,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
-from vs_sim.api import MonotonicClock, OsThreads
+from vs_sim.api import MonotonicClock, OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import (
     ManualClock,
     SimNetwork,
@@ -216,7 +216,14 @@ async def scenario(
         bridges.append(bridge)
         return bridge
 
-    with open_skeleton_world(tmp_path, SkeletonStrategy(), agents=agents, timed=timed) as world:
+    # The agent calls the bridge from a real worker thread over a socket-like transport.
+    with open_skeleton_world(
+        tmp_path,
+        SkeletonStrategy(),
+        agents=agents,
+        timed=timed,
+        blocking=ThreadBlockingRunner(),
+    ) as world:
         world.yields = yields
         world.limits = sample_limits(max_turns=2)
         yield Scenario(world, writers[0], bridges)

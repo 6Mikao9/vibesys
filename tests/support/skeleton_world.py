@@ -79,8 +79,8 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock, clock_from, current_virtual_clock
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, clock_from, current_virtual_clock
 from vs_slurm.api import (
     SlurmConfig,
     SlurmSshTransport,
@@ -109,7 +109,7 @@ if TYPE_CHECKING:
         TurnYields,
     )
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
-    from vs_sim.api import Clock, SleepingClock
+    from vs_sim.api import BlockingRunner, Clock, SleepingClock
 
 LEASE = 100.0
 # A Slurm job that has not ended this long after it was submitted is cancelled and fails: well
@@ -217,6 +217,10 @@ class World:
     times the store's file writes and directory syncs."""
     evaluations: list[SemanticSlurmEvaluationExecutor] = field(default_factory=list)
     """The evaluation executor of every process started, which a host closes at exit."""
+    blocking: BlockingRunner = field(default_factory=InlineBlockingRunner)
+    """Where the hosts' blocking work runs. Inline by default, so the world has no real thread
+    for a ``SimThreads`` to meet; a world whose agent blocks on a real thread hands a
+    ``ThreadBlockingRunner``, and then runs its executor calls on worker threads."""
 
     def initial(self) -> CoreState:
         """The state of a run that has not started, from the real baseline commit."""
@@ -298,7 +302,7 @@ class World:
             ),
             operations=self.operations,
             threads=OsThreads(),
-            blocking=ThreadBlockingRunner(),
+            blocking=self.blocking,
         )
         # The skeleton checks for orphan waits after every commit, so a stall fails where it starts.
         bindings = dataclasses.replace(bindings, check_liveness=True)
@@ -528,6 +532,7 @@ def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; e
     timed: tuple[Clock, float] | None = None,
     agents: Callable[[Path], SessionHost] | None = None,
     git: GitKind = GitKind.FAKE,
+    blocking: BlockingRunner | None = None,
 ) -> Iterator[World]:
     """A fresh run on in-memory Git (or ``git=GitKind.REAL``, real Git) with the Fake Slurm cluster.
 
@@ -547,4 +552,5 @@ def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; e
             strategy=strategy or SkeletonStrategy(),
             operations=_skeleton_operations(env, tmp_path / "templates"),
             timed=timed,
+            blocking=blocking if blocking is not None else InlineBlockingRunner(),
         )
