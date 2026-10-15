@@ -5,7 +5,9 @@ evaluation queue and waits until a slot is bound to it (`a_slot`), so its agents
 work meanwhile. Which waiting candidate a free slot measures is the queue's choice (`_queue`).
 """
 
-from vibesys.candidates.api import Baseline
+from typing import Literal
+
+from vibesys.candidates.api import Baseline, decode_input, input_measurement
 from vibesys.metrics import AcceptedReading, accept_readings
 from vibesys.orchestration.dynamic.search._ids import INPUT_MEASURED
 from vibesys.orchestration.dynamic.search._operations import EvidenceReadings
@@ -35,16 +37,50 @@ from vs_core.api.search import (
     Flow,
     MeasurementPurpose,
     MeasurementRecipe,
+    MeasurementResult,
     RevisionRef,
     Source,
     Stopped,
     TimeUp,
+    Value,
     Workspace,
+    flow,
     trusted_keys,
 )
 
 PROFILE_STAGE = "profile"
 """The task's stage that captures a profile."""
+
+
+class InputPending(Value):
+    """The input's measurement is still to be taken (or in flight)."""
+
+    kind: Literal["input-pending"] = "input-pending"
+
+
+class InputTaken(Value):
+    """The input's trusted measurement is in, to decode."""
+
+    kind: Literal["input-taken"] = "input-taken"
+    result: MeasurementResult
+
+
+@flow(snapshot=InputPending | InputTaken, name="measure-input")
+async def measure_the_input(ctx: Flow, at: InputPending | InputTaken) -> Baseline:
+    """Measure the input once per run, even across a restart after a code change.
+
+    It checkpoints the measurement as soon as it is in, so a restart while its evidence is
+    decoded decodes it again instead of measuring again; a restart while it is measured waits
+    for the same measurement (core re-attaches the request).
+    """
+    ctx.checkpoint(at)
+    if isinstance(at, InputTaken):
+        return await decode_input(ctx, at.result)
+    measured = await input_measurement(ctx)
+    if not isinstance(measured, MeasurementResult):
+        return measured
+    ctx.checkpoint(InputTaken(result=measured))
+    return await decode_input(ctx, measured)
 
 
 def input_so_far(ctx: Flow, w: WorkstreamStart) -> Baseline | None:

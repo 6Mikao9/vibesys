@@ -23,13 +23,19 @@ stop reaches every group (workstreams settle what they started; a planning call 
 measurement are dropped, since nothing they would lead to would start); the root sees it as
 `StopRequested`, plans and binds no more, and returns once nothing is in flight. The winner is
 named as the search goes (`ctx.choose`), so a stop or a deadline adopts what led at that moment.
+
+Before each wait the root checkpoints its record (`DynamicResume`). After a code change it
+resumes from there (`resume`): the input is not measured again once its measurement landed,
+every running workstream resumes from its own checkpoint, and every verdict already decided is
+handed again, since a restart empties the latches.
 """
 
 from typing import assert_never
 
-from vibesys.candidates.api import Baseline, Measured, NotConfigured, Unmeasurable, measure_input
+from vibesys.candidates.api import Baseline, Measured, NotConfigured, Unmeasurable
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, INPUT_MEASURED
+from vibesys.orchestration.dynamic.search._measure import InputPending, measure_the_input
 from vibesys.orchestration.dynamic.search._operations import OPERATIONS
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
 from vibesys.orchestration.dynamic.search._planner import plan
@@ -43,6 +49,7 @@ from vibesys.orchestration.dynamic.search._reports import (
 )
 from vibesys.orchestration.dynamic.search._roles import ROLES
 from vibesys.orchestration.dynamic.search._run_state import (
+    DynamicResume,
     NoPlan,
     Outlined,
     PlanOutcome,
@@ -53,18 +60,27 @@ from vibesys.orchestration.dynamic.search._workstream import workstream
 from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped, search
 
 
-@search("dynamic", config=DynamicConfig, operations=OPERATIONS, roles=ROLES)
-async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
+@search(
+    "dynamic",
+    config=DynamicConfig,
+    operations=OPERATIONS,
+    roles=ROLES,
+    snapshot=DynamicResume,
+)
+async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner | None:
     """Measure the input while planning, run workstreams in the free slots, name the best."""
-    ctx.checkpoint(config)
-    run = RunRecord(config, ctx.facts.baseline, None, ctx.task.terms)
+    base, terms = ctx.facts.baseline, ctx.task.terms
+    if isinstance(given, DynamicResume):
+        run = RunRecord.resumed(given.config, base, terms, given.record)
+    else:
+        run = RunRecord(given, base, None, terms)
     # typed, so the match on what they yield below is checked exhaustive
     # unbounded: the record bounds the workstreams whose agents work (`RunRecord.free_agents`)
     workstreams: Group[WorkstreamDone] = ctx.group()
     planning: Group[PlanOutcome] = ctx.group(limit=1)
     measuring: Group[Baseline] = ctx.group(limit=1)
     async with workstreams, planning, measuring:
-        measuring.start(INPUT_KEY, measure_input)
+        resume(ctx, run, workstreams, measuring)
         while not run.over(
             planning=not planning.free,
             measuring=not measuring.free,
@@ -79,9 +95,29 @@ async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
             if planning.free and not unread and run.may_plan(stopping=ctx.stop_requested):
                 planning.start(run.next_call(), plan, run)
             reports = ctx.channel(REPORTS)
+            ctx.checkpoint(DynamicResume(config=run.config, record=run.state()))
             fold(ctx, run, await ctx.first(measuring, planning, workstreams, reports, ctx.stopped))
             ctx.publish(run.snapshot())
     return run.ending()
+
+
+def resume(
+    ctx: Flow, run: RunRecord, workstreams: Group[WorkstreamDone], measuring: Group[Baseline]
+) -> None:
+    """Start what the record has in flight: on a fresh run, only the input's measurement.
+
+    After a code change, a measured input is handed to the workstreams that wait for it, and
+    one still being measured resumes its measurement; every running workstream resumes from its
+    own checkpoint, and gets the verdict already decided for its submission again.
+    """
+    if run.baseline is None:
+        measuring.start(INPUT_KEY, measure_the_input, InputPending())
+    else:
+        ctx.latch(INPUT_MEASURED).set(run.baseline)
+    for start in run.running.values():
+        workstreams.start(start.key, workstream, start)
+    for key, verdict in run.decided_verdicts():
+        ctx.latch(VERDICTS.of(key)).set(verdict)
 
 
 type Event = Baseline | PlanOutcome | WorkstreamDone | Report | TaskStopped | StopRequested
