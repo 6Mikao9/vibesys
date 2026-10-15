@@ -236,7 +236,7 @@ class _AgentGpuMode:
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
     ) -> GpuCommands:
         return agent_gpu_commands(
-            self.config,
+            self.config.for_run(request.run_id),
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
             launcher=agent_gpu_launcher(self.config, self.shell_command, request.system),
