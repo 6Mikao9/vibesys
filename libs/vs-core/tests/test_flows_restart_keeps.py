@@ -185,6 +185,37 @@ def test_a_workspace_whose_settlement_is_in_flight_is_left_to_it() -> None:
     assert run.state.live.in_flight == ()
 
 
+def test_a_workspace_opening_at_the_change_opens_for_the_resumed_flow() -> None:
+    run = FlowRun.start(parent(holder("v1")), Config())
+    start = run.expect(core.StartAttempt)
+    run.swap(parent(holder("v2")))
+    run.advance_to(1.0)
+
+    assert len([d for d in run.decisions if _starts(d)]) == 1  # asked for again, not sent again
+    opened = run.open_workspace(start)
+    run.reply(run.expect_turn("v2"), Plan(n=1))
+    settle = run.expect(core.Withdraw, label="settle")
+    assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
+    run.close_workspace(settle)
+    assert run.driver.published(run.state, Gave) == Gave(result=1)
+    assert run.state.restart_settled == ()
+
+
+def test_a_workspace_that_opens_for_no_flow_is_settled_not_leaked() -> None:
+    run = FlowRun.start(parent(holder("v1")), Config())
+    start = run.expect(core.StartAttempt)
+    run.swap(parent(None))
+    run.advance_to(1.0)
+    opened = run.open_workspace(start)
+
+    (settle,) = _settles(run, "restart-settle")
+    assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
+    assert settle.request.disposition.retention == "discard"  # ty: ignore[unresolved-attribute]
+    assert [item.reason for item in run.state.restart_settled] == [
+        core.RestartSettleReason.UNCLAIMED
+    ]
+
+
 def test_a_workspace_without_a_salvage_settles_discarded_as_before() -> None:
     @core.flow(snapshot=Job, name="holder")
     async def bare(ctx: core.Flow, job: Job) -> int:

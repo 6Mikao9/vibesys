@@ -98,6 +98,8 @@ async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner |
             ctx.checkpoint(DynamicResume(config=run.config, record=run.state()))
             fold(ctx, run, await ctx.first(measuring, planning, workstreams, reports, ctx.stopped))
             ctx.publish(run.snapshot())
+        # the record is final: a restart while the winner is adopted resumes with all of it
+        ctx.checkpoint(DynamicResume(config=run.config, record=run.state()))
     return run.ending()
 
 

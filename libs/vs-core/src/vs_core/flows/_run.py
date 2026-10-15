@@ -23,6 +23,7 @@ from vs_core.types.search import (
     TimeReached,
     TurnYielded,
     WorkspaceClosed,
+    WorkspaceOpened,
     YieldFailed,
 )
 from vs_core.types.strategy import (
@@ -31,6 +32,7 @@ from vs_core.types.strategy import (
     Measure,
     ProposeWinner,
     Settle,
+    StartAttempt,
     Wait,
     WakeAt,
     Withdraw,
@@ -342,7 +344,7 @@ class _Run:
                 ("decision_id",), f"decision id {pending.decision.root} is not unique"
             )
         work = pending.work
-        if isinstance(work, Measure | Withdraw):
+        if isinstance(work, Measure | Withdraw | StartAttempt):
             label = _label_of(task.path, work.decision_id)
             earlier = self._reattached(task.path, label, work)
             if earlier is not None:
@@ -361,24 +363,20 @@ class _Run:
         self.out.append(decision)
         return pending
 
-    def _reattached(self, path: str, label: str, request: Measure | Withdraw) -> InFlight | None:
+    def _reattached(
+        self, path: str, label: str, request: Measure | Withdraw | StartAttempt
+    ) -> InFlight | None:
         """The request in flight at the restart that ``request`` asks for again, if any.
 
-        A measurement is the same when the same flow asks it under the same label, in the same
-        scope, with the same plan apart from the time it was submitted. A settlement is the same
-        when the same flow closes the same workspace: core settles a workspace once, as it was
-        first asked, so the resumed flow waits for that settlement whatever it asks now.
+        It must come from the same flow, under the same label and in the same scope. A
+        measurement is the same with the same plan apart from the time it was submitted; a
+        workspace is the same request but its id. A settlement is the same when it closes the
+        same workspace: core settles a workspace once, as it was first asked, so the resumed flow
+        waits for that settlement whatever it asks now.
         """
         for item in self._in_flight:
             old = item.request
-            same = (
-                _same_plan(old, request)
-                if isinstance(old, Measure) and isinstance(request, Measure)
-                else isinstance(old, Withdraw)
-                and isinstance(request, Withdraw)
-                and old.target == request.target
-            )
-            if item.path == path and item.label == label and old.scope == request.scope and same:
+            if item.path == path and item.label == label and _same_request(old, request):
                 self._in_flight.remove(item)
                 return item
         return None
@@ -588,6 +586,10 @@ class _Run:
         self._in_flight = [i for i in self._in_flight if not _answers(item, decision, i.request)]
         if pending is None:
             self.dropped.append(Dropped(event=_kind_of(item), decision=decision))
+            if isinstance(item, WorkspaceOpened):  # no flow holds it: settle it, or it leaks
+                path = decision.root.rpartition("/")[0]
+                held = Held(attempt=item.attempt)
+                self._settle_held(f"{path}/" if path else "", held, RestartSettleReason.UNCLAIMED)
         else:
             pending.set(self._rebuilt(item))
 
@@ -678,8 +680,27 @@ def _same_plan(old: Measure, new: Measure) -> bool:
     return old.plan.model_copy(update=when) == new.plan.model_copy(update=when)
 
 
+def _same_request(
+    old: Measure | Withdraw | StartAttempt, new: Measure | Withdraw | StartAttempt
+) -> bool:
+    """Whether ``new`` asks again for what ``old`` asked (see ``_Run._reattached``)."""
+    if old.scope != new.scope:
+        return False
+    match old, new:
+        case Measure(), Measure():
+            return _same_plan(old, new)
+        case Withdraw(), Withdraw():
+            return old.target == new.target
+        case StartAttempt(), StartAttempt():
+            return old.model_copy(update={"decision_id": new.decision_id}) == new
+        case _:
+            return False
+
+
 def _answers(
-    item: Event | Recorded, decision: DecisionId | None, request: Measure | Withdraw
+    item: Event | Recorded,
+    decision: DecisionId | None,
+    request: Measure | Withdraw | StartAttempt,
 ) -> bool:
     """Whether ``item``, answering ``decision``, answers ``request`` (a close: by its workspace)."""
     if isinstance(item, WorkspaceClosed) and isinstance(request, Withdraw):

@@ -11,6 +11,7 @@ and why a search may have no winner.
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -37,11 +38,14 @@ from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
 from vibesys.orchestration.dynamic.search.api import (
     Candidate,
+    EvaluationQueue,
     Failure,
     FailureKind,
     NoPlan,
     PlanCheck,
     PlanUpdate,
+    QueueState,
+    RecordState,
     Result,
     RunRecord,
     RunSnapshot,
@@ -190,6 +194,12 @@ def _check(run: RunRecord, trace: Trace) -> None:
         assert run.ending() is None
     snapshot = run.snapshot()
     assert RunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
+    # resumed after a code change from what it checkpoints, the record is the same record
+    state = run.state()
+    assert RecordState.model_validate_json(state.model_dump_json()) == state
+    resumed = RunRecord.resumed(run.config, run.base, run.terms, state)
+    assert resumed.state() == state
+    assert resumed.snapshot() == snapshot
     assert [item.plan.work_id for item in snapshot.running] == [
         item.plan.work_id for item in run.running.values()
     ]
@@ -361,3 +371,17 @@ def test_a_search_ends_without_a_winner_only_when_no_candidate_stands_and_the_in
         assert isinstance(ending, NoWinner)
         if not trusted(baseline):
             assert ending.reason.startswith("no trusted result")
+
+
+def test_the_record_checkpoints_every_field_it_holds() -> None:
+    """A field added to the record or its queue is resumed after a code change, or is the run's.
+
+    What the run fixes (config, input revision, task terms; the queue's slots and policy) is
+    given again on resume; verdicts not yet handed over are handed again (`decided_verdicts`).
+    """
+    record = run_record()
+    gate = {f"gate_{item.name}" for item in dataclasses.fields(type(record.gate))}
+    held = {item.name for item in dataclasses.fields(RunRecord)} - {"config", "base", "terms"}
+    assert (held - {"gate"}) | gate == set(RecordState.model_fields)
+    queue = {item.name for item in dataclasses.fields(EvaluationQueue)}
+    assert queue - {"slots", "policy", "_verdicts"} == set(QueueState.model_fields)

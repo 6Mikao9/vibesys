@@ -169,6 +169,8 @@ class Host:
     settled: set[str] = field(default_factory=set)
     """The attempts whose workspace the host closed."""
     planner_calls: int = 0
+    made: list[tuple[Asked, RevisionRef]] = field(default_factory=list)
+    """Every candidate revision the implementer replied with, and the turn it answered."""
     _hypotheses: int = 0
     _commits: int = 0
     _events: int = 0
@@ -334,7 +336,9 @@ class Host:
             case 0 | 2:
                 outcome = "supported" if variant % 6 == 0 else "implementation_failed"
                 result = ImplementerResult.model_validate_json(implemented(outcome))
-                self.run.reply(asked, result, checkpoint=self._retained())
+                retained = self._retained()
+                self.made.append((asked, retained.revision))
+                self.run.reply(asked, result, checkpoint=retained)
             case 1:
                 self.run.reply(asked, ImplementerResult.model_validate_json(implemented("blocked")))
             case 3:

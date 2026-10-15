@@ -37,7 +37,14 @@ from vs_core.types.search import (
     YieldFailed,
 )
 from vs_core.types.settlement import Selection
-from vs_core.types.strategy import Decision, Measure, Settle, StrategyState, Withdraw
+from vs_core.types.strategy import (
+    Decision,
+    Measure,
+    Settle,
+    StartAttempt,
+    StrategyState,
+    Withdraw,
+)
 from vs_core.types.until import Failed
 
 if TYPE_CHECKING:
@@ -140,6 +147,9 @@ class RestartSettleReason(StrEnum):
     """The flow was resumed, and ended without reopening it."""
     SETTLING = "settling"
     """Nothing was issued: the flow had asked for its settlement, which core goes on with."""
+    UNCLAIMED = "unclaimed"
+    """It opened after the flow that asked for it stopped waiting for it (a restart dropped the
+    request, or the flow ended first): no flow holds it."""
 
 
 class RestartSettled(Value):
@@ -152,7 +162,7 @@ class RestartSettled(Value):
 
 
 class InFlight(Value):
-    """A measurement or a settlement a flow waited for when the run restarted.
+    """A workspace, a measurement or a settlement a flow waited for when the run restarted.
 
     It waits for a resumed flow that asks for it again (see ``_run.issue``). ``path`` and
     ``label`` are the flow and the id root it issued the request under.
@@ -160,7 +170,7 @@ class InFlight(Value):
 
     path: str
     label: str
-    request: Measure | Withdraw
+    request: Measure | Withdraw | StartAttempt
     closed: WorkspaceClosed | None = None
     """For a settlement: core's answer, when it came before the resumed flow asked again."""
 
