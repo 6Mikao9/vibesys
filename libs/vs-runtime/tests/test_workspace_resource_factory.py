@@ -97,6 +97,7 @@ def _effects() -> ProjectRunEffects:
         log_emit=emit,
         on_log_ready=lambda _path: None,
         clock=ManualClock(),
+        threads=SimThreads(),
     )
 
 
