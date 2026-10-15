@@ -21,7 +21,8 @@ prompt), --noise (perturbed logits), --no-cache-report, --fake-replay (streamed
 requests, the replay's shape, get a wrong token; non-streamed ones the right one),
 --truncate-over N (keep only the first N prompt tokens and count those),
 --text-only-after N (stream text but no token ids), --hang-at N,M,... (those
-requests never answer), --cached-path-shift (a prompt that resumes a cached prefix
+requests never answer), --reset-at N,M,... (those requests get a TCP reset before
+any response byte), --cached-path-shift (a prompt that resumes a cached prefix
 gets a different answer than the same prompt computed cold, as on the GPU builds).
 """
 
@@ -32,6 +33,8 @@ import hashlib
 import json
 import math
 import random
+import socket
+import struct
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -134,6 +137,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         args = self.model.args
         n = self.model.next_request()
+        if n in args.reset_at:
+            # A connection reset before any response byte: RST on close.
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            self.close_connection = True
+            self.connection.close()
+            return
         if args.fail_after is not None and n > args.fail_after:
             self._json(500, {"error": "injected failure"})
             return
@@ -234,6 +243,7 @@ def main() -> None:
     parser.add_argument("--cached-path-shift", action="store_true")
     parser.add_argument("--truncate-over", type=int, default=None)
     parser.add_argument("--text-only-after", type=int, default=None)
+    parser.add_argument("--reset-at", type=lambda v: {int(x) for x in v.split(",")}, default=set())
     parser.add_argument("--hang-at", type=lambda v: {int(x) for x in v.split(",")}, default=set())
     args = parser.parse_args()
     Handler.model = Model(args)

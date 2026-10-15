@@ -21,7 +21,9 @@ Phases:
      The request log is read while it grows; the run stops early when failure
      is already certain (README.md "Early abort").
   4. Score. `metrics.py` on the request log, then the gates: no failed
-     request; on every successful round `prefix_shortfall_tokens` 0, streamed
+     request, except at most max(3, 0.1%) of rounds lost to a transport reset
+     before any response byte (`transport_reset_rounds`; README.md "Transport
+     resets"); on every successful round `prefix_shortfall_tokens` 0, streamed
      token ids, `usage.prompt_tokens` equal to the prompt sent, and no cache
      hit beyond the round's own prefix (none past one block on a round 0);
      first-token agreement with the recorded reference replay
@@ -106,7 +108,51 @@ METRICS: dict[str, dict[str, Any]] = {
         "unit": "rounds submitted before the window's end and not answered inside it",
         "direction": "min",
     },
+    "transport_reset_rounds": {
+        "unit": "rounds lost to a connection reset/refusal before any response byte (tolerated up to max(3, 0.1%))",
+        "direction": "min",
+    },
 }
+
+# A round lost to the transport before the server sent a byte (a stale pooled
+# keep-alive connection reset under load) is not a server answer. session_runner
+# cannot retry it, so the benchmark tolerates a few: such a round stays
+# unanswered (no throughput; it and its session's never-sent next round count
+# as outstanding in the TTFT percentiles), which can only lower the score.
+TRANSPORT_RESET_SHARE = 0.001
+TRANSPORT_RESET_MIN = 3
+# reqwest/hyper errors raised while sending, before any response arrived.
+TRANSPORT_RESET_PREFIX = "request error: error sending request for url"
+TRANSPORT_RESET_CAUSES = (
+    "Connection reset by peer",
+    "Connection refused",
+    "connection closed before message completed",
+)
+
+
+def is_transport_reset(outcome: dict[str, Any]) -> bool:
+    """A failed round that received no response byte: reset or refused while sending.
+
+    An HTTP error status, any streamed chunk, or a partial response is not one.
+    """
+    error = str(outcome.get("error") or "")
+    return (
+        str(outcome.get("status")).upper() != "SUCCESS"
+        and error.startswith(TRANSPORT_RESET_PREFIX)
+        and any(cause in error for cause in TRANSPORT_RESET_CAUSES)
+        and not outcome.get("chunk_count")
+        and not outcome.get("token_event_count")
+        and outcome.get("server_usage") is None
+        and outcome.get("first_token_ms") is None
+        and outcome.get("first_token_id_ms") is None
+        and not outcome.get("output_len_actual")
+    )
+
+
+def transport_reset_limit(rounds: int) -> int:
+    """How many transport-reset rounds a run of `rounds` logged rounds tolerates."""
+    return max(TRANSPORT_RESET_MIN, int(rounds * TRANSPORT_RESET_SHARE))
+
 
 REPLAY_REFERENCE_FORMAT = "glm53-session-replay-reference-v1"
 
@@ -539,10 +585,12 @@ class LogWatch:
     rounds: int = 0
     successes: int = 0
     failures: int = 0
+    transport_resets: int = 0
     shortfall_rounds: int = 0
     over_bound: int = 0
     min_submit: float | None = None
     first_failure: str | None = None
+    first_transport_reset: str | None = None
     first_shortfall: str | None = None
     new_tokens: int = 0
     # "<session_id>/<round_idx>" -> (prompt hash, first output token id) of each
@@ -578,7 +626,11 @@ class LogWatch:
         submit = outcome.get("submit_timestamp")
         if submit is not None:
             self.min_submit = submit if self.min_submit is None else min(self.min_submit, submit)
-        if str(outcome.get("status")).upper() != "SUCCESS":
+        if is_transport_reset(outcome):
+            self.transport_resets += 1
+            if self.first_transport_reset is None:
+                self.first_transport_reset = f"{outcome.get('request_id')}: {outcome.get('error')}"
+        elif str(outcome.get("status")).upper() != "SUCCESS":
             self.failures += 1
             if self.first_failure is None:
                 self.first_failure = f"{outcome.get('request_id')}: status {outcome.get('status')}: {outcome.get('error')}"
@@ -663,6 +715,12 @@ class LogWatch:
             )
         if self.failures:
             return f"a request failed ({self.failures} so far); first: {self.first_failure}"
+        if self.transport_resets > transport_reset_limit(self.rounds):
+            return (
+                f"{self.transport_resets} requests lost to a connection reset before any response, over "
+                f"the max({TRANSPORT_RESET_MIN}, {TRANSPORT_RESET_SHARE:.1%}) tolerated of "
+                f"{self.rounds} rounds; first: {self.first_transport_reset}"
+            )
         if self.shortfall_rounds:
             return (
                 f"prefix_shortfall_tokens > 0 on {self.shortfall_rounds} round(s); first: "
@@ -1106,7 +1164,7 @@ def judge(
 ) -> dict[str, float]:
     """The run's result row, or `Rejected` when a gate fails.
 
-    Gates: no failed request, `prefix_shortfall_tokens` 0 on every round, at
+    Gates: no failed request (beyond the tolerated transport resets), `prefix_shortfall_tokens` 0 on every round, at
     least one counted round, and p99 TTFT within the rejection bound (60 s; the
     same rule the early abort enforces, so the outcome does not depend on when
     it is detected). The 6 s SLO is reported, not gated. `ttft` (default:
@@ -1158,6 +1216,7 @@ def judge(
         "replay_token_agreement": agreement.share,
         "replay_matched_rounds": float(agreement.matched),
         "outstanding_rounds": float(outstanding),
+        "transport_reset_rounds": float(watch.transport_resets),
         **screened,
     }
 

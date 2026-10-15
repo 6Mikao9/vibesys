@@ -96,6 +96,17 @@ first served over the 500 slots). `outstanding_rounds` reports their number;
 with none, the percentiles equal metrics.py's (checked). Throughput metrics
 are metrics.py's unchanged.
 
+**Transport resets.** Any failed request rejects the run, with one bounded
+exception. session_runner (500 pooled keep-alive connections) occasionally
+loses a round when a connection is reset or refused before the server sends a
+single response byte: the baseline evaluation lost 1 of 10,383 rounds this way
+in 4 ms on a healthy server. session_runner cannot retry, so the benchmark
+tolerates up to max(3, 0.1% of logged rounds) such rounds and reports them as
+`transport_reset_rounds`. A tolerated round is unanswered: it adds no
+throughput, it and its session's next (never sent) round count as outstanding
+in the TTFT percentiles, so a reset can only lower the score. Any HTTP error
+status, any streamed byte, or more resets than the bound still rejects the run.
+
 Reported metrics: `p99_ttft_s` (primary objective) and `new_tokens_per_s`
 (second objective), `slo_met` (1 when p99 TTFT <= 6 s, else 0), `slo_margin_s`
 (6 s minus p99 TTFT), then `p50_ttft_s`, `p90_ttft_s`, `max_ttft_s`, `rounds_per_s`,
@@ -103,7 +114,7 @@ Reported metrics: `p99_ttft_s` (primary objective) and `new_tokens_per_s`
 `fraction_of_sim_target` (new tokens/s over the design's 118.8k),
 `fraction_of_workload_ceiling` (over the zero-latency ceiling below),
 `screen_ttft_16k_s`, `screen_ttft_32k_s`, `replay_token_agreement`,
-`replay_matched_rounds` and `outstanding_rounds`.
+`replay_matched_rounds`, `outstanding_rounds` and `transport_reset_rounds`.
 
 An unexpected exception still ends with an `error` record ("benchmark error:
 ..."), so every run leaves an outcome.

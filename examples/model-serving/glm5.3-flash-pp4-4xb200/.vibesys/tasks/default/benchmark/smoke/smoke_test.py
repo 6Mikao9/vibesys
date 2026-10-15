@@ -10,6 +10,9 @@ Runs the real session_runner on a tiny synthetic trace (16 sessions, a
   abort       every 2nd request takes 9 s, over the smoke workload's 8 s
               rejection bound (60 s in the real workload): rejected by the early abort
   failure     HTTP 500 after 40 requests: rejected for a failed request
+  reset       two requests reset before any response byte: scored (bound lifted
+              to 60 s), with transport_reset_rounds 2 and both rounds outstanding
+  reset-flood five such resets: over the bound, rejected
   shortfall   no generated token ids after 40 requests: rejected for prefix_shortfall_tokens
   no-cache    no cached-token report: rejected at screening
   slow-screen every request takes 9 s, over the 8 s bound: rejected at screening
@@ -38,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import hashlib
 import json
 import random
@@ -135,6 +139,7 @@ def run_case(
     sha: str,
     mode: list[str] | None = None,
     runs: int = 1,
+    workload: sr.Workload | None = None,
 ) -> list[dict]:
     port = free_port()
     server = subprocess.Popen(
@@ -146,7 +151,9 @@ def run_case(
         assert server.stdout is not None
         server.stdout.readline()  # the "fake server on" line: listening
         for run in range(runs):
-            records = run_one(f"{name}{'' if run == 0 else f'-{run}'}", port, ns, root, sha, mode)
+            records = run_one(
+                f"{name}{'' if run == 0 else f'-{run}'}", port, ns, root, sha, mode, workload
+            )
         return records
     finally:
         server.terminate()
@@ -154,7 +161,13 @@ def run_case(
 
 
 def run_one(
-    name: str, port: int, ns: argparse.Namespace, root: Path, sha: str, mode: list[str] | None
+    name: str,
+    port: int,
+    ns: argparse.Namespace,
+    root: Path,
+    sha: str,
+    mode: list[str] | None,
+    workload: sr.Workload | None = None,
 ) -> list[dict]:
     out = root / name / "vs_output.jsonl"
     args = sr.parse_args(
@@ -179,7 +192,7 @@ def run_one(
         ]
     )
     started = time.time()
-    code = sr.run(args, smoke_workload(sha), sr.ProtocolReport(out))
+    code = sr.run(args, workload or smoke_workload(sha), sr.ProtocolReport(out))
     records = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
     print(f"--- {name}: exit {code} in {time.time() - started:.0f} s; records:")
     for record in records:
@@ -193,6 +206,58 @@ def expect_error(records: list[dict], *needles: str) -> None:
     message = records[-1]["message"]
     for needle in needles:
         assert needle in message, f"{needle!r} not in {message!r}"
+
+
+def case_transport_reset() -> None:
+    """Only a failure with no response byte is a tolerated transport reset; the bound holds."""
+    reset = {  # session_904_round_000008 of the baseline evaluation (Slurm job 7255)
+        "request_id": "session_904_round_000008",
+        "output_len_actual": 0,
+        "server_usage": None,
+        "first_token_ms": None,
+        "first_token_id_ms": None,
+        "token_event_count": 0,
+        "chunk_count": 0,
+        "status": "FAILED",
+        "error": "request error: error sending request for url (http://127.0.0.1:27255/v1/completions): "
+        "connection error: Connection reset by peer (os error 104)",
+    }
+    assert sr.is_transport_reset(reset)
+    refused = dict(
+        reset,
+        error=reset["error"].replace(
+            "Connection reset by peer (os error 104)", "Connection refused (os error 111)"
+        ),
+    )
+    assert sr.is_transport_reset(refused)
+    not_resets = [
+        dict(reset, status="SUCCESS"),
+        dict(reset, error="HTTP 500 Internal Server Error: injected failure"),
+        dict(reset, error="request error: error decoding response body: Connection reset by peer"),
+        dict(reset, chunk_count=1),
+        dict(reset, token_event_count=1),
+        dict(reset, output_len_actual=1),
+        dict(reset, first_token_ms=3.0),
+        dict(reset, server_usage={"prompt_tokens": 1}),
+    ]
+    for outcome in not_resets:
+        assert not sr.is_transport_reset(outcome), outcome
+    assert sr.transport_reset_limit(0) == 3 and sr.transport_reset_limit(3_999) == 3
+    assert sr.transport_reset_limit(10_383) == 10
+    for total in (10, 1_000, 10_383, 41_444):
+        limit = sr.transport_reset_limit(total)
+        for resets in (limit, limit + 1):
+            watch = sr.LogWatch(over_bound_limit=10**9, window_s=1e9, ttft_bound_s=1e9)
+            watch.rounds = total - resets  # successes do not change the reset verdict
+            for i in range(resets):
+                watch.add({"outcome": dict(reset, request_id=f"r{i}", submit_timestamp=1.0)})
+            why = watch.verdict()
+            assert (why is None) == (resets <= limit), (total, resets, why)
+            assert watch.failures == 0 and watch.transport_resets == resets
+    watch = sr.LogWatch(over_bound_limit=10**9, window_s=1e9, ttft_bound_s=1e9)
+    watch.add({"outcome": dict(not_resets[1], submit_timestamp=1.0)})
+    assert "a request failed (1 so far)" in (watch.verdict() or ""), watch.verdict()
+    print("--- transport reset: classification and max(3, 0.1%) bound hold")
 
 
 def case_judge() -> None:
@@ -237,6 +302,7 @@ def case_judge() -> None:
             assert needle in str(exc), exc
         else:
             raise AssertionError(f"judge accepted {bad}")
+    case_transport_reset()
     # The early-abort count is a property of the quantile and the ceiling, not of the bound.
     assert sr.rounds_over_bound_that_fail(41_444) == 416
     assert sr.WORKLOAD.reject_p99_ttft_s == 60.0
@@ -266,6 +332,8 @@ def main() -> int:
         "slo",
         "abort",
         "failure",
+        "reset",
+        "reset-flood",
         "shortfall",
         "no-cache",
         "slow-screen",
@@ -358,6 +426,20 @@ def main() -> int:
             )
         elif name == "failure":
             expect_error(run_case(name, ["--fail-after", "40"], ns, root, sha), "a request failed")
+        elif name == "reset":
+            # A tolerated reset's round and its session's next one stay unanswered and
+            # count as outstanding (up to the 20 s window each); on this 300-round trace
+            # that alone can pass the 8 s bound, so this case lifts it past the window.
+            lenient = dataclasses.replace(smoke_workload(sha), reject_p99_ttft_s=60.0)
+            records = run_case(name, ["--reset-at", "60,90"], ns, root, sha, workload=lenient)
+            assert [r["kind"] for r in records] == ["hello", "result"], records
+            values = records[-1]["values"]
+            assert values["transport_reset_rounds"] == 2.0, values
+            assert values["outstanding_rounds"] >= 2, values
+            assert values["max_ttft_s"] > 1.0, values  # the unanswered rounds count
+        elif name == "reset-flood":
+            records = run_case(name, ["--reset-at", "60,62,64,66,68"], ns, root, sha)
+            expect_error(records, "lost to a connection reset before any response")
         elif name == "shortfall":
             # The id-less round itself is caught (no token ids) unless its successor's
             # shortfall lands in the same 2 s poll; either rejection is right.
