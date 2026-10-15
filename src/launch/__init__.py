@@ -22,6 +22,7 @@ from vibesys.api.wiring import create_session as _create_session
 from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, build_agent_client
 from vs_github.api import GitHubCLI
 from vs_project.api import Git, generate_run_id
+from vs_runtime.api.infrastructure import EnvironmentSystem
 from vs_runtime.api.wiring import InProcessRuns
 from vs_sandbox.api import SubprocessDockerCli, create_compute_backend
 from vs_sim.api import ProcessesProbe, utc_datetime
@@ -144,8 +145,16 @@ def create_session(
             git=Git(settings.processes),
             github=GitHubCLI(settings.processes),
             git_repository=settings.git_repository,
-            slurm_processes=(
-                settings.processes if settings.slurm_processes is None else settings.slurm_processes
+            system=EnvironmentSystem(
+                threads=timing.threads,
+                network=settings.network,
+                processes=settings.processes,
+                launcher=settings.piped_processes,
+                slurm_processes=(
+                    settings.processes
+                    if settings.slurm_processes is None
+                    else settings.slurm_processes
+                ),
             ),
             state_stores=settings.state_stores,
             agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),

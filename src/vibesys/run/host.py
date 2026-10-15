@@ -496,7 +496,7 @@ class _ProductHostFactory:
             namespace.external_directory() / "slurm-provider-handles",
             clock=clock,
             sleeper=clock,
-            processes=integration.slurm_processes,
+            processes=integration.system.slurm_processes,
         )
 
     async def stop_new_work(self) -> None:
