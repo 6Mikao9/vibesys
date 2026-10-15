@@ -2,9 +2,10 @@
 
 On a shared cluster the input's trusted measurement may wait hours for a slot. The search asks the
 planner at once, telling it the measurement is pending, and starts what it schedules: implementers
-write code meanwhile. What compares a candidate with the input waits for it: no candidate is
-reviewed, measured or named the winner before the input's measurement lands; a workstream that ends
-with a failure is never compared, so it settles at once and frees its slot. A planning call that
+write code meanwhile, and their candidates are reviewed and measured. What compares a candidate
+with the input waits for it: no candidate is settled or named the winner before the input's
+measurement lands; a workstream that ends with a failure is never compared, so it settles at once
+and frees its slot. A planning call that
 ends empty meanwhile is not a stuck planner: planning is asked again when the measurement lands.
 An input that fails its measurement drops a plan made without knowing it that has not started, and
 the planner is asked again with the failure in view; a workstream already running goes on, and its
@@ -69,6 +70,15 @@ def _candidate_measurements(host: Host) -> int:
     )
 
 
+def _reviews(host: Host) -> int:
+    return sum(
+        isinstance(item, Wait)
+        and isinstance(item.request, RequestTurn)
+        and "/judge." in item.request.decision_id.root
+        for item in host.run.decisions
+    )
+
+
 @MODES
 def test_the_planner_is_asked_before_a_slow_input_measurement_lands(*, restarting: bool) -> None:
     host = begin(config(max_in_flight=2, max_rounds=2), restarting=restarting, input_first=False)
@@ -105,19 +115,25 @@ def test_the_planner_is_asked_before_a_slow_input_measurement_lands(*, restartin
             checkpoint=Retained(revision=RevisionRef.of_git_commit(commit)),
         )
 
-    # Nothing that compares a candidate with the input happens before it lands: no review, no
-    # trusted measurement of a candidate, no candidate named the winner.
+    # The candidates are reviewed and measured before the input lands: the input's measurement
+    # holds one of the two evaluation slots, so they take the other in turn. Nothing settles and
+    # no candidate is named the winner: that compares a candidate with the input.
+    host.drain_beside_input()
     assert host.input_waits()
-    assert not host.open(RequestTurn, label="judge")
-    assert _candidate_measurements(host) == 0
+    assert _reviews(host) == 2
+    assert _candidate_measurements(host) == 2
+    record = host.record
+    assert record is not None
+    assert not record.finished
     assert host.run.finished is None
 
-    # When the measurement lands, both candidates are reviewed, measured and settled against it.
+    # When the measurement lands, both candidates are settled against it.
     host.measure_input()
-    assert len(host.open(RequestTurn, label="judge")) == 2
     host.drain()
-    assert _candidate_measurements(host) >= 2
     assert isinstance(host.run.finished, Finish)
+    record = host.record
+    assert record is not None
+    assert {"h1", "h2"} <= {item.plan.work_id for item in record.finished}
     assert_flow_closed(host)
 
 

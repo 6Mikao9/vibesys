@@ -6,7 +6,7 @@ from vibesys.hypothesis.cadence import review_due
 from vibesys.metrics import AcceptedReading, accept_readings
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search._briefs import implement_prompt, review_prompt
-from vibesys.orchestration.dynamic.search._measure import input_so_far, the_input
+from vibesys.orchestration.dynamic.search._measure import input_so_far
 from vibesys.orchestration.dynamic.search._operations import EvidenceReadings
 from vibesys.orchestration.dynamic.search._outcomes import (
     Candidate,
@@ -193,7 +193,6 @@ async def review(  # noqa: PLR0913  # LW-220432 [PLR0913]; each argument is a di
     if revision is None:
         message = "only a changed candidate is reviewed"
         raise ValueError(message)
-    await the_input(ctx, w, work)
     refs = ctx.evaluation.taken(ws, revision)
     readings = await decode_evaluations(ctx, ws, refs) if refs else ()
     prompt = review_prompt(

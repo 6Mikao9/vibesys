@@ -293,6 +293,15 @@ class PortfolioPlan(BaseModel):
         max_length=32,
         description="Parks and abandonments of completed hypotheses; empty when there are none.",
     )
+    evaluation_order: tuple[str, ...] = Field(
+        default=(),
+        max_length=64,
+        description=(
+            "The hypothesis or profile IDs whose waiting candidates a free trusted evaluation "
+            "slot measures first, first to measure first; empty to leave the order as it is. "
+            "Only read when the run lets the orchestrator rank its evaluations."
+        ),
+    )
 
     @field_validator("reasoning")
     @classmethod

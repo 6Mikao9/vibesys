@@ -180,7 +180,9 @@ class LatchKey[T]:
     def of(self, item: str) -> LatchKey[T]:
         """The key of this declaration's latch for ``item``: its own value, of the same type."""
         if not item or "/" in item:
-            raise ContractError(("latch", self.name), "an item must be non-empty and contain no '/'")
+            raise ContractError(
+                ("latch", self.name), "an item must be non-empty and contain no '/'"
+            )
         return LatchKey(f"{self.name}/{item}", declared=self.declaration)
 
     @property

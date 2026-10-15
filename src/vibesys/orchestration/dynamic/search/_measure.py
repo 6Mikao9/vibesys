@@ -1,4 +1,9 @@
-"""The trusted measurement of a candidate, and what its evidence says."""
+"""The trusted measurement of a candidate, and what its evidence says.
+
+A workstream does not reserve its measurement up front: it submits the candidate to the root's
+evaluation queue and waits until a slot is bound to it (`a_slot`), so its agents' slot goes to new
+work meanwhile. Which waiting candidate a free slot measures is the queue's choice (`_queue`).
+"""
 
 from vibesys.candidates.api import Baseline
 from vibesys.metrics import AcceptedReading, accept_readings
@@ -10,6 +15,13 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     WorkEndedError,
     WorkstreamStart,
     ended_by,
+)
+from vibesys.orchestration.dynamic.search._queue import Bound, Dropped, Submission
+from vibesys.orchestration.dynamic.search._reports import (
+    REPORTS,
+    VERDICTS,
+    InputOverdue,
+    Released,
 )
 from vibesys.orchestration.dynamic.search._values import (
     Failure,
@@ -23,6 +35,7 @@ from vs_core.api.search import (
     MeasurementPurpose,
     MeasurementRecipe,
     RevisionRef,
+    TimeUp,
     Workspace,
     trusted_keys,
 )
@@ -39,16 +52,56 @@ def input_so_far(ctx: Flow, w: WorkstreamStart) -> Baseline | None:
 async def the_input(ctx: Flow, w: WorkstreamStart, work: Work) -> Baseline:
     """The input's measurement: known when the workstream started, else waited for here.
 
-    A workstream may start while the input is still being measured: its agents plan, write code
-    and run their own jobs meanwhile. Only what compares the candidate with the input waits for
-    it: the trusted measurement (so the input's own measurement is never queued behind a
-    candidate's), the judge's review, and the settlement. An input that comes back unmeasurable
-    does not stop the candidate's measurement: a candidate can fix what broke the input, and with
-    no input value to beat it is eligible once it passes the task's gates.
+    A workstream may start, and its candidate may even be measured, while the input is still
+    being measured: only what compares the candidate with the input (its settlement) waits for
+    it. A wait longer than the run's ``input_wait_seconds`` is reported to the root once, which
+    tells the orchestrator on its next turn; the workstream goes on waiting. An input that comes
+    back unmeasurable does not stop the candidate: a candidate can fix what broke the input, and
+    with no input value to beat it is eligible once it passes the task's gates.
     """
     if work.baseline is None:
-        work.baseline = w.baseline if w.baseline is not None else await ctx.latch(INPUT_MEASURED)
+        known = input_so_far(ctx, w)
+        work.baseline = known if known is not None else await _wait_for_input(ctx, w)
     return work.baseline
+
+
+async def _wait_for_input(ctx: Flow, w: WorkstreamStart) -> Baseline:
+    measured = ctx.latch(INPUT_MEASURED)
+    limit = w.config.input_wait_seconds
+    if limit is None:
+        return await measured
+    since = ctx.clock.now()
+    match await ctx.first(measured, ctx.timer(since + limit)):
+        case TimeUp():
+            ctx.channel(REPORTS).send(InputOverdue(key=w.key, since=since, limit=limit))
+            return await measured
+        case baseline:
+            return baseline
+
+
+async def a_slot(ctx: Flow, w: WorkstreamStart, revision: RevisionRef) -> None:
+    """Submit ``revision`` for its trusted measurement and wait until a slot is bound to it.
+
+    The root answers with the queue's verdict: measure now, or never (superseded by a newer
+    candidate of the same line, or the queue was full), which ends the work unmeasured.
+    """
+    ctx.channel(REPORTS).send(
+        Submission(
+            key=w.key,
+            work_id=w.plan.work_id,
+            kind=w.plan.kind,
+            candidate=revision,
+            parent=w.parent,
+            at=ctx.clock.now(),
+        )
+    )
+    match await ctx.latch(VERDICTS.of(w.key)):
+        case Bound():
+            return
+        case Dropped(reason=reason, by=by):
+            raise WorkEndedError(
+                Failure(kind=FailureKind.NOT_MEASURED, dropped=reason, superseded_by=by)
+            )
 
 
 async def measure_and_interpret(
@@ -64,8 +117,10 @@ async def measure_and_interpret(
     recipe = MeasurementRecipe.of(ctx.facts)
     if w.plan.kind is WorkKind.PROFILE and w.plan.required_fields:
         recipe = recipe.requiring(PROFILE_STAGE, w.plan.required_fields)
+    await a_slot(ctx, w, revision)
     plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=names)
     found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
+    ctx.channel(REPORTS).send(Released(key=w.key))
     if isinstance(found, Failed):
         raise ended_by(found, None)
     keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose=purpose)

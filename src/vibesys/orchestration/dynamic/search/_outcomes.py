@@ -186,14 +186,14 @@ class Closing(Value):
         """The revision the attempt retained, if any."""
         return None if self.result is None else self.result.candidate.revision
 
-    @property
-    def scored(self) -> bool:
+    def scored(self, plan: WorkPlan) -> bool:
         """Whether settling it compares a candidate with the input, so needs its measurement.
 
-        A closing with a failure cause is ineligible however its candidate measured, so it
-        settles at once and frees its slot, without waiting for the input's measurement.
+        Only a measured candidate is compared. A plan step accepted on its own checks
+        (``evaluate = "none"``) never is, and a closing with a failure cause is ineligible however
+        its candidate measured: both settle at once, without waiting for the input's measurement.
         """
-        return self.candidate is not None and self.cause is None
+        return plan.measured and self.candidate is not None and self.cause is None
 
     @property
     def review_passed(self) -> bool | None:
@@ -338,7 +338,9 @@ def assertion(
         )
     if not w.plan.measured:
         return _unmeasured_step(closing, terms)
-    if closing.scored and baseline is None:
+    if closing.cause is not None and closing.cause.kind is FailureKind.NOT_MEASURED:
+        return _not_measured(closing, terms)
+    if closing.scored(w.plan) and baseline is None:
         message = "a candidate is scored only once the input's measurement is known"
         raise ValueError(message)
     space = space_of(terms)
@@ -380,6 +382,25 @@ def _unmeasured_step(closing: Closing, terms: TaskTerms) -> Settle:
         return settled.model_copy(update={"eligible": False})
     return settled.model_copy(
         update={"retention": "wip", "candidate": closing.candidate, "eligible": False}
+    )
+
+
+def _not_measured(closing: Closing, terms: TaskTerms) -> Settle:
+    """The settlement of a candidate dropped from the evaluation queue unmeasured.
+
+    It is never eligible, but the code is kept as work in progress: a newer candidate that
+    superseded it was built on it, and a plan step may still build on it.
+    """
+    settled = settle_for(closing, gates=gates_of(terms), beats_input=False, unsettled=UNSETTLED)
+    if closing.candidate is None:
+        return settled.model_copy(update={"eligible": False, "outcome": "cancelled"})
+    return settled.model_copy(
+        update={
+            "retention": "wip",
+            "candidate": closing.candidate,
+            "eligible": False,
+            "outcome": "cancelled",
+        }
     )
 
 

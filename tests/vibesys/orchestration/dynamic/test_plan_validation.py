@@ -56,6 +56,8 @@ class Record:
     offer: ProfileOffer | None = None
     repairable: frozenset[str] | None = None
     """The failed plan steps a reply may continue, in a run the task's plan decides."""
+    ranks: bool = False
+    """Whether the run lets the reply order its evaluations."""
 
 
 def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> PlanCheck:
@@ -71,7 +73,7 @@ def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> Plan
         finished_profile(identifier, index) for index, identifier in enumerate(record.profiles, 90)
     )
     run.parents = tuple(record.parents)
-    ledger = replace(run.world().ledger, repairable=record.repairable)
+    ledger = replace(run.world().ledger, repairable=record.repairable, ranks=record.ranks)
     return validate(plan, ledger, run.offered(), capacity=capacity, offer=record.offer)
 
 
@@ -195,6 +197,21 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             Record(hypotheses=[FINISHED_A], repairable=frozenset({"a"})),
             "workstreams.0",
         ),
+        ViolationCode.RANKING_NOT_OFFERED: (
+            portfolio(implement_entry("n"), order=("a",)),
+            keep,
+            "evaluation_order",
+        ),
+        ViolationCode.RANKING_UNKNOWN: (
+            portfolio(implement_entry("n"), order=("n", "z")),
+            Record(hypotheses=[FINISHED_A], ranks=True),
+            "evaluation_order.1",
+        ),
+        ViolationCode.RANKING_DUPLICATE: (
+            portfolio(implement_entry("n"), order=("a", "n", "a")),
+            Record(hypotheses=[FINISHED_A], ranks=True),
+            "evaluation_order.2",
+        ),
     }
 
 
@@ -239,6 +256,14 @@ def test_a_plan_that_breaks_no_rule_is_accepted_whole_in_order() -> None:
     assert [(item.hypothesis_id, item.disposition) for item in result.updates] == [
         ("c", HypothesisStrategy.ABANDONED)
     ]
+
+
+def test_a_run_that_ranks_evaluations_takes_the_replys_order_of_known_and_planned_ids() -> None:
+    plan = portfolio(implement_entry("n"), order=("n", "a"))
+    result = check(plan, Record(hypotheses=[FINISHED_A], ranks=True))
+    assert result.valid
+    assert result.ranking == ("n", "a")
+    assert check(portfolio(implement_entry("n")), Record(ranks=True)).ranking is None
 
 
 @st.composite

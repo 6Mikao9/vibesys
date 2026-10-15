@@ -140,6 +140,14 @@ class Blocker(Value):
     turn_failure: TurnFailureKind | None = None
 
 
+class DropReason(StrEnum):
+    """Why a candidate waiting for an evaluation slot was dropped without being measured. Closed."""
+
+    SUPERSEDED = "superseded"
+    """A newer submission of the same line holds its work: the same workstream line, or a
+    candidate built on it."""
+
+
 class FailureKind(StrEnum):
     """Why a workstream ended without a measured candidate. Closed."""
 
@@ -169,6 +177,9 @@ class FailureKind(StrEnum):
     """Too many turns ended without a candidate that reached measurement."""
     REPEATED_TURN = "repeated-turn"
     """The last turn left nothing an earlier turn had not, so another would repeat it."""
+    NOT_MEASURED = "not-measured"
+    """The candidate waited for an evaluation slot and was dropped unmeasured; ``dropped`` says
+    why, and ``superseded_by`` names the newer submission that holds its work."""
 
 
 _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
@@ -183,6 +194,7 @@ _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
     FailureKind.NO_TRUSTED_EVIDENCE: (frozenset({"status"}), frozenset({"output"})),
     FailureKind.TURN_LIMIT: (frozenset({"turns", "limit", "blocker"}), frozenset()),
     FailureKind.REPEATED_TURN: (frozenset({"blocker"}), frozenset()),
+    FailureKind.NOT_MEASURED: (frozenset({"dropped"}), frozenset({"superseded_by"})),
 }
 
 
@@ -203,6 +215,8 @@ class Failure(Value):
     limit: int | None = None
     blocker: Blocker | None = None
     revision: RevisionRef | None = None
+    dropped: DropReason | None = None
+    superseded_by: str | None = None
 
     @model_validator(mode="after")
     def fields_match_kind(self) -> "Failure":
@@ -222,6 +236,8 @@ class Failure(Value):
                 "limit",
                 "blocker",
                 "revision",
+                "dropped",
+                "superseded_by",
             )
             if getattr(self, name) is not None
         } | ({"output"} if self.output else set())
@@ -321,6 +337,10 @@ class ViolationCode(StrEnum):
     UPDATE_INCOMPLETE = "update-incomplete"
     OUTSIDE_PLAN = "outside-plan"
     """The run follows the task's plan, and the entry is not a repair of one of its failed steps."""
+    RANKING_NOT_OFFERED = "ranking-not-offered"
+    """The reply orders the evaluations, and the run picks the newest candidate itself."""
+    RANKING_UNKNOWN = "ranking-unknown"
+    RANKING_DUPLICATE = "ranking-duplicate"
 
 
 class Alternative(Value):

@@ -108,9 +108,16 @@ INPUT_THROUGHPUT = 50.0
 _CANDIDATE_THROUGHPUT = 100.0
 
 
+HELD_AGENTS = {"max_backlog": 0}
+"""A workstream keeps its agent slot while its candidate is measured, so the next plan is asked
+once the measurement is in, as the stories written before parked workstreams expect. The stories
+of the evaluation queue (`test_evaluation_queue_stories`) override it."""
+
+
 def config(**overrides: object) -> DynamicConfig:
     """A one-round, one-wide config, overridden by the test."""
-    return DynamicConfig.model_validate({"max_rounds": 1, "max_in_flight": 1, **overrides})
+    fields = {"max_rounds": 1, "max_in_flight": 1, **HELD_AGENTS}
+    return DynamicConfig.model_validate({**fields, **overrides})
 
 
 PLAN_DOCUMENTS = ["reference/README.md"]
@@ -120,6 +127,7 @@ def plan_config(*steps: dict[str, object], **overrides: object) -> DynamicConfig
     """A config that follows a plan of ``steps`` (none: the run outlines them), as JSON parses it."""
     plan = {"documents": PLAN_DOCUMENTS, "steps": list(steps)}
     fields = {"max_rounds": 1, "max_in_flight": 1, "mode": "follow_plan", "plan": plan}
+    fields |= HELD_AGENTS
     return DynamicConfig.model_validate_json(json.dumps({**fields, **overrides}))
 
 
@@ -248,6 +256,18 @@ class Host:
                 return
             self.answer(waits[0])
         message = f"the input's measurement did not end in {limit} steps: {self.run.timeline()}"
+        raise AssertionError(message)
+
+    def drain_beside_input(self, *, limit: int = 100) -> None:
+        """Answer every open wait but the input's the ordinary way, without moving the clock."""
+        for _ in range(limit):
+            others = [
+                item for item in self.run.open if item.until is not None and item.path != INPUT_PATH
+            ]
+            if not others:
+                return
+            self.answer(others[0])
+        message = f"waits beside the input's did not end in {limit} steps: {self.run.timeline()}"
         raise AssertionError(message)
 
     def drain_until_turn(self, role: str, *, limit: int = 50) -> None:

@@ -89,7 +89,7 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
     call = Call(capacity=run.capacity(), problem=run.gate.last_error)
 
     async def ask(tries: Tries[Failed]) -> Reply | NoPlan | Again[Failed]:
-        return await ask_planner(planner, run, call, tries.reasons)
+        return await ask_planner(planner, run, call, tries.reasons, now=ctx.clock.now())
 
     while True:
         match await ctx.retry(ask, LOST_TURNS):
@@ -103,11 +103,19 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
 
 
 async def ask_planner(
-    planner: Session, run: RunRecord, call: Call, lost: tuple[Failed, ...]
+    planner: Session,
+    run: RunRecord,
+    call: Call,
+    lost: tuple[Failed, ...],
+    *,
+    now: float | None = None,
 ) -> Reply | NoPlan | Again[Failed]:
-    """One ask: the planner's reply, a plan-less end, or a lost turn to ask again."""
+    """One ask: the planner's reply, a plan-less end, or a lost turn to ask again.
+
+    ``now`` is the run clock when it is asked: the request says how long candidates have waited.
+    """
     asked_of = lost[-1].turn if lost else call.again
-    asked = run.world()
+    asked = run.world(now)
     event = await planner.turn(asked.prompt(call.problem, again=asked_of))
     world = run.world()  # the run as it is when the reply arrives
     match event:
