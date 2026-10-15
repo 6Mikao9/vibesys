@@ -23,7 +23,7 @@ async def do_work(ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work) -> C
     """Let the role this workstream is for do its work; a work that cannot go on closes as failed."""
     try:
         if w.plan.kind is WorkKind.PROFILE:
-            return await profile(ctx, w, ws)
+            return await profile(ctx, w, ws, work)
         return await implement_and_measure(ctx, w, ws, work)
     except WorkEndedError as ended:
         return work.ended(ended)
@@ -46,11 +46,12 @@ async def implement_and_measure(
         # nothing was made, nothing is configured to measure, or a plan step is accepted on
         # the judge's review of its own checks
         return Closing(result=result)
-    evidence = await measure_and_interpret(ctx, w, ws, result.candidate.revision or w.parent)
+    revision = result.candidate.revision or w.parent
+    evidence = await measure_and_interpret(ctx, w, ws, work, revision)
     return Closing(result=result, evidence=evidence)
 
 
-async def profile(ctx: Flow, w: WorkstreamStart, ws: Workspace) -> Closing:
+async def profile(ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work) -> Closing:
     """Have the profiler look at the parent, then capture a trusted profile of it.
 
     What the profiler reports is never read; only what the trusted capture measures is.
@@ -58,4 +59,4 @@ async def profile(ctx: Flow, w: WorkstreamStart, ws: Workspace) -> Closing:
     profiler = ctx.agents.session(PROFILER, workspace=ws, revision=w.parent)
     if isinstance(failed := await profiler.turn(profile_prompt(w.plan, w.parent)), Failed):
         raise ended_by(failed, AgentName.PROFILER, plan=w.plan)
-    return Closing(evidence=await measure_and_interpret(ctx, w, ws, w.parent))
+    return Closing(evidence=await measure_and_interpret(ctx, w, ws, work, w.parent))

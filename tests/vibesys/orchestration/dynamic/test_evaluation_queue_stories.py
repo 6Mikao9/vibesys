@@ -237,9 +237,10 @@ def test_a_wait_for_the_input_past_the_limit_reaches_the_orchestrators_next_turn
     _plan(host, implement("h1"))
     _work(host, "000001.h1", "c1")
 
-    # h1 is measured beside the input, then waits for the input to settle; the planner is asked.
-    _end_measurement(host, "000001.h1")
+    # h1 holds the free evaluation slot, parked: its measurement waits for the input's, and the
+    # planner is asked to fill its agent slot.
     assert host.input_waits()
+    assert not _measured(host)
     first = host.run.expect_turn(role=PLANNER_LABEL)
     assert isinstance(first.context, PlannerPrompt)
     assert first.context.input_overdue is None

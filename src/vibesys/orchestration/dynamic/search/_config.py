@@ -16,7 +16,9 @@ from vs_core.api.search import Value
 
 type Positive = Annotated[int, Field(gt=0, le=1000)]
 type NonNegative = Annotated[int, Field(ge=0, le=1000)]
-type Width = Annotated[int, Field(gt=0, le=32)]
+MAX_WIDTH = 32
+"""The most workstreams, or trusted evaluations, a run holds at once."""
+type Width = Annotated[int, Field(gt=0, le=MAX_WIDTH)]
 type Wait = Annotated[float, Field(gt=0, le=7 * 24 * 3600)]
 
 
@@ -29,8 +31,11 @@ class DynamicConfig(Value):
     """Workstreams whose agents work at once. A workstream whose candidate waits for its trusted
     measurement no longer counts: its slot goes to new work."""
     evaluation_slots: Width | None = None
-    """Trusted measurements the run holds at once, the input's included; None: ``max_in_flight``.
-    A candidate is chosen for a slot only when the slot is free (see `pick`)."""
+    """Trusted measurements the run holds at once, the input's included. A candidate is chosen
+    for a slot only when the slot is free (see `pick`). None: as many as the run environment's
+    evaluation executor admits at once, which the launch fills in (`DynamicLaunch.search_config`);
+    1 when no launch did. More slots than the executor admits would dispatch a measurement that
+    waits in the executor's queue while its deadline runs."""
     max_backlog: Annotated[int, Field(ge=0, le=32)] | None = None
     """Workstreams whose candidate waits for, or holds, an evaluation slot without holding one of
     the ``max_in_flight`` agent slots; None: ``max_in_flight``. Past it, a waiting workstream keeps
@@ -75,7 +80,7 @@ class DynamicConfig(Value):
     @property
     def slots(self) -> int:
         """Trusted measurements the run holds at once."""
-        return self.evaluation_slots or self.max_in_flight
+        return self.evaluation_slots or 1
 
     @property
     def backlog(self) -> int:

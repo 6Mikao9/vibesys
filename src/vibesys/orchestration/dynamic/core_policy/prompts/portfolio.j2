@@ -29,13 +29,13 @@ A candidate must beat it on the objectives to be adopted.
 {% if baseline_pending %}
 
 Input baseline: still being measured (the trusted evaluation may wait in a queue). Plan
-from the task and the code now; the workstreams you schedule start now, their candidates
-are reviewed and measured meanwhile, and compared with the input once its measurement
+from the task and the code now; the workstreams you schedule start now and their candidates
+are reviewed meanwhile; they are measured and compared with the input once its measurement
 lands. A later request shows its result.
 {% endif %}
 {% if input_overdue %}
 
-The input's measurement is overdue: a workstream has waited {% if input_overdue.waited_seconds is not none %}{{ input_overdue.waited_seconds }} seconds{% else %}longer{% endif %} for it (the run allows {{ input_overdue.limit_seconds }}). Candidates are still implemented and measured, but none is settled until the input's measurement lands. Decide whether to keep scheduling work that needs it, schedule work that does not, or park directions that cannot go on without it.
+The input's measurement is overdue: a workstream has waited {% if input_overdue.waited_seconds is not none %}{{ input_overdue.waited_seconds }} seconds{% else %}longer{% endif %} for it (the run allows {{ input_overdue.limit_seconds }}). Candidates are still implemented and reviewed, but none is measured or settled until the input's measurement lands. Decide whether to keep scheduling work that needs it, schedule work that does not, or park directions that cannot go on without it.
 {% endif %}
 {% if evaluations %}
 

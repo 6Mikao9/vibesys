@@ -4,10 +4,10 @@ This is the whole search, top to bottom. The input's measurement, planning and t
 are tasks in three groups, so they run concurrently; the root decides only when to start one and
 when the search is over. Planning does not wait for the input's measurement (on a shared cluster
 it may wait hours for a slot): the planner reads the task and the code meanwhile, and is told the
-measurement is pending. Workstreams start too: their agents write code, run their own jobs, are
-reviewed and measured, and only a settlement that scores a candidate against the input waits for
-its measurement, which the root hands them through the `INPUT_MEASURED` latch when it lands
-(`_measure.the_input`). An input that fails its measurement drops the plans not yet started, and
+measurement is pending. Workstreams start too: their agents write code, run their own jobs and
+are reviewed; a candidate's trusted measurement, and a settlement that scores it against the
+input, wait for the input's measurement, which the root hands them through the `INPUT_MEASURED`
+latch when it lands (`_measure.the_input`). An input that fails its measurement drops the plans not yet started, and
 planning is asked again (`RunRecord.measured`).
 
 Agents never wait for a trusted evaluation slot. A workstream whose candidate is ready submits it

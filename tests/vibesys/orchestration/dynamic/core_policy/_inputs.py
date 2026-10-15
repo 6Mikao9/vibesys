@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from tests.support.task_project import write_task
 
@@ -92,15 +92,21 @@ def resolved(
     )
 
 
+class HostFacts(TypedDict, total=False):
+    """What the host resolved of the run environment and the product config; a test varies one."""
+
+    queue_allowance_seconds: int
+    observe: tuple[int, int]
+    """The poll interval and the backoff cap, in seconds."""
+    max_run_seconds: int | None
+    evaluation_capacity: int
+
+
 def context_of(
-    run: ResolvedRun,
-    options: Mapping[str, object] | None = None,
-    *,
-    queue_allowance_seconds: int = 900,
-    observe: tuple[int, int] = (10, 120),
-    max_run_seconds: int | None = None,
+    run: ResolvedRun, options: Mapping[str, object] | None = None, **host: Unpack[HostFacts]
 ) -> CoreRunContext:
     """The context the host hands the dynamic policy for ``run``, launched with ``options``."""
+    interval, backoff_cap = host.get("observe", (10, 120))
     return CoreRunContext(
         run_id="policy",
         options=launch_of(options),
@@ -109,12 +115,12 @@ def context_of(
         evaluation_plan=run.evaluation_plan,
         environment=run.environment,
         artifacts=run.artifacts,
-        evaluation_capacity=EVALUATION_CAPACITY,
-        queue_allowance_seconds=queue_allowance_seconds,
-        observe_interval_seconds=observe[0],
-        observe_backoff_cap_seconds=observe[1],
+        evaluation_capacity=host.get("evaluation_capacity", EVALUATION_CAPACITY),
+        queue_allowance_seconds=host.get("queue_allowance_seconds", 900),
+        observe_interval_seconds=interval,
+        observe_backoff_cap_seconds=backoff_cap,
         request_retries=RequestRetries(limit=2, backoff=1.0, backoff_cap=8.0),
-        max_run_seconds=max_run_seconds,
+        max_run_seconds=host.get("max_run_seconds"),
         cancellation_bound_seconds=60,
         cleanup_bound_seconds=30,
         reconciliation_bound_seconds=60,
@@ -122,24 +128,11 @@ def context_of(
 
 
 def plan_of(
-    run: ResolvedRun,
-    options: Mapping[str, object] | None = None,
-    *,
-    queue_allowance_seconds: int = 900,
-    observe: tuple[int, int] = (10, 120),
-    max_run_seconds: int | None = None,
+    run: ResolvedRun, options: Mapping[str, object] | None = None, **host: Unpack[HostFacts]
 ) -> CorePlan:
     """What the dynamic policy plans for ``run``."""
     assert PLUGIN.core is not None
-    return PLUGIN.core.plan(
-        context_of(
-            run,
-            options,
-            queue_allowance_seconds=queue_allowance_seconds,
-            observe=observe,
-            max_run_seconds=max_run_seconds,
-        )
-    )
+    return PLUGIN.core.plan(context_of(run, options, **host))
 
 
 def ports(root: Path, run: ResolvedRun) -> OperationPorts:

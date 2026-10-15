@@ -593,8 +593,8 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         metavar="N",
         help=(
             "Dynamic loop: trusted evaluations held at once, the input's included; which "
-            "waiting candidate one measures is chosen only when it frees (default: "
-            "--max-in-flight)."
+            "waiting candidate one measures is chosen only when it frees (default: as many as "
+            "the run environment's evaluation executor admits at once)."
         ),
     )
     parser.add_argument(

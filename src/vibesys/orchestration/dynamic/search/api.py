@@ -5,7 +5,7 @@ from vibesys.candidates.api import review_evaluations as evaluations
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
 from vibesys.orchestration.dynamic.search._budget import budget
-from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._config import MAX_WIDTH, DynamicConfig
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
 from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
@@ -116,6 +116,7 @@ __all__ = [
     "IMPLEMENTER",
     "INTERPRET_KIND",
     "JUDGE",
+    "MAX_WIDTH",
     "OPERATIONS",
     "OUTLINER",
     "PLANNER",

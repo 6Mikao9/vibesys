@@ -52,9 +52,13 @@ def input_so_far(ctx: Flow, w: WorkstreamStart) -> Baseline | None:
 async def the_input(ctx: Flow, w: WorkstreamStart, work: Work) -> Baseline:
     """The input's measurement: known when the workstream started, else waited for here.
 
-    A workstream may start, and its candidate may even be measured, while the input is still
-    being measured: only what compares the candidate with the input (its settlement) waits for
-    it. A wait longer than the run's ``input_wait_seconds`` is reported to the root once, which
+    A workstream may start, and its candidate may be reviewed, while the input is still being
+    measured. Two things wait for it: the settlement, which compares the candidate with the
+    input, and the candidate's trusted measurement. The measurement waits because the backend
+    admits jobs in its own order and counts a measurement's deadline from its dispatch: a
+    candidate dispatched while the input's job still waits for admission would spend its
+    deadline in that queue and settle as failed. It waits once its slot is bound
+    (`measure_and_interpret`) until binding moves into the backend (#2662, steps 2 to 4). A wait longer than the run's ``input_wait_seconds`` is reported to the root once, which
     tells the orchestrator on its next turn; the workstream goes on waiting. An input that comes
     back unmeasurable does not stop the candidate: a candidate can fix what broke the input, and
     with no input value to beat it is eligible once it passes the task's gates.
@@ -105,9 +109,13 @@ async def a_slot(ctx: Flow, w: WorkstreamStart, revision: RevisionRef) -> None:
 
 
 async def measure_and_interpret(
-    ctx: Flow, w: WorkstreamStart, ws: Workspace, revision: RevisionRef
+    ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work, revision: RevisionRef
 ) -> Evidence:
     """Measure ``revision`` with the trusted evaluations and decode what the evidence says.
+
+    The measurement is dispatched only once a slot is bound to it and the input's measurement
+    has landed (`the_input`): the workstream waits for both parked, so its agent slot may go to
+    new work meanwhile.
 
     The backend measures again after an infrastructure failure, so a result that reaches here
     is the candidate's own; a measurement that ended without one is a failure of the workstream.
@@ -118,6 +126,7 @@ async def measure_and_interpret(
     if w.plan.kind is WorkKind.PROFILE and w.plan.required_fields:
         recipe = recipe.requiring(PROFILE_STAGE, w.plan.required_fields)
     await a_slot(ctx, w, revision)
+    await the_input(ctx, w, work)  # until a backend binds a slot at its job's start (#2662)
     plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=names)
     found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
     ctx.channel(REPORTS).send(Released(key=w.key))

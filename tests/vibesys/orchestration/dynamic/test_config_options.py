@@ -102,7 +102,7 @@ def test_profiling_is_never_a_launch_option_but_follows_the_plan(
 
     launch = DynamicLaunch.model_validate(LAUNCH)
 
-    assert launch.search_config(profiling=allowed).profiling is allowed
+    assert launch.search_config(profiling=allowed, evaluation_capacity=1).profiling is allowed
 
 
 # -- following the task's plan --------------------------------------------------------------------
@@ -126,7 +126,7 @@ def test_following_a_plan_is_refused_when_the_task_declares_none_naming_the_sett
             DynamicConfig.model_validate({**VALID, **options})
         return
     launch = DynamicLaunch.model_validate_json(_launch_json(**options), strict=True)
-    config = launch.search_config(profiling=False)
+    config = launch.search_config(profiling=False, evaluation_capacity=1)
     assert config.follows_plan
     assert config.plan is not None
     assert config.plan == Outline.model_validate_json(
@@ -140,7 +140,7 @@ def test_following_a_plan_is_refused_when_the_task_declares_none_naming_the_sett
 def test_an_exploring_run_is_not_given_the_task_plan(plan: dict[str, Any]) -> None:
     for options in ({}, {"mode": "explore"}):
         launch = DynamicLaunch.model_validate_json(_launch_json(plan=plan, **options), strict=True)
-        config = launch.search_config(profiling=False)
+        config = launch.search_config(profiling=False, evaluation_capacity=1)
         assert config.mode == "explore"
         assert config.plan is None
 
