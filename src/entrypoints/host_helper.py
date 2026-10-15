@@ -22,11 +22,14 @@ from typing import TYPE_CHECKING
 from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_api import HarnessOption
 from server.host_helper import serve_channel
+from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
     OsDirectories,
+    StoreLogReader,
     SubprocessRunLauncher,
+    run_streams_directory,
 )
 from server.host_helper_requests import HelperHost
 from server.instances import ControlSocketStopRequester
@@ -87,14 +90,18 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
     store = FileInstanceStore(root)
     # Records carry epoch times, so they age on the epoch clock, not ``threads``' monotonic one.
     epoch = SystemClock()
+    inspector = InstanceInspector(
+        store,
+        FileInstanceLogs(root),
+        FileInstanceMetadataStore(root),
+        epoch,
+    )
+    logs = StoreLogReader(
+        lambda instance_id: run_location(inspector.inspect(instance_id)), run_streams_directory
+    )
     return HelperHost(
         registry=LiveRegistry(store, epoch),
-        inspector=InstanceInspector(
-            store,
-            FileInstanceLogs(root),
-            FileInstanceMetadataStore(root),
-            epoch,
-        ),
+        inspector=inspector,
         stop_effects=StopEffects(
             requester=ControlSocketStopRequester(network, clock=epoch, deadline_clock=threads),
             signaller=PidfdProcessSignaller(),
@@ -107,6 +114,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         checkout=GitCheckoutProbe(source_checkout_root(), SubprocessProbe()),
         dialer=network,
         vibesys_version=host_facts()[1],
+        logs=HelperLogs(logs, threads, threads.sleep),
         harnesses=vetted_harnesses,
     )
 

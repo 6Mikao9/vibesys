@@ -532,6 +532,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_gone",
         "connect_denied",
         "connect_failed",
+        "unknown_instance",
+        "unknown_log_stream",
         "unvetted_harness",
         "internal"
       ],
@@ -544,6 +546,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "instances_watch",
         "paths_complete",
         "instances_inspect",
+        "logs",
         "harnesses"
       ],
       "title": "HelperFeature",
@@ -1139,6 +1142,7 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "InstancesWatchRequest",
       "type": "object"
     },
+    "JsonValue": {},
     "LiveInstanceRecord": {
       "additionalProperties": false,
       "description": "What a detached server publishes about itself (version 4).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal. When the server\nexits it leaves its last record, with an ended phase and ``ended_at``, as a\ntombstone the registry keeps for a day.",
@@ -1241,6 +1245,353 @@ const hostHelperSchema: Record<string, unknown> = {
         "vibesys_version"
       ],
       "title": "LiveInstanceRecord",
+      "type": "object"
+    },
+    "LogChunk": {
+      "additionalProperties": false,
+      "description": "Bytes ``[offset, next_offset)`` of a stream, decoded as UTF-8 text.\n\nThe helper cuts a chunk that more bytes follow after the last line end in\nits window, or, with no line end there, before a character the window\nsplits; so ``data`` decodes without loss except for bytes that are not\nUTF-8, which become U+FFFD. ``next_offset - offset`` counts bytes.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "data": {
+          "title": "Data",
+          "type": "string",
+          "x-vibesys-max-utf8-bytes": 196608
+        },
+        "next_offset": {
+          "minimum": 0,
+          "title": "Next Offset",
+          "type": "integer"
+        },
+        "eof": {
+          "title": "Eof",
+          "type": "boolean"
+        },
+        "closed": {
+          "title": "Closed",
+          "type": "boolean"
+        },
+        "truncated_before": {
+          "title": "Truncated Before",
+          "type": "boolean"
+        },
+        "pipes": {
+          "items": {
+            "$ref": "#/$defs/LogPipeSpan"
+          },
+          "title": "Pipes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "offset",
+        "data",
+        "next_offset",
+        "eof",
+        "closed",
+        "truncated_before",
+        "pipes"
+      ],
+      "title": "LogChunk",
+      "type": "object"
+    },
+    "LogOffset": {
+      "additionalProperties": false,
+      "description": "Read from this byte offset of the stream.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "offset"
+      ],
+      "title": "LogOffset",
+      "type": "object"
+    },
+    "LogPipe": {
+      "description": "Which of a command's output pipes wrote some bytes.",
+      "enum": [
+        "stdout",
+        "stderr"
+      ],
+      "title": "LogPipe",
+      "type": "string"
+    },
+    "LogPipeSpan": {
+      "additionalProperties": false,
+      "description": "Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "length": {
+          "exclusiveMinimum": 0,
+          "title": "Length",
+          "type": "integer"
+        },
+        "pipe": {
+          "$ref": "#/$defs/LogPipe"
+        }
+      },
+      "required": [
+        "offset",
+        "length",
+        "pipe"
+      ],
+      "title": "LogPipeSpan",
+      "type": "object"
+    },
+    "LogStream": {
+      "additionalProperties": false,
+      "description": "One recorded log stream of an instance, as its store indexes it.",
+      "properties": {
+        "id": {
+          "pattern": "^[0-9]{6,12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "owner": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Owner",
+          "type": "object"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "retained_start": {
+          "minimum": 0,
+          "title": "Retained Start",
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogStreamOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "command",
+        "retained_start",
+        "size",
+        "outcome"
+      ],
+      "title": "LogStream",
+      "type": "object"
+    },
+    "LogStreamOutcome": {
+      "description": "How a stream was closed.",
+      "enum": [
+        "ended",
+        "failed",
+        "abandoned"
+      ],
+      "title": "LogStreamOutcome",
+      "type": "string"
+    },
+    "LogTail": {
+      "additionalProperties": false,
+      "description": "Read the last ``tail_bytes`` bytes the stream holds, from the first line start in them.",
+      "properties": {
+        "tail_bytes": {
+          "maximum": 65536,
+          "minimum": 1,
+          "title": "Tail Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tail_bytes"
+      ],
+      "title": "LogTail",
+      "type": "object"
+    },
+    "LogsListReply": {
+      "additionalProperties": false,
+      "description": "The instance's streams, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "logs.list",
+          "default": "logs.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "streams": {
+          "items": {
+            "$ref": "#/$defs/LogStream"
+          },
+          "title": "Streams",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "streams"
+      ],
+      "title": "LogsListReply",
+      "type": "object"
+    },
+    "LogsListRequest": {
+      "additionalProperties": false,
+      "description": "The log streams recorded for one instance, live or ended.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logs.list",
+          "default": "logs.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id"
+      ],
+      "title": "LogsListRequest",
+      "type": "object"
+    },
+    "LogsReadReply": {
+      "additionalProperties": false,
+      "description": "One chunk of the stream.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "logs.read",
+          "default": "logs.read",
+          "title": "Type",
+          "type": "string"
+        },
+        "chunk": {
+          "$ref": "#/$defs/LogChunk"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "chunk"
+      ],
+      "title": "LogsReadReply",
+      "type": "object"
+    },
+    "LogsReadRequest": {
+      "additionalProperties": false,
+      "description": "One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.\n\nA wait ends as soon as bytes arrive or the stream closes, and always before\nthe request's deadline, so a follower keeps exactly one read in flight.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logs.read",
+          "default": "logs.read",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "stream_id": {
+          "pattern": "^[0-9]{6,12}$",
+          "title": "Stream Id",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogOffset"
+            },
+            {
+              "$ref": "#/$defs/LogTail"
+            }
+          ],
+          "title": "Start"
+        },
+        "max_bytes": {
+          "maximum": 65536,
+          "minimum": 4,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "wait_ms": {
+          "default": 0,
+          "maximum": 30000,
+          "minimum": 0,
+          "title": "Wait Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id",
+        "stream_id",
+        "start",
+        "max_bytes"
+      ],
+      "title": "LogsReadRequest",
       "type": "object"
     },
     "MissingLogTail": {
@@ -2162,6 +2513,8 @@ const hostHelperSchema: Record<string, unknown> = {
           "instances.list": "#/$defs/InstancesListRequest",
           "instances.unwatch": "#/$defs/InstancesUnwatchRequest",
           "instances.watch": "#/$defs/InstancesWatchRequest",
+          "logs.list": "#/$defs/LogsListRequest",
+          "logs.read": "#/$defs/LogsReadRequest",
           "paths.complete": "#/$defs/PathsCompleteRequest",
           "ping": "#/$defs/PingRequest",
           "run.connect": "#/$defs/RunConnectRequest",
@@ -2210,6 +2563,12 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/PathsCompleteRequest"
         },
         {
+          "$ref": "#/$defs/LogsListRequest"
+        },
+        {
+          "$ref": "#/$defs/LogsReadRequest"
+        },
+        {
           "$ref": "#/$defs/HarnessesListRequest"
         }
       ],
@@ -2226,6 +2585,8 @@ const hostHelperSchema: Record<string, unknown> = {
           "instances.list": "#/$defs/InstancesListReply",
           "instances.unwatch": "#/$defs/InstancesUnwatchReply",
           "instances.watch": "#/$defs/InstancesWatchReply",
+          "logs.list": "#/$defs/LogsListReply",
+          "logs.read": "#/$defs/LogsReadReply",
           "paths.complete": "#/$defs/PathsCompleteReply",
           "ping": "#/$defs/PingReply",
           "run.connect": "#/$defs/RunConnectReply",
@@ -2274,6 +2635,12 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/PathsCompleteReply"
         },
         {
+          "$ref": "#/$defs/LogsListReply"
+        },
+        {
+          "$ref": "#/$defs/LogsReadReply"
+        },
+        {
           "$ref": "#/$defs/HarnessesListReply"
         },
         {
@@ -2301,6 +2668,8 @@ const hostHelperSchema: Record<string, unknown> = {
     "instances.watch": "instances_watch",
     "instances.unwatch": "instances_watch",
     "paths.complete": "paths_complete",
+    "logs.list": "logs",
+    "logs.read": "logs",
     "harnesses.list": "harnesses"
   },
   "x-vibesys-feature-by-field": {
