@@ -8,6 +8,7 @@
 export {
   EMPTY_RUN_FOLD,
   EMPTY_TRACE_LOG,
+  overviewAt,
   type RunData,
   type RunFold,
   type RunLink,
@@ -43,11 +44,14 @@ export {NOTHING_FOLDED, type RunAtView} from './run-at-view.js';
 export {
   commandable,
   FORCE_STOP_BOUND_MS,
+  HISTORY_PAGE_EVENTS,
+  type HistoryReply,
   MAP_FILTERS,
   type MapFilter,
   type MapState,
   RUN_TABS,
   type RunCapability,
+  type RunHistory,
   type RunLogs,
   type RunPageAction,
   type RunPageRequest,
