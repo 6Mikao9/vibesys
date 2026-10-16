@@ -50,6 +50,7 @@ from ._spans import (
     RunTrace,
     Span,
     SpanAttempt,
+    SpanChange,
     SpanFailure,
     SpanId,
     SpanLabel,
@@ -59,6 +60,8 @@ from ._spans import (
     SpanType,
     SpanWaitKind,
     WaitingOn,
+    WireSpan,
+    span_changes,
 )
 from ._state import Dropped, FlowState, JournaledEvent, Waiting
 from ._winner import INPUT, EndReason, Input, Kept, NoWinner
@@ -108,6 +111,7 @@ __all__ = [
     "Source",
     "Span",
     "SpanAttempt",
+    "SpanChange",
     "SpanFailure",
     "SpanId",
     "SpanKind",
@@ -127,6 +131,7 @@ __all__ = [
     "UnknownRoleError",
     "Waiting",
     "WaitingOn",
+    "WireSpan",
     "Workspace",
     "Workspaces",
     "flow",
@@ -135,4 +140,5 @@ __all__ = [
     "reply_errors",
     "resource",
     "search",
+    "span_changes",
 ]
