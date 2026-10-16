@@ -3238,6 +3238,18 @@
         },
         "reason": {
           "$ref": "#/$defs/IterationUnavailableReason"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
         }
       },
       "required": [
@@ -3251,6 +3263,7 @@
       "enum": [
         "external_state_unavailable",
         "policy_not_mapped",
+        "projection_invalid",
         "state_unavailable"
       ],
       "title": "IterationUnavailableReason",

@@ -197,11 +197,20 @@ class _RunProjection(Protocol):
     def iterations(self) -> object: ...
 
     @property
+    def projection_failure(self) -> str | None:
+        """Why the policy's projection of the committed state failed validation; None if not."""
+        ...
+
+    @property
     def projection(self) -> Mapping[str, object] | None: ...
 
 
 class CommittedStateProjector(Protocol):
-    """Project just-committed plugin state into product run facts."""
+    """Project just-committed plugin state into product run facts.
+
+    A projection is derived from the committed state and never raises for a state it cannot
+    show; it returns a view whose ``projection_failure`` says why instead.
+    """
 
     def project_committed(
         self,
@@ -399,19 +408,59 @@ class _CoreCommitObserver:
         self._run_id = run_id
         self._projector = projector
         self._namespace = namespace
+        self._shown: _RunProjection | None = None
+        """The last view that was built, which the next commit's events are diffed against."""
+        self._seeded = False
+        self._failing = False
 
     def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
-        """Publish the durable state hint before the events derived from it."""
+        """Publish the durable state hint before the events derived from it.
+
+        Events are the difference between this commit's view and the last view that was built,
+        so the rounds of a stretch whose view could not be built are announced by the first
+        commit after it whose view can. A view that cannot be built is reported once, when the
+        failure first appears; the run goes on.
+        """
         self._integration.publish_committed_state(self._namespace, current)
-        _emit_core_commit_events(
-            self._integration.events, self._project(previous), self._project(current)
-        )
+        if not self._seeded:
+            # The first commit this process sees: what it held before was already announced.
+            before = self._project(previous)
+            if before is not None and before.projection_failure is None:
+                self._shown, self._seeded = before, True
+        after = self._project(current)
+        if after is not None and after.projection_failure is not None:
+            self._report_failed_projection(current, after.projection_failure)
+        elif after is not None:
+            _emit_core_commit_events(self._integration.events, self._shown, after)
+            self._shown, self._seeded, self._failing = after, True, False
         _emit_winner_selected(
             self._integration.events,
             winner_selection(previous) if isinstance(previous, RuntimeRecord) else None,
             winner_selection(current) if isinstance(current, RuntimeRecord) else None,
         )
         _emit_span_changes(self._integration.events, _run_trace(previous), _run_trace(current))
+
+    def _report_failed_projection(self, current: BaseModel, failure: str) -> None:
+        if self._failing:
+            return
+        self._failing = True
+        revision = current.envelope.revision if isinstance(current, RuntimeRecord) else None
+        self._integration.events.emit(
+            CoreEventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(
+                summary=(
+                    "the run's view could not be built from its committed state; the run "
+                    "goes on, and the rounds it finishes meanwhile are announced once a "
+                    "later commit's view can be built"
+                ),
+                detail=(
+                    f"the {self._namespace} projection failed validation at core revision "
+                    f"{revision}: {failure}"
+                ),
+                source=FrameworkSource.LOOP,
+                source_label="projection",
+            ),
+        )
 
     def _project(self, value: BaseModel | None) -> _RunProjection | None:
         projector = self._projector

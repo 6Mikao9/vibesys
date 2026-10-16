@@ -804,7 +804,9 @@ export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
  */
-export type IterationUnavailableReason = "external_state_unavailable" | "policy_not_mapped" | "state_unavailable";
+export type IterationUnavailableReason =
+  "external_state_unavailable" | "policy_not_mapped" | "projection_invalid" | "state_unavailable";
+export type Detail5 = string | null;
 export type IterationsReady = boolean | null;
 export type Round2 = number;
 export type Commit2 = string | null;
@@ -2156,6 +2158,7 @@ export interface IterationUnavailable {
   kind?: Kind50;
   schema_version?: SchemaVersion1;
   reason: IterationUnavailableReason;
+  detail?: Detail5;
 }
 /**
  * What one round changed in the workspace.

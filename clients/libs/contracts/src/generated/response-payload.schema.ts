@@ -1263,6 +1263,18 @@ const responsePayloadSchema: Record<string, unknown> = {
         },
         "reason": {
           "$ref": "#/$defs/IterationUnavailableReason"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
         }
       },
       "required": [
@@ -1276,6 +1288,7 @@ const responsePayloadSchema: Record<string, unknown> = {
       "enum": [
         "external_state_unavailable",
         "policy_not_mapped",
+        "projection_invalid",
         "state_unavailable"
       ],
       "title": "IterationUnavailableReason",
