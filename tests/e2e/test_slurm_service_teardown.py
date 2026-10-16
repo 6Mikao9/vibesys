@@ -16,6 +16,21 @@ longer than the old 5 s: the script must wait for it, not count the zombie it le
 when the configured exit wait runs out first, name it and fail the job. A process the job's
 command leaves behind is ended the same way.
 
+Review of that fix (2026-10-16): the script counted a multithreaded process whose main
+thread had exited (``ps`` state ``Zl``) as gone while a sibling thread was still in the
+kernel, and a CUDA process releases the GPU only when its last thread exits. It also never
+signalled a descendant that called ``setsid`` (as Ray and daemons do), since it found
+processes by the sessions it started. Here a tracer holds a worker's sibling thread in its
+exit after the main thread exited, and a command leaves behind a process in a session of
+its own, with a child whose environment is empty.
+
+Second review (2026-10-16): a nested job submitted by the command inherited the marker and
+was killed, and a session found after the first scan got only SIGKILL. A third finding, an
+environment read that blocks on a stuck process's mmap_lock, has no real-tier test: holding
+another process's mmap_lock, or making a read of its environment block, needs privileges
+(``userfaultfd`` for kernel faults, FUSE, or a stuck driver) that a test host does not
+reliably grant, so ``libs/vs-slurm/tests/test_api.py`` pins that every such read is bounded.
+
 Each job runs on the executing Fake Slurm cluster, which runs the exact production-generated
 job script under ``/bin/bash`` inside ``sbatch``. The transport timeout is the hang guard.
 The script's shape and the configuration's bounds are pinned in the deterministic tier by
@@ -39,6 +54,7 @@ from vs_sim.api import MonotonicClock, OsProcesses
 from vs_sim.api.testing import HANG_GUARD_S
 from vs_slurm.api import (
     PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE,
+    SERVICE_NOT_READY_EXIT_CODE,
     SlurmConfig,
     SlurmConnectorTransport,
     SlurmJobRequest,
@@ -55,7 +71,8 @@ _HOLD_SECONDS = 7
 # The parent ignores nothing: on SIGTERM it waits for its child, as a server waits for its
 # workers. The child ignores SIGTERM, so only a SIGKILL ends either of them. The child lets
 # any process trace it (Yama's ptrace_scope 1 otherwise allows only ancestors), and, when a
-# tracer is expected, the service is ready only once the tracer answered.
+# tracer is expected, the service is ready only once the tracer answered. With a ``fail``
+# file, the parent exits once its child is ready instead, and the service never is.
 _SERVICE = textwrap.dedent(
     """
     import ctypes, os, pathlib, signal, sys
@@ -73,6 +90,8 @@ _SERVICE = textwrap.dedent(
         while True:
             signal.pause()
     os.read(reader, 1)
+    if (root / "fail").is_file():
+        sys.exit(1)
     signal.signal(signal.SIGTERM, lambda *_: os.waitpid(child, 0))
     (root / "service.pgid").write_text(str(os.getpgrp()))
     (root / "script.pid").write_text(str(os.getppid()))
@@ -82,7 +101,7 @@ _SERVICE = textwrap.dedent(
     """
 )
 
-# Seizes the service's child with PTRACE_O_TRACEEXIT and holds it in its exit stop, the
+# Seizes the service's child (or the thread named in the file ``argv[4]``) with PTRACE_O_TRACEEXIT and holds it in its exit stop, the
 # state a process killed while the GPU driver frees its memory is in: SIGKILLed, not yet a
 # zombie. With a hold time it then notes whether the job script is still running, lets
 # the exit finish, and never reaps the zombie, so the zombie lasts as long as this tracer;
@@ -91,14 +110,14 @@ _TRACER = textwrap.dedent(
     """
     import ctypes, os, pathlib, signal, sys, time
 
-    root, hold = pathlib.Path(sys.argv[1]), sys.argv[2]
+    root, hold, target = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[4]
     deadline = time.monotonic() + float(sys.argv[3])
     libc = ctypes.CDLL(None, use_errno=True)
     libc.ptrace.argtypes = [ctypes.c_long, ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p]
     PTRACE_SEIZE, PTRACE_CONT, PTRACE_O_TRACEEXIT, PTRACE_EVENT_EXIT = 0x4206, 7, 0x40, 6
-    while not (root / "child.pid").is_file() and time.monotonic() < deadline:
+    while not (root / target).is_file() and time.monotonic() < deadline:
         time.sleep(0.05)
-    child = int((root / "child.pid").read_text())
+    child = int((root / target).read_text())
     if libc.ptrace(PTRACE_SEIZE, child, None, ctypes.c_void_p(PTRACE_O_TRACEEXIT)) != 0:
         (root / "tracer").write_text(f"unavailable: errno {ctypes.get_errno()}")
         sys.exit(0)
@@ -135,6 +154,115 @@ _LEFTOVER = textwrap.dedent(
         while True:
             signal.pause()
     while not (root / "leftover.pid").is_file():
+        signal.sigtimedwait([], 0.05)
+    """
+)
+
+# A command that leaves a multithreaded worker behind: the worker's main thread exits (by
+# the raw exit system call, which ends only the calling thread), while a sibling thread,
+# held by the tracer, lives on, so the worker shows as a zombie with two threads. The
+# command exits 0 once the main thread is gone.
+_THREADED = textwrap.dedent(
+    """
+    import ctypes, os, pathlib, signal, sys, threading
+
+    root = pathlib.Path(sys.argv[1])
+    libc = ctypes.CDLL(None)
+    sys_exit = {"x86_64": 60, "aarch64": 93}[os.uname().machine]
+    worker = os.fork()
+    if worker == 0:
+        libc.prctl(0x59616D61, ctypes.c_ulong(-1), 0, 0, 0)
+        def hold():
+            (root / "thread.tid").write_text(str(threading.get_native_id()))
+            threading.Event().wait()
+        threading.Thread(target=hold).start()
+        while not (root / "tracer").is_file():
+            signal.sigtimedwait([], 0.05)
+        libc.syscall(sys_exit, 0)
+    stat = pathlib.Path(f"/proc/{worker}/stat")
+    while stat.read_text().rsplit(")", 1)[1].split()[0] != "Z":
+        signal.sigtimedwait([], 0.05)
+    (root / "worker.pid").write_text(str(worker))
+    """
+)
+
+# A command that leaves a process in a session of its own (``setsid``, as Ray and daemons
+# do) that ignores SIGTERM, and that process starts a child with an empty environment.
+_ESCAPEE = textwrap.dedent(
+    """
+    import os, pathlib, signal, sys
+
+    root = pathlib.Path(sys.argv[1])
+    holder = (
+        "import os, pathlib, signal, sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); signal.pause()"
+    )
+    if os.fork() == 0:
+        os.setsid()
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        if os.fork() == 0:
+            os.execve(sys.executable, [sys.executable, "-c", holder, str(root / "bare.pid")], {})
+        while not (root / "bare.pid").is_file():
+            signal.sigtimedwait([], 0.05)
+        (root / "escapee.pid").write_text(str(os.getpid()))
+        while True:
+            signal.pause()
+    while not (root / "escapee.pid").is_file():
+        signal.sigtimedwait([], 0.05)
+    """
+)
+
+# A command that submits a nested job: the nested job's process inherits the command's
+# environment, the job's marker included (sbatch exports it), but runs under a job id of its
+# own, in a session of its own. It ignores SIGTERM, so only teardown's SIGKILL would end it.
+_NESTED = textwrap.dedent(
+    """
+    import os, pathlib, signal, subprocess, sys
+
+    root = pathlib.Path(sys.argv[1])
+    holder = (
+        "import os, pathlib, signal, sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); signal.pause()"
+    )
+    env = {**os.environ, "SLURM_JOB_ID": "nested-" + os.environ["SLURM_JOB_ID"]}
+    subprocess.Popen(
+        [sys.executable, "-c", holder, str(root / "nested.pid")], env=env, start_new_session=True
+    )
+    while not (root / "nested.pid").is_file():
+        signal.sigtimedwait([], 0.05)
+    """
+)
+
+# A command whose child leaves the job's sessions only when teardown's SIGTERM arrives, so
+# teardown finds the new session after its first scan: on SIGTERM the child forks a process
+# that calls setsid and then exits on its own SIGTERM, noting that it got one. SIGTERM stays
+# blocked in that process until its handler is in place.
+_LATE_ESCAPEE = textwrap.dedent(
+    """
+    import os, pathlib, signal, sys
+
+    root = pathlib.Path(sys.argv[1])
+
+    def leave(*_):
+        signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGTERM])
+        if os.fork() == 0:
+            os.setsid()
+            def noted(*_):
+                (root / "late-termed").write_text("yes")
+                os._exit(0)
+            signal.signal(signal.SIGTERM, noted)
+            (root / "late.pid").write_text(str(os.getpid()))
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, [signal.SIGTERM])
+            while True:
+                signal.pause()
+        os._exit(0)
+
+    if os.fork() == 0:
+        signal.signal(signal.SIGTERM, leave)
+        (root / "leaver.pid").write_text(str(os.getpid()))
+        while True:
+            signal.pause()
+    while not (root / "leaver.pid").is_file():
         signal.sigtimedwait([], 0.05)
     """
 )
@@ -179,6 +307,7 @@ def _run_job(
     command: tuple[str, ...] = ("true",),
     service: bool = True,
     exit_wait_seconds: int = int(HANG_GUARD_S),
+    grace_seconds: int = _GRACE_SECONDS,
 ) -> SlurmJobResult:
     service_root = tmp_path / "service"
     service_program = tmp_path / "service.py"
@@ -195,7 +324,7 @@ def _run_job(
             kind="connector",
             command=(sys.executable, "-m", "vs_slurm.fake_connector", str(cluster)),
         ),
-        service_stop_grace_seconds=_GRACE_SECONDS,
+        service_stop_grace_seconds=grace_seconds,
         process_exit_wait_seconds=exit_wait_seconds,
         transport_timeout_seconds=int(HANG_GUARD_S) * 2,
     )
@@ -226,7 +355,7 @@ def _kill_group_of(pgid_file: Path) -> None:
             os.killpg(int(pgid_file.read_text(encoding="utf-8")), signal.SIGKILL)
 
 
-def _start_tracer(tmp_path: Path, hold: str) -> subprocess.Popen[bytes]:
+def _start_tracer(tmp_path: Path, hold: str, target: str = "child.pid") -> subprocess.Popen[bytes]:
     root = tmp_path / "service"
     root.mkdir(exist_ok=True)
     (root / "traced").write_text("yes", encoding="utf-8")
@@ -237,7 +366,7 @@ def _start_tracer(tmp_path: Path, hold: str) -> subprocess.Popen[bytes]:
     # > current interpreter and no shell; the tracer must outlive this call and run beside
     # > the job, which a run-to-completion process runner cannot do.
     return subprocess.Popen(  # noqa: S603
-        (sys.executable, str(program), str(root), hold, str(HANG_GUARD_S)),
+        (sys.executable, str(program), str(root), hold, str(HANG_GUARD_S), target),
         start_new_session=True,
     )
 
@@ -301,7 +430,7 @@ def test_job_script_names_a_process_that_outlives_the_exit_wait_and_fails_the_jo
         assert result.exit_code == PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE, result.output
         assert "still alive 1 s after SIGKILL" in result.output
         rows = [line.split() for line in result.output.splitlines()]
-        assert any(row[:1] == [str(child)] and row[4].startswith("t") for row in rows), (
+        assert any(row[:1] == [str(child)] and row[5].startswith("t") for row in rows), (
             result.output
         )
     finally:
@@ -330,3 +459,126 @@ def test_job_script_ends_a_process_its_command_left_behind(
             with suppress(ProcessLookupError):
                 os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
         _kill_group_of(tmp_path / "service" / "service.pgid")
+
+
+def test_a_service_that_never_became_ready_keeps_its_status_when_a_process_outlives_the_wait(
+    tmp_path: Path,
+) -> None:
+    tracer = _start_tracer(tmp_path, "forever")
+    root = tmp_path / "service"
+    (root / "fail").write_text("yes", encoding="utf-8")
+    try:
+        result = _run_job(tmp_path, exit_wait_seconds=1)
+        _require_tracer(tmp_path)
+
+        # At the merge base the teardown overwrote 70 with 71, hiding why the job failed.
+        assert result.exit_code == SERVICE_NOT_READY_EXIT_CODE, result.output
+        child = (root / "child.pid").read_text(encoding="utf-8")
+        assert "still alive 1 s after SIGKILL" in result.output
+        rows = [line.split() for line in result.output.splitlines()]
+        assert any(row[:1] == [child] for row in rows), result.output
+    finally:
+        tracer.kill()
+        tracer.wait(HANG_GUARD_S)
+
+
+def test_job_script_waits_for_a_worker_whose_main_thread_exited_before_its_others(
+    tmp_path: Path,
+) -> None:
+    tracer = _start_tracer(tmp_path, "forever", target="thread.tid")
+    root = tmp_path / "service"
+    program = tmp_path / "threaded.py"
+    program.write_text(_THREADED, encoding="utf-8")
+    try:
+        result = _run_job(
+            tmp_path,
+            command=(sys.executable, str(program), str(root)),
+            service=False,
+            exit_wait_seconds=1,
+        )
+        _require_tracer(tmp_path)
+
+        worker = (root / "worker.pid").read_text(encoding="utf-8")
+        # At the merge base the zombie main thread made the worker count as gone, and the
+        # job ended with status 0 while its sibling thread was still held in its exit.
+        assert result.exit_code == PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE, result.output
+        rows = [line.split() for line in result.output.splitlines()]
+        assert any(row[:1] == [worker] and row[5].startswith("Z") for row in rows), result.output
+    finally:
+        tracer.kill()
+        tracer.wait(HANG_GUARD_S)
+
+
+def test_job_script_ends_a_process_that_left_the_job_session_and_its_children(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "service"
+    root.mkdir()
+    program = tmp_path / "escapee.py"
+    program.write_text(_ESCAPEE, encoding="utf-8")
+    pid_files = (root / "escapee.pid", root / "bare.pid")
+    try:
+        result = _run_job(
+            tmp_path, command=(sys.executable, str(program), str(root)), service=False
+        )
+
+        assert result.exit_code == 0, result.output
+        # At the merge base neither was signalled: both outlived the job.
+        for pid_file in pid_files:
+            assert not _alive(int(pid_file.read_text(encoding="utf-8"))), pid_file.name
+    finally:
+        for pid_file in pid_files:
+            if pid_file.is_file():
+                with suppress(ProcessLookupError):
+                    os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+def test_job_script_leaves_a_nested_job_that_inherited_its_marker_alone(tmp_path: Path) -> None:
+    """Review (2026-10-16): a nested sbatch job inherits the marker; it is not this job's."""
+    root = tmp_path / "service"
+    root.mkdir()
+    program = tmp_path / "nested.py"
+    program.write_text(_NESTED, encoding="utf-8")
+    pid_file = root / "nested.pid"
+    try:
+        result = _run_job(
+            tmp_path, command=(sys.executable, str(program), str(root)), service=False
+        )
+
+        assert result.exit_code == 0, result.output
+        # At the merge base teardown matched the marker alone and killed the nested job.
+        assert _alive(int(pid_file.read_text(encoding="utf-8")))
+    finally:
+        if pid_file.is_file():
+            with suppress(ProcessLookupError):
+                os.kill(int(pid_file.read_text(encoding="utf-8")), signal.SIGKILL)
+
+
+def test_job_script_sends_sigterm_to_a_session_it_finds_after_its_first_scan(
+    tmp_path: Path,
+) -> None:
+    """Review (2026-10-16): a session found after the first scan got only SIGKILL."""
+    root = tmp_path / "service"
+    root.mkdir()
+    program = tmp_path / "late.py"
+    program.write_text(_LATE_ESCAPEE, encoding="utf-8")
+    pid_file = root / "late.pid"
+    try:
+        # The grace is as long as the configuration allows, and the late process exits
+        # on SIGTERM, so a passing run ends well before it.
+        result = _run_job(
+            tmp_path,
+            command=(sys.executable, str(program), str(root)),
+            service=False,
+            grace_seconds=20,
+        )
+
+        assert result.exit_code == 0, result.output
+        # At the merge base it got only SIGKILL, at the end of the grace.
+        assert (root / "late-termed").is_file(), result.output
+        assert not _alive(int(pid_file.read_text(encoding="utf-8")))
+    finally:
+        for name in ("late.pid", "leaver.pid"):
+            if (root / name).is_file():
+                with suppress(ProcessLookupError):
+                    os.kill(int((root / name).read_text(encoding="utf-8")), signal.SIGKILL)
