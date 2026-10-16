@@ -121,6 +121,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
     prepare_trusted_evaluator,
+    require_built_task_image,
     resolve_run_environment_spec,
     run_environment_deprecation,
     run_environment_record,
@@ -257,9 +258,11 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             run_environment_spec = resolve_run_environment_spec(
                 run_environment or make_run_environment_spec(),
                 backend,
+                task_dockerfile=bundle.dockerfile_path,
                 platform=sys.platform,
                 log=buffered_logs.append,
             )
+            require_built_task_image(run_environment_spec, bundle.dockerfile_path)
             environment = build_run_environment(run_environment_spec)
             # Reported once here: the environment is opened again for every candidate.
             if (deprecation := run_environment_deprecation(environment)) is not None:

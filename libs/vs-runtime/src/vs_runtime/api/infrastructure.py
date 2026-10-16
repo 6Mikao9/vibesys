@@ -199,6 +199,7 @@ from vs_runtime._run_environment_facts import (
 from vs_runtime._run_environment_selection import (
     HostEnvironment,
     build_run_environment,
+    derived_environment_name,
     make_run_environment_spec,
     resolve_run_environment_spec,
     run_environment_deprecation,
@@ -231,6 +232,15 @@ from vs_runtime._skills import (
     offered_skill_facts,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
+from vs_runtime._task_image_policy import (
+    EditorImagePlan,
+    TaskImageBuildStep,
+    TaskImageError,
+    TaskImageFacts,
+    editor_image_plan,
+    require_built_task_image,
+    runs_agent_in_container,
+)
 from vs_runtime._tool_location import ToolLocation, ToolSite
 from vs_runtime._trusted_evaluation import (
     ProtocolBenchmarkContract,
@@ -480,6 +490,7 @@ __all__ = [
     "DockerInDockerUnsupportedError",
     "DockerToolBuilder",
     "DurableEventJournal",
+    "EditorImagePlan",
     "EnvironmentStartup",
     "EnvironmentStartupSink",
     "EnvironmentStartupStage",
@@ -589,6 +600,9 @@ __all__ = [
     "StopGraceError",
     "StopTimer",
     "Switch",
+    "TaskImageBuildStep",
+    "TaskImageError",
+    "TaskImageFacts",
     "TerminalSignal",
     "ToolBuildOutputOpener",
     "ToolLocation",
@@ -631,10 +645,12 @@ __all__ = [
     "decide_quota",
     "decode_trusted_benchmark_output",
     "decode_trusted_benchmark_run",
+    "derived_environment_name",
     "detect_linux_profiler",
     "detect_macos_profiler",
     "discover_skill_dirs",
     "docker_evaluator_tools_root",
+    "editor_image_plan",
     "evaluator_agent_toolchains",
     "evaluator_container_setup",
     "evaluator_go_module_ready_path",
@@ -667,6 +683,7 @@ __all__ = [
     "relative_sdk_source",
     "release_all",
     "remote_evaluator_setup_command",
+    "require_built_task_image",
     "required_evaluator_go_module_cache_root",
     "required_evaluator_tools_root",
     "resolve_bundled_tree",
@@ -676,6 +693,7 @@ __all__ = [
     "resolve_sdk_source",
     "run_environment_deprecation",
     "run_environment_record",
+    "runs_agent_in_container",
     "signal_of",
     "stop_gated_evaluation",
     "summarize_linux_profile",

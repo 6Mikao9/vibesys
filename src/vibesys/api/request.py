@@ -34,17 +34,29 @@ from vibesys.run.core_run import ensure_not_legacy_resume
 from vibesys.run.experiment_repo import origin_matches
 from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
-from vs_agent.api.images import build_task_image
+from vs_agent.api.images import (
+    DockerBuildRunner,
+    build_task_image,
+    is_task_image_reference,
+    local_image_id,
+    task_image_inputs,
+    task_image_reference,
+)
 from vs_project.api import GitRemoteRepository
 from vs_runtime.api.infrastructure import (
+    EditorImagePlan,
     RunEnvironmentSpec,
+    TaskImageError,
+    TaskImageFacts,
     build_run_environment,
+    derived_environment_name,
+    editor_image_plan,
     make_run_environment_spec,
     migrate_recorded_run_environment,
     resolve_run_environment_spec,
     run_environment_record,
 )
-from vs_sandbox.api import accelerator_unavailable
+from vs_sandbox.api import accelerator_unavailable, backend_default_image
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -67,18 +79,27 @@ def load_objective(bundle: InputBundle) -> str:
 
 __all__ = [
     "REPOSITORY_SLUG",
+    "DockerBuildRunner",
+    "EditorImagePlan",
     "InputBundle",
     "InputSynthesisError",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
+    "TaskImageError",
+    "TaskImageFacts",
+    "backend_default_image",
     "build_task_image",
     "default_skill_roots",
+    "derived_environment_name",
+    "editor_image_plan",
     "experiment_origin_matches",
     "generate_experiment_name",
+    "is_task_image_reference",
     "load_objective",
     "load_objectives",
     "load_project_task",
     "load_task",
+    "local_image_id",
     "make_run_environment_spec",
     "migrate_recorded_run_environment",
     "repository_name_from_experiment",
@@ -89,6 +110,8 @@ __all__ = [
     "run_environment_uses_docker",
     "supported_profilers",
     "synthesize_input_bundle",
+    "task_image_inputs",
+    "task_image_reference",
     "validate_descriptor",
     "validate_experiment_name",
     "validate_run_request",
@@ -141,6 +164,7 @@ def run_accelerator_unavailable(request: RunRequest, probe: CommandProbe) -> str
     spec = resolve_run_environment_spec(
         request.run_environment or make_run_environment_spec(),
         request.backend,
+        task_dockerfile=request.input_bundle.dockerfile_path,
         platform=sys.platform,
         log=lambda _line: None,
     )

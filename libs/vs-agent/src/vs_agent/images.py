@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import JsonValue, TypeAdapter
 
+from vs_agent._build_context import DOCKERIGNORE, build_context_inputs
 from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_decode.api import decode_json
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
@@ -71,11 +72,16 @@ _PROCESS_SETTLE_TIMEOUT_SECONDS = 5.0
 # After a normally exited leader, leave half of the one final cleanup budget
 # for killing inherited writers and settling the readers they kept open.
 _DRAIN_GRACE_FRACTION = 0.5
-#: Repository of the local tag keyed by a digest of the task's build context,
-#: Dockerfile, and base image argument, so an unchanged task retags the same
-#: image and a changed one gets a new tag. Every build prunes the
-#: repository's other tags, so at most one survives past one launch.
-_TASK_IMAGE_REPOSITORY = "vibesys-task-build"
+TASK_IMAGE_REPOSITORY = "vibesys-task-build"
+"""Repository of the task image's local tag, ``<owner>-<inputs>``.
+
+``<owner>`` is keyed to the task directory's absolute path, so two tasks (or
+two checkouts, or two users of one daemon) never share a tag prefix.
+``<inputs>`` is a digest of the build context, the Dockerfile, and the base
+image argument, so an unchanged task retags the same image and a changed one
+gets a new tag. A build prunes only its own owner's other tags.
+"""
+_TASK_IMAGE_REPOSITORY = TASK_IMAGE_REPOSITORY
 #: Repository of the local tag that names a bare image ID so BuildKit can
 #: resolve it in a ``FROM`` line. Keyed by the full ID, so re-tagging is a
 #: no-op and the agent layer's cache key stays stable.
@@ -840,6 +846,83 @@ def _validated_task_dockerfile(dockerfile_path: Path, timeout: float) -> Path:
     return dockerfile
 
 
+def task_image_reference(dockerfile_path: Path, *, base_image: str | None) -> str:
+    """Return the local tag :func:`build_task_image` builds *dockerfile_path* to.
+
+    The tag is ``<owner>-<inputs>``: ``<owner>`` keys the task directory's
+    location (it scopes pruning only), and ``<inputs>`` is a digest of every
+    build input (the Dockerfile, the context files ``.dockerignore`` keeps,
+    ``base_image``), read now, without Docker. A run records it so a resume can
+    tell unchanged inputs from changed ones with :func:`task_image_inputs`.
+    """
+    dockerfile = _validated_task_dockerfile(dockerfile_path, _DEFAULT_BUILD_TIMEOUT_SECONDS)
+    return _task_image_tag(dockerfile, base_image)
+
+
+def task_image_inputs(reference: str) -> str | None:
+    """Return the build-input digest of a task image *reference*, or ``None`` for another image.
+
+    Two references with the same digest were built from identical inputs,
+    whichever directory the task was in.
+    """
+    if not is_task_image_reference(reference):
+        return None
+    _owner, separator, inputs = reference.removeprefix(f"{TASK_IMAGE_REPOSITORY}:").rpartition("-")
+    return inputs if separator else None
+
+
+def is_task_image_reference(image: str) -> bool:
+    """Return whether *image* is a tag :func:`task_image_reference` produces."""
+    return image.startswith(f"{TASK_IMAGE_REPOSITORY}:")
+
+
+def local_image_id(
+    image: str,
+    *,
+    command_runner: DockerBuildRunner,
+    output: OutputSink,
+    clock: Clock,
+) -> str | None:
+    """Return the immutable ID of *image* (a tag or an ID) in the local daemon, or ``None``.
+
+    A failed ``docker image inspect`` means absent. Docker missing, the
+    inspection outliving its bound, or an answer that is no image ID raises
+    :class:`TaskImageBuildError`.
+    """
+    build = _BuildRun(
+        runner=command_runner,
+        timeout=_DEFAULT_VERIFY_TIMEOUT_SECONDS,
+        output=output,
+        clock=clock,
+    )
+    target = _BuildTarget(
+        source=image,
+        context=Path.cwd(),
+        image_repository=TASK_IMAGE_REPOSITORY,
+        image_label="task image",
+    )
+    argv = ("docker", "image", "inspect", "--format", "{{.Id}}", image)
+    result = _run_docker(build, argv, action="inspecting", target=target)
+    if result.returncode != 0:
+        return None
+    image_id = result.stdout.strip()
+    if result.stdout_truncated or _IMAGE_ID.fullmatch(image_id) is None:
+        displayed = result.stdout_diagnostic("<empty>")
+        raise TaskImageBuildError.invalid_runnable_id(target.image_label, image, displayed)
+    return image_id
+
+
+def _task_image_tag(dockerfile: Path, base_image: str | None) -> str:
+    """The task image's local tag: its owner, then its build inputs."""
+    owner = _task_image_owner(dockerfile.parent)
+    return f"{TASK_IMAGE_REPOSITORY}:{owner}-{_task_image_digest(dockerfile, base_image)}"
+
+
+def _task_image_owner(context: Path) -> str:
+    """A 16-character key of the task directory's absolute location."""
+    return hashlib.sha256(str(context).encode()).hexdigest()[:16]
+
+
 def _build_task_image(dockerfile: Path, *, base_image: str | None, build: _BuildRun) -> _BuiltImage:
     """Build a validated task Dockerfile to a content-addressed tag and return it with its ID."""
     context = dockerfile.parent
@@ -850,42 +933,59 @@ def _build_task_image(dockerfile: Path, *, base_image: str | None, build: _Build
         image_repository=_TASK_IMAGE_REPOSITORY,
         image_label="task image",
     )
-    image_tag = f"{_TASK_IMAGE_REPOSITORY}:{_task_image_digest(context, base_image)}"
+    image_tag = _task_image_tag(dockerfile, base_image)
     built = _build_and_inspect(target, extra_build_args, build, image_tag=image_tag)
     _prune_superseded_task_tags(build, context, keep_tag=image_tag)
     return built
 
 
-def _task_image_digest(context: Path, base_image: str | None) -> str:
-    """Hash *context* and *base_image* into a deterministic 32-character tag suffix.
+def _task_image_digest(dockerfile: Path, base_image: str | None) -> str:
+    """Hash a task's build inputs and *base_image* into a deterministic 32-character tag suffix.
 
     The task Dockerfile is always a direct child of its own build context
     (:func:`_validated_task_dockerfile` keeps the lexical parent as the
-    context), so hashing every file under *context* already covers it along
-    with every other input Docker can read while building. Folding in
-    *base_image* covers the one input outside the context. The same inputs
-    always hash to the same tag, mirroring how
-    :func:`vs_sandbox.feature_image.build_feature_image` keys the agent
-    layer's tag to its own inputs.
+    context), so hashing every file the build sends to Docker (the context
+    after ``.dockerignore``, plus the Dockerfile and ``.dockerignore``)
+    covers every input Docker can read while building. Folding in
+    *base_image* covers the one input outside the context. Paths are hashed
+    relative to the context, so the same inputs hash the same wherever the
+    task lives, mirroring how :func:`vs_sandbox.feature_image.build_feature_image`
+    keys the agent layer's tag to its own inputs.
     """
+    context = dockerfile.parent
     digest = hashlib.sha256()
     digest.update(repr(base_image).encode())
     digest.update(b"\0")
-    for path in sorted(p for p in context.rglob("*") if p.is_file()):
-        digest.update(str(path.relative_to(context)).encode())
+    files = {
+        path.relative_to(context).as_posix(): path for path in context.rglob("*") if path.is_file()
+    }
+    dockerignore = files.get(DOCKERIGNORE)
+    kept = build_context_inputs(
+        files,
+        dockerignore=(
+            None
+            if dockerignore is None
+            else dockerignore.read_text(encoding="utf-8", errors="replace")
+        ),
+        dockerfile=dockerfile.relative_to(context).as_posix(),
+    )
+    for relative in kept:
+        digest.update(relative.encode())
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(files[relative].read_bytes())
         digest.update(b"\0")
     return digest.hexdigest()[:32]
 
 
 def _prune_superseded_task_tags(build: _BuildRun, context: Path, *, keep_tag: str) -> None:
-    """Best-effort: remove every other local tag under :data:`_TASK_IMAGE_REPOSITORY`.
+    """Best-effort: remove this task's other local tags under :data:`TASK_IMAGE_REPOSITORY`.
 
     One launch resolves exactly one task image tag (*keep_tag*, keyed to this
-    task's content); any other tag in the repository is left over from a
-    since-changed task or an earlier VibeSys version and would otherwise
-    accumulate forever, which is the bug this guards against. Removing a tag
+    task's content); any other tag with the same owner prefix is left over
+    from a since-changed version of this task and would otherwise accumulate
+    forever, which is the bug this guards against. Tags of other tasks, other
+    checkouts, other users of the daemon, and earlier VibeSys versions are
+    never touched: a concurrent run may be using them. Removing a tag
     drops a name, not Docker's own layer cache, so a future build of a
     since-pruned task still reuses whatever layers it shares with others.
     Failing to list or remove a tag does not fail the build: the image this
@@ -908,8 +1008,9 @@ def _prune_superseded_task_tags(build: _BuildRun, context: Path, *, keep_tag: st
     if listed.returncode != 0:
         return
     keep_suffix = keep_tag.removeprefix(f"{_TASK_IMAGE_REPOSITORY}:")
+    owner = f"{_task_image_owner(context)}-"
     for tag in listed.stdout.split():
-        if tag == keep_suffix:
+        if tag == keep_suffix or not tag.startswith(owner):
             continue
         timeout = min(_DEFAULT_VERIFY_TIMEOUT_SECONDS, build.remaining())
         if timeout <= 0:

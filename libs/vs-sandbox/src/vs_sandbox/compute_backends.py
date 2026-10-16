@@ -182,6 +182,7 @@ def make_local_shell_sandbox(
 _REGISTRY: dict[ComputeBackend, Callable[..., ComputeBackendImpl]] = {}
 _HOST_ONLY: set[ComputeBackend] = set()
 _AVAILABILITY: dict[ComputeBackend, Callable[[CommandProbe], str | None]] = {}
+_DEFAULT_IMAGES: dict[ComputeBackend, str] = {}
 
 
 def register_compute_backend(
@@ -190,12 +191,14 @@ def register_compute_backend(
     *,
     host_only: bool = False,
     unavailable: Callable[[CommandProbe], str | None] | None = None,
+    default_image: str | None = None,
 ) -> None:
     """Register the factory used to construct one compute backend.
 
     ``host_only`` declares that the backend's accelerator cannot be reached
-    from a container, so its agent has to run on the host. ``unavailable`` says,
-    through a command probe, why this host cannot provide the backend's
+    from a container, so its agent has to run on the host. ``default_image``
+    is the image the factory falls back to when a run names none. ``unavailable``
+    says, through a command probe, why this host cannot provide the backend's
     accelerator (``None`` when it can); it makes the decision the backend's own
     ``ensure_accelerator_available`` makes, and a backend without one always can.
     """
@@ -204,6 +207,10 @@ def register_compute_backend(
         _HOST_ONLY.add(backend)
     else:
         _HOST_ONLY.discard(backend)
+    if default_image is None:
+        _DEFAULT_IMAGES.pop(backend, None)
+    else:
+        _DEFAULT_IMAGES[backend] = default_image
     if unavailable is None:
         _AVAILABILITY.pop(backend, None)
     else:
@@ -228,6 +235,17 @@ def backend_is_host_only(backend: ComputeBackend) -> bool:
     """
     _ensure_defaults()
     return backend in _HOST_ONLY
+
+
+def backend_default_image(backend: ComputeBackend) -> str | None:
+    """Return the image *backend* runs in when the run names none, or ``None``.
+
+    A task Dockerfile is built on top of it (as ``BASE_IMAGE``) before the run
+    starts, before the backend itself is constructed. ``None`` means the
+    backend declares no container image (Metal).
+    """
+    _ensure_defaults()
+    return _DEFAULT_IMAGES.get(backend)
 
 
 def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]; one keyword per construction input every registered backend shares.
@@ -336,18 +354,27 @@ def _trainium_backend(  # noqa: PLR0913
 def _register_defaults() -> None:
     cuda = import_module("vs_sandbox.cuda_backend")
     local = import_module("vs_sandbox.local_compute_backend")
+    rocm = import_module("vs_sandbox.rocm_backend")
+    trainium = import_module("vs_sandbox.trainium_backend")
 
     register_compute_backend(
-        ComputeBackend.CUDA, cuda.CudaBackend, unavailable=cuda.cuda_accelerator_unavailable
+        ComputeBackend.CUDA,
+        cuda.CudaBackend,
+        default_image=cuda.DEFAULT_IMAGE,
+        unavailable=cuda.cuda_accelerator_unavailable,
     )
     register_compute_backend(
         ComputeBackend.METAL,
         local.metal_backend,
         host_only=ComputeBackend.METAL in local.HOST_ONLY_BACKENDS,
     )
-    register_compute_backend(ComputeBackend.TRAINIUM, _trainium_backend)
-    register_compute_backend(ComputeBackend.ROCM, _rocm_backend)
-    register_compute_backend(ComputeBackend.CPU, local.cpu_backend)
+    register_compute_backend(
+        ComputeBackend.TRAINIUM, _trainium_backend, default_image=trainium.DEFAULT_IMAGE
+    )
+    register_compute_backend(ComputeBackend.ROCM, _rocm_backend, default_image=rocm.DEFAULT_IMAGE)
+    register_compute_backend(
+        ComputeBackend.CPU, local.cpu_backend, default_image=local.DEFAULT_CPU_IMAGE
+    )
 
 
 @cache
@@ -362,6 +389,7 @@ __all__ = [
     "Device",
     "SandboxKind",
     "accelerator_unavailable",
+    "backend_default_image",
     "backend_is_host_only",
     "create_compute_backend",
     "register_compute_backend",
