@@ -3,6 +3,18 @@
  * selectors the screen renders: header, stop and ended banners, startup timeline, logs, and the
  * Overview and Work tabs over the folded run at the view (`RunAtView`).
  */
+
+export {
+  EMPTY_RUN_FOLD,
+  EMPTY_TRACE_LOG,
+  type RunData,
+  type RunFold,
+  type RunLink,
+  type SessionView,
+  type TraceLog,
+  traceAt,
+  traceStep,
+} from './live.js';
 export {type ObjectiveBlock, objectiveBlocks} from './objective-text.js';
 export {
   type ChartPointView,
@@ -17,6 +29,7 @@ export {
 export {runRecord, sameRecord} from './record.js';
 export {NOTHING_FOLDED, type RunAtView} from './run-at-view.js';
 export {
+  commandable,
   FORCE_STOP_BOUND_MS,
   RUN_TABS,
   type RunCapability,
@@ -56,6 +69,8 @@ export {
   streamLines,
   type Tone,
   timelineView,
+  type ViewedRun,
+  viewedRun,
 } from './views.js';
 export {WORK_FILTER_ALL, WORK_OUTCOMES, type WorkFilter, type WorkOutcome} from './work-filter.js';
 export {type RowOutcome, rowMatches, type WorkRow, type WorkView, workView} from './work-view.js';
