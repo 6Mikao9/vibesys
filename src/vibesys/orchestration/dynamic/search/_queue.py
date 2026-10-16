@@ -99,6 +99,24 @@ class QueueSnapshot(Value):
     last_bound: Queued | None
 
 
+class QueueState(Value):
+    """Everything the queue knows, so a restart after a code change resumes it as it was.
+
+    The slots and the pick policy are the run's config; the verdicts not yet handed over are
+    not kept: the root hands every decided verdict again after a restart
+    (`RunRecord.decided_verdicts`).
+    """
+
+    pending: tuple[Queued, ...]
+    holding: tuple[str, ...]
+    ranking: tuple[str, ...]
+    dropped: tuple[tuple[Queued, Dropped], ...]
+    last_bound: Queued | None
+    received: int
+    built_on: tuple[tuple[RevisionRef, RevisionRef], ...]
+    overtaken: tuple[tuple[str, int], ...]
+
+
 @dataclass
 class EvaluationQueue:
     """The submissions waiting for a trusted measurement, and the slots that measure them."""
@@ -209,6 +227,35 @@ class EvaluationQueue:
             ranking=self.ranking,
             dropped=tuple(self.dropped),
             last_bound=self.last_bound,
+        )
+
+    def state(self) -> QueueState:
+        """What the queue knows, to resume it from (`resumed`)."""
+        return QueueState(
+            pending=tuple(self.pending),
+            holding=tuple(self.holding),
+            ranking=self.ranking,
+            dropped=tuple(self.dropped),
+            last_bound=self.last_bound,
+            received=self.received,
+            built_on=tuple(self.built_on.items()),
+            overtaken=tuple(self.overtaken.items()),
+        )
+
+    @classmethod
+    def resumed(cls, slots: int, policy: PickPolicy, state: QueueState) -> "EvaluationQueue":
+        """The queue ``state`` describes, with the run's ``slots`` and ``policy``."""
+        return cls(
+            slots=slots,
+            policy=policy,
+            pending=list(state.pending),
+            holding=list(state.holding),
+            ranking=state.ranking,
+            dropped=list(state.dropped),
+            last_bound=state.last_bound,
+            received=state.received,
+            built_on=dict(state.built_on),
+            overtaken=dict(state.overtaken),
         )
 
     def _supersedes(self, newer: Queued, older: Queued) -> bool:

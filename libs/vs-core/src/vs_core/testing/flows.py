@@ -14,8 +14,10 @@ the owned operations a story hands to ``own``, and delivers the events a story n
 
 ``FlowRun.start(..., restarting=True)`` round-trips the state through JSON into a new driver
 after every step, so any story can be repeated as a crash-at-every-step test; a
-``RestartPolicy`` instead restarts after the steps it names. ``FakeView`` is
-the ``RunView`` the search reads: set the clock, attempts and settlements on it.
+``RestartPolicy`` instead restarts after the steps it names, and with ``changes`` each of its
+restarts is also a code change (``code_changed`` makes a changed definition), so every flow
+restarts from its latest checkpoint. ``FakeView`` is the ``RunView`` the search reads: set the
+clock, attempts and settlements on it.
 
 ``FAKE_OPERATIONS`` and ``fake_search`` are the namespace and the decorator a test search uses;
 ``Prompt`` is the context its renders carry, so a turn request can be told by its prompt.
@@ -24,8 +26,8 @@ the ``RunView`` the search reads: set the clock, attempts and settlements on it.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Literal, TypedDict, Unpack
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypedDict, Unpack
 
 from vs_core.api import (
     AdoptionFailed,
@@ -99,6 +101,8 @@ if TYPE_CHECKING:
 
     from vs_core.api import (
         Decision,
+        Flow,
+        NoWinner,
         OperationRequest,
         Role,
         RunFacts,
@@ -147,10 +151,38 @@ FAKE_REGISTRY = FAKE_OPERATIONS.registry()
 
 
 def fake_search[C](
-    name: str, config: type[C], roles: tuple[Role, ...] = (), spans: tuple[SpanKind, ...] = ()
+    name: str,
+    config: type[C],
+    roles: tuple[Role, ...] = (),
+    spans: tuple[SpanKind, ...] = (),
+    *,
+    snapshot: type[Any] | None = None,
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
-    return search(name, config=config, operations=FAKE_OPERATIONS, roles=roles, spans=spans)
+    return search(
+        name,
+        config=config,
+        operations=FAKE_OPERATIONS,
+        roles=roles,
+        spans=spans,
+        snapshot=snapshot,
+    )
+
+
+def code_changed[C](definition: SearchDef[C]) -> SearchDef[C]:
+    """``definition`` with one more journaled read where its root starts: changed code.
+
+    Its journal and the original's diverge at their first step, as they do after a change that
+    alters a prompt or a decision: a run resumed under the other one restarts every flow from
+    its latest checkpoint. Changing back is a code change again.
+    """
+    root = definition.root
+
+    async def changed(ctx: Flow, start: C) -> NoWinner | None:
+        ctx.clock.now()
+        return await root(ctx, start)
+
+    return replace(definition, root=changed)
 
 
 @dataclass
@@ -178,6 +210,9 @@ class RestartPolicy:
     every: bool = False
     after_stop: bool = False
     """Also restart after every step once the run was told to stop."""
+    changes: tuple[SearchDef[Any], ...] = ()
+    """When given, every restart is also a code change: the run goes on under the next of these
+    definitions, in turn (``(code_changed(search), search)`` alternates two codes)."""
 
     def after(self, step: int, *, stopped: bool) -> bool:
         """Whether the run restarts after its ``step``-th event, once told to stop or not."""
@@ -530,10 +565,17 @@ class FlowRun[C]:
         self._pump()
 
     def restart(self) -> None:
-        """Round-trip the state through JSON and continue with a new driver."""
+        """Round-trip the state through JSON and continue with a new driver.
+
+        Under a ``RestartPolicy`` with ``changes`` the new driver runs the next changed code.
+        """
         self.restarts += 1
         self.state = FlowState.model_validate_json(encode_json(self.state))
-        self.driver = self.driver.fresh()
+        changes = self.restarting.changes if isinstance(self.restarting, RestartPolicy) else ()
+        if changes:
+            self.swap(changes[(self.restarts - 1) % len(changes)])
+        else:
+            self.driver = self.driver.fresh()
 
     def swap(self, search: SearchDef[C]) -> None:
         """Continue the run under another definition of the search: the code changed on resume."""

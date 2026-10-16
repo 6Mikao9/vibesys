@@ -5,7 +5,9 @@ evaluation queue and waits until a slot is bound to it (`a_slot`), so its agents
 work meanwhile. Which waiting candidate a free slot measures is the queue's choice (`_queue`).
 """
 
-from vibesys.candidates.api import Baseline
+from typing import Literal
+
+from vibesys.candidates.api import Baseline, decode_input, input_measurement
 from vibesys.metrics import AcceptedReading, accept_readings
 from vibesys.orchestration.dynamic.search._ids import INPUT_MEASURED
 from vibesys.orchestration.dynamic.search._operations import EvidenceReadings
@@ -35,16 +37,50 @@ from vs_core.api.search import (
     Flow,
     MeasurementPurpose,
     MeasurementRecipe,
+    MeasurementResult,
     RevisionRef,
     Source,
     Stopped,
     TimeUp,
+    Value,
     Workspace,
+    flow,
     trusted_keys,
 )
 
 PROFILE_STAGE = "profile"
 """The task's stage that captures a profile."""
+
+
+class InputPending(Value):
+    """The input's measurement is still to be taken (or in flight)."""
+
+    kind: Literal["input-pending"] = "input-pending"
+
+
+class InputTaken(Value):
+    """The input's trusted measurement is in, to decode."""
+
+    kind: Literal["input-taken"] = "input-taken"
+    result: MeasurementResult
+
+
+@flow(snapshot=InputPending | InputTaken, name="measure-input")
+async def measure_the_input(ctx: Flow, at: InputPending | InputTaken) -> Baseline:
+    """Measure the input once per run, even across a restart after a code change.
+
+    It checkpoints the measurement as soon as it is in, so a restart while its evidence is
+    decoded decodes it again instead of measuring again; a restart while it is measured waits
+    for the same measurement (core re-attaches the request).
+    """
+    ctx.checkpoint(at)
+    if isinstance(at, InputTaken):
+        return await decode_input(ctx, at.result)
+    measured = await input_measurement(ctx)
+    if not isinstance(measured, MeasurementResult):
+        return measured
+    ctx.checkpoint(InputTaken(result=measured))
+    return await decode_input(ctx, measured)
 
 
 def input_so_far(ctx: Flow, w: WorkstreamStart) -> Baseline | None:
@@ -61,7 +97,7 @@ async def the_input(ctx: Flow, w: WorkstreamStart, work: Work) -> Baseline:
     admits jobs in its own order and counts a measurement's deadline from its dispatch: a
     candidate dispatched while the input's job still waits for admission would spend its
     deadline in that queue and settle as failed. It waits once its slot is bound
-    (`measure_and_interpret`) until binding moves into the backend (#2662, steps 2 to 4). A wait
+    (`measurement_of`) until binding moves into the backend (#2662, steps 2 to 4). A wait
     longer than the run's ``input_wait_seconds``, counted from the workstream's first wait that
     needs the input (`while_input_pending`), is reported to the root once, which tells the
     orchestrator on its next turn; the workstream goes on waiting. An input that comes
@@ -129,10 +165,15 @@ async def a_slot(ctx: Flow, w: WorkstreamStart, work: Work, revision: RevisionRe
             )
 
 
-async def measure_and_interpret(
+async def measurement_of(
     ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work, revision: RevisionRef
-) -> Evidence:
-    """Measure ``revision`` with the trusted evaluations and decode what the evidence says.
+) -> MeasurementResult:
+    """Measure ``revision`` with the trusted evaluations; what the evidence says is `evidence_of`.
+
+    The measurement is dispatched only once a slot is bound to it and the input's measurement
+    has landed (`the_input`): the workstream waits for both parked, so its agent slot may go to
+    new work meanwhile. A stop while it waits ends it unmeasured (`FailureKind.NOT_MEASURED`),
+    so its reviewed code is kept as work in progress, as a superseded candidate's is.
 
     The measurement is dispatched only once a slot is bound to it and the input's measurement
     has landed (`the_input`): the workstream waits for both parked, so its agent slot may go to
@@ -141,6 +182,9 @@ async def measure_and_interpret(
 
     The backend measures again after an infrastructure failure, so a result that reaches here
     is the candidate's own; a measurement that ended without one is a failure of the workstream.
+    One that ended with a result still holds its slot until `evidence_of` releases it, so the
+    workstream can checkpoint the result first: a restart then resumes it with the result in
+    hand, and it releases the slot then.
     """
     purpose = purpose_of(w)
     names = (PROFILE_STAGE,) if w.plan.kind is WorkKind.PROFILE else ctx.task.terms.measured
@@ -158,7 +202,20 @@ async def measure_and_interpret(
     found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
     ctx.channel(REPORTS).send(Released(key=w.key))
     if isinstance(found, Failed):
+        ctx.channel(REPORTS).send(Released(key=w.key))
         raise ended_by(found, None)
+    return found
+
+
+async def evidence_of(
+    ctx: Flow, w: WorkstreamStart, ws: Workspace, revision: RevisionRef, found: MeasurementResult
+) -> Evidence:
+    """Release the slot ``found`` held and decode what its trusted evidence says of ``revision``.
+
+    Releasing a slot is idempotent, so a workstream resumed with its measurement releases it again.
+    """
+    ctx.channel(REPORTS).send(Released(key=w.key))
+    purpose = purpose_of(w)
     keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose=purpose)
     if not keys:
         none = Failure(

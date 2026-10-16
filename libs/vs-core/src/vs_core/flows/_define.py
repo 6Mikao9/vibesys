@@ -71,6 +71,8 @@ class SearchDef[C]:
     """The agents the search asks: the only ones ``ctx.agents.session`` accepts."""
     owned: tuple[OperationRegistration, ...] = ()
     """Operations other libraries' owners perform for the search (``ctx.owners.perform``)."""
+    snapshot: type[Any] | None = None
+    """What the root may checkpoint besides its config, and is restarted from (``search``)."""
     spans: tuple[SpanKind, ...] = ()
     """The kinds of span the search labels (``ctx.label``, ``label=`` on an aspect call)."""
 
@@ -132,6 +134,7 @@ class Declarations(TypedDict, total=False):
     roles: tuple[Role, ...]
     owned: tuple[OperationRegistration, ...]
     spans: tuple[SpanKind, ...]
+    snapshot: type[Any] | None
 
 
 def search[C](
@@ -146,11 +149,17 @@ def search[C](
     for the search (an issue board, say): their codec is registered, the host must provide an
     owner for each, and a flow asks one with ``ctx.owners.perform``. ``spans`` are the kinds of
     span the search labels: each with its attribute schema, verdicts and link relations.
+
+    ``snapshot`` is a model the root may checkpoint besides its config: what it knows of the
+    run, so a restart after a code change resumes it with that knowledge. The root then takes
+    ``config | snapshot``: the config when the run starts, its latest checkpoint after a
+    restart. Neither model may decode the other's JSON (give the snapshot a ``kind``).
     """
     operations = declared_.get("operations")
     roles = declared_.get("roles", ())
     owned = declared_.get("owned", ())
     spans = declared_.get("spans", ())
+    snapshot = declared_.get("snapshot")
     names = [role.name for role in roles]
     if len(set(names)) != len(names):
         message = f"roles of search {name!r} must have distinct names: {sorted(names)}"
@@ -159,7 +168,9 @@ def search[C](
     declared(spans)  # two kinds with one name are refused at registration
 
     def register(root: Root[C]) -> SearchDef[C]:
-        return SearchDef(name, config, root, operations, roles, owned, spans)
+        return SearchDef(
+            name, config, root, operations, roles, owned, snapshot=snapshot, spans=spans
+        )
 
     return register
 
@@ -193,7 +204,10 @@ class FlowDriver[C]:
         async def supervised(ctx: Flow, config: C) -> None:
             await conclude(kit_of(ctx), await root(ctx, config))
 
-        self._root = FlowDef("root", supervised, type(config))
+        resumes = (
+            type(config) if definition.snapshot is None else definition.snapshot | type(config)
+        )
+        self._root = FlowDef("root", supervised, resumes)
         self._cached: tuple[tuple[int, str], _Run] | None = None
 
     def close(self) -> None:
@@ -250,6 +264,7 @@ class FlowDriver[C]:
                 "journal": (*state.journal, step),
                 "live": run.checkpoint(),
                 "dropped": tuple(run.dropped),
+                "restart_settled": tuple(run.restart_settled),
             }
         )
         self._cached = (key(new), run)
@@ -294,6 +309,7 @@ class FlowDriver[C]:
             journal=(first,),
             live=run.checkpoint(),
             base=base,
+            restart_settled=tuple(run.restart_settled),
         )
         self._cached = (key(state), run)
         return state

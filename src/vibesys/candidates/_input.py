@@ -177,6 +177,18 @@ async def measure_input(ctx: Flow) -> Baseline:
     The result is typed, never raised: an input the task cannot measure is a value the planner
     is shown.
     """
+    measured = await input_measurement(ctx)
+    if isinstance(measured, MeasurementResult):
+        return await decode_input(ctx, measured)
+    return measured
+
+
+async def input_measurement(ctx: Flow) -> MeasurementResult | NotConfigured | Unmeasurable:
+    """The first half of `measure_input`: the trusted measurement of the input, not decoded.
+
+    A flow that checkpoints between the halves resumes a restart with the measurement in hand
+    instead of measuring the input again.
+    """
     terms = ctx.task.terms
     names = terms.measured
     if not names:
@@ -187,11 +199,11 @@ async def measure_input(ctx: Flow) -> Baseline:
         case Failed() as failed:
             return Unmeasurable(failure=_ended(failed))
         case MeasurementResult() as result:
-            return await _decode(ctx, result)
+            return result
 
 
-async def _decode(ctx: Flow, result: MeasurementResult) -> Baseline:
-    """Ask the evidence owner what the trusted evidence of the input says."""
+async def decode_input(ctx: Flow, result: MeasurementResult) -> Baseline:
+    """The second half of `measure_input`: what the trusted evidence of the input says."""
     keys = trusted_keys(
         result, scope=result.scope, candidate=ctx.facts.baseline, purpose="baseline"
     )

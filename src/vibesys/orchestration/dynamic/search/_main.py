@@ -26,7 +26,7 @@ from vibesys.orchestration.dynamic.search._values import (
     MergeRecord,
     ViolationCode,
 )
-from vs_core.api.search import EvidenceKind, RevisionRef, TaskTerms
+from vs_core.api.search import EvidenceKind, RevisionRef, TaskTerms, Value
 
 
 @dataclass(frozen=True)
@@ -77,6 +77,21 @@ class MergeOptions:
         return any(row.hypothesis_id == hypothesis_id for row in self.rows)
 
 
+class MainState(Value):
+    """Everything `MainLine` knows but the input's measurement, to resume main from.
+
+    A restart after a code change resumes main where it was (`MainLine.resumed`); the record
+    keeps the input's measurement.
+    """
+
+    revision: RevisionRef
+    generation: int
+    measurement: MainMeasurement | None
+    merges: tuple[MergeRecord, ...]
+    rounds: tuple[candidates.EligibleRound, ...]
+    merged: tuple[tuple[str, str], ...]
+
+
 @dataclass
 class MainLine:
     """The run's main revision, its latest trusted measurement and every finished merge."""
@@ -95,6 +110,30 @@ class MainLine:
     """The merged mains that are winner-eligible, as the winner is chosen among them."""
     merged: set[tuple[str, str]] = field(default_factory=set)
     """The (hypothesis, revision) candidates a merge already brought into main."""
+
+    def state(self) -> MainState:
+        """What main knows, to resume it from (`resumed`); ``merged`` sorted, as a set has no order."""
+        return MainState(
+            revision=self.revision,
+            generation=self.generation,
+            measurement=self.measurement,
+            merges=tuple(self.merges),
+            rounds=tuple(self.rounds),
+            merged=tuple(sorted(self.merged)),
+        )
+
+    @classmethod
+    def resumed(cls, baseline: candidates.Baseline | None, state: MainState) -> "MainLine":
+        """The main ``state`` describes, compared with the input's ``baseline``."""
+        return cls(
+            revision=state.revision,
+            baseline=baseline,
+            generation=state.generation,
+            measurement=state.measurement,
+            merges=list(state.merges),
+            rounds=list(state.rounds),
+            merged=set(state.merged),
+        )
 
     def reading(self) -> MainReading:
         """What main measures now: its own measurement, else the input's, else pending."""

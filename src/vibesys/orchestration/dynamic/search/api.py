@@ -13,6 +13,7 @@ from vibesys.orchestration.dynamic.search._handoff import (
     WriteHandoff,
 )
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
+from vibesys.orchestration.dynamic.search._main import MainLine, MainState
 from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
     OPERATIONS,
@@ -80,10 +81,12 @@ from vibesys.orchestration.dynamic.search._queue import (
     EvaluationQueue,
     PickPolicy,
     QueueSnapshot,
+    QueueState,
     SlotVerdict,
     Submission,
 )
 from vibesys.orchestration.dynamic.search._reports import InputOverdue, Released
+from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume
 from vibesys.orchestration.dynamic.search._roles import (
     IMPLEMENTER,
     JUDGE,
@@ -94,8 +97,10 @@ from vibesys.orchestration.dynamic.search._roles import (
     ROLES,
 )
 from vibesys.orchestration.dynamic.search._run_state import (
+    DynamicResume,
     NoPlan,
     Outlined,
+    RecordState,
     Running,
     RunRecord,
     RunSnapshot,
@@ -153,6 +158,7 @@ __all__ = [
     "DropReason",
     "Dropped",
     "DynamicConfig",
+    "DynamicResume",
     "EvaluationQueue",
     "EvaluationQueueView",
     "Evidence",
@@ -170,7 +176,9 @@ __all__ = [
     "InputOverdue",
     "InputOverdueView",
     "InterpretEvidence",
+    "MainLine",
     "MainMeasurement",
+    "MainState",
     "MergeOutcome",
     "MergePrompt",
     "MergeRecord",
@@ -200,10 +208,13 @@ __all__ = [
     "PromptTemplate",
     "Proof",
     "QueueSnapshot",
+    "QueueState",
+    "RecordState",
     "Released",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
     "Result",
+    "ResumeStage",
     "ReviewEvaluation",
     "ReviewPrompt",
     "RoundRecord",
@@ -222,6 +233,7 @@ __all__ = [
     "WorkKind",
     "WorkPlan",
     "WorkstreamDone",
+    "WorkstreamResume",
     "WorkstreamStart",
     "WriteHandoff",
     "assertion",

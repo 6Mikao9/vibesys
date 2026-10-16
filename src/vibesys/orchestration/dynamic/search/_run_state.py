@@ -5,7 +5,8 @@ through `planned` and `finished`, which fold their results in; nothing else writ
 the facts (hypotheses, finished work, what is running, the parents on offer) and answers the
 questions the root flow asks of them: may a plan start, is the search over, which plans become
 workstreams, who is ahead. It reads nothing from the run and awaits nothing, so every rule here
-is a plain function of its record. It is rebuilt by replay after a restart, so it is never saved.
+is a plain function of its record. Replay rebuilds it after a restart of the same code; after a
+code change the root resumes it from its checkpoint (`DynamicResume`, `RunRecord.state`).
 """
 
 from dataclasses import dataclass, field
@@ -24,7 +25,7 @@ from vibesys.orchestration.dynamic.search._context import (
 )
 from vibesys.orchestration.dynamic.search._handoff import HandoffWritten
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, planning_key, workstream_key
-from vibesys.orchestration.dynamic.search._main import MainLine
+from vibesys.orchestration.dynamic.search._main import MainLine, MainState
 from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamDone,
     WorkstreamStart,
@@ -45,8 +46,10 @@ from vibesys.orchestration.dynamic.search._prompts import (
     QueuedEvaluation,
 )
 from vibesys.orchestration.dynamic.search._queue import (
+    Bound,
     EvaluationQueue,
     QueueSnapshot,
+    QueueState,
     SlotVerdict,
     Submission,
 )
@@ -161,6 +164,49 @@ class RunSnapshot(Value):
     """The first workstream that waited longer than the run allows for the input's measurement."""
 
 
+class RecordState(Value):
+    """Everything a `RunRecord` knows, so a restart after a code change resumes it as it was.
+
+    What the run fixes (its config, input revision and task terms) is not kept: the record is
+    resumed with them (`RunRecord.resumed`).
+    """
+
+    baseline: candidates.Baseline | None
+    hypotheses: tuple[tuple[str, HypothesisRecord], ...]
+    finished_work: tuple[FinishedWork, ...]
+    running: tuple[WorkstreamStart, ...]
+    accepted: tuple[WorkPlan, ...]
+    parents: tuple[ParentSnapshot, ...]
+    withheld: tuple[str, ...]
+    refunded: int
+    unreachable: tuple[Unreachable, ...]
+    gate_failed: bool
+    gate_blocked_at_done: int | None
+    gate_last_error: PlanProblem | None
+    calls: int
+    handoffs: tuple[str, ...]
+    kept: tuple[tuple[str, Kept], ...]
+    main: MainState
+    main_seen: tuple[tuple[str, int], ...]
+    outline: tuple[Step, ...] | None
+    submitted: tuple[Submission, ...]
+    evaluations: QueueState
+    input_overdue: InputOverdue | None
+
+
+class DynamicResume(Value):
+    """What the dynamic root checkpoints, and resumes from after a code change: config and record.
+
+    ``version`` is this model's own: a change to what it holds that an older checkpoint does not
+    decode as is a new version, and the root takes the union of the versions it can resume.
+    """
+
+    kind: Literal["dynamic-resume"] = "dynamic-resume"
+    version: Literal[1] = 1
+    config: DynamicConfig
+    record: RecordState
+
+
 @dataclass
 class RunRecord:
     """Hypotheses, finished work and parents of one dynamic run, and the slots left to fill."""
@@ -220,6 +266,85 @@ class RunRecord:
         self.evaluations = EvaluationQueue(slots=config.slots, policy=config.pick)
         if self.baseline is None:
             self.evaluations.hold(INPUT_KEY)
+
+    # -- resuming after a code change ------------------------------------------------------------
+
+    def state(self) -> RecordState:
+        """What the record knows, to resume it from (`resumed`)."""
+        return RecordState(
+            baseline=self.baseline,
+            hypotheses=tuple(self.hypotheses.items()),
+            finished_work=tuple(self.finished_work),
+            running=tuple(self.running.values()),
+            accepted=tuple(self.accepted),
+            parents=self.parents,
+            withheld=self.withheld,
+            refunded=self.refunded,
+            unreachable=tuple(self.unreachable),
+            gate_failed=self.gate.failed,
+            gate_blocked_at_done=self.gate.blocked_at_done,
+            gate_last_error=self.gate.last_error,
+            calls=self.calls,
+            handoffs=self.handoffs,
+            kept=tuple(self.kept.items()),
+            main=self.main.state(),
+            main_seen=tuple(self.main_seen.items()),
+            outline=self.outline,
+            submitted=tuple(self.submitted.values()),
+            evaluations=self.evaluations.state(),
+            input_overdue=self.input_overdue,
+        )
+
+    @classmethod
+    def resumed(
+        cls, config: DynamicConfig, base: RevisionRef, terms: TaskTerms, state: RecordState
+    ) -> "RunRecord":
+        """The record ``state`` describes, in the run ``config``, ``base`` and ``terms`` fix."""
+        record = cls(
+            config,
+            base,
+            state.baseline,
+            terms,
+            hypotheses=dict(state.hypotheses),
+            finished_work=list(state.finished_work),
+            running={start.key: start for start in state.running},
+            accepted=list(state.accepted),
+            parents=state.parents,
+            withheld=state.withheld,
+            refunded=state.refunded,
+            unreachable=list(state.unreachable),
+            gate=PlannerGate(
+                failed=state.gate_failed,
+                blocked_at_done=state.gate_blocked_at_done,
+                last_error=state.gate_last_error,
+            ),
+            calls=state.calls,
+            handoffs=state.handoffs,
+            kept=dict(state.kept),
+            main_seen=dict(state.main_seen),
+            submitted={item.key: item for item in state.submitted},
+            input_overdue=state.input_overdue,
+        )
+        record.main = MainLine.resumed(state.baseline, state.main)
+        record.outline = state.outline
+        record.evaluations = EvaluationQueue.resumed(config.slots, config.pick, state.evaluations)
+        return record
+
+    def decided_verdicts(self) -> list[tuple[str, SlotVerdict]]:
+        """The verdict already decided for each running workstream that submitted.
+
+        A restart empties every latch, so the resumed root hands these again: a resumed
+        workstream that waits for its verdict reads it, and one past it never reads it.
+        """
+        queue = self.evaluations
+        dropped = {entry.submission.key: verdict for entry, verdict in queue.dropped}
+        decided: list[tuple[str, SlotVerdict]] = []
+        for key in self.running:
+            if key in queue.holding:
+                decided.append((key, Bound()))
+            elif key in dropped:
+                decided.append((key, dropped[key]))
+        return decided
 
     # -- the plan the run follows --------------------------------------------------------------
 
@@ -345,12 +470,16 @@ class RunRecord:
 
         Within the backlog its workstream is parked, and its agent slot is free.
 
-        A key submits once per run of this record. Its verdict is set on a latch that is set
-        once per run (``VERDICTS.of(key)``), so a second submission would read the first
-        verdict. None can come: workstream keys are not reused, and a restart starts every
-        flow again together, so the root rebuilds this record and every latch starts empty.
+        A key submits one candidate per run. Its verdict is set on a latch that is set once per
+        run (``VERDICTS.of(key)``). A workstream resumed after a code change submits the same
+        candidate again (the report it sent may have been lost with the restart): that is the
+        submission already held, and the resumed root hands its verdict again
+        (`decided_verdicts`). Another candidate under the same key is a bug.
         """
-        if submission.key in self.submitted:
+        known = self.submitted.get(submission.key)
+        if known is not None:
+            if known.model_copy(update={"at": submission.at}) == submission:
+                return
             msg = f"workstream {submission.key!r} submitted twice: its verdict latch is already set"
             raise RuntimeError(msg)
         self.submitted[submission.key] = submission

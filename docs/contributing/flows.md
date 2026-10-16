@@ -209,7 +209,9 @@ reader's receipt of what it implies.** A sender that checkpoints after its send 
 on a restart, so the reader, whose channel starts empty, never hears it; a reader that
 checkpoints after it read the value but before it folded it in loses the fact the same way. Send
 after the last checkpoint that a restart resumes from, as the dynamic search's workstreams do
-(they checkpoint only at their start, and every send is redone after a restart). Unenforced: a
+(each send of theirs follows the checkpoint it is redone from: a workstream that resumes past the
+input's measurement holds the baseline in its own snapshot, and the root sets `INPUT_MEASURED`
+again from its own). Unenforced: a
 checkpoint and a send are ordinary calls in flow code, and which pairs matter depends on what the
 reader does with the value; `test_flows.py` plays every channel story restarted after each
 step, which catches a lost send in the flows it covers.
@@ -378,7 +380,12 @@ async def worker(ctx: Flow, job: Job) -> Done:
     ctx.checkpoint(job.after(step))  # later, a newer resume point
 ```
 
-The root's snapshot type is the config (`ctx.checkpoint(config)`). The restart resolves each flow
+The root may declare its own snapshot (`search(..., snapshot=S)`); it then takes `config | S`
+and resumes from its latest `ctx.checkpoint(S(...))`, holding what it had learned (the dynamic
+search's `DynamicResume`: its record and the input's measurement once it landed). A root without
+one resumes from its config. A snapshot type may be a union of versions (`snapshot=V1 | V2`):
+give each model a `version` literal, and a checkpoint that decodes as none of them raises
+`FlowCodeChanged` as any other unresumable change does. The restart resolves each flow
 through `group.start(key, fn, ...)`, which resumes the flow that had that key from its snapshot if
 the new code starts a flow of the same name there (otherwise `FlowCodeChanged`). Work since the
 last checkpoint is redone, and the results of requests in flight at the change are dropped when
@@ -390,10 +397,25 @@ Replay notices a code change when the new code issues different decisions, makes
 number of reads, or reads a recorded value as a type it no longer decodes as (the old code read
 the clock where the new code reads `ctx.task`). Each of these restarts the flows as above.
 
-**Resources do not leak across a restart.** A workspace a flow opened after its checkpoint is
-settled as part of the restart: the restart's first decisions withdraw each such attempt plainly
-as `cancelled` (decision ids `restart-settle.<n>`), and the restarted flow opens its workspaces
-again.
+**Resources do not leak across a restart, and work in them is not discarded silently.** A
+workspace a flow held at its latest checkpoint is carried across the restart: the resumed flow
+takes it back with `ctx.workspaces.reopen(attempt)` (a `Workspace`, or `NotReopened` when the
+attempt is not one this flow carried), and keeps working in it. Every other held workspace is
+settled as part of the restart (decision ids `restart-settle.<n>`), and the reason is recorded in
+`FlowState.restart_settled` (`RestartSettleReason`): opened after the checkpoint, flow not
+resumable, flow not restarted, not reopened, already settling, or unclaimed. The settlement is a
+plain `cancelled` discard unless the flow said otherwise with `ctx.workspaces.salvage(ws,
+revision, assessment)`, which names how the workspace settles if the restart cannot give it back
+(the dynamic search salvages its latest candidate as unmeasured work in progress).
+
+Requests in flight at the change are not asked twice. A resumed flow that asks again for a
+measurement of the same plan, a settlement of the same workspace, or the opening of the same
+workspace is attached to the request already in flight (`LiveFlows.in_flight`) and gets its
+answer. An opening or a settlement core answers before the resumed flow asks again is kept for
+the flow at that path (`InFlight.answer`), so the workspace still opens once; a measurement
+answered first is dropped, and measured again if asked. A workspace whose settlement was in flight
+is left to it (`ws.settling` on reopen, reason `settling`); a workspace that opens with no flow
+left to claim it, or whose kept opening its flow ends without taking, is settled as `unclaimed`.
 
 ## The winner
 
@@ -449,6 +471,10 @@ def test_a_lost_turn_is_asked_again(begin: Begin) -> None:
 ```
 
 - `begin` runs every story twice: live, and with a save-and-restart after every step.
+- `RestartPolicy(steps=..., changes=(changed, original))` changes the code at those steps instead
+  of only saving: `code_changed(definition)` is the same search under code that no longer
+  replays, so every flow restarts from its checkpoint. Change at sampled steps, not every step:
+  a change at every step restarts the run before it can progress.
 - `run.waiting()` says what each flow waits for (its sources), so a test can assert it.
 - `run.trace()` is the run trace so far (see "The run trace").
 - `run.timeline()` prints the run as a timeline (`worker.1:Plan stop t=30`); property tests print

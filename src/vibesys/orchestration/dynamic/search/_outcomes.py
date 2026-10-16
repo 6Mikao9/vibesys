@@ -29,6 +29,7 @@ from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    DropReason,
     Failure,
     FailureKind,
     MergeOutcome,
@@ -44,6 +45,7 @@ from vs_core.api.search import (
     AssessmentKind,
     AttemptBudget,
     AttemptId,
+    AttemptRef,
     EvidenceKind,
     Failed,
     FailureReason,
@@ -291,6 +293,8 @@ class WorkEndedError(Exception):
 
 STOPPED = Failure(kind=FailureKind.STOPPED)
 """How an operator stop ends a workstream."""
+RESTARTED = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.RESTARTED)
+"""How a workstream ends whose workspace a restart after a code change could not give back."""
 
 
 @dataclass(frozen=True)
@@ -324,6 +328,28 @@ class WorkstreamDone:
     ) -> "WorkstreamDone":
         """No workspace was admitted: the slot is refunded."""
         return cls(start, failure=failure, refunded=True, withheld=withheld)
+
+    @classmethod
+    def lost(
+        cls,
+        start: WorkstreamStart,
+        workspace: AttemptRef,
+        result: Result | None,
+        merge: MergeReport | None = None,
+    ) -> "WorkstreamDone":
+        """Resumed after a code change without its workspace: the restart settled it.
+
+        The restart settled it as the workstream's salvage said: a candidate's or a merger's
+        code is kept as work in progress, unmeasured (`salvage_of`); its settlement reached no
+        flow, so main does not move to a lost merge's commit.
+        """
+        return cls(
+            start,
+            failure=RESTARTED,
+            generation=workspace.generation,
+            result=result,
+            merge=merge,
+        )
 
     @classmethod
     def closed(
@@ -392,6 +418,16 @@ def assertion(
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """The implementer's own outcomes that make a candidate ineligible however it measured."""
+
+
+def salvage_of(closing: Closing, terms: TaskTerms) -> Settle:
+    """How a workspace settles if a restart cannot give it back to its workstream.
+
+    ``closing`` carries what the workstream had made: its latest candidate, or a merger's
+    commit. It settles as a candidate dropped unmeasured: never eligible, its code kept as work
+    in progress.
+    """
+    return _not_measured(closing.model_copy(update={"cause": RESTARTED}), terms)
 
 
 def _unmeasured_step(closing: Closing, terms: TaskTerms) -> Settle:

@@ -178,6 +178,9 @@ class DropReason(StrEnum):
     candidate built on it."""
     STOPPED = "stopped"
     """The run stopped (the operator, or its deadline) before the candidate was measured."""
+    RESTARTED = "restarted"
+    """The run restarted after a code change and could not give the workstream its workspace
+    back: the candidate's code is kept as work in progress, unmeasured."""
 
 
 class FailureKind(StrEnum):

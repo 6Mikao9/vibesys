@@ -20,6 +20,7 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     ended_by,
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
+from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
@@ -35,6 +36,7 @@ from vs_core.api.search import (
     FailureReason,
     Flow,
     GaveUp,
+    RetryPolicy,
     RevisionRef,
     Session,
     Tries,
@@ -43,19 +45,33 @@ from vs_core.api.search import (
 )
 
 
-async def implement_until_measurable(
-    ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work, sessions: "Conversation"
+async def implement_until_measurable(  # noqa: PLR0913  # lint-waiver: LW-271018 [PLR0913]; each argument is a distinct fact of the implementation (the flow, what it works on, what it carries, who it asks, and where it resumes).
+    # > Bundling them in a record only renames the parameters; the workstream already holds each.
+    ctx: Flow,
+    w: WorkstreamStart,
+    ws: Workspace,
+    work: Work,
+    sessions: "Conversation",
+    at: WorkstreamResume | None,
 ) -> Result:
     """Ask the implementer (and the judge, when a review is due) until a candidate is ready.
 
     A turn that ends without a measurable candidate is asked again while the workstream's retry
-    policy and the progress policy allow it; the workstream ends otherwise.
+    policy and the progress policy allow it; the workstream ends otherwise. A workstream resumed
+    after a code change goes on with the turns it had left, and reviews the candidate its
+    implementer had made if that was still to be reviewed.
     """
+    earlier = () if at is None else at.blockers
+    unreviewed = [at.result if at is not None and at.at(ResumeStage.IMPLEMENTED) else None]
+    if len(earlier) >= w.turns and unreviewed[0] is None:
+        raise WorkEndedError(blocked_failure(earlier[-1]))
 
     async def turn(tries: Tries[Blocker]) -> Result | Again[Blocker]:
-        return await take_turn(ctx, w, ws, work, sessions, tries.reasons)
+        made, unreviewed[0] = unreviewed[0], None
+        return await take_turn(ctx, w, ws, work, sessions, (*earlier, *tries.reasons), made)
 
-    match await ctx.retry(turn, w.retries):
+    tries = RetryPolicy(max_tries=max(w.turns - len(earlier), 1))
+    match await ctx.retry(turn, tries):
         case Result() as result:
             return result
         case GaveUp(reasons=blockers):
@@ -78,18 +94,31 @@ async def take_turn(  # noqa: PLR0913  # LW-220431 [PLR0913]; each argument is a
     work: Work,
     sessions: Conversation,
     earlier: tuple[Blocker, ...],
+    made: Result | None = None,
 ) -> Result | Again[Blocker]:
-    """One round with the implementer and the judge: a candidate, or why to ask again."""
+    """One round with the implementer and the judge: a candidate, or why to ask again.
+
+    ``made`` is a candidate the implementer made before a restart: it is reviewed, not made
+    again. A candidate to review, and the reason to ask again, are checkpointed.
+    """
     work.carried = None if work.carried is None else work.carried.unreviewed()
-    baseline = input_so_far(ctx, w)
-    turn = await implementer_turn(sessions.implementer, w, work, earlier, baseline=baseline)
+    turn: Result | Unmeasured
+    if made is None:
+        baseline = input_so_far(ctx, w)
+        turn = await implementer_turn(sessions.implementer, w, work, earlier, baseline=baseline)
+        if isinstance(turn, Result) and _review_due(w, turn):
+            mark(ctx, w, work, ResumeStage.IMPLEMENTED, blockers=earlier, result=turn)
+    else:
+        turn = made
     if isinstance(turn, Result) and _review_due(w, turn):
         turn = await review(ctx, w, ws, work, sessions.judge, turn)
     if isinstance(turn, Result):
         return turn
     work.carried = turn.result
-    if (refused := refusal((*earlier, turn.blocker), w.config, w.parent)) is not None:
+    blockers = (*earlier, turn.blocker)
+    if (refused := refusal(blockers, w.config, w.parent)) is not None:
         raise WorkEndedError(refused)
+    mark(ctx, w, work, ResumeStage.WORKING, blockers=blockers)
     return Again(reason=turn.blocker)
 
 

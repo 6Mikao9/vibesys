@@ -73,9 +73,16 @@ from ._spans import (
     WireSpan,
     span_changes,
 )
-from ._state import Dropped, FlowState, JournaledEvent, Waiting
+from ._state import (
+    Dropped,
+    FlowState,
+    JournaledEvent,
+    RestartSettled,
+    RestartSettleReason,
+    Waiting,
+)
 from ._winner import INPUT, EndReason, Input, Kept, NoWinner
-from ._workspaces import Assessment, NotOpened, Workspace, Workspaces
+from ._workspaces import Assessment, NotOpened, NotReopened, Workspace, Workspaces
 
 __all__ = [
     "INPUT",
@@ -111,8 +118,11 @@ __all__ = [
     "LatchKey",
     "NoWinner",
     "NotOpened",
+    "NotReopened",
     "Owners",
     "Pending",
+    "RestartSettleReason",
+    "RestartSettled",
     "RetryPolicy",
     "RevisionReply",
     "Role",
