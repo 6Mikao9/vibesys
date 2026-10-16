@@ -53,6 +53,8 @@ export {
   type RunHistoryPage,
   type RunInputs,
   type RunOptions,
+  runOfWindow,
+  runWindowUrl,
   type SettingsWelcomeBridge,
   type StartedRun,
   type StartOutcome,
@@ -66,4 +68,5 @@ export {
   type WelcomeOverview,
   type WelcomeRequest,
   type WelcomeResult,
+  type WindowsWelcomeBridge,
 } from './welcome/index.js';
