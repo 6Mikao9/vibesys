@@ -37,7 +37,7 @@ from server.chat.manager import ChatAnswer
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import MAX_REQUEST_LINE_BYTES as MAX
 from server.transport.unix_jsonl import UnixJsonlServer
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
+from vs_sim.api.testing import HANG_GUARD_S, RefusingThreads, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -759,3 +759,37 @@ def test_close_drains_accept_when_listener_close_does_not_interrupt_it(tmp_path:
         parts.close()
 
     threads.run(main)
+
+
+def test_worker_spawn_failure_is_logged_and_retried_not_killing_accept_loop(
+    tmp_path: Path,
+) -> None:
+    """A worker thread-spawn failure drops that connection and keeps accepting.
+
+    Regression test for #2696: previously a WorkerStartRefusedError from
+    threads.spawn() propagated out of _accept_loop, permanently terminating
+    the accept-loop daemon thread. The failed connection must be closed, the
+    failure retried with backoff, and a subsequent connection must succeed.
+    """
+    base_threads = SimThreads(schedule_seed=0)
+    threads = RefusingThreads(base_threads, {"vibesys-server-jsonl-client": 1})
+    socket_path = tmp_path / "control.sock"
+    network = SimNetwork(base_threads)
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        with UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        ):
+            client1 = network.connect(str(socket_path))
+            base_threads.sleep(0.15)
+            assert client1.recv(1, HANG_GUARD_S) == b""
+            client1.close()
+
+            client2 = network.connect(str(socket_path))
+            client2.send(_frame("query.snapshot"))
+            reply = Response.model_validate_json(_read_line(client2))
+            assert reply.ok, reply
+            client2.close()
+
+    base_threads.run(main)

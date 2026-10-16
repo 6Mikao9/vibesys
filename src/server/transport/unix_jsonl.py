@@ -23,6 +23,7 @@ from server.transport.subscriptions import (
     SubscriptionAdmissionClosedError,
     SubscriptionTracker,
 )
+from vs_sim.api import WorkerStartRefusedError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -464,6 +465,17 @@ class UnixJsonlServer:
                     name="vibesys-server-jsonl-client",
                     daemon=True,
                 )
+            except WorkerStartRefusedError as exc:
+                with self._guard:
+                    self._sessions.discard(session)
+                    closing = self._closing
+                connection.close()
+                session.worker_ready.set()
+                if closing:
+                    return
+                _LOG.warning("failed to spawn client worker thread: %s; retrying", exc)
+                self._threads.sleep(_ACCEPT_RETRY_BACKOFF_SECONDS)
+                continue
             except BaseException:
                 with self._guard:
                     self._sessions.discard(session)
