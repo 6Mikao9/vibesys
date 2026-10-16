@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
 import {
+  type KeyNumber,
   overviewView,
   type RunAtView,
   type RunPageState,
@@ -200,5 +201,166 @@ describe('a multi-agent run', () => {
     expect(view.current.map(item => [item.title, item.doing])).toEqual([
       ['round 2', 'Orchestrator turn, 0s'],
     ]);
+  });
+});
+
+/**
+ * The adoption the run ends with, as its span events arrive: the operation that adopts the
+ * winner is labelled with the adopted candidate, what it measured and its ratio to the input's,
+ * and gets its verdict once core has answered (`tests/vibesys/search_faults.py` holds every
+ * search to it). The Overview shows what the run adopted, not what it inferred from its gates.
+ */
+
+const ENDED: RunPageState = {
+  ...LIVE,
+  record: {
+    kind: 'ended',
+    run: {...(LIVE.record as {run: object}).run, phase: 'completed', end: null},
+  } as RunPageState['record'],
+};
+
+interface Adopting {
+  readonly candidate: string | null;
+  readonly value: number | null;
+  readonly vs: number | null;
+  readonly verdict: 'adopted' | 'not_adopted' | null;
+}
+
+function adopting(run: Recording, adoption: Adopting): void {
+  run.start('op:adopt.1', 'flow:#1', 'propose_winner', {
+    kind: 'adoption',
+    title: adoption.candidate ?? 'the input',
+    attrs_json: JSON.stringify({
+      candidate: adoption.candidate,
+      metric_value: adoption.value,
+      vs_baseline: adoption.vs,
+    }),
+  });
+  if (adoption.verdict === null) return;
+  run.end('op:adopt.1', {verdict: adoption.verdict});
+}
+
+function bestOf(run: Recording, state: RunPageState): KeyNumber {
+  const best = overviewView(at(run.events), state).numbers.find(
+    number => number.label === 'Best vs baseline',
+  );
+  if (best === undefined) throw new Error('the Overview has no best candidate number');
+  return best;
+}
+
+describe('the best candidate of a run that adopts', () => {
+  test('is the adopted one, even when a passed gate measured better', () => {
+    const run = recorded();
+    adopting(run, {candidate: 'c1', value: 80, vs: 1.6, verdict: 'adopted'});
+    // round 1 measured 100 (2.00×) and passed, but the search adopted a candidate that read 80
+    expect(bestOf(run, ENDED)).toEqual({
+      label: 'Best vs baseline',
+      value: '1.60×',
+      sub: '80 ops/s · adopted',
+    });
+    expect(bestOf(run, LIVE)).toEqual(bestOf(run, ENDED));
+  });
+
+  test('is the best passed gate while the run is live and has not adopted yet', () => {
+    const run = recorded();
+    const expected = {label: 'Best vs baseline', value: '2.00×', sub: '100 ops/s · so far'};
+    expect(bestOf(run, LIVE)).toEqual(expected);
+    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: null});
+    expect(bestOf(run, LIVE)).toEqual(expected); // core has not answered: not adopted yet
+  });
+
+  test('names no candidate once the run ended without adopting one', () => {
+    const run = recorded();
+    expect(bestOf(run, ENDED)).toEqual({
+      label: 'Best vs baseline',
+      value: '–',
+      sub: 'no candidate adopted',
+    });
+    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: 'not_adopted'});
+    expect(bestOf(run, ENDED).sub).toBe('the adoption failed');
+    expect(bestOf(run, LIVE).value).toBe('2.00×'); // while it runs, the gates are all there is
+  });
+
+  test('says the input stood when that is what was adopted', () => {
+    const run = recorded();
+    adopting(run, {candidate: null, value: 50, vs: 1, verdict: 'adopted'});
+    expect(bestOf(run, ENDED)).toEqual({
+      label: 'Best vs baseline',
+      value: '–',
+      sub: 'no candidate beat the input',
+    });
+  });
+
+  test('shows the measured value when the input was never measured', () => {
+    const run = recorded();
+    adopting(run, {candidate: 'c1', value: 100, vs: null, verdict: 'adopted'});
+    expect(bestOf(run, ENDED)).toEqual({
+      label: 'Best vs baseline',
+      value: '100 ops/s',
+      sub: 'adopted',
+    });
+  });
+});
+
+/**
+ * The order a live multi run emits its spans (`tests/vibesys/serial_search/test_span_labels.py`
+ * plays it): the round's gate is labelled as the measurement is issued, the measurement ends, and
+ * only once its evidence is read does the gate's label gain the value, the ratio and the verdict
+ * (a `span_updated` of a span that already ended); then the round settles accepted and the next
+ * round begins designing.
+ */
+function liveRoundOne(run: Recording): void {
+  run.start('flow:#1', null, 'root');
+  run.start('op:measure.1', 'flow:#1', 'measure');
+  run.end('op:measure.1');
+  const id = 'flow:000001/#1';
+  run.start(id, 'flow:#1', 'play_round', {
+    kind: 'workstream',
+    title: 'round 1',
+    attrs_json: JSON.stringify({hypothesis_id: null, parent_revision: null, round: 1}),
+  });
+  run.relabel(id, {
+    title: 'title h1',
+    attrs_json: JSON.stringify({hypothesis_id: 'h1', parent_revision: 'base', round: 1}),
+  });
+  run.start('op:000001/measure.1', id, 'measure', gate());
+  run.end('op:000001/measure.1');
+  run.relabel('op:000001/measure.1', {
+    verdict: 'passed',
+    attrs_json: JSON.stringify({stage: 'accuracy,benchmark', metric_value: 100, vs_baseline: 2}),
+  });
+  run.end(id, {verdict: 'accepted'});
+}
+
+describe('a live multi run with an accepted round 1', () => {
+  test('mid-run the Overview shows the best candidate and a chart point, and Work its gate', () => {
+    const run = new Recording();
+    liveRoundOne(run);
+    run.start('flow:000002/#1', 'flow:#1', 'play_round', {
+      kind: 'workstream',
+      title: 'round 2',
+      attrs_json: JSON.stringify({hypothesis_id: null, parent_revision: null, round: 2}),
+    });
+    const view = overviewView(at(run.events), LIVE);
+    expect(view.numbers[0]).toEqual({
+      label: 'Best vs baseline',
+      value: '2.00×',
+      sub: '100 ops/s · so far',
+    });
+    expect(view.numbers[1]).toEqual({label: 'Round', value: '2', sub: 'planning'});
+    expect(view.chart?.points.map(point => [point.y, point.filled])).toEqual([[100, true]]);
+    const [first] = workView(at(run.events), ALL).rows;
+    expect(first?.gate).toBe('passed · 2.00×');
+  });
+
+  test('once the run finished the Overview says its last round finished, not working', () => {
+    const run = new Recording();
+    liveRoundOne(run);
+    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: 'adopted'});
+    run.end('flow:#1');
+    const view = overviewView(at(run.events), ENDED);
+    expect(view.numbers[1]).toEqual({label: 'Round', value: '1', sub: 'finished'});
+    expect(view.numbers[0]?.value).toBe('2.00×');
+    expect(view.current).toEqual([]);
   });
 });
