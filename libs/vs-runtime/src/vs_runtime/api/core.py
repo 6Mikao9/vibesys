@@ -13,6 +13,7 @@ from vs_runtime._access_settlement import (
     AccessUnrestorableError,
     AccessViolation,
 )
+from vs_runtime._adoption_commit import adoption_commit_message
 from vs_runtime._agent_evaluation import (
     EVALUATION_TOOL_ID,
     AgentEvaluationBridge,
@@ -435,6 +436,7 @@ __all__ = [
     "WinnerSelection",
     "WorkspaceReceipts",
     "WorkspaceRequests",
+    "adoption_commit_message",
     "as_target",
     "bind_operations",
     "build_operation_catalog",
