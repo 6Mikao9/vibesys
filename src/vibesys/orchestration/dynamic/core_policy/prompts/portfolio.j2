@@ -34,9 +34,33 @@ A candidate must beat it on the objectives to be adopted.
 {% if baseline_pending %}
 
 Input baseline: still being measured (the trusted evaluation may wait in a queue). Plan
-from the task and the code now; the workstreams you schedule start now, and their candidates
-are reviewed, measured and compared with the input once its measurement lands. A later
-request shows its result.
+from the task and the code now; the workstreams you schedule start now and their candidates
+are reviewed meanwhile; they are measured and compared with the input once its measurement
+lands. A later request shows its result.
+{% endif %}
+{% if input_overdue %}
+
+The input's measurement is overdue: a workstream has waited {% if input_overdue.waited_seconds is not none %}{{ input_overdue.waited_seconds }} seconds{% else %}longer{% endif %} for it (the run allows {{ input_overdue.limit_seconds }}). Candidates are still implemented and reviewed, but none is measured or settled until the input's measurement lands. Decide whether to keep scheduling work that needs it, schedule work that does not, or park directions that cannot go on without it.
+{% endif %}
+{% if evaluations %}
+
+Trusted evaluations ({{ evaluations.slots }} at once{% if evaluations.input_holds_slot %}; the input's measurement holds one{% endif %}). A free slot measures {% if evaluations.pick == 'ranked' %}the candidates in your {{ reply.evaluation_order }} first, then the rest newest first{% else %}the newest waiting candidate first{% endif %}, except that a candidate passed over by {{ evaluations.slots }} newer ones goes next.
+{% for item in evaluations.measuring %}
+- measuring: `{{ item.work_id }}` ({{ item.kind.value }}) at `{{ rev(item.revision) }}`
+{% endfor %}
+{% for item in evaluations.waiting %}
+- waiting: `{{ item.work_id }}` ({{ item.kind.value }}) at `{{ rev(item.revision) }}`{% if item.waited_seconds is not none %}, for {{ item.waited_seconds }} seconds{% endif %}
+
+{% endfor %}
+{% for item in evaluations.dropped %}
+- dropped unmeasured: `{{ item.work_id }}` at `{{ rev(item.revision) }}`, {% if item.reason.value == 'superseded' %}replaced by {% if item.superseded_by %}`{{ item.superseded_by }}`{% else %}a newer candidate{% endif %}{% else %}the run stopped first{% endif %}
+
+{% endfor %}
+{% if evaluations.pick == 'ranked' %}
+Set {{ reply.evaluation_order }} to the IDs whose candidates to measure first{% if evaluations.ranking %} (now: {{ evaluations.ranking | join(', ') }}){% endif %}; leave it empty to keep the order. A hypothesis whose candidate is waiting or measured is still in flight: continue, park or abandon it once its result is in.
+{% else %}
+A hypothesis whose candidate is waiting or measured is still in flight: continue, park or abandon it once its result is in.
+{% endif %}
 {% endif %}
 {% if input_failure %}
 

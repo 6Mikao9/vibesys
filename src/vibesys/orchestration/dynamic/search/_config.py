@@ -10,12 +10,16 @@ from typing import Annotated, Self
 
 from pydantic import Field, model_validator
 
+from vibesys.orchestration.dynamic.search._queue import PickPolicy
 from vibesys.orchestration.dynamic.search._steps import Outline, PlanMode
 from vs_core.api.search import Value
 
 type Positive = Annotated[int, Field(gt=0, le=1000)]
 type NonNegative = Annotated[int, Field(ge=0, le=1000)]
-type Width = Annotated[int, Field(gt=0, le=32)]
+MAX_WIDTH = 32
+"""The most workstreams, or trusted evaluations, a run holds at once."""
+type Width = Annotated[int, Field(gt=0, le=MAX_WIDTH)]
+type Wait = Annotated[float, Field(gt=0, le=7 * 24 * 3600)]
 
 
 class DynamicConfig(Value):
@@ -24,7 +28,25 @@ class DynamicConfig(Value):
     max_rounds: Positive
     """Rounds of agent work per slot: the run schedules at most ``max_rounds * max_in_flight``."""
     max_in_flight: Width = 2
-    """Workstreams that run at once."""
+    """Workstreams whose agents work at once. A workstream whose candidate waits for its trusted
+    measurement no longer counts: its slot goes to new work."""
+    evaluation_slots: Width | None = None
+    """Trusted measurements the run holds at once, the input's included. A candidate is chosen
+    for a slot only when the slot is free (see `pick`). None: as many as the run environment's
+    evaluation executor admits at once, which the launch fills in (`DynamicLaunch.search_config`);
+    1 when no launch did. More slots than the executor admits would dispatch a measurement that
+    waits in the executor's queue while its deadline runs."""
+    max_backlog: Annotated[int, Field(ge=0, le=MAX_WIDTH)] = 0
+    """Workstreams whose candidate waits for, or holds, an evaluation slot without holding one of
+    the ``max_in_flight`` agent slots. Past it, a waiting workstream keeps its agent slot, so no
+    new work starts until a measurement ends. The default, 0, keeps every agent slot held until
+    its workstream ends, as a run did before workstreams could park: the operator opts in."""
+    pick: PickPolicy = "newest"
+    """Which waiting candidate a free evaluation slot measures: ``newest`` (the latest submitted),
+    or ``ranked`` (the orchestrator's order, then the newest)."""
+    input_wait_seconds: Wait | None = 3600.0
+    """How long a workstream waits for the input's measurement before the orchestrator is told,
+    on its next turn, that the input is overdue; None: never told."""
     judge_every: Positive = 1
     """A candidate is reviewed by the judge every this many rounds."""
     max_unmeasured_turns: Width = 2
@@ -54,6 +76,11 @@ class DynamicConfig(Value):
     def follows_plan(self) -> bool:
         """Whether the run follows the task's plan."""
         return self.mode == "follow_plan"
+
+    @property
+    def slots(self) -> int:
+        """Trusted measurements the run holds at once."""
+        return self.evaluation_slots or 1
 
     @property
     def start_budget(self) -> int:

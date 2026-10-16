@@ -5,7 +5,7 @@ from vibesys.candidates.api import review_evaluations as evaluations
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
 from vibesys.orchestration.dynamic.search._budget import budget
-from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._config import MAX_WIDTH, DynamicConfig
 from vibesys.orchestration.dynamic.search._handoff import (
     HANDOFF,
     WRITE_HANDOFF_KIND,
@@ -58,8 +58,10 @@ from vibesys.orchestration.dynamic.search._plan import (
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._prompts import (
+    EvaluationQueueView,
     EvidenceCitation,
     ImplementPrompt,
+    InputOverdueView,
     MergeableRow,
     MergePrompt,
     OutlinePrompt,
@@ -72,6 +74,16 @@ from vibesys.orchestration.dynamic.search._prompts import (
     PromptTemplate,
     ReviewPrompt,
 )
+from vibesys.orchestration.dynamic.search._queue import (
+    Bound,
+    Dropped,
+    EvaluationQueue,
+    PickPolicy,
+    QueueSnapshot,
+    SlotVerdict,
+    Submission,
+)
+from vibesys.orchestration.dynamic.search._reports import InputOverdue, Released
 from vibesys.orchestration.dynamic.search._roles import (
     IMPLEMENTER,
     JUDGE,
@@ -95,6 +107,7 @@ from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    DropReason,
     Expectation,
     Failure,
     FailureKind,
@@ -119,6 +132,7 @@ __all__ = [
     "IMPLEMENTER",
     "INTERPRET_KIND",
     "JUDGE",
+    "MAX_WIDTH",
     "MERGER",
     "OPERATIONS",
     "OUTLINER",
@@ -133,9 +147,14 @@ __all__ = [
     "AgentName",
     "Blocker",
     "BlockerKind",
+    "Bound",
     "Candidate",
     "Closing",
+    "DropReason",
+    "Dropped",
     "DynamicConfig",
+    "EvaluationQueue",
+    "EvaluationQueueView",
     "Evidence",
     "EvidenceCitation",
     "EvidenceReading",
@@ -148,6 +167,8 @@ __all__ = [
     "HandoffWritten",
     "HypothesisRecord",
     "ImplementPrompt",
+    "InputOverdue",
+    "InputOverdueView",
     "InterpretEvidence",
     "MainMeasurement",
     "MergeOutcome",
@@ -165,6 +186,7 @@ __all__ = [
     "ParentSnapshot",
     "ParentVerification",
     "PartialRow",
+    "PickPolicy",
     "PlanCheck",
     "PlanMode",
     "PlanUpdate",
@@ -177,6 +199,8 @@ __all__ = [
     "PromptContext",
     "PromptTemplate",
     "Proof",
+    "QueueSnapshot",
+    "Released",
     "RenderRoleArtifacts",
     "RenderedArtifacts",
     "Result",
@@ -187,8 +211,10 @@ __all__ = [
     "RunSnapshot",
     "Running",
     "Scheduled",
+    "SlotVerdict",
     "Step",
     "StepState",
+    "Submission",
     "Verdict",
     "VerifyParentRevision",
     "ViolationCode",

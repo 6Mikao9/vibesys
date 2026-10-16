@@ -392,6 +392,15 @@ class PortfolioPlan(BaseModel):
             "of each workstream, what you would do next on each outcome, and your open doubts."
         )
     )
+    evaluation_order: tuple[str, ...] = Field(
+        default=(),
+        max_length=64,
+        description=(
+            "The hypothesis or profile IDs whose waiting candidates a free trusted evaluation "
+            "slot measures first, first to measure first; empty to leave the order as it is. "
+            "Only read when the run lets the orchestrator rank its evaluations; ignored otherwise."
+        ),
+    )
 
     @field_validator("reasoning")
     @classmethod

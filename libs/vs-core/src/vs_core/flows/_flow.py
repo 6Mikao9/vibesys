@@ -16,7 +16,17 @@ from ._evaluation import Evaluation
 from ._kit import Kit
 from ._owners import Owners
 from ._retry import Again, GaveUp, RetryPolicy, Tries
-from ._sources import First, Latch, LatchKey, Source, StopSource, Task, Timer
+from ._sources import (
+    Channel,
+    ChannelKey,
+    First,
+    Latch,
+    LatchKey,
+    Source,
+    StopSource,
+    Task,
+    Timer,
+)
 from ._spans import AttemptOutcome
 from ._winner import INPUT, Input, Kept
 from ._workspaces import Workspaces
@@ -91,6 +101,23 @@ class Flow:
         self, a: Source[A], b: Source[B], c: Source[C], d: Source[D], /
     ) -> A | B | C | D: ...
 
+    @overload
+    async def first[A, B, C, D, E](
+        self, a: Source[A], b: Source[B], c: Source[C], d: Source[D], e: Source[E], /
+    ) -> A | B | C | D | E: ...
+
+    @overload
+    async def first[A, B, C, D, E, F](
+        self,
+        a: Source[A],
+        b: Source[B],
+        c: Source[C],
+        d: Source[D],
+        e: Source[E],
+        f: Source[F],
+        /,
+    ) -> A | B | C | D | E | F: ...
+
     async def first(self, *sources: Source[object]) -> object:
         """The next value of whichever source is ready first; ties go to the earliest."""
         self._kit.stop_point()
@@ -107,6 +134,15 @@ class Flow:
         later step builds on. Each handle yields the value once; take one per wait.
         """
         return self._run.latch(key)
+
+    def channel[T](self, key: ChannelKey[T]) -> Channel[T]:
+        """A handle on the run-wide channel ``key``: ``send`` to it, or wait for its next value.
+
+        For facts several flows report, as they reach them, to the one flow that keeps their
+        record (each workstream telling the root it waits for an evaluation slot). Values are
+        read in the order sent, each once.
+        """
+        return self._run.channel(key)
 
     @property
     def path(self) -> str:

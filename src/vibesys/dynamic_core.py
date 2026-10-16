@@ -174,7 +174,9 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
                 ),
             )
         )
-    config = launch.search_config(profiling=evaluation.profile_measurement)
+    config = launch.search_config(
+        profiling=evaluation.profile_measurement, evaluation_capacity=context.evaluation_capacity
+    )
     models = {dynamic.ids.role_id(role.name).root: role.name for role in dynamic.roles}
     chosen = {models[role]: model for role, model in context.role_models.items() if role in models}
     return CorePlan(

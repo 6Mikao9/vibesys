@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     COMMIT,
+    EVALUATION_CAPACITY,
     OPTIONS,
     candidate_environment,
     handoff,
@@ -67,6 +68,8 @@ _SEARCH_KEYS = {
     "max_continuation_rounds": st.integers(0, 4),
 }
 _LAUNCHES = st.fixed_dictionaries({}, optional=_SEARCH_KEYS)
+_WIDEST = 32
+"""The most trusted evaluations a config may hold at once (its ``evaluation_slots`` bound)."""
 _RECIPE = ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe")
 
 
@@ -113,7 +116,9 @@ def test_the_limits_admit_exactly_the_attempts_the_config_schedules(
     plan = plan_of(run, options)
     config = _config(plan)
 
-    assert config == launch_of(options).search_config(profiling=False)
+    assert config == launch_of(options).search_config(
+        profiling=False, evaluation_capacity=EVALUATION_CAPACITY
+    )
     assert plan.limits.max_attempts == config.max_rounds * config.max_in_flight
     assert plan.limits.max_parallel == config.max_in_flight
     assert plan.limits.max_turns >= plan.limits.max_attempts
@@ -387,13 +392,36 @@ def test_the_search_config_keeps_the_search_keys_and_takes_profiling_from_the_ru
     """Profiling is the evaluation plan's to decide; every other search key passes through."""
     launch = launch_of(options)
 
-    config = launch.search_config(profiling=profiling)
+    config = launch.search_config(profiling=profiling, evaluation_capacity=EVALUATION_CAPACITY)
 
     assert config.profiling is profiling
     assert {name: getattr(config, name) for name in options} == options
-    assert config.model_dump(exclude={"profiling"}) == launch.model_dump(
-        include=set(DynamicConfig.model_fields) - {"profiling"}
+    resolved = {"profiling", "evaluation_slots"}
+    assert config.model_dump(exclude=resolved) == launch.model_dump(
+        include=set(DynamicConfig.model_fields) - resolved
     )
+
+
+@_SETTINGS
+@given(
+    options=_LAUNCHES,
+    capacity=st.integers(1, 2 * _WIDEST),
+    chosen=st.none() | st.integers(1, _WIDEST),
+)
+def test_the_run_holds_as_many_trusted_evaluations_as_its_executor_admits(
+    tmp_path_factory: pytest.TempPathFactory,
+    options: dict[str, int],
+    capacity: int,
+    chosen: int | None,
+) -> None:
+    """A run that holds more evaluations than its executor admits dispatches a measurement that
+    waits in the executor's queue while its deadline runs, and settles hours of work as failed.
+    The operator's own choice stands."""
+    launch = options if chosen is None else {**options, "evaluation_slots": chosen}
+    plan = plan_of(resolved(tmp_path_factory.mktemp("slots")), launch, evaluation_capacity=capacity)
+
+    expected = min(capacity, _WIDEST) if chosen is None else chosen
+    assert _config(plan).slots == expected
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

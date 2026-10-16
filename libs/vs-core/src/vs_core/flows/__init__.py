@@ -43,7 +43,17 @@ from ._roles import (
     minutes,
     reply_errors,
 )
-from ._sources import Latch, LatchKey, Pending, Source, StopSource, Task, Timer
+from ._sources import (
+    Channel,
+    ChannelKey,
+    Latch,
+    LatchKey,
+    Pending,
+    Source,
+    StopSource,
+    Task,
+    Timer,
+)
 from ._spans import (
     AttemptOutcome,
     FailureKind,
@@ -78,6 +88,8 @@ __all__ = [
     "Assessment",
     "AttemptOutcome",
     "CaptureSpec",
+    "Channel",
+    "ChannelKey",
     "Clock",
     "Deadlock",
     "Dropped",

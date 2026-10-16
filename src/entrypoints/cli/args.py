@@ -604,6 +604,47 @@ def _build_agent_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--evaluation-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Dynamic loop: trusted evaluations held at once, the input's included; which "
+            "waiting candidate one measures is chosen only when it frees (default: as many as "
+            "the run environment's evaluation executor admits at once)."
+        ),
+    )
+    parser.add_argument(
+        "--max-backlog",
+        type=int,
+        default=0,
+        metavar="N",
+        help=(
+            "Dynamic loop: workstreams whose candidate waits for or holds a trusted evaluation "
+            "without holding an agent slot, so new work starts meanwhile; 0 keeps each agent "
+            "slot until its workstream ends (default: 0)."
+        ),
+    )
+    parser.add_argument(
+        "--evaluation-pick",
+        choices=("newest", "ranked"),
+        default="newest",
+        help=(
+            "Dynamic loop: which waiting candidate a free trusted evaluation measures: the "
+            "newest, or the orchestrator's ranking then the newest (default: newest)."
+        ),
+    )
+    parser.add_argument(
+        "--input-wait-seconds",
+        type=float,
+        default=3600.0,
+        metavar="SECONDS",
+        help=(
+            "Dynamic loop: how long a workstream waits for the input's measurement before the "
+            "orchestrator is told it is overdue (default: 3600)."
+        ),
+    )
+    parser.add_argument(
         "--dynamic-mode",
         choices=("explore", "follow_plan"),
         default="explore",

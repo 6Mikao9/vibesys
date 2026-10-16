@@ -122,7 +122,8 @@ def handoff_path(call: int) -> str:
 
 def config(**overrides: object) -> DynamicConfig:
     """A one-round, one-wide config, overridden by the test."""
-    return DynamicConfig.model_validate({"max_rounds": 1, "max_in_flight": 1, **overrides})
+    fields = {"max_rounds": 1, "max_in_flight": 1}
+    return DynamicConfig.model_validate({**fields, **overrides})
 
 
 PLAN_DOCUMENTS = ["reference/README.md"]
@@ -291,6 +292,18 @@ class Host:
                 return
             self.answer(waits[0])
         message = f"the input's measurement did not end in {limit} steps: {self.run.timeline()}"
+        raise AssertionError(message)
+
+    def drain_beside_input(self, *, limit: int = 100) -> None:
+        """Answer every open wait but the input's the ordinary way, without moving the clock."""
+        for _ in range(limit):
+            others = [
+                item for item in self.run.open if item.until is not None and item.path != INPUT_PATH
+            ]
+            if not others:
+                return
+            self.answer(others[0])
+        message = f"waits beside the input's did not end in {limit} steps: {self.run.timeline()}"
         raise AssertionError(message)
 
     def drain_until_turn(self, role: str, *, limit: int = 50) -> None:

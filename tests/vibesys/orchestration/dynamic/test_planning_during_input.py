@@ -2,16 +2,17 @@
 
 On a shared cluster the input's trusted measurement may wait hours for a slot. The search asks the
 planner at once, telling it the measurement is pending, and starts what it schedules: implementers
-write code meanwhile. What compares a candidate with the input waits for it: no candidate is
-reviewed, measured or named the winner before the input's measurement lands; a workstream that ends
-with a failure is never compared, so it settles at once and frees its slot. A planning call that
-ends empty meanwhile is not a stuck planner: planning is asked again when the measurement lands.
-An input that fails its measurement drops a plan made without knowing it that has not started, and
-the planner is asked again with the failure in view; a workstream already running goes on, and its
+write code meanwhile, and their candidates are reviewed. A candidate's trusted measurement waits
+for the input's (an executor admits jobs in its own order, and a measurement's deadline runs from
+its dispatch), and so does what compares a candidate with the input: no candidate is settled or
+named the winner before the input's measurement lands. A workstream that ends with a failure is
+never compared, so it settles at once and frees its slot. A planning call that ends empty
+meanwhile is not a stuck planner: planning is asked again when the measurement lands. An input
+that fails its measurement drops a plan made without knowing it that has not started, and the
+planner is asked again with the failure in view; a workstream already running goes on, and its
 implementer is told the failure. An input with nothing configured to measure it is never shown as
-pending. A stop before it lands leaves the input standing. How each measurement outcome ends the run
-is unchanged
-(`test_unmeasurable_input.py` plays it in both orders).
+pending. A stop before it lands leaves the input standing. How each measurement outcome ends the
+run is unchanged (`test_unmeasurable_input.py` plays it in both orders).
 """
 
 from __future__ import annotations
@@ -69,9 +70,20 @@ def _candidate_measurements(host: Host) -> int:
     )
 
 
+def _reviews(host: Host) -> int:
+    return sum(
+        isinstance(item, Wait)
+        and isinstance(item.request, RequestTurn)
+        and "/judge." in item.request.decision_id.root
+        for item in host.run.decisions
+    )
+
+
 @MODES
 def test_the_planner_is_asked_before_a_slow_input_measurement_lands(*, restarting: bool) -> None:
-    host = begin(config(max_in_flight=2, max_rounds=2), restarting=restarting, input_first=False)
+    # Two evaluation slots: one is free beside the input's, yet no candidate takes it.
+    cfg = config(max_in_flight=2, max_rounds=2, evaluation_slots=2)
+    host = begin(cfg, restarting=restarting, input_first=False)
 
     # The first planner turn is open while the input's measurement is.
     first = host.run.expect_turn(role=PLANNER_LABEL).context
@@ -105,19 +117,31 @@ def test_the_planner_is_asked_before_a_slow_input_measurement_lands(*, restartin
             checkpoint=Retained(revision=RevisionRef.of_git_commit(commit)),
         )
 
-    # Nothing that compares a candidate with the input happens before it lands: no review, no
-    # trusted measurement of a candidate, no candidate named the winner.
+    # The candidates are reviewed before the input lands, but not measured: an executor admits
+    # jobs in its own order, so a candidate dispatched while the input's job waits would spend
+    # its deadline in that queue. Nothing settles and no candidate is named the winner.
+    host.drain_beside_input()
     assert host.input_waits()
-    assert not host.open(RequestTurn, label="judge")
+    assert _reviews(host) == 2
     assert _candidate_measurements(host) == 0
+    record = host.record
+    assert record is not None
+    assert not record.finished
     assert host.run.finished is None
 
-    # When the measurement lands, both candidates are reviewed, measured and settled against it.
+    # When the measurement lands, both candidates are measured and settled against it.
     host.measure_input()
-    assert len(host.open(RequestTurn, label="judge")) == 2
     host.drain()
-    assert _candidate_measurements(host) >= 2
+    measured = {
+        item.request.plan.candidate
+        for item in host.run.decisions
+        if isinstance(item, Wait) and isinstance(item.request, Measure)
+    }
+    assert {RevisionRef.of_git_commit("c1"), RevisionRef.of_git_commit("c2")} <= measured
     assert isinstance(host.run.finished, Finish)
+    record = host.record
+    assert record is not None
+    assert {"h1", "h2"} <= {item.plan.work_id for item in record.finished}
     assert_flow_closed(host)
 
 

@@ -48,6 +48,7 @@ _POLICY_CLI_SELECTION = {
 _OPTION_TO_CLI = {
     "compute_backend": "backend",
     "mode": "dynamic_mode",
+    "pick": "evaluation_pick",
     "operator_constraints": "constraint",
 }
 _CONFIG_ONLY_OPTIONS = frozenset(

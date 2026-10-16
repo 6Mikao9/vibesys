@@ -21,7 +21,7 @@ from pydantic import (
 
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import DomainName
-from vibesys.inputs._plan import TaskPlan, check_plan_documents, render_plan
+from vibesys.inputs._plan import TaskPlan, check_plan_documents, plan_toml_lines
 from vs_project.api import Project, RunResourceRequest
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageNotFoundError,
@@ -416,7 +416,7 @@ def render_input_manifest(manifest: InputManifest) -> str:
     _append_workspace_sources(lines, manifest)
     _append_evaluator(lines, manifest)
     if manifest.plan is not None:
-        lines.extend(render_plan(manifest.plan))
+        lines += plan_toml_lines(manifest.plan)
     return "\n".join(lines) + "\n"
 
 

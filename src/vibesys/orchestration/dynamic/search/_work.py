@@ -7,7 +7,7 @@ from vibesys.orchestration.dynamic.search._implement import (
     Conversation,
     implement_until_measurable,
 )
-from vibesys.orchestration.dynamic.search._measure import measure_and_interpret, the_input
+from vibesys.orchestration.dynamic.search._measure import measure_and_interpret
 from vibesys.orchestration.dynamic.search._outcomes import (
     Closing,
     MergeReport,
@@ -56,8 +56,8 @@ async def implement_and_measure(
         # nothing was made, nothing is configured to measure, or a plan step is accepted on
         # the judge's review of its own checks
         return Closing(result=result)
-    await the_input(ctx, w, work)
-    evidence = await measure_and_interpret(ctx, w, ws, result.candidate.revision or w.parent)
+    revision = result.candidate.revision or w.parent
+    evidence = await measure_and_interpret(ctx, w, ws, work, revision)
     return Closing(result=result, evidence=evidence)
 
 
@@ -69,8 +69,7 @@ async def profile(ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work) -> C
     profiler = ctx.agents.session(PROFILER, workspace=ws, revision=w.parent)
     if isinstance(failed := await profiler.turn(profile_prompt(w.plan, w.parent)), Failed):
         raise ended_by(failed, AgentName.PROFILER, plan=w.plan)
-    await the_input(ctx, w, work)
-    return Closing(evidence=await measure_and_interpret(ctx, w, ws, w.parent))
+    return Closing(evidence=await measure_and_interpret(ctx, w, ws, work, w.parent))
 
 
 async def merge(ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work) -> Closing:
@@ -94,8 +93,7 @@ async def merge(ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work) -> Clo
     work.merged = report
     if report.revision is None or not ctx.task.terms.measured:
         return Closing(merge=report)
-    await the_input(ctx, w, work)
-    evidence = await measure_and_interpret(ctx, w, ws, report.revision)
+    evidence = await measure_and_interpret(ctx, w, ws, work, report.revision)
     return Closing(merge=report, evidence=evidence)
 
 

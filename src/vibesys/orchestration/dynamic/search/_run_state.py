@@ -38,6 +38,19 @@ from vibesys.orchestration.dynamic.search._parents import (
     resolve,
 )
 from vibesys.orchestration.dynamic.search._plan import PlanCheck
+from vibesys.orchestration.dynamic.search._prompts import (
+    DroppedEvaluation,
+    EvaluationQueueView,
+    InputOverdueView,
+    QueuedEvaluation,
+)
+from vibesys.orchestration.dynamic.search._queue import (
+    EvaluationQueue,
+    QueueSnapshot,
+    SlotVerdict,
+    Submission,
+)
+from vibesys.orchestration.dynamic.search._reports import InputOverdue
 from vibesys.orchestration.dynamic.search._steps import (
     DONE,
     StepState,
@@ -59,6 +72,9 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkPlan,
 )
 from vs_core.api.search import INPUT, Input, Kept, NoWinner, RevisionRef, TaskTerms, Value
+
+_DROPPED_SHOWN = 8
+"""The most recent dropped evaluations the orchestrator is shown."""
 
 
 @dataclass(frozen=True)
@@ -139,6 +155,10 @@ class RunSnapshot(Value):
     """The outline of the plan the run follows; empty while exploring or not yet outlined."""
     step_states: tuple[tuple[str, StepState], ...] = ()
     """Each step's state, in the outline's order."""
+    evaluations: QueueSnapshot | None = None
+    """The trusted evaluations: what holds a slot, what waits for one, what was dropped."""
+    input_overdue: InputOverdue | None = None
+    """The first workstream that waited longer than the run allows for the input's measurement."""
 
 
 @dataclass
@@ -178,13 +198,28 @@ class RunRecord:
     outline: tuple[Step, ...] | None = None
     """The steps of the plan the run follows: the task's own, or the outline call's; None
     while a run that follows a plan has yet to outline it, and in a run that explores."""
+    submitted: dict[str, Submission] = field(default_factory=dict)
+    """Running workstreams that submitted their candidate for its trusted measurement, by key:
+    their agents are done, so they no longer hold an agent slot."""
+    evaluations: EvaluationQueue = field(init=False)
+    """The submissions waiting for an evaluation slot, and the measurements holding one."""
+    input_overdue: InputOverdue | None = None
+    """The first report that a workstream waited too long for the input's measurement."""
 
     def __post_init__(self) -> None:
-        """Main starts at the run's input; the task's steps, when declared, are the outline."""
+        """Main starts at the run's input; the task's steps, when declared, are the outline.
+
+        The evaluations are queued, and the input's measurement starts with the run, so it holds
+        the first evaluation slot.
+        """
         self.main = MainLine(revision=self.base, baseline=self.baseline)
         plan = self.config.plan
         if self.config.follows_plan and plan is not None and plan.steps:
             self.outline = plan.steps
+        config = self.config
+        self.evaluations = EvaluationQueue(slots=config.slots, policy=config.pick)
+        if self.baseline is None:
+            self.evaluations.hold(INPUT_KEY)
 
     # -- the plan the run follows --------------------------------------------------------------
 
@@ -229,10 +264,28 @@ class RunRecord:
         """Workstreams ever scheduled: the finished ones and the ones still running."""
         return len(self.finished_work) + len(self.running)
 
+    @property
+    def parked(self) -> frozenset[str]:
+        """Running workstreams that wait on their trusted measurement without an agent slot.
+
+        These are the earliest submitted, up to the run's backlog; any later one keeps its slot.
+        """
+        return frozenset(list(self.submitted)[: self.config.max_backlog])
+
+    @property
+    def working(self) -> tuple[WorkstreamStart, ...]:
+        """Running workstreams that hold an agent slot: not parked on their measurement."""
+        parked = self.parked
+        return tuple(start for key, start in self.running.items() if key not in parked)
+
+    def free_agents(self) -> int:
+        """Agent slots no workstream works in."""
+        return max(self.config.max_in_flight - len(self.working), 0)
+
     def capacity(self) -> int:
         """Free slots the next plan may fill, bounded by the remaining budget."""
         left = remaining(self.config, started=self.started, refunded=self.refunded)
-        return free_slots(self.config, active=len(self.running), left=left)
+        return free_slots(self.config, active=len(self.working), left=left)
 
     def may_plan(self, *, stopping: bool) -> bool:
         """Whether a planning call should start: a slot is free and planning is not held off."""
@@ -275,6 +328,7 @@ class RunRecord:
         """
         self.baseline = baseline
         self.gate.blocked_at_done = None
+        self.evaluations.release(INPUT_KEY)
         if not candidates.trusted(baseline):
             self.accepted = []
         self.main.baseline = baseline
@@ -284,8 +338,53 @@ class RunRecord:
         work = (*self.finished_work, *self.running.values())
         return frozenset(item.plan.work_id for item in work if item.plan.kind is WorkKind.MERGE)
 
-    def world(self) -> PlanWorld:
-        """What a planning call reads of the run now."""
+    # -- the trusted evaluations ---------------------------------------------------------------
+
+    def submit(self, submission: Submission) -> None:
+        """A workstream's candidate waits for its trusted measurement.
+
+        Within the backlog its workstream is parked, and its agent slot is free.
+
+        A key submits once per run of this record. Its verdict is set on a latch that is set
+        once per run (``VERDICTS.of(key)``), so a second submission would read the first
+        verdict. None can come: workstream keys are not reused, and a restart starts every
+        flow again together, so the root rebuilds this record and every latch starts empty.
+        """
+        if submission.key in self.submitted:
+            msg = f"workstream {submission.key!r} submitted twice: its verdict latch is already set"
+            raise RuntimeError(msg)
+        self.submitted[submission.key] = submission
+        self.evaluations.submit(submission)
+        if submission.key in self.parked:
+            self.gate.blocked_at_done = None  # its agent slot is free: planning may fill it
+
+    def released(self, key: str) -> None:
+        """The trusted measurement of ``key`` no longer holds its slot."""
+        self.evaluations.release(key)
+
+    def verdicts(self, *, stopping: bool) -> list[tuple[str, SlotVerdict]]:
+        """Bind the waiting candidates to the free slots: the verdicts for their workstreams.
+
+        After a stop nothing is bound: every waiting candidate is dropped as stopped, so its
+        workstream keeps its reviewed code as work in progress.
+        """
+        if stopping:
+            self.evaluations.stop()
+        else:
+            self.evaluations.bind()
+        return self.evaluations.verdicts()
+
+    def overdue(self, report: InputOverdue) -> None:
+        """A workstream waited too long for the input: the orchestrator is told on its next turn."""
+        if self.baseline is None and self.input_overdue is None:
+            self.input_overdue = report
+            self.gate.blocked_at_done = None
+
+    def world(self, now: float | None = None) -> PlanWorld:
+        """What a planning call reads of the run at ``now``, on the run clock.
+
+        Without ``now`` the request leaves out how long each candidate has waited.
+        """
         offered = self.offered()
         return PlanWorld(
             config=self.config,
@@ -307,6 +406,61 @@ class RunRecord:
             if self.config.profiling
             else None,
             repairable=self.repairable(),
+            parked=self.parked,
+            evaluations=self._queue_view(now),
+            input_overdue=self._overdue_view(now),
+        )
+
+    def _queue_view(self, now: float | None) -> EvaluationQueueView | None:
+        """The evaluation queue as the orchestrator is shown it; None before anything queued."""
+        queue = self.evaluations
+        if not queue.received:
+            return None
+
+        def waited(at: float) -> int | None:
+            return None if now is None else max(int(now - at), 0)
+
+        return EvaluationQueueView(
+            pick=queue.policy,
+            slots=queue.slots,
+            input_holds_slot=INPUT_KEY in queue.holding,
+            measuring=tuple(
+                self._queued_view(self.submitted[key], None)
+                for key in queue.holding
+                if key in self.submitted
+            ),
+            waiting=tuple(
+                self._queued_view(item.submission, waited(item.submission.at))
+                for item in queue.in_order()
+            ),
+            dropped=tuple(
+                DroppedEvaluation(
+                    work_id=item.submission.work_id,
+                    revision=item.submission.candidate,
+                    reason=verdict.reason,
+                    superseded_by=verdict.by,
+                )
+                for item, verdict in queue.dropped[-_DROPPED_SHOWN:]
+            ),
+            ranking=queue.ranking,
+        )
+
+    @staticmethod
+    def _queued_view(submission: Submission, waited: int | None) -> QueuedEvaluation:
+        return QueuedEvaluation(
+            work_id=submission.work_id,
+            kind=submission.kind,
+            revision=submission.candidate,
+            waited_seconds=waited,
+        )
+
+    def _overdue_view(self, now: float | None) -> InputOverdueView | None:
+        report = self.input_overdue
+        if report is None or self.baseline is not None:
+            return None
+        return InputOverdueView(
+            waited_seconds=None if now is None else max(int(now - report.since), 0),
+            limit_seconds=int(report.limit),
         )
 
     def planned(self, outcome: PlanOutcome) -> None:
@@ -334,6 +488,8 @@ class RunRecord:
                 self.gate.last_error = None
                 self.gate.blocked_at_done = None
                 self.accepted.extend(self._as_steps(check.accepted))
+                if check.ranking is not None:
+                    self.evaluations.rank(check.ranking)
             case NoPlan(problem=problem, stuck=stuck, blocked_at_done=at_done):
                 self.gate = PlannerGate(failed=stuck, blocked_at_done=at_done, last_error=problem)
 
@@ -371,6 +527,11 @@ class RunRecord:
         return self.main.revision, None
 
     def _own_last_round(self, plan: WorkPlan) -> tuple[RevisionRef, str | None] | None:
+        """What a continuation builds on: its last round's candidate.
+
+        A hypothesis whose candidate waits for its evaluation is still in flight, so it is never
+        continued before that round is recorded (`PlanLedger.submitted`).
+        """
         prior = self.hypotheses.get(plan.work_id)
         if plan.kind is not WorkKind.IMPLEMENT or not plan.continue_hypothesis or prior is None:
             return None
@@ -436,6 +597,8 @@ class RunRecord:
         """Keep what a finished workstream leaves behind: its record, round and parent."""
         start = done.start
         del self.running[start.key]
+        self.submitted.pop(start.key, None)
+        self.evaluations.forget(start.key)
         profile = start.plan.kind is WorkKind.PROFILE
         self.finished_work.append(
             FinishedWork(
@@ -490,6 +653,7 @@ class RunRecord:
         """
         if key == INPUT_KEY:
             self.accepted = []
+            self.evaluations.release(INPUT_KEY)
         elif key in self.running:
             self.finished(WorkstreamDone.stopped(self.running[key]))
 
@@ -570,4 +734,6 @@ class RunRecord:
             merges=tuple(self.main.merges),
             steps=self.outline or (),
             step_states=tuple(self.step_states().items()),
+            evaluations=self.evaluations.snapshot(),
+            input_overdue=self.input_overdue,
         )

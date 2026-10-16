@@ -19,7 +19,9 @@ from vibesys.orchestration.dynamic.search._parents import ParentOption, ParentSn
 from vibesys.orchestration.dynamic.search._plan import PlanLedger
 from vibesys.orchestration.dynamic.search._prompts import (
     BuildableRow,
+    EvaluationQueueView,
     HistoryRow,
+    InputOverdueView,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -40,6 +42,11 @@ from vs_core.api.search import EvidenceKind, InvocationRef, RevisionRef
 
 class RunningWork(Protocol):
     """What the planner is told of a workstream that has not finished."""
+
+    @property
+    def key(self) -> str:
+        """The workstream's key."""
+        ...
 
     @property
     def plan(self) -> WorkPlan:
@@ -89,18 +96,24 @@ def offer_snapshot(base: RevisionRef, offered: tuple[ParentOption, ...]) -> str:
     return digest.hexdigest()
 
 
-def _status(record: HypothesisRecord, running: frozenset[str]) -> str:
-    return "running" if record.hypothesis_id in running else record.strategy.value
+def _status(record: HypothesisRecord, running: frozenset[str], submitted: frozenset[str]) -> str:
+    if record.hypothesis_id in running:
+        return "running"
+    if record.hypothesis_id in submitted:
+        return "submitted"
+    return record.strategy.value
 
 
-def _history_row(record: HypothesisRecord, running: frozenset[str]) -> HistoryRow:
+def _history_row(
+    record: HypothesisRecord, running: frozenset[str], submitted: frozenset[str]
+) -> HistoryRow:
     last = record.rounds[-1] if record.rounds else None
     shown = "" if last is None else briefs.tail(last.failure_tail, briefs.FAILURE_CHARS)
     return HistoryRow(
         hypothesis_id=record.hypothesis_id,
         sequence=record.first_sequence,
         title=briefs.bounded(record.title, _HISTORY_TITLE_CHARS),
-        status=_status(record, running),
+        status=_status(record, running, submitted),
         strategy=record.strategy.value,
         outcome=None if last is None or last.outcome is None else last.outcome.value,
         summary="" if last is None else briefs.bounded(last.summary, _HISTORY_SUMMARY_CHARS),
@@ -208,6 +221,11 @@ class PlanWorld:
     repairable: frozenset[str] | None = None
     """While the task's plan decides what runs, the failed steps the planner may continue (and
     nothing else); None when the planner may propose any workstream."""
+    parked: frozenset[str] = frozenset()
+    """The keys of running workstreams parked on their trusted measurement: their agents are
+    done and they hold none of the planner's slots (`RunRecord.parked`)."""
+    evaluations: EvaluationQueueView | None = None
+    input_overdue: InputOverdueView | None = None
     main: RevisionRef | None = None
     """The run's main revision; None means the input."""
     main_measurement: MainMeasurement | None = None
@@ -217,9 +235,19 @@ class PlanWorld:
     """Which candidates a merge may name now; its rows are the prompt's mergeable list."""
 
     @property
+    def working(self) -> tuple[RunningWork, ...]:
+        """Running workstreams whose agents still work."""
+        return tuple(item for item in self.running if item.key not in self.parked)
+
+    @property
     def active(self) -> int:
-        """Workstreams that have not finished."""
+        """Workstreams that have not finished: they may still lead to work to wait for."""
         return len(self.running)
+
+    @property
+    def busy(self) -> int:
+        """Workstreams whose agents work: each holds one of the planner's slots."""
+        return len(self.working)
 
     @property
     def done(self) -> int:
@@ -234,7 +262,7 @@ class PlanWorld:
     @property
     def capacity(self) -> int:
         """Free slots the next plan may fill."""
-        return free_slots(self.config, active=self.active, left=self.remaining)
+        return free_slots(self.config, active=self.busy, left=self.remaining)
 
     @property
     def wanted(self) -> int:
@@ -258,12 +286,23 @@ class PlanWorld:
         }
         return PlanLedger(
             hypotheses=self.hypotheses,
-            running=frozenset(item.plan.work_id for item in self.running),
+            running=frozenset(item.plan.work_id for item in self.working),
             profile_ids=frozenset(profiles),
             repairable=self.repairable,
+            submitted=self._waiting_ids(),
+            ranks=self.config.pick == "ranked",
             merge_ids=frozenset(merges | running_merges),
             merging=bool(running_merges),
             merge_options=self.merge_options,
+        )
+
+    def _waiting_ids(self) -> frozenset[str]:
+        """Work ids with a candidate waiting for its evaluation and no workstream working."""
+        working = {item.plan.work_id for item in self.working}
+        return frozenset(
+            item.plan.work_id
+            for item in self.running
+            if item.key in self.parked and item.plan.work_id not in working
         )
 
     def prompt(
@@ -274,8 +313,11 @@ class PlanWorld:
         ``problem`` says why an earlier reply (or call) was not accepted; ``again`` names the
         turn whose reply this request corrects, when it does.
         """
-        running = frozenset(item.plan.work_id for item in self.running)
-        rows: list[WorkstreamHistoryRow] = [_history_row(item, running) for item in self.hypotheses]
+        running = frozenset(item.plan.work_id for item in self.working)
+        submitted = self._waiting_ids()
+        rows: list[WorkstreamHistoryRow] = [
+            _history_row(item, running, submitted) for item in self.hypotheses
+        ]
         implement_rows = tuple(rows)
         profiles = [
             _profile_row(item.sequence, item.plan.required_fields, item, None)
@@ -311,6 +353,8 @@ class PlanWorld:
             profiling=self.offer is not None,
             profile_fields=() if self.offer is None else tuple(str(f) for f in self.offer.fields),
             handoff_paths=self.handoffs,
+            evaluations=self.evaluations,
+            input_overdue=self.input_overdue,
             main_revision=self.main or self.base,
             main_measurement=self.main_measurement,
             merge_running=next(
