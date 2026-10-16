@@ -31,14 +31,17 @@ from .cluster_types import (
 from .cluster_types import validate_operation_id as validate_cluster_operation_id
 from .config import (
     PORT_PLACEHOLDER,
+    MinimalJob,
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
+    SlurmJobResources,
     SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
     SlurmTransport,
     load_slurm_config,
+    minimal_job,
     shell_join_with_port,
 )
 from .connector_protocol import (
@@ -55,8 +58,10 @@ from .connector_protocol import (
 )
 from .errors import (
     SlurmError,
+    SlurmSbatchFailedError,
     SlurmSubmissionRejectedError,
     SlurmTransferInterruptedError,
+    SlurmTransportFailedError,
     SlurmWorkspaceRootProbeError,
 )
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
@@ -270,6 +275,7 @@ __all__ = [
     "LedgerRow",
     "LedgerStage",
     "LedgerState",
+    "MinimalJob",
     "NoAccountingRow",
     "NodeGpus",
     "NotInLedger",
@@ -314,6 +320,7 @@ __all__ = [
     "SlurmFileSource",
     "SlurmJobHandle",
     "SlurmJobRequest",
+    "SlurmJobResources",
     "SlurmJobResult",
     "SlurmJobRunner",
     "SlurmJobStatus",
@@ -321,6 +328,7 @@ __all__ = [
     "SlurmLocalTransport",
     "SlurmPhase",
     "SlurmRawState",
+    "SlurmSbatchFailedError",
     "SlurmService",
     "SlurmSshTransport",
     "SlurmStatus",
@@ -329,6 +337,7 @@ __all__ = [
     "SlurmTransferInterruptedError",
     "SlurmTransport",
     "SlurmTransportBrokerPolicy",
+    "SlurmTransportFailedError",
     "SlurmTransportRequestError",
     "SlurmTreeArtifact",
     "SlurmWorkspaceRootProbeError",
@@ -361,6 +370,7 @@ __all__ = [
     "life_for_status",
     "list_entries",
     "load_slurm_config",
+    "minimal_job",
     "needs_accounting",
     "observe",
     "observe_with_notice",

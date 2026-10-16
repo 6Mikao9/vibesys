@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import math
 import re
 import shlex
 import tomllib
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -226,6 +229,9 @@ class SlurmConfig(BaseModel):
     transport: SlurmTransport
     sbatch_command: tuple[str, ...] = ("sbatch",)
     sbatch_arguments: tuple[str, ...] = ()
+    # Replaces the derived 1-CPU request for minimal jobs (the startup probe) on sites
+    # whose partitions require a GPU or other resources; see ``minimal_job``.
+    probe_sbatch_arguments: tuple[str, ...] | None = None
     poll_interval_seconds: Annotated[float, Field(gt=0)] = 5.0
     # Bounds a job's run, from when it is first seen running; queue wait is not counted.
     job_timeout_seconds: Annotated[int, Field(gt=0)] = 3600
@@ -281,51 +287,57 @@ class SlurmConfig(BaseModel):
     @field_validator(
         "sbatch_command",
         "sbatch_arguments",
+        "probe_sbatch_arguments",
         mode="before",
     )
     @classmethod
     def _normalize_arrays(cls, value: object) -> object:
         return tuple(value) if isinstance(value, list) else value
 
-    @field_validator("sbatch_command", "sbatch_arguments")
+    @field_validator("sbatch_command", "sbatch_arguments", "probe_sbatch_arguments")
     @classmethod
-    def _validate_arrays(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if any(not argument for argument in value):
+    def _validate_arrays[T: tuple[str, ...] | None](cls, value: T) -> T:
+        if value is not None and any(not argument for argument in value):
             message = "command and argument arrays must contain non-empty strings"
             raise ValueError(message)
         return value
 
-    @field_validator("sbatch_arguments")
+    @field_validator("sbatch_arguments", "probe_sbatch_arguments")
     @classmethod
-    def _no_requeue(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        if "--requeue" in value:
+    def _no_requeue[T: tuple[str, ...] | None](cls, value: T) -> T:
+        if value is not None and "--requeue" in value:
             message = (
                 "--requeue is not allowed: VibeSys retries jobs itself and submits --no-requeue"
             )
             raise ValueError(message)
         return value
 
-    @field_validator("sbatch_arguments")
+    @field_validator("sbatch_arguments", "probe_sbatch_arguments")
     @classmethod
-    def _readable_time_limit(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        _sbatch_time_limit_seconds(value)  # raises on a time limit sbatch would not read
+    def _readable_time_limit[T: tuple[str, ...] | None](cls, value: T) -> T:
+        if value is not None:
+            _sbatch_time_limit_seconds(value)  # raises on a time limit sbatch would not read
         return value
 
     @field_validator("process_exit_wait_seconds")
     @classmethod
     def _teardown_fits_the_time_limit(cls, value: int, info: ValidationInfo) -> int:
-        arguments = info.data.get("sbatch_arguments")
         grace = info.data.get("service_stop_grace_seconds")
-        if not isinstance(arguments, tuple) or not isinstance(grace, int):
-            return value  # those fields failed their own validation and are reported there
-        limit = _sbatch_time_limit_seconds(arguments)
-        if limit is not None and grace + value >= limit:
-            message = (
-                f"service_stop_grace_seconds + process_exit_wait_seconds ({grace + value} s) "
-                f"must be shorter than the sbatch_arguments time limit ({limit} s): the job "
-                "script waits that long for the processes it started to exit"
-            )
-            raise ValueError(message)
+        if not isinstance(grace, int):
+            return value  # that field failed its own validation and is reported there
+        for field in ("sbatch_arguments", "probe_sbatch_arguments"):
+            arguments = info.data.get(field)
+            if not isinstance(arguments, tuple):
+                continue  # unset, or failed its own validation and is reported there
+            limit = _sbatch_time_limit_seconds(arguments)
+            if limit is not None and grace + value >= limit:
+                message = (
+                    f"service_stop_grace_seconds + process_exit_wait_seconds "
+                    f"({grace + value} s) must be shorter than the {field} time limit "
+                    f"({limit} s): the job script waits that long for the processes it "
+                    "started to exit"
+                )
+                raise ValueError(message)
         return value
 
     @field_validator("remote_workspace_root")
@@ -340,6 +352,112 @@ class SlurmConfig(BaseModel):
             message = "remote_workspace_root must be an absolute normalized POSIX path"
             raise ValueError(message)
         return path.as_posix()
+
+
+# The ``sbatch`` options a minimal job keeps from ``sbatch_arguments``: where and as whom
+# it runs. Every other option is dropped with any value it takes: GPUs, CPUs, memory,
+# nodes, time, holds, dependencies, arrays, node lists and anything unknown, since an
+# option this list does not name could request resources or delay the start. Only
+# sbatch's canonical spellings are recognized; an abbreviation (``--part``) is dropped.
+_PLACEMENT_LONG_OPTIONS = frozenset(
+    {
+        "--account",
+        "--clusters",
+        "--comment",
+        "--constraint",
+        "--exclude",
+        "--partition",
+        "--qos",
+        "--reservation",
+        "--wckey",
+    }
+)
+_PLACEMENT_SHORT_OPTIONS = frozenset({"-A", "-C", "-M", "-p", "-q", "-x"})
+_MINIMAL_JOB_CPUS = 1
+_MINIMAL_JOB_MEMORY = "1G"
+# Seconds the minimal job leaves for its own command, besides its teardown waits.
+_MINIMAL_JOB_COMMAND_SECONDS = 60
+
+
+class SlurmJobResources(StrEnum):
+    """Which resource request a job is submitted with.
+
+    ``CONFIGURED`` uses the operator's ``sbatch_arguments`` as written: the shape an
+    evaluation needs. ``MINIMAL`` keeps their partition, account and other placement
+    options but asks for one CPU, no GPU and a few minutes
+    (:func:`minimal_job`), so a job that only touches
+    files is not queued behind GPU capacity.
+    """
+
+    CONFIGURED = "configured"
+    MINIMAL = "minimal"
+
+
+@dataclass(frozen=True)
+class MinimalJob:
+    """How a job that only touches a few files is submitted on this cluster.
+
+    ``arguments`` replace ``sbatch_arguments`` for it; ``time_limit_seconds`` is the
+    time limit they set (None: none set); ``description`` names the request for
+    operator-facing messages.
+    """
+
+    arguments: tuple[str, ...]
+    time_limit_seconds: int | None
+    description: str
+
+
+def _placement_options(arguments: Sequence[str]) -> list[str]:
+    kept: list[str] = []
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        index += 1
+        if argument in _PLACEMENT_LONG_OPTIONS or argument in _PLACEMENT_SHORT_OPTIONS:
+            kept.extend(arguments[index - 1 : index + 1])
+            index += 1
+        elif argument.split("=", 1)[0] in _PLACEMENT_LONG_OPTIONS or (
+            argument[:2] in _PLACEMENT_SHORT_OPTIONS and not argument.startswith("--")
+        ):
+            kept.append(argument)
+    return kept
+
+
+def minimal_job(config: SlurmConfig) -> MinimalJob:
+    """The submission of a tiny job: ``probe_sbatch_arguments``, or 1 CPU and no GPU.
+
+    Without the override, the operator's placement options (partition, account, QoS,
+    constraint, reservation, clusters, excluded nodes, wckey, comment) are kept from
+    ``sbatch_arguments`` and everything else is replaced by one node, one task, one
+    CPU, 1 GiB and the shortest whole-minute time limit that still fits the job
+    script's teardown (``service_stop_grace_seconds + process_exit_wait_seconds``)
+    plus a minute for the command. A site whose partitions require a GPU sets
+    ``probe_sbatch_arguments`` instead.
+    """
+    if config.probe_sbatch_arguments is not None:
+        arguments = config.probe_sbatch_arguments
+        return MinimalJob(
+            arguments=arguments,
+            time_limit_seconds=_sbatch_time_limit_seconds(arguments),
+            description="the resources `probe_sbatch_arguments` requests",
+        )
+    teardown = config.service_stop_grace_seconds + config.process_exit_wait_seconds
+    minutes = math.ceil((teardown + _MINIMAL_JOB_COMMAND_SECONDS) / 60)
+    return MinimalJob(
+        arguments=(
+            *_placement_options(config.sbatch_arguments),
+            "--nodes=1",
+            "--ntasks=1",
+            f"--cpus-per-task={_MINIMAL_JOB_CPUS}",
+            f"--mem={_MINIMAL_JOB_MEMORY}",
+            f"--time={minutes}",
+        ),
+        time_limit_seconds=minutes * 60,
+        description=(
+            f"{_MINIMAL_JOB_CPUS} CPU, {_MINIMAL_JOB_MEMORY} of memory and {minutes} min "
+            "without GPUs, in the partition `sbatch_arguments` names"
+        ),
+    )
 
 
 def _sbatch_time_limit_seconds(arguments: Sequence[str]) -> int | None:
