@@ -47,6 +47,7 @@ from vibesys.api import (
     GateKind,
     RunEndingData,
     RunFailedData,
+    RunOverview,
     SpanId,
     TodoItemData,
     ToolResultPayload,
@@ -348,6 +349,8 @@ class RunStartedData(EventPayload):
     # Policy-owned role hints let frontends seed per-round placeholders.
     # Empty when the policy does not declare roles.
     expected_roles: tuple[str, ...] = ()
+    overview: RunOverview | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The run's objective and evaluator; see ``vibesys.events.RunOverview``."""
 
 
 class RunInterruptedData(EventPayload):
