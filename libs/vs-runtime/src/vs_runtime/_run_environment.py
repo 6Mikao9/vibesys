@@ -55,6 +55,7 @@ from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_an
 from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
+    RefusesDockerInDocker,
     attaches_accelerator,
     reject_docker_in_docker,
 )
@@ -569,6 +570,10 @@ class RunEnvironment(CaptureRecoverySource, Protocol):
         """
         ...
 
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """Whether a run here needs the host's Docker daemon to register Sysbox."""
+        ...
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
         ...
@@ -623,7 +628,7 @@ class _NoopWorkspaceRecovery(NoCaptureRecovery):
         return False
 
 
-class HostEnvironment(_NoopWorkspaceRecovery):
+class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Run the agent on the host, refusing to start unless it is confined.
 
     Selected for backends whose accelerator no container can reach (Metal on
@@ -926,6 +931,10 @@ class DockerEnvironment(NoCaptureRecovery):
         """The editor container gets the accelerator, unless Docker-in-Docker forbids it."""
         return attaches_accelerator(docker_in_docker=docker_in_docker)
 
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """A docker-in-docker sandbox runs under the host daemon's Sysbox."""
+        return docker_in_docker
+
     def build_editor(
         self,
         request: RunEnvironmentRequest,
@@ -1126,7 +1135,7 @@ class _SkyPilotRunEnvironmentSession:
         self._close.run(self._steps.close)
 
 
-class SkyPilotEnvironment(DockerEnvironment):
+class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
     """CPU-only Docker editor with host-mediated SkyPilot evaluation."""
 
     config: SkyPilotEnvironmentConfig
@@ -1339,7 +1348,7 @@ class SkyPilotEnvironment(DockerEnvironment):
         )
 
 
-class ModalEnvironment(_NoopWorkspaceRecovery):
+class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Run candidate evaluations as Modal deployments."""
 
     isolated = True
