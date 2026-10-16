@@ -12,6 +12,12 @@ body {
   background: var(--bg);
   color: var(--text);
 }
+/* The window is the document: a `Page` or an `AppFrame` in the root element fills it and scrolls. */
+html,
+body,
+body > div:first-child {
+  height: 100%;
+}
 
 .vs-page,
 .vs-page *,
@@ -178,15 +184,27 @@ body {
   container-type: inline-size;
   min-width: 0;
 }
-/* A mono glyph is 0.6 of the font size wide, so the art fits when the size is the width / (0.6 * columns). */
+/*
+ * A mono glyph is 0.6 of the font size wide, so a size of width / columns sets the art at three
+ * fifths of the container's width, capped at the style's size.
+ */
 .vs-wordmark-art {
+  display: block;
+  width: max-content;
+  max-width: 100%;
   margin: 0;
   font-family: var(--text-display-family);
   font-weight: var(--text-display-weight);
-  font-size: min(var(--text-display-size), calc(100cqi / (0.6 * var(--wordmark-columns))));
+  font-size: min(var(--text-display-size), calc(100cqi / var(--wordmark-columns)));
   line-height: calc(var(--text-display-line) / var(--text-display-size));
   white-space: pre;
   overflow: hidden;
+  color: var(--accent);
+}
+.vs-wordmark[data-align="center"] .vs-wordmark-art {
+  margin: 0 auto;
+}
+.vs-wordmark[data-tone="gradient"] .vs-wordmark-art {
   background: linear-gradient(100deg, var(--text) 15%, var(--accent) 58%, var(--muted) 96%);
   -webkit-background-clip: text;
   background-clip: text;
@@ -1193,4 +1211,131 @@ button.vs-stage-head {
 }
 .vs-sidebar-more:hover {
   color: var(--text);
+}
+
+/* --- app frame --------------------------------------------------------------------------------- */
+
+.vs-app-frame {
+  display: flex;
+  flex-wrap: wrap;
+  height: 100%;
+  background: var(--bg);
+}
+.vs-app-nav {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 var(--sidebar);
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-5);
+  max-width: var(--sidebar);
+  max-height: 100%;
+  overflow-y: auto;
+  /* The window's own controls (macOS's traffic lights) sit over the column's top: start below them. */
+  padding: calc(var(--space-5) + var(--chrome-inset-height, var(--space-0))) var(--space-4)
+    var(--space-5);
+  /* The column's background moves the window; its controls stay controls. */
+  -webkit-app-region: drag;
+  border-right: var(--hairline) solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-app-nav :is(a, button, input, select, textarea, [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+.vs-app-nav-top,
+.vs-app-nav-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.vs-app-nav-footer {
+  gap: var(--space-1);
+  padding-top: var(--space-4);
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-app-main {
+  flex: 999 1 var(--column-main);
+  min-width: 0;
+  max-height: 100%;
+}
+
+/* --- theme swatch ------------------------------------------------------------------------------ */
+
+.vs-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--focus-ring) solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vs-swatch:hover {
+  background: var(--panel-2);
+}
+.vs-swatch[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.vs-swatch:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-swatch-preview {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  height: calc(var(--control) * 2);
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--swatch-line);
+  border-radius: var(--radius);
+  background: var(--swatch-bg);
+}
+.vs-swatch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.vs-swatch-accent {
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--swatch-accent);
+}
+.vs-swatch-bar {
+  display: block;
+  height: calc(var(--dot) - var(--space-1));
+  border-radius: var(--radius-sm);
+}
+.vs-swatch-bar[data-tone="text"] {
+  background: var(--swatch-text);
+}
+.vs-swatch-bar[data-tone="muted"] {
+  background: var(--swatch-muted);
+}
+.vs-swatch-bar[data-tone="panel"] {
+  height: var(--dot);
+  background: var(--swatch-panel);
+}
+.vs-swatch-bar[data-width="wide"] {
+  width: 60%;
+}
+.vs-swatch-bar[data-width="most"] {
+  width: 80%;
+}
+.vs-swatch-bar[data-width="half"] {
+  width: 45%;
+}
+.vs-swatch-bar[data-width="full"] {
+  width: 100%;
 }

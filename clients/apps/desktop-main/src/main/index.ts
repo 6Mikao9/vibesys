@@ -14,12 +14,15 @@ import {
   LocalLink,
   SshLink,
 } from '@vibesys/connection';
+import {RunNotifier} from '@vibesys/feature-app-shell/main';
 import {Hosts} from '@vibesys/feature-hosts/main';
 import {RunControl} from '@vibesys/feature-run-control/main';
+import {PreferencesMain} from '@vibesys/feature-settings/main';
 import type {HostId} from '@vibesys/hosts';
-import {WELCOME_EVENTS} from '@vibesys/ipc';
+import {FIRST_PAINT_CHANNEL, type FirstPaint, WELCOME_EVENTS} from '@vibesys/ipc';
 import {remember, SettingsStore} from '@vibesys/settings';
-import {app, ipcMain, Menu, net, powerMonitor} from 'electron';
+import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor} from 'electron';
+import {surfaceUrl} from './app-assets.js';
 import {AppLaunches} from './app-launches.js';
 import {AppLifecycle, realTimers} from './app-lifecycle.js';
 import {
@@ -35,6 +38,7 @@ import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js'
 import {WelcomeFeed} from './welcome-feed.js';
 import {rendererGeneration} from './welcome-ipc.js';
 import {AppWindow} from './window.js';
+import {chromeInset} from './window-chrome.js';
 
 /** The repository checkout this app was built in: This Mac's VibeSys checkout by default. */
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url)).replace(
@@ -84,10 +88,35 @@ async function openWindow(
   const settings = new SettingsStore({
     settingsPath: join(userData, 'hosts.json'),
     recentPath: join(userData, 'recent.json'),
+    preferencesPath: join(userData, 'preferences.json'),
     log,
   });
   let desktop: Desktop | null = null;
   const welcome = new WelcomeFeed();
+  const surface = surfaceUrl(process.env['VIBESYS_DESKTOP_SHELL']);
+  const preferences = new PreferencesMain({
+    store: settings,
+    nativeTheme,
+    push: value => window.sendWelcome(WELCOME_EVENTS.preferences, welcome.preferences(value)),
+  });
+  await preferences.load();
+  // The preload asks for this before the page's scripts run, so the first paint is in the theme
+  // and clear of the window controls.
+  ipcMain.on(FIRST_PAINT_CHANNEL, event => {
+    const firstPaint: FirstPaint = {
+      theme: preferences.theme(),
+      chromeInset: chromeInset(process.platform),
+    };
+    event.returnValue = firstPaint;
+  });
+  const notifier = new RunNotifier({
+    enabled: () => preferences.notificationsEnabled(),
+    notify: notice => {
+      const notification = new Notification({title: notice.title, body: notice.body});
+      notification.on('click', () => window.focus());
+      notification.show();
+    },
+  });
   const changed = (): void => desktop?.chromeChanged();
   const hosts = new Hosts({
     manager,
@@ -95,7 +124,10 @@ async function openWindow(
     localCheckout: REPOSITORY_ROOT,
     sshConfigPath: join(homedir(), '.ssh', 'config'),
     log,
-    push: listing => window.sendWelcome(WELCOME_EVENTS.listing, welcome.listing(listing)),
+    push: listing => {
+      notifier.listing(listing);
+      window.sendWelcome(WELCOME_EVENTS.listing, welcome.listing(listing));
+    },
     retire: host => welcome.retireHost(host),
   });
   const runs: RunControl = new RunControl({
@@ -109,6 +141,7 @@ async function openWindow(
   });
   const window = new AppWindow({
     log,
+    surfaceUrl: surface,
     connect: (port, runId) => runs.connect(port, runId),
     logs: (runId, request) => runs.logs(runId, request),
     closed: runId => {
@@ -123,6 +156,8 @@ async function openWindow(
     hosts,
     runs,
     settings,
+    preferences,
+    surfaceUrl: surface,
     welcomeIpc: {
       handle: (channel, listener) =>
         ipcMain.handle(channel, (event, ...args) =>

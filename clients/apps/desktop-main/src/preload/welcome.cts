@@ -4,14 +4,16 @@
  * It exposes one function per welcome request (`@vibesys/ipc`'s `WelcomeBridge`); each is an
  * `invoke` the main process answers only for the welcome view's own web contents, and parses with
  * `@vibesys/ipc`'s `parseWelcomeRequest` (`welcome.test.ts` holds the two to the same arguments).
- * Four events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
- * show (`onShowHost`), and a host's runs as its helper pushed them (`onListing`). Sandboxed
+ * Five events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
+ * show (`onShowHost`), a host's runs as its helper pushed them (`onListing`), and the preferences
+ * (`onPreferences`). Before the page's scripts run it asks, synchronously, for what the first paint needs
+ * (the stored theme and the window controls' inset) and sets it on the document. Sandboxed
  * preloads cannot be ES modules or import local files, hence `.cts` and the channel names repeated
  * here; the types keep them in step. It loads only Electron (the package-graph checker's
  * `preload-sandbox`): the payload types come from the bridge interface, which types every member
  * below.
  */
-import type {WelcomeBridge, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
+import type {FirstPaint, WelcomeBridge, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
 
 type Channels = typeof import('@vibesys/ipc').WELCOME_CHANNELS;
 type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
@@ -38,13 +40,20 @@ const CHANNELS: Channels = {
   showWelcome: 'vibesys:welcome:show-welcome',
   retry: 'vibesys:welcome:retry',
   stop: 'vibesys:welcome:stop',
+  preferences: 'vibesys:welcome:preferences',
+  setAppearance: 'vibesys:welcome:set-appearance',
+  setNotifications: 'vibesys:welcome:set-notifications',
+  archive: 'vibesys:welcome:archive',
 };
 const EVENTS: Events = {
   chrome: 'vibesys:welcome:chrome',
   recent: 'vibesys:welcome:recent',
   showHost: 'vibesys:welcome:show-host',
   listing: 'vibesys:welcome:listing',
+  preferences: 'vibesys:welcome:preferences-changed',
 };
+const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
+  'vibesys:welcome:first-paint';
 
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
 interface WelcomePreloadCapabilities {
@@ -87,10 +96,15 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     showWelcome: () => call(CHANNELS.showWelcome),
     retry: () => call(CHANNELS.retry),
     stop: (host, instance, force) => call(CHANNELS.stop, host, instance, force),
+    preferences: () => call(CHANNELS.preferences),
+    setAppearance: appearance => call(CHANNELS.setAppearance, appearance),
+    setNotifications: enabled => call(CHANNELS.setNotifications, enabled),
+    archive: (run, archived) => call(CHANNELS.archive, run, archived),
     onChrome: on(EVENTS.chrome),
     onRecent: on(EVENTS.recent),
     onShowHost: on(EVENTS.showHost),
     onListing: on(EVENTS.listing),
+    onPreferences: on(EVENTS.preferences),
   };
 }
 
@@ -107,6 +121,31 @@ if (process.type === 'renderer') {
         electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
     }),
   );
+  prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
+}
+
+/**
+ * Set the stored theme and the window controls' inset (`--chrome-inset-width`,
+ * `--chrome-inset-height`) on the root element as the parser inserts it, before the first paint. A
+ * preload runs before the document has a root element, so this waits for it with a mutation
+ * observer, whose callback runs before the page renders.
+ */
+function prepareFirstPaint(reply: unknown): void {
+  const firstPaint = reply as FirstPaint | undefined;
+  if (firstPaint === undefined || firstPaint === null) return;
+  const apply = (): boolean => {
+    const root = document.documentElement;
+    if (root === null) return false;
+    root.setAttribute('data-theme', firstPaint.theme);
+    root.style.setProperty('--chrome-inset-width', `${firstPaint.chromeInset.width}px`);
+    root.style.setProperty('--chrome-inset-height', `${firstPaint.chromeInset.height}px`);
+    return true;
+  };
+  if (apply()) return;
+  const observer = new MutationObserver(() => {
+    if (apply()) observer.disconnect();
+  });
+  observer.observe(document, {childList: true});
 }
 
 export = createWelcomePreload;

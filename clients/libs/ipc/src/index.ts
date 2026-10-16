@@ -28,13 +28,17 @@ export {
 } from './run-logs.js';
 export {
   type ChromeState,
+  FIRST_PAINT_CHANNEL,
+  type FirstPaint,
   type HarnessChoice,
   type HarnessListing,
   type HarnessOffer,
   type HostsWelcomeBridge,
   type PathCompletion,
+  type PreferencesView,
   parseWelcomeRequest,
   type RunControlWelcomeBridge,
+  type SettingsWelcomeBridge,
   type StartOutcome,
   type StartRunWelcomeBridge,
   settled,
