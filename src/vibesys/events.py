@@ -7,7 +7,15 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    NonNegativeInt,
+    field_validator,
+    model_validator,
+)
 
 import vs_agent.api as _agent_api
 
@@ -22,6 +30,7 @@ from vs_agent.api import (
     ToolResultPayload,
 )
 from vs_core.api import EndReason, SpanId, WireSpan
+from vs_redaction.api import redact_diagnostic_text
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
 
 CommandResultPayload = _agent_api.CommandResultPayload
@@ -462,6 +471,11 @@ class SubprocessOutputData(EventPayload):
     stream: OutputStream
     content: str
 
+    @field_validator("content")
+    @classmethod
+    def _redact_content(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
+
 
 class JudgeResultData(EventPayload):
     """Verdict and feedback returned by the judge.
@@ -537,8 +551,8 @@ class GateFinishedData(EventPayload):
 
     ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
     ``unit`` keeps the historical fallback of the metric name when the
-    contract declares no unit. ``output_tail`` carries the trailing command
-    output on failure. ``round_label`` groups the per-recipe local-validation
+    contract declares no unit. ``output_tail`` carries bounded, credential-redacted
+    trailing command output on failure. ``round_label`` groups the per-recipe local-validation
     gates of one attempt back together, so a client folds them into a
     pass-fraction itself rather than the backend aggregating one.
     """
@@ -556,6 +570,11 @@ class GateFinishedData(EventPayload):
     round_label: str | None = None
     source: FrameworkSource = FrameworkSource.GATES
     source_label: str | None = None
+
+    @field_validator("output_tail")
+    @classmethod
+    def _redact_output_tail(cls, value: str | None) -> str | None:
+        return None if value is None else redact_diagnostic_text(value)
 
 
 class WorkspaceSnapshotData(EventPayload):
@@ -670,6 +689,11 @@ class WorkstreamFailureData(BaseModel):
     turns: int | None = None
     limit: int | None = None
     text: str = ""
+
+    @field_validator("text")
+    @classmethod
+    def _redact_text(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
 
 
 class WorkstreamFinishedData(EventPayload):
