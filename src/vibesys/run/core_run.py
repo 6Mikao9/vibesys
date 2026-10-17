@@ -26,6 +26,7 @@ from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
     JournalPublicationDelivery,
+    OperatorInbox,
     RunControlBridge,
     RunLoopConfig,
     drive_core,
@@ -119,6 +120,9 @@ def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
 async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> RunEnd:
     """Run one core run to its terminal status over ``host.services``.
 
+    The loop reads operator controls from ``integration.control`` and, when the services
+    carry one, from the run's control inbox, where ``vibesys control`` writes.
+
     Raises ``RunStopped`` when the operator's stop ended the run, so the session reports
     a stopped run, and ``CoreRunRefusedError`` when composition left an executor role
     unserved. Every exit after core starts closes a configured evaluation bridge and
@@ -136,6 +140,10 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     controls = RunControlBridge(
         integration.control,
         _SteerTexts(services.artifacts),
+        inbox=None
+        if services.control_inbox is None
+        else OperatorInbox(services.control_inbox, integration.run_control),
+        control=integration.run_control,
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)

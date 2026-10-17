@@ -126,7 +126,9 @@ def test_steering_queued_while_paused_survives_resume_for_core_to_take(tmp_path:
     assert result == ["Review"]
     # Steering queued while paused waits for core to take it; resuming neither drops nor
     # delivers it, and it reaches a turn only as session input (see the composition test).
-    assert parts.control.take_pending_steer() == ["check for reward hacking"]
+    assert [steer.text for steer in parts.control.take_pending_steer()] == [
+        "check for reward hacking"
+    ]
 
 
 def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
@@ -142,7 +144,7 @@ def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
     assert (pause.ack.action, pause.ack.status) == ("pause", "pending")
     assert (resume.ack.action, resume.ack.status) == ("resume", "consumed")
     assert (steer.ack.action, steer.ack.status) == ("steer", "pending")
-    assert parts.control.take_pending_steer() == ["prioritize latency"]
+    assert [steer.text for steer in parts.control.take_pending_steer()] == ["prioritize latency"]
 
 
 def test_a_resume_command_can_ask_for_the_fallback_and_a_plain_one_cannot(tmp_path: Path) -> None:
@@ -519,7 +521,7 @@ def test_a_resent_control_is_one_control_and_a_reused_id_is_a_conflict(tmp_path:
 
     assert first == again
     assert conflict.value.diagnostic_code == "control_id_conflict"
-    assert parts.control.take_pending_steer() == ["prefer latency"]
+    assert [steer.text for steer in parts.control.take_pending_steer()] == ["prefer latency"]
     assert not parts.control.pause_requested()
 
 

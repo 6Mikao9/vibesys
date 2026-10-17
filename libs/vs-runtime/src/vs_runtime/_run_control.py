@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -68,11 +68,19 @@ class RunControlEventSink(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class QueuedSteer:
+    """One queued steer: its text and the id of the control that sent it, if it had one."""
+
+    text: str
+    control_id: str | None = None
+
+
 class RunControlChannel(Protocol):
     """Cooperative control mailbox shared by callers and the run thread."""
 
-    def queue_steer(self, text: str) -> None:
-        """Queue steering for the next turn.
+    def queue_steer(self, text: str, control_id: str | None = None) -> None:
+        """Queue steering for the next turn; ``control_id`` names the control that sent it.
 
         The queue is the single source of truth. The run loop drains it
         (:meth:`take_pending_steer`) and turns each message into a durable session input,
@@ -80,12 +88,20 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def request_pause(self) -> None:
-        """Request a pause at the next cooperative boundary."""
+    def request_pause(self, control_id: str | None = None) -> None:
+        """Request a pause at the next cooperative boundary; ``control_id`` names its control."""
         ...
 
-    def resume(self) -> None:
+    def resume(self, control_id: str | None = None) -> None:
         """Cancel a pause or stop request and release a parked run."""
+        ...
+
+    def requested_by(self, flag: Literal["pause", "stop"]) -> str | None:
+        """The id of the control that last set ``flag``, or None when it had none.
+
+        ``pause`` names the latest pause or resume (the run resuming itself has none), and
+        ``stop`` the pending stop, so the run records each under the id its sender gave.
+        """
         ...
 
     def land_pause(self) -> None:
@@ -97,7 +113,7 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def resume_with_fallback(self) -> None:
+    def resume_with_fallback(self, control_id: str | None = None) -> None:
         """Resume like :meth:`resume`, asking a run parked on a provider capacity limit to switch.
 
         The request stays pending until a parked turn takes it with
@@ -109,11 +125,11 @@ class RunControlChannel(Protocol):
         """Take the pending fallback request: True once per request."""
         ...
 
-    def request_stop(self, mode: StopMode) -> None:
+    def request_stop(self, mode: StopMode, control_id: str | None = None) -> None:
         """Request an unwind at the next cooperative boundary, draining or cancelling work."""
         ...
 
-    def take_pending_steer(self) -> list[str]:
+    def take_pending_steer(self) -> list[QueuedSteer]:
         """Drain queued steering exactly once."""
         ...
 
@@ -209,23 +225,24 @@ class RuntimeRunControlChannel:
         """Bind the channel to a synchronous semantic event sink; ``threads`` makes its lock."""
         self._events = events
         self._lock = threads.condition(threads.lock())
-        self._pending_steer: list[str] = []
+        self._pending_steer: list[QueuedSteer] = []
         self._paused = False
         self._stop_requested = False
         self._stop_mode: StopMode | None = None
+        self._requested_by: dict[Literal["pause", "stop"], str | None] = {}
         self._fallback_requested = False
         self._stop_listeners: list[Callable[[], object]] = []
         self._capacity_listening = False
         self._capacity_request: int | None = None
         self._capacity_requests = 0
 
-    def queue_steer(self, text: str) -> None:
+    def queue_steer(self, text: str, control_id: str | None = None) -> None:
         """Queue free-text steering for the run loop to take at its next control poll."""
         with self._lock:
-            self._pending_steer.append(text)
+            self._pending_steer.append(QueuedSteer(text, control_id))
         self._emit(RunControlTransitionKind.STEER_QUEUED, text=text)
 
-    def request_pause(self) -> None:
+    def request_pause(self, control_id: str | None = None) -> None:
         """Request that the run park at its next cooperative boundary.
 
         The request is published before a boundary can see it, so a run that
@@ -234,12 +251,18 @@ class RuntimeRunControlChannel:
         self._emit(RunControlTransitionKind.PAUSE_REQUESTED)
         with self._lock:
             self._paused = True
+            self._requested_by["pause"] = control_id
             self._capacity_request = None
             self._lock.notify_all()
 
-    def resume(self) -> None:
+    def resume(self, control_id: str | None = None) -> None:
         """Cancel a pending pause or stop and release a parked run."""
-        self._release(fallback=False)
+        self._release(fallback=False, control_id=control_id)
+
+    def requested_by(self, flag: Literal["pause", "stop"]) -> str | None:
+        """The id of the control that last set ``flag``, or None when it had none."""
+        with self._lock:
+            return self._requested_by.get(flag)
 
     def land_pause(self) -> None:
         """Emit ``PAUSED`` while a pause is in force and no stop is pending."""
@@ -248,9 +271,10 @@ class RuntimeRunControlChannel:
         if landed:
             self._emit(RunControlTransitionKind.PAUSED)
 
-    def _release(self, *, fallback: bool) -> None:
+    def _release(self, *, fallback: bool, control_id: str | None) -> None:
         with self._lock:
             self._paused = False
+            self._requested_by = {"pause": control_id}
             self._stop_requested = False
             self._stop_mode = None
             self._fallback_requested = fallback
@@ -258,9 +282,9 @@ class RuntimeRunControlChannel:
             self._lock.notify_all()
         self._emit(RunControlTransitionKind.RESUMED)
 
-    def resume_with_fallback(self) -> None:
+    def resume_with_fallback(self, control_id: str | None = None) -> None:
         """Resume the run and leave a fallback request for the parked turn to take."""
-        self._release(fallback=True)
+        self._release(fallback=True, control_id=control_id)
 
     def consume_fallback_request(self) -> bool:
         """Take the pending fallback request: True once per request."""
@@ -268,7 +292,7 @@ class RuntimeRunControlChannel:
             requested, self._fallback_requested = self._fallback_requested, False
         return requested
 
-    def request_stop(self, mode: StopMode) -> None:
+    def request_stop(self, mode: StopMode, control_id: str | None = None) -> None:
         """Request that the run unwind at its next cooperative boundary, as ``mode`` says.
 
         The request is published before a boundary can see it, so a run that
@@ -280,6 +304,7 @@ class RuntimeRunControlChannel:
         with self._lock:
             self._stop_requested = True
             self._stop_mode = mode
+            self._requested_by["stop"] = control_id
             self._lock.notify_all()
             listeners = tuple(self._stop_listeners)
         for listener in listeners:
@@ -312,7 +337,7 @@ class RuntimeRunControlChannel:
 
         return unsubscribe
 
-    def take_pending_steer(self) -> list[str]:
+    def take_pending_steer(self) -> list[QueuedSteer]:
         """Drain steering queued since the previous invocation boundary."""
         with self._lock:
             pending, self._pending_steer = self._pending_steer, []
@@ -357,6 +382,7 @@ class RuntimeRunControlChannel:
             timed_out = self._paused and not self._stop_requested
             if timed_out:
                 self._paused = False
+                self._requested_by["pause"] = None
         if timed_out:
             self._emit(RunControlTransitionKind.RESUMED)
         self.raise_if_stopped()
@@ -399,6 +425,7 @@ class RuntimeRunControlChannel:
             end = self._capacity_end(request)
             if end.wake is CapacityWake.ELAPSED:
                 self._paused = False
+                self._requested_by["pause"] = None
                 self._capacity_request = None
         if end.wake is CapacityWake.ELAPSED:
             self._emit(RunControlTransitionKind.RESUMED)
@@ -443,6 +470,7 @@ class RuntimeRunControlChannel:
 __all__ = [
     "CapacityWaitEnd",
     "CapacityWake",
+    "QueuedSteer",
     "RunControlChannel",
     "RunControlEventSink",
     "RunControlTransition",

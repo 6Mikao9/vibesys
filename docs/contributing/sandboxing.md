@@ -168,7 +168,8 @@ macOS when full read confinement matters.
   trusted baseline and fails the round. Credentials in the project directory
   (`agent.toml`, `.env*`, `.vibesys/state/local`) and the run's record
   (`.vibesys/state/runs`) stay readable and writable: the unenforced hidden tier lists
-  both at startup. A project under
+  both at startup. The operator's control inbox (`vibesys control`) is machine-local
+  state outside the project, so the project's write grant does not reach it. A project under
   a tree Landlock must grant, such as `/tmp`, is refused.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,

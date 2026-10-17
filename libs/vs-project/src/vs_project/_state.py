@@ -36,6 +36,7 @@ from pydantic import (
 
 import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
+from vs_project._control_inbox import FileControlInbox
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
@@ -55,6 +56,7 @@ from vs_project._state_io import (
     _read_json_object,
     _serialize_json_object,
     _serialize_state_model,
+    exclusive_write_bytes,
     sync_directory_chain,
 )
 from vs_project._state_io import (
@@ -481,8 +483,14 @@ class StateNamespace:
         except OSError as exc:
             raise ProjectStateError.state_file_read_failed(path, exc) from exc
 
-    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
-        """List direct state-directory entry names without following symlinks."""
+    def entries(
+        self, relative_directory: str | PurePosixPath, *, list_symlinks: bool = False
+    ) -> tuple[str, ...]:
+        """List direct state-directory entry names without following symlinks.
+
+        A symlink among them raises, unless ``list_symlinks``: then it is listed by name like
+        any entry, for a caller that reads each entry on its own and refuses the bad ones.
+        """
         directory = self._resolve_file(relative_directory)
         if not directory.exists():
             return ()
@@ -493,7 +501,7 @@ class StateNamespace:
         except OSError as exc:
             raise ProjectStateError.state_directory_list_failed(directory, exc) from exc
         for entry in entries:
-            if entry.is_symlink():
+            if entry.is_symlink() and not list_symlinks:
                 raise ProjectStateError.state_entry_symlink(entry)
         return tuple(entry.name for entry in entries)
 
@@ -515,6 +523,21 @@ class StateNamespace:
             )
         except OSError as exc:
             raise ProjectStateError.state_file_write_failed(path, exc) from exc
+
+    def create_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> bool:
+        """Durably create one safe state file, unless an entry already holds its name.
+
+        Returns whether this call created it. Of two callers racing for one name, in any
+        processes, exactly one creates it; a reader sees the complete bytes or no file.
+        """
+        path = self._resolve_file(relative_path)
+        try:
+            created = exclusive_write_bytes(path, contents)
+            if created:
+                sync_directory_chain(path.parent, self._containment_root)
+        except OSError as exc:
+            raise ProjectStateError.state_file_write_failed(path, exc) from exc
+        return created
 
     def snapshot_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> StateSnapshot:
         """Prepare an exact portable snapshot of one subsystem-owned file."""
@@ -1403,6 +1426,31 @@ class ProjectState:
         self.portable_namespace(run_id, _CONTROL_NAMESPACE).write_bytes(
             _STOP_REQUEST_FILE, b"stop\n"
         )
+
+    def control_inbox(self, run_id: str) -> FileControlInbox:
+        """Open the run's inbox of operator control requests (``vibesys control``).
+
+        The inbox is machine-local state, outside git: another process (the operator's
+        ``vibesys control``) writes it, so in the project's checkout it would read as a write
+        by the run's agents.
+        """
+        return FileControlInbox(self.local_namespace(run_id, _CONTROL_NAMESPACE))
+
+    def require_local_run(self, run_id: str) -> None:
+        """Raise ``ProjectStateError`` unless this state home holds ``run_id``'s local state.
+
+        Every run that started creates its machine-local state. A process writing a run's
+        machine-local state from outside it (``vibesys control``) checks first, so a write
+        under another state home (another user, a shell without ``VIBESYS_STATE_HOME``,
+        another host) fails instead of being lost.
+        """
+        if not self._contained_local_run_dir(run_id).is_dir():
+            message = (
+                f"run {run_id!r} has no machine-local state under the VibeSys state home "
+                f"{self._state_home} on this machine; run this where the run runs, with the "
+                f"same {_STATE_HOME_ENV} as the run"
+            )
+            raise ProjectStateError(message)
 
     def stop_requested(self, run_id: str) -> bool:
         """Whether the operator's stop of ``run_id`` was recorded (``record_stop_request``)."""

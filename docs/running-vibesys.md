@@ -411,6 +411,35 @@ host. Nonterminal evaluator identity and replayable results live in the run's
 machine-local `skypilot` state namespace. See
 [Remote Slurm execution](remote-slurm-execution.md).
 
+## Control a Running Run
+
+A run started without the TUI or the web app has no client to steer it from. `vibesys control`
+sends it a control through its control inbox, a directory in the run's machine-local state
+(under the VibeSys state home, `~/.vibesys` by default, outside the project), from the project
+directory (or `--project PATH`):
+
+```bash
+vibesys control <run-id> steer "prefer latency over throughput"
+vibesys control <run-id> pause
+vibesys control <run-id> resume
+vibesys control <run-id> resume --fallback
+vibesys control <run-id> resume --when capacity_returns
+vibesys control <run-id> stop --mode cancel
+```
+
+The command validates the control, writes it, and prints its id. The run applies it at its next
+control poll, about once a second, or when it resumes if it is not running. A control the run
+cannot apply, such as a pause after a stop, is marked rejected: its reason is written to the
+inbox's `rejected/` directory. Each control is applied once, even across a crash or when the
+same control also arrives over a client's socket: pass `--control-id ID` to resend the same
+control safely. An id, once used, keeps its control: sending a different control under it is
+refused.
+
+`vibesys control` must run on the machine that holds the run's state home, and refuses a run
+whose machine-local state it cannot find there, naming the state home it looked in (set
+`VIBESYS_STATE_HOME` to point elsewhere). Controls still pending stay on that machine: if you
+resume the run on another host, send them again there; resending under the same id is safe.
+
 ## Supply an Input with CLI Flags
 
 Automation can supply the task contract without first writing a project.

@@ -24,6 +24,7 @@ from vs_runtime._agent_evaluation import (
     SnapshotWorkspace,
 )
 from vs_runtime._capture_command_operation import CaptureCommandOwner
+from vs_runtime._control_bridge import OperatorInbox, RunControlBridge, SteerArtifacts
 from vs_runtime._core_loop import (
     AdmissionBusyError,
     CommitObserver,
@@ -90,13 +91,11 @@ from vs_runtime._core_run import (
     CoreHeldWorkspaces,
     CoreRunHost,
     NextWake,
-    RunControlBridge,
     RunLoopConfig,
     RunOutcome,
     RunStalledError,
     RunTiming,
     StallNotes,
-    SteerArtifacts,
     core_next_wake,
     drive_core,
     start_core,
@@ -351,6 +350,7 @@ __all__ = [
     "OperationPorts",
     "OperationReceipts",
     "OperationRole",
+    "OperatorInbox",
     "OrphanWaitError",
     "OwedKey",
     "OwedSubmission",
