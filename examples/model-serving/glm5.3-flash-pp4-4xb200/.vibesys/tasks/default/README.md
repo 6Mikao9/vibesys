@@ -15,7 +15,7 @@ same as the vLLM variant of this task (the vLLM repository's task
 | `/vibesys_serve.sh` (repository root) | candidate (agent-written) | the server launch; absent at the start |
 | `vibesys.input.toml`, `objectives.toml` | task | commands, timeouts, objectives |
 | `benchmark/` | task | `session_replay.py`, the handoff's `metrics.py`, the trace manifest pin, CPU smoke test |
-| `accuracy_checker/` | task | `checker.py`, `engine_scan.py` (+ its unit test), `make_reference.py` (`reference.json` is generated once on GPUs and kept at an operator path) |
+| `accuracy_checker/` | task | `checker.py`, `engine_scan.py` (+ its unit test), `make_reference.py`, `test_trusted_builds.py` (`reference.json` is generated once on GPUs and kept at an operator path) |
 | `reference/` | task | the handoff's README, contract and pass-rule docs (4-7), small target files under `data/` |
 
 ## Interface
@@ -129,4 +129,5 @@ for the exact replay.
 python benchmark/smoke/smoke_test.py --engine <session_runner> --tokenizer <tokenizer.json> --text-file <text>
 python accuracy_checker/smoke_test.py --text-file <enwik9>
 uv run pytest accuracy_checker/test_engine_scan.py -q --no-cov -p no:tach   # from the VibeSys repo root, full path
+python accuracy_checker/test_trusted_builds.py
 ```

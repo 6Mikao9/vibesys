@@ -17,13 +17,17 @@ cached tokens the way vLLM does.
 Fault flags make the failure paths testable: --slow-every/--slow-ms (TTFT
 outliers), --fail-after (HTTP 500), --drop-token-ids-after (no generated ids:
 the client's next prompt comes up short), --canned (one fixed token for every
-prompt), --noise (perturbed logits), --no-cache-report, --fake-replay (streamed
+prompt), --noise (perturbed logits), --logprob-scale F (every logprob sharpened or flattened by
+F: the greedy token is unchanged, its logprob is not), --no-cache-report, --fake-replay (streamed
 requests, the replay's shape, get a wrong token; non-streamed ones the right one),
 --truncate-over N (keep only the first N prompt tokens and count those),
 --text-only-after N (stream text but no token ids), --hang-at N,M,... (those
 requests never answer), --reset-at N,M,... (those requests get a TCP reset before
 any response byte), --cached-path-shift (a prompt that resumes a cached prefix
-gets a different answer than the same prompt computed cold, as on the GPU builds).
+gets a different answer than the same prompt computed cold, as on the GPU builds),
+--alt-numerics N (another honest parallel layout: on one prompt in N the top token
+is a confident other candidate, deterministic per prompt, as PP4 vs TP4+EP on the
+GPUs), --shuffled (every answer is the one for another prompt: plausible, wrong).
 """
 
 from __future__ import annotations
@@ -84,12 +88,19 @@ class Model:
     def logits(self, prompt: list[int], cached: int = 0) -> dict[int, float]:
         if self.args.canned:
             return {4242: 0.0, 4243: -3.0}
-        seed = int.from_bytes(hashlib.sha256(json.dumps(prompt).encode()).digest()[:8], "big")
+        key = json.dumps(prompt) + ("shuffled" if self.args.shuffled else "")
+        seed = int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], "big")
         if self.args.cached_path_shift and cached > 0:
             seed ^= 1
         rng = random.Random(seed)
         tokens = [rng.randrange(1_000, 150_000) for _ in range(CANDIDATES)]
         scores = [rng.gauss(0.0, 2.0) for _ in range(CANDIDATES)]
+        if self.args.alt_numerics and seed % self.args.alt_numerics == 0:
+            # Promote the second-ranked candidate 2 nats above the first: a confident, systematic flip.
+            order = sorted(range(CANDIDATES), key=lambda i: -scores[i])
+            scores[order[1]] = scores[order[0]] + 2.0
+        if self.args.logprob_scale != 1.0:
+            scores = [s * self.args.logprob_scale for s in scores]
         if self.args.noise:
             noise = random.Random(seed ^ 0x5EED)
             scores = [s + noise.gauss(0.0, self.args.noise) for s in scores]
@@ -238,9 +249,12 @@ def main() -> None:
     parser.add_argument("--drop-token-ids-after", type=int, default=None)
     parser.add_argument("--canned", action="store_true")
     parser.add_argument("--noise", type=float, default=0.0)
+    parser.add_argument("--logprob-scale", type=float, default=1.0)
     parser.add_argument("--no-cache-report", action="store_true")
     parser.add_argument("--fake-replay", action="store_true")
     parser.add_argument("--cached-path-shift", action="store_true")
+    parser.add_argument("--alt-numerics", type=int, default=0)
+    parser.add_argument("--shuffled", action="store_true")
     parser.add_argument("--truncate-over", type=int, default=None)
     parser.add_argument("--text-only-after", type=int, default=None)
     parser.add_argument("--reset-at", type=lambda v: {int(x) for x in v.split(",")}, default=set())
