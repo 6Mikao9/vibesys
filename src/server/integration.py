@@ -103,6 +103,7 @@ _CONTROL_EVENT_TYPES = frozenset(
         CoreEventType.RESUMED,
         CoreEventType.STOP_REQUESTED,
         CoreEventType.STEER_CONSUMED,
+        CoreEventType.STEER_DROPPED,
         CoreEventType.PAUSED,
         CoreEventType.STOPPED,
     }
@@ -440,6 +441,8 @@ class RunIntegrationAdapter:
                 round_label=event.round_label,
                 execution_id=event.execution_id,
             )
+        elif event.type is CoreEventType.STEER_DROPPED:
+            self.controller.record_steer_dropped(event.text)
         elif event.type is CoreEventType.PAUSED:
             self.controller.land_pause_at_boundary()
         elif event.type is CoreEventType.STOPPED:

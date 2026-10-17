@@ -6929,7 +6929,7 @@
     },
     "SteerRequest": {
       "additionalProperties": false,
-      "description": "Free-text guidance for the run's next agent turn.",
+      "description": "Free-text guidance for the next agent turn of its target, the whole run by default.\n\nThe message reaches exactly one turn of the target, once. A target the run cannot resolve\n(a role the search does not declare, an attempt or item it does not hold, or an attempt\nthat has ended) is refused, and the message reaches no one.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
@@ -6946,6 +6946,13 @@
           "minLength": 1,
           "title": "Text",
           "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/SteerTarget",
+          "default": {
+            "kind": "run",
+            "id": null
+          }
         }
       },
       "required": [
@@ -6955,6 +6962,43 @@
       ],
       "title": "SteerRequest",
       "type": "object"
+    },
+    "SteerTarget": {
+      "additionalProperties": false,
+      "description": "Whom a steer is for: the whole run, or one role, attempt or item, by id.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SteerTargetKind",
+          "default": "run"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "title": "SteerTarget",
+      "type": "object"
+    },
+    "SteerTargetKind": {
+      "description": "What a steer is addressed to.",
+      "enum": [
+        "run",
+        "role",
+        "attempt",
+        "item"
+      ],
+      "title": "SteerTargetKind",
+      "type": "string"
     },
     "StopCommand": {
       "additionalProperties": false,
