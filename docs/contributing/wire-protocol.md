@@ -35,7 +35,7 @@ The authoritative message taxonomy is three unions in `src/server/api/protocol.p
 
 | Direction | Union | Members |
 | --- | --- | --- |
-| client to server | `ProtocolRequest` | `command.*`, `query.*`, `subscribe` (17 types) |
+| client to server | `ProtocolRequest` | `command.*`, `query.*`, `subscribe` (18 types) |
 | server to client, control | `Response` | one per request, correlated by `request_id` |
 | server to client, stream | `ServerMessage` | `subscribed`, `event`, `event_batch`, `active_executions_chunk`, `protocol_error` |
 
@@ -182,6 +182,27 @@ A run paused on a provider capacity limit (`quota_paused`) resumes when the oper
 The wait is held by the live run server: if the server ends, the run ends like any other. `when`
 is a new request field, so a client discovers support for it by `WP-CAPABILITY-PROBE`: an older
 server rejects it as an unknown field.
+
+## Operator controls
+
+`command.control` carries one `control`, a `ControlRequest` (`vibesys.api`): the schema every
+control ingress accepts, so a client and a headless run's inbox say the same things. Its
+`action` is `steer` (`text`), `pause`, `resume` (`fallback`, `when`, as `command.resume`) or
+`stop` (`mode`: `drain`, the default, or `cancel`, which also cancels the work in flight). Like
+every protocol model it forbids unknown keys, and it has no field that reaches evaluation,
+checkers, trust rules or resource partitions: `vs_runtime`'s `control_schema_fields` holds every
+field to a reviewed allow-list of names and JSON types.
+
+Every control carries a `control_id` the client chooses (1 to 128 letters, digits, `.`, `_` or
+`-`). The same control sent again under its id returns the first ack and changes nothing; a
+different control under a used id answers the protocol error `control_id_conflict`. The server
+keeps answered ids for the life of the run session only, so the TypeScript transport does not
+resend `command.control` after a dropped connection. The server turns `command.pause`,
+`command.resume`, `command.steer` and `command.stop` into the same request, named by their
+envelope's `request_id`, and applies all five through one `RunControl.submit`, so they ack
+alike. A single-action command that reuses a `request_id` with a different command is therefore
+a different control under a used id, and also answers `control_id_conflict`. A refusal carries a typed reason that the server answers with its own protocol error. It
+is a new request type, so a client discovers it by `WP-CAPABILITY-PROBE`.
 
 ## Framing and connection decisions
 

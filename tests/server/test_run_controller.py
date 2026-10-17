@@ -3,6 +3,8 @@
 from pathlib import Path
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.server.support import (
     DEADLOCK_GUARD_S,
@@ -12,8 +14,22 @@ from tests.server.support import (
     run_at_paused_boundary,
 )
 
-from server.api.protocol import PauseCommand, ResumeCommand, SteerCommand, StopCommand
-from server.api.service import CapacityWaitUnavailableError
+from server.api.protocol import (
+    ControlCommand,
+    PauseCommand,
+    Response,
+    ResumeCommand,
+    SteerCommand,
+    StopCommand,
+    decode_request,
+)
+from server.api.service import (
+    CapacityWaitUnavailableError,
+    ControlIdConflictError,
+    ControlProtocolCommand,
+    RunControlSlot,
+    control_request,
+)
 from server.events import (
     EventStatus,
     EventType,
@@ -21,10 +37,24 @@ from server.events import (
     RunStatusChangedData,
 )
 from server.run_lifecycle import RunStatus
-from vibesys.api import RunStopped
+from vibesys.api import (
+    ControlAck,
+    ControlRequest,
+    ControlStatus,
+    PauseRequest,
+    RefusalReason,
+    RunStopped,
+    SteerRequest,
+)
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
 from vs_core.api import StopMode
+from vs_runtime.api.infrastructure import (
+    ChannelRunControl,
+    RunControlTransition,
+    create_run_control_channel,
+)
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 def _status_changes(parts: ServerParts) -> list[tuple[RunStatus, RunStatus]]:
@@ -421,3 +451,106 @@ def test_finish_does_not_interrupt_presentation_only_chat(tmp_path: Path) -> Non
     ]
     assert len(finished) == 1
     assert finished[0].status is EventStatus.COMPLETED
+
+
+_SINGLE_ACTION_COMMANDS = st.one_of(
+    st.builds(PauseCommand, timestamp=st.just(REQUEST_TIME)),
+    st.builds(ResumeCommand, timestamp=st.just(REQUEST_TIME), fallback=st.booleans()),
+    st.builds(
+        SteerCommand,
+        timestamp=st.just(REQUEST_TIME),
+        text=st.text(min_size=1, max_size=20).filter(str.strip),
+    ),
+    st.builds(StopCommand, timestamp=st.just(REQUEST_TIME)),
+)
+
+
+def _channel_state(parts: ServerParts) -> tuple[object, ...]:
+    return (
+        parts.control.take_pending_steer(),
+        parts.control.pause_requested(),
+        parts.control.stop_mode(),
+        parts.control.consume_fallback_request(),
+    )
+
+
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(commands=st.lists(_SINGLE_ACTION_COMMANDS, max_size=6))
+def test_a_control_command_does_what_the_single_action_command_it_carries_does(
+    tmp_path_factory: pytest.TempPathFactory, commands: list[ControlProtocolCommand]
+) -> None:
+    """``command.control`` and the single-action commands reach the run through one entry point."""
+    single = build_server_parts(tmp_path_factory.mktemp("single"))
+    carried = build_server_parts(tmp_path_factory.mktemp("carried"))
+    for command in commands:
+        wrapped = ControlCommand(timestamp=REQUEST_TIME, control=control_request(command))
+        assert single.api.execute(command).ack == carried.api.execute(wrapped).ack
+    assert _channel_state(single) == _channel_state(carried)
+
+
+def test_a_control_command_with_a_key_its_action_does_not_declare_is_refused_naming_it() -> None:
+    frame = (
+        '{"type": "command.control", "timestamp": "2026-01-01T00:00:00Z",'
+        ' "control": {"control_id": "c1", "action": "steer", "text": "go",'
+        ' "checker": "always-pass"}}'
+    )
+
+    response = decode_request(frame, clock=ManualClock())
+
+    assert isinstance(response, Response)
+    assert not response.ok
+    assert response.diagnostic is not None
+    assert response.diagnostic.validation_paths is not None
+    assert any("checker" in path for path in response.diagnostic.validation_paths)
+
+
+def test_a_resent_control_is_one_control_and_a_reused_id_is_a_conflict(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    steer = ControlCommand(
+        timestamp=REQUEST_TIME, control=SteerRequest(control_id="c1", text="prefer latency")
+    )
+
+    first = parts.api.execute(steer).ack
+    again = parts.api.execute(steer).ack
+    with pytest.raises(ControlIdConflictError) as conflict:
+        parts.api.execute(
+            ControlCommand(timestamp=REQUEST_TIME, control=PauseRequest(control_id="c1"))
+        )
+
+    assert first == again
+    assert conflict.value.diagnostic_code == "control_id_conflict"
+    assert parts.control.take_pending_steer() == ["prefer latency"]
+    assert not parts.control.pause_requested()
+
+
+def _ignore(transition: RunControlTransition) -> None:
+    del transition
+
+
+class _RefusingControl(ChannelRunControl):
+    """The run's control, refusing every request for one reason."""
+
+    def __init__(self, reason: RefusalReason, threads: SimThreads) -> None:
+        super().__init__(create_run_control_channel(_ignore, threads=threads), threads)
+        self.reason = reason
+
+    def submit(self, request: ControlRequest) -> ControlAck:
+        return ControlAck(
+            control_id=request.control_id,
+            action=request.action,
+            status=ControlStatus.REFUSED,
+            reason=self.reason,
+        )
+
+
+@pytest.mark.parametrize("reason", list(RefusalReason))
+def test_every_refusal_reason_answers_with_a_protocol_error(reason: RefusalReason) -> None:
+    """A new refusal reason without its protocol error fails here, not as a server crash."""
+    threads = SimThreads()
+    slot = RunControlSlot(threads.condition(threads.rlock()))
+    slot.install(_RefusingControl(reason, threads))
+
+    with pytest.raises(RuntimeError) as refused:
+        slot.execute(PauseCommand(timestamp=REQUEST_TIME))
+
+    assert isinstance(getattr(refused.value, "diagnostic_code", None), str)

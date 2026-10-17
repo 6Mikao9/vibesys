@@ -17,7 +17,8 @@ export type Request =
   | DesignQuery
   | DesignPatchQuery
   | EventsQuery
-  | SubscribeRequest;
+  | SubscribeRequest
+  | ControlCommand;
 export type ProtocolVersion = 1;
 export type RequestId = string;
 export type ClientId = string;
@@ -135,6 +136,27 @@ export type ProtocolVersion17 = 1;
 export type RequestId17 = string;
 export type ClientId17 = string;
 export type Timestamp17 = string;
+export type Type17 = "command.control";
+export type ControlRequest = SteerRequest | PauseRequest | ResumeRequest | StopRequest;
+export type ControlId = string;
+export type Action = "steer";
+export type Text2 = string;
+export type ControlId1 = string;
+export type Action1 = "pause";
+export type ControlId2 = string;
+export type Action2 = "resume";
+export type Fallback1 = boolean;
+export type When1 = "now" | "capacity_returns";
+export type ControlId3 = string;
+export type Action3 = "stop";
+/**
+ * How a stop treats work in flight: let it finish, or cancel it.
+ */
+export type StopMode = "drain" | "cancel";
+export type ProtocolVersion18 = 1;
+export type RequestId18 = string;
+export type ClientId18 = string;
+export type Timestamp18 = string;
 export type Ok = boolean;
 export type Error = string | null;
 export type Id = string;
@@ -158,7 +180,10 @@ export type CauseId = string | null;
 export type DebugRef = string | null;
 export type Source = string | null;
 export type ValidationPaths = (string | number)[][] | null;
-export type Action = "pause" | "resume" | "steer" | "stop";
+/**
+ * What a control request asks for; the tag of the ``ControlRequest`` union.
+ */
+export type ControlAction = "steer" | "pause" | "resume" | "stop";
 export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
@@ -193,7 +218,7 @@ export type TuiTheme =
   | "catppuccin-latte"
   | "high-contrast-dark"
   | "high-contrast-light";
-export type ProtocolVersion18 = 1;
+export type ProtocolVersion19 = 1;
 export type RunId1 = string;
 export type ProjectScope = string | null;
 export type Sequence = number;
@@ -271,17 +296,17 @@ export type Verdict = string | null;
 export type Reason1 = string | null;
 export type Spans = Span[];
 export type OverviewVersion = 1;
-export type Text2 = string;
+export type Text3 = string;
 export type Metric = string | null;
 export type Unit = string | null;
 export type Direction = ("max" | "min") | null;
 export type CorrectnessCheck = string[];
 export type Name1 = string;
 export type Version = string;
-export type ProtocolVersion19 = 1;
+export type ProtocolVersion20 = 1;
 export type Sequence1 = number;
 export type RunId2 = string;
-export type Timestamp18 = string;
+export type Timestamp19 = string;
 /**
  * Wire event kinds persisted in the event log.
  */
@@ -337,7 +362,7 @@ export type EventType =
   | "span_started"
   | "span_updated"
   | "span_ended";
-export type Text3 = string;
+export type Text4 = string;
 /**
  * Lifecycle and command states reported in events.
  */
@@ -668,7 +693,7 @@ export type WorkstreamFailureKind =
 export type Role = string | null;
 export type Turns = number | null;
 export type Limit2 = number | null;
-export type Text4 = string;
+export type Text5 = string;
 export type Kind46 = "turn_usage_recorded";
 export type InputTokens2 = number | null;
 export type CacheCreationInputTokens = number | null;
@@ -702,7 +727,7 @@ export type HypothesisId = string;
 export type Identified = boolean;
 export type Title4 = string | null;
 export type Claim = string | null;
-export type Action1 = string | null;
+export type Action4 = string | null;
 export type FirstRound = number;
 export type LastRound = number;
 export type Round1 = number;
@@ -827,30 +852,30 @@ export type Patch = string | null;
 export type Truncated1 = boolean;
 export type ServerMessage =
   SubscribedMessage | EventMessage | EventBatchMessage | ActiveExecutionsChunkMessage | ProtocolErrorMessage;
-export type Type17 = "subscribed";
-export type RequestId18 = string;
-export type ClientId18 = string;
+export type Type18 = "subscribed";
+export type RequestId19 = string;
+export type ClientId19 = string;
 export type RunId5 = string;
 export type LatestSequence = number;
-export type Type18 = "event";
+export type Type19 = "event";
 /**
  * Event batch and cursor metadata sent to subscribers.
  */
 export type EventBatchMessage = EventBatchMessage1 | EventBatchMessage2;
-export type Type19 = "event_batch";
+export type Type20 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
 export type ActiveExecutionsCheckpointId = null;
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
 export type Rebootstrap = boolean;
-export type Type20 = "event_batch";
+export type Type21 = "event_batch";
 export type Events2 = RunEvent[];
 export type ThroughSequence1 = number;
 export type StoreId2 = string;
 export type HistoryAfterSequence1 = number;
 export type Rebootstrap1 = boolean;
-export type Type21 = "active_executions_chunk";
+export type Type22 = "active_executions_chunk";
 export type CheckpointId = string;
 export type ChunkIndex = number;
 export type ChunkCount = number;
@@ -858,9 +883,9 @@ export type Payload1 = string;
 export type ThroughSequence2 = number;
 export type StoreId3 = string;
 export type HistoryAfterSequence2 = number;
-export type Type22 = "protocol_error";
-export type RequestId19 = string | null;
-export type ClientId19 = string;
+export type Type23 = "protocol_error";
+export type RequestId20 = string | null;
+export type ClientId20 = string;
 export type Code2 = string;
 export type Message2 = string;
 export type LogOwner = StartupStep | GateStage | ToolBuild | RunNarration;
@@ -1159,13 +1184,66 @@ export interface SubscribeRequest {
   store_id?: StoreId;
 }
 /**
+ * Send one operator control in the schema every control ingress shares.
+ *
+ * ``control`` is a ``vibesys.api.ControlRequest``, the request the headless inbox carries
+ * too, so a client and ``vibesys control`` say the same things. The single-action commands
+ * above remain; the server turns each into the same request. A server that predates this
+ * command rejects it (``WP-CAPABILITY-PROBE``).
+ */
+export interface ControlCommand {
+  protocol_version?: ProtocolVersion17;
+  request_id?: RequestId17;
+  client_id?: ClientId17;
+  timestamp: Timestamp17;
+  type: Type17;
+  control: ControlRequest;
+}
+/**
+ * Free-text guidance for the run's next agent turn.
+ */
+export interface SteerRequest {
+  control_id: ControlId;
+  action: Action;
+  text: Text2;
+}
+/**
+ * Reach the next safe boundary and hold the run there.
+ */
+export interface PauseRequest {
+  control_id: ControlId1;
+  action: Action1;
+}
+/**
+ * Continue a paused run.
+ *
+ * ``fallback`` switches a run paused on a provider capacity limit to its configured fallback
+ * provider as it resumes. ``when="capacity_returns"`` keeps such a run paused until capacity
+ * should be back, then resumes it; it is refused when the run is not paused on a capacity
+ * limit, and cannot be combined with ``fallback``, which resumes now.
+ */
+export interface ResumeRequest {
+  control_id: ControlId2;
+  action: Action2;
+  fallback?: Fallback1;
+  when?: When1;
+}
+/**
+ * End the run, draining or cancelling the work in flight.
+ */
+export interface StopRequest {
+  control_id: ControlId3;
+  action: Action3;
+  mode?: StopMode;
+}
+/**
  * Response envelope for all protocol requests.
  */
 export interface Response {
-  protocol_version?: ProtocolVersion17;
-  request_id: RequestId17;
-  client_id?: ClientId17;
-  timestamp: Timestamp17;
+  protocol_version?: ProtocolVersion18;
+  request_id: RequestId18;
+  client_id?: ClientId18;
+  timestamp: Timestamp18;
   ok?: Ok;
   error?: Error;
   diagnostic?: Diagnostic | null;
@@ -1208,10 +1286,10 @@ export interface Diagnostic {
   validation_paths?: ValidationPaths;
 }
 /**
- * Acknowledgment of a requested run command.
+ * Acknowledgment of a requested run command; ``action`` is the control's tag.
  */
 export interface CommandAck {
-  action: Action;
+  action: ControlAction;
   status: Status;
 }
 /**
@@ -1269,7 +1347,7 @@ export interface InteractiveSetupDefaults {
  * Current server projection of a run's public state.
  */
 export interface RunSnapshot {
-  protocol_version?: ProtocolVersion18;
+  protocol_version?: ProtocolVersion19;
   run_id: RunId1;
   project_scope?: ProjectScope;
   sequence: Sequence;
@@ -1398,7 +1476,7 @@ export interface RunOverview {
  * task gates on none).
  */
 export interface ObjectiveOverview {
-  text: Text2;
+  text: Text3;
   metric?: Metric;
   unit?: Unit;
   direction?: Direction;
@@ -1428,12 +1506,12 @@ export interface EvaluatorIdentity {
  * object, which lets ``EventStore`` replay history without copying it.
  */
 export interface RunEvent {
-  protocol_version?: ProtocolVersion19;
+  protocol_version?: ProtocolVersion20;
   sequence?: Sequence1;
   run_id?: RunId2;
-  timestamp: Timestamp18;
+  timestamp: Timestamp19;
   type: EventType;
-  text?: Text3;
+  text?: Text4;
   diagnostic?: Diagnostic | null;
   status?: EventStatus | null;
   round_label?: RoundLabel2;
@@ -2023,7 +2101,7 @@ export interface WorkstreamFailureData {
   role?: Role;
   turns?: Turns;
   limit?: Limit2;
-  text?: Text4;
+  text?: Text5;
 }
 /**
  * Settled token and cost accounting for one finished agent turn.
@@ -2100,7 +2178,7 @@ export interface HypothesisEntry {
   identified?: Identified;
   title?: Title4;
   claim?: Claim;
-  action?: Action1;
+  action?: Action4;
   first_round: FirstRound;
   last_round: LastRound;
   rounds?: Rounds;
@@ -2258,9 +2336,9 @@ export interface DesignPatch {
  * Initial acknowledgment for an event subscription.
  */
 export interface SubscribedMessage {
-  type: Type17;
-  request_id: RequestId18;
-  client_id?: ClientId18;
+  type: Type18;
+  request_id: RequestId19;
+  client_id?: ClientId19;
   run_id: RunId5;
   latest_sequence: LatestSequence;
 }
@@ -2268,14 +2346,14 @@ export interface SubscribedMessage {
  * Single-event message for the legacy streaming protocol.
  */
 export interface EventMessage {
-  type: Type18;
+  type: Type19;
   event: RunEvent;
 }
 /**
  * Event batch and cursor metadata sent to subscribers.
  */
 export interface EventBatchMessage1 {
-  type: Type19;
+  type: Type20;
   events: Events1;
   through_sequence?: ThroughSequence;
   active_executions?: ActiveExecutions;
@@ -2288,7 +2366,7 @@ export interface EventBatchMessage1 {
  * Event batch and cursor metadata sent to subscribers.
  */
 export interface EventBatchMessage2 {
-  type: Type20;
+  type: Type21;
   events: Events2;
   through_sequence?: ThroughSequence1;
   active_executions: null;
@@ -2307,7 +2385,7 @@ export interface EventBatchMessage2 {
  * sequence space even when the batch itself was split into event frames.
  */
 export interface ActiveExecutionsChunkMessage {
-  type: Type21;
+  type: Type22;
   checkpoint_id: CheckpointId;
   chunk_index: ChunkIndex;
   chunk_count: ChunkCount;
@@ -2320,9 +2398,9 @@ export interface ActiveExecutionsChunkMessage {
  * Structured error envelope for protocol failures.
  */
 export interface ProtocolErrorMessage {
-  type: Type22;
-  request_id?: RequestId19;
-  client_id?: ClientId19;
+  type: Type23;
+  request_id?: RequestId20;
+  client_id?: ClientId20;
   code: Code2;
   message: Message2;
   diagnostic?: Diagnostic | null;

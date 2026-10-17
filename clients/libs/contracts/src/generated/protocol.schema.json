@@ -986,17 +986,10 @@
     },
     "CommandAck": {
       "additionalProperties": false,
-      "description": "Acknowledgment of a requested run command.",
+      "description": "Acknowledgment of a requested run command; ``action`` is the control's tag.",
       "properties": {
         "action": {
-          "enum": [
-            "pause",
-            "resume",
-            "steer",
-            "stop"
-          ],
-          "title": "Action",
-          "type": "string"
+          "$ref": "#/$defs/ControlAction"
         },
         "status": {
           "enum": [
@@ -1113,6 +1106,84 @@
       ],
       "title": "ConfigurationFailedData",
       "type": "object"
+    },
+    "ControlAction": {
+      "description": "What a control request asks for; the tag of the ``ControlRequest`` union.",
+      "enum": [
+        "steer",
+        "pause",
+        "resume",
+        "stop"
+      ],
+      "title": "ControlAction",
+      "type": "string"
+    },
+    "ControlCommand": {
+      "additionalProperties": false,
+      "description": "Send one operator control in the schema every control ingress shares.\n\n``control`` is a ``vibesys.api.ControlRequest``, the request the headless inbox carries\ntoo, so a client and ``vibesys control`` say the same things. The single-action commands\nabove remain; the server turns each into the same request. A server that predates this\ncommand rejects it (``WP-CAPABILITY-PROBE``).",
+      "properties": {
+        "protocol_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "client_id": {
+          "default": "",
+          "title": "Client Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "command.control",
+          "default": "command.control",
+          "title": "Type",
+          "type": "string"
+        },
+        "control": {
+          "$ref": "#/$defs/ControlRequest"
+        }
+      },
+      "required": [
+        "timestamp",
+        "type",
+        "control"
+      ],
+      "title": "ControlCommand",
+      "type": "object"
+    },
+    "ControlRequest": {
+      "discriminator": {
+        "mapping": {
+          "pause": "#/$defs/PauseRequest",
+          "resume": "#/$defs/ResumeRequest",
+          "steer": "#/$defs/SteerRequest",
+          "stop": "#/$defs/StopRequest"
+        },
+        "propertyName": "action"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SteerRequest"
+        },
+        {
+          "$ref": "#/$defs/PauseRequest"
+        },
+        {
+          "$ref": "#/$defs/ResumeRequest"
+        },
+        {
+          "$ref": "#/$defs/StopRequest"
+        }
+      ]
     },
     "DesignFileChange": {
       "additionalProperties": false,
@@ -3932,6 +4003,29 @@
       "title": "PauseCommand",
       "type": "object"
     },
+    "PauseRequest": {
+      "additionalProperties": false,
+      "description": "Reach the next safe boundary and hold the run there.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "pause",
+          "default": "pause",
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "control_id",
+        "action"
+      ],
+      "title": "PauseRequest",
+      "type": "object"
+    },
     "PerfDeltaReason": {
       "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
       "enum": [
@@ -5071,6 +5165,43 @@
         "type"
       ],
       "title": "ResumeCommand",
+      "type": "object"
+    },
+    "ResumeRequest": {
+      "additionalProperties": false,
+      "description": "Continue a paused run.\n\n``fallback`` switches a run paused on a provider capacity limit to its configured fallback\nprovider as it resumes. ``when=\"capacity_returns\"`` keeps such a run paused until capacity\nshould be back, then resumes it; it is refused when the run is not paused on a capacity\nlimit, and cannot be combined with ``fallback``, which resumes now.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "resume",
+          "default": "resume",
+          "title": "Action",
+          "type": "string"
+        },
+        "fallback": {
+          "default": false,
+          "title": "Fallback",
+          "type": "boolean"
+        },
+        "when": {
+          "default": "now",
+          "enum": [
+            "now",
+            "capacity_returns"
+          ],
+          "title": "When",
+          "type": "string"
+        }
+      },
+      "required": [
+        "control_id",
+        "action"
+      ],
+      "title": "ResumeRequest",
       "type": "object"
     },
     "RoundFinishedData": {
@@ -6767,6 +6898,35 @@
       "title": "SteerCommand",
       "type": "object"
     },
+    "SteerRequest": {
+      "additionalProperties": false,
+      "description": "Free-text guidance for the run's next agent turn.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "steer",
+          "default": "steer",
+          "title": "Action",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "control_id",
+        "action",
+        "text"
+      ],
+      "title": "SteerRequest",
+      "type": "object"
+    },
     "StopCommand": {
       "additionalProperties": false,
       "description": "Request stopping after the active agent call.",
@@ -6809,6 +6969,42 @@
         "type"
       ],
       "title": "StopCommand",
+      "type": "object"
+    },
+    "StopMode": {
+      "description": "How a stop treats work in flight: let it finish, or cancel it.",
+      "enum": [
+        "drain",
+        "cancel"
+      ],
+      "title": "StopMode",
+      "type": "string"
+    },
+    "StopRequest": {
+      "additionalProperties": false,
+      "description": "End the run, draining or cancelling the work in flight.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "stop",
+          "default": "stop",
+          "title": "Action",
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/StopMode",
+          "default": "drain"
+        }
+      },
+      "required": [
+        "control_id",
+        "action"
+      ],
+      "title": "StopRequest",
       "type": "object"
     },
     "SubprocessOutputData": {
@@ -7726,6 +7922,7 @@
     "request": {
       "discriminator": {
         "mapping": {
+          "command.control": "#/$defs/ControlCommand",
           "command.pause": "#/$defs/PauseCommand",
           "command.resume": "#/$defs/ResumeCommand",
           "command.steer": "#/$defs/SteerCommand",
@@ -7797,6 +7994,9 @@
         },
         {
           "$ref": "#/$defs/SubscribeRequest"
+        },
+        {
+          "$ref": "#/$defs/ControlCommand"
         }
       ],
       "title": "Request"

@@ -132,6 +132,22 @@ from vs_runtime._model_artifacts import (
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._operator_control import (
+    CONTROL_ID_PATTERN,
+    CONTROL_REQUEST,
+    ChannelRunControl,
+    ControlAck,
+    ControlAction,
+    ControlRequest,
+    ControlStatus,
+    PauseRequest,
+    RefusalReason,
+    ResumeRequest,
+    ResumeWhen,
+    SteerRequest,
+    StopRequest,
+    check_one_way_to_resume,
+)
 from vs_runtime._project_materialization import (
     FreshProjectError,
     FreshProjectErrorKind,
@@ -468,6 +484,8 @@ def create_model_request_reconciler(
 
 
 __all__ = [
+    "CONTROL_ID_PATTERN",
+    "CONTROL_REQUEST",
     "DEFAULT_RETRY_SECONDS",
     "PACKAGE_ROOT_TOKEN",
     "PAUSE_FOR_OPERATOR",
@@ -497,8 +515,13 @@ __all__ = [
     "CapacityTimer",
     "CapacityWaitEnd",
     "CapacityWake",
+    "ChannelRunControl",
     "ClusterEvaluationFacts",
     "CommandExecutionResult",
+    "ControlAck",
+    "ControlAction",
+    "ControlRequest",
+    "ControlStatus",
     "DockerEnvironment",
     "DockerEnvironmentConfig",
     "DockerEnvironmentFacts",
@@ -557,6 +580,7 @@ __all__ = [
     "NativeCpuProfilerPreflight",
     "OwnedWorkspaces",
     "ParallelCandidateObstacle",
+    "PauseRequest",
     "PreparedModelArtifacts",
     "PreparedTrustedEvaluator",
     "ProjectMaterializationEffects",
@@ -577,7 +601,10 @@ __all__ = [
     "QuotaDecision",
     "QuotaPolicy",
     "RecordState",
+    "RefusalReason",
     "ResolvedEvaluatorPackage",
+    "ResumeRequest",
+    "ResumeWhen",
     "RootBaselineDrifted",
     "RunControlChannel",
     "RunControlEventSink",
@@ -615,7 +642,9 @@ __all__ = [
     "StartupOutputOpener",
     "StateBuildStore",
     "StateValidationPasses",
+    "SteerRequest",
     "StopGraceError",
+    "StopRequest",
     "StopTimer",
     "Switch",
     "TaskImageBuildStep",
@@ -654,6 +683,7 @@ __all__ = [
     "build_run_environment",
     "build_skill_catalog",
     "build_trusted_benchmark_command",
+    "check_one_way_to_resume",
     "classify",
     "collect_linux_profile",
     "collect_macos_profile",

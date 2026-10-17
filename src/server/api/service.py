@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -23,6 +24,8 @@ from server.api.protocol import (
     ChatResult,
     ChatThreadCreateQuery,
     ChatThreadInfo,
+    CommandAck,
+    ControlCommand,
     DesignPatch,
     DesignPatchQuery,
     DesignQuery,
@@ -48,9 +51,17 @@ from server.api.protocol import (
     failure_response,
 )
 from server.chat.options import ChatOptions, build_chat_options
-from server.control_envelope import CommandAck
 from server.events import EventType, RunEvent, RunOverview, RunStartedData
-from vibesys.api import IterationUnavailable, RunRecordReadError
+from vibesys.api import (
+    ControlStatus,
+    IterationUnavailable,
+    PauseRequest,
+    RefusalReason,
+    ResumeRequest,
+    RunRecordReadError,
+    SteerRequest,
+    StopRequest,
+)
 from vibesys.api.hypothesis import agent_projection
 from vs_sim.api import utc_datetime
 
@@ -64,7 +75,7 @@ if TYPE_CHECKING:
     from server.integration import RunIntegrationAdapter
     from server.journal import WireJournal
     from server.settings import InteractiveSetupDefaults
-    from vibesys.api import RunControl, RunRecord, RunView, WorkspaceChange
+    from vibesys.api import ControlRequest, RunControl, RunRecord, RunView, WorkspaceChange
     from vs_sim.api import Clock, Condition, Threads
 
 
@@ -153,6 +164,46 @@ class CapacityWaitUnavailableError(RuntimeError):
         super().__init__("The run is not paused on a provider capacity limit")
 
 
+class ControlIdConflictError(RuntimeError):
+    """A control whose ``control_id`` already named a different control."""
+
+    diagnostic_code = "control_id_conflict"
+
+    def __init__(self, control_id: str) -> None:
+        """Name the reused id."""
+        super().__init__(f"Control id {control_id!r} already named a different control")
+
+
+_REFUSALS: dict[RefusalReason, type[Exception]] = {
+    RefusalReason.NOT_PAUSED_ON_CAPACITY: CapacityWaitUnavailableError,
+}
+"""The protocol error each refusal answers with."""
+
+
+type ControlProtocolCommand = (
+    PauseCommand | ResumeCommand | SteerCommand | StopCommand | ControlCommand
+)
+"""Every protocol request that controls the run."""
+
+
+def control_request(command: ControlProtocolCommand) -> ControlRequest:
+    """The operator control a protocol command carries, in the schema every ingress shares.
+
+    A single-action command has no control id of its own; its envelope's ``request_id``
+    names it, so resending the same request is one control.
+    """
+    if isinstance(command, ControlCommand):
+        return command.control
+    control_id = f"wire-{hashlib.sha256(command.request_id.encode()).hexdigest()[:32]}"
+    if isinstance(command, PauseCommand):
+        return PauseRequest(control_id=control_id)
+    if isinstance(command, ResumeCommand):
+        return ResumeRequest(control_id=control_id, fallback=command.fallback, when=command.when)
+    if isinstance(command, SteerCommand):
+        return SteerRequest(control_id=control_id, text=command.text)
+    return StopRequest(control_id=control_id)
+
+
 class RunControlSlot:
     """Synchronize command admission with installation of one run session.
 
@@ -168,7 +219,7 @@ class RunControlSlot:
         self._condition = condition
         self._state = _RunControlState.AWAITING_SESSION
         self._control: RunControl | None = None
-        self._stop_pending = False
+        self._stop_pending: StopRequest | None = None
 
     def install(self, control: RunControl) -> None:
         """Install the session and deliver one retained stop intent, if any."""
@@ -176,12 +227,12 @@ class RunControlSlot:
             if self._state is not _RunControlState.AWAITING_SESSION:
                 message = f"cannot install run control while slot is {self._state.value}"
                 raise RuntimeError(message)
-            if self._stop_pending:
+            if self._stop_pending is not None:
                 # Control methods are synchronous messages to the process-local
                 # session. Deliver under the shared re-entrant condition so a
                 # concurrent command cannot overtake this retained intent.
-                control.stop()
-                self._stop_pending = False
+                control.submit(self._stop_pending)
+                self._stop_pending = None
             self._control = control
             self._state = _RunControlState.ACTIVE
 
@@ -194,45 +245,29 @@ class RunControlSlot:
             self._control = None
             self._state = _RunControlState.ENDED
 
-    def execute(
-        self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
-    ) -> CommandAck:
+    def execute(self, command: ControlProtocolCommand) -> CommandAck:
         """Apply one command or retain the sole command safe before startup."""
+        request = control_request(command)
         with self._condition:
             control = self._control
             if control is None:
                 if self._state is _RunControlState.AWAITING_SESSION and isinstance(
-                    request, StopCommand
+                    request, StopRequest
                 ):
-                    self._stop_pending = True
-                    return CommandAck(action="stop", status="pending")
+                    self._stop_pending = request
+                    return CommandAck(action=request.action, status="pending")
                 raise RunControlUnavailableError(self._state)
-            return self._execute_active(control, request)
-
-    @staticmethod
-    def _execute_active(
-        control: RunControl,
-        request: PauseCommand | ResumeCommand | SteerCommand | StopCommand,
-    ) -> CommandAck:
-        """Deliver one command while the slot prevents session release."""
-        if isinstance(request, PauseCommand):
-            control.pause()
-            return CommandAck(action="pause", status="pending")
-        if isinstance(request, ResumeCommand):
-            if request.when == "capacity_returns":
-                if not control.resume_when_capacity_returns():
-                    raise CapacityWaitUnavailableError
-                return CommandAck(action="resume", status="pending")
-            if request.fallback:
-                control.resume_with_fallback()
-            else:
-                control.resume()
-            return CommandAck(action="resume", status="consumed")
-        if isinstance(request, StopCommand):
-            control.stop()
-            return CommandAck(action="stop", status="pending")
-        control.steer(request.text)
-        return CommandAck(action="steer", status="pending")
+            # Delivered while the slot prevents session release.
+            ack = control.submit(request)
+        match ack.status, ack.reason:
+            case ControlStatus.REFUSED, RefusalReason() as reason:
+                raise _REFUSALS[reason]
+            case ControlStatus.CONFLICT, _:
+                raise ControlIdConflictError(request.control_id)
+            case ControlStatus.PENDING, _:
+                return CommandAck(action=ack.action, status="pending")
+            case _:
+                return CommandAck(action=ack.action, status="consumed")
 
 
 @dataclass(frozen=True)
@@ -334,7 +369,9 @@ class RunApi:
     # lint-waiver: LW-009027 [C901, PLR0911, PLR0912]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
     def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911, PLR0912
         """Route one typed request to its owning service."""
-        if isinstance(request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand)):
+        if isinstance(
+            request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand, ControlCommand)
+        ):
             return self._execute_command(request)
         if isinstance(request, ChatQuery):
             return self._execute_chat(request)
@@ -436,9 +473,7 @@ class RunApi:
         message = f"Unsupported protocol request: {type(request).__name__}"
         raise TypeError(message)
 
-    def _execute_command(
-        self, request: PauseCommand | ResumeCommand | SteerCommand | StopCommand
-    ) -> Response:
+    def _execute_command(self, request: ControlProtocolCommand) -> Response:
         """Send a command through the runtime's synchronized control slot."""
         if self._controller.is_read_only():
             raise RunReadOnlyError

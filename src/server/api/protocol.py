@@ -11,6 +11,7 @@ from pydantic import ConfigDict, Field, FiniteFloat, TypeAdapter, model_validato
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
 from server.control_envelope import (
+    CommandAckEnvelope,
     ProtocolModel,
     Request,
     ResponseEnvelope,
@@ -22,7 +23,13 @@ from server.execution import ActiveAgentExecution
 from server.host_api import PROTOCOL_VERSION
 from server.run_lifecycle import RunStatus
 from server.settings import InteractiveSetupDefaults
-from vibesys.api import IterationUnavailable
+from vibesys.api import (
+    ControlAction,
+    ControlRequest,
+    IterationUnavailable,
+    ResumeWhen,
+    check_one_way_to_resume,
+)
 from vibesys.api.hypothesis import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -124,13 +131,11 @@ class ResumeCommand(Request):
     # ``capacity_returns`` keeps a run paused on a provider capacity limit paused until
     # capacity should be back (``quota_waiting``), then resumes it; ``now`` resumes at once
     # and ends such a wait. A server without the field rejects it (``WP-CAPABILITY-PROBE``).
-    when: Literal["now", "capacity_returns"] = "now"
+    when: ResumeWhen = "now"
 
     @model_validator(mode="after")
     def _one_way_to_resume(self) -> ResumeCommand:
-        if self.fallback and self.when == "capacity_returns":
-            message = "fallback resumes now; it cannot wait for capacity to return"
-            raise ValueError(message)
+        check_one_way_to_resume(fallback=self.fallback, when=self.when)
         return self
 
 
@@ -139,6 +144,19 @@ class SteerCommand(Request):
 
     type: Literal["command.steer"] = "command.steer"
     text: str = Field(min_length=1)
+
+
+class ControlCommand(Request):
+    """Send one operator control in the schema every control ingress shares.
+
+    ``control`` is a ``vibesys.api.ControlRequest``, the request the headless inbox carries
+    too, so a client and ``vibesys control`` say the same things. The single-action commands
+    above remain; the server turns each into the same request. A server that predates this
+    command rejects it (``WP-CAPABILITY-PROBE``).
+    """
+
+    type: Literal["command.control"] = "command.control"
+    control: ControlRequest
 
 
 class SnapshotQuery(Request):
@@ -321,7 +339,8 @@ ProtocolRequest = Annotated[
     | DesignQuery
     | DesignPatchQuery
     | EventsQuery
-    | SubscribeRequest,
+    | SubscribeRequest
+    | ControlCommand,
     Field(discriminator="type"),
 ]
 
@@ -567,8 +586,16 @@ class DesignPatch(ProtocolModel):
     truncated: bool = False
 
 
+class CommandAck(CommandAckEnvelope):
+    """Acknowledgment of a requested run command; ``action`` is the control's tag."""
+
+    action: ControlAction
+
+
 class Response(ResponseEnvelope):
     """Response envelope for all protocol requests."""
+
+    ack: CommandAck | None = None
 
     chat: ChatResult | None = None
     chat_thread: ChatThreadInfo | None = None
