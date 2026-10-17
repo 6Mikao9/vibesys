@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -177,9 +177,9 @@ def test_a_bounded_wait_that_times_out_resumes_the_run_itself() -> None:
     events = FakeRunControlEventSink()
     threads = SimThreads()
     control = create_run_control_channel(events, threads=threads)
-    control.request_pause()
+    control.pause_for_quota(0.0)
 
-    resumed = threads.run(lambda: control.wait_resumed(0.0))
+    resumed = threads.run(control.wait_resumed)
 
     assert resumed is PauseWake.ELAPSED
     assert not control.pause_requested()
@@ -193,40 +193,109 @@ def test_a_bounded_wait_that_times_out_resumes_the_run_itself() -> None:
 def test_a_bounded_wait_that_something_resumed_reports_it() -> None:
     threads = SimThreads()
     control = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
-    control.request_pause()
+    control.pause_for_quota(0.0)
     control.resume()
 
-    assert threads.run(lambda: control.wait_resumed(0.0)) is PauseWake.RESUMED
+    assert threads.run(control.wait_resumed) is PauseWake.RESUMED
 
 
 def test_a_stop_ends_a_bounded_wait_and_is_never_cleared_by_its_timeout() -> None:
     threads = SimThreads()
     control = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
-    control.request_pause()
+    control.pause_for_quota(0.0)
     control.request_stop(StopMode.DRAIN)
 
     with pytest.raises(RunStopped):
-        threads.run(lambda: control.wait_resumed(0.0))
+        threads.run(control.wait_resumed)
 
     assert control.stop_requested()
 
 
 def test_a_fallback_request_is_taken_once_and_a_plain_resume_clears_a_stale_one() -> None:
     control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    control.enter_capacity(timed=True)
 
-    control.resume_with_fallback()
+    control.pause_for_quota()
+    assert control.resume_with_fallback() is True
     assert control.consume_fallback_request() is True
     assert control.consume_fallback_request() is False
 
+    control.pause_for_quota()
     control.resume_with_fallback()
     control.resume()
     assert control.consume_fallback_request() is False
+
+
+_Unpause = Literal["resume", "elapsed", "fallback"]
+
+
+@given(st.lists(st.sampled_from(["resume", "elapsed", "fallback"]), min_size=1, max_size=6))
+# The request a fallback resume left, outliving the timed resume of the next pause.
+@example(["fallback", "elapsed"])
+def test_a_fallback_request_answers_only_the_quota_pause_it_ended(
+    unpauses: list[_Unpause],
+) -> None:
+    """Each quota pause ends one way; only a fallback resume leaves a request to take.
+
+    No turn takes the requests here, so a request that outlived its pause would be taken
+    by the turn a later pause resumes.
+    """
+    threads = SimThreads()
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    control.enter_capacity(timed=True)
+
+    for unpause in unpauses:
+        match unpause:
+            case "resume":
+                control.pause_for_quota()
+                control.resume()
+            case "elapsed":
+                control.pause_for_quota(0.0)
+                assert threads.run(control.wait_resumed) is PauseWake.ELAPSED
+            case "fallback":
+                control.pause_for_quota()
+                assert control.resume_with_fallback() is True
+
+    assert control.consume_fallback_request() is (unpauses[-1] == "fallback")
+
+
+@pytest.mark.parametrize("pause", ["none", "operator", "stopping", "no_turn_left"])
+def test_a_fallback_is_refused_and_changes_nothing_unless_a_waiting_turn_would_take_it(
+    pause: Literal["none", "operator", "stopping", "no_turn_left"],
+) -> None:
+    """Refused unless a quota stop paused the run and a stopped turn still waits on it.
+
+    ``no_turn_left``: the only stopped turn was cancelled while the pause's timed resume
+    was armed, so the run stays paused until then and no turn would take the switch.
+    """
+    events = FakeRunControlEventSink()
+    control = create_run_control_channel(events, threads=SimThreads())
+    if pause == "operator":
+        control.request_pause()
+    if pause == "stopping":
+        control.enter_capacity(timed=True)
+        control.pause_for_quota()
+        control.request_stop(StopMode.DRAIN)
+    if pause == "no_turn_left":
+        control.enter_capacity(timed=True)
+        control.pause_for_quota(600.0)
+        control.leave_capacity(timed=True)
+    before = list(events.transitions)
+
+    assert control.resume_with_fallback() is False
+
+    assert control.pause_requested() is (pause != "none")
+    assert control.stop_requested() is (pause == "stopping")
+    assert control.consume_fallback_request() is False
+    assert events.transitions == before
 
 
 def test_resuming_with_the_fallback_releases_a_parked_run_like_a_resume() -> None:
     events = FakeRunControlEventSink()
     control = create_run_control_channel(events, threads=SimThreads())
     control.request_pause()
+    control.enter_capacity()
+    control.pause_for_quota()
 
     control.resume_with_fallback()
 
@@ -341,7 +410,7 @@ def test_a_self_resume_releases_every_parked_waiter(
     threads = SimThreads(schedule_seed=seed)
     events = FakeRunControlEventSink()
     control = create_run_control_channel(events, threads=threads)
-    control.request_pause()
+    control.pause_for_quota()
     released: list[float] = []
 
     def boundary() -> None:
@@ -350,12 +419,13 @@ def test_a_self_resume_releases_every_parked_waiter(
 
     def turn() -> None:
         if source == "timed":
-            assert control.wait_resumed(seconds) is PauseWake.ELAPSED
+            control.pause_for_quota(seconds)
+            assert control.wait_resumed() is PauseWake.ELAPSED
             return
         control.enter_capacity()
         try:
             request = control.park_for_capacity(waiting=True)
-            assert request is not None
+            assert isinstance(request, int)
             assert control.wait_for_capacity(seconds, request).wake is CapacityWake.ELAPSED
         finally:
             control.leave_capacity()
@@ -411,7 +481,7 @@ class _ParkedTurns:
         self.threads = SimThreads(schedule_seed=seed)
         self.events = FakeRunControlEventSink()
         self.control = create_run_control_channel(self.events, threads=self.threads)
-        self.control.request_pause()
+        self.control.pause_for_quota()
         self.base = self.threads.now()
         self.ended = [False] * len(waiters)
         self.outcomes: dict[int, tuple[object, float]] = {}
@@ -424,13 +494,14 @@ class _ParkedTurns:
             return self.ended[index]
 
         if waiter.kind == "timed":
-            wake = control.wait_resumed(waiter.seconds, ended=gone)
+            control.pause_for_quota(waiter.seconds)
+            wake = control.wait_resumed(ended=gone)
             self.outcomes[index] = (wake, self.threads.now())
             return
         control.enter_capacity()
         try:
             request = control.park_for_capacity(ended=gone)
-            assert request is not None
+            assert isinstance(request, int)
             self.requests[index] = request
             end = control.wait_for_capacity(waiter.seconds, request, ended=gone)
             self.outcomes[index] = (end.wake, self.threads.now())

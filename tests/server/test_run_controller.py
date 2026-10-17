@@ -1,6 +1,7 @@
 """Pause, stop, steering, and terminal-state tests for the run controller."""
 
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -28,6 +29,7 @@ from server.api.service import (
     ControlIdConflictError,
     ControlProtocolCommand,
     RunControlSlot,
+    RunStoppingError,
     control_request,
 )
 from server.events import (
@@ -154,9 +156,12 @@ def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
 def test_a_resume_command_can_ask_for_the_fallback_and_a_plain_one_cannot(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
+    parts.control.pause_for_quota()
     parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME))
     assert parts.control.consume_fallback_request() is False
 
+    parts.control.enter_capacity(timed=True)  # a stopped turn waits to take the switch
+    parts.control.pause_for_quota()
     ack = parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=True)).ack
 
     assert ack is not None
@@ -176,6 +181,36 @@ def test_waiting_for_capacity_is_refused_for_a_run_not_paused_on_a_capacity_limi
 
     assert refused.value.diagnostic_code == "capacity_wait_unavailable"
     assert parts.control.pause_requested()
+
+
+def test_the_fallback_is_refused_for_a_run_not_paused_on_a_capacity_limit(
+    tmp_path: Path,
+) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.api.execute(PauseCommand(timestamp=REQUEST_TIME))
+
+    with pytest.raises(CapacityWaitUnavailableError):
+        parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=True))
+
+    assert parts.control.pause_requested()
+    assert parts.control.consume_fallback_request() is False
+
+
+@pytest.mark.parametrize("when", ["now", "capacity_returns"])
+def test_a_capacity_resume_for_a_stopping_run_answers_that_it_is_stopping(
+    tmp_path: Path, when: Literal["now", "capacity_returns"]
+) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.control.enter_capacity()
+    parts.control.pause_for_quota()
+    parts.api.execute(StopCommand(timestamp=REQUEST_TIME))
+
+    with pytest.raises(RunStoppingError) as refused:
+        parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=when == "now", when=when))
+
+    assert refused.value.diagnostic_code == "run_stopping"
+    assert parts.control.stop_requested()
+    assert parts.control.consume_fallback_request() is False
 
 
 def test_a_resume_cannot_both_switch_to_the_fallback_and_wait_for_capacity() -> None:
@@ -480,17 +515,31 @@ def _channel_state(parts: ServerParts) -> tuple[object, ...]:
     )
 
 
+def _answer(parts: ServerParts, command: ControlProtocolCommand) -> object:
+    """The command's ack, or the type of the protocol error it was refused with."""
+    try:
+        return parts.api.execute(command).ack
+    except CapacityWaitUnavailableError as refused:
+        return type(refused)
+
+
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
-@given(commands=st.lists(_SINGLE_ACTION_COMMANDS, max_size=6))
+@given(commands=st.lists(_SINGLE_ACTION_COMMANDS, max_size=6), quota_paused=st.booleans())
 def test_a_control_command_does_what_the_single_action_command_it_carries_does(
-    tmp_path_factory: pytest.TempPathFactory, commands: list[ControlProtocolCommand]
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    commands: list[ControlProtocolCommand],
+    quota_paused: bool,
 ) -> None:
     """``command.control`` and the single-action commands reach the run through one entry point."""
     single = build_server_parts(tmp_path_factory.mktemp("single"))
     carried = build_server_parts(tmp_path_factory.mktemp("carried"))
+    if quota_paused:
+        single.control.pause_for_quota()
+        carried.control.pause_for_quota()
     for command in commands:
         wrapped = ControlCommand(timestamp=REQUEST_TIME, control=control_request(command))
-        assert single.api.execute(command).ack == carried.api.execute(wrapped).ack
+        assert _answer(single, command) == _answer(carried, wrapped)
     assert _channel_state(single) == _channel_state(carried)
 
 

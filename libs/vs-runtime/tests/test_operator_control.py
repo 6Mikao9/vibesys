@@ -244,7 +244,9 @@ class _Expected:
     steers: list[str] = field(default_factory=list)
     withdrawals: list[str] = field(default_factory=list)
     paused: bool = False
+    quota_paused: bool = False
     stop: StopMode | None = None
+    fallback: bool = False
     answered: dict[str, tuple[ControlRequest, ControlAck]] = field(default_factory=dict)
 
 
@@ -256,12 +258,16 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
         case PauseRequest():
             expected.paused = True
             return ControlStatus.PENDING
-        case ResumeRequest(when="capacity_returns"):
-            # No turn is parked on a capacity limit here, so the wait is refused.
+        case ResumeRequest(when=when, fallback=fallback) if when == "capacity_returns" or (
+            fallback and (not expected.quota_paused or expected.stop)
+        ):
+            # No turn is parked for the operator here, so a wait for capacity is refused; a
+            # switch to the fallback answers only a quota stop's pause with a turn waiting.
             return ControlStatus.REFUSED
-        case ResumeRequest():
-            expected.paused = False
+        case ResumeRequest(fallback=fallback):
+            expected.paused = expected.quota_paused = False
             expected.stop = None
+            expected.fallback = fallback
             return ControlStatus.CONSUMED
         case StopRequest(mode=mode):
             expected.stop = mode
@@ -272,14 +278,19 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
             return ControlStatus.PENDING
 
 
-@given(st.lists(_requests(_IDS), max_size=16))
+@given(sequence=st.lists(_requests(_IDS), max_size=16), quota_paused=st.booleans())
 def test_submit_applies_each_control_id_once_as_its_action_says(
-    sequence: list[ControlRequest],
+    *, sequence: list[ControlRequest], quota_paused: bool
 ) -> None:
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     control = ChannelRunControl(channel, SimThreads())
-    expected = _Expected()
+    expected = _Expected(paused=quota_paused, quota_paused=quota_paused)
+    if quota_paused:
+        # A turn waits on the pause's timed resume, never leaving: it would take a fallback.
+        channel.enter_capacity(timed=True)
+        channel.pause_for_quota()
     for request in sequence:
+        stopping = expected.stop is not None
         ack = control.submit(request)
         assert (ack.control_id, ack.action) == (request.control_id, request.action)
         answered = expected.answered.get(request.control_id)
@@ -290,10 +301,12 @@ def test_submit_applies_each_control_id_once_as_its_action_says(
             assert ack == answered[1]
         else:
             assert ack.status is ControlStatus.CONFLICT
-        assert (ack.reason is RefusalReason.NOT_PAUSED_ON_CAPACITY) == (
-            ack.status is ControlStatus.REFUSED
-        )
+        if ack.status is ControlStatus.REFUSED and answered is None:
+            assert ack.reason is (
+                RefusalReason.STOPPING if stopping else RefusalReason.NOT_PAUSED_ON_CAPACITY
+            )
     assert [steer.text for steer in channel.take_pending_steer()] == expected.steers
     assert [w.withdraws for w in channel.take_pending_withdrawals()] == expected.withdrawals
     assert channel.pause_requested() == expected.paused
     assert channel.stop_mode() == expected.stop
+    assert channel.consume_fallback_request() == expected.fallback
