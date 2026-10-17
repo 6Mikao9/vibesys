@@ -42,6 +42,7 @@ from vs_evaluation.api import (
     same_work,
 )
 from vs_redaction.api import redact_diagnostic_tail
+from vs_runtime._evaluation_failure_text import render_stage_output_with_service_log
 from vs_runtime._failure_classification import RecordState, classify, is_unsettled, signal_of
 from vs_runtime._measurement_progress import StageRun
 from vs_runtime._trusted_evaluation import (
@@ -81,6 +82,8 @@ if TYPE_CHECKING:
     from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
+SERVICE_LOG_SUMMARY_CHARS = 2_000
+"""The most service log a failed stage's summary keeps; its own output matters more."""
 
 type StageFailureText = Callable[[Sequence[tuple[str | None, EvidenceKind]], str | None], str]
 
@@ -95,6 +98,13 @@ def _completed(raw: SlurmCommandResult, metadata: SlurmExecutionMetadata | None)
         and metadata.job_exit_code == 0
         and metadata.collection_failure is None
     )
+
+
+def _redacted_service_log(step: EvaluationStepResult) -> str | None:
+    """The step's service log tail, credential-redacted and bounded like the output tails."""
+    if step.service_log_tail is None:
+        return None
+    return redact_diagnostic_tail(step.service_log_tail, max_chars=STAGE_OUTPUT_TAIL_CHARS) or None
 
 
 def _stage_failure_kind(evidence: TrustedEvidence) -> StageFailureKind:
@@ -485,7 +495,11 @@ class SemanticSlurmEvaluationExecutor:
                 )
                 results.append(
                     raw_step.model_copy(
-                        update={"name": step.name, "operator_failure": operator_step_failure}
+                        update={
+                            "name": step.name,
+                            "operator_failure": operator_step_failure,
+                            "service_log_tail": _redacted_service_log(raw_step),
+                        }
                     )
                 )
                 continue
@@ -495,7 +509,7 @@ class SemanticSlurmEvaluationExecutor:
             evidence, operator_evidence_summary = self._evidence(
                 stage,
                 raw,
-                raw_step.failure,
+                raw_step,
                 handle_id=handle_id,
                 metadata=metadata,
             )
@@ -535,6 +549,7 @@ class SemanticSlurmEvaluationExecutor:
                         redact_diagnostic_tail(raw.stderr, max_chars=STAGE_OUTPUT_TAIL_CHARS)
                         or None
                     ),
+                    service_log_tail=None if completed else _redacted_service_log(raw_step),
                     failure_kind=None if completed else _stage_failure_kind(evidence),
                     failure=(
                         None
@@ -593,11 +608,13 @@ class SemanticSlurmEvaluationExecutor:
         self,
         stage: SemanticEvaluationStage,
         raw: SlurmCommandResult,
-        failure: str | None,
+        raw_step: EvaluationStepResult,
         *,
         handle_id: str,
         metadata: SlurmExecutionMetadata | None,
     ) -> tuple[TrustedEvidence, str | None]:
+        failure = raw_step.failure
+        service_log_tail = raw_step.service_log_tail
         passed = _completed(raw, metadata) and raw.exit_code == 0
         service_not_ready = metadata is not None and metadata.service_not_ready
         metrics: tuple[EvidenceMetric, ...] = ()
@@ -667,9 +684,11 @@ class SemanticSlurmEvaluationExecutor:
                 )
                 metrics = () if stats is None else stats.metrics()
         if not passed and summary is None:
-            # The provider's stage failure already holds the stage output plus the
-            # server log tail; keep its end, where the cause usually is.
-            detail = failure or raw.output
+            # The stage's own output ends the text, where its verdict is and where the
+            # agent's excerpt cuts; the capped service log precedes it.
+            detail = render_stage_output_with_service_log(
+                failure or raw.output, (service_log_tail or "")[-SERVICE_LOG_SUMMARY_CHARS:]
+            )
             summary = detail[-MAX_EVIDENCE_SUMMARY_CHARS:] or f"{stage.kind.value} command failed"
             operator_summary = (
                 redact_diagnostic_tail(detail, max_chars=MAX_EVIDENCE_SUMMARY_CHARS)

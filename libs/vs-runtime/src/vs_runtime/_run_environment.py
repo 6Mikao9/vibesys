@@ -86,6 +86,7 @@ from vs_runtime._run_environment_facts import (
     ModalEnvironmentFacts,
     RunEnvironmentPresentationFacts,
     SkyPilotEnvironmentFacts,
+    agent_git_writable_in,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
@@ -219,6 +220,7 @@ class RunEnvironmentView:
     """Run-environment-neutral facts consumed by loops and agent construction."""
 
     paths: AgentPaths
+    agent_git_writable: bool  # required, no default; prompts branch on this
     prompt_notes: str = ""
     isolated: bool = False
     cli_sandboxed: bool = False
@@ -692,11 +694,10 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         del presentation
         materialize_effective_objective(request)
         document, grants = outside_objective(request.objective, request.log_dir)
-        sandbox = _make_host_sandbox(request)
         evaluation = _host_evaluation_plan(request)
         return command_environment_session(
             SandboxSession.borrowed(
-                sandbox=sandbox,
+                sandbox=_make_host_sandbox(request),
                 view=RunEnvironmentView(
                     paths=AgentPaths(
                         objective=(str(document) if document is not None else "OBJECTIVE.md"),
@@ -704,6 +705,7 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                         benchmark_command=evaluation.benchmark_command,
                         profiler_support=request.profiler_support_path,
                     ),
+                    agent_git_writable=True,
                     agent_host_resources=grants,
                 ),
             )
@@ -904,7 +906,8 @@ class DockerEnvironment(NoCaptureRecovery):
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve Docker presentation facts."""
-        return _PreparedRunEnvironment(DockerEnvironmentFacts(), partial(self._open, request))
+        facts = DockerEnvironmentFacts(agent_git_writable=agent_git_writable_in(request.workspace))
+        return _PreparedRunEnvironment(facts, partial(self._open, request))
 
     def _open(
         self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
@@ -921,6 +924,7 @@ class DockerEnvironment(NoCaptureRecovery):
             isolated=True,
             cli_sandboxed=True,
             env_kind="docker",
+            agent_git_writable=agent_git_writable_in(request.workspace),
         )
         with _starting_container(request) as output:
             return command_environment_session(
@@ -1344,6 +1348,7 @@ class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
                 host_device_reselect=False,
                 env_kind="skypilot",
                 profile_execution="remote",
+                agent_git_writable=agent_git_writable_in(request.workspace),
             ),
         )
 
@@ -1580,6 +1585,7 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                         host_device_reselect=False,
                         env_kind="modal",
                         profile_execution="remote",
+                        agent_git_writable=agent_git_writable_in(request.workspace),
                         deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
                         framework_setup_timeout_seconds=setup_timeout_seconds,
                     ),
