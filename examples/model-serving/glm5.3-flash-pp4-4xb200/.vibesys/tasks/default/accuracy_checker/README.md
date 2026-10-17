@@ -90,7 +90,17 @@ For each answer, against each trusted build:
   its own top token (a probability ratio of 1.35). NVFP4 weights with a
   different parallel layout change the order of reductions, so two candidates
   the reference almost tied can swap. At most 20% of answers may be near ties;
-- **mismatch**: anything else. **One mismatch fails the check.**
+- **mismatch**: anything else. A mismatch fails the check at once unless it
+  is **tolerated**: the token is in some trusted build's top 10 and at most
+  **3.0 nats** below that build's top token (a probability ratio of 20), and at
+  most **max(1, ceil(5% of rounds))** rounds have such a mismatch (2 of 37).
+  The serving engine is nondeterministic on low-margin prompts: the unmodified
+  PP4 baseline answered `session_p8k_a1k_cached/round1` with the reference's
+  rank-2 token (1.6 nats below the top) in about one run in three, and three
+  repeats per build cannot record every such flip. A wrong server still fails:
+  on the real reference, random tokens, a constant token, the next round's
+  answer and "always the rank-2 token" each leave 23 to 37 rounds with a
+  mismatch outside this tolerance.
 
 And over the logprobs:
 
@@ -103,11 +113,18 @@ And over the logprobs:
 - the mean distance over all answers within **0.25 nats**, so logprobs shifted
   across the board fail even with every token right.
 
-The report gives `logprob_only_misses`, `logprob_only_miss_names`, and the
-limits (`max_logprob_miss_share`, `mean_abs_dlogprob_limit`).
+The report gives `logprob_only_misses`, `logprob_only_miss_names`,
+`tolerated_mismatches` (each with its round, request, token, build, rank and
+gap), `hard_mismatches`, and the limits (`max_logprob_miss_share`,
+`mean_abs_dlogprob_limit`, `max_tolerated_mismatch_rounds`,
+`max_tolerated_gap_nats`). The first and the last line of the output state the
+verdict and every tolerated mismatch, so a truncated log still shows both;
+per-answer progress goes to stderr while the checker runs.
 
 The replay-shaped request's token must be the logprob request's, a token the
-reference gave, or a near tie of the reference's top token. It carries no
+reference gave, or a near tie of the reference's top token; otherwise it is a
+mismatch of its round, tolerated on the same terms and counted against the same
+budget of rounds. It carries no
 salt (the replay sends none), so on a server that already ran the checker it
 may resume the earlier run's cache, hence the tolerance instead of equality.
 
@@ -184,3 +201,7 @@ merged file; constant-token, shuffled-answer and 1.5-nat-noise servers fail it.
 `test_trusted_builds.py` (no server; pytest or plain python) checks the
 format-3 validation, the format-2 conversion, and that an answer passes
 exactly when it fits some build, over generated inputs.
+`test_tolerated_mismatches.py` (same) checks the tolerated-mismatch rule: the
+budget, the top-10 and 3.0-nat bounds, the shared budget with replay-shaped
+answers, the mean-logprob gate, the verdict line, and that random, constant
+and shifted answers still fail.

@@ -109,6 +109,10 @@ def main() -> int:
     for name, flags, expected in cases:
         result = with_server(flags, checker, runs=2 if name == "repeat-run" else 1)
         verdict = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+        # The verdict and the tolerated mismatches open and close the output (a truncated log shows them).
+        assert verdict.startswith("ACCURACY ") and result.stdout.splitlines()[0] == verdict, (
+            result.stdout[-2000:]
+        )
         brief = [
             line
             for line in result.stdout.splitlines()

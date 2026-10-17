@@ -24,7 +24,13 @@ any one build within that build's own repeat noise:
   match     the candidate's greedy token is one the reference gave in a repeat.
   near tie  it differs, but it is in the reference's top 10 and the reference
             ranked it within NEAR_TIE_NATS of its own top token.
-  mismatch  anything else. One mismatch fails the check.
+  mismatch  anything else. A mismatch fails the check unless it is tolerated:
+            the token is in some build's top 10 within MAX_TOLERATED_GAP_NATS
+            of that build's top token, and at most max(1, ceil(
+            MAX_TOLERATED_SHARE x rounds)) rounds (2 of 37) have one. A
+            replay-shaped answer (below) outside the reference counts the same
+            way. The server is nondeterministic on low-margin prompts: the
+            unmodified baseline flipped such a token in about 1 run in 3.
   logprob   the candidate's logprob of the reference's top token should be within
             MAX_ABS_DLOGPROB of the range the reference's repeats spanned. A
             matching token outside it is a "logprob-only miss": allowed for at
@@ -44,6 +50,9 @@ cheaper, different answer (README.md, "Threat model").
 Also: the server must count every prompt token, return the generated token id,
 report a prefix-cache hit for each cached round 1 of at least 32k tokens of
 prefix, and its answers must vary with the prompt like the reference's do.
+The first and the last line of the output state the verdict and every
+tolerated mismatch, so a truncated log still shows both; per-answer progress
+goes to stderr while the checker runs.
 """
 
 from __future__ import annotations
@@ -51,6 +60,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
 import secrets
 import sys
 from pathlib import Path
@@ -85,6 +95,12 @@ MAX_ABS_DLOGPROB = 1.0
 # trusted build's accepted tokens but a logprob is beyond MAX_ABS_DLOGPROB.
 MAX_LOGPROB_MISS_SHARE = 0.2
 MEAN_ABS_DLOGPROB = 0.25
+# A token flip the reference build itself could make: in some trusted build's
+# top 10 and at most 3.0 nats (a probability ratio of 20) below its top token.
+# Up to max(1, ceil(MAX_TOLERATED_SHARE x rounds)) rounds may have one; a wrong
+# answer outside the top 10 or further below still fails at once.
+MAX_TOLERATED_GAP_NATS = 3.0
+MAX_TOLERATED_SHARE = 0.05
 # Below this prefix a cache hit is not required: a hybrid model's prefix cache
 # may only resume at block boundaries of several thousand tokens.
 MIN_PREFIX_FOR_REQUIRED_HIT = 32 * 1024
@@ -107,6 +123,34 @@ class Verdict:
     problems: list[str]
     # Token matches, but the reference token's logprob is beyond MAX_ABS_DLOGPROB of the range.
     logprob_miss: bool = False
+    # A mismatch whose token is in this build's top 10 (rank `ref_rank`, 1 = top) within
+    # MAX_TOLERATED_GAP_NATS of its top token: counts against the tolerated-mismatch budget.
+    tolerable: bool = False
+    ref_rank: int | None = None
+    # The replay-shaped request's token, when it is outside the reference but tolerable
+    # (`shaped_tolerance` names the build, its rank and gap): counts against the same budget.
+    shaped_token: int | None = None
+    shaped_tolerance: dict | None = None
+
+
+def tolerance(expects: dict[str, dict], token: int) -> dict | None:
+    """The trusted build that ranks `token` closest to its own top token, if any ranks it in
+    its top 10 within MAX_TOLERATED_GAP_NATS: {build, expected, rank, gap_nats}; else None."""
+    best = None
+    for build, expect in expects.items():
+        ranked = [int(t) for t, _ in expect["top"]]
+        ref_top = {int(t): float(lp) for t, lp in expect["top"]}
+        if token not in ref_top:
+            continue
+        gap = ref_top[int(expect["token"])] - ref_top[token]
+        if gap <= MAX_TOLERATED_GAP_NATS and (best is None or gap < best["gap_nats"]):
+            best = {
+                "build": build,
+                "expected": int(expect["token"]),
+                "rank": ranked.index(token) + 1,
+                "gap_nats": round(gap, 4),
+            }
+    return best
 
 
 def judge(name: str, build: str, expect: dict, answer: Answer, prompt_len: int) -> Verdict:
@@ -120,6 +164,7 @@ def judge(name: str, build: str, expect: dict, answer: Answer, prompt_len: int) 
             f"usage.prompt_tokens {answer.prompt_tokens} for a {prompt_len}-token prompt"
         )
     gap = None
+    rank = None
     if answer.token in accepted:
         kind = "match"
     elif answer.token in ref_top and ref_top[expected] - ref_top[answer.token] <= NEAR_TIE_NATS:
@@ -127,7 +172,10 @@ def judge(name: str, build: str, expect: dict, answer: Answer, prompt_len: int) 
         gap = ref_top[expected] - ref_top[answer.token]
     else:
         kind = "mismatch"
-        gap = ref_top[expected] - ref_top[answer.token] if answer.token in ref_top else None
+        if answer.token in ref_top:
+            gap = ref_top[expected] - ref_top[answer.token]
+            rank = [int(t) for t, _ in expect["top"]].index(answer.token) + 1
+    tolerable = kind == "mismatch" and gap is not None and gap <= MAX_TOLERATED_GAP_NATS
     dlp = None
     logprob_miss = False
     if expected in answer.top:
@@ -152,6 +200,8 @@ def judge(name: str, build: str, expect: dict, answer: Answer, prompt_len: int) 
         answer.seconds,
         problems,
         logprob_miss,
+        tolerable,
+        rank,
     )
 
 
@@ -162,7 +212,8 @@ def judge_builds(name: str, expects: dict[str, dict], answer: Answer, prompt_len
     """The answer judged against every trusted build; the verdict of the build it fits best.
 
     Best = passes (not a mismatch, no problem) first, then match before near
-    tie, then within-tolerance before logprob-only miss, then the smallest logprob distance to that build's repeat range.
+    tie, then a tolerable mismatch before any other, then within-tolerance before logprob-only miss,
+    then the smallest logprob distance to that build's repeat range.
     """
     verdicts = [judge(name, build, expect, answer, prompt_len) for build, expect in expects.items()]
     return min(
@@ -170,6 +221,7 @@ def judge_builds(name: str, expects: dict[str, dict], answer: Answer, prompt_len
         key=lambda v: (
             v.kind == "mismatch" or bool(v.problems),
             KIND_RANK[v.kind],
+            not v.tolerable,
             v.logprob_miss,
             abs(v.dlogprob) if v.dlogprob is not None else float("inf"),
         ),
@@ -194,6 +246,19 @@ def replay_shaped_kind(expects: dict[str, dict], token: int, logprob_token: int)
     )
 
 
+def judge_replay_shaped(verdict: Verdict, expects: dict[str, dict], shaped: int) -> None:
+    """Record the replay-shaped request's token on the round's verdict: acceptable (nothing),
+    a tolerable mismatch (`shaped_token`, counted against the budget), or a problem."""
+    problem = replay_shaped_kind(expects, shaped, verdict.got)
+    if problem is None:
+        return
+    shaped_tolerance = tolerance(expects, shaped)
+    if shaped_tolerance is not None:
+        verdict.shaped_token, verdict.shaped_tolerance = shaped, shaped_tolerance
+    else:
+        verdict.problems.append(problem)
+
+
 def run(base_url: str, model: str, reference: dict, log=print) -> tuple[bool, dict]:
     base = base_url.rstrip("/")
     served = [m.get("id") for m in get_json(f"{base}/v1/models", 30).get("data", [])]
@@ -213,9 +278,7 @@ def run(base_url: str, model: str, reference: dict, log=print) -> tuple[bool, di
         )
         answer = complete(base, model, prompt, REQUEST_TIMEOUT_S, cache_salt=run_salt)
         verdict = judge_builds(name, expects, answer, len(prompt))
-        shaped_problem = replay_shaped_kind(expects, shaped, verdict.got)
-        if shaped_problem is not None:
-            verdict.problems.append(shaped_problem)
+        judge_replay_shaped(verdict, expects, shaped)
         if shaped_prompt_tokens != len(prompt):
             verdict.problems.append(
                 f"replay-shaped request: usage.prompt_tokens {shaped_prompt_tokens} for a "
@@ -227,6 +290,10 @@ def run(base_url: str, model: str, reference: dict, log=print) -> tuple[bool, di
             if verdict.kind == "match" and not verdict.problems
             else f"  <-- {verdict.kind} {verdict.problems}"
         )
+        if verdict.kind == "mismatch" and verdict.tolerable:
+            flag += f" (tolerable: rank {verdict.ref_rank}, {verdict.ref_gap_nats:.3f} nats below the top)"
+        if verdict.shaped_token is not None:
+            flag += f"  <-- replay-shaped answer {verdict.shaped_token} tolerable {verdict.shaped_tolerance}"
         log(
             f"{name}: expected {verdict.expected} ({verdict.build}) got {verdict.got} "
             f"dlogprob {verdict.dlogprob if verdict.dlogprob is None else round(verdict.dlogprob, 4)} "
@@ -256,12 +323,69 @@ def run(base_url: str, model: str, reference: dict, log=print) -> tuple[bool, di
     return summarize(verdicts, hit_problems, reference)
 
 
+def tolerated_budget(rounds: int) -> int:
+    """How many rounds may have a tolerable mismatch: max(1, ceil(5% of rounds))."""
+    return max(1, math.ceil(MAX_TOLERATED_SHARE * rounds - 1e-9))
+
+
+def tolerated_entries(v: Verdict) -> list[dict]:
+    """The tolerable mismatches of one round: its logprob answer's and its replay-shaped answer's."""
+    out = []
+    if v.kind == "mismatch" and v.tolerable:
+        out.append(
+            {
+                "name": v.name,
+                "request": "logprob",
+                "got": v.got,
+                "build": v.build,
+                "expected": v.expected,
+                "rank": v.ref_rank,
+                "gap_nats": round(v.ref_gap_nats, 4),
+            }
+        )
+    if v.shaped_token is not None:
+        out.append(
+            {
+                "name": v.name,
+                "request": "replay-shaped",
+                "got": v.shaped_token,
+                **v.shaped_tolerance,
+            }
+        )
+    return out
+
+
+def headline(ok: bool, summary: dict) -> str:
+    """One line with the verdict and every tolerated mismatch; printed first and last."""
+    if "error" in summary:
+        return f"ACCURACY FAIL: {summary['error']}"
+    tolerated = "; ".join(
+        f"{e['name']} ({e['request']}) got {e['got']}, {e['build']} top {e['expected']}, "
+        f"rank {e['rank']}, {e['gap_nats']:.3f} nats below"
+        for e in summary["tolerated_mismatches"]
+    )
+    rounds = len({e["name"] for e in summary["tolerated_mismatches"]})
+    line = (
+        f"ACCURACY {'PASS' if ok else 'FAIL'}: {summary['answers']} answers, {summary['matches']} matches, "
+        f"{summary['near_ties']} near ties, {rounds} of {summary['max_tolerated_mismatch_rounds']} tolerated "
+        f"mismatch rounds" + (f" [{tolerated}]" if tolerated else "")
+    )
+    if not ok:
+        first = summary["failures"][0]
+        line += f"; {len(summary['failures'])} failure(s), first: {first[:300]}{'...' if len(first) > 300 else ''}"
+    return line
+
+
 def summarize(
     verdicts: list[Verdict], hit_problems: list[str], reference: dict
 ) -> tuple[bool, dict]:
     """The run's verdict from its per-answer verdicts: the shares, the mean, the failures."""
     near = [v for v in verdicts if v.kind == "near_tie"]
     mismatches = [v for v in verdicts if v.kind == "mismatch"]
+    hard = [v for v in mismatches if not v.tolerable]
+    tolerated = [entry for v in verdicts for entry in tolerated_entries(v)]
+    tolerated_rounds = sorted({entry["name"] for entry in tolerated})
+    budget = tolerated_budget(len(verdicts))
     misses = [v for v in verdicts if v.logprob_miss]
     problems = [f"{v.name}: {p}" for v in verdicts for p in v.problems] + hit_problems
     dlps = [abs(v.dlogprob) for v in verdicts if v.dlogprob is not None]
@@ -269,8 +393,16 @@ def summarize(
     expected_distinct = len({v.expected for v in verdicts})
     got_distinct = len({v.got for v in verdicts})
     failures = []
-    if mismatches:
-        failures.append(f"{len(mismatches)} mismatch(es): " + ", ".join(v.name for v in mismatches))
+    if hard:
+        failures.append(
+            f"{len(hard)} mismatch(es) outside every trusted build's top 10 or more than "
+            f"{MAX_TOLERATED_GAP_NATS} nats below its top token: " + ", ".join(v.name for v in hard)
+        )
+    if len(tolerated_rounds) > budget:
+        failures.append(
+            f"{len(tolerated_rounds)} rounds with a top-10 mismatch, above the {budget} tolerated: "
+            + ", ".join(tolerated_rounds)
+        )
     if len(near) > MAX_NEAR_TIE_SHARE * len(verdicts):
         failures.append(
             f"{len(near)} near-tie flips of {len(verdicts)} answers, above {MAX_NEAR_TIE_SHARE:.0%}"
@@ -294,6 +426,10 @@ def summarize(
         "matches": sum(v.kind == "match" for v in verdicts),
         "near_ties": len(near),
         "mismatches": len(mismatches),
+        "hard_mismatches": len(hard),
+        "tolerated_mismatches": tolerated,
+        "max_tolerated_mismatch_rounds": budget,
+        "max_tolerated_gap_nats": MAX_TOLERATED_GAP_NATS,
         "logprob_only_misses": len(misses),
         "logprob_only_miss_names": [v.name for v in misses],
         "max_logprob_miss_share": MAX_LOGPROB_MISS_SHARE,
@@ -366,16 +502,24 @@ def main() -> int:
     except ReferenceError as exc:
         print(f"FAIL: {args.reference}: {exc}")
         return 2
+    lines: list[str] = []
+
+    def log(line: str) -> None:
+        # Live progress on stderr; stdout gets the lines after the verdict line, in order.
+        print(line, file=sys.stderr, flush=True)
+        lines.append(line)
+
     try:
-        ok, summary = run(args.base_url, args.model, reference)
+        ok, summary = run(args.base_url, args.model, reference, log=log)
     except RequestError as exc:
-        print(f"FAIL: {exc}")
+        verdict = f"ACCURACY FAIL: {exc}"
+        print("\n".join([verdict, *lines, verdict]))
         return 1
     if args.report is not None:
         args.report.write_text(json.dumps(summary, indent=2) + "\n")
     brief = {k: v for k, v in summary.items() if k != "verdicts"}
-    print(json.dumps(brief, indent=2))
-    print("PASS" if ok else "FAIL")
+    verdict = headline(ok, summary)
+    print("\n".join([verdict, *lines, json.dumps(brief, indent=2), verdict]))
     return 0 if ok else 1
 
 
