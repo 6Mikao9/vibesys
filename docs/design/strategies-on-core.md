@@ -361,8 +361,7 @@ each paid turn atomically with its dispatch), `accuracy_receipt` (the evidence l
   retained candidate (its parent if that round retained nothing), exactly as `dynamic` treats
   `continue_hypothesis`.
 - A round that ran the official gates and passed settles `eligible` when review passed and,
-  with a measured baseline, the headline beats it. A round the evaluation budget left
-  unmeasured (`--evaluation-budget`) settles `eligible=False` with `retention="candidate"`: a
+  with a measured baseline, the headline beats it. A round no gate measured (its review was deferred) settles `eligible=False` with `retention="candidate"`: a
   buildable parent that can never be adopted (assumption A1, to verify in Phase 2: core accepts
   such a settlement and a later `StartAttempt` may use it as `base`). The fallback if core
   refuses is `retention="wip"`, and the last fallback is to measure every round.
@@ -389,7 +388,7 @@ The role ids are strategy-scoped like `dynamic-*`; see Q6 for per-role model con
 
 Kept with the same names and meaning: `--max-rounds`, `--max-retries-per-round` (becomes
 `paid_invocation_limit`), `--judge-every` (accepted, unused by `single`, as today),
-`--evaluation-budget` (replacing the cadence `--official-eval-every`), `--constraint`, `--modality`, `--interface`, `--objective` and the
+`--constraint`, `--modality`, `--interface`, `--objective` and the
 metric space, the profile-guided input from the bundle. `--max-in-flight`,
 `--max-unmeasured-turns` stay documented as dynamic-only. `--turn-drop-backoff-seconds`
 becomes a loop-wide option because a lost provider connection is now a strategy event for
@@ -892,7 +891,7 @@ and before dispatch, and after dispatch and before the observation is committed.
 
 ### 9.3 Phase 3: single
 
-- **Added properties.** S1: a round the evaluation budget left unmeasured is never a winner or
+- **Added properties.** S1: a round no gate measured is never a winner or
   a base. S2: differential test against the golden transcripts of the legacy
   loop: for generated per-round outcomes, round records, endings and the final record equal the
   transcript. S3: the attempt base is the best, a passed idea the plan names with

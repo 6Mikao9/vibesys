@@ -7,7 +7,7 @@ transition and return the encoded result. Every function is a pure function of i
 so a replay after a crash repeats it.
 
 What it owns: choosing the next round (finished, continue, new hypothesis), starting a
-hypothesis on its base, the evaluation budget of the trusted gates, the Pareto
+hypothesis on its base, when the trusted gates measure, the Pareto
 guard on a verdict, noting a failed attempt on the active hypothesis, and closing a round into a
 `RoundRecord`. What it does not own: turns, measurements or any workspace operation; the caller
 supplies plain facts (`ClosingFacts`).
@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
+from vibesys.hypothesis import cadence
 from vibesys.hypothesis.attempts import (
     AttemptState,
     CandidateReply,
@@ -132,13 +133,9 @@ def validate_plan(config: HypothesisConfig, ledger: Ledger, updates: list) -> No
     HypothesisSearch(config).validate_updates(ledger.search, updates)
 
 
-def official_reason(
-    config: HypothesisConfig, ledger: Ledger, *, candidate_ready: bool = True
-) -> str | None:
-    """Why the trusted gates measure the reviewed candidate, or None when the budget is spent."""
-    return HypothesisSearch(config).official_due(
-        records=ledger.records, candidate_ready=candidate_ready
-    )
+def official_reason(*, candidate_ready: bool = True) -> str | None:
+    """Why the trusted gates measure the reviewed candidate, or None when it is not ready."""
+    return cadence.official_due(candidate_ready=candidate_ready)
 
 
 def pareto_conflict(
