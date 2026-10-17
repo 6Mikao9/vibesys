@@ -22,6 +22,7 @@ import {
   endedRunStatus,
   hasRunEnded,
   type MutableCoreState,
+  type QuotaPause,
   type QuotaState,
 } from './state.js';
 import {ledgerWith} from './token-usage.js';
@@ -256,32 +257,40 @@ function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {
   return applyRunStatus(state, data.status);
 }
 
+/** The pause a `quota_paused` event on a named limit (`condition`) sets, waiting on nothing yet. */
+function pauseFromEvent(
+  data: Extract<RunEventData, {kind: 'quota_paused'}>,
+  condition: QuotaPause['condition'],
+): QuotaPause {
+  return {
+    provider: data.provider,
+    condition,
+    detail: data.detail,
+    resetsAt: data.resets_at ?? null,
+    resumesAt: data.resumes_at ?? null,
+    policy: data.policy ?? null,
+    fallback:
+      data.fallback_provider == null
+        ? null
+        : {provider: data.fallback_provider, model: data.fallback_model ?? null},
+    waiting: null,
+  };
+}
+
 /**
  * The quota state after `event`: a pause sets it, any event that settles the stop clears it.
  * `provider_switched` additionally records what it switched, in `lastSwitch`: that fact is
  * sticky, so every branch carries the previous one forward rather than dropping it.
+ *
+ * An outage (`unavailable`) never pauses the run: only the stopped turn waits, while other
+ * turns go on and may hold a real pause. So its events neither set nor settle the pause.
  */
 function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): QuotaState {
   const data = event.data;
   switch (data?.kind) {
     case 'quota_paused':
-      return {
-        ...quota,
-        sequence,
-        pause: {
-          provider: data.provider,
-          condition: data.condition,
-          detail: data.detail,
-          resetsAt: data.resets_at ?? null,
-          resumesAt: data.resumes_at ?? null,
-          policy: data.policy ?? null,
-          fallback:
-            data.fallback_provider == null
-              ? null
-              : {provider: data.fallback_provider, model: data.fallback_model ?? null},
-          waiting: null,
-        },
-      };
+      if (data.condition === 'unavailable') return quota;
+      return {...quota, sequence, pause: pauseFromEvent(data, data.condition)};
     case 'quota_waiting':
       // A wait belongs to the pause it waits out; one with no pause folded has nothing to show.
       return quota.pause === null
@@ -297,6 +306,7 @@ function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): Q
         : {...quota, sequence, pause: {...quota.pause, waiting: null}};
     case 'quota_resumed':
     case 'quota_abandoned':
+      if (data.condition === 'unavailable') return quota;
       return {...quota, sequence, pause: null};
     case 'provider_switched':
       return {

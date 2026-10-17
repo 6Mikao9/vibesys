@@ -9,7 +9,7 @@ is testable over all inputs without a clock.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -106,6 +106,109 @@ class Switch:
 type QuotaDecision = Hold | WaitFor | GiveUp | Switch
 
 
+@dataclass(frozen=True, slots=True)
+class OutagePolicy:
+    """How long one turn waits out a provider outage, and how often it tries again.
+
+    An outage (``QuotaCondition.UNAVAILABLE``) names no limit and no reset time: the
+    provider kept failing with transient errors. Nobody can decide anything about it,
+    so unlike a quota it never waits for the operator. The turn is sent again after
+    ``first_wait_seconds``, then after waits that double up to ``max_wait_seconds``,
+    until ``budget_seconds`` have passed since the turn's first stop; then the turn
+    fails with the error, as it did before there was a gate, or, with
+    ``switch_when_spent``, the run switches to its fallback provider.
+    :func:`outage_policy_for` derives the policy a run's quota policy asks for.
+    """
+
+    budget_seconds: float = 6 * 3600.0
+    """Six hours. It is the longest one turn may already run (vs_agent's
+    ``DEFAULT_TURN_TIMEOUT_S``), so waiting it out holds a turn no longer than working
+    does. It covers the gateway outages seen on live runs (503 "No available accounts"
+    for hours on 2026-10-16) and an incident at a provider, which is usually resolved
+    within hours. An outage longer than that is more likely a revoked account or a
+    removed model, which waiting cannot fix, and the run should end and say so.
+
+    The budget is per turn and bounds only the waiting. Sooner ends come from outside
+    the policy: a stop request or a cancellation of the turn ends a wait at once, and
+    no wait runs past the run's deadline (``decide_outage`` takes the time the run has
+    left), so an outage never holds a run beyond its deadline."""
+    first_wait_seconds: float = 60.0
+    max_wait_seconds: float = 600.0
+    """Ten minutes. Each attempt also spends agentshim's own retries (about fifteen
+    minutes, ``TRANSIENT_RETRY_DELAYS_S``) before it stops again, so a stalled turn
+    probes the provider about every 25 minutes at most."""
+    switch_when_spent: bool = False
+    """Switch to the fallback provider once the budget is spent, instead of failing."""
+
+    def __post_init__(self) -> None:
+        """Reject values no decision can use."""
+        values = (self.budget_seconds, self.first_wait_seconds, self.max_wait_seconds)
+        if not all(math.isfinite(value) and value > 0 for value in values):
+            message = f"outage policy seconds must be positive numbers, got {values!r}"
+            raise ValueError(message)
+        if self.first_wait_seconds > self.max_wait_seconds:
+            message = "first_wait_seconds must not exceed max_wait_seconds"
+            raise ValueError(message)
+
+
+PROVIDER_OUTAGE = OutagePolicy()
+
+
+def outage_policy_for(quota: QuotaPolicy, base: OutagePolicy = PROVIDER_OUTAGE) -> OutagePolicy:
+    """The outage policy a run with quota policy ``quota`` follows.
+
+    ``pause`` and ``wait`` wait an outage out for the whole budget: an outage names
+    nothing an operator could decide, so it never waits for one. ``fail`` and
+    ``fallback`` say the run should not sit on a provider that cannot serve it, so
+    they allow one backoff step (``first_wait_seconds``, enough for a blip to pass);
+    then ``fail`` fails the turn and ``fallback`` switches to the fallback provider.
+    """
+    if quota.action in (QuotaAction.PAUSE, QuotaAction.WAIT):
+        return base
+    return replace(
+        base,
+        budget_seconds=base.first_wait_seconds,
+        switch_when_spent=quota.action is QuotaAction.FALLBACK,
+    )
+
+
+def decide_outage(
+    policy: OutagePolicy, *, stop: int, elapsed: float, run_left: float | None
+) -> WaitFor | GiveUp | Switch:
+    """Decide what to do about the ``stop``-th outage stop of one turn (the first is 1).
+
+    ``elapsed`` is the time since the turn's first outage stop and ``run_left`` the time
+    to the run's deadline (``None`` for a run without one). A wait never runs past the
+    budget nor past the deadline, so the time from the first stop to the last attempt is
+    at most the budget, and a turn never waits once the run is out of time. A spent
+    budget switches providers under ``switch_when_spent``; a deadline never does.
+    """
+    if run_left is not None and run_left <= 0:
+        return GiveUp("the run reached its deadline while the provider was unavailable")
+    remaining = policy.budget_seconds - elapsed
+    if remaining <= 0:
+        end = Switch if policy.switch_when_spent else GiveUp
+        return end(
+            f"the provider stayed unavailable for {describe_seconds(elapsed)}, "
+            f"the whole {describe_seconds(policy.budget_seconds)} outage budget"
+        )
+    doublings = min(max(stop - 1, 0), 32)  # 2**32 minutes is past any cap
+    wanted = min(policy.first_wait_seconds * 2.0**doublings, policy.max_wait_seconds)
+    bound = remaining if run_left is None else min(remaining, run_left)
+    return WaitFor(min(wanted, bound))
+
+
+def describe_seconds(seconds: float) -> str:
+    """A duration in the largest units that keep it exact to the second: ``2 h 5 min``."""
+    whole = max(round(seconds), 0)
+    hours, rest = divmod(whole, 3600)
+    minutes, secs = divmod(rest, 60)
+    parts = [
+        f"{value} {unit}" for value, unit in ((hours, "h"), (minutes, "min"), (secs, "s")) if value
+    ]
+    return " ".join(parts) or "0 s"
+
+
 def capacity_returns_at(*, resets_at: float | None, now: float) -> float | None:
     """When capacity should be back: the provider's reset time plus the margin, if still ahead."""
     if resets_at is not None and resets_at + RESET_MARGIN_SECONDS > now:
@@ -139,10 +242,13 @@ def decide_quota(
     remaining = None if budget is None else budget - waited
     end = Switch if policy.action is QuotaAction.FALLBACK else GiveUp
     if remaining is not None and remaining <= 0:
-        return end(f"waited {waited:g}s for capacity, the whole budget")
+        return end(f"waited {describe_seconds(waited)} for capacity, the whole budget")
     wanted = capacity_wait(policy, resets_at=resets_at, now=now)
     if capacity_returns_at(resets_at=resets_at, now=now) is not None:
         if remaining is not None and wanted > remaining:
-            return end(f"capacity returns in {wanted:g}s, past the {remaining:g}s still allowed")
+            return end(
+                f"capacity returns in {describe_seconds(wanted)}, "
+                f"past the {describe_seconds(remaining)} still allowed"
+            )
         return WaitFor(wanted)
     return WaitFor(wanted if remaining is None else min(wanted, remaining))

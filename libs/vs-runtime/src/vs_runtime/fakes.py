@@ -46,8 +46,14 @@ from vs_sim.api.testing import FakeProcesses, ProcessScript
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vs_agent.api import CapacityStops
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
-    from vs_runtime._run_control import CapacityWaitEnd, RunControlChannel, RunControlTransition
+    from vs_runtime._run_control import (
+        CapacityWaitEnd,
+        PauseWake,
+        RunControlChannel,
+        RunControlTransition,
+    )
     from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
     from vs_sim.api import OutputSink, ProcessSpec, Threads
@@ -224,27 +230,48 @@ class FakeCapacityTimer:
         """Return the virtual epoch second."""
         return self._now
 
-    def wait_for_capacity(self, seconds: float, request: int) -> CapacityWaitEnd:
+    def wait_for_capacity(
+        self, seconds: float, request: int, turn: CapacityStops
+    ) -> CapacityWaitEnd:
         """Let ``during_capacity_wait`` act as the operator, else spend ``seconds`` of virtual time.
 
         The real channel then settles the wait with a zero timeout, so its outcome and its
-        transitions are the production ones.
+        transitions are the production ones. A cancelled ``turn`` spends no time.
         """
         self.capacity_waits.append(seconds)
         acted = self._during_capacity_wait is not None and self._during_capacity_wait(seconds)
-        if not acted:
+        if not acted and not turn.cancelled:
             self._now += seconds
-        return self._control.wait_for_capacity(0.0, request)
+        return self._control.wait_for_capacity(0.0, request, ended=lambda: turn.cancelled)
 
-    def wait_resumed(self, seconds: float) -> bool:
-        """Spend ``seconds`` of virtual time, or fewer when the operator resumes first."""
+    def wait_resumed(self, seconds: float, turn: CapacityStops) -> PauseWake:
+        """Spend ``seconds`` of virtual time, or fewer when the operator resumes first.
+
+        A cancelled ``turn`` spends no time.
+        """
         self.waits.append(seconds)
-        if self._operator_after is not None and self._operator_after < seconds:
-            self._now += self._operator_after
+        operator_first = self._operator_after is not None and self._operator_after < seconds
+        if turn.cancelled:
+            seconds = 0.0
+        elif operator_first and self._operator_after is not None:
+            seconds = self._operator_after
             self._control.resume()
-        else:
-            self._now += seconds
-        return self._control.wait_resumed(0.0)
+        self._now += seconds
+        return self._control.wait_resumed(0.0, ended=lambda: turn.cancelled)
+
+    def park_for_capacity(self, turn: CapacityStops, *, waiting: bool) -> int | None:
+        """Park on the real channel, as production does; a cancelled ``turn`` ends the park."""
+        return self._control.park_for_capacity(waiting=waiting, ended=lambda: turn.cancelled)
+
+    def wait_out(self, turn: CapacityStops, seconds: float) -> None:
+        """Spend ``seconds`` of virtual time holding one turn; ``waits`` records it.
+
+        Nothing ends the wait sooner: a test that cancels or stops a turn mid-wait runs the
+        production timer on the simulated threads instead.
+        """
+        del turn
+        self.waits.append(seconds)
+        self._now += seconds
 
 
 class FakeProjectMaterializationEffects:

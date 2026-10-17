@@ -299,13 +299,30 @@ class CoreAgentEventSink:
             where,
         )
 
-    def quota_resumed(self, provider: str, reason: QuotaResumeReason, where: Attribution) -> None:
-        """Emit that the paused turn is being sent again on the same provider."""
+    def quota_resumed(
+        self,
+        error: AgentQuotaError,
+        reason: QuotaResumeReason,
+        waited_seconds: float,
+        where: Attribution,
+    ) -> None:
+        """Emit that the stopped turn is being sent again on the same provider."""
         self._attributed(
-            CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider=provider, reason=reason), where
+            CoreEventType.QUOTA_RESUMED,
+            QuotaResumedData.model_validate(
+                {
+                    "provider": error.provider,
+                    "condition": error.condition.value,
+                    "reason": reason,
+                    "waited_seconds": waited_seconds,
+                }
+            ),
+            where,
         )
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
         """Emit that the turn ended with the quota error."""
         self._attributed(
             CoreEventType.QUOTA_ABANDONED,
@@ -314,6 +331,7 @@ class CoreAgentEventSink:
                 condition=error.condition.value,
                 detail=error.detail,
                 reason=reason,
+                waited_seconds=waited_seconds,
             ),
             where,
         )

@@ -6,9 +6,15 @@ export const QUOTA_BANNER_ID = 'quota_paused';
 /** The slash command text that resumes on the configured fallback. */
 export const RESUME_FALLBACK_ARGUMENT = 'fallback';
 
+/** Why the provider stopped, in the operator's words; one entry per condition that pauses the run. */
+const QUOTA_WHY: Readonly<Record<QuotaPause['condition'], string>> = {
+  quota_exhausted: 'is out of quota',
+  rate_limited: 'is rate limited',
+};
+
 /** What the banner says happened: the provider and why, in the operator's words. */
 export function quotaSummary(pause: QuotaPause): string {
-  const why = pause.condition === 'quota_exhausted' ? 'is out of quota' : 'is rate limited';
+  const why = QUOTA_WHY[pause.condition];
   return `${pause.provider} ${why}. The run is paused until you decide.`;
 }
 

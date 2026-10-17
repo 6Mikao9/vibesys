@@ -21,6 +21,7 @@ from vs_agent.cli_common import build_schema_hint
 from vs_agent.contracts import (
     DEFAULT_TURN_TIMEOUT_S,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentTurnResult,
     AgentTurnTimeoutError,
     SteerOutcome,
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
         AgentObserver,
         AgentSessionSpec,
         AgentTurnRequest,
+        CapacityStops,
     )
     from vs_sim.api import Threads
 
@@ -127,20 +129,50 @@ class TurnEvents:
         self.exhausted: list[agentshim.RateLimitStatus] = []
         #: Why the turn in flight was stopped for its reply, or ``None``.
         self.breach: str | None = None
+        #: Whether the caller cancelled the turn in flight.
+        self.cancelled = False
         self._guard = ReplyGuard()
         self._stop: Callable[[], None] | None = None
+        self._turn: CapacityStops | None = None
+        self._cancel_delivered = False
+        self._running = False
         self._steers = steers
 
-    def begin_turn(self, *, structured: bool, stop: Callable[[], None]) -> None:
-        """Start watching a turn; *stop* ends it when its reply crosses a limit."""
+    def begin_turn(
+        self, *, structured: bool, stop: Callable[[], None], turn: CapacityStops | None
+    ) -> None:
+        """Start watching a turn; *stop* ends it when its reply crosses a limit.
+
+        ``turn`` is the caller's record of the turn, when it keeps one. A cancellation
+        it already holds stays in force, and one that lands before the library runs the
+        turn (when an interrupt has nothing to stop) stops it at its first event.
+        """
         self.structured = structured
         self.exhausted = []
         self.breach = None
+        self.cancelled = turn is not None and turn.cancelled
         self._guard = ReplyGuard()
         self._stop = stop
+        self._turn = turn
+        self._cancel_delivered = False
+        self._running = False
+
+    def cancel(self, interrupt: Callable[[], None]) -> None:
+        """Stop the turn in flight now with *interrupt*, and record that it was stopped.
+
+        Once the library has run the turn (it emitted an event), *interrupt* reaches it, so
+        the turn's next event does not stop it again. Before that, an interrupt has nothing
+        to stop, and the turn's first event delivers the cancellation instead.
+        """
+        self.cancelled = True
+        if self._running:
+            self._cancel_delivered = True
+        interrupt()
 
     def on_event(self, event: agentshim.AgentEvent) -> None:
         """Translate and forward one library event, if anyone is listening."""
+        self._stop_if_cancelled()
+        self._running = True
         if isinstance(event, agentshim.SteerConsumed):
             self._steers.consumed(event.text)
         elif isinstance(event, agentshim.SteerRejected):
@@ -156,6 +188,16 @@ class TurnEvents:
         translated = shim_translation.event_from(event, structured=self.structured)
         if translated is not None:
             observer.on_event(translated)
+
+    def _stop_if_cancelled(self) -> None:
+        """Stop the turn once if its caller cancelled it, even before the library ran it."""
+        turn = self._turn
+        if turn is None or self._cancel_delivered or not turn.cancelled:
+            return
+        self._cancel_delivered = True
+        self.cancelled = True
+        if self._stop is not None:
+            self._stop()
 
     def _refuse_reply(self, text: str) -> bool:
         """Stop the turn the first time its reply crosses a limit; whether *text* is refused."""
@@ -196,6 +238,16 @@ class LaunchedSession:
         self.timeout = timeout
         self.log = log
         self.closed = False
+        self._turn: CapacityStops | None = None
+
+    def track(self, turn: CapacityStops | None) -> None:
+        """Make :meth:`cancel` reach ``turn``, the caller's record of the turn in flight."""
+        self._turn = turn
+
+    @property
+    def tracked(self) -> CapacityStops | None:
+        """The caller's record of the turn in flight, when it keeps one."""
+        return self._turn
 
     def close(self) -> None:
         """Release this logical session, stopping any turn it still owns."""
@@ -207,9 +259,15 @@ class LaunchedSession:
         """Stop an in-flight turn by terminating the provider process.
 
         A turn waiting out a transient provider error stops waiting and raises
-        that error instead of retrying.
+        that error instead of retrying, as a plain failure: a cancelled turn is
+        never a capacity stop for the caller to wait out. A turn the caller's
+        capacity gate is waiting on is cancelled through its tracked record,
+        which ends that wait and keeps the turn from being sent again.
         """
-        self.session.interrupt()
+        turn = self._turn
+        if turn is not None:
+            turn.cancel()
+        self.events.cancel(self.session.interrupt)
 
     def adopt(self, session_id: str) -> bool:
         """Continue ``session_id`` on the next turn, if the session accepts it.
@@ -256,10 +314,22 @@ def _run_turn(
         message = "agent session is closed"
         raise RuntimeError(message)
 
+    turn_record = live.tracked
+    if turn_record is not None and turn_record.cancelled:
+        # Cancelled since the caller last decided to send it, when an interrupt had no
+        # turn to stop: it is not sent. A cancel landing after this check is seen by
+        # ``begin_turn`` or, once the library runs the turn, at its first event.
+        message = "turn cancelled before it was sent"
+        raise agentshim.TurnCancelledError(message)
+
     expected = request.expected_provider_session_id
     events = live.events
     events.observer = observer
-    events.begin_turn(structured=request.output_schema is not None, stop=live.session.interrupt)
+    events.begin_turn(
+        structured=request.output_schema is not None,
+        stop=live.session.interrupt,
+        turn=turn_record,
+    )
     try:
         if expected is None:
             turn = _run(live, request, expect_conversation=None)
@@ -367,17 +437,19 @@ def _run(
     except agentshim.TurnTimeoutError as exc:
         raise shim_translation.timeout_error_from(exc) from exc
     except agentshim.TurnFailedError as exc:
-        classified = shim_translation.failure_from(
-            exc, provider=live.profile.name, exhausted=live.events.exhausted
-        )
-        if classified is not None:
-            raise classified from exc
         if held is not None and session.conversation_id is None:
             live.log(
                 f"the resumed {live.profile.name} turn failed; dropped the conversation "
                 "so the next turn starts fresh."
             )
-        raise
+        classified = shim_translation.failure_from(
+            exc, provider=live.profile.name, exhausted=live.events.exhausted
+        )
+        if classified is None or (
+            live.events.cancelled and isinstance(classified, AgentQuotaError)
+        ):
+            raise
+        raise classified from exc
 
 
 def _turn_request(live: LaunchedSession, request: AgentTurnRequest) -> agentshim.TurnRequest:

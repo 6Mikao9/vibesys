@@ -79,7 +79,8 @@ class RunControlBridge:
     had an id is recorded as ``op-<id>``, and one core already holds is not emitted again;
     any other has the identity ``control-<n>``, continuing the count of controls core
     already holds, so a resumed run never reuses an identity. A stop carries no result: the search
-    adopts its last choice and ends the run itself.
+    adopts its last choice and ends the run itself. The first poll also records the run's
+    deadline on the channel, for work on other threads that must not wait past it.
 
     With an ``inbox``, each poll also applies the inbox's requests, in id order, each as one
     control ``op-<control id>``; see the module docstring for how each applies once.
@@ -130,6 +131,7 @@ class RunControlBridge:
         self._consumption.newly_delivered(core, self._report_consumed)
         if not self._started:
             self._started = True
+            self._channel.set_run_deadline(core.run.deadline_at)
             self._count = len(core.run.controls)
             self._paused = core.run.status == RunStatus.PAUSED
             self._stopped = any(c.action == "stop" for c in core.run.controls)

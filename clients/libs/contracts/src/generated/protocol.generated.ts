@@ -573,7 +573,7 @@ export type WindowMinutes = number | null;
 export type Exhausted = boolean;
 export type Kind33 = "quota_paused";
 export type Provider7 = string;
-export type Condition = "quota_exhausted" | "rate_limited";
+export type Condition = "quota_exhausted" | "rate_limited" | "unavailable";
 export type Detail1 = string;
 export type ResetsAt1 = number | null;
 export type ResumesAt = number | null;
@@ -582,12 +582,15 @@ export type FallbackProvider = string | null;
 export type FallbackModel = string | null;
 export type Kind34 = "quota_resumed";
 export type Provider8 = string;
+export type Condition1 = ("quota_exhausted" | "rate_limited" | "unavailable") | null;
 export type Reason5 = "operator" | "wait_elapsed";
+export type WaitedSeconds = number;
 export type Kind35 = "quota_abandoned";
 export type Provider9 = string;
-export type Condition1 = "quota_exhausted" | "rate_limited";
+export type Condition2 = "quota_exhausted" | "rate_limited" | "unavailable";
 export type Detail2 = string;
 export type Reason6 = string;
+export type WaitedSeconds1 = number;
 export type Kind36 = "quota_waiting";
 export type Provider10 = string;
 export type ResumesAt1 = number | null;
@@ -1915,8 +1918,10 @@ export interface RateLimitUpdateData {
 /**
  * A turn stopped on a provider capacity limit and the run paused for it.
  *
- * ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or
- * ``rate_limited`` (sustained rate limiting); ``detail`` is the provider's
+ * ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit),
+ * ``rate_limited`` (sustained rate limiting) or ``unavailable`` (a provider outage:
+ * only the stopped turn waits, under its outage budget, and the run is not paused);
+ * ``detail`` is the provider's
  * diagnostic and ``resets_at`` the epoch second the provider said capacity
  * returns, when it said. The run stays paused until it resumes; ``resumes_at`` is the
  * epoch second the run's quota policy resumes it by itself, ``None`` when only the
@@ -1935,22 +1940,33 @@ export interface QuotaPausedData {
   fallback_model?: FallbackModel;
 }
 /**
- * A run paused on a capacity limit resumed on the same provider and sent the turn again.
+ * A turn stopped on a capacity limit is sent again on the same provider.
+ *
+ * ``condition`` is the limit it stopped on, as in ``quota_paused`` (``None`` in events
+ * recorded before the field existed). ``waited_seconds`` is how long that stop held the
+ * turn: for ``unavailable`` the turn's own backoff, during which the rest of the run went
+ * on; otherwise the run's pause.
  */
 export interface QuotaResumedData {
   kind: Kind34;
   provider: Provider8;
+  condition?: Condition1;
   reason?: Reason5;
+  waited_seconds?: WaitedSeconds;
 }
 /**
  * The quota policy ended a turn with the quota error instead of pausing or waiting longer.
+ *
+ * ``waited_seconds`` is how long this last stop held the turn before it ended (zero when
+ * it ended without waiting, and in events recorded before the field existed).
  */
 export interface QuotaAbandonedData {
   kind: Kind35;
   provider: Provider9;
-  condition: Condition1;
+  condition: Condition2;
   detail: Detail2;
   reason: Reason6;
+  waited_seconds?: WaitedSeconds1;
 }
 /**
  * At the operator's request, the run paused on a capacity limit resumes when capacity returns.

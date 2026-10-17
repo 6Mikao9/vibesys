@@ -470,8 +470,10 @@ class RateLimitUpdateData(EventPayload):
 class QuotaPausedData(EventPayload):
     """A turn stopped on a provider capacity limit and the run paused for it.
 
-    ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or
-    ``rate_limited`` (sustained rate limiting); ``detail`` is the provider's
+    ``condition`` is ``quota_exhausted`` (a usage, spend or billing limit),
+    ``rate_limited`` (sustained rate limiting) or ``unavailable`` (a provider outage:
+    only the stopped turn waits, under its outage budget, and the run is not paused);
+    ``detail`` is the provider's
     diagnostic and ``resets_at`` the epoch second the provider said capacity
     returns, when it said. The run stays paused until it resumes; ``resumes_at`` is the
     epoch second the run's quota policy resumes it by itself, ``None`` when only the
@@ -481,7 +483,7 @@ class QuotaPausedData(EventPayload):
 
     kind: Literal["quota_paused"] = "quota_paused"
     provider: str
-    condition: Literal["quota_exhausted", "rate_limited"]
+    condition: Literal["quota_exhausted", "rate_limited", "unavailable"]
     detail: str
     resets_at: float | None = None
     resumes_at: float | None = None
@@ -491,11 +493,19 @@ class QuotaPausedData(EventPayload):
 
 
 class QuotaResumedData(EventPayload):
-    """A run paused on a capacity limit resumed on the same provider and sent the turn again."""
+    """A turn stopped on a capacity limit is sent again on the same provider.
+
+    ``condition`` is the limit it stopped on, as in ``quota_paused`` (``None`` in events
+    recorded before the field existed). ``waited_seconds`` is how long that stop held the
+    turn: for ``unavailable`` the turn's own backoff, during which the rest of the run went
+    on; otherwise the run's pause.
+    """
 
     kind: Literal["quota_resumed"] = "quota_resumed"
     provider: str
+    condition: Literal["quota_exhausted", "rate_limited", "unavailable"] | None = None
     reason: Literal["operator", "wait_elapsed"] = "operator"
+    waited_seconds: float = 0.0
 
 
 class QuotaWaitingData(EventPayload):
@@ -536,13 +546,18 @@ class ProviderSwitchedData(EventPayload):
 
 
 class QuotaAbandonedData(EventPayload):
-    """The quota policy ended a turn with the quota error instead of pausing or waiting longer."""
+    """The quota policy ended a turn with the quota error instead of pausing or waiting longer.
+
+    ``waited_seconds`` is how long this last stop held the turn before it ended (zero when
+    it ended without waiting, and in events recorded before the field existed).
+    """
 
     kind: Literal["quota_abandoned"] = "quota_abandoned"
     provider: str
-    condition: Literal["quota_exhausted", "rate_limited"]
+    condition: Literal["quota_exhausted", "rate_limited", "unavailable"]
     detail: str
     reason: str
+    waited_seconds: float = 0.0
 
 
 class SubprocessOutputData(EventPayload):

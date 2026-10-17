@@ -73,6 +73,7 @@ export interface UsageMeter {
  */
 export interface QuotaPause {
   readonly provider: string;
+  /** Never `unavailable`: an outage holds only its own turn and never pauses the run. */
   readonly condition: 'quota_exhausted' | 'rate_limited';
   readonly detail: string;
   readonly resetsAt: number | null;

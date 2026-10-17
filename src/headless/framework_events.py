@@ -18,6 +18,7 @@ from vibesys.api import (
     RunConfiguredData,
     WinnerSelectedData,
     WorkspaceSnapshotData,
+    describe_seconds,
 )
 
 _EXCLUDED_PATHS_SHOWN = 5
@@ -63,19 +64,42 @@ def format_rate_limit_event(event: CoreEvent) -> str | None:
 def format_quota_event(event: CoreEvent) -> str | None:
     """Return the terminal rendering of a quota pause, resume or abandonment, or None."""
     data = event.data
-    if isinstance(data, QuotaResumedData):
-        by = "the wait elapsed" if data.reason == "wait_elapsed" else "resumed"
-        return f"[quota] {by}; sending the paused {data.provider} turn again"
-    if isinstance(data, ProviderSwitchedData):
-        return (
-            f"[quota] switched from {data.from_provider} to {data.to_provider} ({data.to_model}) "
-            f"by the {data.reason}; new sessions start there ({data.detail})"
-        )
-    if isinstance(data, QuotaAbandonedData):
-        return f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}; {data.reason}"
-    if not isinstance(data, QuotaPausedData):
-        return None
-    line = f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}; the run is paused"
+    match data:
+        case QuotaResumedData():
+            return _format_quota_resumed(data)
+        case ProviderSwitchedData():
+            return (
+                f"[quota] switched from {data.from_provider} to {data.to_provider} "
+                f"({data.to_model}) by the {data.reason}; new sessions start there ({data.detail})"
+            )
+        case QuotaAbandonedData():
+            return (
+                f"[quota] {data.provider} {_quota_condition(data.condition)}: "
+                f"{data.detail}; {data.reason}"
+            )
+        case QuotaPausedData():
+            return _format_quota_paused(data)
+        case _:
+            return None
+
+
+def _format_quota_resumed(data: QuotaResumedData) -> str:
+    waited = describe_seconds(data.waited_seconds)
+    if data.condition == "unavailable":
+        return f"[quota] {data.provider} turn waited {waited} out of an outage; sending it again"
+    by = "the wait elapsed" if data.reason == "wait_elapsed" else "resumed"
+    after = f" after {waited}" if data.waited_seconds > 0 else ""
+    return f"[quota] {by}{after}; sending the paused {data.provider} turn again"
+
+
+def _format_quota_paused(data: QuotaPausedData) -> str:
+    what = f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}"
+    if data.condition == "unavailable":
+        line = f"{what}; this turn waits, the run goes on"
+        if data.resumes_at is not None:
+            line += f"; trying again at {_utc(data.resumes_at)}"
+        return line
+    line = f"{what}; the run is paused"
     if data.resets_at is not None:
         line += f" (capacity returns {_utc(data.resets_at)})"
     if data.resumes_at is not None:
@@ -85,8 +109,34 @@ def format_quota_event(event: CoreEvent) -> str | None:
     return line
 
 
+_QUOTA_CONDITIONS = {
+    "quota_exhausted": "quota exhausted",
+    "rate_limited": "rate limited",
+    "unavailable": "unavailable",
+}
+
+
 def _quota_condition(condition: str) -> str:
-    return "quota exhausted" if condition == "quota_exhausted" else "rate limited"
+    return _QUOTA_CONDITIONS[condition]
+
+
+def outage_wait_seconds(event: CoreEvent) -> float:
+    """Seconds a turn waited out a provider outage in this event; zero for any other event.
+
+    A wait counts whether the turn was then sent again (``quota_resumed``) or the wait
+    ended it (``quota_abandoned``: cancelled, or the run's deadline came).
+    """
+    data = event.data
+    if isinstance(data, QuotaResumedData | QuotaAbandonedData) and data.condition == "unavailable":
+        return data.waited_seconds
+    return 0.0
+
+
+def format_outage_summary(seconds: float) -> str | None:
+    """The run-end line for the time turns spent waiting out provider outages, or None."""
+    if seconds <= 0:
+        return None
+    return f"[quota] turns waited out provider outages for {describe_seconds(seconds)} in total"
 
 
 def _utc(epoch: float) -> str:
