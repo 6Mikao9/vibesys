@@ -1480,6 +1480,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "instance records, and a /proc OS adapter",
     ),
     "src/server/transport/websocket.py": (EdgeKind.STATIC_FILES, "the web client"),
+    "src/launch/scripted_agents.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "the scripted implementer's source edits and the reads of the candidate it and the judge make",
+    ),
     "src/vibesys/config.py": (EdgeKind.INPUT_LOADER, "VibeSys configuration"),
     "src/vibesys/domains/rendering.py": (EdgeKind.PACKAGED_RESOURCE, "role templates"),
     "src/vibesys/inputs/_manifest.py": (EdgeKind.INPUT_LOADER, "the task manifest"),
