@@ -28,6 +28,7 @@ from vs_project.api import Project, RunResourceRequest
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageNotFoundError,
     EvaluatorPackageRequirement,
+    check_unread_paths,
     resolve_evaluator_package,
 )
 
@@ -118,6 +119,19 @@ class WorkspaceInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sources: tuple[WorkspaceSource, ...] = ()
+    unread: tuple[str, ...] = ()
+    """Workspace paths (files or directories) the evaluation never reads, such as agent notes.
+
+    A commit that changes only these is the same measured input as one an earlier run
+    already measured. Its official measurement then reuses that run instead of running
+    again, but only when the task sets ``[benchmark] reuse_agent_run = true``, the run was
+    the scope's only measurement submission, both runs had dedicated measurement resources
+    and the same stages, budgets and policy, and it ended in a pass or a workload failure.
+    Without the opt-in the paths still define the measured input, and every official
+    measurement runs fresh.
+    """
+
+    _check_unread = field_validator("unread")(check_unread_paths)
 
 
 class WorkspaceSource(BaseModel):
@@ -267,6 +281,12 @@ class BenchmarkCommand(InputCommand):
     #: passed. A task whose benchmark is meaningful without a passing accuracy check
     #: declares ``requires_accuracy = false``.
     requires_accuracy: StrictBool = True
+    #: Opt-in to answering an official measurement with the agent's own earlier evaluation of
+    #: the identical input (see ``docs/running-vibesys.md``). Off by default: an agent that
+    #: keeps a lucky first run and re-measures an unlucky one would bias the official score
+    #: upward, so only a task whose benchmark noise is small enough declares
+    #: ``reuse_agent_run = true``.
+    reuse_agent_run: StrictBool = False
 
     @model_validator(mode="after")
     def _one_result_contract(self) -> BenchmarkCommand:
@@ -686,6 +706,8 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
         lines.append(f"result_protocol = {manifest.benchmark.result_protocol}")
     if not manifest.benchmark.requires_accuracy:
         lines.append("requires_accuracy = false")
+    if manifest.benchmark.reuse_agent_run:
+        lines.append("reuse_agent_run = true")
     if manifest.benchmark.result is not None:
         lines.extend(
             [
@@ -698,6 +720,8 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
 
 
 def _append_workspace_sources(lines: list[str], manifest: InputManifest) -> None:
+    if manifest.workspace is not None and manifest.workspace.unread:
+        lines.extend(["", "[workspace]", f"unread = {_toml_array(manifest.workspace.unread)}"])
     if manifest.workspace is not None:
         for source in manifest.workspace.sources:
             lines.extend(

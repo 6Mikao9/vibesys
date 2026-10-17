@@ -234,6 +234,68 @@ def test_manifest_rejects_inconsistent_cross_references(
         InputManifest.model_validate(_manifest(overrides))
 
 
+_PLAIN_PATH = st.lists(
+    st.text(alphabet="abcXYZ019_-.", min_size=1, max_size=6).filter(
+        lambda part: part not in {".", ".."}
+    ),
+    min_size=1,
+    max_size=3,
+).map("/".join)
+
+
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(
+    unread=st.lists(
+        st.tuples(_PLAIN_PATH, st.booleans()).map(lambda item: item[0] + ("/" if item[1] else "")),
+        min_size=1,
+        max_size=3,
+    ),
+    sources=st.booleans(),
+)
+def test_unread_workspace_paths_round_trip_through_manifest_toml(
+    *, unread: list[str], sources: bool
+) -> None:
+    workspace = {"unread": unread, "sources": [_source()] if sources else []}
+    manifest = InputManifest.model_validate(_manifest({"workspace": workspace}))
+    assert InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest))) == manifest
+
+
+@pytest.mark.parametrize("reuse", [None, False, True])
+def test_reuse_agent_run_defaults_off_and_round_trips_at_the_benchmark_table(
+    *, reuse: bool | None
+) -> None:
+    benchmark: dict[str, object] = {"command": ["python", "bench.py"]}
+    if reuse is not None:
+        benchmark["reuse_agent_run"] = reuse
+    manifest = InputManifest.model_validate(_manifest({"benchmark": benchmark}))
+    assert manifest.benchmark.reuse_agent_run is bool(reuse)
+    rendered = render_input_manifest(manifest)
+    assert ("reuse_agent_run = true" in rendered) is bool(reuse)
+    assert InputManifest.model_validate(tomllib.loads(rendered)) == manifest
+
+
+@pytest.mark.parametrize(
+    ("benchmark", "section"),
+    [
+        ({"command": ["python", "bench.py"], "reuse_agent_runs": True}, "benchmark"),
+        ({"command": ["python", "bench.py"], "reuse_agent_run": "yes"}, "benchmark"),
+    ],
+)
+def test_a_misspelt_or_non_boolean_reuse_opt_in_is_rejected_naming_it(
+    benchmark: dict[str, object], section: str
+) -> None:
+    with pytest.raises(ValidationError, match=r"reuse_agent_run"):
+        InputManifest.model_validate(_manifest({section: benchmark}))
+
+
+@pytest.mark.parametrize(
+    "path", ["", "/abs", "../up", "a/../b", "a//b", "./a", "notes/*", "a?", "[ab]", ":(top)a", "!a"]
+)
+def test_an_unread_path_that_is_not_plain_is_rejected_naming_it(path: str) -> None:
+    with pytest.raises(ValidationError, match=r"unread path .* must be a plain relative"):
+        InputManifest.model_validate(_manifest({"workspace": {"unread": [path]}}))
+
+
 _VALID_TOML = """version = 1
 [agent]
 domain = "generic"

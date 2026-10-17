@@ -8,6 +8,7 @@ options and generated evaluation plans and check what the plan says about each.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -292,11 +293,21 @@ startup_timeout_seconds = 700
 
 
 def _slurm_view(
-    root: Path, *, service: bool, profile_command: tuple[str, ...] | None = ("profile",)
+    root: Path,
+    *,
+    service: bool,
+    profile_command: tuple[str, ...] | None = ("profile",),
+    sbatch_arguments: tuple[str, ...] = (),
+    dedicated_measurement_resources: bool = False,
 ) -> RunEnvironmentView:
     """The view of a real Slurm run whose capture command comes from the production wiring."""
     path = root / "slurm.toml"
-    path.write_text(_OPERATOR + (_SERVICE if service else ""), encoding="utf-8")
+    operator = _OPERATOR.replace(
+        "job_timeout_seconds = 1800\n",
+        f"job_timeout_seconds = 1800\nsbatch_arguments = {json.dumps(list(sbatch_arguments))}\n"
+        f"dedicated_measurement_resources = {json.dumps(dedicated_measurement_resources)}\n",
+    )
+    path.write_text(operator + (_SERVICE if service else ""), encoding="utf-8")
     settings = load_slurm_operator_settings(path)
     capture = trusted_profile_command(
         settings.config, settings.policy, profile_command, profiler_tree="profiler"
@@ -349,6 +360,61 @@ def test_profile_work_follows_the_evaluation_plan_and_the_capture_the_run_offers
     assert _config(made).profiling is wants_profile
     assert made.facts.task is not None
     assert set(made.facts.task.profile_fields) == (supplied if wants_profile else set())
+
+
+@pytest.mark.parametrize(
+    ("environment", "sbatch_arguments", "declared", "exclusive"),
+    [
+        ("host", (), False, False),
+        ("slurm", (), False, False),
+        ("slurm", ("--exclusive",), False, True),
+        ("slurm", ("--exclusive=user",), False, False),
+        ("slurm", ("--exclusive", "--oversubscribe"), False, False),
+        ("slurm", ("--exclusive", "--share"), False, False),
+        ("slurm", ("--gres=gpu:4", "-c", "64"), True, True),
+        ("slurm", ("--oversubscribe",), True, True),
+    ],
+)
+def test_measurement_plans_carry_dedicated_resources_only_when_the_executor_declares_them(
+    tmp_path: Path,
+    environment: str,
+    sbatch_arguments: tuple[str, ...],
+    *,
+    declared: bool,
+    exclusive: bool,
+) -> None:
+    """The executor's capability reaches every measurement plan; only then may one be reused."""
+    view = (
+        candidate_environment()
+        if environment == "host"
+        else _slurm_view(
+            tmp_path,
+            service=False,
+            sbatch_arguments=sbatch_arguments,
+            dedicated_measurement_resources=declared,
+        )
+    )
+    made = plan_of(resolved(tmp_path, environment=view))
+    assert made.facts.dedicated_measurement_resources is exclusive
+
+
+@pytest.mark.parametrize("opted_in", [False, True])
+def test_the_tasks_reuse_opt_in_reaches_the_facts_and_changes_the_recipe_identity(
+    tmp_path: Path, *, opted_in: bool
+) -> None:
+    """``[benchmark] reuse_agent_run`` is read into the plan the run's facts and recipe come from."""
+
+    def made(*, reuse: bool) -> CorePlan:
+        plan = TrustedEvaluationPlan(
+            accuracy_command="true", accuracy_timeout_seconds=11, reuse_agent_run=reuse
+        )
+        return plan_of(resolved(tmp_path, plan=plan))
+
+    chosen, other = made(reuse=opted_in), made(reuse=not opted_in)
+    assert chosen.facts.reuse_agent_run is opted_in
+    assert chosen.facts.task is not None
+    assert other.facts.task is not None
+    assert chosen.facts.task.recipe != other.facts.task.recipe
 
 
 @_SETTINGS

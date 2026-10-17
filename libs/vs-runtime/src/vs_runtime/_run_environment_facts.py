@@ -46,6 +46,11 @@ class ClusterEvaluationFacts:
         return self.settings.config.evaluation_capacity
 
     @property
+    def dedicated_measurement_resources(self) -> bool:
+        """Whether each trusted evaluation job holds its nodes alone (``SlurmConfig``)."""
+        return self.settings.config.dedicates_measurement_resources
+
+    @property
     def captures_profile(self) -> bool:
         """Whether the cluster runs a profile capture for this run."""
         return self.plan.profile_command is not None

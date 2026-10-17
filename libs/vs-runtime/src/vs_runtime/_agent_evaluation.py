@@ -293,6 +293,10 @@ class AgentEvaluationPolicy:
     accuracy_stage: str | None
     accuracy_gated: tuple[EvidenceKind, ...]
     """Evidence kinds that count only if the accuracy stage passed: the task's trust rule."""
+    dedicated_measurement_resources: bool = False
+    """The run's executor gives each job its resources alone (``MeasurementRecipe``)."""
+    reuse_agent_run: bool = False
+    """The task opts in to reusing this run for its official measurement."""
     purpose: Literal["baseline", "local-validation", "official", "profile"] = "local-validation"
 
     @classmethod
@@ -314,6 +318,8 @@ class AgentEvaluationPolicy:
             queue_allowance=recipe.queue_allowance,
             accuracy_stage=recipe.accuracy_stage,
             accuracy_gated=recipe.accuracy_gated,
+            dedicated_measurement_resources=recipe.dedicated_measurement_resources,
+            reuse_agent_run=recipe.reuse_agent_run,
             purpose=purpose,
         )
 
@@ -331,11 +337,16 @@ class AgentEvaluationPolicy:
             queue_allowance=self.queue_allowance,
             accuracy_stage=self.accuracy_stage,
             accuracy_gated=self.accuracy_gated,
+            dedicated_measurement_resources=self.dedicated_measurement_resources,
+            reuse_agent_run=self.reuse_agent_run,
         )
 
-    def plan(self, candidate: RevisionRef, *, now_at: float) -> MeasurementPlan:
+    def plan(
+        self, candidate: RevisionRef, *, measured_input: str, now_at: float
+    ) -> MeasurementPlan:
         """The ordered plan over the declared stages for this candidate, submitted now."""
-        return self.measurement.plan(candidate, purpose=self.purpose, now_at=now_at)
+        planned = self.measurement.plan(candidate, purpose=self.purpose, now_at=now_at)
+        return planned.model_copy(update={"measured_input": measured_input})
 
 
 class SnapshotWorkspace(Protocol):
@@ -347,6 +358,10 @@ class SnapshotWorkspace(Protocol):
 
     async def matches_revision(self, revision: str) -> bool:
         """Whether the workspace's content is exactly ``revision``."""
+        ...
+
+    async def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of ``revision`` reads."""
         ...
 
 
@@ -777,6 +792,7 @@ class AgentEvaluationBridge:
                 raise ToolRefusedError(ToolRefusal.WORKSPACE_GONE)
             scoped = self._scoped(scope)
             revision = await self._revision(workspace, scoped)
+            measured_input = await workspace.measured_input(revision)
             key = OwedKey(scope=scope, revision=revision, policy=self._policy_digest)
             owed = self._owed.find(key)
             charged = None if owed is None else self._charge_of(shell, owed)
@@ -791,7 +807,9 @@ class AgentEvaluationBridge:
             try:
                 event = AgentMeasurementRequested(
                     scope=scope,
-                    plan=self._policy.plan(revision_ref(revision), now_at=now),
+                    plan=self._policy.plan(
+                        revision_ref(revision), measured_input=measured_input, now_at=now
+                    ),
                     within=Within(limit=self._policy.measurement.budget()),
                     call_id=owed.call_id,
                 )

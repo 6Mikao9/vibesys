@@ -200,6 +200,50 @@ The timeout bounds the load after readiness and cannot exceed the remaining
 capture deadline. Profiling provides diagnostic evidence; accuracy and benchmark
 acceptance still use their own unchanged gates.
 
+A task may name workspace paths its evaluation never reads, such as the notes
+an agent keeps between turns:
+
+```toml
+[workspace]
+unread = ["NOTES.md", "evidence/"]
+```
+
+A commit that changes only these paths is the input an earlier run already
+measured, so the strategy's official measurement can reuse that run instead of
+submitting a second job. Each entry is a plain relative file or directory path,
+without wildcards.
+
+### Reusing the agent's own run
+
+A task that declares `reuse_agent_run = true` under `[benchmark]` lets the
+strategy's official measurement of a candidate reuse the agent's own earlier
+evaluation of it. The official result then names the run it reused and carries
+that run's records. All of these must hold:
+
+- The task opts in with `reuse_agent_run = true`. It defaults to `false`, and
+  both the official and the agent measurement plans must carry it. The
+  framework reads it from the project root at start, never from a candidate
+  tree, and changing it changes the measurement's identity.
+- The run is the scope's only admitted measurement run, of any input. If the
+  agent measured two inputs, none is reused.
+- It measured the same input (the commit, or a commit that differs only in
+  `workspace.unread` paths) with the same stages, execution budgets, queue
+  allowance and stage policy.
+- Both measurement plans have dedicated measurement resources: the executor
+  gives each job its GPUs and CPU cores alone. A Slurm executor declares this
+  with `dedicated_measurement_resources = true` in its configuration, or with a
+  bare `--exclusive` as the last node-sharing option in `sbatch_arguments`
+  (`--exclusive=user`, `--exclusive=mcs`, `--exclusive=topo`, `--oversubscribe`,
+  `--share` and `-s` share nodes and do not count).
+- It ended with a pass or a workload failure (the candidate's own failure). A
+  failure of the infrastructure, or an unclassified end, is never reused.
+
+Reuse is off by default because of optional stopping. An agent that can keep a
+lucky first run and re-measure an unlucky one makes the official score the
+better of its runs, which biases the score upward by up to about 0.4 standard
+deviations of the benchmark's run-to-run noise. Declare it only where that
+noise is small next to the differences the task cares about.
+
 ## Start from an Example
 
 The examples under `examples/<category>/` in a VibeSys source checkout are
@@ -355,6 +399,11 @@ Omitted configuration flags and the selected task are restored from
 may increase. Other recorded settings cannot change during a resume, including
 the runtime environment: a run launched with `--modal` resumes on Modal without
 repeating the flag.
+
+A run resumes only with a VibeSys whose persisted state has the same version.
+A change to that state's shape raises the version and has no migration, so a
+run written by an older version is refused with an error naming both versions;
+start a new run instead.
 
 For a SkyPilot run, the portable environment choice is recorded, while the
 operator profile and local profiles-file path must be supplied on the resuming

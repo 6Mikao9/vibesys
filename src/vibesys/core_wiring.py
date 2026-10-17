@@ -101,6 +101,10 @@ class EvaluationInputs:
     """The task requires a benchmark to pass the accuracy gate (``requires_accuracy``)."""
     builds: bool = False
     """The task declares a candidate build, measured before its other gates."""
+    dedicated_measurement_resources: bool = False
+    """The trusted executor runs each measurement on hosts it holds alone."""
+    reuse_agent_run: bool = False
+    """The task opts in to reusing the agent's run for the official measurement."""
 
 
 def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
@@ -129,6 +133,8 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
         profile_seconds=plan.profile_timeout_seconds,
         benchmark_needs_accuracy=EvidenceKind.BENCHMARK in plan.accuracy_gated,
         builds=plan.build is not None,
+        dedicated_measurement_resources=run.environment.dedicated_measurement_resources,
+        reuse_agent_run=plan.reuse_agent_run,
     )
 
 
@@ -138,8 +144,10 @@ def agent_evaluation_policy(
     """The plan an agent measures with: the run's configured gates, once each.
 
     It is built from the same recipe as the strategy's own trusted measurement plans, so an
-    agent measurement and a trusted one share one identity. A task's build stage, when the
-    recipe has one, comes first: the gates after it load what it built.
+    agent measurement's identity equals the strategy's official one in everything but the
+    purpose (``local-validation``). Core lets an official measurement reuse the scope's one
+    agent run of the same measured input (``vs_core``'s ``_measurement_reuse``). A task's build
+    stage, when the recipe has one, comes first: the gates after it load what it built.
     """
     builds = any(item.stage_id == "build" for item in recipe.stages)
     configured = tuple(

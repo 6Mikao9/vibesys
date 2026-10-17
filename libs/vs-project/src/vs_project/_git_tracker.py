@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import shutil
+from contextlib import suppress
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -286,6 +289,47 @@ class GitTracker:
             [".", *self._state_integration.metadata_restore_exclusions],
             style=PatchStyle.EXACT,
         )
+
+    def measured_input(self, commit: str, unread: Sequence[str]) -> str:
+        """The digest of what an evaluation of *commit* reads: its tree, less *unread*.
+
+        *unread* names workspace paths (files or directories) the task's evaluation never
+        reads, such as an agent's notes. Two commits that differ only there have the same
+        digest, so they are one measured input. The digest covers the sorted *unread* list
+        and every other tracked path,
+        VibeSys's own files included, as the patch from the baseline commit, which is part of
+        the digest too, so commits of different workspaces never share one.
+
+        A worktree of *commit* after :meth:`withhold_unread` holds exactly what this digests:
+        two commits with one digest are evaluated on byte-identical trees.
+        """
+        root = self._git.root_commit(commit)
+        if root is None:
+            message = f"cannot resolve workspace baseline for commit {commit}"
+            raise ValueError(message)
+        withheld = sorted({Path(path).as_posix().rstrip("/") for path in unread})
+        skipped = [f":(exclude){_wildcard_safe(path)}" for path in withheld]
+        patch = self._git.diff_patch(root, commit, [".", *skipped], style=PatchStyle.EXACT)
+        digest = hashlib.sha256(f"{root}\n".encode())
+        # The declaration is part of the input: one tree read under another declaration is
+        # another evaluated tree, since a different set of paths is withheld from it.
+        digest.update(f"{json.dumps(withheld)}\n".encode())
+        digest.update(patch.encode())
+        return f"sha256:{digest.hexdigest()}"
+
+    def withhold_unread(self, unread: Sequence[str]) -> None:
+        """Remove *unread* from this worktree, so it holds what :meth:`measured_input` digests.
+
+        Each path is removed with everything below it; a symlink is removed itself, never
+        followed. A path with a symlink or a file on the way to it names nothing in the
+        tree (the entry on the way is what the tree holds, and the digest covers it), so
+        it is left as it is. Call it on a fresh worktree of a commit, before evaluating it.
+        """
+        with open_workspace_tree(self.root) as tree:
+            for path in unread:
+                # A symlink on the way: nothing of the tree lies below it.
+                with suppress(WorkspacePathError):
+                    tree.remove(Path(path).as_posix().rstrip("/"))
 
     def diff_name_status(self, base: str, head: str) -> str | None:
         """Return the NUL-delimited ``--name-status`` diff between two commits.

@@ -30,6 +30,7 @@ from .common import (
     ScopeReopenNormalization,
     Seconds,
     Value,
+    unset,
 )
 from .evaluation_history import (
     EvaluationHistoryCursor,
@@ -95,6 +96,24 @@ class MeasurementPlan(Value):
     submitted_at: Seconds
     queue_allowance: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
+    dedicated_measurement_resources: bool = Field(default=False, exclude_if=unset)
+    """The executor gives this measurement its resources alone (``RunFacts``' capability).
+
+    Only a run with it may answer another measurement: an agent's evaluation on a shared
+    host is timed beside other work, so it can never stand for an official run.
+    """
+    reuse_agent_run: bool = Field(default=False, exclude_if=unset)
+    """The task opts in to reuse (``RunFacts.reuse_agent_run``); both runs must carry it."""
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The digest of what the evaluation reads at ``candidate``, when the runtime computed it.
+
+    The runtime owns it: the content of the candidate's tree without the paths the task
+    declares its evaluation never reads (an agent's notes, say). Two revisions with one
+    measured input are one measured candidate, so a notes-only commit is no new candidate.
+    An agent's evaluation plan carries it from the runtime's snapshot, and core sets it on a
+    Measure plan from the scope's checkpoint of the revision. None when nobody computed it;
+    then only the commit identifies the candidate.
+    """
     accuracy_stage: str | None = Field(default=None, min_length=1)
     """The stage whose pass is the correctness (accuracy) gate, named explicitly.
 
@@ -183,6 +202,22 @@ class EvidenceRef(Value):
     status: ObservationStatus
     artifacts: tuple[ArtifactRef, ...] = ()
     acceptance_receipt: EvidenceAcceptanceReceipt | None = None
+    reused_from: RequestId | None = Field(default=None, exclude_if=unset)
+    """The earlier submission whose finished job this record re-reads; None for a new run.
+
+    A reused record names its own submission as ``source_request`` and its own purpose and
+    candidate, but no new job ran: it is the result of ``reused_from``'s job, which core
+    checked carries the same evidence id and status (`vs_core._measurement_reuse`).
+    """
+
+    proof_kind: EvidenceKind | None = Field(default=None, exclude_if=unset)
+    """On a ``local-validation`` record, the proof kind its stage would have in an official run.
+
+    An agent's record is ``local-validation`` whatever stage it read, so it carries the kind of
+    its stage here (correctness for the accuracy stage, benchmark for the others). Core
+    answers an official measurement from it only with a record of exactly this kind, so a
+    reused result cannot swap two stages' kinds. None on any other record.
+    """
 
     @property
     def key(self) -> EvidenceKey:
@@ -199,8 +234,10 @@ class EvidenceRef(Value):
         tell from the record whether it ran alone. The rule: a measurement counts as
         trusted only when the framework took it of the exact revision it retains, and
         the framework always takes that measurement itself, serially, with the
-        official gates (``official`` purpose; purpose is not part of work identity, so
-        an executor may answer it from an identical earlier result). An agent record is
+        official gates (``official`` purpose). Core alone may answer it from an earlier
+        framework-run job of the same measured input, and only when that job's plan says
+        its executor held the hosts alone (``vs_core._measurement_reuse``); the records
+        it then adds are new ``official`` rows naming that job. An agent record is
         advice: it carries a kind that no eligibility requirement or ``accuracy_proof``
         ever selects. Without this, a candidate with an agent record and its official
         record would hold two CORRECTNESS rows and ``accuracy_proof`` would call them
@@ -209,6 +246,12 @@ class EvidenceRef(Value):
         if self.purpose == "local-validation" and self.kind in _PROOF_KINDS:
             raise ContractValidationError(
                 "kind", "a local-validation record cannot be correctness or benchmark proof"
+            )
+        if self.proof_kind is not None and (
+            self.kind is not EvidenceKind.LOCAL_VALIDATION or self.proof_kind not in _PROOF_KINDS
+        ):
+            raise ContractValidationError(
+                "proof_kind", "only a local-validation record names a correctness or benchmark kind"
             )
         return self
 
@@ -267,6 +310,8 @@ class OwnedJob(Value):
     terminal: bool = False
     released: bool = False
     evidence: tuple[EvidenceRef, ...] = ()
+    reuses: RequestId | None = Field(default=None, exclude_if=unset)
+    """The earlier submission whose finished job answers this one (`SubmitMeasurement.reuses`)."""
     pacing: ObservePacing = ObservePacing()
     wait: WaitOn | None = None
     """What the live job waits on: its next poll's timer, or the poll in flight. A terminal
@@ -448,6 +493,8 @@ class MeasurementIdentity(Value):
     stages: tuple[MeasurementStageIdentity, ...]
     accuracy_stage: str | None = Field(default=None, min_length=1)
     accuracy_gated: tuple[EvidenceKind, ...]
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The plan's ``measured_input``: what the evaluation reads at ``candidate``, if known."""
 
     @classmethod
     def from_plan(cls, plan: MeasurementPlan, candidate: RevisionRef) -> MeasurementIdentity:
@@ -455,6 +502,7 @@ class MeasurementIdentity(Value):
         return cls(
             purpose=plan.purpose,
             candidate=candidate,
+            measured_input=plan.measured_input,
             evaluator_digest=plan.evaluator_digest,
             workload_digest=plan.workload_digest,
             environment_digest=plan.environment_digest,
@@ -470,6 +518,19 @@ class MeasurementIdentity(Value):
             accuracy_stage=plan.accuracy_stage,
             accuracy_gated=tuple(sorted(set(plan.accuracy_gated))),
         )
+
+    def measures_same_input(self, other: MeasurementIdentity) -> bool:
+        """Whether ``other`` runs this evaluation on the same input, whatever its purpose.
+
+        Every field but the purpose must match, except the candidate: one commit is one input,
+        and two commits are one input when both measured inputs are known and equal (a commit
+        that changed only paths the evaluation never reads).
+        """
+        same_input = self.candidate == other.candidate or (
+            self.measured_input is not None and self.measured_input == other.measured_input
+        )
+        rest = {"purpose": self.purpose, "candidate": self.candidate, "measured_input": None}
+        return same_input and other.model_copy(update=rest) == self.model_copy(update=rest)
 
     @model_validator(mode="after")
     def canonical_stage_dag(self) -> MeasurementIdentity:
@@ -909,6 +970,13 @@ class SubmitMeasurement(RequestBase):
 
     kind: Literal["submit_measurement"] = "submit_measurement"
     plan: MeasurementPlan
+    reuses: RequestId | None = Field(default=None, exclude_if=unset)
+    """An earlier submission of the same input whose finished job answers this one.
+
+    Core sets it only under the reuse rule (`vs_core._measurement_reuse`). The runtime then
+    runs no job: it reads the earlier job's result again as this submission's evidence, each
+    record naming ``reuses`` as ``reused_from``.
+    """
 
 
 class ObserveOwnedJob(RequestBase):

@@ -268,6 +268,13 @@ class Workspace(Protocol):
         """Return the revision a snapshot with this exact label created, if any."""
         ...
 
+    async def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of *revision* reads.
+
+        Two revisions that differ only in paths the task declares unread share it.
+        """
+        ...
+
     async def pending_changes(self) -> list[str]:
         """List uncommitted workspace-relative paths."""
         ...
@@ -340,6 +347,15 @@ class Workspaces(Protocol):
 
         A ``from_revision`` the run's repository does not hold (unknown, malformed, or not a
         commit) raises :class:`WorkspaceRestoreError`; nothing is created.
+        """
+        ...
+
+    async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
+        """Create an isolated candidate of *revision* to evaluate, as its measured input reads it.
+
+        It holds *revision*'s files less the paths the task declares unread, so its files are
+        exactly what ``Workspace.measured_input`` digests: an evaluation reads nothing the
+        digest does not cover. Errors as :meth:`create_candidate`.
         """
         ...
 

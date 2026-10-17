@@ -489,7 +489,8 @@ class LoopInput:
             '[accuracy]\ncommand = ["python", ".vibesys/tasks/default/accuracy.py"]\n'
             "timeout_seconds = 30\n"
             '[benchmark]\ncommand = ["python", ".vibesys/tasks/default/benchmark.py"]\n'
-            "timeout_seconds = 30\nresult_protocol = 2\n",
+            # The task opts in to reusing the agent's own run for the official measurement.
+            "timeout_seconds = 30\nresult_protocol = 2\nreuse_agent_run = true\n",
             objective="Raise queue throughput.\n",
         )
         (task / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
@@ -506,6 +507,9 @@ class LoopInput:
             'name = "fake"\n'
             f'remote_workspace_root = "{remote}"\n'
             f"poll_interval_seconds = {poll_interval_s}\n"
+            # Each evaluation holds its node alone, so an agent's run may stand for the
+            # official one (``SlurmConfig.dedicated_measurement_resources``).
+            'sbatch_arguments = ["--exclusive"]\n'
             f'transport = {{ kind = "connector", command = {command} }}\n',
             encoding="utf-8",
         )

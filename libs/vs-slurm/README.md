@@ -72,6 +72,20 @@ host = "my-cluster"
 commands on `PATH`. Every transport process has the hard deadline configured by
 `transport_timeout_seconds`.
 
+`dedicated_measurement_resources` (default `false`) declares that each
+measurement job gets its GPUs and CPU cores to itself through the scheduler,
+though it may share the host with other jobs. Set it for a shared GPU node
+where `sbatch_arguments` allocate whole GPUs and cores (for example
+`--gres=gpu:4 -c 64`) but cannot pass `--exclusive` without taking the whole
+node from other users. A bare `--exclusive` as the last node-sharing option in
+`sbatch_arguments` implies it (`--exclusive=user`, `--exclusive=mcs`,
+`--exclusive=topo`, `--oversubscribe`, `--share` and `-s` share nodes, so they
+do not count). When it holds, an official measurement of a task that opts in
+may reuse the agent's own run of the identical input instead of queuing a
+second job; leave it `false` unless the declaration is
+true, because it is the only evidence that the two runs faced the same
+conditions.
+
 Every job is submitted with `--no-requeue`, after the operator's
 `sbatch_arguments`, and `--requeue` there is rejected: VibeSys retries a failed
 job itself, and a scheduler requeue would rerun stages that already finished.

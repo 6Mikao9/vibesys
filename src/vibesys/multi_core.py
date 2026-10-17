@@ -151,6 +151,8 @@ def _plan_for(launch_type: type[MultiRunLaunch]) -> Callable[[CoreRunContext], C
             evaluator_digest=evaluation.evaluator_digest,
             workload_digest=evaluation.workload_digest,
             environment_digest=evaluation.environment_digest,
+            dedicated_measurement_resources=evaluation.dedicated_measurement_resources,
+            reuse_agent_run=evaluation.reuse_agent_run,
             task=terms,
         )
         profiler_id = context.facts.profiler_id

@@ -56,6 +56,18 @@ class TurnFailureKind(StrEnum):
     """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
 
 
+def unset(value: object) -> bool:
+    """Whether an optional field is unset (None) or a flag is off, so serialization leaves it out.
+
+    For ``Field(exclude_if=unset)`` on optional fields and flags: left out when unset, a value that sets
+    none of them serializes, and so digests, budget keys and request ids, exactly as before the
+    field existed. That keeps identities stable; it does not make an older run resumable. Any
+    new field changes the envelope's shape and version, and core refuses an envelope of
+    another version (there is no migration).
+    """
+    return value is None or value is False
+
+
 class Value(BaseModel):
     """Persistable data, never live interfaces or mutable containers."""
 
@@ -758,6 +770,19 @@ class RunFacts(Value):
     evaluator_digest: str
     workload_digest: str
     environment_digest: str
+    dedicated_measurement_resources: bool = Field(default=False, exclude_if=unset)
+    """Each measurement job gets its GPUs and CPU cores to itself, as the run's executor declares.
+
+    The executor's capability, derived from how it submits jobs (a Slurm job with a bare
+    ``--exclusive`` or an operator declaration), never from a backend's name. A run timed so is timed as an official
+    measurement is, so only such a run may answer one (``vs_core._measurement_reuse``).
+    """
+    reuse_agent_run: bool = Field(default=False, exclude_if=unset)
+    """The task opts in to answering an official measurement with the agent's own run.
+
+    Declared by the task author. Off by default because reuse lets an agent re-measure until
+    a run suits it, which biases the official score upward by the benchmark's noise.
+    """
     artifacts: tuple[ArtifactRef, ...] = ()
     task: TaskTerms | None = None
     """What the task fixes; a search that measures candidates reads it with ``ctx.task``."""
@@ -864,6 +889,8 @@ class Observation(Value):
     status: ObservationStatus
     resource_id: ResourceId | None = None
     revision: RevisionRef | None = None
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The digest of what an evaluation reads at ``revision``, when the runtime computed it."""
     accepted: bool = False
     terminal: bool = False
     released: bool = False

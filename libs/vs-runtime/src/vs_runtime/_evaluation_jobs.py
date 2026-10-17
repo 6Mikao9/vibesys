@@ -8,6 +8,7 @@ consumes: status, release, progress, scientific stage results and evidence.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
@@ -219,6 +220,11 @@ class JobView:
     failure: MeasurementFailure | None
     operator_diagnostic: str = ""
 
+    def reused_from(self, source: RequestId) -> JobView:
+        """This view with each record marked as re-read from the run of submission ``source``."""
+        marked = tuple(item.model_copy(update={"reused_from": source}) for item in self.evidence)
+        return dataclasses.replace(self, evidence=marked)
+
 
 def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, identity, job and observer are independent facts of one view.
     poll: ExecutorPoll,
@@ -358,6 +364,13 @@ def _core_kind(kind: StageKind, purpose: str) -> EvidenceKind:
     return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
 
 
+def _proof_kind(kind: StageKind, purpose: str) -> EvidenceKind | None:
+    """The kind an official run would give this stage's record, named on an agent's record."""
+    if purpose != "local-validation" or kind is StageKind.PROFILE:
+        return None
+    return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
+
+
 def _evidence(
     terminal: ExecutorObservation,
     plan: MeasurementPlan,
@@ -382,6 +395,7 @@ def _evidence(
             EvidenceRef(
                 evidence_id=EvidenceId(root=item.evidence_id),
                 kind=_core_kind(item.kind, plan.purpose),
+                proof_kind=_proof_kind(item.kind, plan.purpose),
                 purpose=plan.purpose,
                 scope=subject.scope,
                 source_request=subject.request_id,
