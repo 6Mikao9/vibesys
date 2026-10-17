@@ -3,7 +3,13 @@
  * startup timeline, the log streams grouped by owner, and the stop and ended banners. The renderer
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
-import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
+import {
+  harnessName,
+  type LogOwner,
+  type RunEvent,
+  type RunOverview,
+  type Span,
+} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import {endedLook, type HostRun, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
@@ -120,10 +126,6 @@ export interface QuotaBannerView {
   readonly stopWaiting: Offer;
 }
 
-function providerName(provider: string): string {
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
-}
-
 /**
  * The quota banner, or null unless the run is paused by a usage limit. `time` words an epoch second
  * (the shell formats it in the user's time zone); nothing here reads a clock.
@@ -149,7 +151,7 @@ export function quotaBannerView(
       body: 'The run waits for you to resume it, or for its quota to return.',
     };
   }
-  const provider = providerName(pause.provider);
+  const provider = harnessName(pause.provider);
   if (waiting !== null) {
     return {
       ...offers,

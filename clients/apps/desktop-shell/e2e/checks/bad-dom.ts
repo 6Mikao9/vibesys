@@ -37,6 +37,10 @@ export const CLEAN_SCREEN = `
     </div>
     <p>The planner explained <code>total_ops_per_sec</code> and <code>0123456789abcdef0123</code>.</p>
     <div style="width:80px">we will pad and re-measure the queue</div>
+    <div><span>Claude Code · Opus 5.5 · Judge</span> <span>Perf evaluator</span> <span>Planner</span></div>
+    <div>Lock-free ring with per-slot sequence numbers</div>
+    <div><span data-mono-id>claude-opus-5-5</span> <span data-mono-id>perf-evaluator</span> <code>judge</code></div>
+    <div>queue-rs · mpmc</div>
     <div class="vs-pane-body" style="width:440px">
       <div style="max-width:100ch">The judge read the candidate source and found that it matches the declared outcome, so the idea passed.</div>
     </div>
@@ -75,6 +79,48 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     check: 'raw-text',
     message: /enum value "implementation-failed"/,
     html: `<div style="${PAGE}"><span>implementation-failed</span></div>`,
+  },
+  {
+    name: 'a model id with its vendor prefix dropped, as a label',
+    check: 'raw-text',
+    message: /code name "opus-5-5"/,
+    html: `<div style="${PAGE}"><span class="chip">opus-5-5</span></div>`,
+  },
+  {
+    name: 'a model id in a chip',
+    check: 'raw-text',
+    message: /registry id "claude-opus-5-5"/,
+    html: `<div style="${PAGE}"><span class="chip">claude-opus-5-5</span></div>`,
+  },
+  {
+    name: 'a role id as a title',
+    check: 'raw-text',
+    message: /registry id "judge"/,
+    html: `<div style="${PAGE}"><h2>judge</h2></div>`,
+  },
+  {
+    name: 'a role id after a separator and in a short phrase',
+    check: 'raw-text',
+    message: /registry id "perf-evaluator"/,
+    html: `<div style="${PAGE}"><span>agent turn · perf-evaluator</span> <span>waiting after judge</span></div>`,
+  },
+  {
+    name: 'a harness id as a label',
+    check: 'raw-text',
+    message: /registry id "claude"/,
+    html: `<div style="${PAGE}"><span>claude</span></div>`,
+  },
+  {
+    name: 'a harness name in lowercase',
+    check: 'raw-text',
+    message: /lowercase name "claude code"/,
+    html: `<div style="${PAGE}"><span>claude code</span></div>`,
+  },
+  {
+    name: 'a role name in lowercase',
+    check: 'raw-text',
+    message: /lowercase name "perf evaluator"/,
+    html: `<div style="${PAGE}"><span>Run · perf evaluator</span></div>`,
   },
   {
     name: 'a template hole, undefined, NaN, null and a hash in the text',

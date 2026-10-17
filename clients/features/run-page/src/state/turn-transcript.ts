@@ -5,7 +5,7 @@
  * selected span and the spans under it name the turns, each turn's entries are folded as its own
  * sequence (`transcriptBySpan`), and the turns follow in the order their spans started.
  */
-import type {Span} from '@vibesys/contracts';
+import {roleName, type Span} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import {type TranscriptEntry, transcriptBySpan} from '@vibesys/run-state/transcript';
@@ -153,7 +153,7 @@ function replyRow(entry: TranscriptEntry, author: string): TurnRow {
 }
 
 function rowOf(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
-  const agent = entry.agentKind === undefined ? 'Agent' : plain(entry.agentKind);
+  const agent = entry.agentKind === undefined ? 'Agent' : roleName(entry.agentKind);
   switch (entry.kind) {
     case 'assistant':
       return messageRow(entry, 'reply', agent);

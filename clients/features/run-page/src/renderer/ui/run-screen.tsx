@@ -1,3 +1,4 @@
+import {roleName} from '@vibesys/contracts';
 import {type CoreState, EMPTY_LEDGER} from '@vibesys/run-state';
 import {
   Banner,
@@ -38,6 +39,7 @@ import {
   routeLevel,
   runNow,
   runPhase,
+  stepLabel,
   stopBannerView,
   streamLines,
   timelineView,
@@ -286,9 +288,11 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
   const opened: Route = {...route, step: null, item: null};
   if (zoomed.idea !== null)
     items.push({id: 'idea', label: markdownToPlain(zoomed.idea.title), to: opened});
-  if (zoomed.agent !== null) items.push({id: 'agent', label: zoomed.agent.role, to: opened});
+  if (zoomed.agent !== null) {
+    items.push({id: 'agent', label: roleName(zoomed.agent.role), to: opened});
+  }
   if (zoomed.step !== null) {
-    const label = zoomed.step.role ?? zoomed.step.title;
+    const label = stepLabel(zoomed.step);
     items.push({id: 'step', label, to: {...route, item: null}});
   }
   if (zoomed.item !== null) items.push({id: 'item', label: zoomed.item, to: route});

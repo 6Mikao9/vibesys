@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, test} from '@playwright/test';
+import {rawTextOf} from './checks/screen-check.js';
 import {type FakeHostWindow, listed, open, SEED, server, sidebar} from './world.js';
 
 test('the sidebar lists live and recent runs, and a run that ends moves to Recent', async ({
@@ -54,6 +55,14 @@ test('Settings changes the theme at once and keeps it', async ({page}) => {
   await expect(page.getByRole('switch', {name: /Notify me/})).not.toBeChecked();
   const axe = await new AxeBuilder({page}).analyze();
   expect(axe.violations).toEqual([]);
+});
+
+test('the sidebar and Settings draw no code names', async ({page}) => {
+  await open(page);
+  expect(await rawTextOf(page)).toEqual([]);
+  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+  expect(await rawTextOf(page)).toEqual([]);
 });
 
 test('Match system follows the system appearance', async ({page}) => {

@@ -2,7 +2,8 @@
  * What the New run screen shows, derived from the machine's snapshot: the facts about the machine,
  * the "Ready to start" items, why Start is disabled, and the one-line summary of the run.
  */
-import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
+import {harnessName, modelName} from '@vibesys/contracts';
+import {acceleratorName, type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import type {BrandMarkName, CheckState, KeyValueItem} from '@vibesys/ui';
 import {
@@ -44,7 +45,7 @@ export function machineFacts(machine: MachineDescription): KeyValueItem[] {
       : [{key: 'VibeSys', value: `${checkout.version} at ${checkout.root}`, mono: true}]),
     {
       key: 'Hardware',
-      value: `${hardware.cpu_cores} cores${gpus === '' ? '' : `, ${gpus}`} (${hardware.accelerator})`,
+      value: `${hardware.cpu_cores} cores${gpus === '' ? '' : `, ${gpus}`} (${acceleratorName(hardware.accelerator)})`,
     },
     {
       key: 'Docker',
@@ -317,7 +318,7 @@ export function summary(context: NewRunContext): string | null {
     task,
     machineLabel(machine),
     ...(backend === null ? [] : [backendLabel(backend)]),
-    agent.model,
+    modelName(agent.model),
     rounds,
   ].join(' · ');
 }

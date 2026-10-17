@@ -2,6 +2,7 @@
  * paused, the operator's resume choices. Presentational: it renders the fact it is given and
  * reports clicks through the command port, the same one `RunControls` sends through. */
 
+import {harnessName, modelName} from '@vibesys/contracts';
 import type {RunCommand, RunCommandOutcome} from '@vibesys/run-session';
 import {type JSX, useState} from 'react';
 import type {QuotaBanner as QuotaBannerFact} from '../../state/quota-banner.js';
@@ -65,8 +66,8 @@ export function QuotaBanner({banner, command}: QuotaBannerProps): JSX.Element | 
             <button type="button" disabled={pending !== null} onClick={() => void resume(true)}>
               {pending === 'fallback'
                 ? 'Resuming…'
-                : `Resume on ${banner.fallback.provider}${
-                    banner.fallback.model === null ? '' : ` (${banner.fallback.model})`
+                : `Resume on ${harnessName(banner.fallback.provider)}${
+                    banner.fallback.model === null ? '' : ` (${modelName(banner.fallback.model)})`
                   }`}
             </button>
           )}

@@ -3,6 +3,7 @@
  * each agent drawn once under its first starter with `+ also under <role>` for fan-in, finished
  * subtrees folded (`agentTree`); and the pane of one opened agent: its facts and its turns.
  */
+import {modelName, roleName} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import {
   Button,
@@ -29,6 +30,7 @@ import {
 } from '../../../../state/index.js';
 import {roleSeries} from '../../../../state/role-series.js';
 import {duration} from '../../../../state/span-reading.js';
+import {statusWords} from '../../../../state/span-words.js';
 import type {ViewBase, WithCore} from '../props.js';
 
 export interface AgentsViewProps extends ViewBase {
@@ -87,11 +89,11 @@ function AgentLine(props: {
   return (
     <PickRow
       id={agent.id}
-      title={agent.role}
+      title={roleName(agent.role)}
       swatch={roleSeries(agent.role)}
       {...(view.compact || summary === '' ? {} : {summary})}
       guides={row.guides}
-      state={{tone: tone(agent.status), label: agent.status}}
+      state={{tone: tone(agent.status), label: statusWords(agent.status).label}}
       badges={also}
       figure={agent.turns.toLocaleString('en-US')}
       figureTone="muted"
@@ -195,7 +197,8 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
   const {agent, model, zoom} = props;
   const spans = model.trace.spans;
   const turns = useMemo(() => agentTurns(spans, agent.id), [spans, agent.id]);
-  const modelName = agentModel(agent, props.core);
+  const agentModelId = agentModel(agent, props.core);
+  const shownModel = agentModelId === null ? null : modelName(agentModelId);
   const spent = tokensByAgent(spans, props.tokens).get(agent.id);
   const spentLine = spent === undefined ? null : tokensLine(spent);
   const parents = agent.startedBy
@@ -205,33 +208,33 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
     <Stack gap="space-3">
       <KeyValue
         items={[
-          {key: 'role', value: agent.role},
-          {key: 'model', value: modelName ?? 'the run’s default', mono: modelName !== null},
+          {key: 'Role', value: roleName(agent.role)},
+          {key: 'Model', value: shownModel ?? 'The run’s default'},
           {
-            key: 'started by',
+            key: 'Started by',
             value:
               parents.length === 0
-                ? 'the search'
+                ? 'The search'
                 : parents.map(parent => (
                     <Button
                       key={parent.id}
                       size="sm"
                       variant="quiet"
-                      text={parent.role}
+                      text={roleName(parent.role)}
                       press={() => zoom({type: 'open-agent', agent: parent.id})}
                     />
                   )),
           },
-          {key: 'turns', value: String(agent.turns)},
+          {key: 'Turns', value: String(agent.turns)},
           ...(spent === undefined || spentLine === null
             ? []
             : [
                 {
-                  key: 'tokens',
+                  key: 'Tokens',
                   value: <span title={tokensTitle(spent)}>{spentLine}</span>,
                 },
               ]),
-          {key: 'status', value: agent.status},
+          {key: 'Status', value: statusWords(agent.status).label},
         ]}
       />
       <TurnList turns={turns} clock={props.clock} tokens={props.tokens} zoom={zoom} />
@@ -266,7 +269,7 @@ function TurnList(props: {
             id={turn.span}
             lead={String(turn.number)}
             title={turn.headline ?? `Turn ${turn.number}`}
-            state={{tone: tone(turn.status), label: turn.status}}
+            state={{tone: tone(turn.status), label: statusWords(turn.status).label}}
             {...(end === null ? {} : {figure: duration(end - turn.startedAt)})}
             figureTone="muted"
             {...(measure === null ? {} : {measure: {...measure, size: 'line' as const}})}

@@ -6,13 +6,6 @@
  */
 import {type AgentChoice, defaultRole, type Form} from './form.js';
 
-/** A role id as a table label: its words, capitalised (`multi-implementer`: `Multi implementer`). */
-export function roleLabel(role: string): string {
-  const words = role.split(/[-_.]+/).filter(word => word !== '');
-  const text = words.join(' ');
-  return text === '' ? role : text.charAt(0).toUpperCase() + text.slice(1);
-}
-
 /** What the roles named like these usually do, by the last word of their id; copy only. */
 const SUMMARIES: readonly (readonly [string, string])[] = [
   ['orchestrator', 'Plans each round'],

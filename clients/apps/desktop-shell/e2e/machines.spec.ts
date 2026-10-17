@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {rawTextOf} from './checks/screen-check.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -159,4 +160,10 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
   // New run here opens New run.
   await page.getByRole('button', {name: 'New run here'}).click();
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+});
+
+test('the machines screen names its harnesses and hardware, never their ids', async ({page}) => {
+  await openMachines(page);
+  await expect(page.getByText('Claude Code · Codex installed')).toBeVisible();
+  expect(await rawTextOf(page)).toEqual([]);
 });

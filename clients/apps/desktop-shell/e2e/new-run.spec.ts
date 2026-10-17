@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {rawTextOf} from './checks/screen-check.js';
 import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeHostWindow, open, PROJECT, SEED} from './world.js';

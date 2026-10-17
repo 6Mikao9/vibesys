@@ -12,6 +12,7 @@ import {
   adoptionSpan,
   type GateReading,
   type IdeaSpec,
+  MODEL_A,
   planningSpan,
   rootSpan,
   Trace,
@@ -57,7 +58,7 @@ export function runHeader(trace: Trace, runId: string, objectives: readonly Axis
     {
       run_log_path: `logs/${runId}`,
       project_root: 'project',
-      model: 'example-model',
+      model: MODEL_A,
       objective: 'Raise queue throughput',
       search_policy: 'beam',
       benchmark_contract: true,

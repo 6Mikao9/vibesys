@@ -4,7 +4,7 @@
  * graph (`@vibesys/run-state/agents`) keeps only an agent's latest turn; the pane that lists every
  * turn reads the trace here, once per agent opened.
  */
-import type {Span} from '@vibesys/contracts';
+import {roleName, type Span} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import {stringAttr} from './span-reading.js';
@@ -31,7 +31,7 @@ export function agentTurns(spans: ReadonlyMap<string, Span>, agent: string): rea
     turns.push({
       span: span.id,
       number: turns.length + 1,
-      headline: title === undefined || title === null || title === '' ? null : title,
+      headline: title === undefined || title === null || title === '' ? null : roleName(title),
       status: span.status,
       startedAt: span.started_at,
       endedAt: span.ended_at ?? null,

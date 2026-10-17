@@ -5,6 +5,7 @@
  * kicker, title and facts); the views (`views/`) draw what is in them.
  */
 
+import {roleName} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
@@ -16,7 +17,10 @@ import {
   type RunMode,
   type RunPageAction,
   type RunPageState,
+  stepLabel,
+  stepTitle,
 } from '../../state/index.js';
+import {plain, statusWords} from '../../state/span-words.js';
 import {FramedPane} from './framed-pane.js';
 import {agentFolds, IdeasList, ModeSwitch} from './run-level.js';
 import {
@@ -60,7 +64,7 @@ function stepChip(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral'
   if (step.status === 'failed') return {tone: 'err', label: 'Failed'};
   return step.status === 'done'
     ? {tone: 'ok', label: 'Done'}
-    : {tone: 'neutral', label: step.status};
+    : {tone: 'neutral', label: statusWords(step.status).label};
 }
 
 function logsOptions(main: string): {value: RunMode; label: string}[] {
@@ -109,12 +113,16 @@ function AgentLevel(props: LevelProps & {readonly agent: AgentNode}): JSX.Elemen
     <Panes>
       <AgentsPane {...props} selected={agent.id} />
       <FramedPane
-        kicker={`agent · ${agent.role}`}
-        title={agent.activity.within?.title ?? agent.role}
+        kicker={`Agent · ${roleName(agent.role)}`}
+        title={agent.activity.within?.title ?? roleName(agent.role)}
         width="fill"
         enterKey={`agent ${agent.id}`}
         meta={
-          <Chip label={agent.status} tone={agent.status === 'running' ? 'live' : 'neutral'} dot />
+          <Chip
+            label={statusWords(agent.status).label}
+            tone={agent.status === 'running' ? 'live' : 'neutral'}
+            dot
+          />
         }
         header={agentHeader(view)}
       >
@@ -163,11 +171,9 @@ function StepPane(
   return (
     <FramedPane
       kicker={
-        step.role === null
-          ? step.kind.replaceAll('_', ' ')
-          : `${step.kind.replaceAll('_', ' ')} · ${step.role}`
+        step.role === null ? plain(step.kind) : `${plain(step.kind)} · ${roleName(step.role)}`
       }
-      title={step.title}
+      title={stepTitle(step)}
       width="fill"
       enterKey={`step ${step.span}`}
       meta={<Chip label={chip.label} tone={chip.tone} dot />}
@@ -218,15 +224,15 @@ function ItemLevel(
   return (
     <Panes>
       <FramedPane
-        kicker={step.role ?? step.kind.replaceAll('_', ' ')}
-        title={step.title}
+        kicker={step.role === null ? plain(step.kind) : stepLabel(step)}
+        title={stepTitle(step)}
         width="outline"
         header={stepHeader(view)}
       >
         <StepView {...view} />
       </FramedPane>
       <FramedPane
-        kicker="item"
+        kicker="Item"
         title={item}
         width="inspector"
         enterKey={`item ${item}`}

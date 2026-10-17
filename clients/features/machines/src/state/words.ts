@@ -2,7 +2,8 @@
  * How the Machines screen words a machine: its status, the one line under its name, and its facts,
  * each a function of what its last report said.
  */
-import type {MachineDescription} from '@vibesys/hosts';
+import {harnessName} from '@vibesys/contracts';
+import {acceleratorName, type MachineDescription} from '@vibesys/hosts';
 import {type Machine, type MachineStatus, machineStatus} from './machines.js';
 
 /** The tones the screen draws a status in (the design system's status tones). */
@@ -71,20 +72,13 @@ function hardwareText(described: MachineDescription): string {
   for (const gpu of gpus) counts.set(gpu.model, (counts.get(gpu.model) ?? 0) + 1);
   const shown = [...counts].map(([model, count]) => (count > 1 ? `${count}× ${model}` : model));
   const graphics =
-    shown.length === 0 ? 'no GPU' : `${shown.join(', ')} (${ACCELERATORS[accelerator]})`;
+    shown.length === 0 ? 'no GPU' : `${shown.join(', ')} (${acceleratorName(accelerator)})`;
   return `${cpu_cores} CPU cores · ${graphics}`;
 }
 
-const ACCELERATORS: Readonly<Record<MachineDescription['hardware']['accelerator'], string>> = {
-  cpu: 'CPU only',
-  cuda: 'CUDA',
-  rocm: 'ROCm',
-  metal: 'Metal',
-};
-
 function dockerText(described: MachineDescription): string {
   const {docker} = described;
-  return 'version' in docker ? `docker ${docker.version}` : `not reachable: ${docker.reason}`;
+  return 'version' in docker ? `Docker ${docker.version}` : `not reachable: ${docker.reason}`;
 }
 
 function harnessText(described: MachineDescription): string {

@@ -6,6 +6,7 @@
  *
  * Pure over the candidates the run folded and the run clock; the views add presses and layout.
  */
+import {roleName} from '@vibesys/contracts';
 import type {
   Candidate,
   CandidateAttempt,
@@ -13,9 +14,11 @@ import type {
   CandidateStep,
 } from '@vibesys/run-state/candidates';
 import {figureOf} from './ideas-view.js';
+import {stepLabel, stepTitle} from './names.js';
 import {roleSeries} from './role-series.js';
 import type {Direction, RunModel} from './run-model.js';
-import {duration, formatValue, ratio, words} from './span-reading.js';
+import {duration, formatValue, ratio} from './span-reading.js';
+import {plain} from './span-words.js';
 
 /** How much of the run the Timeline shows. */
 export type TimelineRange = 'hour' | 'day' | 'all';
@@ -122,6 +125,8 @@ export function stepSegments(
   return steps.map(step => {
     const end = endOf(step.startedAt, step.endedAt, now);
     const took = end > step.startedAt ? [duration(end - step.startedAt)] : [];
+    const name = step.role === null ? plain(step.kind) : stepLabel(step);
+    const title = stepTitle(step);
     return {
       id: step.span,
       start: step.startedAt,
@@ -129,7 +134,9 @@ export function stepSegments(
       kind: stepKind(step),
       role: step.role,
       ...(step.role === null ? {} : {series: roleSeries(step.role)}),
-      label: [step.role ?? words(step.kind), step.title, ...took].join(' · '),
+      label: [name, ...(title.toLowerCase() === name.toLowerCase() ? [] : [title]), ...took].join(
+        ' · ',
+      ),
     };
   });
 }
@@ -262,8 +269,8 @@ export function legendItems(
   legend: TimelineLegend,
 ): readonly {readonly label: string; readonly series?: number; readonly hatched?: boolean}[] {
   return [
-    ...legend.roles.map(({role, series}) => ({label: role, series})),
-    ...(legend.gates ? [{label: 'gate', hatched: true}] : []),
+    ...legend.roles.map(({role, series}) => ({label: roleName(role), series})),
+    ...(legend.gates ? [{label: 'Gate', hatched: true}] : []),
   ];
 }
 
@@ -320,15 +327,15 @@ export interface AttemptLine {
 }
 
 function resultOf(attempt: CandidateAttempt): string {
-  if (attempt.outcome === 'running') return 'running';
+  if (attempt.outcome === 'running') return 'Running';
   const measured = attempt.measurement;
   const failed = measured?.failed ?? null;
-  if (failed !== null) return words(failed.check);
+  if (failed !== null) return plain(failed.check);
   if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
     return ratio(measured.vsBaseline);
   }
-  if (measured?.verdict !== null && measured?.verdict !== undefined) return words(measured.verdict);
-  return attempt.reason === null ? 'failed' : words(attempt.reason);
+  if (measured?.verdict !== null && measured?.verdict !== undefined) return plain(measured.verdict);
+  return attempt.reason === null ? 'Failed' : plain(attempt.reason);
 }
 
 const ATTEMPT_TONE: Readonly<Record<CandidateOutcome, AttemptLine['tone']>> = {
