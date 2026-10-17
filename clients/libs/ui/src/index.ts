@@ -15,7 +15,7 @@ export {
   type ButtonVariant,
 } from './components/button.js';
 export {Banner, type BannerTone, Card} from './components/card.js';
-export {Chart, type ChartPoint, type ChartTick} from './components/chart.js';
+export {Chart, type ChartPoint, type ChartSize, type ChartTick} from './components/chart.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
 export {Collapsible} from './components/collapsible.js';
 export {Dialog} from './components/dialog.js';
@@ -27,7 +27,16 @@ export {
   type ProseBlock,
   Stat,
 } from './components/display.js';
+export {DotLegend, type LegendItem} from './components/dot-legend.js';
 export {Field, TextInput} from './components/field.js';
+export {
+  Gantt,
+  type GanttRow,
+  type GanttSegment,
+  type GanttTick,
+  type GanttView,
+} from './components/gantt.js';
+export type {Guide} from './components/guides.js';
 export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
 export {
   type Align,
@@ -49,8 +58,27 @@ export {
   ToolCall,
   type ToolState,
 } from './components/message.js';
+export {Meter} from './components/meter.js';
+export {
+  Narrative,
+  Said,
+  Thought,
+  ToolGroup,
+  type ToolLine,
+} from './components/narrative.js';
+export {NewBelow} from './components/new-below.js';
+export {Pane, Panes, type PaneWidth} from './components/panes.js';
 export {type Completion, PathInput} from './components/path-input.js';
+export {
+  type HeaderColumn,
+  type ListHeader,
+  PickList,
+  PickRow,
+  type RowBar,
+} from './components/pick-list.js';
+export {Breadcrumb, type Crumb, type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
+export {SearchBox} from './components/search-box.js';
 export {type ChoiceOption, SegmentedControl} from './components/segmented-control.js';
 export {Select, type SelectOption} from './components/select.js';
 export {SidebarItem, SidebarSection, type SidebarTarget} from './components/sidebar.js';
