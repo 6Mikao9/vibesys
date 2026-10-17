@@ -51,6 +51,7 @@ from vs_runtime.api.infrastructure import (
     ControlStatus,
     RefusalReason,
     RunControlTransitionKind,
+    SteerMode,
     SteerRequest,
     SteerTarget,
     SteerTargetKind,
@@ -326,3 +327,105 @@ def test_a_steer_with_no_target_is_for_the_whole_run() -> None:
         "kind": "run",
         "id": None,
     }
+
+
+def _guidance_ends(run: _Run) -> list[str]:
+    return [
+        t.text for t in run.sink.transitions if t.kind is RunControlTransitionKind.GUIDANCE_ENDED
+    ]
+
+
+def _dropped_as(reason: InputDropReason) -> Callable[[CoreState], CoreState]:
+    def end(core: CoreState) -> CoreState:
+        (record,) = core.sessions.inputs
+        receipt = InputDropped(
+            input_id=record.input.input_id, target=record.input.target, reason=reason, at=3.0
+        )
+        inputs = (record.model_copy(update={"receipt": receipt}),)
+        return core.model_copy(
+            update={"sessions": core.sessions.model_copy(update={"inputs": inputs})}
+        )
+
+    return end
+
+
+def _reopened(core: CoreState) -> CoreState:
+    attempts = tuple(
+        row.model_copy(update={"generation": row.generation + 1})
+        if row.attempt_id.root == "live"
+        else row
+        for row in core.attempts.attempts
+    )
+    return core.model_copy(
+        update={"attempts": core.attempts.model_copy(update={"attempts": attempts})}
+    )
+
+
+@pytest.mark.parametrize(
+    ("end", "reason"),
+    [
+        (_dropped_as(InputDropReason.WITHDRAWN), "withdrawn"),
+        (_dropped_as(InputDropReason.OWNER_TERMINAL), "owner-terminal"),
+        (_dropped_as(InputDropReason.RUN_TERMINAL), "run-terminal"),
+        (_reopened, "its attempt was reopened"),
+    ],
+)
+def test_the_end_of_standing_guidance_is_reported_once_as_an_end_not_a_drop(
+    end: Callable[[CoreState], CoreState], reason: str
+) -> None:
+    run = _run()
+    core = _core()
+    run.bridge.poll(core, 1.0)
+    target = SteerTarget(kind=SteerTargetKind.ATTEMPT, id="live")
+    run.control.submit(
+        SteerRequest(control_id="keep", text="keep bf16", target=target, mode=SteerMode.STANDING)
+    )
+    for event in run.bridge.poll(core, 2.0):
+        core = step(core, event).state
+    assert _guidance_ends(run) == []
+
+    core = end(core)
+    run.bridge.poll(core, 3.0)
+    run.bridge.poll(core, 4.0)
+
+    assert _guidance_ends(run) == [f"standing guidance keep ended: {reason}"]
+    assert _drops(run) == []
+
+
+def _guided(run: _Run) -> CoreState:
+    """A run holding standing guidance for the attempt ``live``, as its bridge recorded it."""
+    core = _core()
+    run.bridge.poll(core, 1.0)
+    target = SteerTarget(kind=SteerTargetKind.ATTEMPT, id="live")
+    run.control.submit(
+        SteerRequest(control_id="keep", text="keep bf16", target=target, mode=SteerMode.STANDING)
+    )
+    for event in run.bridge.poll(core, 2.0):
+        core = step(core, event).state
+    return core
+
+
+@pytest.mark.parametrize(
+    "end",
+    [_dropped_as(InputDropReason.WITHDRAWN), _dropped_as(InputDropReason.RUN_TERMINAL), _reopened],
+)
+def test_a_restarted_bridge_does_not_report_an_end_the_run_already_holds(
+    end: Callable[[CoreState], CoreState],
+) -> None:
+    ended = end(_guided(_run()))
+
+    restarted = _run()
+    restarted.bridge.poll(ended, 3.0)
+    restarted.bridge.poll(ended, 4.0)
+
+    assert _guidance_ends(restarted) == []
+
+
+def test_guidance_whose_attempt_reopened_and_then_the_run_ended_is_reported_once() -> None:
+    run = _run()
+    core = _reopened(_guided(run))
+    run.bridge.poll(core, 3.0)
+    core = _dropped_as(InputDropReason.RUN_TERMINAL)(core)
+    run.bridge.poll(core, 4.0)
+
+    assert _guidance_ends(run) == ["standing guidance keep ended: its attempt was reopened"]

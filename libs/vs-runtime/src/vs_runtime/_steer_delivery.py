@@ -25,6 +25,7 @@ from vs_core.api import (
     CoreState,
     InputDropped,
     InputId,
+    InputMode,
     InvocationInputTarget,
     ItemInputTarget,
     RoleId,
@@ -34,13 +35,19 @@ from vs_core.api import (
     SessionInput,
     SessionInputReceived,
 )
-from vs_runtime._operator_control import RefusalReason, SteerTargetKind
+from vs_runtime._operator_control import (
+    RefusalReason,
+    SteerMode,
+    SteerRequest,
+    SteerTargetKind,
+    WithdrawRequest,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_core.api import ControlInput, InputTarget
-    from vs_runtime._operator_control import SteerTarget
+    from vs_runtime._operator_control import ControlRequest, SteerTarget
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,62 @@ def target_refusal(core: CoreState, target: SteerTarget) -> RefusalReason | None
     return None
 
 
+def standing_input_id(control_id: str) -> InputId:
+    """The input of the steer an operator sent under ``control_id``."""
+    return InputId(root=f"steer-op-{control_id}")
+
+
+def standing_in_force(core: CoreState, control_id: str) -> bool:
+    """Whether the steer sent under ``control_id`` is standing guidance core holds in force."""
+    input_id = standing_input_id(control_id)
+    return any(
+        row.input.input_id == input_id
+        and row.input.mode is InputMode.STANDING
+        and row.receipt is None
+        for row in core.sessions.inputs
+    )
+
+
+def _never_standing(core: CoreState, control_id: str) -> bool:
+    """Whether no later state could hold the steer sent under ``control_id`` in force.
+
+    So when core holds a control under that id that is not a steer, or the steer's input
+    that is not standing guidance or has ended. An id core does not hold yet may be a standing
+    steer the run has not taken; the run checks it again when it takes the withdrawal.
+    """
+    held = {control.control_id.root: control for control in core.run.controls}
+    control = held.get(f"op-{control_id}")
+    if control is not None and control.action != "steer":
+        return True
+    input_id = standing_input_id(control_id)
+    return any(
+        row.input.input_id == input_id
+        and (row.input.mode is not InputMode.STANDING or row.receipt is not None)
+        for row in core.sessions.inputs
+    )
+
+
+def request_refusal(core: CoreState, request: ControlRequest) -> RefusalReason | None:
+    """Why no later state of ``core`` could accept ``request``, or None.
+
+    ``core`` may be a poll behind the run and a refusal is the id's answer for good, so a
+    steer is refused only for a target no later state could take, and a withdrawal only for
+    a steer that is not, or is no longer, standing guidance; nothing else is refused here.
+    """
+    match request:
+        case SteerRequest(target=target):
+            return target_refusal(core, target)
+        case WithdrawRequest(withdraws=withdraws) if _never_standing(core, withdraws):
+            return RefusalReason.NOT_STANDING
+        case _:
+            return None
+
+
+def input_mode(mode: SteerMode) -> InputMode | None:
+    """The input mode core records for a steer sent in ``mode``; None is the next turn."""
+    return InputMode.STANDING if mode is SteerMode.STANDING else None
+
+
 def names_target(target: SteerTarget, held: InputTarget | None) -> bool:
     """Whether ``held``, core's input target of a recorded steer, is the one ``target`` names.
 
@@ -162,6 +225,7 @@ def steer_input(
             artifact=control.artifact,
             received_at=now_at,
             sequence=sequence,
+            mode=control.input_mode or InputMode.NEXT_TURN,
         )
     )
 
@@ -192,7 +256,13 @@ def _sent_as(input_id: InputId) -> str:
 
 
 class SteerConsumption:
-    """Reports each steer once, when core records that a turn received it or dropped it."""
+    """Reports each steer once: when a turn received it, or when it reaches no turn any more.
+
+    A next-turn steer ends when a turn receives it or core drops it. Standing guidance ends
+    when it is withdrawn, or its target or the run ends; guidance to an attempt also stops
+    reaching it when the attempt is reopened as a new generation, which core does not record
+    as an end, so that is reported here once too.
+    """
 
     def __init__(self) -> None:
         """Start with nothing reported; the first poll seeds what already happened."""
@@ -203,34 +273,59 @@ class SteerConsumption:
         core: CoreState,
         delivered: Callable[[str, str, str], None],
         dropped: Callable[[str], None],
+        ended: Callable[[str], None],
     ) -> None:
         """Report each steer settled since last time.
 
-        ``delivered(role, scope owner, invocation)`` for one a turn received, and
-        ``dropped(reason)`` for one core dropped because its target can no longer take input.
+        ``delivered(role, scope owner, invocation)`` for one a turn received,
+        ``dropped(reason)`` for one core dropped because its target can no longer take input,
+        and ``ended(reason)`` for standing guidance that no longer reaches any turn.
         Receipts recorded before the first call are not reported: a resumed run must not
         announce again what its previous process already announced.
         """
         settled = {
-            row.input.input_id: row.receipt
+            row.input.input_id: row
             for row in core.sessions.inputs
-            if row.receipt is not None and row.input.input_id.root.startswith("steer-")
+            if row.input.input_id.root.startswith("steer-")
+            and (row.receipt is not None or _superseded(core, row.input))
         }
         if self._reported is None:
             self._reported = set(settled)
             return
-        for input_id, receipt in settled.items():
+        for input_id, row in settled.items():
             if input_id in self._reported:
                 continue
             self._reported.add(input_id)
-            if isinstance(receipt, InputDropped):
+            receipt = row.receipt
+            if row.input.mode is InputMode.STANDING:
+                why = (
+                    receipt.reason.value
+                    if isinstance(receipt, InputDropped)
+                    else "its attempt was reopened"
+                )
+                ended(f"standing guidance {_sent_as(input_id)} ended: {why}")
+            elif isinstance(receipt, InputDropped):
                 dropped(f"steer {_sent_as(input_id)} reached no turn: {receipt.reason.value}")
-                continue
-            invocation = next(
-                row for row in core.sessions.invocations if row.invocation == receipt.invocation
-            )
-            delivered(
-                invocation.turn.session.role_id.root,
-                invocation.scope.owner.root,
-                receipt.invocation.invocation_id.root,
-            )
+            elif receipt is not None:
+                invocation = next(
+                    row for row in core.sessions.invocations if row.invocation == receipt.invocation
+                )
+                delivered(
+                    invocation.turn.session.role_id.root,
+                    invocation.scope.owner.root,
+                    receipt.invocation.invocation_id.root,
+                )
+
+
+def _superseded(core: CoreState, item: SessionInput) -> bool:
+    """Whether standing guidance for one attempt generation outlived it: the attempt reopened.
+
+    An input to an attempt names its generation, so a reopened attempt's turns never match it.
+    """
+    target = item.target
+    if item.mode is not InputMode.STANDING or not isinstance(target, ScopeInputTarget):
+        return False
+    return any(
+        row.attempt_id == target.scope.owner and row.generation > target.scope.generation
+        for row in core.attempts.attempts
+    )

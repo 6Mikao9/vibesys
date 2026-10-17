@@ -44,9 +44,11 @@ from vibesys.api import (
     PauseRequest,
     RefusalReason,
     RunStopped,
+    SteerMode,
     SteerRequest,
     SteerTarget,
     SteerTargetKind,
+    WithdrawRequest,
 )
 from vibesys.events import CoreEventType
 from vibesys.events import EventStatus as CoreEventStatus
@@ -584,7 +586,7 @@ def test_a_steer_the_run_refuses_answers_its_protocol_error(
     tmp_path: Path, reason: RefusalReason, code: str
 ) -> None:
     parts = build_server_parts(tmp_path)
-    parts.operator_control.check_targets(lambda _target: reason)
+    parts.operator_control.check_requests(lambda _request: reason)
     steer = SteerRequest(
         control_id="s1",
         text="look again",
@@ -596,3 +598,39 @@ def test_a_steer_the_run_refuses_answers_its_protocol_error(
 
     assert getattr(refused.value, "diagnostic_code", None) == code
     assert parts.control.take_pending_steer() == []
+
+
+def test_a_withdrawal_of_no_standing_guidance_answers_its_protocol_error(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.operator_control.check_requests(lambda _request: RefusalReason.NOT_STANDING)
+    withdraw = WithdrawRequest(control_id="w1", withdraws="s1")
+
+    with pytest.raises(RuntimeError) as refused:
+        parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=withdraw))
+
+    assert getattr(refused.value, "diagnostic_code", None) == "withdraw_not_standing"
+    assert parts.control.take_pending_withdrawals() == []
+
+
+def test_standing_guidance_is_journaled_in_force_then_ended(tmp_path: Path) -> None:
+    """Guidance is journaled active, not waiting for a turn; its withdrawal pending, its end done.
+
+    The withdrawal's entry stays pending: the end of the guidance is journaled as its own entry.
+    """
+    parts = build_server_parts(tmp_path)
+    steer = SteerRequest(control_id="keep", text="keep bf16", mode=SteerMode.STANDING)
+    parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=steer))
+    withdraw = WithdrawRequest(control_id="w1", withdraws="keep")
+    parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=withdraw))
+    parts.control.notify_guidance_ended("standing guidance keep ended: withdrawn")
+
+    controls = [
+        (event.text, event.status)
+        for event in parts.journal.read()
+        if event.type is EventType.CONTROL
+    ]
+    assert controls == [
+        ("/steer --standing: keep bf16", EventStatus.ACTIVE),
+        ("/withdraw: keep", EventStatus.PENDING),
+        ("/guidance ended: standing guidance keep ended: withdrawn", EventStatus.COMPLETED),
+    ]
