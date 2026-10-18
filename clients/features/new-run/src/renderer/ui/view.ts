@@ -151,10 +151,8 @@ export function rolesView(context: NewRunContext): RolesView {
     : {kind: 'pending'};
 }
 
-export {backendLabel};
-
 /**
- * The compute backend the run will use, read-only: it is the task's, so it is shown, never chosen.
+ * The compute backend the run will use, read-only: it is the task's, so it is never chosen.
  * Null until the checks for the inputs now have reported it (or from a helper that does not).
  */
 export function backendOf(context: NewRunContext): Backend | null {
