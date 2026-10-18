@@ -73,6 +73,8 @@ if TYPE_CHECKING:
     from vs_sim.api import Network, ProbeResult, Threads, Worker
     from vs_sim.api.testing import SimThreads
 
+RUN_ID = "20261010-120000-11111111-dynamic"
+"""The run ``project_with_run`` records."""
 HOME = "/home/user"
 VIBESYS_VERSION = "0+test"
 HARNESSES = (
