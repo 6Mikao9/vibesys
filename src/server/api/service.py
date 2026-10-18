@@ -47,7 +47,6 @@ from server.api.protocol import (
     SnapshotQuery,
     SteerCommand,
     StopCommand,
-    TuiDefaultsQuery,
     decode_request,
     failure_response,
 )
@@ -76,7 +75,6 @@ if TYPE_CHECKING:
     from server.execution import ActiveAgentExecution, ExecutionTracker
     from server.integration import RunIntegrationAdapter
     from server.journal import WireJournal
-    from server.settings import InteractiveSetupDefaults
     from vibesys.api import ControlRequest, RunControl, RunRecord, RunView, WorkspaceChange
     from vs_sim.api import Clock, Condition, Threads
 
@@ -401,7 +399,6 @@ class RunApi:
         controls: RunControlSlot,
         clock: Clock,
         project_scope: str | None = None,
-        tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         threads: Threads,
     ) -> None:
         """Initialize the API with the components that own each request surface."""
@@ -414,9 +411,6 @@ class RunApi:
         self._controls = controls
         self._clock = clock
         self._project_scope = project_scope
-        self._tui_defaults_provider = tui_defaults
-        self._tui_defaults: InteractiveSetupDefaults | None = None
-        self._tui_defaults_lock = threads.lock()
         # Keyed by the attached run so the projection's diff cache survives
         # across requests but never outlives the run it was built for.
         self._design: tuple[str, DesignLog] | None = None
@@ -448,8 +442,8 @@ class RunApi:
         """Execute a request and reflect the issuing client on its response."""
         return self._execute(request).model_copy(update={"client_id": request.client_id})
 
-    # lint-waiver: LW-009027 [C901, PLR0911, PLR0912]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
-    def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911, PLR0912
+    # lint-waiver: LW-009027 [C901, PLR0911]; exhaustive protocol dispatch keeps each request variant routed to its owning handler.
+    def _execute(self, request: ProtocolRequest) -> Response:  # noqa: C901, PLR0911
         """Route one typed request to its owning service."""
         if isinstance(
             request, (PauseCommand, ResumeCommand, SteerCommand, StopCommand, ControlCommand)
@@ -464,12 +458,6 @@ class RunApi:
                 request_id=request.request_id,
                 timestamp=self._now(),
                 chat_options=self.chat_options(),
-            )
-        if isinstance(request, TuiDefaultsQuery):
-            return Response(
-                request_id=request.request_id,
-                timestamp=self._now(),
-                tui_defaults=self.tui_defaults(),
             )
         if isinstance(request, HistoryQuery):
             self._journal.record(EventType.STATUS_QUERY, "/history")
@@ -596,15 +584,6 @@ class RunApi:
         """Return the agent choices available for experiment chat."""
         settings = self._chat.run_settings
         return None if settings is None else build_chat_options(settings)
-
-    def tui_defaults(self) -> InteractiveSetupDefaults | None:
-        """Load and cache defaults for the interactive setup form."""
-        if self._tui_defaults_provider is None:
-            return None
-        with self._tui_defaults_lock:
-            if self._tui_defaults is None:
-                self._tui_defaults = self._tui_defaults_provider()
-            return self._tui_defaults
 
     def snapshot(self, *, expected_store_id: str | None = None) -> RunSnapshot:
         """Return state from the expected store, or fail if that sequence space is gone."""

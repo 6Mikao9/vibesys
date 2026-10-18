@@ -2,7 +2,7 @@
 
 This page is the starting point for contributors extending VibeSys. It links
 to the focused guides for framework code, domains, skills, profilers, input
-bundles, and the TUI.
+bundles, and the desktop app.
 
 ## Before you change code
 
@@ -26,7 +26,6 @@ clients/libs/contracts/      TypeScript server protocol types and validator
 clients/libs/transport/      Runtime-neutral transport and the WebSocket adapter
 clients/libs/transport-node/ Node transport: the Unix-socket client
 clients/libs/run-state/      Pure backend-event projection (the run fold)
-clients/tui/                 TypeScript terminal UI and launcher
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles
 resources/evaluators/    Reusable versioned evaluator packages
@@ -85,19 +84,7 @@ uv run vibesys validate examples/data-structures/repositories/queue-rs --task sp
 uv run pytest
 ```
 
-To use the interactive TUI from a checkout, install Node.js 20+, Bun, and pnpm
-11 (or enable Corepack). The launcher installs frontend dependencies and builds
-the client when needed.
-
-For a headless installation directly from GitHub without a checkout:
-
-```bash
-python -m pip install "git+https://github.com/uw-syfi/vibesys.git"
-```
-
-GitHub source installs skip optional submodules and do not build the native TUI.
-Pass `--headless` to suppress the fallback notice. Use a supported PyPI wheel
-when you need the bundled TUI.
+For desktop development, see [Desktop app development](desktop-development.md).
 
 ### Tests and submodules
 
@@ -282,8 +269,7 @@ What it does not cover: GPU devices and drivers, profiler captures (only the ser
 starts), the accelerator-attached editor of the plain Docker environment on a GPU
 host, and the SkyPilot and Modal editors.
 
-The TypeScript client has its own workflow; see
-[`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:
+The TypeScript client has its own workflow:
 
 ```bash
 cd clients
@@ -307,8 +293,6 @@ removes it.
 
 When Python protocol models change, regenerate the files under
 `clients/libs/contracts/src/generated/` and review the diff.
-See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
-TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
 
 The [desktop development guide](desktop-development.md) covers local and SSH
 connections, the shell, and the Electron app.
@@ -358,7 +342,7 @@ command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
 ./support/repoctl/repoctl test
 ```
 
-This does not run every CI check. Electron end-to-end tests (`tui_e2e`) are
+This does not run every CI check. Electron end-to-end tests (`clients_e2e`) are
 CI-only by default: Playwright needs Chromium and its system libraries as well
 as the client and Python environments, so making the normal local command
 acquire or require them would make it unexpectedly heavyweight. Run that group
@@ -369,10 +353,10 @@ a free port for its own server, so parallel runs on one machine do not collide.
 uv sync --dev
 pnpm --dir clients install --frozen-lockfile
 (cd clients && pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium)
-./support/repoctl/repoctl run-checks --group tui_e2e
+./support/repoctl/repoctl run-checks --group clients_e2e
 ```
 
-The CI-only decision is specific to `tui_e2e`. It does not change the
+The CI-only decision is specific to `clients_e2e`. It does not change the
 selection policy for the other check groups without local-selection keys; each
 has its own prerequisites and needs its own policy decision.
 
@@ -383,19 +367,19 @@ format check, knip, the TypeScript architecture checks, the frozen-UI check, and
 screenshots. One command runs them, as the same repoctl check groups CI runs:
 
 ```bash
-./scripts/check_clients.sh            # tui_quality, tui_tests, ui_gallery_linux
+./scripts/check_clients.sh            # clients_quality, clients_tests, ui_gallery_linux
 ./scripts/check_clients.sh --dry-run  # print the commands
 ```
 
-The client tests need the Bun version pinned in `packaging/tui_packaging.py` (`BUN_VERSION`), the
+The client tests need the Bun version pinned in `packaging/fetch_bun.py` (`BUN_VERSION`), the
 one CI installs. `clients/tools/scripts/run_bun_tests.mjs` fails at once, naming the pin and
 `packaging/fetch_bun.py`, when the Bun on `PATH` differs, because another version resolves
 imports differently (Bun 1.3.9 cannot find `./welcome.cjs` from its `welcome.cts` source).
 
 `ui_gallery_linux` compares the gallery's screenshots in the Linux image CI uses and checks
 that two baseline updates write identical images, so it needs Docker. The script leaves out the
-CI groups that need a display or build the shipped packages (`tui_build`, `tui_package_smoke`,
-`tui_e2e`), each named with its reason in the script.
+CI groups that need a display or build the client (`clients_build`, `clients_e2e`), each named
+with its reason in the script.
 `tests/quality/test_check_clients_matches_ci.py` fails when CI gains a client group the script
 neither runs nor lists, so the two cannot drift.
 
