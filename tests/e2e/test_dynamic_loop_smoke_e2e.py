@@ -656,7 +656,7 @@ def _assert_headless_stream(
     run_id: str,
     committed: frozenset[str],
     rendered: str,
-    base_runs: int,
+    job_counts: range,
 ) -> None:
     """What a headless frontend received from the core path is complete, legal and anchored.
 
@@ -693,16 +693,10 @@ def _assert_headless_stream(
         assert all(opened < i < closed for i, kind in mine if kind in _AGENT_CONTENT)
 
     jobs = {event.execution_id for event in events if event.type is CoreEventType.GATE_STARTED}
-    # The baseline, the implementer's own, the candidate's, and the base runs core asked for.
-    assert len(jobs) == 3 + base_runs, jobs
-    # No job reused another's run: the comparison never settled (the runs show no noise), so the
-    # candidate's official measurement ran afresh (#2949 reuses only a settled comparison).
-    reused = {
-        e.execution_id
-        for e in events
-        if e.type is CoreEventType.GATE_FINISHED and getattr(e.data, "reused", False)
-    }
-    assert not reused, reused
+    # The baseline, the implementer's own, the runs core asked for, and the candidate's
+    # official measurement (a re-read of the samples held runs its gates too). A run of core's
+    # that the run's end cancelled before it started ran no gate.
+    assert len(jobs) in job_counts, jobs
     for job in jobs:
         # A job runs the gates its kind needs: a validation run has fewer than a trusted one.
         gates = {
@@ -872,17 +866,31 @@ def test_core_path_runs_the_fake_slurm_search(
     assert selection["revision"] != envelope["core"]["run"]["facts"]["baseline"]
     # The baseline and the implementer's own in-turn measurement through the tool were each
     # submitted exactly once. The task declares no per-run noise and the Fake benchmark reads
-    # the same value on every run, so the runs show no noise and the comparison never reaches a
-    # verdict (`vs_core._comparison`): it stays a close call, which earns the base runs of its
-    # own up to `MIN_SAMPLES_WITHOUT_FLOOR` samples, and the official check of the candidate
-    # takes a run of its own instead of reusing the implementer's (#2949 reuses only a settled
-    # comparison). Nothing else is ever submitted twice.
+    # the same value on every run, so the comparison is a close call with no estimate of its
+    # noise (`vs_core._comparison`): core runs the base and the candidate's input again itself,
+    # each up to `MIN_SAMPLES_WITHOUT_FLOOR` runs, and once both sides hold that many identical
+    # runs no verdict can ever be reached, so nothing more is run. The implementer's turn does not
+    # wait for core's runs (they are not its attempt's history), so the strategy's official check
+    # may come while they are still under way: then it runs afresh and its run is the candidate's
+    # last sample, in place of core's; otherwise it is answered by the samples held (#2949).
     evaluation = envelope["core"]["evaluation"]
-    base_runs = len(evaluation.get("base_runs", []))
-    assert base_runs <= MIN_SAMPLES_WITHOUT_FLOOR - 1, evaluation["base_runs"]
-    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == (
-        3 + base_runs
+    core_runs = {run["request_id"]["root"] for run in evaluation.get("core_runs", [])}
+    purposes = [
+        job["plan"]["purpose"]
+        for job in evaluation["jobs"]
+        if job["submission_id"]["root"] in core_runs
+    ]
+    (official,) = (job for job in evaluation["jobs"] if job["plan"]["purpose"] == "official")
+    fresh_official = official.get("reuses") is None
+    assert purposes.count("baseline") == MIN_SAMPLES_WITHOUT_FLOOR - 1, evaluation["core_runs"]
+    # The agent's run, core's runs of its input, and a fresh official run: the fewest for a verdict.
+    assert 1 + purposes.count("local-validation") + fresh_official == MIN_SAMPLES_WITHOUT_FLOOR, (
+        evaluation["core_runs"]
     )
+    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == (
+        2 + len(core_runs) + fresh_official
+    )
+    cancelled = sum(job["status"] == "cancelled" for job in evaluation["jobs"])
     assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
     # The agent's own evaluation and the official one both sit in the ledger for the winner. A
     # framework run is trusted whoever asked for it, so the agent's records are correctness and
@@ -902,5 +910,5 @@ def test_core_path_runs_the_fake_slurm_search(
         run_id=result.run_id,
         committed=_strings_of(envelope["core"]),
         rendered=capsys.readouterr().out,
-        base_runs=base_runs,
+        job_counts=range(3 + len(core_runs) - cancelled, 3 + len(core_runs) + 1),
     )

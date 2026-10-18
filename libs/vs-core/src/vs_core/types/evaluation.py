@@ -38,7 +38,7 @@ from .evaluation_history import (
     RepeatedFailureGuidance,
 )
 from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
-from .measurement import BaseClaim, BaseRef, BaseRun, Comparison, Reading, Runaway, Sample
+from .measurement import BaseClaim, BaseRef, Comparison, CoreRun, Reading, Runaway, Sample
 from .until import Within
 from .waits import WaitOn
 
@@ -285,6 +285,12 @@ class OwnedJob(Value):
     wait: WaitOn | None = None
     """What the live job waits on: its next poll's timer, or the poll in flight. A terminal
     job waits on nothing."""
+    collecting: RequestId | None = Field(default=None, exclude_if=unset)
+    """The collection of the ended job's evidence still under way, if one is.
+
+    The job ended without its records, so core asked for them (``CollectEvidence``); until
+    that request ends, whether the run gave a sample is not known, and the comparisons it
+    serves take no replacement run (`vs_core._base_runs.after_run`)."""
     queue_credit: Seconds = 0
     """Seconds of queue time this job's facts earned: its limit counts from its start.
 
@@ -297,6 +303,10 @@ class OwnedJob(Value):
     def waits_while_live(self) -> OwnedJob:
         """Only a live job waits, and it always names what will move it."""
         _job_wait(terminal=self.terminal, wait=self.wait)
+        if self.collecting is not None and (not self.terminal or self.evidence):
+            raise ContractValidationError(
+                "collecting", "only an ended job without its evidence collects it"
+            )
         return self
 
 
@@ -354,6 +364,13 @@ class ContinuationPhase(StrEnum):
     BLOCKED = "blocked"
 
 
+def settling_named(comparisons: tuple[Comparison, ...], settling: tuple[str, ...]) -> None:
+    """Every settling input is the candidate input of one of ``comparisons``, named once."""
+    known = {comparison.candidate_input for comparison in comparisons}
+    if len(set(settling)) != len(settling) or not set(settling) <= known:
+        raise ContractValidationError("settling", "names an input of no comparison, or twice")
+
+
 class ResumeAuthorizationReceipt(Value):
     """Immutable publication proof, independent of the current continuation phase.
 
@@ -370,12 +387,17 @@ class ResumeAuthorizationReceipt(Value):
     timeout: TimedOut | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
     comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
-    """The comparisons with a base of the candidates the wait's jobs measured, as held now.
+    """The attempt's comparisons with a base the resume tells its agent of, as held now.
 
-    Each is recomputed over the samples fresh now, so a base whose samples partly went stale is
+    Those of the candidates the wait's jobs measured, and every other one of the attempt whose
+    verdict changed since the attempt's last resume told it (`comparisons_to_publish`). Each is
+    recomputed over the samples fresh now, so a base whose samples partly went stale is
     compared over the rest, and an input none of whose base samples is fresh is left out
     (`latest_comparisons`).
     """
+    settling: tuple[str, ...] = Field(default=(), exclude_if=unset)
+    """The candidate inputs of ``comparisons`` core still has runs under way for: each such
+    comparison is provisional, and changes when they land."""
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorizationReceipt:
@@ -387,6 +409,7 @@ class ResumeAuthorizationReceipt(Value):
             raise ContractValidationError(
                 "repeated_failure.cursor", "differs from publication cursor"
             )
+        settling_named(self.comparisons, self.settling)
         return self
 
 
@@ -571,7 +594,9 @@ type SubmissionReceipt = Annotated[
 class SubmissionBudget(Value):
     """Immutable first submission bound for one scope and measurement identity.
 
-    The first limit cannot exceed the run ceiling. Workload rejection is durable;
+    The first limit cannot exceed the run ceiling, but for the budget core opens for its own
+    runs of an attempt's base, whose limit is ``MAX_CORE_BASE_RUNS``
+    (`vs_core._base_runs`). Workload rejection is durable;
     conclusive infrastructure failure may retry within this bound. Transport
     reconciliation accounting remains RequestRecord.retry_count, not this receipt list.
     """
@@ -611,8 +636,9 @@ class EvaluationState(Value):
     evidence: tuple[EvidenceRef, ...] = ()
     submission_budgets: tuple[SubmissionBudget, ...] = ()
     agent_calls: tuple[AgentCall, ...] = ()
-    base_runs: tuple[BaseRun, ...] = Field(default=(), exclude_if=unset)
-    """The runs of a base core asked for itself, which have no decision or agent call to name them."""
+    core_runs: tuple[CoreRun, ...] = Field(default=(), exclude_if=unset)
+    """The runs core asked for itself (of a base, or of a candidate again), which have no decision
+    or agent call to name them."""
     base_claims: tuple[BaseClaim, ...] = Field(default=(), exclude_if=unset)
     """The strategy's own runs of a base that core awaits instead of starting another."""
     samples: tuple[Sample, ...] = Field(default=(), exclude_if=unset)
@@ -635,14 +661,14 @@ class EvaluationState(Value):
     """
 
     def asked_without_decision(self, request_id: RequestId, scope: Scope) -> bool:
-        """Whether ``request_id`` is a submission core admitted for an agent call or a base run.
+        """Whether ``request_id`` is a submission core admitted for an agent call or itself.
 
         Such a submission has no ``Measure`` decision, so core's own record of the call or of
-        the base run is what proves where it came from.
+        its own run is what proves where it came from.
         """
         return any(
             call.request_id == request_id and call.scope == scope for call in self.agent_calls
-        ) or any(run.request_id == request_id and run.scope == scope for run in self.base_runs)
+        ) or any(run.request_id == request_id and run.scope == scope for run in self.core_runs)
 
     def evidence_for(self, key: EvidenceKey) -> EvidenceRef | None:
         """The ledger record with this full identity, or None."""
@@ -877,11 +903,13 @@ class DeadlineReached(Value):
 
 
 class JobWaitLapsed(Value):
-    """A request a live job waits on ended without moving the job.
+    """A request a job waits on ended without moving the job.
 
     Internal signal raised once a step's other signals settle, never shell input: the poll
     blocked at its bound, or the job refused its answer (stale or foreign). The job polls
-    again after its backoff instead of waiting on a request that is over.
+    again after its backoff instead of waiting on a request that is over. For an ended job it
+    is the collection of its evidence that ended (``OwnedJob.collecting``): the job stops
+    collecting, and the comparisons its run serves take the runs they still need.
     """
 
     kind: Literal["job_wait_lapsed"] = "job_wait_lapsed"
@@ -917,7 +945,10 @@ class ResumeAuthorized(Value):
     history_cursor: EvaluationHistoryCursor | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
     comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
-    """The comparisons with a base of what the awaited jobs measured, frozen at authorization."""
+    """The comparisons the resume tells its agent of, frozen at authorization
+    (``ResumeAuthorizationReceipt.comparisons``)."""
+    settling: tuple[str, ...] = Field(default=(), exclude_if=unset)
+    """The candidate inputs of ``comparisons`` core still had runs under way for."""
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorized:
@@ -929,6 +960,7 @@ class ResumeAuthorized(Value):
             raise ContractValidationError(
                 "repeated_failure.cursor", "differs from publication cursor"
             )
+        settling_named(self.comparisons, self.settling)
         return self
 
 

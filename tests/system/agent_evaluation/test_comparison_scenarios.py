@@ -513,9 +513,11 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
 ) -> None:
     """The tool's reply and the resume receipt drop a base sample that went stale.
 
-    Each job takes three times as long as a base sample stays fresh (``STALING``). The input's
-    first run (the strategy's baseline) is stale by the agent's second evaluation, so the base is
-    measured again beside it, and only that new run counts. Both readers of the comparison,
+    Each job takes three times as long as a base sample stays fresh (``STALING``), so the
+    strategy's baseline is stale when the first candidate's run ends, and core measures the base
+    again. The agent does not wait for that run: it evaluates its second candidate at once, and
+    the base run lands beside it, so one fresh base run serves both candidates and only it
+    counts. Both readers of the comparison,
     the resume receipt (core's authorization) and the tool's reply (the bridge), must take the
     run clock: read at any other moment, the stale baseline run still counts as a second base
     sample.
@@ -524,6 +526,9 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
     async with play(tmp_path, script, pace=STALING) as played:
         state = played.process.shell.record.envelope.core
         assert len(played.cluster.runs[BASE_SPEED]) == 2, "the stale base was measured again"
+        assert {c.candidate_value for c in played.comparisons} >= {played.cluster.runs[130.0][0]}, (
+            "the first candidate, whose base went stale while it ran, was compared too"
+        )
         last = _final(played)
         assert last.candidate_value == played.cluster.runs[140.0][0]
         assert last.base_samples == 1, "only the fresh base run counts"
@@ -536,4 +541,62 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
             if wait.authorization_receipt is not None and wait.authorization_receipt.comparisons
         ]
         assert receipts, "a resume published the comparison"
-        assert receipts[-1] == (last,)
+        # The first candidate, re-compared over the fresh base run, may be told again beside it.
+        assert last in receipts[-1]
+        assert all(c.base_samples == 1 for c in receipts[-1]), "only the fresh base run counts"
+
+
+SLOW = Pace(runtime=10.0, base_staleness=100_000.0)
+"""Jobs that take ten seconds; the base never goes stale."""
+
+
+@pytest.mark.regression
+async def test_an_agent_that_resumed_on_a_provisional_comparison_is_told_where_it_ended(
+    tmp_path: Path,
+) -> None:
+    """A later resume tells of an earlier candidate's comparison once core's runs changed it.
+
+    With no declared noise a verdict needs three runs a side, which core takes after the agent
+    resumed. The resume that waited for the first candidate marks its comparison provisional.
+    Before, a later resume told only of the candidates it waited for, so the agent never learned
+    the first candidate's verdict unless it evaluated it again, which the resume told it not to.
+    """
+    task = TERMS.model_copy(update={"relative_noise": 0.0})
+    script = (Turn(speed=130.0), Turn(speed=131.0), Turn(speed=132.0), Turn(speed=133.0))
+    async with play(tmp_path, script, task=task, pace=SLOW) as played:
+        state = played.process.shell.record.envelope.core
+        receipts = [
+            wait.authorization_receipt
+            for wait in state.evaluation.continuations
+            if wait.authorization_receipt is not None
+        ]
+        first = played.comparisons[0].candidate_input
+        told = [
+            (c.verdict, c.candidate_input in receipt.settling)
+            for receipt in receipts
+            for c in receipt.comparisons
+            if c.candidate_input == first
+        ]
+        assert told[0] == (ComparisonVerdict.WITHIN_NOISE, True), "first told as provisional"
+        assert told[-1] == (ComparisonVerdict.BETTER, False), "later told where it ended"
+        assert len(told) == len(set(told)), "each change is told once"
+
+
+@pytest.mark.regression
+async def test_a_repeat_evaluation_tells_the_agent_its_comparison_is_still_settling(
+    tmp_path: Path,
+) -> None:
+    """The tool's reply to a repeat call marks a comparison provisional, as a resume does.
+
+    With no declared noise core runs both sides again after the agent resumed. The resume
+    tells the agent to evaluate the unchanged content again to read the comparison once those
+    runs land; before, that reply carried no settling flag, so the agent could not tell a
+    provisional comparison from a final one.
+    """
+    task = TERMS.model_copy(update={"relative_noise": 0.0})
+    script = (Turn(speed=130.0), Turn(speed=131.0), Turn(peek=True))
+    async with play(tmp_path, script, task=task, pace=SLOW) as played:
+        (told,) = played.writer.seen
+        assert told is not None, "the tool reported no comparison to the agent"
+        assert told["settling"] is True, "core's runs of the comparison were still under way"
+        assert told["candidate_samples"] < 3

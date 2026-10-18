@@ -8,6 +8,7 @@ from vs_core._attempt_track import (
 )
 from vs_core._comparison import (
     BASE_MAX_SAMPLES,
+    MAX_CORE_BASE_RUNS,
     MIN_SAMPLES_WITHOUT_FLOOR,
     VERDICT_NOISES,
     ComparisonPolicy,
@@ -16,6 +17,7 @@ from vs_core._comparison import (
     close_call,
     compare,
     comparison_of,
+    comparison_settling,
     comparisons_of,
     effect_verdict,
     evaluation_of,
@@ -24,6 +26,7 @@ from vs_core._comparison import (
     policy_of,
     samples_of,
     terms_policy,
+    verdict_unreachable,
 )
 from vs_core._continuations import SuspensionRefusal
 from vs_core._evidence_views import (
@@ -513,9 +516,9 @@ from vs_core.types.kinds import EventKind, WorkKind
 from vs_core.types.measurement import (
     BaseClaim,
     BaseRef,
-    BaseRun,
     Comparison,
     ComparisonVerdict,
+    CoreRun,
     EffectVerdict,
     Reading,
     Runaway,
@@ -818,6 +821,7 @@ __all__ = [
     "INPUT",
     "INTERPRET_SUFFIX",
     "MARKDOWN_PROSE_CONVENTION",
+    "MAX_CORE_BASE_RUNS",
     "MAX_CORRECTIONS",
     "MAX_LOST_TURNS",
     "MAX_REASK_CHAIN",
@@ -907,7 +911,6 @@ __all__ = [
     "Backoff",
     "BaseClaim",
     "BaseRef",
-    "BaseRun",
     "BenchmarkFailure",
     "BlockRequest",
     "BlockedRecordStalled",
@@ -964,6 +967,7 @@ __all__ = [
     "ControlRefusedError",
     "CoreEvent",
     "CoreReducers",
+    "CoreRun",
     "CoreState",
     "CoreStep",
     "CoreView",
@@ -1439,6 +1443,7 @@ __all__ = [
     "close_call",
     "compare",
     "comparison_of",
+    "comparison_settling",
     "comparisons_of",
     "component",
     "control_refusal",
@@ -1502,6 +1507,7 @@ __all__ = [
     "unreleased_records",
     "validate_startup",
     "validate_terminal_inputs",
+    "verdict_unreachable",
     "verify_encoding",
     "waits",
     "within",

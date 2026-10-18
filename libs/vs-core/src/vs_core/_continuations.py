@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from ._comparison import latest_comparisons, moment_of
+from ._comparison import comparisons_to_publish, moment_of
 from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
 from ._proofs import continues_admitted_work
@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     )
     from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
+    from .types.measurement import Comparison
     from .types.records import ChildLease, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
 
@@ -163,12 +164,12 @@ def published_history(
 ) -> AttemptEvaluationHistory:
     """``history`` as it stood when core published ``cursor`` with a resume's authorization.
 
-    The scope may submit again between the authorization and the resume's dispatch (core's
-    own base run, earned by a close call of any attempt sharing the base, is one), and that
-    submission leaves the whole stored history incomplete until it ends. Coverage and records
-    only grow, so the prefix through ``cursor`` is what authorization proved. With nothing
-    submitted since, that is the stored history itself; no cursor, or one the stored coverage
-    does not hold, is an unavailable history.
+    The scope may submit again between the authorization and the resume's dispatch, and that
+    submission leaves the whole stored history incomplete until it ends. (Core's own runs in
+    the scope are not the attempt's history, so they never do: ``_evaluation_history``.)
+    Coverage and records only grow, so the prefix through ``cursor`` is what authorization
+    proved. With nothing submitted since, that is the stored history itself; no cursor, or one
+    the stored coverage does not hold, is an unavailable history.
     """
     if (
         cursor is None
@@ -685,7 +686,7 @@ def _publish(
         if refusal is not None:
             return _refuse(state, continuation, refusal, _history_update(owner, history))
     cursor = history.cursor if history is not None else None
-    comparisons = latest_comparisons(
+    comparisons, settling = comparisons_to_publish(
         state,
         invocation.scope,
         (
@@ -693,6 +694,7 @@ def _publish(
             for job in _jobs(state, continuation)
             if isinstance(job, OwnedJob) and job.plan.measured_input is not None
         ),
+        _told(state, context, invocation.scope),
         moment_of(context.run),
     )
     publication = ResumeAuthorizationReceipt(
@@ -702,6 +704,7 @@ def _publish(
         timeout=continuation.timeout,
         history_cursor=cursor,
         comparisons=comparisons,
+        settling=settling,
     )
     authorized = continuation.model_copy(
         update={
@@ -720,9 +723,27 @@ def _publish(
                 timeout=authorized.timeout,
                 history_cursor=publication.history_cursor,
                 comparisons=comparisons,
+                settling=settling,
             ),
         ),
         signals=_history_update(owner, history),
+    )
+
+
+def _told(
+    state: EvaluationState, context: EvaluationContext, scope: Scope
+) -> tuple[tuple[Comparison, bool], ...]:
+    """Every comparison the scope's earlier resumes told of, oldest first, and if it was settling.
+
+    Read from each authorized continuation's receipt (``ResumeAuthorizationReceipt.settling``).
+    """
+    scopes = {row.invocation: row.scope for row in context.sessions.invocations}
+    return tuple(
+        (comparison, comparison.candidate_input in receipt.settling)
+        for row in state.continuations
+        if (receipt := row.authorization_receipt) is not None
+        and scopes.get(row.invocation) == scope
+        for comparison in receipt.comparisons
     )
 
 

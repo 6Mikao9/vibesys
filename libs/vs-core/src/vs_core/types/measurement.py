@@ -68,16 +68,30 @@ class Sample(Value):
     base: BaseRef | None = None
 
 
-class BaseRun(Value):
-    """A run of a base that core itself asked for, on a candidate's behalf, in its scope.
+class CoreRun(Value):
+    """A run core itself asked for, on a candidate's behalf, in its scope.
 
     No decision and no agent call asked for it, so this record is its origin: core admitted it
-    to compare ``candidate`` (the run whose result needed a base) with a measured base.
+    so that ``candidate`` (the run whose result needed it) has a comparison with a measured
+    base. Its plan says which side it measures: the base, or (under no declared floor) the
+    candidate's own input again (`vs_core._comparison`).
     """
 
     request_id: RequestId
     scope: Scope
     candidate: RequestId
+    candidate_input: str = Field(min_length=1)
+    """The measured input of ``candidate``: the comparison this run serves is of that input.
+
+    A close call's stop is counted per comparison (`vs_core._comparison.base_run_stalled`), so
+    another candidate's runs of the same base never count toward it.
+    """
+    fresh_when_asked: Count
+    """How many fresh samples of the input it measures were held when core asked for it.
+
+    A base run that lands without leaving more than this replaced a sample that went stale
+    while it ran, and earns its close call no further base run (`vs_core._comparison`).
+    """
 
 
 class BaseClaim(Value):
