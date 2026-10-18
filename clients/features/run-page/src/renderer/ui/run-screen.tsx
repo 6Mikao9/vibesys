@@ -331,16 +331,10 @@ function openedDetail(
 }
 
 function RunContent(props: {
-  readonly detail: ReturnType<typeof openedDetail>;
-  readonly transcript: HistoryProgress | null;
   readonly deep: boolean;
   readonly level: LevelProps;
   readonly zoomed: ResolvedZoom;
 }): JSX.Element {
-  if (props.detail.loading !== null) return <HistoryLoading progress={props.detail.loading} />;
-  if (props.transcript !== null && props.deep) {
-    return <HistoryLoading progress={props.transcript} />;
-  }
   return props.deep ? (
     <DeepLevel {...props.level} zoomed={props.zoomed} />
   ) : (
@@ -386,7 +380,14 @@ export function RunScreen(props: {
     state.ideasHovered ?? state.ideasPinned ?? zoomed.idea?.id ?? null,
   );
   const deep = routeLevel(route) !== 'run' && (zoomed.idea !== null || zoomed.agent !== null);
-  const level = {state, base, core: detail.core, mode: route.mode, dispatch};
+  const level = {
+    state,
+    base,
+    core: detail.core,
+    mode: route.mode,
+    dispatch,
+    loading: detail.loading ?? transcript,
+  };
   return (
     <Screen
       density="compact"
@@ -426,13 +427,7 @@ export function RunScreen(props: {
       {detail.problem === null ? null : (
         <Banner tone="warn" title="The step’s transcript is not available" body={detail.problem} />
       )}
-      <RunContent
-        detail={detail}
-        transcript={transcript}
-        deep={deep}
-        level={level}
-        zoomed={zoomed}
-      />
+      <RunContent deep={deep} level={level} zoomed={zoomed} />
     </Screen>
   );
 }

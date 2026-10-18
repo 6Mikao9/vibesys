@@ -8,9 +8,10 @@
 import type {CoreState} from '@vibesys/run-state';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
-import {Chip, markdownToPlain, Pane, Panes} from '@vibesys/ui';
+import {Card, Chip, markdownToPlain, Pane, Panes, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
+  type HistoryProgress,
   implementerOutcomes,
   type ResolvedZoom,
   type RunMode,
@@ -51,6 +52,20 @@ export interface LevelProps {
   readonly core: CoreState | null;
   readonly mode: RunMode;
   readonly dispatch: Dispatch;
+  readonly loading: HistoryProgress | null;
+}
+
+function StepLoading(props: {readonly progress: HistoryProgress}): JSX.Element {
+  return (
+    <Card>
+      <Stack gap="space-3">
+        <Text variant="heading">Reading step transcript…</Text>
+        <Text variant="code" tone="muted">
+          {`${props.progress.events} events read so far`}
+        </Text>
+      </Stack>
+    </Card>
+  );
 }
 
 function stepChip(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral'; label: string} {
@@ -148,7 +163,7 @@ function AgentsPane(props: LevelProps & {readonly selected: string | null}): JSX
 function StepPane(
   props: LevelProps & {readonly zoomed: ResolvedZoom; readonly step: CandidateStep},
 ): JSX.Element {
-  const {state, base, core, mode, zoomed, step, dispatch} = props;
+  const {state, base, core, mode, zoomed, step, dispatch, loading} = props;
   const chip = stepChip(step);
   const view: StepViewProps = {
     ...base,
@@ -174,7 +189,13 @@ function StepPane(
       actions={<ModeSwitch mode={mode} options={logsOptions('Step')} zoom={base.zoom} />}
       header={mode === 'logs' ? logsHeader(logs) : stepHeader(view)}
     >
-      {mode === 'logs' ? <LogsView {...logs} /> : <StepView {...view} />}
+      {mode === 'logs' ? (
+        <LogsView {...logs} />
+      ) : loading !== null ? (
+        <StepLoading progress={loading} />
+      ) : (
+        <StepView {...view} />
+      )}
     </FramedPane>
   );
 }
@@ -204,7 +225,7 @@ function ItemLevel(
     readonly item: string;
   },
 ): JSX.Element {
-  const {base, core, zoomed, step, item} = props;
+  const {base, core, zoomed, step, item, loading} = props;
   const view: StepViewProps = {
     ...base,
     core,
@@ -232,7 +253,7 @@ function ItemLevel(
         enterKey={`item ${item}`}
         header={itemHeader(opened)}
       >
-        <ItemView {...opened} />
+        {loading === null ? <ItemView {...opened} /> : <StepLoading progress={loading} />}
       </FramedPane>
     </Panes>
   );
