@@ -78,6 +78,7 @@ from server.host_envelope import (
     RunId,
 )
 from server.host_examples import CreatedProject, ExampleList
+from server.host_harness import HarnessChoice, HarnessOption
 from server.host_preflight import Backend, Check, RoleName, RunOptions
 from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
 from vs_decode.api import Unreadable, decode_json
@@ -889,26 +890,6 @@ class ResumeLatest(BaseModel):
     latest: Literal[True]
 
 
-class HarnessChoice(BaseModel):
-    """One agent CLI provider and one model it runs."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider: str
-    model: str
-
-
-class HarnessOption(BaseModel):
-    """A vetted provider and model pair a run may start with."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider: str
-    model: str
-    default: bool
-    """The model a run on ``provider`` uses when nothing names one."""
-
-
 class HarnessesListRequest(HelperRequestBase):
     """The vetted provider and model pairs ``run.start``'s ``harness`` accepts."""
 
@@ -1607,6 +1588,9 @@ class MachineDescription(BaseModel):
     docker: DockerReachable | DockerUnreachable
     harness_clis: tuple[str, ...]
     """The vetted harness providers whose CLI is installed on this machine, in offer order."""
+    harness_cli_names: dict[str, str] = Field(default_factory=dict)
+    """Each of ``harness_clis`` as people call it ("Claude Code"), as agentshim names it; a
+    helper that predates it sends none and a client shows the provider id."""
     runs: RunCounts
 
 
