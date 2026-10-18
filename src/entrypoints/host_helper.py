@@ -189,7 +189,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
             pause=threads.sleep,
             intents=ProjectStopIntents(),
         ),
-        projects=FileProjects(git_repositories(Git(OsProcesses()))),
+        projects=FileProjects(git_repositories(Git(OsProcesses())), threads),
         directories=OsDirectories(),
         launcher=SubprocessRunLauncher(SubprocessLauncher(), headless_command),
         preflight=SubprocessRunPreflight(SubprocessLauncher(), headless_command),

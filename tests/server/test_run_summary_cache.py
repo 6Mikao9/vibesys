@@ -14,8 +14,9 @@ from tests.server.run_summary_support import RUN_ID, events, journal_lines
 from server.events import EventType, OutputData, RunEvent, SpanStartedData
 from server.host_run_summary import RUN_SUMMARY_FILE
 from server.run_summary import RunSummaryFold, Summarized, SummaryState
-from server.run_summary_cache import HEAD_BYTES, TAIL_BYTES, summarize_journal
+from server.run_summary_cache import HEAD_BYTES, TAIL_BYTES, SummaryReader, summarize_journal
 from vs_core.api import Span, SpanStatus, SpanType
+from vs_sim.api.testing import SimThreads
 
 
 def _scratch(lines: list[bytes]) -> bytes:
@@ -36,6 +37,76 @@ def _from_scratch(journal: bytes) -> tuple[SummaryState, int]:
 def _summarize(directory: Path) -> tuple[SummaryState, int]:
     summarized: Summarized = summarize_journal(directory / "run-events.jsonl")
     return summarized.fold.state(), summarized.journal_bytes
+
+
+def test_helper_reader_returns_consistent_pages_from_an_unchanged_journal() -> None:
+    lines = _padded_journal(100)
+    with tempfile.TemporaryDirectory() as raw:
+        journal = Path(raw) / "run-events.jsonl"
+        journal.write_bytes(_scratch(lines))
+        summarize_journal(journal)  # A prior helper process left a valid disk cache.
+        reader = SummaryReader(SimThreads().lock())
+        first = reader.summarize(journal)
+        second = reader.summarize(journal)
+        assert first.fold.state() == second.fold.state()
+        assert first.fold.page(0) == second.fold.page(0)
+
+
+def test_helper_reader_invalidates_on_append_replacement_and_cache_damage() -> None:
+    lines = _padded_journal(120)
+    with tempfile.TemporaryDirectory() as raw:
+        directory = Path(raw)
+        journal = directory / "run-events.jsonl"
+        reader = SummaryReader(SimThreads().lock())
+        journal.write_bytes(_scratch(lines[:80]))
+        assert reader.summarize(journal).fold.state() == _from_scratch(journal.read_bytes())[0]
+
+        with journal.open("ab") as stream:
+            stream.write(_scratch(lines[80:]))
+        assert reader.summarize(journal).fold.state() == _from_scratch(journal.read_bytes())[0]
+
+        other = [
+            line.replace(RUN_ID.encode(), b"20261010-120000-22222222-dynamic") for line in lines
+        ]
+        assert len(_scratch(other)) == len(_scratch(lines))
+        journal.write_bytes(_scratch(other))
+        assert reader.summarize(journal).fold.state() == _from_scratch(journal.read_bytes())[0]
+
+        (directory / RUN_SUMMARY_FILE).write_bytes(b"broken cache")
+        assert reader.summarize(journal).fold.state() == _from_scratch(journal.read_bytes())[0]
+
+        journal.write_bytes(_scratch(lines[:40]))
+        assert reader.summarize(journal).fold.state() == _from_scratch(journal.read_bytes())[0]
+
+
+def test_helper_reader_keeps_an_issued_page_stable_during_later_appends() -> None:
+    lines = _padded_journal(120)
+    with tempfile.TemporaryDirectory() as raw:
+        journal = Path(raw) / "run-events.jsonl"
+        journal.write_bytes(_scratch(lines[:80]))
+        reader = SummaryReader(SimThreads().lock())
+        first = reader.summarize(journal)
+        state = first.fold.state()
+        page = first.fold.page(0)
+
+        with journal.open("ab") as stream:
+            stream.write(_scratch(lines[80:]))
+        second = reader.summarize(journal)
+
+        assert second.fold.state() == _from_scratch(journal.read_bytes())[0]
+        assert first.fold.state() == state
+        assert first.fold.page(0) == page
+
+
+def test_helper_reader_does_not_keep_an_unterminated_tail() -> None:
+    lines = _padded_journal(12)
+    with tempfile.TemporaryDirectory() as raw:
+        journal = Path(raw) / "run-events.jsonl"
+        reader = SummaryReader(SimThreads().lock())
+        journal.write_bytes(_scratch(lines).rstrip(b"\n"))
+        assert reader.summarize(journal).fold.state() == _from_scratch(journal.read_bytes())[0]
+        journal.write_bytes(_scratch(lines))
+        assert reader.summarize(journal).fold.state() == _from_scratch(journal.read_bytes())[0]
 
 
 def _cache_boundary(directory: Path) -> int | None:

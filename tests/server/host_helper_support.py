@@ -365,7 +365,7 @@ def fake_host(
             pause=threads.sleep,
             intents=FakeStopIntents(),
         ),
-        projects=FileProjects(FakeGitRepositories().repository),
+        projects=FileProjects(FakeGitRepositories().repository, threads),
         directories=directories or FakeDirectories(tree={HOME: {}}),
         launcher=launcher or FakeRunLauncher(failed_launch),
         preflight=FakeRunPreflight(),

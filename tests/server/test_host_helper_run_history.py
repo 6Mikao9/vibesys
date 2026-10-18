@@ -162,7 +162,7 @@ def test_one_channel_looks_a_run_up_once_however_many_pages_it_reads(tmp_path: P
     journal.parent.mkdir(parents=True, exist_ok=True)
     journal.write_bytes(b"".join(_lines([_event(n) for n in range(1, 8)])))
     repositories = _CountingRepositories()
-    projects = FileProjects(repositories)
+    projects = FileProjects(repositories, SimThreads())
 
     for from_sequence in (1, 3, 5, 7):
         projects.run_events(project, _RUN_ID, from_sequence, 2, with_totals=True)
@@ -175,7 +175,7 @@ def test_a_run_not_found_is_looked_up_again_so_one_that_starts_later_is_found(
 ) -> None:
     project = project_with_run(tmp_path / "proj", _RUN_ID)
     repositories = _CountingRepositories()
-    projects = FileProjects(repositories)
+    projects = FileProjects(repositories, SimThreads())
     other = "20261010-120000-22222222-other"
 
     for _attempt in range(2):
@@ -192,7 +192,7 @@ def test_totals_are_named_only_for_a_request_that_asked_for_them(tmp_path: Path)
     journal.parent.mkdir(parents=True, exist_ok=True)
     body = b"".join(_lines([_event(1), _event(2), _event(3)]))
     journal.write_bytes(body)
-    projects = FileProjects(FakeGitRepositories().repository)
+    projects = FileProjects(FakeGitRepositories().repository, SimThreads())
 
     plain = projects.run_events(project, _RUN_ID, 1, 2, with_totals=False)
     totals = projects.run_events(project, _RUN_ID, 1, 2, with_totals=True)
