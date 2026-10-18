@@ -27,6 +27,7 @@ from vs_slurm.api import (
     SlurmConfig,
     SlurmJobStatus,
     SlurmSshTransport,
+    WithdrawalTiming,
     Withdrawn,
     evaluation_key,
     job_of_handle,
@@ -38,13 +39,27 @@ from vs_slurm.api import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_slurm.api import ClusterInspectOutcome, ClusterTarget
+    from vs_slurm.api import (
+        ClusterInspectOutcome,
+        ClusterTarget,
+        WithdrawalMark,
+        WithdrawalUndone,
+    )
 
 PROJECT = "demo-0123456789ab"
 CONFIG = SlurmConfig(
     name="test", remote_workspace_root="/runs", transport=SlurmSshTransport(host="h")
 )
 NOW = 1e6
+
+
+# One transport call to the cluster may take this long (``transport_timeout_seconds``).
+_CALL_SECONDS = 110.0
+
+
+def _timing(now: float) -> WithdrawalTiming:
+    """A withdrawer's timing, its clock standing at ``now``."""
+    return WithdrawalTiming(clock=ManualClock(now), call_seconds=_CALL_SECONDS)
 
 
 class _Interleaved:
@@ -75,6 +90,11 @@ class _Interleaved:
 
     def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
         return self._inner.replace(current, record)
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        return self._inner.write_withdrawal(current, document)
 
     def renew(self, key: str, lease: LedgerLease) -> None:
         self._inner.renew(key, lease)
@@ -175,7 +195,11 @@ def test_the_sweep_never_withdraws_a_request_wanted_again_after_it_decided(
 
         racing = _Interleaved(world.ledger, after_read=after_read, race=interfere)
         outcomes = sweep_unleased(
-            racing, world.cluster, now=NOW, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+            racing,
+            world.cluster,
+            timing=_timing(NOW),
+            grace_seconds=0.0,
+            orphans=OrphanChecks(900.0),
         )
 
         assert outcomes == ()
@@ -255,7 +279,10 @@ def test_a_process_inspects_a_jobless_attempt_for_one_claim_window_then_never(
             now += gap
             before = cluster.inspections
             assert (
-                sweep_unleased(ledger, cluster, now=now, grace_seconds=0.0, orphans=orphans) == ()
+                sweep_unleased(
+                    ledger, cluster, timing=_timing(now), grace_seconds=0.0, orphans=orphans
+                )
+                == ()
             )
             expected = attempts if now - first <= WINDOW else 0
             assert cluster.inspections - before == expected
@@ -270,12 +297,17 @@ def test_an_orphan_that_starts_within_the_window_is_still_cancelled(appears_afte
         operation = ledger_operation_id(key, 0)
         cluster = _CountingCluster()
         orphans = OrphanChecks(window_seconds=WINDOW)
-        assert sweep_unleased(ledger, cluster, now=NOW, grace_seconds=0.0, orphans=orphans) == ()
+        assert (
+            sweep_unleased(ledger, cluster, timing=_timing(NOW), grace_seconds=0.0, orphans=orphans)
+            == ()
+        )
         cluster.script(operation, states=(SlurmJobStatus.RUNNING,))
         assert isinstance(cluster.submit(request, operation_id=operation), ClusterSubmitted)
 
         later = NOW + appears_after
-        outcomes = sweep_unleased(ledger, cluster, now=later, grace_seconds=0.0, orphans=orphans)
+        outcomes = sweep_unleased(
+            ledger, cluster, timing=_timing(later), grace_seconds=0.0, orphans=orphans
+        )
 
         (outcome,) = outcomes
         assert isinstance(outcome, Withdrawn)
@@ -284,7 +316,11 @@ def test_an_orphan_that_starts_within_the_window_is_still_cancelled(appears_afte
         assert isinstance(observed, ClusterObservation)
         assert observed.status.terminal
         # Once a sweep saw its job ended (or the window closed), it is never inspected again.
-        sweep_unleased(ledger, cluster, now=later + 1.0, grace_seconds=0.0, orphans=orphans)
+        sweep_unleased(
+            ledger, cluster, timing=_timing(later + 1.0), grace_seconds=0.0, orphans=orphans
+        )
         before = cluster.inspections
-        sweep_unleased(ledger, cluster, now=later + 2.0, grace_seconds=0.0, orphans=orphans)
+        sweep_unleased(
+            ledger, cluster, timing=_timing(later + 2.0), grace_seconds=0.0, orphans=orphans
+        )
         assert cluster.inspections == before

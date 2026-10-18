@@ -28,6 +28,8 @@ from vs_slurm.api import (
     SlurmConnectorTransport,
     SubmitBoundJob,
     UnreadableLease,
+    WithdrawalMark,
+    WithdrawalUndone,
     encode_ledger_document,
     ledger_operation_id,
 )
@@ -220,6 +222,110 @@ def test_of_many_swaps_from_one_revision_exactly_the_first_is_stored(
             entry = case.reopen().read(KEY)
             assert entry is not None
             assert (entry.record.state, entry.revision) == (writers[0], 1)
+
+
+def _mark(attempt: int = 0, *, by: str = "run-b") -> WithdrawalMark:
+    return WithdrawalMark(
+        attempt=attempt, by=by, writer="0f3c9e1", since=100.0, until=700.0, reason="gone"
+    )
+
+
+_LIVE = (LedgerState.SUBMITTING, LedgerState.SUBMITTED, LedgerState.COMPLETED)
+
+
+@pytest.mark.parametrize("state", _LIVE)
+def test_a_withdrawal_mark_and_its_undoing_are_read_back_beside_an_unchanged_record(
+    case: _Case, state: LedgerState
+) -> None:
+    """A mark is a document of its own: the record, and its revision, stay as they were."""
+    planted = _record(state=state)
+    case.plant(KEY, 0, encode_ledger_document(planted))
+    live = case.reopen().read(KEY)
+    assert live is not None
+    assert (live.withdrawal, live.withdrawal_revision) == (None, -1)
+
+    assert case.reopen().write_withdrawal(live, _mark())
+    marked = case.reopen().read(KEY)
+    assert marked is not None
+    assert (marked.record, marked.revision) == (planted, 0)
+    assert (marked.withdrawal, marked.withdrawal_revision) == (_mark(), 0)
+
+    assert case.reopen().write_withdrawal(marked, WithdrawalUndone(attempt=0))
+    undone = case.reopen().read(KEY)
+    assert undone is not None
+    assert (undone.record, undone.revision) == (planted, 0)
+    assert (undone.withdrawal, undone.withdrawal_revision) == (None, 1)
+
+
+def test_a_mark_on_an_earlier_attempt_is_not_the_current_attempts(case: _Case) -> None:
+    case.ledger.claim(_record())
+    claimed = case.ledger.read(KEY)
+    assert claimed is not None
+    assert case.ledger.write_withdrawal(claimed, _mark())
+    marked = case.ledger.read(KEY)
+    assert marked is not None
+    assert case.ledger.replace(marked, _record(state=LedgerState.WITHDRAWN))
+    case.ledger.claim(_record(attempt=1, owner="run-b"))
+    entry = case.reopen().read(KEY)
+    assert entry is not None
+    assert entry.record.attempt == 1
+    assert (entry.withdrawal, entry.withdrawal_revision) == (None, -1)
+
+
+@given(withdrawers=st.lists(st.sampled_from(("run-b", "run-c", "vibesys-sweep")), min_size=2))
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None)
+def test_of_many_marks_from_one_revision_exactly_the_first_is_stored(
+    withdrawers: list[str],
+) -> None:
+    """Two withdrawers deciding on one read never both believe they hold the mark."""
+    for implementation in IMPLEMENTATIONS:
+        with TemporaryDirectory() as directory:
+            case = _make(implementation, Path(directory))
+            case.ledger.claim(_record())
+            read = [case.reopen().read(KEY) for _ in withdrawers]
+            won = [
+                case.reopen().write_withdrawal(entry, _mark(by=by))
+                for entry, by in zip(read, withdrawers, strict=True)
+                if entry is not None
+            ]
+            assert won == [True] + [False] * (len(withdrawers) - 1)
+            entry = case.reopen().read(KEY)
+            assert entry is not None
+            assert entry.withdrawal == _mark(by=withdrawers[0])
+
+
+@given(
+    state=_STATES,
+    marked=st.booleans(),
+    kind=st.sampled_from(("mark", "undone")),
+    attempt=st.sampled_from((0, 1)),
+)
+@settings(max_examples=examples(pr=25, nightly=100), deadline=None)
+def test_a_store_writes_only_the_withdrawal_revisions_that_follow_the_entry(
+    state: LedgerState, *, marked: bool, kind: str, attempt: int
+) -> None:
+    """A mark goes on the live current attempt with none standing; an undoing follows a mark."""
+    for implementation in IMPLEMENTATIONS:
+        with TemporaryDirectory() as directory:
+            case = _make(implementation, Path(directory))
+            case.plant(KEY, 0, encode_ledger_document(_record(state=state)))
+            entry = case.reopen().read(KEY)
+            assert entry is not None
+            if marked and not state.final:
+                assert case.ledger.write_withdrawal(entry, _mark())
+                entry = case.reopen().read(KEY)
+                assert entry is not None
+            standing = entry.withdrawal is not None
+            document = _mark(attempt) if kind == "mark" else WithdrawalUndone(attempt=attempt)
+            allowed = attempt == 0 and (
+                (kind == "mark" and not state.final and not standing)
+                or (kind == "undone" and standing)
+            )
+            if allowed:
+                assert case.ledger.write_withdrawal(entry, document)
+            else:
+                with pytest.raises(LedgerError):
+                    case.ledger.write_withdrawal(entry, document)
 
 
 @given(before=_STATES, after=_STATES)

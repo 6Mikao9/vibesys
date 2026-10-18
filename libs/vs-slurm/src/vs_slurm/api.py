@@ -73,6 +73,7 @@ from .ledger import (
     BATCH_RESULT_LAYOUT,
     LEDGER_FORMAT_VERSION,
     AttachJob,
+    AwaitWithdrawal,
     CheckJob,
     ClaimAttempt,
     Leased,
@@ -92,12 +93,15 @@ from .ledger import (
     SubmitStep,
     Unleased,
     UnreadableLease,
+    WithdrawalMark,
+    WithdrawalUndone,
     check_transition,
     claim_expired,
     decode_lease,
     decode_record,
     evaluation_key,
     handle_of_job,
+    held_by_others,
     job_of_handle,
     lease_verdict,
     ledger_operation_id,
@@ -109,14 +113,19 @@ from .ledger import (
 )
 from .ledger import encode as encode_ledger_document
 from .ledger_actions import (
+    CLOCK_SKEW_SECONDS,
     Kept,
     NotInLedger,
     OrphanChecks,
+    WithdrawalTiming,
+    Withdrawer,
     Withdrawn,
     WithdrawOutcome,
     WithdrawUnknown,
+    relinquish,
     settle,
     sweep_unleased,
+    undo_expired_withdrawal,
     withdraw,
 )
 from .ledger_listing import (
@@ -216,6 +225,7 @@ from .workspace_probe import probe_workspace_root
 __all__ = [
     "BATCH_RESULT_LAYOUT",
     "CANCEL_REACTIONS",
+    "CLOCK_SKEW_SECONDS",
     "DEFAULT_COMMAND_SECONDS",
     "ENTRY_ID_LENGTH",
     "INITIAL_LIFE",
@@ -234,6 +244,7 @@ __all__ = [
     "STAGE_TIMEOUT_EXIT_CODES",
     "AccountingRow",
     "AttachJob",
+    "AwaitWithdrawal",
     "CheckJob",
     "ClaimAttempt",
     "Cluster",
@@ -352,6 +363,10 @@ __all__ = [
     "Unresolved",
     "WithdrawOutcome",
     "WithdrawUnknown",
+    "WithdrawalMark",
+    "WithdrawalTiming",
+    "WithdrawalUndone",
+    "Withdrawer",
     "Withdrawn",
     "advance",
     "advance_with_notice",
@@ -364,6 +379,7 @@ __all__ = [
     "evaluation_key",
     "gpu_count",
     "handle_of_job",
+    "held_by_others",
     "job_of_handle",
     "lease_verdict",
     "ledger_operation_id",
@@ -381,6 +397,7 @@ __all__ = [
     "probe_workspace_root",
     "queue_snapshot_command",
     "recorded_job_ids",
+    "relinquish",
     "resolve_entries",
     "runtime_content_identity",
     "sbatch_partitions",
@@ -395,6 +412,7 @@ __all__ = [
     "sweep_unleased",
     "transitioned",
     "tree_content_identity",
+    "undo_expired_withdrawal",
     "unframed_output",
     "validate_cluster_operation_id",
     "validate_holder",
@@ -483,6 +501,17 @@ class EvaluationLedger(Protocol):
         True when it was written. False when another writer already moved the
         attempt past ``current``: the caller reads the request again and decides
         anew. Raises ``LedgerError`` for a change ``check_transition`` refuses.
+        """
+        ...
+
+    def write_withdrawal(
+        self, current: LedgerEntry, document: WithdrawalMark | WithdrawalUndone
+    ) -> bool:
+        """Compare-and-swap: write ``document`` as the withdrawal revision after ``current``'s.
+
+        True when it was written; False when another withdrawal revision of the
+        attempt was written since ``current`` was read. Raises ``LedgerError``
+        for a revision ``check_withdrawal`` refuses. Never touches the record.
         """
         ...
 

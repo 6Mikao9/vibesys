@@ -3,8 +3,8 @@
 The evaluation ledger (#2757) records every Slurm evaluation a project's runs
 asked for, under the operator's staging root on the cluster. ``list`` reads it
 with no VibeSys run attached; ``remove`` withdraws entries: a queued one never
-runs, a running one has its Slurm job cancelled, and an attached run sees the
-entry as withdrawn. Both go through the ledger and cluster interfaces of
+runs, a running one has its Slurm job cancelled, and a run attached to it
+submits the request again as a new attempt. Both go through the ledger and cluster interfaces of
 ``vs_slurm``, never through the files.
 
 This is a light host command: its module-level imports stay within the
@@ -34,6 +34,8 @@ from vs_slurm.api import (
     SlurmCluster,
     SlurmConfigError,
     SlurmJobRunner,
+    WithdrawalTiming,
+    Withdrawer,
     Withdrawn,
     WithdrawOutcome,
     WithdrawUnknown,
@@ -53,6 +55,8 @@ if TYPE_CHECKING:
 
 _DEFAULT_SLURM_CONFIG = Path("~/.config/vibesys/slurm.toml")
 _REMOVED_REASON = "removed with `vibesys evals remove`"
+# The withdrawer this command names in the entries it marks withdrawing.
+_WITHDRAWER = "vibesys-evals"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,12 +65,14 @@ class EvalsHost:
 
     ``ledger`` opens the ledger of a project id. ``current_project`` names the
     project of the working directory, for a command without ``--project``.
-    ``confirm`` asks the operator a yes-or-no question.
+    ``confirm`` asks the operator a yes-or-no question. ``call_seconds``
+    bounds one transport call to the cluster (``transport_timeout_seconds``).
     """
 
     ledger: Callable[[str], EvaluationLedger]
     cluster: Cluster
     clock: Clock
+    call_seconds: float
     current_project: Callable[[], str]
     confirm: Callable[[str], bool]
 
@@ -146,7 +152,19 @@ def _remove(
     )
     if not args.yes and not host.confirm(question):
         return 1, "Nothing removed.\n"
-    outcomes = [withdraw(ledger, host.cluster, key, reason=_REMOVED_REASON) for key in keys]
+    outcomes = [
+        withdraw(
+            ledger,
+            host.cluster,
+            key,
+            Withdrawer(
+                by=_WITHDRAWER,
+                reason=_REMOVED_REASON,
+                timing=WithdrawalTiming(clock=host.clock, call_seconds=host.call_seconds),
+            ),
+        )
+        for key in keys
+    ]
     code = 1 if any(isinstance(outcome, WithdrawUnknown) for outcome in outcomes) else 0
     return code, "\n".join(format_withdrawal(outcome) for outcome in outcomes) + "\n"
 
@@ -255,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             cluster=cluster,
             clock=clock,
+            call_seconds=config.transport_timeout_seconds,
             current_project=_current_project,
             confirm=_ask,
         )

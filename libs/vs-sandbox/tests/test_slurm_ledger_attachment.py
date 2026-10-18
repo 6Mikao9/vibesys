@@ -44,6 +44,8 @@ from vs_slurm.api import (
     SlurmSshTransport,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
+    WithdrawalTiming,
+    Withdrawer,
     job_of_handle,
     ledger_operation_id,
     transitioned,
@@ -368,7 +370,18 @@ def test_an_operator_removal_racing_a_submitter_is_never_overwritten(remove_at: 
         operation = ledger_operation_id(key, 0)
 
         def remove() -> None:
-            withdraw(world.ledger, world.cluster, key, reason="removed by operator")
+            withdraw(
+                world.ledger,
+                world.cluster,
+                key,
+                Withdrawer(
+                    by="vibesys-evals",
+                    reason="removed by operator",
+                    timing=WithdrawalTiming(
+                        clock=world.clock, call_seconds=CONFIG.transport_timeout_seconds
+                    ),
+                ),
+            )
 
         if remove_at == "before_sbatch":
             world.cluster.script(operation, queue_wait_s=math.inf, on_dispatch=remove)
