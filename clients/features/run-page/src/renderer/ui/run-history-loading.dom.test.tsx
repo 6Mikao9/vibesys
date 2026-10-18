@@ -101,6 +101,11 @@ function replay(size: number, total: number | undefined): readonly RunPageState[
     states.push(state);
   };
   step({type: 'record', record: {kind: 'ended', run: ENDED}});
+  const summary = asked.find(request => request.kind === 'read-summary');
+  if (summary?.kind !== 'read-summary') throw new Error('no summary asked');
+  // The host serves no summary, so the history is what the screen waits for.
+  step({type: 'summary', token: summary.token, reply: {kind: 'unsupported'}, wallMs: 0});
+  states.splice(0, states.length - 1); // the screens from here on are the history's loading
   const nextRead = () => asked.find(request => request.kind === 'read-history');
   for (let request = nextRead(); request?.kind === 'read-history'; request = nextRead()) {
     step({type: 'history', token: request.token, reply: pageOf(request.from, size, total)});

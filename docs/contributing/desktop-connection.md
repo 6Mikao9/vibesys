@@ -628,7 +628,20 @@ expected time and "Stop waiting" (`command.pause`) until `quota_wait_cancelled`.
 refuses the wait (an older one rejects `when`) no longer offers it for that run instance. Times are
 words for the events' epoch seconds in the user's time zone; no clock is read. Leaving the run
 releases it (`releaseRun`), and a new shell document detaches the run the old one held. An ended run
-opens from its recorded history instead: the store reads `runs.read_events` (feature `run_history`,
+opens from its summary: the store asks for `runs.summary` (feature `run_summary`, through the welcome
+bridge's `readSummary`, whose main-process reader joins the pages and reads again when the run moved
+between two), seeds the trace from it as it does from a live session's snapshot (`traceStep`), and
+folds the turns' last replies and the run's spend into the core from events rebuilt from the summary
+(`run-summary.ts`), so the run level is final and interactive without reading the journal and the
+header, the hero and the idea rows read what they read for the whole history. A live run takes it
+for its first paint until its session's snapshot arrives. The transcript, the agents' models and a
+turn's tool output are in the history: a pane that needs them (an agent or a step is open, or the
+Agents face) asks for it (`need-history`), and it is read as below into a core of its own that
+replaces the seed only when it is all read; until then those panes show its progress and the run
+level stays. A host without the summary, or one whose summary read fails, is read through its
+history from the start, behind the loading screen. Only if that read also fails does the screen
+report an unavailable run:
+the store reads `runs.read_events` (feature `run_history`,
 through the welcome bridge's `readEvents`) with up to three pages in flight under tokens (the first
 open-ended; its reply's totals cut the rest of the journal into spans, `history-pager.ts`), validates
 each event, and folds the pages in journal order, each event once, into the same `run` slice, so the tabs have one source; an older host answers

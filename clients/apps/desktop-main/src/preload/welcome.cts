@@ -33,6 +33,7 @@ const CHANNELS: Channels = {
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
   readEvents: 'vibesys:welcome:read-events',
+  readSummary: 'vibesys:welcome:read-summary',
   preferences: 'vibesys:welcome:preferences',
   setAppearance: 'vibesys:welcome:set-appearance',
   setNotifications: 'vibesys:welcome:set-notifications',
@@ -103,6 +104,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     releaseRun: () => call(CHANNELS.releaseRun),
     readEvents: (host, project, runId, fromSequence, max) =>
       call(CHANNELS.readEvents, host, project, runId, fromSequence, max),
+    readSummary: (host, project, runId) => call(CHANNELS.readSummary, host, project, runId),
     connectRun: id => capabilities.connectRun(id),
     onWake: listener => capabilities.on(WAKE_CHANNEL, () => listener()),
     stopConfirmed: (host, instance, force) => call(CHANNELS.stopConfirmed, host, instance, force),

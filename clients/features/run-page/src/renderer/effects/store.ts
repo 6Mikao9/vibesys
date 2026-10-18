@@ -7,6 +7,8 @@
  * (`SessionHolder`). `dispose` stops every follower, closes the session, lets the run go and cancels
  * the bound; a reply that arrives later is dropped by its token.
  */
+
+import type {RunStatus} from '@vibesys/contracts';
 import {type LogListOutcome, type LogTransport, startLogFollower} from '@vibesys/logs';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {createStore, type Store} from '@vibesys/store';
@@ -19,6 +21,7 @@ import {
   type RunPageState,
   runPageInitial,
   runPageStep,
+  type SummaryReply,
 } from '../../state/index.js';
 import {type OpenSession, SessionHolder} from './live-session.js';
 
@@ -40,6 +43,8 @@ export interface RunPagePorts {
   readonly openSession: OpenSession;
   /** One page of the ended run's recorded events from `from`. */
   readHistory(from: number, max: number): Promise<HistoryReply>;
+  /** The run's summary: its run level without its history. */
+  readSummary(status: RunStatus): Promise<SummaryReply>;
   /** Resume an ended run that its end record says can resume. */
   resumeEnded(fromRound: number | null): void;
   openWindow(): void;
@@ -150,6 +155,19 @@ function readHistory(
     .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
 }
 
+/** Read the run's summary; a read that throws settles as a failed one. */
+function readSummary(
+  ports: RunPagePorts,
+  request: Extract<RunPageRequest, {readonly kind: 'read-summary'}>,
+  dispatch: Dispatch,
+): void {
+  const settle = (reply: SummaryReply): void =>
+    dispatch({type: 'summary', token: request.token, reply, wallMs: ports.now()});
+  void ports
+    .readSummary(request.status)
+    .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
+}
+
 /** List the run's log streams; a listing that throws settles as a transport failure. */
 function listLogs(
   ports: RunPagePorts,
@@ -236,6 +254,9 @@ export function createRunPageStore(
         return;
       case 'read-history':
         readHistory(ports, request, dispatch);
+        return;
+      case 'read-summary':
+        readSummary(ports, request, dispatch);
         return;
       case 'pause':
       case 'resume':

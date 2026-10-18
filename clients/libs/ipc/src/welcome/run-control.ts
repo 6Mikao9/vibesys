@@ -1,6 +1,6 @@
 /**
  * The run-control feature's welcome requests: attach, resume, stop (the view asks the user first),
- * letting a run go, and reading a run's recorded history.
+ * letting a run go, and reading a run's recorded history and its summary.
  */
 import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
 import {exactResumeRunId, type ResumeRunId} from '@vibesys/runs';
@@ -13,6 +13,7 @@ export const RUN_CONTROL_CHANNELS = {
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
   readEvents: 'vibesys:welcome:read-events',
+  readSummary: 'vibesys:welcome:read-summary',
 } as const;
 
 /** The most events one history page may ask for. */
@@ -37,6 +38,44 @@ export type RunHistoryPage =
       readonly totalEvents?: number;
       readonly totalBytes?: number;
     }
+  | {readonly kind: 'unsupported'};
+
+/** A count of tokens spent as a host's summary words it; `null`: not reported. */
+export interface SummaryTokens {
+  readonly input: number | null;
+  readonly cacheRead: number | null;
+  readonly cacheWrite: number | null;
+  readonly output: number | null;
+  readonly reasoning: number | null;
+}
+
+/**
+ * A run's summary (`runs.summary`, feature `run_summary`) with its pages joined: what the run level
+ * shows, as the journal stood at `throughSequence`. The documents are the run protocol's, as the
+ * helper recorded them (the page validates them before folding them): the spans in the order they
+ * started, the overview, and each turn's last typed reply with its schema.
+ */
+export interface RunSummary {
+  readonly throughSequence: number;
+  readonly eventCount: number;
+  readonly journalBytes: number;
+  readonly overview: unknown;
+  readonly spans: readonly unknown[];
+  readonly replies: readonly {
+    readonly spanId: string;
+    readonly kind: string;
+    readonly jsonSchema: unknown;
+    readonly value: unknown;
+  }[];
+  /** The whole run's spend, every turn's. */
+  readonly tokens: SummaryTokens;
+  /** Each turn span's spend. */
+  readonly usage: readonly {readonly spanId: string; readonly tokens: SummaryTokens}[];
+}
+
+/** A run's summary, or that this host's VibeSys does not serve one. */
+export type RunSummaryResult =
+  | {readonly kind: 'summary'; readonly summary: RunSummary}
   | {readonly kind: 'unsupported'};
 
 /**
@@ -70,6 +109,12 @@ export interface RunControlWelcomeBridge {
     fromSequence: number,
     max: number,
   ): Promise<WelcomeResult<RunHistoryPage>>;
+  /** Run `runId`'s summary in `project` on `host`: its run level without its history. */
+  readSummary(
+    host: HostKey,
+    project: string,
+    runId: string,
+  ): Promise<WelcomeResult<RunSummaryResult>>;
 }
 
 export type RunControlRequest =
@@ -95,6 +140,12 @@ export type RunControlRequest =
       readonly runId: string;
       readonly from: number;
       readonly max: number;
+    }
+  | {
+      readonly kind: 'read-summary';
+      readonly host: HostId;
+      readonly project: string;
+      readonly runId: string;
     };
 
 function forceStop(value: unknown): boolean {
@@ -150,6 +201,13 @@ export function parseRunControlRequest(
         runId: exactResumeRunId(third),
         from: sequence(fourth),
         max: pageSize(fifth),
+      };
+    case RUN_CONTROL_CHANNELS.readSummary:
+      return {
+        kind: 'read-summary',
+        host: hostFromKey(first),
+        project: project(second),
+        runId: exactResumeRunId(third),
       };
   }
 }

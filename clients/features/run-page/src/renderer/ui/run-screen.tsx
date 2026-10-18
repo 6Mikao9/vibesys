@@ -44,6 +44,7 @@ import {
   streamLines,
   timelineView,
   traceArrival,
+  transcriptLoading,
 } from '../../state/index.js';
 import {Hero} from './hero.js';
 import {HistoryLoading} from './history-loading.js';
@@ -338,6 +339,7 @@ export function RunScreen(props: {
     );
   }
   const problem = historyProblem(state);
+  const transcript = transcriptLoading(state);
   const zoomed = resolveZoom(model, route);
   // The chain lit on the chart and in the tree: what the pointer is on, else what was pinned or opened.
   const lit = ideaAncestry(
@@ -382,7 +384,14 @@ export function RunScreen(props: {
         hover={idea => dispatch({type: 'ideas-hover', idea})}
       />
       {deep ? <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} /> : null}
-      {deep ? <DeepLevel {...level} zoomed={zoomed} /> : <RunLevel {...level} />}
+      {transcript !== null && (deep || route.mode === 'agents') ? (
+        // The run level is final, but the agents and steps read the transcript, still being read.
+        <HistoryLoading progress={transcript} />
+      ) : deep ? (
+        <DeepLevel {...level} zoomed={zoomed} />
+      ) : (
+        <RunLevel {...level} />
+      )}
     </Screen>
   );
 }

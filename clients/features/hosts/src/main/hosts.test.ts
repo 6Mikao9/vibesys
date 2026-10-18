@@ -472,6 +472,122 @@ describe('Hosts.readEvents page size', () => {
   });
 });
 
+describe('Hosts.readSummary', () => {
+  const tally = (input: number | null) => ({
+    input,
+    cache_read: null,
+    cache_write: null,
+    output: null,
+    reasoning: null,
+  });
+  const page = (through: number, rest: object) => ({
+    through_sequence: through,
+    event_count: through,
+    journal_bytes: 99,
+    span_count: 2,
+    reply_count: 1,
+    usage_count: 1,
+    tokens: tally(7),
+    overview: null,
+    spans: [],
+    replies: [],
+    schemas: {},
+    usage: [],
+    next_offset: null,
+    ...rest,
+  });
+  const key = '/srv/project run-1';
+  const SCHEMA = 'a'.repeat(64);
+
+  async function subject(
+    pages: readonly {offset: number; page: Record<string, unknown>}[],
+    features = true,
+  ) {
+    const link = new FakeLink();
+    if (!features) link.helper.features.delete('run_summary');
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    link.helper.host.summaries.set(key, pages);
+    const built = completionSubject(link);
+    return {link, ...built};
+  }
+
+  test('joins the pages, each reply with the schema its page or an earlier one carried', async () => {
+    const {hosts, manager} = await subject([
+      {
+        offset: 0,
+        page: page(40, {
+          spans: [{id: 'a'}, {id: 'b'}],
+          next_offset: 2,
+          schemas: {[SCHEMA]: {title: 'Plan'}},
+        }),
+      },
+      {
+        offset: 2,
+        page: page(40, {
+          replies: [{span_id: 'a', kind: 'Plan', schema_id: SCHEMA, value: {summary: 'x'}}],
+          usage: [{span_id: 'a', tally: tally(5)}],
+        }),
+      },
+    ]);
+    await using _manager = manager;
+
+    const result = await hosts.readSummary(LOCAL, '/srv/project', 'run-1');
+
+    expect(result).toEqual({
+      kind: 'summary',
+      summary: {
+        throughSequence: 40,
+        eventCount: 40,
+        journalBytes: 99,
+        overview: null,
+        spans: [{id: 'a'}, {id: 'b'}],
+        replies: [{spanId: 'a', kind: 'Plan', jsonSchema: {title: 'Plan'}, value: {summary: 'x'}}],
+        tokens: {input: 7, cacheRead: null, cacheWrite: null, output: null, reasoning: null},
+        usage: [
+          {
+            spanId: 'a',
+            tokens: {input: 5, cacheRead: null, cacheWrite: null, output: null, reasoning: null},
+          },
+        ],
+      },
+    });
+  });
+
+  test('reads again from the start when the run moved between two pages, and gives up after a few', async () => {
+    const moving = await subject([
+      {offset: 0, page: page(40, {next_offset: 2})},
+      {offset: 2, page: page(41, {})},
+    ]);
+    await using _manager = moving.manager;
+
+    await expect(moving.hosts.readSummary(LOCAL, '/srv/project', 'run-1')).rejects.toThrow(
+      'the run kept changing while its summary was read',
+    );
+    expect(
+      moving.link.helper.requests.filter(request => request.type === 'runs.summary').length,
+    ).toBe(6);
+  });
+
+  test('is unsupported, and sends nothing, on a helper without run_summary', async () => {
+    const {hosts, link, manager} = await subject([{offset: 0, page: page(1, {})}], false);
+    await using _manager = manager;
+
+    await expect(hosts.readSummary(LOCAL, '/srv/project', 'run-1')).resolves.toEqual({
+      kind: 'unsupported',
+    });
+    expect(link.helper.requests.filter(request => request.type === 'runs.summary')).toEqual([]);
+  });
+
+  test('names the run when the host has none by that name', async () => {
+    const {hosts, manager} = await subject([]);
+    await using _manager = manager;
+
+    await expect(hosts.readSummary(LOCAL, '/srv/project', 'run-9')).rejects.toThrow(
+      'Could not read the summary of run run-9',
+    );
+  });
+});
+
 describe('Hosts checkout changes', () => {
   test('removing a host fences an older checkout validation before acknowledging removal', async () => {
     const settings = new SettingsStore({
