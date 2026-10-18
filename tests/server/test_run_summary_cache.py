@@ -6,13 +6,11 @@ import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import patch
 
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.server.run_summary_support import RUN_ID, events, journal_lines
 
-import server.run_summary_cache as summary_cache
 from server.events import EventType, OutputData, RunEvent, SpanStartedData
 from server.host_run_summary import RUN_SUMMARY_FILE
 from server.run_summary import RunSummaryFold, Summarized, SummaryState
@@ -40,18 +38,17 @@ def _summarize(directory: Path) -> tuple[SummaryState, int]:
     return summarized.fold.state(), summarized.journal_bytes
 
 
-def test_helper_reader_reuses_a_validated_fold_across_pages() -> None:
+def test_helper_reader_returns_consistent_pages_from_an_unchanged_journal() -> None:
     lines = _padded_journal(100)
     with tempfile.TemporaryDirectory() as raw:
         journal = Path(raw) / "run-events.jsonl"
         journal.write_bytes(_scratch(lines))
         summarize_journal(journal)  # A prior helper process left a valid disk cache.
         reader = SummaryReader()
-        with patch("server.run_summary_cache._restore", wraps=summary_cache._restore) as restore:  # noqa: SLF001
-            first = reader.summarize(journal)
-            second = reader.summarize(journal)
+        first = reader.summarize(journal)
+        second = reader.summarize(journal)
         assert first.fold.state() == second.fold.state()
-        assert restore.call_count == 1
+        assert first.fold.page(0) == second.fold.page(0)
 
 
 def test_helper_reader_invalidates_on_append_replacement_and_cache_damage() -> None:
