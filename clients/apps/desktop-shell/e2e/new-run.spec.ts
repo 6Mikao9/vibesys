@@ -22,7 +22,9 @@ test('New run is prefilled from the last run on its machine and starts once the 
   await expect(page.getByLabel('Task', {exact: true})).toHaveValue('mpmc');
   await expect(page.getByRole('radio', {name: 'Claude Code'})).toBeChecked();
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-opus-4-5');
-  await expect(page.getByLabel('Model', {exact: true}).locator('option:checked')).toHaveText('Opus 4.5');
+  await expect(page.getByLabel('Model', {exact: true}).locator('option:checked')).toHaveText(
+    'Opus 4.5',
+  );
   // All is well: the checks fold into one line, which opens to show each of them.
   await expect(ready(page)).toContainText(/Ready · \d+ checks passed/);
   await expect(ready(page)).not.toContainText('Agent image');

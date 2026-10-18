@@ -14,8 +14,8 @@ import type {
   ObjectiveAxis,
 } from '@vibesys/run-state/candidates';
 import {metricLabel} from './metric-words.js';
-import {objectivesOf} from './pareto-view.js';
 import {stepLabel, stepTitle} from './names.js';
+import {objectivesOf} from './pareto-view.js';
 import {
   type IdeaResult,
   inputValueOf,
