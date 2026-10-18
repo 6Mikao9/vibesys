@@ -18,6 +18,7 @@
  * longer offers it for this run instance (`waitRefused`).
  */
 
+import type {RunStatus} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
@@ -41,6 +42,7 @@ import {
   traceProblems,
   traceStep,
 } from './live.js';
+import type {RunSummaryState, SummaryReply} from './run-summary.js';
 
 /** When a Resume takes effect: now, or once the provider's capacity returns. */
 export type ResumeWhen = 'now' | 'capacity_returns';
@@ -100,6 +102,12 @@ export type RunHistory =
       readonly kind: 'reading';
       readonly pager: HistoryPager;
       readonly progress: HistoryProgress;
+      /**
+       * The fold of the events read so far. It replaces the run's core only when the history is
+       * all read: a prefix of the transcript is no run's, and a summary-seeded core (which holds
+       * the turns' last replies) would double its replies if the history folded onto it.
+       */
+      readonly core: CoreState | null;
     }
   | {readonly kind: 'read'}
   | {readonly kind: 'unsupported'}
@@ -182,7 +190,11 @@ export interface RunPageState {
   readonly view: RunView;
   /** Why the last command the run refused failed, until the next one. */
   readonly notice: string | null;
-  /** An ended run's recorded events, read into `run`. */
+  /** The run's summary, which opens the run level (`run-summary.ts`). */
+  readonly summary: RunSummaryState;
+  /** A pane asked for the transcript, even if the summary has not arrived yet. */
+  readonly wantsHistory: boolean;
+  /** An ended run's recorded events, read into `run` for its transcript. */
   readonly history: RunHistory;
   /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
   readonly waitRefused: string | null;
@@ -228,7 +240,16 @@ export type RunPageAction =
   /** The run refused a Resume when capacity returns (an older server rejects `when`). */
   | {readonly type: 'wait-refused'; readonly message: string}
   | {readonly type: 'view'; readonly view: RunView}
-  | {readonly type: 'history'; readonly token: number; readonly reply: HistoryReply};
+  | {readonly type: 'history'; readonly token: number; readonly reply: HistoryReply}
+  /** The run's summary arrived (or did not) at `wallMs` on this window's clock. */
+  | {
+      readonly type: 'summary';
+      readonly token: number;
+      readonly reply: SummaryReply;
+      readonly wallMs: number;
+    }
+  /** A pane needs the run's transcript, which only its history holds: read it. */
+  | {readonly type: 'need-history'};
 
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
@@ -244,6 +265,8 @@ export type RunPageRequest =
   | {readonly kind: 'attach'; readonly token: number; readonly instance: string}
   /** Let the attached run go (its session closes with it). */
   | {readonly kind: 'release'}
+  /** Read the run's summary, answering `summary` with `token`. */
+  | {readonly kind: 'read-summary'; readonly token: number; readonly status: RunStatus}
   /** Read the ended run's recorded events from `from`, answering `history` with `token`. */
   | {
       readonly kind: 'read-history';
@@ -285,6 +308,8 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     clockMs: null,
     view: {at: 'live'},
     notice: null,
+    summary: {kind: 'idle'},
+    wantsHistory: false,
     history: {kind: 'idle'},
     waitRefused: null,
     next: 1,
@@ -404,7 +429,7 @@ function startReading(state: RunPageState): RunPageStep {
     state: {
       ...state,
       next: started.nextToken,
-      history: {kind: 'reading', pager: started.pager, progress: NO_PROGRESS},
+      history: {kind: 'reading', pager: started.pager, progress: NO_PROGRESS, core: null},
     },
     requests: started.requests.map(asked => ({kind: 'read-history', ...asked})),
   };
@@ -418,29 +443,68 @@ export function historyAwaiting(history: RunHistory): readonly number[] {
   );
 }
 
+/** Whether the run fold holds anything yet: a session's snapshot or events, or a summary. */
+function folded(state: RunPageState): boolean {
+  return state.run.core !== null || state.run.trace !== EMPTY_RUN_FOLD.trace;
+}
+
+/** Ask for the run's summary, which opens the run level. */
+function startSummary(state: RunPageState, status: RunStatus): RunPageStep {
+  const token = state.next;
+  return {
+    state: {...state, next: token + 1, summary: {kind: 'reading', token}},
+    requests: [{kind: 'read-summary', token, status}],
+  };
+}
+
 /**
- * An ended run opened with nothing folded reads its history once into the run fold; a run that is
- * live again (a resume)
- * gets its data from its session, and drops a history read in flight.
+ * A run opened with nothing folded asks for its summary, which holds the run level whole. A live
+ * run takes it for its first paint until its session's snapshot arrives; an ended run's history (its
+ * transcript) is read only when a pane needs it (`need-history`), or at once when its host serves
+ * no summary. A run watched to its end already holds what its session folded. A run that is live
+ * again (a resume) gets its data from its session, and drops a history read in flight.
  */
 function historyFor(state: RunPageState): RunPageStep {
-  if (state.record.kind === 'live') {
-    return {
-      state: state.history.kind === 'idle' ? state : {...state, history: {kind: 'idle'}},
-      requests: [],
-    };
+  switch (state.record.kind) {
+    case 'live': {
+      const idle: RunHistory = {kind: 'idle'};
+      const cleared: RunPageState =
+        state.history.kind === 'idle' ? state : {...state, history: idle};
+      return cleared.summary.kind === 'idle' && !folded(cleared)
+        ? startSummary(cleared, state.record.run.phase)
+        : {state: cleared, requests: []};
+    }
+    case 'unlisted':
+      return state.history.kind === 'reading'
+        ? {state: {...state, history: {kind: 'idle'}}, requests: []}
+        : {state, requests: []};
+    case 'ended':
+      return state.history.kind === 'idle'
+        ? endedHistoryFor(state, state.record.run.phase)
+        : {state, requests: []};
   }
-  if (state.record.kind === 'unlisted' && state.history.kind === 'reading') {
-    return {state: {...state, history: {kind: 'idle'}}, requests: []};
+}
+
+/** What an ended run whose history is not asked yet needs first: its summary, or its history. */
+function endedHistoryFor(state: RunPageState, status: RunStatus): RunPageStep {
+  const read: RunPageStep = {state: {...state, history: {kind: 'read'}}, requests: []};
+  switch (state.summary.kind) {
+    case 'ready':
+      return state.wantsHistory ? startReading(state) : {state, requests: []};
+    case 'reading':
+      // A session that watched the run to its end folded it: the summary's answer is not needed.
+      return folded(state)
+        ? {state: {...read.state, summary: {kind: 'superseded'}}, requests: []}
+        : {state, requests: []};
+    case 'idle':
+      return folded(state) ? read : startSummary(state, status);
+    case 'unsupported':
+      return folded(state) ? read : startReading(state);
+    case 'failed':
+      return folded(state) ? read : startReading(state);
+    default:
+      return {state, requests: []};
   }
-  if (state.record.kind === 'ended' && state.history.kind === 'idle') {
-    // A run watched to its end already holds what its session folded; only one opened ended
-    // (nothing folded yet) reads its recorded history.
-    const folded = state.run.core !== null || state.run.trace !== EMPTY_RUN_FOLD.trace;
-    if (folded) return {state: {...state, history: {kind: 'read'}}, requests: []};
-    return startReading(state);
-  }
-  return {state, requests: []};
 }
 
 function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
@@ -460,27 +524,31 @@ function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
 function withHistory(state: RunPageState, token: number, reply: HistoryReply): RunPageStep {
   const {history} = state;
   if (history.kind !== 'reading') return {state, requests: []};
+  // A run opened from its summary keeps its run level when the transcript cannot be read; one
+  // opened from its history has only a prefix of the run to drop.
+  const kept = state.summary.kind === 'ready' ? state.run : EMPTY_RUN_FOLD;
   if (reply.kind === 'unsupported') {
-    return {state: {...state, run: EMPTY_RUN_FOLD, history: reply}, requests: []};
+    return {state: {...state, run: kept, history: reply}, requests: []};
   }
   if (reply.kind === 'failed') {
-    // What was folded is a prefix of the run: drop it rather than leave it to read as the run.
     return {
-      state: {...state, run: EMPTY_RUN_FOLD, history: {kind: 'failed', message: reply.message}},
+      state: {...state, run: kept, history: {kind: 'failed', message: reply.message}},
       requests: [],
     };
   }
   const step = receivePage(history.pager, token, reply, HISTORY_PAGE_EVENTS, state.next);
   // A reply for a reading that is over (or one page twice) is dropped.
   if (step === null) return {state, requests: []};
-  const run: RunFold =
+  const core =
     step.events.length === 0
-      ? state.run
-      : {
-          ...state.run,
-          core: reduceEventBatch(state.run.core ?? initialCoreState(), step.events),
-          trace: traceStep(state.run.trace, {kind: 'events', events: step.events}),
-        };
+      ? history.core
+      : reduceEventBatch(history.core ?? initialCoreState(), step.events);
+  // The events are the journal's, so a trace already seeded from the summary skips them; one that
+  // was not (an older host) grows with them.
+  const trace =
+    step.events.length === 0
+      ? state.run.trace
+      : traceStep(state.run.trace, {kind: 'events', events: step.events});
   const before = history.progress;
   const progress: HistoryProgress = {
     events: before.events + step.events.length,
@@ -490,12 +558,64 @@ function withHistory(state: RunPageState, token: number, reply: HistoryReply): R
   return {
     state: {
       ...state,
-      run,
+      run: step.done ? {...state.run, trace, core} : {...state.run, trace},
       next: step.nextToken,
-      history: step.done ? {kind: 'read'} : {kind: 'reading', pager: step.pager, progress},
+      history: step.done ? {kind: 'read'} : {kind: 'reading', pager: step.pager, progress, core},
     },
     requests: step.requests.map(asked => ({kind: 'read-history', ...asked})),
   };
+}
+
+/** The run's summary arrived: seed the run fold from it, unless something else already did. */
+function withSummary(
+  state: RunPageState,
+  token: number,
+  reply: SummaryReply,
+  wallMs: number,
+): RunPageStep {
+  const {summary} = state;
+  if (summary.kind !== 'reading' || summary.token !== token) return {state, requests: []};
+  if (reply.kind === 'unsupported') {
+    const unsupported = {...state, summary: reply};
+    return state.record.kind === 'ended' && state.history.kind === 'idle'
+      ? startReading(unsupported)
+      : {state: unsupported, requests: []};
+  }
+  if (reply.kind === 'failed') {
+    // A live run has its session; an ended one can still read the full history.
+    const failed = {...state, summary: reply};
+    return state.record.kind === 'ended' && state.history.kind === 'idle'
+      ? startReading(failed)
+      : {state: failed, requests: []};
+  }
+  if (folded(state)) return {state: {...state, summary: {kind: 'superseded'}}, requests: []};
+  const data: RunData = {kind: 'snapshot', snapshot: reply.snapshot};
+  const ready: RunPageState = {
+    ...state,
+    summary: {
+      kind: 'ready',
+      through: reply.through,
+      eventCount: reply.eventCount,
+      journalBytes: reply.journalBytes,
+    },
+    run: {
+      core: reduceEventBatch(initialCoreState(), reply.seed),
+      trace: traceStep(state.run.trace, data),
+      heard: heardAfter(state.run.heard, data, wallMs),
+    },
+  };
+  return ready.record.kind === 'ended' && ready.wantsHistory
+    ? startReading(ready)
+    : {state: ready, requests: []};
+}
+
+/** A pane needs the transcript: an ended run opened from its summary reads its history now. */
+function withNeedHistory(state: RunPageState): RunPageStep {
+  const wanted = state.wantsHistory ? state : {...state, wantsHistory: true};
+  if (wanted.record.kind !== 'ended' || wanted.summary.kind !== 'ready') {
+    return {state: wanted, requests: []};
+  }
+  return wanted.history.kind === 'idle' ? startReading(wanted) : {state: wanted, requests: []};
 }
 
 function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
@@ -787,6 +907,10 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       return {state: {...state, view: action.view}, requests: []};
     case 'history':
       return withHistory(state, action.token, action.reply);
+    case 'summary':
+      return withSummary(state, action.token, action.reply, action.wallMs);
+    case 'need-history':
+      return withNeedHistory(state);
     default:
       return null;
   }

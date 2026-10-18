@@ -7,10 +7,11 @@
  * window (`attach`, the same run control a run page uses) and its session runs over the window's
  * relay (`run-connection.ts`); Pause and Resume are commands on that session.
  */
-import {validateRunEvent} from '@vibesys/contracts';
+import {type RunStatus, validateRunEvent} from '@vibesys/contracts';
 import {
   type DesktopBridge,
   type RunHistoryPage,
+  type RunSummaryResult,
   settled,
   type WelcomeBridge,
   type WelcomeResult,
@@ -19,7 +20,7 @@ import type {LogListOutcome, LogReadInput, LogReadOutcome, LogTransport} from '@
 import {WebSession, type WebSessionOptions} from '@vibesys/run-session';
 import {exactResumeRunId, type RunRef} from '@vibesys/runs';
 import type {AbortSignalLike} from '@vibesys/transport';
-import type {HistoryReply} from '../../state/index.js';
+import {type HistoryReply, type SummaryReply, summaryFacts} from '../../state/index.js';
 import type {LiveSession, SessionObserver} from './live-session.js';
 import {type PortMessages, welcomeRunBridge} from './run-connection.js';
 import type {RunPagePorts} from './store.js';
@@ -38,6 +39,7 @@ export type RunPageBridge = Pick<
   | 'connectRun'
   | 'onWake'
   | 'readEvents'
+  | 'readSummary'
 >;
 
 /** The page the session runs in: where the preload's ports arrive, and the app's session wiring. */
@@ -77,6 +79,24 @@ function historyReply(page: RunHistoryPage): HistoryReply {
       kind: 'failed',
       message: `the run's history holds an unreadable event: ${String(error)}`,
     };
+  }
+}
+
+/**
+ * A summary read as the screen takes it: validated into its snapshot and seed events. A summary
+ * that is not a valid one fails the read, as a history with an unreadable event does.
+ */
+function summaryReply(
+  result: WelcomeResult<RunSummaryResult>,
+  runId: string,
+  status: RunStatus,
+): SummaryReply {
+  if (!result.ok) return {kind: 'failed', message: result.error};
+  if (result.value.kind === 'unsupported') return result.value;
+  try {
+    return {kind: 'summary', ...summaryFacts(result.value.summary, runId, status)};
+  } catch (error) {
+    return {kind: 'failed', message: `the run’s summary is not readable: ${String(error)}`};
   }
 }
 
@@ -187,6 +207,10 @@ export function welcomeRunPorts(
         bridge.readEvents(host, target.project, target.run.runId, from, max),
       );
       return result.ok ? historyReply(result.value) : {kind: 'failed', message: result.error};
+    },
+    readSummary: async status => {
+      const result = await settled(bridge.readSummary(host, target.project, target.run.runId));
+      return summaryReply(result, target.run.runId, status);
     },
     resumeEnded: () =>
       void settled(bridge.resume(host, target.project, exactResumeRunId(target.run.runId))),

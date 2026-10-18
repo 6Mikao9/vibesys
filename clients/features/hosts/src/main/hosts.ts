@@ -12,7 +12,7 @@ import {
   type HostConnection,
   type LogsLease,
 } from '@vibesys/connection';
-import type {PathsCompleteReply} from '@vibesys/contracts/host-helper';
+import type {HelperMessage, PathsCompleteReply} from '@vibesys/contracts/host-helper';
 import {
   type HostId,
   type HostKey,
@@ -26,7 +26,15 @@ import {
   inspectionReply,
   validHostPath,
 } from '@vibesys/hosts';
-import type {HarnessListing, PathCompletion, RunHistoryPage, RunLogsRequest} from '@vibesys/ipc';
+import type {
+  HarnessListing,
+  PathCompletion,
+  RunHistoryPage,
+  RunLogsRequest,
+  RunSummary,
+  RunSummaryResult,
+  SummaryTokens,
+} from '@vibesys/ipc';
 import type {LogListOutcome, LogReadOutcome} from '@vibesys/logs';
 import {
   rememberInstance,
@@ -54,6 +62,69 @@ export interface HostsDeps {
   readonly push: (listing: HostListing) => void;
   /** Forget a host's retained listing when it leaves the desired set. */
   readonly retire: (host: HostKey) => void;
+}
+
+/** How many times a summary is read again when its pages disagree on where the run stood. */
+const SUMMARY_READ_ATTEMPTS = 3;
+
+type SummaryReply = Extract<HelperMessage, {type: 'runs.summary'}>;
+
+const tokens = (tally: SummaryReply['tokens']): SummaryTokens => ({
+  input: tally.input,
+  cacheRead: tally.cache_read,
+  cacheWrite: tally.cache_write,
+  output: tally.output,
+  reasoning: tally.reasoning,
+});
+
+/**
+ * Every page of one run's summary joined, or null when the pages disagree on the sequence the run
+ * stood at (it wrote between two of them): the caller reads again.
+ */
+async function readSummaryPages(
+  connection: {
+    request(body: {type: 'runs.summary'} & Record<string, unknown>): Promise<SummaryReply>;
+  },
+  project: string,
+  runId: string,
+): Promise<RunSummary | null> {
+  const spans: unknown[] = [];
+  const replies: SummaryReply['replies'][number][] = [];
+  const usage: SummaryReply['usage'][number][] = [];
+  const schemas = new Map<string, unknown>();
+  let first: SummaryReply | null = null;
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page: SummaryReply = await connection.request({
+      type: 'runs.summary',
+      project,
+      run_id: runId,
+      offset,
+    });
+    if (first !== null && page.through_sequence !== first.through_sequence) return null;
+    first ??= page;
+    spans.push(...page.spans);
+    replies.push(...page.replies);
+    usage.push(...page.usage);
+    for (const [key, schema] of Object.entries(page.schemas)) schemas.set(key, schema);
+    offset = page.next_offset ?? null;
+  }
+  if (first === null) return null;
+  return {
+    throughSequence: first.through_sequence,
+    eventCount: first.event_count,
+    journalBytes: first.journal_bytes,
+    overview: first.overview,
+    spans,
+    replies: replies.map(reply => ({
+      spanId: reply.span_id,
+      kind: reply.kind,
+      jsonSchema: schemas.get(reply.schema_id) ?? null,
+      value: reply.value,
+    })),
+    tokens: tokens(first.tokens),
+    usage: usage.map(entry => ({spanId: entry.span_id, tokens: tokens(entry.tally)})),
+  };
 }
 
 /** One checkout change, unique across renderer-document lifetimes. */
@@ -334,6 +405,32 @@ export class Hosts {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read the history of run ${runId}`);
+    }
+  }
+
+  /**
+   * Run `runId`'s summary in `project` on `id` (`runs.summary`): what the run level shows, without
+   * the history it comes from, its pages joined. A run still writing can move between pages; every
+   * page names the sequence it was read at, and a read whose pages disagree starts again, a few
+   * times before it fails. `unsupported` when the host's VibeSys does not serve summaries.
+   */
+  async readSummary(id: HostId, project: string, runId: string): Promise<RunSummaryResult> {
+    await using lease = await this.connection(id);
+    try {
+      await lease.connection.ready();
+      if (lease.connection.features?.includes('run_summary') !== true) {
+        return {kind: 'unsupported'};
+      }
+      for (let attempt = 0; attempt < SUMMARY_READ_ATTEMPTS; attempt += 1) {
+        const summary = await readSummaryPages(lease.connection, project, runId);
+        if (summary !== null) return {kind: 'summary', summary};
+      }
+      throw new Error('the run kept changing while its summary was read');
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not read the summary of run ${runId}`);
     }
   }
 

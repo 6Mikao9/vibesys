@@ -39,6 +39,7 @@ export interface DesktopDeps {
     | 'cancelCheckoutOwner'
     | 'complete'
     | 'harnesses'
+    | 'readSummary'
     | 'logs'
     | 'recent'
     | 'releaseLogs'
@@ -241,6 +242,8 @@ export class Desktop {
         const {host, project, runId, from, max} = request;
         return this.#deps.history.read({host: hostKey(host), project, runId}, from, max);
       }
+      case 'read-summary':
+        return hosts.readSummary(request.host, request.project, request.runId);
       case 'release-run':
         this.#deps.window.releaseSurfaceRun();
         return null;

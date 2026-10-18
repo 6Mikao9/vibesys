@@ -119,6 +119,7 @@ export function installFakeServer(seed: FakeServerSeed): void {
     onWake: () => undefined,
     // This fake records no history: an ended run reads that its host does not serve one.
     readEvents: () => ok({kind: 'unsupported'}),
+    readSummary: () => ok({kind: 'unsupported'}),
   });
   Object.assign(target.fakeHost, {commands, send: (message: unknown) => stream?.(message)});
 }

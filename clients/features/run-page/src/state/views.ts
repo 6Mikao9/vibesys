@@ -449,20 +449,26 @@ function adoptedAtEnd(
  */
 export type TraceArrival = 'arrived' | 'awaited' | 'none';
 
-export function traceArrival(state: RunPageState): TraceArrival {
-  if (state.record.kind === 'ended') {
-    // The history is read into the fold page by page: until the last, the fold is a prefix.
-    switch (state.history.kind) {
-      case 'reading':
-        return 'awaited';
-      case 'failed':
-      case 'unsupported':
-        return 'none';
-      case 'idle':
-      case 'read':
-        break;
-    }
+/** An ended run's recorded data, before falling back to the fold already on the page. */
+function endedTraceArrival(state: RunPageState): TraceArrival | null {
+  if (state.record.kind !== 'ended') return null;
+  if (state.summary.kind === 'reading') return 'awaited';
+  // A ready summary keeps the run level whole while its optional transcript is read or fails.
+  switch (state.history.kind) {
+    case 'reading':
+      return state.summary.kind === 'ready' ? 'arrived' : 'awaited';
+    case 'failed':
+    case 'unsupported':
+      return state.summary.kind === 'ready' ? 'arrived' : 'none';
+    case 'idle':
+    case 'read':
+      return null;
   }
+}
+
+export function traceArrival(state: RunPageState): TraceArrival {
+  const ended = endedTraceArrival(state);
+  if (ended !== null) return ended;
   const {trace} = state.run;
   if (state.session?.hasSnapshot === true || trace.base.sequence > 0 || trace.events.length > 0) {
     return 'arrived';
@@ -484,7 +490,18 @@ export function traceArrival(state: RunPageState): TraceArrival {
  */
 export function historyLoading(state: RunPageState): HistoryProgress | null {
   if (state.record.kind !== 'ended' || state.history.kind !== 'reading') return null;
-  return state.history.progress;
+  // A run opened from its summary shows its run level whole while its transcript is read.
+  return state.summary.kind === 'ready' ? null : state.history.progress;
+}
+
+/**
+ * How far the transcript of a run opened from its summary has been read while it is read, else
+ * null. The run level is final, but the transcript, the agents' models and the turns' tool output
+ * are in the history, so the panes that show them wait with this progress (`HistoryLoading`).
+ */
+export function transcriptLoading(state: RunPageState): HistoryProgress | null {
+  if (state.record.kind !== 'ended' || state.history.kind !== 'reading') return null;
+  return state.summary.kind === 'ready' ? state.history.progress : null;
 }
 
 /**
