@@ -61,6 +61,7 @@ async function chipsOf(
         base={{model, clock: {start: 0, now: 1000}, tokens: EMPTY_LEDGER, zoom: () => undefined}}
         core={null}
         mode="ideas"
+        loading={null}
         dispatch={() => undefined}
         zoomed={{idea: opened, agent: null, step: null, item: null}}
       />,

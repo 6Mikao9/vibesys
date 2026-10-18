@@ -131,6 +131,10 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.runDigests(key, path, [name]),
       {kind: 'run-digests', host, project: path, runIds: [name]},
     ],
+    [
+      bridge => bridge.readSpan(key, path, name, 'op:turn', 1, 100),
+      {kind: 'read-span', host, project: path, runId: name, spanId: 'op:turn', from: 1, max: 100},
+    ],
     [bridge => bridge.preferences(), {kind: 'preferences'}],
     [bridge => bridge.setAppearance(appearance), {kind: 'set-appearance', appearance}],
     [bridge => bridge.setNotifications(force), {kind: 'set-notifications', enabled: force}],
