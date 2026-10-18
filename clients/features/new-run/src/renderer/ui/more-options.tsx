@@ -23,11 +23,13 @@ import {
   type Budget,
   defaultRole,
   type Effort,
+  modelLabel,
   type NewRunContext,
   roleLabel,
   roleSummary,
   vettedModels,
 } from '../../state/index.js';
+import {TimeLimitField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
 import {moreOptionsSummary, type RolesView, rolesView} from './view.js';
 
@@ -73,7 +75,7 @@ function RoleRows(
                 value={choice.model ?? NONE}
                 options={[
                   {value: NONE, label: 'Same as run'},
-                  ...models.map(m => ({value: m, label: m})),
+                  ...models.map(m => ({value: m, label: modelLabel(offers, agent.provider, m)})),
                 ]}
                 change={model =>
                   dispatch({type: 'role', role: {...choice, model: model === NONE ? null : model}})
@@ -146,7 +148,7 @@ function ExampleDestination(props: CardProps): JSX.Element | null {
       <TextInput
         mono
         value={project.destination}
-        change={destination => dispatch({type: 'project', project: {...project, destination}})}
+        change={destination => dispatch({type: 'destination', destination})}
       />
     </Field>
   );
@@ -169,6 +171,7 @@ export function MoreOptions(
       {...(open ? {} : {summary: problem ?? moreOptionsSummary(context)})}
     >
       <Stack gap="space-4">
+        <TimeLimitField {...props} />
         <Stack gap="space-2">
           <Text variant="body-strong">Results</Text>
           <SegmentedControl
