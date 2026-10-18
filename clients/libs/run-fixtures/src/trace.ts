@@ -77,6 +77,11 @@ export interface IdeaSpec {
   readonly summary?: string;
   /** How long the idea runs, in seconds; defaults to 600. */
   readonly took?: number;
+  /**
+   * The framework's comparison of the idea's measurement with its base's (`measurement_compared`),
+   * emitted when the gate ends; none when omitted. Only a passed idea carries a revision to join.
+   */
+  readonly effect?: 'better' | 'within_noise' | 'worse';
   /** What the implementer's turn spent, reported when the turn ends; none when omitted. */
   readonly usage?: TurnUsage;
 }
@@ -237,6 +242,30 @@ function workstreamLabel(spec: IdeaSpec, settled: boolean): Label {
   });
 }
 
+/** The framework's comparison of a measured idea with its base, when the spec carries one. */
+function compared(trace: Trace, spec: IdeaSpec, at: number): void {
+  const {end} = spec;
+  if (spec.effect === undefined || (end.kind !== 'passed' && end.kind !== 'slower')) return;
+  trace.event(
+    'measurement_compared',
+    {
+      metric: 'total_ops_per_sec',
+      unit: 'ops/s',
+      direction: 'max',
+      candidate_commit: `r${spec.n}`,
+      base_commit: spec.on === undefined || spec.on === null ? 'r0' : `r${spec.on}`,
+      candidate_value: end.value,
+      base_value: end.value / end.ratio,
+      ratio: end.ratio,
+      noise: 0.03,
+      verdict: spec.effect,
+      candidate_samples: 5,
+      base_samples: 5,
+    },
+    at,
+  );
+}
+
 /** Write one idea: its workstream, an implementer turn (with retries), and a gate when it got there. */
 export function addIdea(trace: Trace, spec: IdeaSpec): void {
   const took = spec.took ?? 600;
@@ -326,6 +355,7 @@ export function addIdea(trace: Trace, spec: IdeaSpec): void {
   };
   trace.span('span_started', {...gate, status: 'running'}, turnEnd + 1);
   trace.span('span_ended', gate, stopsAt - 1);
+  compared(trace, spec, stopsAt - 1);
   trace.span('span_ended', workstream(end.kind === 'passed' ? 'done' : 'done', true), stopsAt);
 }
 
