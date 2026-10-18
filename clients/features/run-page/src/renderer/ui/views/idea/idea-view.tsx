@@ -24,13 +24,7 @@ import {
 import {type JSX, useState} from 'react';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {outcomeWords} from '../../../../state/ideas-view.js';
-import {
-  spendOf,
-  stepLabel,
-  stepTitle,
-  tokensColumn,
-  turnTokens,
-} from '../../../../state/index.js';
+import {spendOf, stepLabel, stepTitle, tokensColumn, turnTokens} from '../../../../state/index.js';
 import {roleSeries} from '../../../../state/role-series.js';
 import {duration} from '../../../../state/span-reading.js';
 import {plain, statusWords} from '../../../../state/span-words.js';

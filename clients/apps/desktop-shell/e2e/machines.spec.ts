@@ -40,6 +40,7 @@ const SEED: FakeBridgeSeed = {
     hardware: {cpu_cores: 64, gpus: [], accelerator: 'cpu'},
     docker: {reachable: true, version: '29.1'},
     harness_clis: ['claude', 'codex'],
+    harness_cli_names: {claude: 'Claude Code', codex: 'Codex'},
     runs: {live: 1, ended_today: 2},
   },
   checkouts: {
@@ -164,6 +165,6 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
 
 test('the machines screen names its harnesses and hardware, never their ids', async ({page}) => {
   await openMachines(page);
-  await expect(page.getByText('Claude · Codex installed')).toBeVisible();
+  await expect(page.getByText('Claude Code · Codex installed')).toBeVisible();
   expect(await rawTextOf(page)).toEqual([]);
 });

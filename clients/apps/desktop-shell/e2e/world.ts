@@ -89,6 +89,7 @@ export const SEED: FakeBridgeSeed = {
       },
       docker: {reachable: true, version: '27.3.1'},
       harness_clis: ['claude', 'codex'],
+      harness_cli_names: {claude: 'Claude Code', codex: 'Codex'},
       runs: {live: 1, ended_today: 2},
     },
     harnesses: [
