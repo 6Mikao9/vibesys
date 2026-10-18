@@ -206,6 +206,7 @@ describe('the ended banner', () => {
           kind: 'reading',
           pager: startHistory(1, 2000, 1).pager,
           progress: {events: 0, bytes: 0, total: null},
+          core: null,
         },
       } as const;
       expect(endedView(reading)?.reason).toMatch(/^Reading the run.s history/);

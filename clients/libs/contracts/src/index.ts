@@ -55,4 +55,5 @@ export {
   responseError,
   streamFailure,
   validateRunEvent,
+  validateRunSnapshot,
 } from './protocol-parse.js';

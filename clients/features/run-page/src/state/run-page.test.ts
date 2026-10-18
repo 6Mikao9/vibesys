@@ -24,6 +24,7 @@ import {
   runPhase,
   type Unavailable,
 } from './run-page.js';
+import type {SummaryReply} from './run-summary.js';
 import {scrubberView} from './scrub.js';
 import {
   endedView,
@@ -258,8 +259,37 @@ function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
   }
 }
 
+/** A reply to a summary read (some for tokens the page never asked), of any of its outcomes. */
+function summaryAction(random: Seeded, issued: readonly number[]): RunPageAction {
+  const token = random.pick(issued);
+  const outcome = random.int(4);
+  const reply: SummaryReply =
+    outcome === 0
+      ? {kind: 'unsupported'}
+      : outcome === 1
+        ? {kind: 'failed', message: 'channel closed'}
+        : {
+            kind: 'summary',
+            snapshot: {
+              run_id: RUN.runId,
+              sequence: 5,
+              status: 'completed',
+              spans: [traceSpan('flow:a')],
+            },
+            seed: [],
+            through: 5,
+            eventCount: 5,
+            journalBytes: 100,
+          };
+  return {type: 'summary', token, reply, wallMs: 0};
+}
+
 function randomAction(random: Seeded, issued: readonly number[]): RunPageAction {
-  switch (random.int(9)) {
+  switch (random.int(11)) {
+    case 9:
+      return summaryAction(random, issued);
+    case 10:
+      return {type: 'need-history'};
     case 6:
     case 7:
       return liveAction(random, issued);
@@ -290,6 +320,7 @@ function issues(request: RunPageRequest): number | null {
     case 'list-logs':
     case 'attach':
     case 'read-history':
+    case 'read-summary':
       return request.token;
     default:
       return null;
@@ -303,6 +334,7 @@ function awaited(state: RunPageState) {
     attach: state.link.kind === 'attaching' ? state.link.token : null,
     // Each page in flight is its own slot: a reply is awaited by the token it was asked under.
     ...Object.fromEntries(historyAwaiting(state.history).map(token => [`history:${token}`, token])),
+    summary: state.summary.kind === 'reading' ? state.summary.token : null,
   };
 }
 
@@ -311,6 +343,7 @@ function reply(action: RunPageAction) {
   if (action.type === 'streams') return {slot: 'logs', token: action.token};
   if (action.type === 'attached') return {slot: 'attach', token: action.token};
   if (action.type === 'history') return {slot: `history:${action.token}`, token: action.token};
+  if (action.type === 'summary') return {slot: 'summary', token: action.token};
   return null;
 }
 
@@ -737,7 +770,13 @@ describe('the run page store', () => {
         timestamp: '2026-10-15T16:30:51Z',
         data: {span: {id}},
       }) as unknown as RunEvent;
-    const ended = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]);
+    const opened = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]);
+    const asked = opened.requests.find(request => request.kind === 'read-summary');
+    if (asked?.kind !== 'read-summary') throw new Error('no summary asked');
+    // A host that serves no summary (an older helper) is read through its history.
+    const ended = fold(opened.state, [
+      {type: 'summary', token: asked.token, reply: {kind: 'unsupported'}, wallMs: 0},
+    ]);
     const first = ended.requests.find(request => request.kind === 'read-history');
     expect(first).toMatchObject({from: FIRST_HISTORY_SEQUENCE, max: HISTORY_PAGE_EVENTS});
     if (first?.kind !== 'read-history') throw new Error('no history asked');

@@ -103,6 +103,7 @@ function fakePorts(stops: boolean[], app = new FakeApp()): RunPagePorts {
       return app.session();
     },
     readHistory: () => Promise.resolve({kind: 'unsupported'}),
+    readSummary: () => Promise.resolve({kind: 'unsupported'}),
     resumeEnded: ignore,
     openWindow: ignore,
     now: () => app.wallMs,

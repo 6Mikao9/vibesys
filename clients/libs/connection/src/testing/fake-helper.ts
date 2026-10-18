@@ -99,6 +99,11 @@ export interface FakeHost {
   readonly unverified: string[];
   /** Project directories and their tasks. */
   readonly projects: Map<string, readonly string[]>;
+  /**
+   * The pages `runs.summary` answers per `PROJECT RUN_ID` (a space between), each served for its
+   * `offset`; a page not named here, or a run not named, is an unknown run.
+   */
+  readonly summaries: Map<string, readonly {readonly offset: number; readonly page: Reply}[]>;
   /** Directories and the directories in them. */
   readonly directories: Map<string, readonly string[]>;
   /** How each live run answers its run channel. */
@@ -223,6 +228,7 @@ export class FakeHelper {
     unreadable: [],
     unverified: [],
     projects: new Map(),
+    summaries: new Map(),
     directories: new Map(),
     runs: new Map(),
     denied: new Set(),
@@ -864,6 +870,15 @@ class HelperSession {
     if (!this.#helper.host.projects.has(request.project)) {
       this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
       return;
+    }
+    if (request.type === 'runs.summary') {
+      const served = this.#helper.host.summaries
+        .get(`${request.project} ${request.run_id}`)
+        ?.find(entry => entry.offset === request.offset);
+      if (served !== undefined) {
+        this.#send({...served.page, type: 'runs.summary', request_id: id});
+        return;
+      }
     }
     this.#send({
       ...this.#error(id, 'unknown_run', `${request.project} has no run '${request.run_id}'`),

@@ -64,7 +64,10 @@ function fold(
   return state;
 }
 
-function tokenOf(asked: readonly RunPageRequest[], kind: 'attach' | 'read-history'): number {
+function tokenOf(
+  asked: readonly RunPageRequest[],
+  kind: 'attach' | 'read-history' | 'read-summary',
+): number {
   const request = asked.filter(each => each.kind === kind).at(-1);
   if (request === undefined || !('token' in request)) throw new Error(`no ${kind} asked`);
   return request.token;
@@ -77,6 +80,15 @@ const session = (hasSnapshot: boolean): RunPageAction => ({
   type: 'session',
   session: {hasSnapshot, streaming: true, controls: true, error: null},
 });
+
+/** The host answered the summary read: it serves none, so the history is read instead. */
+const NO_SUMMARY = (asked: readonly RunPageRequest[]) =>
+  ({
+    type: 'summary',
+    token: tokenOf(asked, 'read-summary'),
+    reply: {kind: 'unsupported'},
+    wallMs: 0,
+  }) as RunPageAction;
 
 const history = (reply: HistoryReply) => (asked: readonly RunPageRequest[]) =>
   ({type: 'history', token: tokenOf(asked, 'read-history'), reply}) as RunPageAction;
@@ -118,20 +130,24 @@ describe('an ended run', () => {
     expect(traceArrival(fold([ENDED]))).toBe('awaited');
   });
 
+  test('awaits its spans while its history is read, from a host that serves no summary', () => {
+    expect(traceArrival(fold([ENDED, NO_SUMMARY]))).toBe('awaited');
+  });
+
   test('has them once the last page of history carried any', () => {
     const page = history({kind: 'page', events: [SPAN], next: 2, complete: true});
-    expect(traceArrival(fold([ENDED, page]))).toBe('arrived');
+    expect(traceArrival(fold([ENDED, NO_SUMMARY, page]))).toBe('arrived');
   });
 
   test('still awaits them after a page that is not the last: a prefix is not the run', () => {
     const page = history({kind: 'page', events: [SPAN], next: 2, complete: false});
-    expect(traceArrival(fold([ENDED, page]))).toBe('awaited');
+    expect(traceArrival(fold([ENDED, NO_SUMMARY, page]))).toBe('awaited');
   });
 
   test('drops the prefix it folded when a later page fails, rather than show it as the run', () => {
     const first = history({kind: 'page', events: [SPAN], next: 2, complete: false});
     const failed = history({kind: 'failed', message: 'channel closed'});
-    const state = fold([ENDED, first, failed]);
+    const state = fold([ENDED, NO_SUMMARY, first, failed]);
     expect(traceArrival(state)).toBe('none');
     expect(state.run.trace.events.length).toBe(0);
     expect(historyProblem(state)).toContain('channel closed');
@@ -144,7 +160,7 @@ describe('an ended run', () => {
       {kind: 'unsupported'},
       {kind: 'failed', message: 'channel closed'},
     ] as const) {
-      expect(traceArrival(fold([ENDED, history(reply)]))).toBe('none');
+      expect(traceArrival(fold([ENDED, NO_SUMMARY, history(reply)]))).toBe('none');
     }
   });
 });

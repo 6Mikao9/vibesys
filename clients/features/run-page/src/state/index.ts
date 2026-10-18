@@ -68,6 +68,7 @@ export {
   runPageStep,
   runPhase,
 } from './run-page.js';
+export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
 export {spendOf, tokensByAgent, turnTokens} from './token-usage.js';
 export {
@@ -94,6 +95,7 @@ export {
   type TraceArrival,
   timelineView,
   traceArrival,
+  transcriptLoading,
   viewedRun,
 } from './views.js';
 export {

@@ -96,6 +96,7 @@ export function installFakeFixtureServer(seed: FixtureServerSeed): void {
     onWake: () => undefined,
     readEvents: (_host: string, _project: string, _run: string, from: number, max: number) =>
       history(from, max),
+    readSummary: () => Promise.resolve({ok: true, value: {kind: 'unsupported'}}),
   });
   Object.assign(target.fakeHost, {
     /** Streams more of the run as one live batch. */

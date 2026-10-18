@@ -6,6 +6,7 @@ import type {
   Diagnostic,
   ProtocolResponse,
   RunEvent,
+  RunSnapshot,
   ServerMessage,
 } from './protocol.js';
 import {
@@ -56,6 +57,15 @@ export function parseProtocolResponse(line: string): ProtocolResponse {
 /** Validate an event from a non-transport boundary and return its typed value. */
 export function validateRunEvent(value: unknown): RunEvent {
   return validateRunEventAt(value, 'run event');
+}
+
+/**
+ * Validate a run snapshot from a non-transport boundary (the run page seeds its trace from one
+ * made of a host's run summary) and return its typed value.
+ */
+export function validateRunSnapshot(value: unknown): RunSnapshot {
+  validateSchema(value, {$ref: '#/$defs/RunSnapshot'}, 'run snapshot', OPEN_WALK);
+  return value as RunSnapshot;
 }
 
 /**
