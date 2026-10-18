@@ -572,7 +572,7 @@ def test_a_helper_that_keeps_indexes_answers_from_the_journal_as_it_now_is(
     project = project_with_run(tmp_path_factory.mktemp("host") / "proj", _RUN_ID)
     path = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
-    projects = FileProjects(FakeGitRepositories().repository)
+    projects = FileProjects(FakeGitRepositories().repository, SimThreads())
     journal = _Journal.open(path)
     written: list[_Document] = []
 

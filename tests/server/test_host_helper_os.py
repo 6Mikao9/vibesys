@@ -27,7 +27,7 @@ from server.host_helper_requests import PathHints, ProjectLookupError, ScannedEn
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import FakeGitRepositories, run_execution_record
 from vs_sim.api import ProbeResult, ProcessSpec
-from vs_sim.api.testing import FakeProcessLauncher, ProcessScript, ScriptedProbe
+from vs_sim.api.testing import FakeProcessLauncher, ProcessScript, ScriptedProbe, SimThreads
 
 
 def test_a_scan_marks_directories_and_links_to_them_and_stops_at_its_limit(
@@ -104,7 +104,7 @@ def test_expansion_touches_only_a_leading_tilde() -> None:
 
 
 def test_projects_report_missing_and_uninitialized_directories(tmp_path: Path) -> None:
-    projects = FileProjects(FakeGitRepositories().repository)
+    projects = FileProjects(FakeGitRepositories().repository, SimThreads())
     with pytest.raises(ProjectLookupError) as missing:
         projects.tasks(tmp_path / "missing")
     with pytest.raises(ProjectLookupError) as bare:
