@@ -13,13 +13,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_sim.api.testing import examples
 
 from .test_measurement_reuse import (
+    Variant,
     measured,
     reloaded,
     revision,
@@ -39,6 +40,15 @@ _PASSED = core.EvaluationTerminalFacts(
         core.EvaluationStageResult(stage_id="accuracy", outcome=core.EvaluationStageOutcome.PASSED),
         core.EvaluationStageResult(
             stage_id="benchmark", outcome=core.EvaluationStageOutcome.PASSED
+        ),
+    ),
+    accuracy_passed=True,
+)
+_FAILED = core.EvaluationTerminalFacts(
+    stages=(
+        core.EvaluationStageResult(stage_id="accuracy", outcome=core.EvaluationStageOutcome.PASSED),
+        core.EvaluationStageResult(
+            stage_id="benchmark", outcome=core.EvaluationStageOutcome.FAILED
         ),
     ),
     accuracy_passed=True,
@@ -100,39 +110,80 @@ def reading(value: float) -> core.Reading:
     return core.Reading(metric=METRIC, value=value, direction="max", unit="tok/s")
 
 
-def ended_with(
-    state: core.CoreState, request: core.SubmitMeasurement, value: float | None
-) -> core.CoreState:
-    """Accept ``request``'s job and end it passed, its benchmark record reading ``value``.
-
-    With None the record carries no reading, as a benchmark that reported no metric does."""
-    return ended_transition(state, request, value).state
-
-
-def ended_transition(
-    state: core.CoreState, request: core.SubmitMeasurement, value: float | None
-) -> core.Transition:
-    """`ended_with`, with the transition that ended the job: its events and its state."""
+def started_with(state: core.CoreState, request: core.SubmitMeasurement) -> core.CoreState:
+    """Accept ``request``'s job: it is running, and core holds it in the order it started."""
     started = seen(request, 1)
     state = committed(state, started)
     state = transition(state, core.MeasurementSubmissionObserved(observation=started)).state
     resource = started.resource_id
     assert resource is not None
-    state = transition(state, core.JobObserved(resource_id=resource, observation=started)).state
+    return transition(state, core.JobObserved(resource_id=resource, observation=started)).state
+
+
+def ended_with(
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    value: float | None,
+    *,
+    reused: core.RequestId | None = None,
+    failed: bool = False,
+) -> core.CoreState:
+    """Accept ``request``'s job and end it with the benchmark reading ``value``."""
+    return ended_transition(state, request, value, reused=reused, failed=failed).state
+
+
+def ended_transition(
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    value: float | None,
+    *,
+    reused: core.RequestId | None = None,
+    failed: bool = False,
+) -> core.Transition:
+    """End a newly accepted job and return its final transition."""
+    state = started_with(state, request)
+    return finished_transition(state, request, value, reused=reused, failed=failed)
+
+
+def finished_with(
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    value: float | None,
+    *,
+    reused: core.RequestId | None = None,
+    failed: bool = False,
+) -> core.CoreState:
+    """End an already accepted job as passed or as a workload failure."""
+    return finished_transition(state, request, value, reused=reused, failed=failed).state
+
+
+def finished_transition(
+    state: core.CoreState,
+    request: core.SubmitMeasurement,
+    value: float | None,
+    *,
+    reused: core.RequestId | None = None,
+    failed: bool = False,
+) -> core.Transition:
+    """End an already accepted job and return the final transition."""
+    status = core.ObservationStatus.FAILED if failed else core.ObservationStatus.SUCCEEDED
     finished = seen(
         request,
         2,
-        status=core.ObservationStatus.SUCCEEDED,
+        status=status,
         terminal=True,
         released=True,
         children_complete=True,
         observed_at=state.run.now_at,
     )
+    resource = finished.resource_id
+    assert resource is not None
     assert isinstance(request.plan.candidate, core.RevisionRef)
     assert request.request_id is not None
+    source = request.request_id if reused is None else reused
     records = tuple(
         core.EvidenceRef(
-            evidence_id=core.EvidenceId(root=f"{request.request_id.root}-{stage}"),
+            evidence_id=core.EvidenceId(root=f"{source.root}-{stage}"),
             kind=core.EvidenceKind.CORRECTNESS
             if stage == "accuracy"
             else core.EvidenceKind.BENCHMARK,
@@ -145,20 +196,26 @@ def ended_transition(
             workload_digest=request.plan.workload_digest,
             environment_digest=request.plan.environment_digest,
             provenance="trusted",
-            status=core.ObservationStatus.SUCCEEDED,
+            status=status,
             reading=reading(value) if stage == "benchmark" and value is not None else None,
+            reused_from=reused,
         )
         for stage in ("accuracy", "benchmark")
     )
-    state = committed(state, finished, _PASSED)
-    state = transition(state, core.MeasurementSubmissionObserved(observation=finished)).state
+    facts = _FAILED if failed else _PASSED
+    failure = core.MeasurementFailure.WORKLOAD if failed else None
+    state = committed(state, finished, facts)
+    state = transition(
+        state, core.MeasurementSubmissionObserved(observation=finished, failure=failure)
+    ).state
     return transition(
         state,
         core.JobObserved(
             resource_id=resource,
             observation=finished,
             evidence=records,
-            evaluation_result=_PASSED,
+            evaluation_result=facts,
+            failure=failure,
         ),
     )
 
@@ -185,16 +242,26 @@ class Lab:
         return cls(state=state, scopes=scopes)
 
     def call(
-        self, name: str, commit: str, candidate_input: str, *, base_input: str = "base"
+        self,
+        name: str,
+        commit: str,
+        candidate_input: str,
+        *,
+        base_input: str = "base",
+        variant: Variant = "same",
     ) -> list[core.SubmitMeasurement]:
-        """The agent of attempt ``name`` evaluates ``commit``; the submissions core allocated."""
+        """The agent of attempt ``name`` evaluates ``commit``; the submissions core allocated.
+
+        ``variant`` is how the plan differs from the official one: another variant is another
+        evaluation, whose base is measured under it too.
+        """
         before = len(submissions(self.state))
         self.calls += 1
         self.state = transition(
             self.state,
             core.AgentMeasurementRequested(
                 scope=self.scopes[name],
-                plan=measured("local-validation", commit, candidate_input),
+                plan=measured("local-validation", commit, candidate_input, variant),
                 within=core.Within(limit=100.0),
                 call_id=f"call-{self.calls}",
                 base_input=base_input,
@@ -474,9 +541,146 @@ def test_the_comparison_a_resume_publishes_is_the_one_the_samples_make() -> None
     lab = Lab.of("a")
     lab.call("a", "c1", "input-1")
     lab.measure({"input-1": 130.0, "base": 100.0})
-    kept = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"])
+    now = core.moment_of(lab.state.run)
+    kept = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
     assert kept == lab.comparisons()
-    assert core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["other"]) == ()
+    assert core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["other"], now) == ()
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(
+    wait=st.floats(min_value=0.0, max_value=3 * STALENESS),
+    again=st.booleans(),
+)
+@example(wait=STALENESS + 1.0, again=False)
+@example(wait=STALENESS, again=False)
+def test_a_comparison_whose_base_went_stale_is_not_presented_as_held_now(
+    *, wait: float, again: bool
+) -> None:
+    """A resume receipt presents a comparison only while its base's samples still count.
+
+    The log of comparisons only grows, so before, after ``base_staleness`` with no new sample
+    the receipt (and the tool's reply) still told the agent the old verdict "as held now". The
+    comparison presented is the one the samples held at that moment make, or none. With
+    ``again`` a later call re-measures the base, and the fresh comparison is presented.
+    """
+    lab = Lab.of("a")
+    lab.call("a", "c1", "input-1")
+    lab.measure({"input-1": 130.0, "base": 100.0})
+    lab.advance(wait)
+    if again:
+        lab.call("a", "c2", "input-1")
+        lab.measure({"input-1": 130.0, "base": 100.0})
+    now = core.moment_of(lab.state.run)
+    presented = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
+    held = core.comparisons_of(lab.state.evaluation, now)
+    assert presented == held
+    if not again:
+        assert (presented == ()) == (wait > STALENESS)
+
+
+@pytest.mark.regression
+def test_a_comparison_whose_base_went_partly_stale_is_recomputed_over_the_rest() -> None:
+    """When only some base samples went stale, the comparison is the one the fresh ones make.
+
+    The base reads 100 at the start; a close call on another input earns it a second run, which
+    reads 104, three quarters of the staleness bound later. Half a bound after that the first
+    base run no longer counts. The log's entry for the first input still rests on the base run
+    of 100, but what is presented is the comparison with the base run of 104 alone, never
+    dropped while a fresh base sample exists.
+    """
+    lab = Lab.of("a")
+    lab.call("a", "c1", "input-1")
+    lab.measure({"input-1": 130.0, "base": 100.0})
+    lab.advance(0.75 * STALENESS)
+    lab.call("a", "c2", "input-2")
+    lab.measure({"input-2": 101.0, "base": 104.0})
+    assert len(lab.baselines()) == 2, "the close call on input-2 earned the base a second run"
+    lab.advance(0.5 * STALENESS)
+    now = core.moment_of(lab.state.run)
+    (presented,) = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
+    assert (presented.base_samples, presented.base_value) == (1, 104.0)
+    assert presented.verdict is core.ComparisonVerdict.BETTER
+    logged = [c for c in lab.comparisons() if c.candidate_input == "input-1"]
+    assert presented not in logged, "the log holds only the comparison with the base run of 100"
+
+
+@pytest.mark.regression
+def test_an_input_presents_the_comparison_with_its_current_base_in_its_newest_evaluation() -> None:
+    """An input whose base changed, then measured in a second evaluation: one comparison, current.
+
+    The agent compares one input with ``base``, then with ``base-2``, then evaluates it under
+    another evaluation (another environment) against ``base-2``. The comparison presented is
+    the newest evaluation's against the input's current base: not the one against the base it
+    no longer names, nor the older evaluation's.
+    """
+    lab = Lab.of("a")
+    values = {"input-1": 130.0, "base": 100.0, "base-2": 110.0}
+    lab.call("a", "c1", "input-1")
+    lab.measure(values)
+    lab.call("a", "c2", "input-1", base_input="base-2")
+    lab.measure(values)
+    now = core.moment_of(lab.state.run)
+    (first,) = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
+    assert (first.base_input, first.candidate_samples) == ("base-2", 2)
+    lab.call("a", "c3", "input-1", base_input="base-2", variant="environment")
+    lab.measure(values | {"input-1": 140.0})
+    now = core.moment_of(lab.state.run)
+    (latest,) = core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now)
+    assert (latest.base_input, latest.candidate_samples, latest.candidate_value) == (
+        "base-2",
+        1,
+        140.0,
+    )
+
+
+@pytest.mark.regression
+def test_a_verdict_from_a_zero_noise_under_a_declared_floor_is_no_close_call() -> None:
+    """A candidate that reads 0 under a declared floor is ``worse``, decisively.
+
+    Its ratio is 0, so its noise is 0 too, but the task declared its noise: the verdict stands
+    on it. Keying the close call on a zero noise instead (review H) took one more base run and
+    made the official check run afresh for a candidate that measured nothing.
+    """
+    lab = Lab.of("a")
+    first = lab.call("a", "c1", "input-1")[0]
+    lab.measure({"input-1": 0.0, "base": 100.0})
+    (comparison,) = lab.comparisons()
+    assert (comparison.verdict, comparison.noise) == (core.ComparisonVerdict.WORSE, 0.0)
+    assert not core.close_call(comparison)
+    assert len(lab.baselines()) == 1, "no extra base run"
+    assert final_check(lab, "a", "c1", "input-1").reuses == first.request_id
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("floor", [FLOOR, 0.0])
+@pytest.mark.parametrize("cause", ["stale", "failed"])
+def test_an_official_check_whose_base_has_no_fresh_sample_runs_afresh(
+    floor: float, cause: str
+) -> None:
+    """With no fresh base sample there is no verdict, so the agent's run does not answer.
+
+    The agent's one run is decisive against the base under a declared floor, and a close call
+    without one. Then the base's samples go stale, or the base's only run failed (it gives no
+    sample). Before, no comparison meant "nothing to ask for", and the official check reused
+    the agent's single run, which then became the ranked answer on no comparison at all.
+    """
+    lab = Lab.of("a", floor=floor)
+    asked = lab.call("a", "c1", "input-1")
+    if cause == "stale":
+        lab.measure({"input-1": 300.0, "base": 100.0})
+        lab.advance(STALENESS + 1.0)
+    else:
+        for request in asked:
+            assert request.request_id is not None
+            lab.ended.add(request.request_id.root)
+            failed = request.plan.purpose == "baseline"
+            lab.state = ended_with(lab.state, request, 100.0 if failed else 300.0, failed=failed)
+    now = core.moment_of(lab.state.run)
+    assert core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now) == ()
+    check = final_check(lab, "a", "c1", "input-1")
+    assert check.reuses is None, "the official check runs afresh"
 
 
 def final_check(lab: Lab, name: str, commit: str, candidate_input: str) -> core.SubmitMeasurement:
@@ -524,6 +728,172 @@ def test_the_final_check_of_a_decisive_result_is_answered_by_the_samples_held() 
     assert check.reuses == first.request_id
 
 
+def official_reading(lab: Lab, check: core.SubmitMeasurement) -> core.Reading:
+    """The headline reading the ledger's benchmark record of the official check states."""
+    (record,) = (
+        item
+        for item in lab.state.evaluation.evidence
+        if item.source_request == check.request_id and item.kind is core.EvidenceKind.BENCHMARK
+    )
+    assert record.reading is not None
+    return record.reading
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(
+    values=st.lists(st.floats(min_value=50.0, max_value=400.0), min_size=1, max_size=4),
+    official=st.floats(min_value=50.0, max_value=400.0),
+    reload=st.booleans(),
+)
+@example(values=[300.0, 250.0], official=280.0, reload=False)
+@example(values=[101.0, 104.0], official=99.0, reload=True)
+def test_the_official_record_states_the_value_its_comparison_compared(
+    *, values: list[float], official: float, reload: bool
+) -> None:
+    """The ledger's official record, which ranking reads, states the comparison's candidate value.
+
+    The agent re-runs one input any number of times, then the strategy asks for the official
+    measurement: answered by those samples when they are decisive, or by one more run when they
+    are a close call. Before, the record that carried the answer through the ledger read the
+    first run's value while the comparison stated the mean, so the agent saw one number and the
+    leaderboard ranked another. Each run's own reading stays in its sample.
+    """
+    lab = Lab.of("a")
+    for number, value in enumerate(values):
+        lab.call("a", f"c{number}", "input-1")
+        lab.measure({"input-1": value, "base": 100.0})
+    if reload:
+        lab.state = reloaded(lab.state)
+    check = final_check(lab, "a", f"c{len(values) - 1}", "input-1")
+    assert check.request_id is not None
+    lab.ended.add(check.request_id.root)
+    if check.reuses is None:
+        lab.state = ended_with(lab.state, check, official)
+    else:
+        source = next(s for s in lab.state.evaluation.samples if s.run == check.reuses)
+        lab.state = ended_with(lab.state, check, source.reading.value, reused=check.reuses)
+    stated = official_reading(lab, check)
+    assert stated.value == lab.comparisons()[-1].candidate_value
+    (ranked,) = (
+        item
+        for item in lab.state.evaluation.measurements_of(revision(f"c{len(values) - 1}"))
+        if item.purpose == "official" and item.kind is core.EvidenceKind.BENCHMARK
+    )
+    assert ranked.reading == stated
+    runs = [s.reading.value for s in lab.state.evaluation.samples if s.measured_input == "input-1"]
+    assert runs == [*values, *([official] if check.reuses is None else [])]
+    assert reloaded(lab.state) == lab.state
+
+
+@pytest.mark.regression
+def test_a_task_that_declares_no_noise_gets_no_verdict_from_runs_that_show_none() -> None:
+    """With no declared ``relative_noise``, identical base runs measure no noise either.
+
+    Before, the close call earned the base one more run, and when it read what the first did
+    (a quantized or cached benchmark), the spread was zero and the 0.3% gap between the two
+    sides was ``better``: the official check then reused the agent's single run. Now the base
+    takes at most two extra runs (three in all, the fewest that can give a verdict), the
+    comparison stays ``within_noise`` and a close call, and the official check runs afresh.
+    """
+    lab = Lab.of("a", floor=0.0)
+    lab.call("a", "c1", "input-1")
+    lab.measure({"input-1": 100.3, "base": 100.0})
+    assert [(c.candidate_samples, c.base_samples) for c in lab.comparisons()] == [
+        (1, 1),
+        (1, 2),
+        (1, core.MIN_SAMPLES_WITHOUT_FLOOR),
+    ]
+    assert {c.verdict for c in lab.comparisons()} == {core.ComparisonVerdict.WITHIN_NOISE}
+    assert len(lab.baselines()) == core.MIN_SAMPLES_WITHOUT_FLOOR, "at most two extra base runs"
+    check = final_check(lab, "a", "c1", "input-1")
+    assert check.reuses is None, "still a close call: the official check takes its own run"
+
+
+def test_three_runs_a_side_without_a_declared_floor_give_a_verdict() -> None:
+    """The agent's three runs of one input and the base's three, with a spread: a verdict."""
+    lab = Lab.of("a", floor=0.0)
+    for number, value in enumerate((110.0, 111.0, 109.0)):
+        lab.call("a", f"c{number}", "input-1")
+        lab.measure({"input-1": value, "base": 100.0})
+    last = lab.comparisons()[-1]
+    assert (last.candidate_samples, last.base_samples) == (3, 3)
+    assert last.verdict is core.ComparisonVerdict.BETTER
+    assert not core.close_call(last)
+    assert final_check(lab, "a", "c2", "input-1").reuses is not None
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(official=st.floats(min_value=1.0, max_value=400.0), reused=st.booleans())
+@example(official=80.0, reused=False)
+@example(official=80.0, reused=True)
+def test_a_failed_official_record_keeps_the_reading_its_run_reported(
+    *, official: float, reused: bool
+) -> None:
+    """The official answer states the samples' mean only for a record that passed.
+
+    A benchmark can report its metrics and then fail a check, so its FAILED record carries a
+    reading. Before, the official record was restated as the mean of the runs that passed, so
+    a failed run read as a passing number. Without ``reused`` the official check runs afresh
+    and fails; with it the agent's own run of the input failed, and the official measurement
+    re-reads that run, as the reuse rule prefers a failed run.
+    """
+    lab = Lab.of("a")
+    lab.call("a", "c1", "input-1")
+    lab.measure({"input-1": 200.0 if reused else 101.0, "base": 100.0})
+    if reused:
+        asked = lab.call("a", "c2", "input-1")
+        (failing,) = (r for r in asked if r.plan.purpose == "local-validation")
+        assert failing.request_id is not None
+        lab.ended.add(failing.request_id.root)
+        lab.state = ended_with(lab.state, failing, official, failed=True)
+        lab.measure({"base": 100.0})
+        check = final_check(lab, "a", "c2", "input-1")
+        assert check.reuses == failing.request_id
+    else:
+        check = final_check(lab, "a", "c1", "input-1")
+        assert check.reuses is None, "a close call runs afresh"
+    assert check.request_id is not None
+    lab.ended.add(check.request_id.root)
+    lab.state = ended_with(lab.state, check, official, reused=check.reuses, failed=True)
+    stated = official_reading(lab, check)
+    assert stated.value == official
+
+
+def test_an_official_run_is_reused_by_its_own_reading_not_the_answer_its_record_states() -> None:
+    """A second official measurement of the input re-reads the first official run as it ran.
+
+    The first official run of the input is the first conclusive run, so it carries the answer
+    for a later official measurement of the same input (another commit of the same tree). Its
+    ledger record states the mean of the samples, but the runtime re-reports the run's own
+    reading, so the reused record is checked against that (``run_reading``); checked against
+    the stated mean it would be refused and the measurement would run afresh.
+    """
+    lab = Lab.of("a")
+    first = final_check(lab, "a", "c1", "input-1")
+    assert first.reuses is None, "no run of the input yet"
+    lab.state = started_with(lab.state, first)
+    agent, base = lab.call("a", "c2", "input-1")
+    for request, value in ((agent, 200.0), (base, 100.0)):
+        assert request.request_id is not None
+        lab.ended.add(request.request_id.root)
+        lab.state = ended_with(lab.state, request, value)
+    assert first.request_id is not None
+    lab.ended.add(first.request_id.root)
+    lab.state = finished_with(lab.state, first, 210.0)
+    assert official_reading(lab, first).value == 205.0, "the mean of 200 and 210"
+    second = final_check(lab, "a", "c3", "input-1")
+    assert second.reuses == first.request_id
+    assert second.request_id is not None
+    lab.ended.add(second.request_id.root)
+    lab.state = ended_with(lab.state, second, 210.0, reused=first.request_id)
+    assert official_reading(lab, second).value == 205.0
+    (job,) = (j for j in lab.state.evaluation.jobs if j.submission_id == second.request_id)
+    assert job.status is core.ObservationStatus.SUCCEEDED
+    assert len(job.evidence) == 2, "every record of the re-read run was accepted"
+
+
 def fresh_base_samples(lab: Lab) -> list[core.Sample]:
     return [
         s
@@ -564,19 +934,24 @@ def base_running(lab: Lab) -> bool:
         max_size=7,
     ),
     reload_at=st.integers(min_value=0, max_value=7),
+    floor=st.sampled_from((FLOOR, 0.0)),
 )
+@example(calls=[("a", 0, 1.01, 0.0)], reload_at=7, floor=FLOOR)
+@example(calls=[("a", 0, 1.01, 0.0), ("a", 0, 1.0, 1.0)], reload_at=1, floor=0.0)
 def test_the_base_is_measured_once_per_input_and_again_only_on_staleness_or_a_close_call(
-    calls: list[tuple[str, int, float, float]], reload_at: int
+    calls: list[tuple[str, int, float, float]], reload_at: int, floor: float
 ) -> None:
     """Over any sequence of evaluations by two attempts with the clock moving between them.
 
     A call allocates a run of the base exactly when no fresh sample of it is held and none is
     running. The only other runs of the base are the re-measures a close call earns once a
     candidate's samples end, so no base is ever measured twice for a decisive result, and a
-    close call never takes the base past ``BASE_MAX_SAMPLES`` fresh samples. A reload loses
-    nothing.
+    close call never takes the base past ``BASE_MAX_SAMPLES`` fresh samples under a declared
+    floor (one extra run) or ``MIN_SAMPLES_WITHOUT_FLOOR`` without one (two extra runs). A
+    reload loses nothing.
     """
-    lab = Lab.of("a", "b")
+    lab = Lab.of("a", "b", floor=floor)
+    most = core.BASE_MAX_SAMPLES if floor else core.MIN_SAMPLES_WITHOUT_FLOOR
     values: dict[str, float] = {"base": 100.0}
     for number, (name, input_number, factor, wait) in enumerate(calls):
         if number == reload_at:
@@ -597,7 +972,7 @@ def test_the_base_is_measured_once_per_input_and_again_only_on_staleness_or_a_cl
             assert any(core.close_call(c) for c in lab.comparisons()[logged:]), (
                 "a base run beyond the first is earned by a close call"
             )
-        assert len(fresh_base_samples(lab)) <= core.BASE_MAX_SAMPLES
+        assert len(fresh_base_samples(lab)) <= most
     assert reloaded(lab.state) == lab.state
 
 

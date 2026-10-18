@@ -8,7 +8,7 @@ from vs_core._attempt_track import (
 )
 from vs_core._comparison import (
     BASE_MAX_SAMPLES,
-    CLOSE_CALL_NOISES,
+    MIN_SAMPLES_WITHOUT_FLOOR,
     VERDICT_NOISES,
     ComparisonPolicy,
     Measured,
@@ -23,6 +23,7 @@ from vs_core._comparison import (
     moment_of,
     policy_of,
     samples_of,
+    terms_policy,
 )
 from vs_core._continuations import SuspensionRefusal
 from vs_core._evidence_views import (
@@ -806,7 +807,6 @@ __all__ = [
     "ADOPTED",
     "BASE_MAX_SAMPLES",
     "CAPTURE_SUFFIX",
-    "CLOSE_CALL_NOISES",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
     "EXPORT_PATCH_SUFFIX",
@@ -823,6 +823,7 @@ __all__ = [
     "MAX_TURN_SECONDS",
     "MAY_WAIT_ON",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
+    "MIN_SAMPLES_WITHOUT_FLOOR",
     "NOT_ADOPTED",
     "OPERATOR_ACTIONS",
     "PLAIN_LINE_CONVENTION",
@@ -1484,6 +1485,7 @@ __all__ = [
     "step",
     "subjects",
     "suspension_refusal",
+    "terms_policy",
     "trace_step",
     "translate",
     "trusted_keys",

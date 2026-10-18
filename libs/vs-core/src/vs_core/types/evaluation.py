@@ -211,7 +211,10 @@ class EvidenceRef(Value):
 
     Set by the runtime on a benchmark record only. Core keeps it so that the decisions over
     samples (`vs_core._comparison`) are pure state that a resume replays, instead of numbers
-    held only in the runtime's ledger.
+    held only in the runtime's ledger. An official measurement's record enters core's ledger
+    stating the mean of the samples that answer it (`vs_core._comparison.as_answer`), and the
+    headline a reader decodes from any record is this reading, so ranking reads the value the
+    comparison states. A run's own reading is its ``Sample``'s.
     """
 
     @property
@@ -367,7 +370,12 @@ class ResumeAuthorizationReceipt(Value):
     timeout: TimedOut | None = None
     repeated_failure: RepeatedFailureGuidance | None = None
     comparisons: tuple[Comparison, ...] = Field(default=(), exclude_if=unset)
-    """The comparisons with a base of the candidates the wait's jobs measured, as held now."""
+    """The comparisons with a base of the candidates the wait's jobs measured, as held now.
+
+    Each is recomputed over the samples fresh now, so a base whose samples partly went stale is
+    compared over the rest, and an input none of whose base samples is fresh is left out
+    (`latest_comparisons`).
+    """
 
     @model_validator(mode="after")
     def guidance_cursor(self) -> ResumeAuthorizationReceipt:

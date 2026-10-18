@@ -229,22 +229,41 @@ recorded and its spread shows in the noise, but it is not refused.
 Samples of one input are aggregated: nothing is picked among them and nothing is
 refused because there are several, so re-running an input until a run suits the
 agent gains nothing. The strategy's official measurement of an input the attempt
-already measured is answered from those samples, and runs afresh only when a
-comparison with the base is a close call that one more sample would narrow.
+already measured is answered from those samples, and runs afresh when a
+comparison with the base is a close call that one more sample would narrow, or
+when no fresh sample of the base is held (its runs went stale or failed), so there
+is no comparison at all. Either
+way, the official result's headline objective states the mean of the samples of the
+input held when the result is stored, the value its comparison states then, and
+that mean is the candidate's headline value in ranking. A task's other objectives
+(for example p99 latency beside throughput) are the answering run's own values: a
+sample holds only the headline reading. The strategies' "beats the input" checks
+(merge and adoption) still compare that value with the input's own baseline run
+under `relative_noise`, not with the comparison's verdict.
 
 An agent's evaluation is compared with its base, the revision its workspace
 started from. The base is measured once per (measured input, gates, host) and
 cached in the run's state, and measured again only when its samples are older
 than the task's `base_staleness` on the run clock (6 hours) or a close call earns
-it one more sample (a base holds at most two fresh samples). A base the strategy is already
+it more samples (a base holds at most two fresh samples when the task declares
+`relative_noise`, three when it does not). A base the strategy is already
 measuring (its own measurement of the run's input, still running) is awaited rather than
 measured again: core claims that run, and its result becomes the base's samples when it ends. The
 comparison is the ratio of the candidate's mean over the base's mean, its noise,
 and a verdict: `better`, `within_noise` or `worse`. The noise is one standard
-error of the ratio, computed from the runs' relative spread (never below the
-task's declared `relative_noise`) and the sample counts; a verdict needs two
-noises. The agent's evaluation tool and the resumed turn report it, and the run's
-events carry it as `measurement_compared`.
+error of the ratio. With a declared `relative_noise` it comes from the runs'
+pooled relative spread, never below that floor, and a verdict needs two noises.
+A task that declares none has only the runs' spread to go on, and a candidate's
+code can change how much its runs vary, so each side keeps its own spread
+(Welch's t test). It gets a verdict only once the candidate and the base hold
+three runs each and those runs differ, and then the bar is the Student-t
+quantile at the floor of the Welch-Satterthwaite degrees of freedom (between
+4.30 noises at the fewest runs and 2.04 with many), which keeps false verdicts
+near 5% whatever the two spreads and counts. Until then the
+result is `within_noise` and a close call: the base takes up to two more runs,
+and the official check runs afresh. The agent's evaluation tool and the resumed turn
+report the comparison the base's fresh samples make, and the run's events carry
+each one logged as `measurement_compared`.
 
 Evaluations have no allowance. A plan cannot cap them and core admits every call it can;
 only the turn's own time limit bounds an agent's work. A conservative runaway flag only
@@ -262,9 +281,11 @@ keeping the change (above 1 for a metric where more is better, below 1 for one w
 better; 1, the default, asks for any gain beyond noise). A bar on the wrong side of the base is
 refused with the designer's usual correction. When the trusted gates measure a candidate the
 framework compares it with its base (the comparison above, over every sample of its measured
-input) and holds the gain against the bar with the comparison's own noise: `supported` when it
-clears the bar by more than two noises, `disproven` when it misses by more than that, and
-`within_noise` otherwise. The judge reviews correctness and evidence, not arithmetic, and
+input) and holds the gain against the bar with the comparison's own noise and the same rule a
+verdict follows: `supported` when it clears the bar by more than two noises under a declared
+`relative_noise` (without one, by more than the Student-t number for the fewest runs a side),
+`disproven` when it misses by more than that, and `within_noise` otherwise, which is also the
+answer for every bar while the runs give no estimate of the noise. The judge reviews correctness and evidence, not arithmetic, and
 free-text performance thresholds no longer belong in a plan's pass criteria. A candidate with no
 comparison (the task has no benchmark stage, or its base could not be measured) is resolved as
 before, from its headline metric against its parent round.

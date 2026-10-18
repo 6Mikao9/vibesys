@@ -12,16 +12,21 @@ of these hold:
   same stages with the same execution budgets, queue allowance and stage policy;
 - they ended conclusively: terminal, released, accepted, every record trusted and accepted by
   core, and any failure the candidate's own (a workload failure), never the machinery's;
-- the samples held do not leave a close call against the base: when they do, one more run
-  narrows the noise (`official_needs_samples`), and the official measurement runs afresh.
+- the samples held have a fresh comparison with the base that is no close call: when they are
+  a close call, one more run narrows the noise, and when no base sample is fresh (stale,
+  failed or still running) they have no verdict at all (`official_needs_samples`); either
+  way the official measurement runs afresh.
 
 Every conclusive run of one measured input is a sample of one measurement
 (`vs_core._comparison`). The rule never picks the best of them, and it never refuses because
-there are several: the official measurement is answered by *all* of them. The one record that
-carries that answer through the ledger is a failed run if any run failed (a candidate that
-failed once did not pass), else the input's first run. The choice depends on no value a run
-measured, so re-running until a lucky sample gains nothing: the number a decision rests on is
-the aggregate the comparison states.
+there are several: the official measurement is answered by *all* of them. The run whose
+records carry that answer through the ledger is a failed run if any run failed (a candidate
+that failed once did not pass), else the input's first run; the choice depends on no value a
+run measured. Its benchmark record enters the ledger stating the mean of the samples
+(`vs_core._comparison.as_answer`), the candidate value the comparison states when the answer
+is stored, so every reader that ranks candidates reads that one number, and re-running until
+a lucky sample gains nothing. (Merge and adoption decisions do not read it yet: they compare
+with the input's baseline run, #3136.)
 
 The decision is a pure function of core state, taken when the Measure is admitted and recorded
 in the submission request (`SubmitMeasurement.reuses`), so a resume replays it. Only the first
@@ -36,7 +41,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._comparison import Measured, Moment, evaluation_of, official_needs_samples
+from ._comparison import Measured, Moment, evaluation_of, official_needs_samples, run_reading
 from .types.common import ObservationStatus, RevisionRef
 from .types.evaluation import MeasurementIdentity, OwnedJob, PreparedSubmissionReceipt
 from .types.job_observations import MeasurementFailure
@@ -175,7 +180,8 @@ def reused_record(
     """Whether ``evidence`` may enter the ledger as ``job``'s, as far as reuse is concerned.
 
     A new run's record names no earlier run. A reusing submission's record names the run it
-    re-reads and carries one of that run's evidence ids with its kind, status, artifacts and reading.
+    re-reads and carries one of that run's evidence ids with its kind, status, artifacts and the
+    reading that run took (`run_reading`: an official run's ledger record states its answer).
     """
     reuses = job.reuses if isinstance(job, OwnedJob) else None
     if evidence.reused_from != reuses:
@@ -189,7 +195,7 @@ def reused_record(
             and item.status == evidence.status
             and item.artifacts == evidence.artifacts
             and item.kind == evidence.kind
-            and item.reading == evidence.reading
+            and run_reading(state, source, item) == evidence.reading
             for item in source.evidence
         )
         for source in state.jobs
