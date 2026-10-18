@@ -8,6 +8,7 @@
  * the bound; a reply that arrives later is dropped by its token.
  */
 import {type LogListOutcome, type LogTransport, startLogFollower} from '@vibesys/logs';
+import type {RunStatus} from '@vibesys/contracts';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {createStore, type Store} from '@vibesys/store';
 import {
@@ -42,7 +43,7 @@ export interface RunPagePorts {
   /** One page of the ended run's recorded events from `from`. */
   readHistory(from: number, max: number): Promise<HistoryReply>;
   /** The run's summary: its run level without its history. */
-  readSummary(): Promise<SummaryReply>;
+  readSummary(status: RunStatus): Promise<SummaryReply>;
   /** Resume an ended run that its end record says can resume. */
   resumeEnded(fromRound: number | null): void;
   openWindow(): void;
@@ -162,7 +163,7 @@ function readSummary(
   const settle = (reply: SummaryReply): void =>
     dispatch({type: 'summary', token: request.token, reply, wallMs: ports.now()});
   void ports
-    .readSummary()
+    .readSummary(request.status)
     .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
 }
 

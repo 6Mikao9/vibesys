@@ -10,7 +10,7 @@ import {implementerOutcomes} from './idea-outcomes.js';
 import {EMPTY_TRACE_LOG, traceAt, traceStep} from './live.js';
 import {type RunPageState, runPageInitial, runPageStep} from './run-page.js';
 import {summaryFacts, type WireSummary, type WireTokens} from './run-summary.js';
-import {historyLoading, traceArrival, transcriptLoading} from './views.js';
+import {historyLoading, historyProblem, traceArrival, transcriptLoading} from './views.js';
 
 /** The shared fixture: a journal and the summary the helper folds from it (`runs.summary`). */
 const FIXTURE = resolve(
@@ -84,6 +84,19 @@ describe('a run seeded from its summary holds what the whole journal holds for t
     expect(seeded.tokens).toEqual(whole.tokens);
   });
 
+  test('a reported zero stays zero when no turn span names that spend', () => {
+    const empty = wire(fixture.summary);
+    const summary = {
+      ...empty,
+      usage: [],
+      tokens: {...empty.tokens, input: 0, output: null},
+    };
+    const zero = reduceEventBatch(initialCoreState(), summaryFacts(summary, RUN_ID, 'completed').seed);
+    expect(zero.tokens.total.input).toBe(0);
+    expect(zero.tokens.total.output).toBeNull();
+    expect(zero.tokens.bySpan).toEqual({});
+  });
+
   test('the idea rows read each implementer’s reply from the seeded core', () => {
     const candidates = new CandidateFold();
     candidates.apply(fixture.events);
@@ -96,6 +109,10 @@ describe('a run seeded from its summary holds what the whole journal holds for t
     expect(facts.snapshot.spans).toEqual(fixture.summary.spans as never);
     expect(facts.snapshot.sequence).toBe(fixture.summary.through_sequence);
     expect(facts.through).toBe(fixture.summary.through_sequence);
+  });
+
+  test('the snapshot carries the registry status requested by the run page', () => {
+    expect(summaryFacts(wire(fixture.summary), RUN_ID, 'failed').snapshot.status).toBe('failed');
   });
 
   test('a summary that is not a snapshot of a run is refused, naming what is wrong', () => {
@@ -145,6 +162,7 @@ describe('an ended run opened from its summary', () => {
     const {asked} = opened();
     const kinds = asked.requests.map(each => each.kind);
     expect(kinds).toContain('read-summary');
+    expect(asked.requests.find(each => each.kind === 'read-summary')).toMatchObject({status: 'stopped'});
     expect(kinds).not.toContain('read-history');
     expect(traceArrival(asked.state)).toBe('awaited');
   });
@@ -230,17 +248,52 @@ describe('an ended run opened from its summary', () => {
     expect(older.requests.map(each => each.kind)).toEqual(['read-history']);
   });
 
-  test('a summary that fails to read fails the run’s history, naming why', () => {
+  test('a summary that fails falls back to full history, then shows the run', () => {
     const asked = runPageStep(initial(), ENDED);
     const request = asked.requests.find(each => each.kind === 'read-summary');
     if (request?.kind !== 'read-summary') throw new Error('no summary asked');
-    const failed = runPageStep(asked.state, {
+    const fallback = runPageStep(asked.state, {
       type: 'summary',
       token: request.token,
       reply: {kind: 'failed', message: 'channel closed'},
       wallMs: 0,
     });
-    expect(failed.state.history).toEqual({kind: 'failed', message: 'channel closed'});
+    expect(fallback.requests.map(each => each.kind)).toEqual(['read-history']);
+    expect(historyLoading(fallback.state)).not.toBeNull();
+    expect(historyProblem(fallback.state)).toBeNull();
+    const history = fallback.requests[0];
+    if (history?.kind !== 'read-history') throw new Error('no history asked');
+    const loaded = runPageStep(fallback.state, {
+      type: 'history',
+      token: history.token,
+      reply: {
+        kind: 'page',
+        events: fixture.events,
+        next: (fixture.events.at(-1)?.sequence ?? 0) + 1,
+        complete: true,
+      },
+    });
+    expect(traceArrival(loaded.state)).toBe('arrived');
+    expect(historyProblem(loaded.state)).toBeNull();
+    expect(traceSpans(loaded.state.run.trace.head)).toEqual(fixture.summary.spans);
+  });
+
+  test('only a failed summary and failed history show an error', () => {
+    const asked = runPageStep(initial(), ENDED);
+    const request = asked.requests.find(each => each.kind === 'read-summary');
+    if (request?.kind !== 'read-summary') throw new Error('no summary asked');
+    const fallback = runPageStep(asked.state, {
+      type: 'summary', token: request.token,
+      reply: {kind: 'failed', message: 'summary closed'}, wallMs: 0,
+    });
+    const history = fallback.requests[0];
+    if (history?.kind !== 'read-history') throw new Error('no history asked');
+    const failed = runPageStep(fallback.state, {
+      type: 'history', token: history.token,
+      reply: {kind: 'failed', message: 'history closed'},
+    });
+    expect(traceArrival(failed.state)).toBe('none');
+    expect(historyProblem(failed.state)).toContain('history closed');
   });
 
   test('a late or repeated summary reply is dropped by its token', () => {

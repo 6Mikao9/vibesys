@@ -636,7 +636,9 @@ for its first paint until its session's snapshot arrives. The transcript, the ag
 turn's tool output are in the history: a pane that needs them (an agent or a step is open, or the
 Agents face) asks for it (`need-history`), and it is read as below into a core of its own that
 replaces the seed only when it is all read; until then those panes show its progress and the run
-level stays. A host without the summary is read through its history from the start, behind the loading screen:
+level stays. A host without the summary, or one whose summary read fails, is read through its
+history from the start, behind the loading screen. Only if that read also fails does the screen
+report an unavailable run:
 the store reads `runs.read_events` (feature `run_history`,
 through the welcome bridge's `readEvents`) with up to three pages in flight under tokens (the first
 open-ended; its reply's totals cut the rest of the journal into spans, `history-pager.ts`), validates

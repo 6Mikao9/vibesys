@@ -18,6 +18,7 @@
  * longer offers it for this run instance (`waitRefused`).
  */
 
+import type {RunStatus} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
@@ -265,7 +266,7 @@ export type RunPageRequest =
   /** Let the attached run go (its session closes with it). */
   | {readonly kind: 'release'}
   /** Read the run's summary, answering `summary` with `token`. */
-  | {readonly kind: 'read-summary'; readonly token: number}
+  | {readonly kind: 'read-summary'; readonly token: number; readonly status: RunStatus}
   /** Read the ended run's recorded events from `from`, answering `history` with `token`. */
   | {
       readonly kind: 'read-history';
@@ -448,11 +449,11 @@ function folded(state: RunPageState): boolean {
 }
 
 /** Ask for the run's summary, which opens the run level. */
-function startSummary(state: RunPageState): RunPageStep {
+function startSummary(state: RunPageState, status: RunStatus): RunPageStep {
   const token = state.next;
   return {
     state: {...state, next: token + 1, summary: {kind: 'reading', token}},
-    requests: [{kind: 'read-summary', token}],
+    requests: [{kind: 'read-summary', token, status}],
   };
 }
 
@@ -470,7 +471,7 @@ function historyFor(state: RunPageState): RunPageStep {
       const cleared: RunPageState =
         state.history.kind === 'idle' ? state : {...state, history: idle};
       return cleared.summary.kind === 'idle' && !folded(cleared)
-        ? startSummary(cleared)
+        ? startSummary(cleared, state.record.run.phase)
         : {state: cleared, requests: []};
     }
     case 'unlisted':
@@ -478,12 +479,14 @@ function historyFor(state: RunPageState): RunPageStep {
         ? {state: {...state, history: {kind: 'idle'}}, requests: []}
         : {state, requests: []};
     case 'ended':
-      return state.history.kind === 'idle' ? endedHistoryFor(state) : {state, requests: []};
+      return state.history.kind === 'idle'
+        ? endedHistoryFor(state, state.record.run.phase)
+        : {state, requests: []};
   }
 }
 
 /** What an ended run whose history is not asked yet needs first: its summary, or its history. */
-function endedHistoryFor(state: RunPageState): RunPageStep {
+function endedHistoryFor(state: RunPageState, status: RunStatus): RunPageStep {
   const read: RunPageStep = {state: {...state, history: {kind: 'read'}}, requests: []};
   switch (state.summary.kind) {
     case 'ready':
@@ -492,8 +495,10 @@ function endedHistoryFor(state: RunPageState): RunPageStep {
       // A session that watched the run to its end folded it: the summary's answer is not needed.
       return folded(state) ? read : {state, requests: []};
     case 'idle':
-      return folded(state) ? read : startSummary(state);
+      return folded(state) ? read : startSummary(state, status);
     case 'unsupported':
+      return folded(state) ? read : startReading(state);
+    case 'failed':
       return folded(state) ? read : startReading(state);
     default:
       return {state, requests: []};
@@ -575,15 +580,11 @@ function withSummary(
       : {state: unsupported, requests: []};
   }
   if (reply.kind === 'failed') {
-    // A live run has its session; an ended one has nothing else to show.
+    // A live run has its session; an ended one can still read the full history.
     const failed = {...state, summary: reply};
-    return {
-      state:
-        state.record.kind === 'ended'
-          ? {...failed, history: {kind: 'failed', message: reply.message}}
-          : failed,
-      requests: [],
-    };
+    return state.record.kind === 'ended' && state.history.kind === 'idle'
+      ? startReading(failed)
+      : {state: failed, requests: []};
   }
   if (folded(state)) return {state: {...state, summary: {kind: 'superseded'}}, requests: []};
   const data: RunData = {kind: 'snapshot', snapshot: reply.snapshot};

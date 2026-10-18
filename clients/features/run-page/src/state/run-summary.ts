@@ -121,8 +121,10 @@ function unnamedSpend(summary: WireSummary): WireTokens | null {
   const rest = (pick: (tokens: WireTokens) => number | null): number | null => {
     const total = pick(summary.tokens);
     if (total === null) return null;
-    const left = total - (sum(pick) ?? 0);
-    return left > 0 ? left : null;
+    const named = sum(pick);
+    const left = total - (named ?? 0);
+    // A reported zero with no named report is still a report, not an unknown count.
+    return left > 0 || (left === 0 && named === null) ? left : null;
   };
   const left: WireTokens = {
     input: rest(tokens => tokens.input),
