@@ -153,13 +153,7 @@ def _web_assets_from_argv(argv: list[str]) -> WebAssetBundle | None:
     value = cli._option_from_argv(argv, "--web-assets")  # noqa: SLF001  # lint-waiver: LW-101004 [SLF001]; reuse the CLI's private option scanner before full argument parsing
     if value is not None:
         return WebAssetBundle.from_directory(Path(value), require_manifest=False)
-    source_root = Path(__file__).resolve().parents[2]
-    candidate = source_root / "clients" / "apps" / "web" / "dist"
-    return (
-        WebAssetBundle.from_directory(candidate, require_manifest=True)
-        if candidate.is_dir()
-        else None
-    )
+    return None
 
 
 def _web_origins_from_argv(argv: list[str]) -> tuple[str, ...]:
@@ -448,8 +442,11 @@ def _spawn_detached(
             ),
             effects,
         )
-        print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
-        webbrowser.open(record.url, new=2)
+        if _web_assets_from_argv(arguments) is not None:
+            print(f"VibeSys web UI: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101036 [T201]; expose the detached capability URL to the launcher user
+            webbrowser.open(record.url, new=2)
+        else:
+            print(f"VibeSys gateway: {record.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101200 [T201]; expose the detached capability URL to the launcher user
 
 
 @dataclass(frozen=True)
@@ -580,7 +577,7 @@ def _instance_in_use(instance_path: Path, hold: WebInstanceHold) -> str:
     """Explain a refused launch, naming the processes in the way, if it can.
 
     The blocker is whatever holds the startup log, which need not be a VibeSys
-    gateway and need not be stoppable with `vibesys web stop`: a descendant
+    gateway: a descendant
     that inherited the log keeps it after the gateway is gone, and nothing
     publishes a record for such a process. So this names the measured holders
     and offers both escapes rather than routing every case through `stop`.
@@ -594,8 +591,7 @@ def _instance_in_use(instance_path: Path, hold: WebInstanceHold) -> str:
     )
     return (
         f"Another process holds {log_path}, so this launch would overwrite a running "
-        f"gateway's output.{users} Stop the gateway with `vibesys web stop --instance "
-        f"{instance_path}`, or end those processes yourself if no gateway owns them."
+        f"gateway's output.{users} End those processes before starting another gateway."
     )
 
 
@@ -980,11 +976,7 @@ def main(
         cli.render_configuration_error(exc)
     except WebSocketBindError as exc:
         sys.stderr.write(f"{exc}\n")
-        sys.stderr.write(
-            "Inspect or stop that listener with "
-            f"`vibesys web status --port {exc.port}` or "
-            f"`vibesys web stop --port {exc.port}`.\n"
-        )
+        sys.stderr.write(f"Inspect or stop the listener on port {exc.port} before retrying.\n")
         raise SystemExit(1) from None
 
 
@@ -1029,8 +1021,11 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                     code="invalid_arguments",
                     stage="argument_parsing",
                 )
-            print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
-            webbrowser.open(existing.url, new=2)
+            if web_bundle is not None:
+                print(f"VibeSys web UI: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101039 [T201]; expose the reused capability URL to the launcher user
+                webbrowser.open(existing.url, new=2)
+            else:
+                print(f"VibeSys gateway: {existing.url}", flush=True)  # noqa: T201  # lint-waiver: LW-101201 [T201]; expose the reused capability URL to the launcher user
             return
         if detach:
             try:
