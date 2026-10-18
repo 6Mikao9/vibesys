@@ -43,7 +43,7 @@ export function AgentCard(props: CardProps): JSX.Element {
           }))}
         />
       </Stack>
-      <Field label="Model" help="Only models VibeSys has tested with this harness are listed.">
+      <Field label="Model">
         <Select
           value={agent.model}
           options={vettedModels(offers, agent.provider).map(model => ({

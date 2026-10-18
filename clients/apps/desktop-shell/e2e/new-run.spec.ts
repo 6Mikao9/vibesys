@@ -25,6 +25,13 @@ test('New run is prefilled from the last run on its machine and starts once the 
   await expect(page.getByLabel('Model', {exact: true}).locator('option:checked')).toHaveText(
     'Opus 4.5',
   );
+  for (const oldHint of [
+    'Runs on CPU, as the task declares.',
+    'Only models VibeSys has tested with this harness are listed.',
+    'Searches without rounds, such as evolve, take none.',
+  ]) {
+    await expect(page.getByText(oldHint, {exact: true})).toHaveCount(0);
+  }
   // All is well: the checks fold into one line, which opens to show each of them.
   await expect(ready(page)).toContainText(/Ready · \d+ checks passed/);
   await expect(ready(page)).not.toContainText('Agent image');
