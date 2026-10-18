@@ -3,7 +3,6 @@
  * each agent drawn once under its first starter with `+ also under <role>` for fan-in, finished
  * subtrees folded (`agentTree`); and the pane of one opened agent: its facts and its turns.
  */
-import {modelName, roleName} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import {
   Button,
@@ -19,6 +18,7 @@ import {type JSX, useMemo} from 'react';
 import {type AgentRow, agentTree, type FoldRow} from '../../../../state/agent-tree.js';
 import {type AgentTurn, agentModel, agentTurns} from '../../../../state/agent-turns.js';
 import {
+  roleLabel,
   spendOf,
   type TokensCells,
   tokensByAgent,
@@ -89,7 +89,7 @@ function AgentLine(props: {
   return (
     <PickRow
       id={agent.id}
-      title={roleName(agent.role)}
+      title={roleLabel(agent.role)}
       swatch={roleSeries(agent.role)}
       {...(view.compact || summary === '' ? {} : {summary})}
       guides={row.guides}
@@ -197,8 +197,7 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
   const {agent, model, zoom} = props;
   const spans = model.trace.spans;
   const turns = useMemo(() => agentTurns(spans, agent.id), [spans, agent.id]);
-  const agentModelId = agentModel(agent, props.core);
-  const shownModel = agentModelId === null ? null : modelName(agentModelId);
+  const modelName = agentModel(agent, props.core);
   const spent = tokensByAgent(spans, props.tokens).get(agent.id);
   const spentLine = spent === undefined ? null : tokensLine(spent);
   const parents = agent.startedBy
@@ -208,8 +207,8 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
     <Stack gap="space-3">
       <KeyValue
         items={[
-          {key: 'Role', value: roleName(agent.role)},
-          {key: 'Model', value: shownModel ?? 'The run’s default'},
+          {key: 'Role', value: roleLabel(agent.role)},
+          {key: 'Model', value: modelName ?? 'The run’s default', mono: modelName !== null},
           {
             key: 'Started by',
             value:
@@ -220,7 +219,7 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
                       key={parent.id}
                       size="sm"
                       variant="quiet"
-                      text={roleName(parent.role)}
+                      text={roleLabel(parent.role)}
                       press={() => zoom({type: 'open-agent', agent: parent.id})}
                     />
                   )),

@@ -36,6 +36,8 @@ export type TurnRow =
       readonly kind: 'reply';
       readonly id: string;
       readonly author: string;
+      /** The id of the role that replied (what `author` names for a person); null when unknown. */
+      readonly role: string | null;
       /** The reply model's name (`OrchestratorPlan`): what kind of reply this is. */
       readonly replyKind: string;
       readonly title: string;
@@ -144,6 +146,7 @@ function replyRow(entry: TranscriptEntry, author: string): TurnRow {
     kind: 'reply',
     id: entry.id,
     author,
+    role: entry.agentKind ?? null,
     replyKind: reply.kind,
     title: replyTitle(reply.kind),
     fields: replyFields(reply.json_schema as Readonly<Record<string, unknown>>, value),

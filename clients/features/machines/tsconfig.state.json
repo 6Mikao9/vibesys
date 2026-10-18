@@ -19,9 +19,6 @@
   ],
   "references": [
     {
-      "path": "../../libs/contracts/tsconfig.lib.json"
-    },
-    {
       "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {

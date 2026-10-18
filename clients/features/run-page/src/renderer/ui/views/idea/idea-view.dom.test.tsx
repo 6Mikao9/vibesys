@@ -91,9 +91,9 @@ test('a one-attempt idea shows its steps, role first, and a step opens', async (
   expect(listNames(container).some(name => name === 'Attempts')).toBe(false);
   const steps = options(container, 'mpmc steps');
   expect(steps.map(row => row.textContent)).toEqual([
-    expect.stringContaining('implementer'),
-    expect.stringContaining('gate'),
-    expect.stringContaining('judge'),
+    expect.stringContaining('Implementer'),
+    expect.stringContaining('Gate'),
+    expect.stringContaining('Judge'),
   ]);
   expect(steps[0]?.textContent).toContain('1m');
   await act(async () => steps[1]?.click());
@@ -107,7 +107,7 @@ test('the latest attempt is selected; choosing another shows its steps', async (
   const {container, unmount} = await mount(<IdeaView {...view(candidate, e => events.push(e))} />);
   const lines = options(container, 'Attempts');
   expect(lines.map(row => row.textContent)).toEqual([
-    expect.stringContaining('turned down'),
+    expect.stringContaining('Turned down'),
     expect.stringContaining('1.50×'),
     expect.stringContaining('1.50×'),
   ]);
@@ -203,7 +203,7 @@ test('the strip is keyed by a legend of exactly the roles in it, in the segments
   const legend = container.querySelector('ul[aria-label="Step colors"]');
   expect(legend).not.toBeNull();
   const entries = [...(legend?.querySelectorAll('li') ?? [])];
-  expect(entries.map(each => each.textContent)).toEqual(['implementer', 'orchestrator', 'gate']);
+  expect(entries.map(each => each.textContent)).toEqual(['Implementer', 'Planner', 'Gate']);
   const swatches = entries.map(each => each.querySelector('.vs-series-swatch') as HTMLElement);
   expect(swatches.map(each => each.getAttribute('data-hatched') !== null)).toEqual([
     false,
@@ -228,7 +228,7 @@ test('a strip without a gate has no gate entry, and a role is listed once', asyn
   const {container, unmount} = await mount(<IdeaView {...view(candidate, () => undefined)} />);
   const legend = container.querySelector('ul[aria-label="Step colors"]');
   expect([...(legend?.querySelectorAll('li') ?? [])].map(each => each.textContent)).toEqual([
-    'judge',
+    'Judge',
   ]);
   await unmount();
 });
@@ -244,11 +244,11 @@ test('a step row names its role once, in its strip color, with status only when 
   const rows = options(container, 'mpmc steps');
   const occurrences = (row: HTMLElement | undefined, word: string): number =>
     (row?.textContent ?? '').split(word).length - 1;
-  expect(occurrences(rows[0], 'orchestrator')).toBe(1);
-  expect(occurrences(rows[1], 'implementer')).toBe(1);
+  expect(occurrences(rows[0], 'Planner')).toBe(1);
+  expect(occurrences(rows[1], 'Implementer')).toBe(1);
   expect(rows[1]?.textContent).toContain('Padded the counters');
-  expect(occurrences(rows[2], 'judge')).toBe(1);
-  expect(occurrences(rows[3], 'gate')).toBe(1);
+  expect(occurrences(rows[2], 'Judge')).toBe(1);
+  expect(occurrences(rows[3], 'Gate')).toBe(1);
   const swatches = rows.map(row => row.querySelector('.vs-series-swatch') as HTMLElement);
   expect(colorsOf(swatches)).toEqual(colorsOf(container.querySelectorAll('.vs-gantt-seg')));
   expect(swatches[3]?.getAttribute('data-hatched')).not.toBeNull();
@@ -256,7 +256,7 @@ test('a step row names its role once, in its strip color, with status only when 
   expect(rows.map(row => row.querySelector('.vs-chip')?.textContent ?? null)).toEqual([
     null,
     null,
-    'failed',
+    'Failed',
     null,
   ]);
   expect(rows.some(row => row.querySelector('.vs-pickrow-dot') !== null)).toBe(false);

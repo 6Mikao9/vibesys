@@ -41,6 +41,7 @@ export function Text(props: {
       id={props.id}
       title={props.title}
       data-tone={tone}
+      data-mono-id={variant === 'code' || undefined}
       style={typeStyle(variant)}
     >
       {props.children}

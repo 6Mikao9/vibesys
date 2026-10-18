@@ -7,7 +7,6 @@
  * the latest `CoreState`, so there is no "already shown" latch to carry forward: each render simply
  * asks whether the current quota fact is still the one worth showing.
  */
-import {harnessName, modelName} from '@vibesys/contracts';
 import type {CoreState, ProviderSwitch, QuotaPause} from '@vibesys/run-state';
 
 /** The pause banner's own choices: the operator's resume affordances. */
@@ -62,7 +61,7 @@ function pauseFacts(pause: QuotaPause): Omit<QuotaPauseBanner, 'kind'> {
   const reset =
     pause.resetsAt === null ? '' : ` Capacity returns at ${formatEpoch(pause.resetsAt)}.`;
   return {
-    message: `${harnessName(pause.provider)} ${why}. The run is paused until it resumes.`,
+    message: `${pause.provider} ${why}. The run is paused until it resumes.`,
     detail: `${pause.detail}${reset}`.trim(),
     wait:
       pause.resumesAt === null
@@ -73,10 +72,10 @@ function pauseFacts(pause: QuotaPause): Omit<QuotaPauseBanner, 'kind'> {
 }
 
 function switchFacts(switched: ProviderSwitch): Omit<QuotaSwitchBanner, 'kind'> {
-  const model = switched.toModel === '' ? '' : ` (${modelName(switched.toModel)})`;
+  const model = switched.toModel === '' ? '' : ` (${switched.toModel})`;
   const who = switched.reason === 'policy' ? 'the quota policy' : 'an operator';
   return {
-    message: `Switched from ${harnessName(switched.fromProvider)} to ${harnessName(switched.toProvider)}${model}.`,
+    message: `Switched from ${switched.fromProvider} to ${switched.toProvider}${model}.`,
     detail: `${who} made the switch: ${switched.detail}`,
   };
 }

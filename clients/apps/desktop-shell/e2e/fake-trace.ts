@@ -199,7 +199,7 @@ function firstCall(): readonly Step[] {
     started_at: 330,
   };
   const plan = planning(1, 374);
-  const planner = turn('op:plan1-turn', plan.id, 'planner', 375, 'planner-1');
+  const planner = turn('op:plan1-turn', plan.id, 'orchestrator', 375, 'planner-1');
   const titles = [
     'Lock-free ring with per-slot sequence numbers',
     'Cache-line padding and batched enqueue',
@@ -271,7 +271,7 @@ function firstCall(): readonly Step[] {
 /** The second planning call: three workstreams building on earlier ones, still at work. */
 function secondCall(): readonly Step[] {
   const plan = planning(2, 1211);
-  const planner = turn('op:plan2-turn', plan.id, 'planner', 1212, 'planner-2');
+  const planner = turn('op:plan2-turn', plan.id, 'orchestrator', 1212, 'planner-2');
   const w5 = workstream(5, 'Combine W1 ring with W2 padding', 1239, [1]);
   const w6 = workstream(6, 'Wait-free consumer path', 1240, [1]);
   const w7: FakeSpan = {

@@ -3,13 +3,7 @@
  * startup timeline, the log streams grouped by owner, and the stop and ended banners. The renderer
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
-import {
-  harnessName,
-  type LogOwner,
-  type RunEvent,
-  type RunOverview,
-  type Span,
-} from '@vibesys/contracts';
+import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import {endedLook, type HostRun, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
@@ -92,6 +86,10 @@ function offer(shown: boolean, unavailable?: string): Offer {
   return {shown, disabledReason: unavailable ?? null};
 }
 
+function providerName(provider: string): string {
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
 export function headerView(state: RunPageState): HeaderView {
   const phase = runPhase(state);
   const {project, task} = state.title;
@@ -151,7 +149,7 @@ export function quotaBannerView(
       body: 'The run waits for you to resume it, or for its quota to return.',
     };
   }
-  const provider = harnessName(pause.provider);
+  const provider = providerName(pause.provider);
   if (waiting !== null) {
     return {
       ...offers,

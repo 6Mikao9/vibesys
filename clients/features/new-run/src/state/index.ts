@@ -47,6 +47,7 @@ export {
 export {
   agentWithRoles,
   formWithRoles,
+  roleLabel,
   roleSummary,
   rolesAfter,
 } from './roles.js';

@@ -2,7 +2,6 @@
  * What the New run screen shows, derived from the machine's snapshot: the facts about the machine,
  * the "Ready to start" items, why Start is disabled, and the one-line summary of the run.
  */
-import {harnessName, modelName} from '@vibesys/contracts';
 import {acceleratorName, type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import type {BrandMarkName, CheckState, KeyValueItem} from '@vibesys/ui';
@@ -306,7 +305,10 @@ function lastSegment(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
-/** The run in one line: project, task, machine, model, rounds; null before it has a project. */
+/**
+ * The run in one line: project, task, machine, backend, rounds; null before it has a project. The
+ * model is the Agent card's: its name comes from the backend, which this line does not yet read.
+ */
 export function summary(context: NewRunContext): string | null {
   const project = projectPath(context.form);
   const {task, agent, budget, machine} = context.form;
@@ -318,7 +320,6 @@ export function summary(context: NewRunContext): string | null {
     task,
     machineLabel(machine),
     ...(backend === null ? [] : [backendLabel(backend)]),
-    modelName(agent.model),
     rounds,
   ].join(' · ');
 }

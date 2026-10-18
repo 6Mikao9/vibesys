@@ -145,8 +145,7 @@ function planResult(reply: ReplyRow, context: ResultContext): TurnResultView {
   const shown = new Set([...sections.map(section => section.key), 'title']);
   const headline = text(reply.value, 'title');
   // Only the orchestrator plans a base; a turn of another role (a judge) builds on nothing.
-  const builtOn =
-    reply.author.toLowerCase() === 'orchestrator' ? builtOnOf(reply.value, context) : null;
+  const builtOn = reply.role === 'orchestrator' ? builtOnOf(reply.value, context) : null;
   return {
     id: reply.id,
     label: 'Plan',

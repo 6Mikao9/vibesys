@@ -5,7 +5,6 @@
  * kicker, title and facts); the views (`views/`) draw what is in them.
  */
 
-import {roleName} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
@@ -17,6 +16,7 @@ import {
   type RunMode,
   type RunPageAction,
   type RunPageState,
+  roleLabel,
   stepLabel,
   stepTitle,
 } from '../../state/index.js';
@@ -113,8 +113,8 @@ function AgentLevel(props: LevelProps & {readonly agent: AgentNode}): JSX.Elemen
     <Panes>
       <AgentsPane {...props} selected={agent.id} />
       <FramedPane
-        kicker={`Agent · ${roleName(agent.role)}`}
-        title={agent.activity.within?.title ?? roleName(agent.role)}
+        kicker={`Agent · ${roleLabel(agent.role)}`}
+        title={agent.activity.within?.title ?? roleLabel(agent.role)}
         width="fill"
         enterKey={`agent ${agent.id}`}
         meta={
@@ -171,7 +171,7 @@ function StepPane(
   return (
     <FramedPane
       kicker={
-        step.role === null ? plain(step.kind) : `${plain(step.kind)} · ${roleName(step.role)}`
+        step.role === null ? plain(step.kind) : `${plain(step.kind)} · ${roleLabel(step.role)}`
       }
       title={stepTitle(step)}
       width="fill"

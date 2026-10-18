@@ -4,10 +4,10 @@
  * the idea and agent-turn cases a real run produces but a recording may not hold. `Trace` numbers
  * events and stamps them on the run clock; `addIdea` writes one idea's workstream, turns and gate.
  */
-import {DISPLAY_IDS, type Span} from '@vibesys/contracts';
+import {CODE_IDS, type Span} from '@vibesys/contracts';
 
 /** Two models the registry names, so the screens show names: the fixtures never spell a model id. */
-export const [MODEL_A = 'model-a', MODEL_B = 'model-b'] = DISPLAY_IDS.models;
+export const [MODEL_A = 'model-a', MODEL_B = 'model-b'] = CODE_IDS.models;
 
 const START = Date.UTC(2026, 9, 15, 16, 30, 51);
 

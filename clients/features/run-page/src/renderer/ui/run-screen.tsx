@@ -1,4 +1,3 @@
-import {roleName} from '@vibesys/contracts';
 import {type CoreState, EMPTY_LEDGER} from '@vibesys/run-state';
 import {
   Banner,
@@ -36,6 +35,7 @@ import {
   type RunPageAction,
   type RunPageState,
   resolveZoom,
+  roleLabel,
   routeLevel,
   runNow,
   runPhase,
@@ -289,7 +289,7 @@ function crumbs(zoomed: ResolvedZoom, route: Route, zoom: Zoom): Crumb[] {
   if (zoomed.idea !== null)
     items.push({id: 'idea', label: markdownToPlain(zoomed.idea.title), to: opened});
   if (zoomed.agent !== null) {
-    items.push({id: 'agent', label: roleName(zoomed.agent.role), to: opened});
+    items.push({id: 'agent', label: roleLabel(zoomed.agent.role), to: opened});
   }
   if (zoomed.step !== null) {
     const label = stepLabel(zoomed.step);

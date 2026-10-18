@@ -4,7 +4,7 @@
  * titles; any other kind, or a span with no label, reads plainly from its name and title. Nothing
  * is guessed from a span's name.
  */
-import {modelName, roleName, type Span} from '@vibesys/contracts';
+import {roleName, type Span} from '@vibesys/contracts';
 import {stepName, stringAttr, words} from './span-reading.js';
 import type {Tone} from './views.js';
 
@@ -77,7 +77,7 @@ export function titleOf(span: Span): string {
     case 'agent_turn': {
       const model = stringAttr(span, 'model');
       const role = roleName(title);
-      return model === null ? role : `${role} · ${modelName(model)}`;
+      return model === null ? role : `${role} · ${model}`;
     }
     case 'gate':
       return `Gate · ${gateTitle(title)}`;

@@ -41,7 +41,7 @@ export function runHeader(trace: Trace, runId: string, objectives: readonly Axis
       outer_loop: 'iterate',
       input: 'objectives/queue.md',
       max_rounds: 6,
-      expected_roles: ['planner', 'implementer', 'judge'],
+      expected_roles: ['orchestrator', 'implementer', 'judge'],
       // The run declares what it optimizes, as a real run's first event does.
       overview: {
         objective: {

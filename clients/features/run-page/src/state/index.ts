@@ -37,7 +37,7 @@ export {
   type ParetoView,
   paretoView,
 } from './pareto-view.js';
-export {stepLabel, stepTitle} from './names.js';
+export {roleLabel, stepLabel, stepTitle} from './names.js';
 export {runRecord, sameRecord} from './record.js';
 export {roleSeries} from './role-series.js';
 export {

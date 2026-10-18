@@ -23,7 +23,7 @@
         "input": "objectives/queue.md",
         "max_rounds": 6,
         "expected_roles": [
-          "planner",
+          "orchestrator",
           "implementer",
           "judge"
         ],

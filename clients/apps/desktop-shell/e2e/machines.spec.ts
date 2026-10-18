@@ -164,6 +164,6 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
 
 test('the machines screen names its harnesses and hardware, never their ids', async ({page}) => {
   await openMachines(page);
-  await expect(page.getByText('Claude Code · Codex installed')).toBeVisible();
+  await expect(page.getByText('Claude · Codex installed')).toBeVisible();
   expect(await rawTextOf(page)).toEqual([]);
 });

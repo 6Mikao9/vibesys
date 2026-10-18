@@ -128,20 +128,20 @@ test('the agents tree shows who started whom, and an agent opens beside it with 
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
   const agents = page.getByRole('listbox', {name: 'Agents'});
   await expect(agents.getByRole('option')).toHaveCount(6);
-  await expect(agents.getByRole('option').nth(0)).toContainText('planner');
-  await expect(agents.getByRole('option', {name: /judge/})).toContainText(
-    '+ also under implementer',
+  await expect(agents.getByRole('option').nth(0)).toContainText('Planner');
+  await expect(agents.getByRole('option', {name: /judge/i})).toContainText(
+    '+ also under Implementer',
   );
   await expect(page.getByText('agent · started by the row above · now')).toBeVisible();
   await check(page, 'ink-agents');
 
   await agents
-    .getByRole('option', {name: /^done implementer/})
+    .getByRole('option', {name: /^Done Implementer/})
     .first()
     .click();
   const turns = page.getByRole('listbox', {name: 'Turns'});
   await expect(turns.getByRole('option')).toHaveCount(1);
-  await expect(page.getByRole('button', {name: 'planner'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Planner'})).toBeVisible();
   await check(page, 'ink-agent');
 
   // A turn opens as a step, beside the agents.
@@ -167,15 +167,15 @@ test('the run, each agent and each turn name the tokens they spent', async ({pag
   await expect(page.getByText('in (cached)', {exact: true})).toBeVisible();
   // Each agent's turns summed: the first implementer's one turn, the planner's one measured turn,
   // input with its cached share beside it, then output.
-  await expect(agents.getByRole('option', {name: /implementer/}).nth(0)).toContainText(
+  await expect(agents.getByRole('option', {name: /implementer/i}).nth(0)).toContainText(
     '1.2M 1.1M cached',
   );
-  await expect(agents.getByRole('option', {name: /planner/}).nth(0)).toContainText('182.4k');
+  await expect(agents.getByRole('option', {name: /planner/i}).nth(0)).toContainText('182.4k');
   await check(page, 'ink-agents-tokens');
 
   // W5's implementer: its pane totals it, and its turn opens with its tokens in the header.
   await agents
-    .getByRole('option', {name: /implementer/})
+    .getByRole('option', {name: /implementer/i})
     .nth(1)
     .click();
   await expect(page.getByText('in 48.3k (31k cached) · out 2.6k').first()).toBeVisible();
@@ -192,10 +192,10 @@ test.describe('at 1000px', () => {
     await expect(page.getByText('in 1.5M (1.3M cached) · out 51.1k')).toBeVisible();
     await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
     const agents = page.getByRole('listbox', {name: 'Agents'});
-    await expect(agents.getByRole('option', {name: /implementer/}).nth(0)).toContainText('1.2M');
+    await expect(agents.getByRole('option', {name: /implementer/i}).nth(0)).toContainText('1.2M');
     await check(page, 'ink-agents-tokens-1000');
     await agents
-      .getByRole('option', {name: /implementer/})
+      .getByRole('option', {name: /implementer/i})
       .nth(1)
       .click();
     await check(page, 'ink-agent-tokens-1000');

@@ -111,12 +111,6 @@ export const BAD_SCREENS: readonly BadScreen[] = [
     html: `<div style="${PAGE}"><span>claude</span></div>`,
   },
   {
-    name: 'a harness name in lowercase',
-    check: 'raw-text',
-    message: /lowercase name "claude code"/,
-    html: `<div style="${PAGE}"><span>claude code</span></div>`,
-  },
-  {
     name: 'a role name in lowercase',
     check: 'raw-text',
     message: /lowercase name "perf evaluator"/,

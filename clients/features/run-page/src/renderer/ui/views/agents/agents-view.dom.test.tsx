@@ -164,10 +164,10 @@ describe('AgentsView', () => {
     );
     expect(view.textContent).toContain('agent · started by the row above · now');
     expect(options(view).map(each => each.textContent)).toEqual([
-      expect.stringMatching(/^orchestrator/),
-      expect.stringMatching(/implementer.*ring padding/),
+      expect.stringMatching(/^Planner/),
+      expect.stringMatching(/Implementer.*ring padding/),
       expect.stringMatching(
-        /judge.*ring padding · Padding keeps its gain.*\+ also under implementer/,
+        /Judge.*ring padding · Padding keeps its gain.*\+ also under Implementer/,
       ),
     ]);
   });
@@ -177,7 +177,7 @@ describe('AgentsView', () => {
     const view = await mount(
       <AgentsView {...base(modelOf(FAN_IN), sent)} {...folds()} selected={null} compact={false} />,
     );
-    await click(option(view, 'judge'));
+    await click(option(view, 'Judge'));
     expect(sent).toEqual([{type: 'open-agent', agent: 'judge'}]);
   });
 
@@ -187,8 +187,8 @@ describe('AgentsView', () => {
     );
     expect(view.textContent).not.toContain('started by the row above');
     expect(view.textContent).not.toContain('ring padding');
-    expect(option(view, 'judge').textContent).toContain('+1 parent');
-    expect(option(view, 'implementer').getAttribute('aria-selected')).toBe('true');
+    expect(option(view, 'Judge').textContent).toContain('+1 parent');
+    expect(option(view, 'Implementer').getAttribute('aria-selected')).toBe('true');
   });
 
   test('finished subtrees fold, active agents stay, and a press asks the page to unfold', async () => {
@@ -213,8 +213,8 @@ describe('AgentsView', () => {
       />,
     );
     expect(options(view).map(each => each.textContent)).toEqual([
-      expect.stringContaining('orchestrator'),
-      expect.stringContaining('live'),
+      expect.stringContaining('Planner'),
+      expect.stringContaining('Live'),
       expect.stringContaining(`+ ${FOLD_FROM} finished`),
     ]);
     await click(option(view, 'finished'));
@@ -247,7 +247,7 @@ describe('AgentsView', () => {
           compact={selected !== null}
         />,
       );
-      for (let n = 0; n < FOLD_FROM; n += 1) expect(view.textContent).toContain(`boss${n}`);
+      for (let n = 0; n < FOLD_FROM; n += 1) expect(view.textContent).toContain(`Boss${n}`);
       if (selected !== 'lead-1') expect(view.textContent).toContain(`+ ${FOLD_FROM} finished`);
     }
   });
@@ -266,7 +266,7 @@ describe('AgentsView', () => {
     const view = await mount(
       <AgentsView {...base(model, [])} {...folds()} selected="old-2" compact />,
     );
-    expect(option(view, 'old2').getAttribute('aria-selected')).toBe('true');
+    expect(option(view, 'Old2').getAttribute('aria-selected')).toBe('true');
     expect(view.textContent).not.toContain('finished');
   });
 
@@ -313,7 +313,7 @@ describe('AgentPane', () => {
   test('shows the agent’s facts and its turns in order', async () => {
     const view = await mount(pane([]));
     expect(view.textContent).toContain('claude-sonnet-5');
-    expect(view.textContent).toMatch(/started by\s*orchestrator/);
+    expect(view.textContent).toMatch(/Started by\s*Planner/);
     expect(options(view).map(each => each.textContent)).toEqual([
       expect.stringMatching(/1.*Pad the ring.*1m/),
       expect.stringMatching(/2.*Measure it.*1m/),
@@ -345,14 +345,14 @@ describe('AgentPane', () => {
     const named = await mount(<AgentPane {...base(MODEL, [])} core={core} agent={unnamed} />);
     expect(named.textContent).toContain('gpt-6-luna');
     const none = await mount(<AgentPane {...base(MODEL, [])} core={null} agent={unnamed} />);
-    expect(none.textContent).toContain('the run’s default');
+    expect(none.textContent).toContain('The run’s default');
   });
 
   test('the starter is a button that opens that agent, and a turn opens its step', async () => {
     const sent: ZoomEvent[] = [];
     const view = await mount(pane(sent));
     const starter = [...view.querySelectorAll('button')].find(
-      each => each.textContent === 'orchestrator',
+      each => each.textContent === 'Planner',
     );
     if (starter === undefined) throw new Error('no starter button');
     await click(starter);
@@ -387,7 +387,7 @@ describe('token usage', () => {
     );
     expect(view.textContent).toContain('in (cached)');
     expect(view.textContent).toContain('out');
-    const row = option(view, 'implementer');
+    const row = option(view, 'Implementer');
     const [input, output] = [...row.querySelectorAll('.vs-pickrow-measure')];
     expect(input?.textContent).toBe('48k 24k cached');
     expect(output?.textContent).toBe('3k');
@@ -436,7 +436,7 @@ describe('token usage', () => {
     const view = await mount(
       <AgentPane {...base(MODEL, [])} tokens={LEDGER} core={null} agent={agent} />,
     );
-    expect(view.textContent).toMatch(/tokens\s*in 48k \(24k cached\) · out 3k/);
+    expect(view.textContent).toMatch(/Tokens\s*in 48k \(24k cached\) · out 3k/);
     expect(options(view).map(each => each.textContent)).toEqual([
       expect.stringMatching(/Pad the ring.*in 30k \(24k cached\) · out 2k/),
       expect.stringMatching(/Measure it.*in 18k \(cached unknown\) · out 1k/),
@@ -471,13 +471,13 @@ describe('token usage', () => {
         ),
       );
     await draw(ledgerOf([{span: 'turn:impl:2', input: 1_000}]));
-    expect(option(container, 'implementer').textContent).toContain('1k');
+    expect(option(container, 'Implementer').textContent).toContain('1k');
     await draw(
       ledgerOf([
         {span: 'turn:impl:2', input: 1_000},
         {span: 'turn:impl:100', input: 1_500},
       ]),
     );
-    expect(option(container, 'implementer').textContent).toContain('2.5k');
+    expect(option(container, 'Implementer').textContent).toContain('2.5k');
   });
 });

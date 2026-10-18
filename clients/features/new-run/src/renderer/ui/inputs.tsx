@@ -1,6 +1,5 @@
 /** The New run form's numbered cards: the machine, the project and task, the agent, the budget. */
 
-import {harnessName, modelName, roleName} from '@vibesys/contracts';
 import {type CompletionAction, type CompletionState, suggestions} from '@vibesys/hosts';
 import {
   Banner,
@@ -27,6 +26,7 @@ import {
   type NewRunContext,
   type NewRunEvent,
   type ProjectChoice,
+  roleLabel,
   roleSummary,
   vettedModels,
 } from '../../state/index.js';
@@ -286,7 +286,7 @@ function RoleRows(
     <Stack gap="space-3">
       {roles.map(role => {
         const choice = agent.roles.find(each => each.role === role) ?? defaultRole(role);
-        const label = roleName(role);
+        const label = roleLabel(role);
         const does = roleSummary(role);
         return (
           <Grid key={role} min="field" gap="space-3">
@@ -303,7 +303,7 @@ function RoleRows(
                 value={choice.model ?? NONE}
                 options={[
                   {value: NONE, label: 'Same as run'},
-                  ...models.map(m => ({value: m, label: modelName(m)})),
+                  ...models.map(m => ({value: m, label: m})),
                 ]}
                 change={model =>
                   dispatch({type: 'role', role: {...choice, model: model === NONE ? null : model}})
@@ -394,14 +394,14 @@ export function AgentCard(props: CardProps): JSX.Element {
         <Field label="Harness">
           <Select
             value={agent.provider}
-            options={providers.map(provider => ({value: provider, label: harnessName(provider)}))}
+            options={providers.map(provider => ({value: provider, label: provider}))}
             change={provider => dispatch({type: 'provider', provider})}
           />
         </Field>
         <Field label="Model" help="Only models VibeSys has tested with this harness are listed.">
           <Select
             value={agent.model}
-            options={models.map(model => ({value: model, label: modelName(model)}))}
+            options={models.map(model => ({value: model, label: model}))}
             change={model => dispatch({type: 'model', model})}
           />
         </Field>

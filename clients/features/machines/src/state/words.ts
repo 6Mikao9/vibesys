@@ -2,7 +2,6 @@
  * How the Machines screen words a machine: its status, the one line under its name, and its facts,
  * each a function of what its last report said.
  */
-import {harnessName} from '@vibesys/contracts';
 import {acceleratorName, type MachineDescription} from '@vibesys/hosts';
 import {type Machine, type MachineStatus, machineStatus} from './machines.js';
 

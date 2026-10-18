@@ -1,7 +1,7 @@
 /**
  * How the Run screen names what ran: a role, a model, a step. The ids come from the run's events;
  * the names a person reads come from the backend registries (`@vibesys/contracts`'
- * `roleName` and `modelName`), so no screen draws an id such as `perf-evaluator`.
+ * `roleName`), so no screen draws an id such as `perf-evaluator`.
  */
 import {roleName} from '@vibesys/contracts';
 import type {CandidateStep} from '@vibesys/run-state/candidates';
@@ -17,4 +17,9 @@ export function stepTitle(step: Pick<CandidateStep, 'title' | 'role'>): string {
 /** What a step is called in a list or a crumb: its role's name, else its title. */
 export function stepLabel(step: Pick<CandidateStep, 'title' | 'role'>): string {
   return step.role === null ? step.title : roleName(step.role);
+}
+
+/** An agent role a person reads ("Judge", "Perf evaluator"): the backend's name for it. */
+export function roleLabel(role: string): string {
+  return roleName(role);
 }

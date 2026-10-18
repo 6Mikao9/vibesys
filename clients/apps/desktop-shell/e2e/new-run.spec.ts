@@ -89,7 +89,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
   await page.getByLabel('Extra arguments').fill('--max-in-flight 3');
   await page.getByLabel('Rounds').selectOption('5');
   await page.getByRole('button', {name: /^Roles:/}).click();
-  await page.getByLabel('Multi judge reasoning effort').selectOption('high');
+  await page.getByLabel('Judge reasoning effort').selectOption('high');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();

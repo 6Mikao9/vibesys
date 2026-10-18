@@ -31,6 +31,7 @@ export function Select<T extends string>(props: {
         id={wiring.id}
         value={props.value}
         data-mono={props.mono === true || undefined}
+        data-mono-id={props.mono === true || undefined}
         aria-describedby={wiring.describedBy}
         aria-invalid={wiring.invalid || undefined}
         onChange={event => {

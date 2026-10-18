@@ -27,6 +27,11 @@ export function wordsOfId(id: string): string {
   return text === '' ? id : text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** The title of a role the catalog declares, or null for any other text (an idea's headline). */
+export function declaredRoleName(role: string): string | null {
+  return ROLES[role] ?? null;
+}
+
 /** An agent role a person reads: "Judge", "Perf evaluator". */
 export function roleName(role: string): string {
   return ROLES[role] ?? wordsOfId(role);

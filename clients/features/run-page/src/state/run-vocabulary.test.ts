@@ -227,7 +227,7 @@ describe('the Run screen words over generated runs', () => {
           ...Object.keys(view.counts),
         ].join(' ');
         expect(words).not.toMatch(OLD_WORDS);
-        for (const row of view.rows) expect(row.state.label).toMatch(/^(passed|failed|running)/);
+        for (const row of view.rows) expect(row.state.label).toMatch(/^(Passed|Failed|Running)/);
       }
     }
   });

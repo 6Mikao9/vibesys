@@ -5,7 +5,7 @@
  * moment of the call, so the caller fixes the viewport, theme and fonts and lets the page settle.
  */
 import type {Page} from '@playwright/test';
-import {DISPLAY_IDS, harnessName, modelName, roleName} from '@vibesys/contracts';
+import {CODE_IDS, roleName} from '@vibesys/contracts';
 import {FAILURE_REASONS} from '@vibesys/run-fixtures';
 import {
   type CheckId,
@@ -46,23 +46,19 @@ const RAW_WORDS: readonly string[] = FAILURE_REASONS.filter(reason => /[-_]/.tes
 
 /** The ids the backend registries name, so the list of what must not show raw cannot drift. */
 const REGISTRY_IDS: readonly string[] = [
-  ...DISPLAY_IDS.harnesses,
-  ...DISPLAY_IDS.models,
-  ...DISPLAY_IDS.roles,
+  ...CODE_IDS.harnesses,
+  ...CODE_IDS.models,
+  ...CODE_IDS.roles,
 ];
 
-/** The names the registries give those ids. */
-const REGISTRY_NAMES: readonly string[] = [
-  ...DISPLAY_IDS.harnesses.map(harnessName),
-  ...DISPLAY_IDS.models.map(modelName),
-  ...DISPLAY_IDS.roles.map(roleName),
-];
+/** The role names the catalog gives: none may be drawn in lowercase. */
+const REGISTRY_NAMES: readonly string[] = CODE_IDS.roles.map(roleName);
 
 /**
  * The names the fixture worlds' user typed: a project folder, an SSH alias, a task. They are the
  * user's own identifiers, shown as they were typed, not code names the app made up.
  */
-const USER_NAMES: readonly string[] = ['queue-rs', 'queue-rs-2', 'remote-host', 'host-b'];
+const USER_NAMES: readonly string[] = ['queue-rs', 'queue-rs-2', 'remote-host', 'host-a', 'host-b'];
 
 /** The script that defines the helpers and the checks in the page and runs `only` of them. */
 function script(only: readonly PageCheckId[], input: CheckInput): string {

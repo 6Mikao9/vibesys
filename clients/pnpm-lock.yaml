@@ -477,9 +477,6 @@ importers:
       '@vibesys/connection':
         specifier: workspace:*
         version: link:../../libs/connection
-      '@vibesys/contracts':
-        specifier: workspace:*
-        version: link:../../libs/contracts
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../../libs/hosts
@@ -4394,7 +4391,6 @@ snapshots:
   '@vibesys/feature-machines@file:features/machines(@types/react@19.1.13)':
     dependencies:
       '@vibesys/connection': file:libs/connection
-      '@vibesys/contracts': file:libs/contracts
       '@vibesys/hosts': file:libs/hosts
       '@vibesys/ipc': file:libs/ipc(@types/react@19.1.13)
       '@vibesys/settings': file:libs/settings(@types/react@19.1.13)

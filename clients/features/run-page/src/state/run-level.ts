@@ -285,9 +285,9 @@ function ticks(low: number, high: number, label: (value: number) => string) {
 }
 
 const RESULT_WORDS: Readonly<Record<IdeaResult, string>> = {
-  passed: 'passed',
-  failed: 'failed',
-  pending: 'not measured yet',
+  passed: 'Passed',
+  failed: 'Failed',
+  pending: 'Not measured yet',
 };
 
 function pointTone(point: PerformancePoint): 'accent' | 'muted' | 'err' {
@@ -369,7 +369,7 @@ export function stripChartView(
   const open = focusOn(model, fold.points, focus);
   const points = fold.points.map(point => ({
     id: point.id,
-    label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'new best' : RESULT_WORDS[point.result]}`,
+    label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'New best' : RESULT_WORDS[point.result]}`,
     x: minutes(point.at),
     y: point.value,
     filled: point.result !== 'pending',
