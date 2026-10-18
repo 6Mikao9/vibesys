@@ -10,7 +10,14 @@ from typing import TYPE_CHECKING, Literal, assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, records, scheduling, sessions, settlement
-from ._continuations import SuspensionRefusal, exhausted, paid_prefix_refusal, wait_refusal_in
+from ._continuations import (
+    SuspensionRefusal,
+    exhausted,
+    paid_prefix_refusal,
+    published_history,
+    resume_refusal,
+    wait_refusal_in,
+)
 from ._deadlines import queued_until, resolve_until
 from ._dispatch_episode import (
     dispatch_episode_current,
@@ -84,7 +91,6 @@ from .types.evaluation import (
     EvaluationEvent,
     MeasurementRequested,
 )
-from .types.evaluation_history import EvaluationHistoryAvailability
 from .types.kernel import (
     AreaChange,
     AreaContext,
@@ -108,6 +114,7 @@ from .types.kernel import (
     Transition,
 )
 from .types.records import (
+    Attribution,
     BlockedRecordStalled,
     BlockRequest,
     CancelOwnedResource,
@@ -331,7 +338,10 @@ def _resolve(state: CoreState, outbound: Outbound, cause: DecisionId | None) -> 
     """Resolve an outbound request's ``until`` to the absolute form stored on its record."""
     match outbound.until:
         case Inherited():
-            owner = cause or outbound.request.decision_id
+            # A request of its own ends with the decision it names (an agent's or core's own
+            # names none, and ends with the step's); any other, with the step that made it.
+            own = outbound.request.decision_id
+            owner = (own or cause) if outbound.attribution is Attribution.OWN else (cause or own)
             receipt = next((item for item in state.run.receipts if item.decision_id == owner), None)
             if receipt is None or receipt.until is None:
                 raise ContractError(("until",), "an inherited until needs its accepted decision")
@@ -808,24 +818,30 @@ def propagate(
         pending.extend((child, cause, admission_id) for child in change.signals)
         _validate_area_outputs(state, area, change, cause)
         requests.extend(
-            _resolve(
-                state,
-                outbound.model_copy(
-                    update={
-                        "request": outbound.request.model_copy(
-                            update={
-                                "decision_id": outbound.request.decision_id or cause,
-                                "admission_id": outbound.request.admission_id or admission_id,
-                            }
-                        )
-                    }
-                ),
-                cause,
-            )
+            _resolve(state, _attributed(outbound, cause, admission_id), cause)
             for outbound in change.requests
         )
         events.extend(change.events)
     return _end_fired_watches(_registered_transition(state, requests, events), dispatch)
+
+
+def _attributed(
+    outbound: Outbound, cause: DecisionId | None, admission_id: DecisionId | None
+) -> Outbound:
+    """``outbound`` with the decision and admission it belongs to (see ``Attribution``)."""
+    if outbound.attribution is Attribution.OWN:
+        return outbound
+    request = outbound.request
+    return outbound.model_copy(
+        update={
+            "request": request.model_copy(
+                update={
+                    "decision_id": request.decision_id or cause,
+                    "admission_id": request.admission_id or admission_id,
+                }
+            )
+        }
+    )
 
 
 def _end_fired_watches(transition: Transition, dispatch: Dispatch) -> Transition:
@@ -1542,21 +1558,15 @@ def _validate_resume_owner(
             ),
             None,
         )
-        if (
-            owner is None
-            or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
-            or exhausted(state.attempts, request.scope)
-        ):
+        if owner is None or exhausted(state.attempts, request.scope):
             raise ContractError(
                 ("evaluation_history",), "resume requires complete unexhausted attempt history"
             )
         prefix = preceding.evaluation_prefix
         history = owner.evaluation_history
-        refusal = paid_prefix_refusal(history, prefix)
-        if prefix is None or refusal is not None:  # None is a refusal; this narrows the type
-            raise ContractError(
-                ("evaluation_prefix",), (refusal or SuspensionRefusal.PREFIX_MISMATCH).detail
-            )
+        # Coverage only grows, so the paid-cycle prefix is checked on the stored history.
+        if prefix is None or paid_prefix_refusal(history, prefix) is not None:
+            raise ContractError(("evaluation_prefix",), SuspensionRefusal.PREFIX_MISMATCH.detail)
         if (
             publication_cursor is None
             or publication_cursor.ordinal < prefix.ordinal
@@ -1570,6 +1580,12 @@ def _validate_resume_owner(
             raise ContractError(
                 ("authorization_receipt", "history_cursor"),
                 "resume requires exact publication history prefix after paid-cycle start",
+            )
+        # The rule authorization applied, to the history it published (``published_history``).
+        refusal = resume_refusal(published_history(history, publication_cursor), prefix)
+        if refusal is not None:
+            raise ContractError(
+                ("evaluation_history",), "resume requires complete unexhausted attempt history"
             )
     else:
         if (

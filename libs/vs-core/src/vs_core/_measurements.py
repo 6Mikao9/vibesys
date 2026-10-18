@@ -115,7 +115,14 @@ from .types.evaluation import (
 from .types.evaluation_history import EvaluationStageOutcome
 from .types.job_observations import MeasurementFailure
 from .types.kernel import AreaChange
-from .types.records import Outbound, RequestObserved, RequestPhase, inherit, within
+from .types.records import (
+    Attribution,
+    Outbound,
+    RequestObserved,
+    RequestPhase,
+    inherit,
+    within,
+)
 from .types.strategy import Measure
 from .types.until import Until, Within
 from .types.waits import WaitOn
@@ -1467,14 +1474,11 @@ def _job_request(
     # stop, a drain and a late observation all name the submission's decision. Left to the
     # asker, two events asking for one step at one instant stamp it differently and the one
     # request id would carry two payloads.
-    inherited = (
-        canonical.request if canonical is not None and model is not CollectEvidence else None
-    )
     return model(
         request_id=RequestId(root=f"{_step_prefix(job, action)}{suffix}"),
         scope=job.scope,
         admission_id=canonical.request.admission_id if canonical is not None else None,
-        decision_id=inherited.decision_id if inherited is not None else None,
+        decision_id=canonical.request.decision_id if canonical is not None else None,
         resource_id=job.resource_id,
     )
 
@@ -1504,10 +1508,15 @@ def _job_outbound(
     context: EvaluationContext,
     action: str,
 ) -> Outbound:
-    """A job request with the bound its kind gets: cancellation or reconciliation."""
+    """A job request with the bound its kind gets: cancellation or reconciliation.
+
+    A step that names the submission's decision keeps it, an agent's ``None`` included: any
+    signal of a step may ask for it, and the asker's decision is not the job's.
+    """
     limits = context.run.limits
     bound = limits.cancellation_bound if model is CancelOwnedJob else limits.reconciliation_bound
-    return within(_job_request(model, job, context, action), bound)
+    outbound = within(_job_request(model, job, context, action), bound)
+    return outbound.model_copy(update={"attribution": Attribution.OWN})
 
 
 def _terminate(

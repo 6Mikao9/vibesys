@@ -52,9 +52,11 @@ from .types.evaluation import (
     RegisteredOwnedJob,
     ResumeAuthorizationReceipt,
     ResumeAuthorized,
+    ResumeRefusal,
+    ResumeRefused,
     TurnSuspended,
 )
-from .types.evaluation_history import EvaluationHistoryAvailability
+from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryAvailability
 from .types.job_observations import JobTimeout, TimedOut, WaitEnd
 from .types.kernel import AreaChange, EvaluationContext
 from .types.records import InspectRequest, Outbound, RequestPhase, within
@@ -70,7 +72,7 @@ if TYPE_CHECKING:
         EvaluationState,
         EvidenceRef,
     )
-    from .types.evaluation_history import AttemptEvaluationHistory, EvaluationHistoryCursor
+    from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import RunState, SessionsContext, Signal, StrategyEvent
     from .types.records import ChildLease, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
@@ -137,6 +139,58 @@ def paid_prefix_refusal(
     ):
         return SuspensionRefusal.PREFIX_MISMATCH
     return None
+
+
+def resume_refusal(
+    history: AttemptEvaluationHistory, prefix: EvaluationHistoryCursor | None
+) -> ResumeRefusal | None:
+    """Why an attempt's turn that waited from ``prefix`` cannot resume on ``history``, or None.
+
+    The one rule for both ends of a resume: authorization asks it of the history it
+    publishes, and the resume's dispatch asks it of that same history as the attempt still
+    stores it (``published_history``), so core never authorizes a resume that its dispatch
+    would refuse.
+    """
+    if history.availability != EvaluationHistoryAvailability.COMPLETE:
+        return ResumeRefusal.HISTORY_UNAVAILABLE
+    if paid_prefix_refusal(history, prefix) is not None:
+        return ResumeRefusal.PREFIX_MISMATCH
+    return None
+
+
+def published_history(
+    history: AttemptEvaluationHistory, cursor: EvaluationHistoryCursor | None
+) -> AttemptEvaluationHistory:
+    """``history`` as it stood when core published ``cursor`` with a resume's authorization.
+
+    The scope may submit again between the authorization and the resume's dispatch (core's
+    own base run, earned by a close call of any attempt sharing the base, is one), and that
+    submission leaves the whole stored history incomplete until it ends. Coverage and records
+    only grow, so the prefix through ``cursor`` is what authorization proved. With nothing
+    submitted since, that is the stored history itself; no cursor, or one the stored coverage
+    does not hold, is an unavailable history.
+    """
+    if (
+        cursor is None
+        or cursor.ordinal > len(history.covered_submissions)
+        or (
+            cursor.ordinal
+            and history.covered_submissions[cursor.ordinal - 1] != cursor.submission_id
+        )
+    ):
+        return AttemptEvaluationHistory()
+    if cursor.ordinal == len(history.covered_submissions):
+        return history
+    covered = history.covered_submissions[: cursor.ordinal]
+    records = tuple(record for record in history.records if record.ordinal <= cursor.ordinal)
+    complete = tuple(record.submission_id for record in records) == covered
+    return AttemptEvaluationHistory(
+        availability=EvaluationHistoryAvailability.COMPLETE
+        if complete
+        else EvaluationHistoryAvailability.UNAVAILABLE,
+        covered_submissions=covered,
+        records=records,
+    )
 
 
 def exhausted(attempts: AttemptsState, scope: Scope) -> bool:
@@ -607,17 +661,30 @@ def _authorize(
                 state, continuation.model_copy(update={"phase": ContinuationPhase.AUTHORIZED})
             )
         )
+    return _publish(state, context, continuation, invocation, evidence)
+
+
+def _publish(
+    state: EvaluationState,
+    context: EvaluationContext,
+    continuation: Continuation,
+    invocation: Invocation,
+    evidence: tuple[EvidenceRef, ...],
+) -> AreaChange[EvaluationState]:
+    """Authorize the settled wait's resume once, or refuse it for good (``resume_refusal``)."""
     owner = _attempt(context, invocation.scope)
     history = (
         produce_history(invocation.scope, state, context.records, owner, context.run)
         if owner
         else None
     )
-    cursor = (
-        history.cursor
-        if history is not None and history.availability == EvaluationHistoryAvailability.COMPLETE
-        else None
-    )
+    if history is not None:
+        # Every submission has ended (``attempt_settled``), so this history is final: a
+        # refusal now is a refusal forever, and the wait ends without a resume.
+        refusal = resume_refusal(history, invocation.evaluation_prefix)
+        if refusal is not None:
+            return _refuse(state, continuation, refusal, _history_update(owner, history))
+    cursor = history.cursor if history is not None else None
     comparisons = latest_comparisons(
         state,
         invocation.scope,
@@ -655,14 +722,45 @@ def _authorize(
                 comparisons=comparisons,
             ),
         ),
-        signals=(
-            AttemptEvaluationHistoryUpdated(
-                attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
-                history=history,
+        signals=_history_update(owner, history),
+    )
+
+
+def _history_update(
+    owner: AttemptView | None, history: AttemptEvaluationHistory | None
+) -> tuple[Signal, ...]:
+    """The signal storing the history a continuation's end published, when it has one.
+
+    The ends of the jobs a continuation awaits leave publishing the history to it.
+    """
+    if owner is None or history is None:
+        return ()
+    return (
+        AttemptEvaluationHistoryUpdated(
+            attempt=AttemptRef(attempt_id=owner.attempt_id, generation=owner.generation),
+            history=history,
+        ),
+    )
+
+
+def _refuse(
+    state: EvaluationState,
+    continuation: Continuation,
+    reason: ResumeRefusal,
+    signals: tuple[Signal, ...],
+) -> AreaChange[EvaluationState]:
+    """End a wait whose resume core will never authorize: cancel it and say why."""
+    cancelled = continuation.model_copy(update={"phase": ContinuationPhase.CANCELLED})
+    return AreaChange(
+        state=_store(state, cancelled),
+        events=(
+            ResumeRefused(
+                continuation_id=continuation.continuation_id,
+                invocation=continuation.invocation,
+                reason=reason,
             ),
-        )
-        if owner is not None and history is not None
-        else (),
+        ),
+        signals=signals,
     )
 
 
@@ -988,9 +1086,11 @@ def _publication_history(
 ) -> _PublicationProof:
     owner = _attempt(context, invocation.scope)
     cursor = proof.cursor
+    # The history as published: the scope may have submitted again since (``published_history``).
     if (
         owner is None
-        or owner.evaluation_history.availability != EvaluationHistoryAvailability.COMPLETE
+        or published_history(owner.evaluation_history, cursor).availability
+        != EvaluationHistoryAvailability.COMPLETE
     ):
         return _PublicationMissing("history")
     covered = owner.evaluation_history.covered_submissions
