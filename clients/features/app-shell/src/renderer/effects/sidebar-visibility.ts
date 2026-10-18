@@ -3,6 +3,7 @@
  * shortcut that toggles it.
  */
 import {
+  isSettingsShortcut,
   isSidebarShortcut,
   parseSidebarShown,
   type ShortcutKey,
@@ -56,9 +57,29 @@ export function bindSidebarShortcut(
   dispatch: (action: SidebarAction) => void,
 ): () => void {
   const listener = (event: ShortcutKey & {preventDefault(): void}): void => {
+    if (isSettingsShortcut(event, mac)) {
+      event.preventDefault();
+      dispatch({type: 'select', screen: {kind: 'settings'}});
+      return;
+    }
     if (!isSidebarShortcut(event, mac)) return;
     event.preventDefault();
     dispatch({type: 'toggle-sidebar'});
+  };
+  target.addEventListener('keydown', listener);
+  return () => target.removeEventListener('keydown', listener);
+}
+
+/** Open Settings from a run window, where the main window owns the sidebar state. */
+export function bindRunWindowSettingsShortcut(
+  target: KeyTarget,
+  mac: boolean,
+  openSettings: () => void,
+): () => void {
+  const listener = (event: ShortcutKey & {preventDefault(): void}): void => {
+    if (!isSettingsShortcut(event, mac)) return;
+    event.preventDefault();
+    openSettings();
   };
   target.addEventListener('keydown', listener);
   return () => target.removeEventListener('keydown', listener);

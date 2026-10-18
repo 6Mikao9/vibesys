@@ -208,7 +208,11 @@ test("Machines' New run here opens New run on that machine", async ({page}) => {
   await expect(page.getByLabel('Run on')).toHaveValue('ssh:host-b');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^Machines/})
+    .getByRole('button', {name: 'Settings'})
+    .click();
+  await page
+    .getByRole('navigation', {name: 'Settings sections'})
+    .getByRole('button', {name: /Machines/})
     .click();
   await page
     .getByRole('tree', {name: 'Machines'})

@@ -12,6 +12,8 @@ import {
   WORDMARK,
 } from '@vibesys/feature-app-shell/renderer';
 import {
+  type Clock,
+  machineCounts,
   type Screen,
   type SidebarState,
   sidebarShortcutLabel,
@@ -271,13 +273,30 @@ export function Shell(props: {
           />
         );
       case 'settings':
-        return <SettingsScreen state={settingsState} dispatch={settings.dispatch} />;
+        return (
+          <SettingsScreen
+            state={settingsState}
+            dispatch={settings.dispatch}
+            back={() => sidebar.store.dispatch({type: 'back-from-settings'})}
+            machinesContent={
+              <MachinesScreen
+                embedded
+                state={machinesState}
+                dispatch={machines.dispatch}
+                newRun={host => select({kind: 'new-run', machine: host})}
+                back={() => select({kind: 'settings'})}
+              />
+            }
+            machines={machineCounts(sidebarState)}
+          />
+        );
       case 'machines':
         return (
           <MachinesScreen
             state={machinesState}
             dispatch={machines.dispatch}
             newRun={host => select({kind: 'new-run', machine: host})}
+            back={() => select({kind: 'settings'})}
           />
         );
       case 'run':
@@ -301,10 +320,14 @@ export function Shell(props: {
       actions={sidebar.actions}
       version={props.version}
       shortcut={sidebarShortcutLabel(props.stores.bridge.platform === 'darwin')}
+      clock={viewerClock}
       screen={screen}
     />
   );
 }
+
+/** The moment Recent's times are worded against: now, in the viewer's own zone. */
+const viewerClock = (): Clock => ({now: Date.now()});
 
 /**
  * A run window: the Run screen for `run` alone, with no sidebar, below the same title-bar row as

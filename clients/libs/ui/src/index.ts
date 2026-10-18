@@ -58,6 +58,7 @@ export {
   type PageWidth,
   Reserve,
   Row,
+  SectionLayout,
   Split,
   Stack,
 } from './components/layout.js';
@@ -113,7 +114,12 @@ export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {SearchBox} from './components/search-box.js';
 export {type ChoiceOption, SegmentedControl} from './components/segmented-control.js';
 export {Select, type SelectOption} from './components/select.js';
-export {SidebarItem, SidebarSection, type SidebarTarget} from './components/sidebar.js';
+export {
+  SidebarGroup,
+  SidebarItem,
+  SidebarSection,
+  type SidebarTarget,
+} from './components/sidebar.js';
 export {Slider} from './components/slider.js';
 export {Sparkline, type SparkStep} from './components/sparkline.js';
 export {Chip, StatusDot, type StatusTone} from './components/status.js';

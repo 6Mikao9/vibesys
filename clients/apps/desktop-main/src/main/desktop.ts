@@ -31,7 +31,10 @@ import {
 import type {AppWindow} from './window.js';
 
 export interface DesktopDeps {
-  readonly window: Pick<AppWindow, 'focus' | 'releaseSurfaceRun' | 'sendWelcome' | 'welcome'>;
+  readonly window: Pick<
+    AppWindow,
+    'focus' | 'openSettings' | 'releaseSurfaceRun' | 'sendWelcome' | 'welcome'
+  >;
   readonly welcome: Pick<WelcomeFeed, 'recent' | 'snapshot'>;
   readonly hosts: Pick<
     Hosts,
@@ -41,6 +44,7 @@ export interface DesktopDeps {
     | 'harnesses'
     | 'readSummary'
     | 'readSpan'
+    | 'runDigests'
     | 'logs'
     | 'recent'
     | 'releaseLogs'
@@ -84,6 +88,7 @@ type ScreenRequest = Extract<
       | 'helper-features'
       | 'open-run-window'
       | 'show-main-window'
+      | 'open-settings'
       | 'open-external';
   }
 >;
@@ -254,6 +259,8 @@ export class Desktop {
           request.from,
           request.max,
         );
+      case 'run-digests':
+        return hosts.runDigests(request.host, request.project, request.runIds);
       case 'release-run':
         this.#deps.window.releaseSurfaceRun();
         return null;
@@ -283,6 +290,10 @@ export class Desktop {
       case 'open-run-window':
         return Promise.resolve(this.#openRunWindow(request.run));
       case 'show-main-window':
+        this.#deps.window.focus();
+        return Promise.resolve(null);
+      case 'open-settings':
+        this.#deps.window.openSettings();
         this.#deps.window.focus();
         return Promise.resolve(null);
       case 'open-external':

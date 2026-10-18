@@ -90,6 +90,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.readEvents]: 5,
   [WELCOME_CHANNELS.readSummary]: 3,
   [WELCOME_CHANNELS.readSpan]: 6,
+  [WELCOME_CHANNELS.runDigests]: 3,
   [WELCOME_CHANNELS.preferences]: 0,
   [WELCOME_CHANNELS.setAppearance]: 1,
   [WELCOME_CHANNELS.setNotifications]: 1,
@@ -107,6 +108,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.helperFeatures]: 1,
   [WELCOME_CHANNELS.openRunWindow]: 1,
   [WELCOME_CHANNELS.showMainWindow]: 0,
+  [WELCOME_CHANNELS.openSettings]: 0,
   [WELCOME_CHANNELS.openExternal]: 1,
 } as const satisfies Readonly<Record<WelcomeChannel, number>>;
 

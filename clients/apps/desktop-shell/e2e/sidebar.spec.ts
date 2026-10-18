@@ -138,6 +138,66 @@ test('the shortcut and the menu item toggle it, from any focus', async ({page}) 
   await expect(sidebar(page)).toBeVisible();
 });
 
+test('Command-comma opens Settings repeatedly and Back restores the run with the sidebar shown or hidden', async ({
+  page,
+}) => {
+  await openRun(page);
+  for (const collapsed of [false, true]) {
+    if (collapsed) await page.keyboard.press('Meta+Backslash');
+    await page.keyboard.press('Meta+,');
+    await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+    await page.keyboard.press('Meta+,');
+    await page.getByRole('button', {name: 'Back', exact: true}).click();
+    await expect(page.getByRole('heading', {name: 'Appearance'})).toHaveCount(0);
+    await expect(page.getByRole('button', {name: 'New run'})).toHaveCount(collapsed ? 0 : 1);
+  }
+});
+
+test('Settings sections are peers; Back exits to the same run', async ({page}) => {
+  await openRun(page);
+  const nav = sidebar(page);
+  await nav.getByRole('button', {name: 'Settings'}).click();
+  const sections = page.getByRole('navigation', {name: 'Settings sections'});
+  const appearance = sections.getByRole('button', {name: 'Appearance'});
+  const machines = sections.getByRole('button', {name: /Machines/});
+  const notifications = sections.getByRole('button', {name: 'Notifications'});
+  await expect(appearance).toHaveAttribute('aria-current', 'page');
+  await expect(machines).toBeVisible();
+  await expect(notifications).toBeVisible();
+  await expect(nav.getByRole('button', {name: 'Machines'})).toHaveCount(0);
+  await machines.click();
+  await expect(machines).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', {name: 'Where runs can go'})).toBeVisible();
+  await page.getByRole('button', {name: 'Add a machine'}).click();
+  const host = page.getByRole('textbox', {name: 'SSH host'});
+  await host.fill('host');
+  await host.press(',');
+  await expect(host).toHaveValue('host,');
+  await host.press('Meta+,');
+  await expect(page.getByRole('heading', {name: 'Where runs can go'})).toBeVisible();
+  await notifications.click();
+  await expect(notifications).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', {name: 'Notifications', exact: true})).toBeVisible();
+  await appearance.click();
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toBeVisible();
+  await page.getByRole('button', {name: 'Back', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'Appearance'})).toHaveCount(0);
+});
+
+test('Settings section navigation remains reachable at narrow width', async ({page}) => {
+  await page.setViewportSize({width: 800, height: 700});
+  await openRun(page);
+  await sidebar(page).getByRole('button', {name: 'Settings'}).click();
+  const sections = page.getByRole('navigation', {name: 'Settings sections'});
+  await expect(sections).toBeInViewport();
+  await sections.getByRole('button', {name: 'Notifications'}).click();
+  await expect(page.getByRole('heading', {name: 'Notifications', exact: true})).toBeVisible();
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
 test('hidden, no sidebar control can be focused, and the run still opens from the shortcut', async ({
   page,
 }) => {

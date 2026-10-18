@@ -17,6 +17,12 @@ export interface FakeBridgeSeed {
   readonly appearance: {readonly mode: string; readonly light: string; readonly dark: string};
   readonly listings: readonly unknown[];
   readonly recent: readonly unknown[];
+  /**
+   * What each run's journal says (`runs.list`'s digest), by run id, as the app reads it
+   * (`RunDigestEntry`); a run not named is one the host has no record of. Without it the host
+   * answers as an older helper would: it does not offer digests.
+   */
+  readonly digests?: Readonly<Record<string, unknown>>;
   /** The saved machines, as `hosts.json` and This Mac list them. */
   readonly machines?: readonly {host: string; label: string; checkout: string}[];
   /** What each machine's facts say, by host; a machine not named here is ready with `facts`. */
@@ -104,6 +110,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         );
         return store({...preferences, archived: archived ? [...others, run] : others});
       },
+      runDigests: () => ok({kind: 'unsupported'}),
       onListing: on('listing'),
       onRecent: on('recent'),
       onPreferences: on('preferences'),
@@ -112,6 +119,7 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       onToggleSidebar: (listener: () => void) => {
         toggleListeners.push(listener);
       },
+      onOpenSettings: () => undefined,
     },
     fakeHost: {
       /** The application menu's "Toggle Sidebar". */
@@ -143,6 +151,21 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     paint.disconnect();
   });
   paint.observe(document, {childList: true});
+}
+
+/**
+ * The run digests part of the Fake, as a further init script after `installFakeBridge`: the
+ * host's answer to what a run's journal says (`seed.digests`), or that it offers none.
+ */
+export function installFakeDigests(seed: FakeBridgeSeed): void {
+  const digests = seed.digests;
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
+    runDigests: (_host: string, _project: string, runIds: readonly string[]) => {
+      if (digests === undefined) return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
+      const runs = new Map(runIds.flatMap(id => (id in digests ? [[id, digests[id]]] : [])));
+      return Promise.resolve({ok: true, value: {kind: 'digests', runs}});
+    },
+  });
 }
 
 /**
@@ -315,6 +338,10 @@ export function installFakeWindows(): void {
       return ok();
     },
     showMainWindow: () => {
+      record.shownMain += 1;
+      return ok();
+    },
+    openSettings: () => {
       record.shownMain += 1;
       return ok();
     },
