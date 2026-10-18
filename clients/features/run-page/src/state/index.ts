@@ -30,6 +30,13 @@ export {
   outcomeWords,
 } from './ideas-view.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';
+export {
+  objectivesOf,
+  type ParetoAxisView,
+  type ParetoPointView,
+  type ParetoView,
+  paretoView,
+} from './pareto-view.js';
 export {runRecord, sameRecord} from './record.js';
 export {roleSeries} from './role-series.js';
 export {
