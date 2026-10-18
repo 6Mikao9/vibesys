@@ -19,7 +19,7 @@ import {
   type RunDigestEntry,
   type RunDigestsReply,
 } from '@vibesys/hosts';
-import {type RecentRun, type RunRef, sameRun} from '@vibesys/runs';
+import {type RecentRun, type RunRef, type SkippedRecent, sameRun} from '@vibesys/runs';
 import type {Step} from '@vibesys/store';
 import {
   ALL_RUNS_EMPTY,
@@ -109,6 +109,8 @@ export interface SidebarState {
   /** The latest listing of each host, one per host. */
   readonly listings: readonly HostListing[];
   readonly recent: readonly RecentRun[];
+  /** Saved runs the app could not read, so Recent leaves them out; empty when it read them all. */
+  readonly skippedRecent: readonly SkippedRecent[];
   readonly archived: readonly RunRef[];
   /** What each machine lists of its projects' runs, for the All runs screen. */
   readonly allRuns: AllRunsState;
@@ -128,6 +130,7 @@ export type SidebarAction =
       readonly type: 'overview';
       readonly listings: readonly HostListing[];
       readonly recent: readonly RecentRun[];
+      readonly skippedRecent: readonly SkippedRecent[];
     }
   | {readonly type: 'listing'; readonly listing: HostListing}
   | {readonly type: 'recent'; readonly recent: readonly RecentRun[]}
@@ -167,6 +170,7 @@ export type SidebarStep = Step<SidebarState, SidebarRequest>;
 export const SIDEBAR_EMPTY: SidebarState = {
   listings: [],
   recent: [],
+  skippedRecent: [],
   archived: [],
   allRuns: ALL_RUNS_EMPTY,
   digests: {},
@@ -369,11 +373,13 @@ function baseStep(state: SidebarState, action: SidebarAction): SidebarStep {
         ...state,
         listings: action.listings.reduce<HostListing[]>(withListing, []),
         recent: action.recent,
+        skippedRecent: action.skippedRecent,
       });
     case 'listing':
       return same({...state, listings: withListing(state.listings, action.listing)});
+    // A pushed list is of a file the store has just written, which it writes only when all is readable.
     case 'recent':
-      return same({...state, recent: action.recent});
+      return same({...state, recent: action.recent, skippedRecent: []});
     case 'archived':
       return same({...state, archived: action.archived});
     case 'select':
