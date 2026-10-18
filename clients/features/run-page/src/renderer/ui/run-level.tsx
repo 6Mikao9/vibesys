@@ -9,6 +9,7 @@ import {
   Button,
   DotLegend,
   EmptyState,
+  Field,
   markdownToPlain,
   Pane,
   Panes,
@@ -17,22 +18,19 @@ import {
   Row,
   SearchBox,
   SegmentedControl,
+  Select,
   Stack,
 } from '@vibesys/ui';
-import type {JSX} from 'react';
+import {type JSX, useState} from 'react';
 import {
   ageWords,
-  bestLine,
-  defaultLayout,
   type IdeasFilter,
-  type IdeasLayout,
   type ImplementerOutcomes,
   ideasView,
   implementerOutcomes,
   type NowItem,
   nowView,
   type RunMode,
-  type RunModel,
   type RunPageAction,
   type RunPageState,
   traceArrival,
@@ -40,7 +38,7 @@ import {
 } from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
 import {IdeaPickRow} from './idea-pick-row.js';
-import {BestLineRow, IdeasTreeList, LayoutSwitch} from './ideas-tree.js';
+import {type IdeasSort, IdeasTable} from './ideas-table.js';
 import {AgentsView, type AgentsViewProps} from './views/agents/agents-view.js';
 import {agentsHeader, logsHeader, timelineHeader} from './views/headers.js';
 import {LogsView, type LogsViewProps} from './views/logs/logs-view.js';
@@ -160,27 +158,28 @@ function IdeasLegend(props: {
   );
 }
 
-/** The layout the Ideas face is in: the reader's pick, else by the run. */
-function ideasLayout(state: RunPageState, model: RunModel): IdeasLayout {
-  return state.ideasLayout ?? defaultLayout(model);
-}
-
 function IdeasFace(props: {
   readonly state: RunPageState;
   readonly base: ViewBase;
   readonly outcomes: ImplementerOutcomes;
+  readonly selected: string | null;
+  readonly modeControls: boolean;
   readonly dispatch: Dispatch;
 }): JSX.Element {
-  const {state, base, outcomes, dispatch} = props;
+  const {state, base, dispatch} = props;
+  const [sort, setSort] = useState<IdeasSort>('newest');
   if (base.model.candidates.candidates.length === 0) {
-    return <EmptyState title="No ideas yet" body="Each idea the run tries shows here." />;
+    return (
+      <>
+        {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
+        <EmptyState title="No ideas yet" body="Each idea the run tries shows here." />
+      </>
+    );
   }
-  const line = bestLine(base.model);
-  const layout = ideasLayout(state, base.model);
   return (
     <>
+      {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
       <IdeasLegend state={state} base={base} dispatch={dispatch} />
-      {line === null ? null : <BestLineRow line={line} dispatch={dispatch} />}
       <Row gap="space-3" align="center">
         <Stack gap="space-0" grow>
           <SearchBox
@@ -190,21 +189,48 @@ function IdeasFace(props: {
             change={query => dispatch({type: 'ideas-filter', filter: {...state.ideas, query}})}
           />
         </Stack>
-        <LayoutSwitch layout={layout} dispatch={dispatch} />
+        <Field label="Sort ideas">
+          <Select
+            value={sort}
+            options={[
+              {value: 'newest', label: 'Newest'},
+              {value: 'oldest', label: 'Oldest'},
+              {value: 'result', label: 'Best result'},
+            ]}
+            change={setSort}
+          />
+        </Field>
       </Row>
-      {layout === 'tree' ? (
-        <IdeasTreeList base={base} outcomes={outcomes} state={state} dispatch={dispatch} />
-      ) : (
-        <IdeasList
-          base={base}
-          outcomes={outcomes}
-          filter={state.ideas}
-          selected={null}
-          compact={false}
-          dispatch={dispatch}
-        />
-      )}
+      <IdeasTable
+        base={base}
+        filter={state.ideas}
+        sort={sort}
+        selected={props.selected}
+        outcomes={props.outcomes}
+        dispatch={dispatch}
+      />
     </>
+  );
+}
+
+/** The Ideas master pane is the same component and width before and after an idea opens. */
+export function IdeasPane(props: {
+  readonly state: RunPageState;
+  readonly base: ViewBase;
+  readonly core: CoreState | null;
+  readonly selected: string | null;
+  readonly dispatch: Dispatch;
+}): JSX.Element {
+  const outcomes = implementerOutcomes(props.core, props.base.model.candidates);
+  return (
+    <FramedPane
+      kicker="ideas"
+      title={`${props.base.model.candidates.candidates.length}`}
+      width="master"
+      header={{}}
+    >
+      <IdeasFace {...props} outcomes={outcomes} modeControls />
+    </FramedPane>
   );
 }
 
@@ -220,7 +246,7 @@ function nowZoom(item: NowItem): ZoomEvent {
   }
 }
 
-function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
+export function NowPane(props: {readonly base: ViewBase}): JSX.Element | null {
   const {base} = props;
   const items = nowView(base.model);
   if (items.length === 0) return null;
@@ -290,7 +316,16 @@ function runFace(
     case 'ideas':
       return {
         header: {},
-        body: <IdeasFace state={state} base={base} outcomes={outcomes} dispatch={dispatch} />,
+        body: (
+          <IdeasFace
+            state={state}
+            base={base}
+            outcomes={outcomes}
+            selected={null}
+            modeControls={false}
+            dispatch={dispatch}
+          />
+        ),
       };
   }
 }
