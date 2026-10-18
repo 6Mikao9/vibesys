@@ -91,7 +91,10 @@ describe('a run seeded from its summary holds what the whole journal holds for t
       usage: [],
       tokens: {...empty.tokens, input: 0, output: null},
     };
-    const zero = reduceEventBatch(initialCoreState(), summaryFacts(summary, RUN_ID, 'completed').seed);
+    const zero = reduceEventBatch(
+      initialCoreState(),
+      summaryFacts(summary, RUN_ID, 'completed').seed,
+    );
     expect(zero.tokens.total.input).toBe(0);
     expect(zero.tokens.total.output).toBeNull();
     expect(zero.tokens.bySpan).toEqual({});
@@ -162,7 +165,9 @@ describe('an ended run opened from its summary', () => {
     const {asked} = opened();
     const kinds = asked.requests.map(each => each.kind);
     expect(kinds).toContain('read-summary');
-    expect(asked.requests.find(each => each.kind === 'read-summary')).toMatchObject({status: 'stopped'});
+    expect(asked.requests.find(each => each.kind === 'read-summary')).toMatchObject({
+      status: 'stopped',
+    });
     expect(kinds).not.toContain('read-history');
     expect(traceArrival(asked.state)).toBe('awaited');
   });
@@ -283,13 +288,16 @@ describe('an ended run opened from its summary', () => {
     const request = asked.requests.find(each => each.kind === 'read-summary');
     if (request?.kind !== 'read-summary') throw new Error('no summary asked');
     const fallback = runPageStep(asked.state, {
-      type: 'summary', token: request.token,
-      reply: {kind: 'failed', message: 'summary closed'}, wallMs: 0,
+      type: 'summary',
+      token: request.token,
+      reply: {kind: 'failed', message: 'summary closed'},
+      wallMs: 0,
     });
     const history = fallback.requests[0];
     if (history?.kind !== 'read-history') throw new Error('no history asked');
     const failed = runPageStep(fallback.state, {
-      type: 'history', token: history.token,
+      type: 'history',
+      token: history.token,
       reply: {kind: 'failed', message: 'history closed'},
     });
     expect(traceArrival(failed.state)).toBe('none');

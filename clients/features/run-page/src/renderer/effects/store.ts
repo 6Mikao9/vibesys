@@ -7,8 +7,9 @@
  * (`SessionHolder`). `dispose` stops every follower, closes the session, lets the run go and cancels
  * the bound; a reply that arrives later is dropped by its token.
  */
-import {type LogListOutcome, type LogTransport, startLogFollower} from '@vibesys/logs';
+
 import type {RunStatus} from '@vibesys/contracts';
+import {type LogListOutcome, type LogTransport, startLogFollower} from '@vibesys/logs';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {createStore, type Store} from '@vibesys/store';
 import {
