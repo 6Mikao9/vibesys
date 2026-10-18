@@ -74,7 +74,7 @@ from server.span_index import (
 )
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import GitRunHistory, NullGitTrackerEvents, Project, ProjectError
-from vs_sim.api import ProcessSpec
+from vs_sim.api import OsThreads, ProcessSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -82,9 +82,10 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from server.run_summary import Summarized
+    from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
     from vs_project.api import GitRepositoryFactory
-    from vs_sim.api import CommandProbe, ProcessLauncher
+    from vs_sim.api import CommandProbe, ProcessLauncher, Threads
 
 _PYPROJECT_LIMIT_BYTES = 1 << 20
 _LAUNCH_OUTPUT_TAIL = 2000
@@ -134,13 +135,15 @@ class FileProjects:
     project has checked out.
     """
 
-    def __init__(self, repositories: GitRepositoryFactory) -> None:
+    def __init__(self, repositories: GitRepositoryFactory, threads: Threads | None = None) -> None:
         """Read run branches through the repositories ``repositories`` opens."""
         self._repositories = repositories
+        self._threads = threads if threads is not None else OsThreads()
         self._journals: dict[tuple[Path, str], Path] = {}
         self._tallies: dict[Path, JournalTally] = {}
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
         self._indexes: dict[Path, JournalIndex] = {}
+        self._summary_reader: SummaryReader | None = None
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -288,9 +291,11 @@ class FileProjects:
         # lint-waiver: LW-640283 [PLC0415]; the summary fold costs the helper nothing until asked.
         # > At module level every channel would load the fold and its cache before `hello`, which
         # > the helper's start-up ceiling forbids; the import stays visible to tach.
-        from server.run_summary_cache import summarize_journal  # noqa: PLC0415
+        from server.run_summary_cache import SummaryReader  # noqa: PLC0415
 
-        return summarize_journal(self._journal(project, run_id))
+        if self._summary_reader is None:
+            self._summary_reader = SummaryReader(self._threads.lock())
+        return self._summary_reader.summarize(self._journal(project, run_id))
 
     def _indexed_read[Facts](
         self, journal: Path, ask: Callable[[JournalIndex], tuple[list[Entry], Facts]]
