@@ -3,13 +3,20 @@
  * host's listing calls for.
  */
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
+export {type Clock, formatWhen} from './recent-words.js';
 export {type RunRowStatus, statusWord} from './run-status.js';
 export {
+  type DigestSlot,
+  digestKey,
   initialSidebar,
+  liveMachineGroups,
   liveRows,
+  type MachineRunGroup,
   machineCounts,
   RECENT_ROWS,
+  type RowProblem,
   type RunRow,
+  recentGroups,
   recentRows,
   type Screen,
   type ShellActions,
@@ -24,6 +31,7 @@ export {
   sidebarStep,
 } from './sidebar.js';
 export {
+  isSettingsShortcut,
   isSidebarShortcut,
   parseSidebarShown,
   type ShortcutKey,

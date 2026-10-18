@@ -196,6 +196,8 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     }),
     harnesses: async () => ({kind: 'unsupported'}),
     readSummary: async () => ({kind: 'unsupported'}),
+    runDigests: async () => ({kind: 'unsupported'}),
+
     logs: async () => ({ok: true, instanceId: '000000000001', streams: []}),
     recent: async () => undefined,
     releaseLogs: () => undefined,

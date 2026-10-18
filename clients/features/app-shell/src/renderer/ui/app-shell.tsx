@@ -1,10 +1,10 @@
-import {AppFrame, Button, Row, SidebarItem, SidebarSection, Text} from '@vibesys/ui';
+import {AppFrame, Button, Row, SidebarGroup, SidebarItem, SidebarSection, Text} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
-  liveRows,
-  machineCounts,
+  type Clock,
+  liveMachineGroups,
   type RunRow,
-  recentRows,
+  recentGroups,
   type Screen,
   type ShellActions,
   type SidebarAction,
@@ -27,7 +27,16 @@ function RunItem(props: {
   return (
     <SidebarItem
       label={row.title}
-      detail={row.detail}
+      detail={row.trail === null ? row.detail : `${row.detail} · ${row.trail}`}
+      hint={row.tooltip}
+      {...(row.problem?.retry === true
+        ? {
+            action: {
+              label: 'Retry',
+              press: () => dispatch({type: 'retry-digest', run: row.run}),
+            },
+          }
+        : {})}
       status={{tone: row.look.tone, label: row.look.word}}
       active={sameScreen(state.selection, screen)}
       press={() => dispatch({type: 'select', screen})}
@@ -73,12 +82,14 @@ export function AppShell(props: {
   readonly actions: ShellActions;
   readonly version: string;
   readonly shortcut: string;
+  /** The moment and zone Recent's times are worded in; the app passes the viewer's own. */
+  readonly clock: () => Clock;
   readonly screen: (screen: Screen) => ReactNode;
 }): JSX.Element {
   const {state, dispatch, actions} = props;
-  const live = liveRows(state);
-  const recent = recentRows(state);
-  const machines = machineCounts(state);
+  const live = liveMachineGroups(state);
+  const recent = recentGroups(state, props.clock());
+  const recentCount = recent.groups.reduce((total, machine) => total + machine.rows.length, 0);
   const toggle = (
     <SidebarToggle
       shown={state.shown}
@@ -101,7 +112,8 @@ export function AppShell(props: {
       label="VibeSys"
       navHidden={!state.shown}
       control={toggle}
-      nav={
+      onCollapse={() => dispatch({type: 'toggle-sidebar'})}
+      navPinned={
         <>
           <Row justify="between">
             <Row gap="space-3">
@@ -120,48 +132,47 @@ export function AppShell(props: {
             text="New run"
             press={select({kind: 'new-run'})}
           />
+        </>
+      }
+      nav={
+        <>
           {live.length === 0 ? null : (
-            <SidebarSection title="Live">{live.map(item)}</SidebarSection>
+            <SidebarSection title="Live">
+              {live.map(group => (
+                <SidebarGroup key={group.title} title={group.title}>
+                  {group.rows.map(row => item(row))}
+                </SidebarGroup>
+              ))}
+            </SidebarSection>
           )}
           <SidebarSection
             title="Recent"
             showAll={{
-              label:
-                recent.more === 0 ? 'Show all' : `Show all (${recent.rows.length + recent.more})`,
+              label: recent.more === 0 ? 'Show all' : `Show all (${recentCount + recent.more})`,
               press: select({kind: 'all-runs'}),
             }}
           >
-            {recent.rows.length === 0 ? (
+            {recent.groups.length === 0 ? (
               <Text variant="small" tone="muted">
                 Runs you open show up here.
               </Text>
             ) : (
-              recent.rows.map(item)
+              recent.groups.map(machine => (
+                <SidebarGroup key={machine.host} title={machine.title}>
+                  {machine.rows.map(row => item(row))}
+                </SidebarGroup>
+              ))
             )}
           </SidebarSection>
         </>
       }
       footer={
-        <>
-          <SidebarItem
-            label="Machines"
-            icon="monitor"
-            count={machines.count}
-            {...(machines.attention === 0
-              ? {}
-              : {
-                  detail: `${machines.attention} need${machines.attention === 1 ? 's' : ''} attention`,
-                })}
-            active={state.selection.kind === 'machines'}
-            press={select({kind: 'machines'})}
-          />
-          <SidebarItem
-            label="Settings"
-            icon="gear"
-            active={state.selection.kind === 'settings'}
-            press={select({kind: 'settings'})}
-          />
-        </>
+        <SidebarItem
+          label="Settings"
+          icon="gear"
+          active={state.selection.kind === 'settings' || state.selection.kind === 'machines'}
+          press={select({kind: 'settings'})}
+        />
       }
     >
       {props.screen(state.selection)}
