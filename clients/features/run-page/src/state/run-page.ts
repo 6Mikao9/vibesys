@@ -493,7 +493,9 @@ function endedHistoryFor(state: RunPageState, status: RunStatus): RunPageStep {
       return state.wantsHistory ? startReading(state) : {state, requests: []};
     case 'reading':
       // A session that watched the run to its end folded it: the summary's answer is not needed.
-      return folded(state) ? read : {state, requests: []};
+      return folded(state)
+        ? {state: {...read.state, summary: {kind: 'superseded'}}, requests: []}
+        : {state, requests: []};
     case 'idle':
       return folded(state) ? read : startSummary(state, status);
     case 'unsupported':

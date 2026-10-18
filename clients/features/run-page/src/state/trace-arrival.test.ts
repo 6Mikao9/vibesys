@@ -126,6 +126,37 @@ describe('a live run', () => {
 });
 
 describe('an ended run', () => {
+  test('keeps a folded live trace visible after the run ends while its summary request is pending', () => {
+    const opened = runPageStep(initial(), LIVE);
+    const summary = opened.requests.find(request => request.kind === 'read-summary');
+    const attach = opened.requests.find(request => request.kind === 'attach');
+    if (summary?.kind !== 'read-summary' || attach?.kind !== 'attach') {
+      throw new Error('live run did not ask for summary and attach');
+    }
+    const linked = runPageStep(opened.state, {type: 'attached', token: attach.token, error: null});
+    const folded = runPageStep(linked.state, {
+      type: 'run-data',
+      wallMs: 0,
+      data: {kind: 'events', events: [SPAN]},
+    });
+    expect(traceArrival(folded.state)).toBe('arrived');
+
+    const ended = runPageStep(folded.state, ENDED);
+    expect(ended.state.history.kind).toBe('read');
+    expect(ended.state.summary.kind).toBe('superseded');
+    expect(traceArrival(ended.state)).toBe('arrived');
+    expect(historyLoading(ended.state)).toBeNull();
+
+    const late = runPageStep(ended.state, {
+      type: 'summary',
+      token: summary.token,
+      reply: {kind: 'unsupported'},
+      wallMs: 0,
+    });
+    expect(late.state).toBe(ended.state);
+    expect(traceArrival(late.state)).toBe('arrived');
+  });
+
   test('awaits its spans while its history is read', () => {
     expect(traceArrival(fold([ENDED]))).toBe('awaited');
   });
