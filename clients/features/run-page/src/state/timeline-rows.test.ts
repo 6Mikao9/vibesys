@@ -160,7 +160,7 @@ describe('step segments', () => {
     ]);
     expect(segments[0]?.series).not.toBe(segments[2]?.series);
     expect(segments[3]?.end).toBe(50);
-    expect(segments[0]?.label).toBe('implementer · agent_turn t · 10s');
+    expect(segments[0]?.label).toBe('Implementer · agent_turn t · 10s');
   });
 });
 
@@ -172,9 +172,9 @@ describe('attempts', () => {
     const live = attempt('l', 'running', 200, 0);
     const lines = attemptLines({...base, attempts: [failed, kept, live]}, 260, 'ops/s');
     expect(lines.map(line => [line.title, line.result, line.tone])).toEqual([
-      ['attempt 1', 'turned down', 'err'],
+      ['attempt 1', 'Turned down', 'err'],
       ['attempt 2', '1.50×', 'ok'],
-      ['attempt 3', 'running', 'live'],
+      ['attempt 3', 'Running', 'live'],
     ]);
     expect(lines[1]?.value).toBe('40 ops/s');
     expect(lines.map(line => line.took)).toEqual(['1m', '2m', '1m']);

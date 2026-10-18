@@ -60,7 +60,12 @@ export function Table<Row>(props: {
                 onKeyDown={select === undefined ? undefined : event => keyDown(event, key)}
               >
                 {columns.map(column => (
-                  <td key={column.key} data-mono={column.mono} data-align={column.align}>
+                  <td
+                    key={column.key}
+                    data-mono={column.mono}
+                    data-mono-id={column.mono}
+                    data-align={column.align}
+                  >
                     {column.cell(row)}
                   </td>
                 ))}

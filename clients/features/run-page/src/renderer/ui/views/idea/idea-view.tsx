@@ -24,9 +24,10 @@ import {
 import {type JSX, useState} from 'react';
 import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {outcomeWords} from '../../../../state/ideas-view.js';
-import {spendOf, tokensColumn, turnTokens} from '../../../../state/index.js';
+import {spendOf, stepLabel, stepTitle, tokensColumn, turnTokens} from '../../../../state/index.js';
 import {roleSeries} from '../../../../state/role-series.js';
-import {duration, words} from '../../../../state/span-reading.js';
+import {duration} from '../../../../state/span-reading.js';
+import {plain, statusWords} from '../../../../state/span-words.js';
 import {
   type AttemptLine,
   attemptLines,
@@ -205,13 +206,13 @@ function stateOf(step: CandidateStep): {tone: 'live' | 'ok' | 'err' | 'neutral';
     case 'running':
     case 'waiting':
     case 'pending':
-      return {tone: 'live', label: step.status};
+      return {tone: 'live', label: statusWords(step.status).label};
     case 'done':
-      return {tone: 'ok', label: 'done'};
+      return {tone: 'ok', label: 'Done'};
     case 'failed':
-      return {tone: 'err', label: 'failed'};
+      return {tone: 'err', label: 'Failed'};
     default:
-      return {tone: 'neutral', label: step.status};
+      return {tone: 'neutral', label: statusWords(step.status).label};
   }
 }
 
@@ -249,18 +250,19 @@ function StepRows(props: {
     >
       {props.steps.map((step, index) => {
         const took = tookOf(step);
-        const name = step.role ?? words(step.kind);
+        const name = step.role === null ? plain(step.kind) : stepLabel(step);
         const badges = noteworthy(step);
         // Every row reads alike: its mark, its name (the role, or the kind for a gate), then the
         // step's headline after it when it has one beyond the name.
-        const titled = step.title !== '' && step.title !== name;
+        const headline = stepTitle(step);
+        const titled = headline !== '' && headline !== name;
         const measure = cells[index] ?? null;
         return (
           <PickRow
             key={step.span}
             id={step.span}
             title={name}
-            {...(titled ? {summary: step.title} : {})}
+            {...(titled ? {summary: headline} : {})}
             {...(step.role === null
               ? {hatched: step.kind === 'gate'}
               : {swatch: roleSeries(step.role)})}

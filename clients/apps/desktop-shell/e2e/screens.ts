@@ -10,7 +10,16 @@ import {settled} from './checks/settle.js';
 import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 
 /** A screen of the walk: a level, or a face of the run level, or the scrubbed run. */
-type Screen = 'run' | 'idea' | 'step' | 'item' | 'judge' | 'timeline' | 'agents' | 'scrubbed';
+type Screen =
+  | 'run'
+  | 'idea'
+  | 'step'
+  | 'item'
+  | 'judge'
+  | 'timeline'
+  | 'agents'
+  | 'agent'
+  | 'scrubbed';
 
 export interface Journey {
   /** The title of the idea to open, or null for the second row. */
@@ -109,6 +118,13 @@ async function backToRun(page: Page): Promise<void> {
   await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
 }
 
+/** The first agent of the Agents face, opened beside the list. */
+async function openAgent(page: Page): Promise<void> {
+  await settled(page);
+  await page.getByRole('listbox', {name: 'Agents'}).getByRole('option').first().click();
+  await expect(page.getByRole('listbox', {name: 'Turns'})).toBeVisible();
+}
+
 /** Walks every screen of `journey`, calling `visit` on each; returns what moved between screens. */
 export async function walkScreens(
   page: Page,
@@ -124,13 +140,13 @@ export async function walkScreens(
   await openIdea(page, journey.idea);
   await walk.at('idea');
   if (journey.command !== null) {
-    await openStep(page, /implementer/);
+    await openStep(page, /implementer/i);
     await walk.at('step');
     await openItem(page, journey.command);
     await walk.at('item');
     if (journey.judge) {
       await backToIdea(page);
-      await openStep(page, /judge/);
+      await openStep(page, /judge/i);
       await walk.at('judge');
     }
   }
@@ -140,6 +156,9 @@ export async function walkScreens(
     await show.getByText(face === 'timeline' ? 'Timeline' : 'Agents').click();
     await walk.at(face);
   }
+  await openAgent(page);
+  await walk.at('agent');
+  await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();
   await show.getByText('Ideas').click();
   if (journey.live) {
     await page.getByRole('slider', {name: 'Run position'}).focus();

@@ -131,7 +131,7 @@ describe('the turns under a step', () => {
     const view = turns(state);
     expect(view?.turns).toBe(1);
     expect(view?.rows).toEqual([
-      {kind: 'heading', id: 'turn op:1', title: 'implementer', detail: 'Running'},
+      {kind: 'heading', id: 'turn op:1', title: 'Implementer', detail: 'Running'},
       expect.objectContaining({kind: 'message', variant: 'reasoning', text: 'Thinking it over. '}),
       expect.objectContaining({
         kind: 'message',

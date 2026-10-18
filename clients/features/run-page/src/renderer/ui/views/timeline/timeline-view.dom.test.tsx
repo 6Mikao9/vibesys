@@ -176,8 +176,8 @@ test('a figure too long for its column is a short form, with the whole on hover'
   ]);
   expect(figures).toEqual([
     ['1.50×', null],
-    ['93/100', 'failed · 93/100 trials'],
-    ['failed', 'failed · implementer gave up'],
+    ['93/100', 'Failed · 93/100 trials'],
+    ['Failed', 'Failed · implementer gave up'],
   ]);
   await unmount();
 });
@@ -186,7 +186,7 @@ test('a legend names each role on the bars, in the color of its segments, and th
   const {container, unmount} = await mount(<TimelineView {...base(IDEAS, 3600)} />);
   const legend = container.querySelector('[aria-label="Bar colors"]');
   const entries = [...(legend?.querySelectorAll('li') ?? [])];
-  expect(entries.map(each => each.textContent ?? '')).toEqual(['implementer', 'judge', 'gate']);
+  expect(entries.map(each => each.textContent ?? '')).toEqual(['Implementer', 'Judge', 'Gate']);
   const colors = entries.map(item =>
     (item.querySelector('.vs-series-swatch') as HTMLElement).style.getPropertyValue('--seg-color'),
   );

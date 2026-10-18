@@ -152,6 +152,9 @@ importers:
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../libs/contracts
       '@vibesys/run-fixtures':
         specifier: workspace:*
         version: link:../../libs/run-fixtures

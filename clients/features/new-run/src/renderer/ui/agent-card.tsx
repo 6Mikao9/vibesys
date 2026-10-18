@@ -3,7 +3,7 @@
 import type {HarnessOffer} from '@vibesys/ipc';
 import {BrandMark, Card, ChoiceTiles, Field, Select, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
-import {vettedModels} from '../../state/index.js';
+import {harnessLabel, modelLabel, vettedModels} from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {harnessMark} from './view.js';
 
@@ -38,17 +38,17 @@ export function AgentCard(props: CardProps): JSX.Element {
           change={provider => dispatch({type: 'provider', provider})}
           options={providers.map(provider => ({
             value: provider,
-            label: provider,
+            label: harnessLabel(offers, provider),
             leading: <BrandMark mark={harnessMark(provider)} />,
           }))}
         />
       </Stack>
-      <Field label="Model" help="Only models VibeSys has tested with this harness are listed.">
+      <Field label="Model">
         <Select
           value={agent.model}
           options={vettedModels(offers, agent.provider).map(model => ({
             value: model,
-            label: model,
+            label: modelLabel(offers, agent.provider, model),
           }))}
           change={model => dispatch({type: 'model', model})}
         />

@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {rawTextOf} from './checks/screen-check.js';
 import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeHostWindow, open, PROJECT, SEED} from './world.js';
@@ -19,8 +20,18 @@ test('New run is prefilled from the last run on its machine and starts once the 
   await expect(page.getByLabel('Run on')).toHaveValue('ssh:host-b');
   await expect(page.getByLabel('Project', {exact: true})).toHaveValue(PROJECT);
   await expect(page.getByLabel('Task', {exact: true})).toHaveValue('mpmc');
-  await expect(page.getByRole('radio', {name: 'claude'})).toBeChecked();
+  await expect(page.getByRole('radio', {name: 'Claude Code'})).toBeChecked();
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-opus-4-5');
+  await expect(page.getByLabel('Model', {exact: true}).locator('option:checked')).toHaveText(
+    'Opus 4.5',
+  );
+  for (const oldHint of [
+    'Runs on CPU, as the task declares.',
+    'Only models VibeSys has tested with this harness are listed.',
+    'Searches without rounds, such as evolve, take none.',
+  ]) {
+    await expect(page.getByText(oldHint, {exact: true})).toHaveCount(0);
+  }
   // All is well: the checks fold into one line, which opens to show each of them.
   await expect(ready(page)).toContainText(/Ready · \d+ checks passed/);
   await expect(ready(page)).not.toContainText('Agent image');
@@ -88,7 +99,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
   await page.getByLabel('Extra arguments').fill('--max-in-flight 3');
   await page.getByLabel('Rounds').selectOption('5');
   await page.getByRole('button', {name: /^Roles:/}).click();
-  await page.getByLabel('Multi judge reasoning effort').selectOption('high');
+  await page.getByLabel('Judge reasoning effort').selectOption('high');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
@@ -210,8 +221,11 @@ test('the harness is chosen from tiles with a mark and a name each', async ({pag
   // A harness with a mark in the package draws it; one without draws the generic glyph.
   await expect(harness.locator('svg.vs-brand-mark')).toHaveCount(2);
   await expect(harness.locator('svg.vs-brand-mark[data-generic]')).toHaveCount(1);
-  await page.getByRole('radio', {name: 'codex'}).check();
+  await page.getByRole('radio', {name: 'Codex'}).check();
   await expect(page.getByLabel('Model', {exact: true})).toHaveValue('gpt-5-codex');
+  await expect(page.getByLabel('Model', {exact: true}).locator('option:checked')).toHaveText(
+    'GPT-5 Codex',
+  );
   await start(page).click();
   const {started} = await fakeNewRun(page);
   expect(started).toMatchObject([{harness: {provider: 'codex', model: 'gpt-5-codex'}}]);
@@ -255,4 +269,14 @@ test('a failing check opens the checks by itself, and the error stays when More 
   await expect(ready(page)).toContainText('1 check needs attention');
   await expect(ready(page)).toContainText('--max-rounds is set above');
   await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
+});
+
+test('New run, with More options open, draws no role, harness or model ids as text', async ({
+  page,
+}) => {
+  await open(page);
+  await page.getByRole('button', {name: /More options/}).click();
+  await expect(page.getByLabel('Extra arguments')).toBeVisible();
+  // Agentshim supplies harness and model names; the raw ids stay in option values.
+  expect(await rawTextOf(page)).toEqual([]);
 });

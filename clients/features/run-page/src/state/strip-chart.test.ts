@@ -58,9 +58,9 @@ describe('the strip chart', () => {
       {x: 4, y: 14},
       {x: 5, y: 14},
     ]);
-    expect(chart?.points.find(point => point.id === 'b')?.label).toContain('passed');
-    expect(chart?.points.find(point => point.id === 'c')?.label).toContain('failed');
-    expect(chart?.points.find(point => point.id === 'a')?.label).toContain('new best');
+    expect(chart?.points.find(point => point.id === 'b')?.label).toContain('Passed');
+    expect(chart?.points.find(point => point.id === 'c')?.label).toContain('Failed');
+    expect(chart?.points.find(point => point.id === 'a')?.label).toContain('New best');
   });
 
   test('the y-axis starts at 0 whatever was measured', () => {

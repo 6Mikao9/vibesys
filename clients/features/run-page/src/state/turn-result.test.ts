@@ -242,7 +242,7 @@ describe('the plan an orchestrator turn ends with', () => {
     const w = world(recorded);
     const last = w.narrative('turn2')?.blocks.at(-1);
     if (last?.kind !== 'reply') throw new Error('no reply');
-    const judged = turnResult({...last.reply, author: 'Judge'}, w.context(2));
+    const judged = turnResult({...last.reply, author: 'Judge', role: 'judge'}, w.context(2));
     expect(judged.builtOn).toBeNull();
     expect(judged.summary).not.toContain('builds on');
   });

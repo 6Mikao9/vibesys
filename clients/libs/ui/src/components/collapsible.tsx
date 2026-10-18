@@ -34,7 +34,11 @@ export function Collapsible(props: {
           <Icon name="chevron-right" />
         </span>
         {props.leading}
-        <span className="vs-collapsible-label" data-mono={props.mono === true || undefined}>
+        <span
+          className="vs-collapsible-label"
+          data-mono={props.mono === true || undefined}
+          data-mono-id={props.mono === true || undefined}
+        >
           {props.label}
         </span>
         {props.summary === undefined ? null : (

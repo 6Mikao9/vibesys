@@ -15,7 +15,7 @@ import {
 import {type JSX, useState} from 'react';
 import {missingFeatures, type ProjectChoice} from '../../state/index.js';
 import type {CardProps} from './card-props.js';
-import {backendLabel, backendOf, machineLabel, projectLabels, recentProjects} from './view.js';
+import {machineLabel, projectLabels, recentProjects} from './view.js';
 
 type Source = ProjectChoice['source'];
 
@@ -139,29 +139,20 @@ function TaskField(props: CardProps): JSX.Element | null {
   if (tasks.length === 0) {
     return <Text tone="warn">This project defines no tasks.</Text>;
   }
-  const backend = backendOf(context);
   return (
-    <Stack gap="space-2">
-      <Field label="Task">
-        <Select
-          mono
-          value={task ?? NONE}
-          options={[
-            ...(task === null ? [{value: NONE, label: 'Choose a task'}] : []),
-            ...tasks.map(name => ({value: name, label: name})),
-          ]}
-          change={name => {
-            if (name !== NONE) dispatch({type: 'task', task: name});
-          }}
-        />
-      </Field>
-      {/* The task decides its backend: shown here, never a choice. */}
-      {backend === null ? null : (
-        <Text variant="small" tone="muted">
-          Runs on {backendLabel(backend)}, as the task declares.
-        </Text>
-      )}
-    </Stack>
+    <Field label="Task">
+      <Select
+        mono
+        value={task ?? NONE}
+        options={[
+          ...(task === null ? [{value: NONE, label: 'Choose a task'}] : []),
+          ...tasks.map(name => ({value: name, label: name})),
+        ]}
+        change={name => {
+          if (name !== NONE) dispatch({type: 'task', task: name});
+        }}
+      />
+    </Field>
   );
 }
 

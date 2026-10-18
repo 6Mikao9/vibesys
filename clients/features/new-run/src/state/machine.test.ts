@@ -22,7 +22,6 @@ import {
   offers,
   prefill,
   recordedAgent,
-  roleLabel,
   roleSummary,
   rolesAfter,
   runInputs,
@@ -462,7 +461,6 @@ describe('the run reports its roles', () => {
 
 describe('roles', () => {
   test('a role id reads as a label, and only the roles this copy knows say what they do', () => {
-    expect(roleLabel('multi-implementer')).toBe('Multi implementer');
     expect(roleSummary('multi-implementer')).toBe('Writes candidates');
     expect(roleSummary('implementer')).toBe('Writes candidates');
     expect(roleSummary('multi-unheard-of')).toBeNull();

@@ -32,7 +32,7 @@ export function BudgetCard(props: CardProps): JSX.Element {
   return (
     <Card section="Budget">
       <Grid min="field" gap="space-3">
-        <Field label="Rounds" help="Searches without rounds, such as evolve, take none.">
+        <Field label="Rounds">
           <Select
             value={budget.rounds === null ? 'configured' : String(budget.rounds)}
             options={withCurrent(

@@ -107,8 +107,8 @@
           "started_at": 375,
           "label": {
             "kind": "agent_turn",
-            "title": "planner",
-            "attrs_json": "{\"role\":\"planner\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-1\",\"started_by\":[]}"
+            "title": "orchestrator",
+            "attrs_json": "{\"role\":\"orchestrator\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-1\",\"started_by\":[]}"
           }
         }
       }
@@ -130,8 +130,8 @@
           "started_at": 375,
           "label": {
             "kind": "agent_turn",
-            "title": "planner",
-            "attrs_json": "{\"role\":\"planner\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-1\",\"started_by\":[]}"
+            "title": "orchestrator",
+            "attrs_json": "{\"role\":\"orchestrator\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-1\",\"started_by\":[]}"
           },
           "ended_at": 405,
           "waiting_on": []
@@ -696,8 +696,8 @@
           "started_at": 1212,
           "label": {
             "kind": "agent_turn",
-            "title": "planner",
-            "attrs_json": "{\"role\":\"planner\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-2\",\"started_by\":[]}"
+            "title": "orchestrator",
+            "attrs_json": "{\"role\":\"orchestrator\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-2\",\"started_by\":[]}"
           }
         }
       }
@@ -719,8 +719,8 @@
           "started_at": 1212,
           "label": {
             "kind": "agent_turn",
-            "title": "planner",
-            "attrs_json": "{\"role\":\"planner\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-2\",\"started_by\":[]}"
+            "title": "orchestrator",
+            "attrs_json": "{\"role\":\"orchestrator\",\"model\":\"claude-sonnet-5\",\"agent\":\"planner-2\",\"started_by\":[]}"
           },
           "ended_at": 1236,
           "waiting_on": []
