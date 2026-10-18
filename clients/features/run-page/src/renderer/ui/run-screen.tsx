@@ -47,12 +47,33 @@ import {
 } from '../../state/index.js';
 import {Hero} from './hero.js';
 import {HistoryLoading} from './history-loading.js';
-import {DeepLevel, type LevelProps} from './levels.js';
+import {DeepLevel, IdeasWorkspace, type LevelProps} from './levels.js';
 import {RunLevel} from './run-level.js';
 import {RunScrubber} from './run-scrubber.js';
 import type {ViewBase, Zoom} from './views/props.js';
 
 type Dispatch = (action: RunPageAction) => void;
+
+function LevelBody(props: {
+  readonly deep: boolean;
+  readonly route: Route;
+  readonly zoomed: ResolvedZoom;
+  readonly level: LevelProps;
+}): JSX.Element | null {
+  if (props.route.mode === 'ideas' && props.zoomed.step === null && props.zoomed.agent === null) {
+    return <IdeasWorkspace {...props.level} idea={props.zoomed.idea} />;
+  }
+  return props.deep ? (
+    <DeepLevel {...props.level} zoomed={props.zoomed} />
+  ) : (
+    <RunLevel {...props.level} />
+  );
+}
+
+function showsBreadcrumb(route: Route, zoomed: ResolvedZoom): boolean {
+  if (routeLevel(route) === 'run') return false;
+  return !(route.mode === 'ideas' && zoomed.idea !== null && zoomed.step === null);
+}
 
 function reason(offer: Offer): {disabledReason?: string} {
   return offer.disabledReason === null ? {} : {disabledReason: offer.disabledReason};
@@ -330,18 +351,6 @@ function openedDetail(
   return {core, loading, problem: null};
 }
 
-function RunContent(props: {
-  readonly deep: boolean;
-  readonly level: LevelProps;
-  readonly zoomed: ResolvedZoom;
-}): JSX.Element {
-  return props.deep ? (
-    <DeepLevel {...props.level} zoomed={props.zoomed} />
-  ) : (
-    <RunLevel {...props.level} />
-  );
-}
-
 /** The run's header, overview, and current level over its summary and selected detail. */
 export function RunScreen(props: {
   readonly state: RunPageState;
@@ -423,11 +432,13 @@ export function RunScreen(props: {
         lit={lit}
         hover={idea => dispatch({type: 'ideas-hover', idea})}
       />
-      {deep ? <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} /> : null}
+      {showsBreadcrumb(route, zoomed) ? (
+        <Breadcrumb label="Zoom" items={crumbs(zoomed, route, zoom)} />
+      ) : null}
       {detail.problem === null ? null : (
         <Banner tone="warn" title="The step’s transcript is not available" body={detail.problem} />
       )}
-      <RunContent deep={deep} level={level} zoomed={zoomed} />
+      <LevelBody deep={deep} route={route} zoomed={zoomed} level={level} />
     </Screen>
   );
 }
