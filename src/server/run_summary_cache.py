@@ -17,13 +17,16 @@ holds across:
 - a resume: the writer appends after the last complete line, so the prefix is unchanged;
 - a crash while the cache is written: it is replaced atomically, so a reader sees the old cache
   or the new one, and both describe a prefix of the journal;
-- a journal replaced by another file (a copy, a restored backup, another run's directory) or
-  cut short: a fingerprint mismatch or a short journal is a miss, and the fold starts over;
+- a journal replaced by another file whose first or last fingerprint window differs, or cut
+  short: a fingerprint mismatch or a short journal is a miss, and the fold starts over;
 - a cache of another fold version, or one that does not parse: a miss.
 
 A cache that could not be written costs only time. Two readers racing each write a valid cache;
 the later write may cover less, which is valid too. A line the fold cannot read ends the summary
 before it, as it ends ``runs.read_events``, and the cache stops there as well.
+
+An in-place rewrite that preserves length and both fingerprint windows is outside the
+append-only journal contract; the on-disk cache has the same limit.
 
 Light like the helper: the standard library, ``vs_project.api`` and the light ``server`` modules.
 
@@ -34,6 +37,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
+from threading import Lock
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
 from pydantic import (
@@ -59,6 +64,7 @@ TAIL_BYTES: Final = 64 * 1024
 """How much of the journal before the cache's boundary its second fingerprint covers."""
 
 _FORMAT: Final = "vibesys-run-summary"
+_MEMORY_CACHE_MAX_BYTES: Final = 32 * 1024 * 1024
 
 _Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 
@@ -115,19 +121,73 @@ class _Cache(BaseModel):
         return version
 
 
+@dataclass
+class _Remembered:
+    journal: Path
+    cache_identity: tuple[int, int, int, int, int]
+    boundary: int
+    fingerprints: tuple[str, str]
+    fold: RunSummaryFold
+
+
+class SummaryReader:
+    """Reuse one validated fold across pages in one helper process."""
+
+    def __init__(self) -> None:
+        """Start with no remembered run."""
+        self._lock = Lock()
+        self._remembered: _Remembered | None = None
+
+    def summarize(self, journal: Path) -> Summarized:
+        """Read the current journal and return a fold isolated from later requests."""
+        with self._lock:
+            summarized, remembered = _summarize_journal(journal, self._remembered)
+            self._remembered = remembered
+            # The retained fold grows in place on append. A worker pages its return value after
+            # this lock is released, so give it its own maps while retaining the validated fold.
+            return Summarized(
+                RunSummaryFold.from_state(summarized.fold.state()), summarized.journal_bytes
+            )
+
+
 def summarize_journal(journal: Path) -> Summarized:
     """The fold of ``journal`` as it is now; a journal that does not exist holds no events.
 
     Folds only what the cache does not cover and writes the cache again when the fold covers
     more complete lines than it did.
     """
+    summarized, _ = _summarize_journal(journal, None)
+    return summarized
+
+
+def _cache_identity(cache: Path) -> tuple[int, int, int, int, int] | None:
+    try:
+        stat = cache.stat()
+    except OSError:
+        return None
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
+def _summarize_journal(
+    journal: Path, remembered: _Remembered | None
+) -> tuple[Summarized, _Remembered | None]:
     cache = journal.with_name(RUN_SUMMARY_FILE)
     try:
         stream = journal.open("rb")
     except FileNotFoundError:
-        return Summarized(RunSummaryFold(), 0)
+        return Summarized(RunSummaryFold(), 0), None
     with stream:
-        restored = _restore(cache, stream)
+        valid_memory = (
+            remembered is not None
+            and remembered.journal == journal
+            and _cache_identity(cache) == remembered.cache_identity
+            and _fingerprints(stream, remembered.boundary) == remembered.fingerprints
+        )
+        restored = (
+            (remembered.fold, remembered.boundary)
+            if valid_memory and remembered is not None
+            else _restore(cache, stream)
+        )
         fold, cached = restored if restored is not None else (RunSummaryFold(), 0)
         stream.seek(cached)
         offset = cached
@@ -139,13 +199,24 @@ def summarize_journal(journal: Path) -> Summarized:
                 _keep(cache, stream, fold, covered, cached)
                 if fold.consume(line, complete=False):
                     offset += len(line)
-                return Summarized(fold, offset)
+                return Summarized(fold, offset), None
             if not fold.consume(line):
                 break
             offset += len(line)
             covered = offset
-        _keep(cache, stream, fold, covered, cached)
-        return Summarized(fold, covered)
+        cache_current = _keep(cache, stream, fold, covered, cached)
+        identity = _cache_identity(cache)
+        fingerprints = _fingerprints(stream, covered)
+        if (
+            cache_current
+            and identity is not None
+            and identity[2] <= _MEMORY_CACHE_MAX_BYTES
+            and fingerprints is not None
+        ):
+            return Summarized(fold, covered), _Remembered(
+                journal, identity, covered, fingerprints, fold
+            )
+        return Summarized(fold, covered), None
 
 
 def _restore(cache: Path, journal: BinaryIO) -> tuple[RunSummaryFold, int] | None:
@@ -175,13 +246,13 @@ def _restore(cache: Path, journal: BinaryIO) -> tuple[RunSummaryFold, int] | Non
     )
 
 
-def _keep(cache: Path, journal: BinaryIO, fold: RunSummaryFold, boundary: int, cached: int) -> None:
-    """Replace the cache with ``fold`` at ``boundary``, when that is further than it was."""
+def _keep(cache: Path, journal: BinaryIO, fold: RunSummaryFold, boundary: int, cached: int) -> bool:
+    """Keep ``fold`` at ``boundary`` on disk; return whether the cache covers it."""
     if boundary <= cached:
-        return
+        return True
     fingerprints = _fingerprints(journal, boundary)
     if fingerprints is None:
-        return
+        return False
     head, tail = fingerprints
     state = fold.state()
     document = {
@@ -203,7 +274,8 @@ def _keep(cache: Path, journal: BinaryIO, fold: RunSummaryFold, boundary: int, c
     try:
         atomic_write_bytes(cache, contents)
     except (OSError, ProjectError):
-        return
+        return False
+    return True
 
 
 def _fingerprints(journal: BinaryIO, boundary: int) -> tuple[str, str] | None:

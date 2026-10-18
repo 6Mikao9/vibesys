@@ -82,6 +82,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from server.run_summary import Summarized
+    from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
     from vs_project.api import GitRepositoryFactory
     from vs_sim.api import CommandProbe, ProcessLauncher
@@ -141,6 +142,7 @@ class FileProjects:
         self._tallies: dict[Path, JournalTally] = {}
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
         self._indexes: dict[Path, JournalIndex] = {}
+        self._summary_reader: SummaryReader | None = None
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -288,9 +290,11 @@ class FileProjects:
         # lint-waiver: LW-640283 [PLC0415]; the summary fold costs the helper nothing until asked.
         # > At module level every channel would load the fold and its cache before `hello`, which
         # > the helper's start-up ceiling forbids; the import stays visible to tach.
-        from server.run_summary_cache import summarize_journal  # noqa: PLC0415
+        from server.run_summary_cache import SummaryReader  # noqa: PLC0415
 
-        return summarize_journal(self._journal(project, run_id))
+        if self._summary_reader is None:
+            self._summary_reader = SummaryReader()
+        return self._summary_reader.summarize(self._journal(project, run_id))
 
     def _indexed_read[Facts](
         self, journal: Path, ask: Callable[[JournalIndex], tuple[list[Entry], Facts]]
