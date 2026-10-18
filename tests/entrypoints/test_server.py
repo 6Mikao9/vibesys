@@ -61,6 +61,7 @@ from entrypoints.server import (
 from server.runtime import WebPortObservation, WebPortState
 from server.transport.discovery import WebInstanceClaim, WebInstanceHold, WebInstanceRecord
 from server.transport.websocket import WebSocketLimits
+from vs_project.api import user_runtime_root
 from vs_sim.api.testing import SimThreads, stop_process
 
 if TYPE_CHECKING:
@@ -189,13 +190,18 @@ def _write_web_build_manifest(assets: Path, workspace: Path, source: Path) -> No
     (assets / ".vibesys-web-build.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def _socket_in_runtime_root() -> str:
+    """A control socket path the server accepts: inside the user's runtime root."""
+    return str(user_runtime_root(os.environ, os.getuid()) / "control.sock")
+
+
 def _asset_validation_arguments(tmp_path: Path, assets: Path) -> list[str]:
     return [
         "--web",
         "--web-instance",
         str(tmp_path / "web-gateway.json"),
         "--control-socket",
-        str(tmp_path / "control.sock"),
+        _socket_in_runtime_root(),
         "--web-assets",
         str(assets),
         "--zz-after-assets",
@@ -1005,6 +1011,37 @@ def test_web_instance_claim_reports_ownership(tmp_path: Path) -> None:
     assert WebInstanceClaim.is_held(instance_path) is False
 
 
+@pytest.mark.parametrize(
+    "place", ["elsewhere", "root's parent", "sibling with the root's name as prefix", "link out"]
+)
+def test_a_control_socket_outside_the_runtime_root_is_refused_at_startup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    place: str,
+) -> None:
+    """Operator clients present the key only inside the root, so the server binds only there."""
+    runtime = tmp_path / "runtime"
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    root = runtime / "vibesys"
+    root.mkdir(parents=True, mode=0o700)
+    (tmp_path / "agent-writable").mkdir()
+    (root / "link-out").symlink_to(tmp_path / "agent-writable", target_is_directory=True)
+    socket = {
+        "elsewhere": tmp_path / "agent-writable" / "control.sock",
+        "root's parent": runtime / "control.sock",
+        "sibling with the root's name as prefix": runtime / "vibesys-other" / "control.sock",
+        "link out": root / "link-out" / "control.sock",
+    }[place]
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--control-socket", str(socket), "--local"])
+
+    err = capsys.readouterr().err
+    assert exit_info.value.code == 2
+    assert f"--control-socket {socket} is not inside the operator's runtime root {root}" in err
+
+
 def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1022,7 +1059,7 @@ def test_a_run_argument_diagnostic_reaches_stderr_before_any_transport_binds(
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(SystemExit) as exit_info:
-        main(["--control-socket", str(tmp_path / "control.sock")])
+        main(["--control-socket", _socket_in_runtime_root()])
 
     streams = capsys.readouterr()
     assert exit_info.value.code == 2
@@ -1092,7 +1129,7 @@ def test_every_run_argument_diagnostic_renders_its_message_and_its_usage(flag: s
     errors = StringIO()
 
     with redirect_stderr(errors), pytest.raises(SystemExit) as exit_info:
-        main(["--control-socket", "control.sock", flag])
+        main(["--control-socket", _socket_in_runtime_root(), flag])
 
     lines = errors.getvalue().splitlines()
     assert exit_info.value.code == 2
@@ -1119,7 +1156,7 @@ def test_every_rejected_web_port_names_the_flag_instead_of_exiting_silently(valu
     errors = StringIO()
 
     with redirect_stderr(errors), pytest.raises(SystemExit) as exit_info:
-        main(["--control-socket", "control.sock", "--web-port", value])
+        main(["--control-socket", _socket_in_runtime_root(), "--web-port", value])
 
     assert exit_info.value.code == 2
     assert errors.getvalue().startswith("vibesys: --web-port ")
@@ -1129,6 +1166,9 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     observed: dict[str, object] = {}
     invocation = object()
     request = SimpleNamespace(resolved_run_id="run-1", resolved_project_root=tmp_path.resolve())
@@ -1163,6 +1203,8 @@ def test_web_main_uses_ephemeral_socket_and_web_runtime(
     assert isinstance(observed["socket_path"], Path)
     assert observed["socket_path"].name == "control.sock"
     assert observed["socket_path"].parent.name.startswith("vibesys-web-")
+    # In the runtime root, where no confined agent can write and where clients dial.
+    assert observed["socket_path"].parent.parent == runtime / "vibesys"
     options = observed["options"]
     assert isinstance(options, dict)
     assert options["web"] is True
