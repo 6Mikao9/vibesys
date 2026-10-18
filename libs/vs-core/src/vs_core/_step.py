@@ -18,6 +18,7 @@ from ._dispatch_episode import (
     retirement_dispatch,
     scope_admission,
 )
+from ._evaluation_history import produce_history
 from ._host_epochs import downtime
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
@@ -1549,6 +1550,72 @@ def _unique_record(state: CoreState, identity: RequestId) -> RequestRecord | Non
     return candidates[0] if candidates else None
 
 
+def _certified_late(state: CoreState, event: CoreEvent) -> CoreState:
+    """Certify, at its dispatch, a resume published before its history could be complete.
+
+    Older code published a resume with no history cursor when an accepted job had failed
+    without facts, then refused to dispatch it. The suspended agent submits nothing until
+    it resumes, so the history it resumes after is the attempt's history now: once that is
+    complete, the stored receipt takes its cursor and the attempt its history.
+    """
+    record = (
+        _unique_record(state, event.request_id) if isinstance(event, DispatchAuthorized) else None
+    )
+    request = record.request if record is not None else None
+    if not isinstance(request, ResumeSessionTurn) or not isinstance(request.scope.owner, AttemptId):
+        return state
+    continuation = next(
+        (
+            row
+            for row in state.evaluation.continuations
+            if row.continuation_id == request.continuation_id
+            and row.phase == ContinuationPhase.AUTHORIZED
+            and row.authorization_receipt is not None
+            and row.authorization_receipt.history_cursor is None
+        ),
+        None,
+    )
+    owner = next(
+        (
+            row
+            for row in state.attempts.attempts
+            if row.attempt_id == request.scope.owner and row.generation == request.scope.generation
+        ),
+        None,
+    )
+    if continuation is None or continuation.authorization_receipt is None or owner is None:
+        return state
+    history = produce_history(request.scope, state.evaluation, state.records, owner, state.run)
+    if history.availability != EvaluationHistoryAvailability.COMPLETE:
+        return state
+    receipt = continuation.authorization_receipt.model_copy(
+        update={"history_cursor": history.cursor}
+    )
+    certified = continuation.model_copy(update={"authorization_receipt": receipt})
+    return state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "continuations": tuple(
+                        certified if row is continuation else row
+                        for row in state.evaluation.continuations
+                    )
+                }
+            ),
+            "attempts": state.attempts.model_copy(
+                update={
+                    "attempts": tuple(
+                        row.model_copy(update={"evaluation_history": history})
+                        if row is owner
+                        else row
+                        for row in state.attempts.attempts
+                    )
+                }
+            ),
+        }
+    )
+
+
 def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
     """Only dependencies and recovery proof authorize ordinary dispatch."""
     if isinstance(event, DispatchAuthorized):
@@ -1606,6 +1673,7 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     """
     given = state
     _validate_observation_ingress(state, event)
+    state = _certified_late(state, event)
     _validate_authorization(state, event)
     if isinstance(event, DecisionCompleted | RecoveryReady | InputWithdrawRequested):
         raise ContractError(

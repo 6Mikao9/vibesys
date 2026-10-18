@@ -842,3 +842,92 @@ def test_a_measurement_that_ran_and_failed_without_facts_still_completes_history
     ]
     assert all(not record.stages for record in history.records if record.submission_id in ended)
     dispatch_publication(result.state, wait)
+
+
+@pytest.mark.parametrize(
+    "status", [core.ObservationStatus.FAILED, core.ObservationStatus.SUCCEEDED]
+)
+def test_a_resume_published_without_a_cursor_is_certified_at_dispatch_once_history_completes(
+    status: core.ObservationStatus,
+) -> None:
+    """Run r2 stored a resume authorized with no cursor while a failed job had no facts.
+
+    Its dispatch certifies it once the history is complete; a success without facts still
+    leaves history unavailable, and the dispatch is still refused.
+    """
+    state, wait = publication_state()
+    first = state.evaluation.jobs[0]
+    assert first.observation is not None
+    ended = first.observation.model_copy(update={"status": status})
+    state = state.model_copy(
+        update={
+            "evaluation": state.evaluation.model_copy(
+                update={
+                    "jobs": tuple(
+                        job.model_copy(update={"observation": ended}) if job is first else job
+                        for job in state.evaluation.jobs
+                    )
+                }
+            ),
+            "records": state.records.model_copy(
+                update={
+                    "records": tuple(
+                        row.model_copy(update={"observation": ended, "evaluation_result": None})
+                        if row.request_id == first.submission_id
+                        else row
+                        for row in state.records.records
+                    )
+                }
+            ),
+        }
+    )
+    published = core.step(state, core.TurnSuspended(continuation=wait)).state
+    stored = published.evaluation.continuations[0]
+    assert stored.authorization_receipt is not None
+    owner = published.attempts.attempts[0]
+    legacy = published.model_copy(
+        update={
+            "evaluation": published.evaluation.model_copy(
+                update={
+                    "continuations": (
+                        stored.model_copy(
+                            update={
+                                "authorization_receipt": stored.authorization_receipt.model_copy(
+                                    update={"history_cursor": None}
+                                )
+                            }
+                        ),
+                    )
+                }
+            ),
+            "attempts": published.attempts.model_copy(
+                update={
+                    "attempts": (
+                        owner.model_copy(
+                            update={
+                                "evaluation_history": owner.evaluation_history.model_copy(
+                                    update={
+                                        "availability": core.EvaluationHistoryAvailability.UNAVAILABLE
+                                    }
+                                )
+                            }
+                        ),
+                    )
+                }
+            ),
+        }
+    )
+    if status == core.ObservationStatus.SUCCEEDED:
+        with pytest.raises(core.ContractError, match="complete unexhausted"):
+            dispatch_publication(legacy, wait)
+        return
+    result = dispatch_publication(legacy, wait)
+    receipt = result.state.evaluation.continuations[0].authorization_receipt
+    assert receipt is not None
+    assert receipt.history_cursor == core.EvaluationHistoryCursor(
+        ordinal=3, submission_id=state.evaluation.jobs[-1].submission_id
+    )
+    assert (
+        result.state.attempts.attempts[0].evaluation_history.availability
+        == core.EvaluationHistoryAvailability.COMPLETE
+    )
