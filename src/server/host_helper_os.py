@@ -74,7 +74,7 @@ from server.span_index import (
 )
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import GitRunHistory, NullGitTrackerEvents, Project, ProjectError
-from vs_sim.api import OsThreads, ProcessSpec
+from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -135,10 +135,10 @@ class FileProjects:
     project has checked out.
     """
 
-    def __init__(self, repositories: GitRepositoryFactory, threads: Threads | None = None) -> None:
+    def __init__(self, repositories: GitRepositoryFactory, threads: Threads) -> None:
         """Read run branches through the repositories ``repositories`` opens."""
         self._repositories = repositories
-        self._threads = threads if threads is not None else OsThreads()
+        self._threads = threads
         self._journals: dict[tuple[Path, str], Path] = {}
         self._tallies: dict[Path, JournalTally] = {}
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}

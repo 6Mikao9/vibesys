@@ -236,7 +236,7 @@ def test_a_run_with_no_journal_has_an_empty_digest_and_an_unreadable_one_says_so
     tmp_path: Path,
 ) -> None:
     project = project_with_run(tmp_path / "proj", RUN_ID)
-    projects = FileProjects(FakeGitRepositories().repository)
+    projects = FileProjects(FakeGitRepositories().repository, SimThreads())
     root = project.resolve()
 
     assert projects.run_digest(root, RUN_ID) == digest_journal(())
@@ -251,7 +251,7 @@ def test_an_ended_runs_digest_is_kept_while_its_journal_is_unchanged_and_a_live_
     tmp_path: Path,
 ) -> None:
     project = project_with_run(tmp_path / "proj", RUN_ID)
-    projects = FileProjects(FakeGitRepositories().repository)
+    projects = FileProjects(FakeGitRepositories().repository, SimThreads())
     root = project.resolve()
     journal = _write_journal(project, _ENDED)
     kept = projects.run_digest(root, RUN_ID)
