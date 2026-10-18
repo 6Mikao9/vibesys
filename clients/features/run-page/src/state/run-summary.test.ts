@@ -172,6 +172,22 @@ describe('an ended run opened from its summary', () => {
     expect(runPageStep(needed.state, {type: 'need-history'}).requests).toEqual([]);
   });
 
+  test('remembers a transcript request made before the summary arrives', () => {
+    const opened = runPageStep(initial(), ENDED);
+    const request = opened.requests.find(each => each.kind === 'read-summary');
+    if (request?.kind !== 'read-summary') throw new Error('no summary asked');
+    const wanted = runPageStep(opened.state, {type: 'need-history'});
+    expect(wanted.requests).toEqual([]);
+    const ready = runPageStep(wanted.state, {
+      type: 'summary',
+      token: request.token,
+      reply: {kind: 'summary', ...facts},
+      wallMs: 0,
+    });
+    expect(ready.requests.map(each => each.kind)).toEqual(['read-history']);
+    expect(transcriptLoading(ready.state)).not.toBeNull();
+  });
+
   test('a transcript that cannot be read leaves the run level standing', () => {
     const {state} = opened();
     const needed = runPageStep(state.state, {type: 'need-history'});

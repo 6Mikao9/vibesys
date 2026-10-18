@@ -191,6 +191,8 @@ export interface RunPageState {
   readonly notice: string | null;
   /** The run's summary, which opens the run level (`run-summary.ts`). */
   readonly summary: RunSummaryState;
+  /** A pane asked for the transcript, even if the summary has not arrived yet. */
+  readonly wantsHistory: boolean;
   /** An ended run's recorded events, read into `run` for its transcript. */
   readonly history: RunHistory;
   /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
@@ -306,6 +308,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     view: {at: 'live'},
     notice: null,
     summary: {kind: 'idle'},
+    wantsHistory: false,
     history: {kind: 'idle'},
     waitRefused: null,
     next: 1,
@@ -484,7 +487,7 @@ function endedHistoryFor(state: RunPageState): RunPageStep {
   const read: RunPageStep = {state: {...state, history: {kind: 'read'}}, requests: []};
   switch (state.summary.kind) {
     case 'ready':
-      return {state, requests: []};
+      return state.wantsHistory ? startReading(state) : {state, requests: []};
     case 'reading':
       // A session that watched the run to its end folded it: the summary's answer is not needed.
       return folded(state) ? read : {state, requests: []};
@@ -584,31 +587,32 @@ function withSummary(
   }
   if (folded(state)) return {state: {...state, summary: {kind: 'superseded'}}, requests: []};
   const data: RunData = {kind: 'snapshot', snapshot: reply.snapshot};
-  return {
-    state: {
-      ...state,
-      summary: {
-        kind: 'ready',
-        through: reply.through,
-        eventCount: reply.eventCount,
-        journalBytes: reply.journalBytes,
-      },
-      run: {
-        core: reduceEventBatch(initialCoreState(), reply.seed),
-        trace: traceStep(state.run.trace, data),
-        heard: heardAfter(state.run.heard, data, wallMs),
-      },
+  const ready: RunPageState = {
+    ...state,
+    summary: {
+      kind: 'ready',
+      through: reply.through,
+      eventCount: reply.eventCount,
+      journalBytes: reply.journalBytes,
     },
-    requests: [],
+    run: {
+      core: reduceEventBatch(initialCoreState(), reply.seed),
+      trace: traceStep(state.run.trace, data),
+      heard: heardAfter(state.run.heard, data, wallMs),
+    },
   };
+  return ready.record.kind === 'ended' && ready.wantsHistory
+    ? startReading(ready)
+    : {state: ready, requests: []};
 }
 
 /** A pane needs the transcript: an ended run opened from its summary reads its history now. */
 function withNeedHistory(state: RunPageState): RunPageStep {
-  if (state.record.kind !== 'ended' || state.summary.kind !== 'ready') {
-    return {state, requests: []};
+  const wanted = state.wantsHistory ? state : {...state, wantsHistory: true};
+  if (wanted.record.kind !== 'ended' || wanted.summary.kind !== 'ready') {
+    return {state: wanted, requests: []};
   }
-  return state.history.kind === 'idle' ? startReading(state) : {state, requests: []};
+  return wanted.history.kind === 'idle' ? startReading(wanted) : {state: wanted, requests: []};
 }
 
 function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
