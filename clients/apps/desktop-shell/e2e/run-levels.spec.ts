@@ -172,7 +172,7 @@ test('every level opens from the keyboard alone, and Escape walks back', async (
   const steps = page.getByRole('listbox', {name: /steps$/});
   await tabInto(page, steps);
   await page.keyboard.press('Home');
-  const implementer = steps.getByRole('option', {name: /implementer/}).first();
+  const implementer = steps.getByRole('option', {name: /implementer/i}).first();
   for (let press = 0; press < 20; press += 1) {
     if (await implementer.evaluate(element => element === document.activeElement)) break;
     await page.keyboard.press('ArrowDown');
@@ -239,7 +239,7 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
 
   // Level 1: the idea beside the ideas, with what it built on.
-  await ideas.getByRole('option', {name: /^running Combine W1 ring with W2 padding/}).click();
+  await ideas.getByRole('option', {name: /^Running Combine W1 ring with W2 padding/}).click();
   await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
   await expect(
     page
@@ -251,7 +251,7 @@ test('every level opens by click and walks back by Escape, the crumbs and Back',
   // Level 2: a step beside the idea's steps.
   const steps = page.getByRole('listbox', {name: /steps$/});
   await steps
-    .getByRole('option', {name: /implementer/})
+    .getByRole('option', {name: /implementer/i})
     .first()
     .click();
   // The turn reads as narrative: thinking and text first, the tool call folded into one line.
@@ -364,12 +364,12 @@ test('the performance row is the same element, in the same place and size, at ev
   };
 
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
-  await ideas.getByRole('option', {name: /^running Combine W1 ring with W2 padding/}).click();
+  await ideas.getByRole('option', {name: /^Running Combine W1 ring with W2 padding/}).click();
   await expect(page.getByRole('heading', {name: 'Combine W1 ring with W2 padding'})).toBeVisible();
   await unchanged();
   await page
     .getByRole('listbox', {name: /steps$/})
-    .getByRole('option', {name: /implementer/})
+    .getByRole('option', {name: /implementer/i})
     .first()
     .click();
   await expect(page.getByRole('region', {name: 'Agent turn'})).toBeVisible();
@@ -401,7 +401,7 @@ test('an open idea is singled out on the chart: its dot ringed, the rest dimmed,
   expect(await emphasized(page)).toEqual({focus: [], related: [], dim: []});
 
   // A measured idea: its own dot is the focus, the other dots stay (dimmed), its base is outlined.
-  await ideas.getByRole('option', {name: /^passed Cache-line padding/}).click();
+  await ideas.getByRole('option', {name: /^Passed Cache-line padding/}).click();
   expect(await emphasized(page)).toEqual({
     focus: ['Cache-line padding and batched enqueue'],
     related: ['Lock-free ring with per-slot sequence numbers'],
@@ -414,7 +414,7 @@ test('an open idea is singled out on the chart: its dot ringed, the rest dimmed,
 
   // An idea with no measurement singles nothing out, outlines its base, and says why in words.
   await page.keyboard.press('Escape');
-  await ideas.getByRole('option', {name: /^running Combine W1 ring with W2 padding/}).click();
+  await ideas.getByRole('option', {name: /^Running Combine W1 ring with W2 padding/}).click();
   expect(await emphasized(page)).toEqual({
     focus: [],
     related: ['Lock-free ring with per-slot sequence numbers'],
@@ -501,7 +501,7 @@ test('an idea’s header stays on clean lines at 900 and 1500 px, with a long ba
   await openRun(page, false, long);
   await page
     .getByRole('listbox', {name: 'Ideas'})
-    .getByRole('option', {name: /^passed Cache-line padding/})
+    .getByRole('option', {name: /^Passed Cache-line padding/})
     .click();
   for (const width of [900, 1500]) {
     await page.setViewportSize({width, height: 900});
@@ -586,7 +586,7 @@ test('the Logs face lists the run’s streams by owner, and an idea shows only i
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Ideas').click();
   await page
     .getByRole('listbox', {name: 'Ideas'})
-    .getByRole('option', {name: /^running Combine W1 ring with W2 padding/})
+    .getByRole('option', {name: /^Running Combine W1 ring with W2 padding/})
     .click();
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
   await expect(page.getByRole('log', {name: /benchmark/})).toContainText('repetition 1');
@@ -645,7 +645,7 @@ test('an idea’s Logs face shows its stream without a pick: the page follows wh
   await openRun(page);
   await page
     .getByRole('listbox', {name: 'Ideas'})
-    .getByRole('option', {name: /^running Combine W1 ring with W2 padding/})
+    .getByRole('option', {name: /^Running Combine W1 ring with W2 padding/})
     .click();
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
   await expect(page.getByRole('log', {name: /benchmark/})).toContainText('repetition 1: 41.2');
@@ -682,7 +682,7 @@ test('a live turn keeps its scroll position and its element as events arrive', a
     .click();
   await page
     .getByRole('listbox', {name: /steps$/})
-    .getByRole('option', {name: /implementer/})
+    .getByRole('option', {name: /implementer/i})
     .first()
     .click();
   const emit = (events: readonly unknown[]) =>

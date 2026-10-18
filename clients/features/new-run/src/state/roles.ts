@@ -4,13 +4,12 @@
  * module holds the rules over that list: what the table shows for a role, and how the form's role
  * settings follow a new list.
  */
+import {roleName} from '@vibesys/contracts';
 import {type AgentChoice, defaultRole, type Form} from './form.js';
 
-/** A role id as a table label: its words, capitalised (`multi-implementer`: `Multi implementer`). */
+/** A role a person reads ("Judge"): the backend's name for it, else the words of its id. */
 export function roleLabel(role: string): string {
-  const words = role.split(/[-_.]+/).filter(word => word !== '');
-  const text = words.join(' ');
-  return text === '' ? role : text.charAt(0).toUpperCase() + text.slice(1);
+  return roleName(role);
 }
 
 /** What the roles named like these usually do, by the last word of their id; copy only. */

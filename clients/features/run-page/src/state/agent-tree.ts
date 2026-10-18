@@ -10,7 +10,7 @@
  * Rows are a function of the graph, the spans (for each agent's latest headline) and `expanded`,
  * built in one pass over the agents; the list's windowing keeps a large run cheap to draw.
  */
-import type {Span} from '@vibesys/contracts';
+import {roleName, type Span} from '@vibesys/contracts';
 import type {AgentGraph, AgentNode} from '@vibesys/run-state/agents';
 
 /** One lineage cell before a row, as the list draws it. */
@@ -110,13 +110,17 @@ export function agentTree(
   selected: string | null = null,
 ): readonly TreeRow[] {
   const {roots, parentOf} = place(graph.agents);
-  const roles = new Map(graph.agents.map(agent => [agent.id, agent.role]));
+  const roles = new Map(graph.agents.map(agent => [agent.id, roleName(agent.role)]));
   for (const root of roots) measure(root, selected);
   const rows: TreeRow[] = [];
 
   const headlineOf = (agent: AgentNode): string | null => {
     const title = spans.get(agent.activity.turn)?.label?.title;
-    return title === undefined || title === null || title === '' || title === agent.role
+    return title === undefined ||
+      title === null ||
+      title === '' ||
+      title === agent.role ||
+      title === roleName(agent.role)
       ? null
       : title;
   };

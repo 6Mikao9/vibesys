@@ -2,7 +2,7 @@
  * What the New run screen shows, derived from the machine's snapshot: the facts about the machine,
  * the "Ready to start" items, why Start is disabled, and the one-line summary of the run.
  */
-import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
+import {acceleratorName, type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import type {BrandMarkName, CheckState, KeyValueItem} from '@vibesys/ui';
 import {
@@ -44,7 +44,7 @@ export function machineFacts(machine: MachineDescription): KeyValueItem[] {
       : [{key: 'VibeSys', value: `${checkout.version} at ${checkout.root}`, mono: true}]),
     {
       key: 'Hardware',
-      value: `${hardware.cpu_cores} cores${gpus === '' ? '' : `, ${gpus}`} (${hardware.accelerator})`,
+      value: `${hardware.cpu_cores} cores${gpus === '' ? '' : `, ${gpus}`} (${acceleratorName(hardware.accelerator)})`,
     },
     {
       key: 'Docker',
@@ -151,10 +151,8 @@ export function rolesView(context: NewRunContext): RolesView {
     : {kind: 'pending'};
 }
 
-export {backendLabel};
-
 /**
- * The compute backend the run will use, read-only: it is the task's, so it is shown, never chosen.
+ * The compute backend the run will use, read-only: it is the task's, so it is never chosen.
  * Null until the checks for the inputs now have reported it (or from a helper that does not).
  */
 export function backendOf(context: NewRunContext): Backend | null {
@@ -305,7 +303,10 @@ function lastSegment(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
-/** The run in one line: project, task, machine, model, rounds; null before it has a project. */
+/**
+ * The run in one line: project, task, machine, backend, rounds; null before it has a project. The
+ * model is the Agent card's: its name comes from the backend, which this line does not yet read.
+ */
 export function summary(context: NewRunContext): string | null {
   const project = projectPath(context.form);
   const {task, agent, budget, machine} = context.form;
@@ -317,7 +318,6 @@ export function summary(context: NewRunContext): string | null {
     task,
     machineLabel(machine),
     ...(backend === null ? [] : [backendLabel(backend)]),
-    agent.model,
     rounds,
   ].join(' · ');
 }

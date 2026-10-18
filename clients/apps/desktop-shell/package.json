@@ -44,6 +44,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
     "@types/react-dom": "19.1.9",
+    "@vibesys/contracts": "workspace:*",
     "@vibesys/run-fixtures": "workspace:*",
     "@vitejs/plugin-react": "5.0.4",
     "typescript": "^5.8.3"

@@ -5,7 +5,7 @@
  * selected span and the spans under it name the turns, each turn's entries are folded as its own
  * sequence (`transcriptBySpan`), and the turns follow in the order their spans started.
  */
-import type {Span} from '@vibesys/contracts';
+import {roleName, type Span} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import {type TranscriptEntry, transcriptBySpan} from '@vibesys/run-state/transcript';
@@ -36,6 +36,8 @@ export type TurnRow =
       readonly kind: 'reply';
       readonly id: string;
       readonly author: string;
+      /** The id of the role that replied (what `author` names for a person); null when unknown. */
+      readonly role: string | null;
       /** The reply model's name (`OrchestratorPlan`): what kind of reply this is. */
       readonly replyKind: string;
       readonly title: string;
@@ -144,6 +146,7 @@ function replyRow(entry: TranscriptEntry, author: string): TurnRow {
     kind: 'reply',
     id: entry.id,
     author,
+    role: entry.agentKind ?? null,
     replyKind: reply.kind,
     title: replyTitle(reply.kind),
     fields: replyFields(reply.json_schema as Readonly<Record<string, unknown>>, value),
@@ -153,7 +156,7 @@ function replyRow(entry: TranscriptEntry, author: string): TurnRow {
 }
 
 function rowOf(entry: TranscriptEntry, turnEnded: boolean): TurnRow {
-  const agent = entry.agentKind === undefined ? 'Agent' : plain(entry.agentKind);
+  const agent = entry.agentKind === undefined ? 'Agent' : roleName(entry.agentKind);
   switch (entry.kind) {
     case 'assistant':
       return messageRow(entry, 'reply', agent);

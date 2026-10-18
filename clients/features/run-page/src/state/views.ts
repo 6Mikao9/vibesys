@@ -86,6 +86,10 @@ function offer(shown: boolean, unavailable?: string): Offer {
   return {shown, disabledReason: unavailable ?? null};
 }
 
+function providerName(provider: string): string {
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
 export function headerView(state: RunPageState): HeaderView {
   const phase = runPhase(state);
   const {project, task} = state.title;
@@ -118,10 +122,6 @@ export interface QuotaBannerView {
   readonly wait: Offer;
   /** "Stop waiting": shown while the run waits. */
   readonly stopWaiting: Offer;
-}
-
-function providerName(provider: string): string {
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
 /**

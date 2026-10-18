@@ -34,6 +34,7 @@ const tool = (id: string, state: 'ok' | 'failed' | 'pending' = 'ok'): ToolRow =>
 const reply: TurnRow = {
   kind: 'reply',
   id: 'r',
+  role: null,
   author: 'Agent',
   replyKind: 'Result',
   title: 'Result',

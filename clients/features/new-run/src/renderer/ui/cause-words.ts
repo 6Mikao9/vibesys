@@ -6,7 +6,7 @@
  * (a helper that predates the cause, or a failure with none) gets a generic headline and its
  * message as `raw`.
  */
-import type {Backend, Check, RunOption} from '../../state/index.js';
+import {type Backend, type Check, type RunOption, roleLabel} from '../../state/index.js';
 
 /** The words of one failed check. */
 export interface FailureWords {
@@ -130,7 +130,7 @@ function agentWords(
   const where = cause.fallback
     ? "Change the fallback model in the project's agent configuration"
     : 'Choose a vetted model in Agent';
-  const whose = cause.role === null ? '' : ` for the ${cause.role} role`;
+  const whose = cause.role === null ? '' : ` for the ${roleLabel(cause.role)} role`;
   return words(
     `${chosen}${whose} for the harness ${cause.provider}. ${where}; vetted models: ${vetted}.`,
     null,

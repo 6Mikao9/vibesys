@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {rawTextOf} from './checks/screen-check.js';
 import {
   type FakeBridgeSeed,
   installFakeBridge,
@@ -39,6 +40,7 @@ const SEED: FakeBridgeSeed = {
     hardware: {cpu_cores: 64, gpus: [], accelerator: 'cpu'},
     docker: {reachable: true, version: '29.1'},
     harness_clis: ['claude', 'codex'],
+    harness_cli_names: {claude: 'Claude Code', codex: 'Codex'},
     runs: {live: 1, ended_today: 2},
   },
   checkouts: {
@@ -159,4 +161,10 @@ test('add a machine, change a checkout from labelled suggestions, and remove a m
   // New run here opens New run.
   await page.getByRole('button', {name: 'New run here'}).click();
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+});
+
+test('the machines screen names its harnesses and hardware, never their ids', async ({page}) => {
+  await openMachines(page);
+  await expect(page.getByText('Claude Code · Codex installed')).toBeVisible();
+  expect(await rawTextOf(page)).toEqual([]);
 });

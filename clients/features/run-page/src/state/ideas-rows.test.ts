@@ -23,16 +23,16 @@ describe('a failed idea', () => {
     for (const reason of REASONS) {
       const item = failedFor(reason);
       const words = reason.replaceAll('_', ' ');
-      expect(figureOf(item).figure).toBe(`failed · ${words}`);
+      expect(figureOf(item).figure).toBe(`Failed · ${words}`);
       expect(outcomeWords(item)).toBe(`failed · ${words}`);
       const view = ideasView(modelOf([item]), {...IDEAS_FILTER_DEFAULT, failed: true});
-      expect(view.rows[0]?.state.label).toBe(`failed · ${words}`);
-      expect(view.rows[0]?.figure).toBe(`failed · ${words}`);
+      expect(view.rows[0]?.state.label).toBe(`Failed · ${words}`);
+      expect(view.rows[0]?.figure).toBe(`Failed · ${words}`);
     }
   });
 
   test('says only "failed" when the run gave no reason', () => {
-    expect(figureOf(failedFor(null)).figure).toBe('failed');
+    expect(figureOf(failedFor(null)).figure).toBe('Failed');
   });
 });
 

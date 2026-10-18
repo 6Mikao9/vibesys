@@ -5,6 +5,7 @@
  * moment of the call, so the caller fixes the viewport, theme and fonts and lets the page settle.
  */
 import type {Page} from '@playwright/test';
+import {CODE_IDS, roleName} from '@vibesys/contracts';
 import {FAILURE_REASONS} from '@vibesys/run-fixtures';
 import {
   type CheckId,
@@ -43,6 +44,22 @@ const CHECKS: Readonly<Record<PageCheckId, (input: CheckInput) => Violation[]>> 
 /** Enum values that never read as words: the failure reasons spelled with a hyphen or underscore. */
 const RAW_WORDS: readonly string[] = FAILURE_REASONS.filter(reason => /[-_]/.test(reason));
 
+/** The ids the backend registries name, so the list of what must not show raw cannot drift. */
+const REGISTRY_IDS: readonly string[] = [
+  ...CODE_IDS.harnesses,
+  ...CODE_IDS.models,
+  ...CODE_IDS.roles,
+];
+
+/** The role names the catalog gives: none may be drawn in lowercase. */
+const REGISTRY_NAMES: readonly string[] = CODE_IDS.roles.map(roleName);
+
+/**
+ * The names the fixture worlds' user typed: a project folder, an SSH alias, a task. They are the
+ * user's own identifiers, shown as they were typed, not code names the app made up.
+ */
+const USER_NAMES: readonly string[] = ['queue-rs', 'queue-rs-2', 'remote-host', 'host-a', 'host-b'];
+
 /** The script that defines the helpers and the checks in the page and runs `only` of them. */
 function script(only: readonly PageCheckId[], input: CheckInput): string {
   const sources = [...HELPERS, ...Object.values(CHECKS)].map(each => each.toString());
@@ -55,7 +72,14 @@ export async function screenCheck(
   page: Page,
   only: readonly PageCheckId[] = Object.keys(CHECKS) as PageCheckId[],
 ): Promise<Violation[]> {
-  return page.evaluate<Violation[]>(script(only, {rawWords: RAW_WORDS}));
+  return page.evaluate<Violation[]>(
+    script(only, {
+      rawWords: RAW_WORDS,
+      ids: REGISTRY_IDS,
+      names: REGISTRY_NAMES,
+      userNames: USER_NAMES,
+    }),
+  );
 }
 
 /** One screen's violations that no known failure explains, and the known ones it matched. */
@@ -77,4 +101,10 @@ export function report(
     else known.push({violation, failure});
   }
   return {unexplained, known};
+}
+
+/** What the screen draws that no person should read: raw ids, code names, lowercase names. */
+export async function rawTextOf(page: Page): Promise<string[]> {
+  const found = await screenCheck(page, ['raw-text']);
+  return found.map(each => `${each.message} (${each.where})`);
 }

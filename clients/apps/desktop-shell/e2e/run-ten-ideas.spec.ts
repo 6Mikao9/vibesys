@@ -25,7 +25,7 @@ const failedChip = (page: Page) => page.locator('button.vs-dotlegend-item', {has
 const failedRows = (page: Page) =>
   ideas(page)
     .getByRole('option')
-    .filter({hasText: /failed ·/});
+    .filter({hasText: /Failed ·/});
 
 test('failed ideas are listed by default, in the tree and the list, and a filter hides them', async ({
   page,
@@ -37,7 +37,7 @@ test('failed ideas are listed by default, in the tree and the list, and a filter
   await expect(failedChip(page)).toHaveAttribute('aria-pressed', 'true');
   // A failed idea sits under its base like the others, with its reason in words.
   await expect(ideas(page).getByRole('option', {name: /Replace the mutex/})).toContainText(
-    'failed · review rejected',
+    'Failed · review rejected',
   );
   await shot(page, 'ten-ideas-tree');
 

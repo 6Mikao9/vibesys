@@ -207,8 +207,8 @@ describe('a multi-agent run', () => {
     expect(
       rows.map(row => [row.title, row.figure, row.trail.label, row.state.label]).sort(),
     ).toEqual([
-      ['title h1', '2.00×', 'input', 'passed'],
-      ['title h2', '0.20×', 'title h1', 'passed'],
+      ['title h1', '2.00×', 'input', 'Passed'],
+      ['title h2', '0.20×', 'title h1', 'Passed'],
     ]);
     expect(rows.map(row => [row.title, row.badges.map(badge => badge.label)]).sort()).toEqual([
       ['title h1', ['best']],
@@ -240,7 +240,7 @@ describe('a multi-agent run', () => {
         (event.data as {span: Span}).span.id === 'op:000002/orchestrator.1',
     );
     expect(nowView(at(events, designing + 1)).map(item => [item.context, item.doing])).toEqual([
-      ['round 2', 'orchestrator'],
+      ['round 2', 'Planner'],
     ]);
   });
 });

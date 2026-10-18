@@ -10,6 +10,7 @@ export type {
   InstanceInspection,
   MachineDescription,
 } from '@vibesys/contracts/host-helper';
+export {acceleratorName} from './accelerator.js';
 export {
   COMPLETION_EMPTY,
   type CompletionAction,

@@ -76,6 +76,7 @@ export function TextInput(props: {
       spellCheck={false}
       autoComplete="off"
       data-mono={props.mono === true || undefined}
+      data-mono-id={props.mono === true || undefined}
       aria-describedby={wiring.describedBy}
       aria-invalid={wiring.invalid || undefined}
       onChange={event => props.change?.(event.target.value)}

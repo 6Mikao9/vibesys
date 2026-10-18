@@ -78,6 +78,21 @@ export function defaultAgent(
   return {provider: chosen, model, roles: roles.map(defaultRole)};
 }
 
+/** The harness as people call it ("Claude Code"): the name the host sends, else the raw id. */
+export function harnessLabel(offers: readonly HarnessOffer[], provider: string): string {
+  return offers.find(offer => offer.provider === provider)?.display?.providerName ?? provider;
+}
+
+/** The model as people call it ("Opus 5.5"): the name the host sends, else the raw id. */
+export function modelLabel(
+  offers: readonly HarnessOffer[],
+  provider: string,
+  model: string,
+): string {
+  const offer = offers.find(each => each.provider === provider && each.model === model);
+  return offer?.display?.modelName ?? model;
+}
+
 /** The vetted models of `provider`, in offer order. */
 export function vettedModels(offers: readonly HarnessOffer[], provider: string): string[] {
   return offers.filter(offer => offer.provider === provider).map(offer => offer.model);

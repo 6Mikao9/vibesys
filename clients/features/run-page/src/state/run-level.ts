@@ -4,7 +4,7 @@
  * its live step), and what a route resolves to in the run (`resolveZoom`): an id the run does not
  * hold resolves a level up, so a stale address still opens.
  */
-import type {Span} from '@vibesys/contracts';
+import {roleName, type Span} from '@vibesys/contracts';
 import type {AgentNode} from '@vibesys/run-state/agents';
 import type {
   Candidate,
@@ -14,6 +14,7 @@ import type {
   ObjectiveAxis,
 } from '@vibesys/run-state/candidates';
 import {metricLabel} from './metric-words.js';
+import {stepLabel, stepTitle} from './names.js';
 import {objectivesOf} from './pareto-view.js';
 import {
   type IdeaResult,
@@ -284,9 +285,9 @@ function ticks(low: number, high: number, label: (value: number) => string) {
 }
 
 const RESULT_WORDS: Readonly<Record<IdeaResult, string>> = {
-  passed: 'passed',
-  failed: 'failed',
-  pending: 'not measured yet',
+  passed: 'Passed',
+  failed: 'Failed',
+  pending: 'Not measured yet',
 };
 
 function pointTone(point: PerformancePoint): 'accent' | 'muted' | 'err' {
@@ -368,7 +369,7 @@ export function stripChartView(
   const open = focusOn(model, fold.points, focus);
   const points = fold.points.map(point => ({
     id: point.id,
-    label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'new best' : RESULT_WORDS[point.result]}`,
+    label: `${point.title} · ${formatValue(point.value)} · ${point.best ? 'New best' : RESULT_WORDS[point.result]}`,
     x: minutes(point.at),
     y: point.value,
     filled: point.result !== 'pending',
@@ -403,8 +404,8 @@ export function stripChartView(
 export interface NowItem {
   readonly id: string;
   /**
-   * What runs, kept whole on a narrow row: who runs it and what (`implementer · Agent turn`,
-   * `waiting after implementer`) for an idea, the role for an agent.
+   * What runs, kept whole on a narrow row: who runs it and what (`Implementer · Agent turn`,
+   * `Waiting after Implementer`) for an idea, the role for an agent.
    */
   readonly doing: string;
   /** What it belongs to, which gives way first: the idea's title, or what the agent works in. */
@@ -429,8 +430,11 @@ function waitingSince(span: Span | undefined): number | null {
 /** What a step does: its role, and its title unless that only repeats the role (`implementer`). */
 function stepSummary(step: CandidateStep): string {
   if (step.role === null) return step.title;
-  const same = step.title.trim().toLowerCase() === step.role.trim().toLowerCase();
-  return same || step.title === '' ? step.role : `${step.role} · ${step.title}`;
+  const role = roleName(step.role);
+  const title = stepTitle(step);
+  return title.trim().toLowerCase() === role.trim().toLowerCase() || title === ''
+    ? role
+    : `${role} · ${title}`;
 }
 
 /** What runs now: each running idea's latest running step, then agents working outside ideas. */
@@ -461,11 +465,11 @@ function ideaNow(item: Candidate, spans: ReadonlyMap<string, Span>): NowItem {
     if (attempt === undefined || last === undefined) {
       const open = {kind: 'idea', idea: item.id} as const;
       const since = attempt?.startedAt ?? item.startedAt;
-      return {id: item.id, doing: 'starting', context: item.title, since, open};
+      return {id: item.id, doing: 'Starting', context: item.title, since, open};
     }
     return {
       id: attempt.span,
-      doing: `waiting after ${last.role ?? last.title}`,
+      doing: `Waiting after ${stepLabel(last)}`,
       context: item.title,
       since: waitingSince(spans.get(attempt.span)) ?? last.endedAt ?? attempt.startedAt,
       open: {kind: 'step', idea: item.id, step: last.span},
@@ -484,8 +488,8 @@ function agentNow(agent: AgentNode): NowItem {
   const within = agent.activity.within;
   return {
     id: agent.activity.turn,
-    doing: agent.role,
-    context: within === null ? 'agent turn' : within.title,
+    doing: roleName(agent.role),
+    context: within === null ? 'Agent turn' : within.title,
     since: agent.activity.startedAt,
     open: {kind: 'agent', agent: agent.id},
   };

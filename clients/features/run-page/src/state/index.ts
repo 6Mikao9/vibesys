@@ -30,6 +30,7 @@ export {
   outcomeWords,
 } from './ideas-view.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';
+export {roleLabel, stepLabel, stepTitle} from './names.js';
 export {
   objectivesOf,
   type ParetoAxisView,

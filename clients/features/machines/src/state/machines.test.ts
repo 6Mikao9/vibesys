@@ -355,7 +355,7 @@ describe('machinesStep', () => {
       {key: 'Checkout', value: '~/vibesys', mono: true},
       {key: 'Version', value: '0.1.1 · e66d941 · clean', mono: true},
       {key: 'Hardware', value: '64 CPU cores · no GPU', mono: false},
-      {key: 'Docker', value: 'docker 29.1', mono: false},
+      {key: 'Docker', value: 'Docker 29.1', mono: false},
       {key: 'Harnesses', value: 'Claude Code · Codex · mystery installed', mono: false},
       {key: 'Runs', value: '1 live · 2 ended today', mono: false},
     ]);

@@ -5,7 +5,7 @@
  * transports report through. Runtime neutral: no DOM, no Node.
  */
 
-export {CODE_IDS, roleName, wordsOfId} from './display-names.js';
+export {CODE_IDS, declaredRoleName, roleName, wordsOfId} from './display-names.js';
 export {
   BackendClientError,
   type BackendErrorKind,

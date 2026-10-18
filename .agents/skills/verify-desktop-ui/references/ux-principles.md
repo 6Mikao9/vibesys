@@ -19,7 +19,14 @@ can decide it.
 3. **No raw identifiers in text a person reads.** No snake_case, `${…}`,
    `undefined`, `NaN`, `null`, long hashes, raw enum values (a failure reason
    spelled as the program spells it) or Markdown markers. Identifiers belong
-   in code or monospace-id elements. Enforced by the `raw-text` check.
+   in code or monospace-id elements (`data-mono-id`, which a code-styled `Text`
+   and a mono field set). Nor code names: a harness, model or role id (`claude`,
+   `opus-5-5`, `judge`) drawn as a label, any kebab-case identifier standing as a
+   label, or a role's name in lowercase. Names are capitalised: "Judge",
+   "Perf evaluator"; the backend owns them (`roleName`; harness and model names
+   are agentshim's). Names the user typed (a project folder, an SSH alias) are
+   theirs and listed in the check. Enforced by the `raw-text` check, whose ids
+   come from the generated `CODE_IDS`.
 4. **Plain words, few of them.** Prefer a chip, a count or a figure to a
    sentence. Say "failed a check", not the name of the condition. Unenforced:
    wording needs judgment.

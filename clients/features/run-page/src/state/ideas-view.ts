@@ -89,7 +89,8 @@ export function outcomeWords(item: Candidate): string {
 
 function stateOf(item: Candidate): IdeaRow['state'] {
   const tone = {running: 'live', passed: 'ok', failed: 'err'} as const;
-  return {tone: tone[item.outcome], label: outcomeWords(item)};
+  const label = outcomeWords(item);
+  return {tone: tone[item.outcome], label: label.charAt(0).toUpperCase() + label.slice(1)};
 }
 
 /** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */
@@ -102,12 +103,15 @@ export function figureOf(item: Candidate): {figure: string; tone: IdeaTone} {
       failed.completed !== null && failed.required !== null
         ? `${failed.completed}/${failed.required}${failed.unit === null ? '' : ` ${failed.unit}`}`
         : words(failed.check);
-    return {figure: `failed · ${progress}`, tone: 'err'};
+    return {figure: `Failed · ${progress}`, tone: 'err'};
   }
   if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
     return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'passed' ? 'ok' : 'err'};
   }
-  if (item.outcome === 'failed') return {figure: outcomeWords(item), tone: 'err'};
+  if (item.outcome === 'failed') {
+    const label = outcomeWords(item);
+    return {figure: label.charAt(0).toUpperCase() + label.slice(1), tone: 'err'};
+  }
   return {figure: '–', tone: 'muted'};
 }
 
