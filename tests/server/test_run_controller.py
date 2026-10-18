@@ -674,6 +674,23 @@ def test_a_withdrawal_of_no_standing_guidance_answers_its_protocol_error(tmp_pat
     assert parts.control.take_pending_withdrawals() == []
 
 
+def test_a_control_sent_after_the_run_ended_answers_that_run_control_is_unavailable(
+    tmp_path: Path,
+) -> None:
+    """The run ended before its session did: the same answer as a control after the session."""
+    parts = build_server_parts(tmp_path)
+    parts.operator_control.end()
+
+    with pytest.raises(RuntimeError) as refused:
+        parts.api.execute(
+            ControlCommand(timestamp=REQUEST_TIME, control=PauseRequest(control_id="p1"))
+        )
+
+    assert getattr(refused.value, "diagnostic_code", None) == "run_control_unavailable"
+    assert str(refused.value) == "Run control is unavailable after the run session ends"
+    assert not parts.control.pause_requested()
+
+
 def test_standing_guidance_is_journaled_in_force_then_ended(tmp_path: Path) -> None:
     """Guidance is journaled active, not waiting for a turn; its withdrawal pending, its end done.
 
@@ -695,4 +712,22 @@ def test_standing_guidance_is_journaled_in_force_then_ended(tmp_path: Path) -> N
         ("/steer --standing: keep bf16", EventStatus.ACTIVE),
         ("/withdraw: keep", EventStatus.PENDING),
         ("/guidance ended: standing guidance keep ended: withdrawn", EventStatus.COMPLETED),
+    ]
+
+
+def test_an_inbox_request_the_run_set_aside_is_journaled_as_failed(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+
+    parts.control.notify_request_rejected("w-1", "it ended nothing: no standing steer w-0")
+
+    controls = [
+        (event.text, event.status)
+        for event in parts.journal.read()
+        if event.type is EventType.CONTROL
+    ]
+    assert controls == [
+        (
+            "/control request w-1 rejected: it ended nothing: no standing steer w-0",
+            EventStatus.FAILED,
+        )
     ]

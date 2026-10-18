@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
@@ -41,6 +42,7 @@ from vs_core.api import (
     run_pause,
     step,
 )
+from vs_project.api import InboxEntry, RequestState, RequestStatus
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
@@ -48,10 +50,16 @@ from vs_runtime.api.infrastructure import (
     ChannelRunControl,
     ControlAck,
     ControlRequest,
+    ControlStatus,
     PauseRequest,
     QuotaAction,
     QuotaPolicy,
+    RefusalReason,
     ResumeRequest,
+    RunControlTransitionKind,
+    SteerRequest,
+    StopRequest,
+    WithdrawRequest,
     create_run_control_channel,
     install_capacity_gate,
 )
@@ -61,6 +69,11 @@ from vs_sim.api.testing import HANG_GUARD_S, SimThreads, VirtualClock
 if TYPE_CHECKING:
     from vs_core.api import ArtifactRef, CoreEvent
     from vs_runtime.api.infrastructure import RunControlChannel
+
+
+def _live() -> str | None:
+    """A poster's view of a run that has not ended."""
+    return None
 
 
 @dataclass
@@ -82,6 +95,8 @@ class _Run:
     """Events of polls the shell has not committed yet, in order."""
     turns: int = 0
     """Turns waiting on a quota stop, parked for the operator."""
+    sink: FakeRunControlEventSink = field(default_factory=FakeRunControlEventSink)
+    """What the run told its operators."""
 
     def poll(self, *, commit: bool = True) -> tuple[CoreEvent, ...]:
         """Poll the bridge; ``commit=False`` leaves the events queued, as the shell may.
@@ -124,11 +139,12 @@ class _Run:
 
 def _run() -> _Run:
     threads = SimThreads()
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    sink = FakeRunControlEventSink()
+    channel = create_run_control_channel(sink, threads=threads)
     control = ChannelRunControl(channel, threads)
     inbox = FakeControlInbox()
     bridge = RunControlBridge(channel, _Texts(), inbox=OperatorInbox(inbox, control))
-    return _Run(channel, control, bridge, inbox, initial_state())
+    return _Run(channel, control, bridge, inbox, initial_state(), sink=sink)
 
 
 def _restarted(run: _Run) -> _Run:
@@ -137,7 +153,7 @@ def _restarted(run: _Run) -> _Run:
     bridge = RunControlBridge(
         fresh.channel, _Texts(), inbox=OperatorInbox(run.inbox, fresh.control)
     )
-    return _Run(fresh.channel, fresh.control, bridge, run.inbox, run.core)
+    return _Run(fresh.channel, fresh.control, bridge, run.inbox, run.core, sink=fresh.sink)
 
 
 type _Op = Literal[
@@ -196,7 +212,9 @@ def _apply(run: _Run, op: _Op, control_id: str) -> _Run:
         case "operator" | "resume" | "fallback" | "capacity":
             run.control.submit(_request(op, control_id))  # through the socket's entry point
         case "inbox-operator" | "inbox-resume" | "inbox-fallback" | "inbox-capacity":
-            run.inbox.post(control_id, _request(op, control_id).model_dump_json().encode())
+            run.inbox.post(
+                control_id, _request(op, control_id).model_dump_json().encode(), ended=_live
+            )
         case "poll":
             run.poll()
         case "poll-queued":
@@ -246,7 +264,7 @@ def test_a_capacity_wait_from_the_inbox_settles_only_once_core_records_it() -> N
     run.channel.pause_for_quota()
     run.poll()
     request = ResumeRequest(control_id="w1", when="capacity_returns")
-    run.inbox.post("w1", request.model_dump_json().encode())
+    run.inbox.post("w1", request.model_dump_json().encode(), ended=_live)
 
     run.poll(commit=False)  # applied, but core has not committed it yet
     run.poll(commit=False)
@@ -269,7 +287,7 @@ def test_a_capacity_wait_asked_in_the_poll_that_first_sees_the_quota_pause_is_ta
     run = _run()
     run.stop_on_quota()
     request = ResumeRequest(control_id="w1", when="capacity_returns")
-    run.inbox.post("w1", request.model_dump_json().encode())
+    run.inbox.post("w1", request.model_dump_json().encode(), ended=_live)
 
     run.poll()
     run.poll()
@@ -308,7 +326,7 @@ def test_a_fallback_resume_reusing_a_plain_resumes_id_is_rejected_not_settled() 
     run.poll()
 
     payload = {"control_id": "x", "action": "resume", "fallback": True}
-    run.inbox.post("x", json.dumps(payload).encode())
+    run.inbox.post("x", json.dumps(payload).encode(), ended=_live)
     run.poll()
 
     assert [entry.request_id for entry in run.inbox.rejected()] == ["x"]
@@ -365,7 +383,7 @@ def test_an_inbox_request_core_refuses_at_commit_is_answered_with_cores_reason()
     """
     run = _run()
     run.poll()
-    run.inbox.post("p1", PauseRequest(control_id="p1").model_dump_json().encode())
+    run.inbox.post("p1", PauseRequest(control_id="p1").model_dump_json().encode(), ended=_live)
     (pause,) = run.bridge.poll(run.core, 1.0)
     blocked = RunControlEvent(
         control=ControlInput(
@@ -384,6 +402,199 @@ def test_an_inbox_request_core_refuses_at_commit_is_answered_with_cores_reason()
         ("p1", "refused by the run: terminal run rejects controls")
     ]
     assert run.channel.pause_state() is None
+    # The operator hears it once, as the inbox request's rejection, through the one path.
+    assert _told(run) == [
+        (
+            RunControlTransitionKind.REQUEST_REJECTED,
+            "p1",
+            "refused by the run: terminal run rejects controls",
+        )
+    ]
+
+
+def _told(run: _Run) -> list[tuple[RunControlTransitionKind, str | None, str]]:
+    """Each refusal or rejection the run reported to its operators: kind, request id, text."""
+    answers = (RunControlTransitionKind.REQUEST_REJECTED, RunControlTransitionKind.CONTROL_REFUSED)
+    return [(t.kind, t.request_id, t.text) for t in run.sink.transitions if t.kind in answers]
+
+
+def _end_blocked(run: _Run) -> None:
+    """Commit the run loop's stop of a run whose recovery is blocked: the run ends."""
+    blocked = RunControlEvent(
+        control=ControlInput(
+            control_id=ControlId(root="recovery-blocked"), action="stop", mode=StopMode.CANCEL
+        ),
+        result=RunResultProposal(outcome="blocked", reason="recovery blocked"),
+        now_at=1.0,
+    )
+    run.core = step(run.core, blocked).state
+
+
+@pytest.mark.parametrize("poll_after_stop", [False, True])
+def test_a_refused_rerecording_of_a_hold_neither_lifts_nor_blames_the_operators_pause(
+    *, poll_after_stop: bool
+) -> None:
+    """Core accepted the operator's pause p0 long ago; only the bridge's copy of it is refused.
+
+    A capacity wait c2 under the hold leaves the channel when its turn is cancelled, and the
+    bridge records the hold again (``control-<n>``, origin p0) to clear the wait in core.
+    The run has a stop by then, so core refuses that copy. It is not the operator's request:
+    the hold stands and nobody is told that p0 was refused. A poll between the stop and the
+    cancel records the stop, which lifts core's pause, but core still holds p0.
+    """
+    run = _run()
+    run.control.submit(PauseRequest(control_id="p0"))
+    run.stop_on_quota()
+    run.control.submit(ResumeRequest(control_id="c2", when="capacity_returns"))
+    run.poll()
+    assert run.agrees()
+    run.control.submit(StopRequest(control_id="s1"))
+    if poll_after_stop:
+        run.poll()
+    run.cancel_turn()
+    run.poll()
+
+    assert _told(run) == []
+    pause = run.channel.pause_state()
+    assert pause is not None
+    assert pause.owner is PauseOwner.OPERATOR
+
+
+def test_a_control_sent_after_the_last_poll_is_answered_when_the_run_ends() -> None:
+    """The run loop polls no more once core is TERMINAL; ``end`` answers what came after.
+
+    A socket pause p3 sent between the last poll and the run's end is refused with core's
+    reason and its hold lifted, a steer s5 and a withdrawal w6 sent then are reported
+    dropped with the run's end, and an inbox request posted then is rejected with it, each
+    told once.
+    """
+    run = _run()
+    run.poll()
+    _end_blocked(run)
+    run.control.submit(PauseRequest(control_id="p3"))
+    run.inbox.post("p4", PauseRequest(control_id="p4").model_dump_json().encode(), ended=_live)
+    run.control.submit(SteerRequest(control_id="s5", text="late"))
+    run.control.submit(WithdrawRequest(control_id="w6", withdraws="s5"))
+    run.bridge.settled(run.core, running=False)
+    run.bridge.end(run.core)
+
+    assert run.channel.pause_state() is None
+    told = _told(run)
+    assert told[0] == (
+        RunControlTransitionKind.CONTROL_REFUSED,
+        None,
+        "pause p3: terminal run rejects controls",
+    )
+    assert [(kind, request_id) for kind, request_id, _ in told[1:]] == [
+        (RunControlTransitionKind.REQUEST_REJECTED, "p4")
+    ]
+    assert run.inbox.pending() == ()
+    ended = "the run ended: recovery blocked"
+    assert _dropped(run) == [
+        f"steer s5 reached no turn: {ended}",
+        f"withdraw w6 ended nothing: {ended}",
+    ]
+    assert run.channel.take_pending_steer() == []
+    assert run.channel.take_pending_withdrawals() == []
+
+
+_AFTER_THE_END: tuple[ControlRequest, ...] = (
+    PauseRequest(control_id="late"),
+    ResumeRequest(control_id="late"),
+    ResumeRequest(control_id="late", when="capacity_returns"),
+    StopRequest(control_id="late"),
+    SteerRequest(control_id="late", text="late"),
+    WithdrawRequest(control_id="late", withdraws="s0"),
+)
+
+
+@pytest.mark.parametrize("request_", _AFTER_THE_END, ids=lambda r: r.action.value)
+def test_a_control_sent_after_the_run_ended_is_refused_and_reaches_nothing(
+    request_: ControlRequest,
+) -> None:
+    """Once ``end`` has run, no later control waits: each is refused in its ack, for good."""
+    run = _run()
+    run.control.submit(PauseRequest(control_id="p0"))
+    run.poll()
+    _end_blocked(run)
+    run.bridge.settled(run.core, running=False)
+    run.bridge.end(run.core)
+    before = (run.channel.pause_state(), run.channel.stop_requested(), len(run.sink.transitions))
+
+    ack = run.control.submit(request_)
+    again = run.control.submit(request_)
+
+    assert ack.status is ControlStatus.REFUSED
+    assert ack.reason is RefusalReason.RUN_ENDED
+    assert again == ack
+    assert (
+        run.channel.pause_state(),
+        run.channel.stop_requested(),
+        len(run.sink.transitions),
+    ) == before
+    assert run.channel.take_pending_steer() == []
+    assert run.channel.take_pending_withdrawals() == []
+
+
+def test_a_control_answered_before_the_end_replays_its_ack_after_it() -> None:
+    """The end refuses only controls first sent after it; a resend keeps its first answer."""
+    run = _run()
+    first = run.control.submit(PauseRequest(control_id="p0"))
+    run.poll()
+    _end_blocked(run)
+    run.bridge.end(run.core)
+
+    assert run.control.submit(PauseRequest(control_id="p0")) == first
+
+
+class _RejectedOnceListed(FakeControlInbox):
+    """An inbox another process sets aside each request in, right after this one lists it."""
+
+    def pending(self) -> tuple[InboxEntry, ...]:
+        listed = super().pending()
+        for entry in listed:
+            self.reject(entry.request_id, "set aside by another process")
+        return listed
+
+
+def test_a_request_set_aside_already_is_not_reported_again() -> None:
+    """A rejection is reported once: only by the process whose mark set the request aside."""
+    run = _run()
+    inbox = _RejectedOnceListed()
+    bridge = RunControlBridge(run.channel, _Texts(), inbox=OperatorInbox(inbox, run.control))
+    inbox.post("p1", PauseRequest(control_id="p1").model_dump_json().encode(), ended=_live)
+    _end_blocked(run)
+
+    bridge.end(run.core)
+
+    assert _told(run) == []
+    assert inbox.status("p1", ended=None) == RequestStatus(
+        RequestState.REJECTED, "set aside by another process"
+    )
+
+
+def _dropped(run: _Run) -> list[str]:
+    """What the run reported dropped: steers that reached no turn, withdrawals that ended nothing."""
+    return [
+        t.text for t in run.sink.transitions if t.kind is RunControlTransitionKind.STEER_DROPPED
+    ]
+
+
+def test_a_refused_control_no_operator_can_be_told_of_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A quota pause after a stop is the channel's own: no operator to tell; the log keeps it."""
+    run = _run()
+    run.control.submit(StopRequest(control_id="s1"))
+    run.poll()
+    run.stop_on_quota()
+    with caplog.at_level(logging.WARNING):
+        run.poll()
+
+    assert _told(run) == []
+    assert "the run refused a pause control: a stopped run takes no pause or resume" in (
+        caplog.text
+    )
 
 
 class _QuotaWhileRead(ChannelRunControl):
@@ -419,9 +630,9 @@ def test_each_inbox_request_is_judged_against_the_pause_the_run_is_in_by_then() 
     inbox = FakeControlInbox()
     bridge = RunControlBridge(channel, _Texts(), inbox=OperatorInbox(inbox, control))
     run = _Run(channel, control, bridge, inbox, initial_state())
-    run.inbox.post("a1", ResumeRequest(control_id="a1").model_dump_json().encode())
+    run.inbox.post("a1", ResumeRequest(control_id="a1").model_dump_json().encode(), ended=_live)
     wait = ResumeRequest(control_id="a2", when="capacity_returns")
-    run.inbox.post("a2", wait.model_dump_json().encode())
+    run.inbox.post("a2", wait.model_dump_json().encode(), ended=_live)
 
     run.poll()
 
@@ -485,7 +696,7 @@ def test_cancelling_the_turn_that_waits_for_capacity_ends_the_pause_in_core_too(
         run.poll()
         assert run_pause(run.core.run) == RunPause(owner=PauseOwner.QUOTA)
         request = ResumeRequest(control_id="w1", when="capacity_returns")
-        run.inbox.post("w1", request.model_dump_json().encode())
+        run.inbox.post("w1", request.model_dump_json().encode(), ended=_live)
         run.poll()
         assert run_pause(run.core.run) == RunPause(owner=PauseOwner.QUOTA, capacity_wait=True)
         threads.sleep(cancel_after)
