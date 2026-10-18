@@ -252,6 +252,23 @@ warns: when one attempt's agent has had `runaway_evaluations` calls admitted (40
 each a call for a different candidate), the run emits one `framework_warning` event for
 that attempt. The flag never refuses a call or waits on anything.
 
+### Who decides whether an idea held
+
+In the multi search the implementer reports implementation status only: `implemented`,
+`continue`, `implementation_failed` or `blocked`. Whether the idea held is derived by the
+framework. The designer's plan carries a typed bar, `minimum_ratio`: the smallest ratio of the
+candidate's headline metric over its base's, in the metric's own direction, that justifies
+keeping the change (above 1 for a metric where more is better, below 1 for one where less is
+better; 1, the default, asks for any gain beyond noise). A bar on the wrong side of the base is
+refused with the designer's usual correction. When the trusted gates measure a candidate the
+framework compares it with its base (the comparison above, over every sample of its measured
+input) and holds the gain against the bar with the comparison's own noise: `supported` when it
+clears the bar by more than two noises, `disproven` when it misses by more than that, and
+`within_noise` otherwise. The judge reviews correctness and evidence, not arithmetic, and
+free-text performance thresholds no longer belong in a plan's pass criteria. A candidate with no
+comparison (the task has no benchmark stage, or its base could not be measured) is resolved as
+before, from its headline metric against its parent round.
+
 ## Start from an Example
 
 The examples under `examples/<category>/` in a VibeSys source checkout are
@@ -528,7 +545,8 @@ other requests. When the run takes an action, its agents are told what changed a
 turn, and `vibesys control <run-id> status <id>` reads `applied`.
 
 The run refuses an action that could change nothing, with the reason: an attempt that has
-ended, or that is parked or blocked; an attempt or item the run does not hold; an item already
+ended, that is blocked, or that is parked with no reopen waiting (cancelling a parked attempt
+that is waiting to reopen cancels that reopen, and the attempt ends); an attempt or item the run does not hold; an item already
 cancelled; a limit above the launch limit. An attempt or item the run does not hold yet is
 judged when the run takes the action, since the run may start it first, so cancelling a work
 item before any attempt at it has started is refused. A refused request is set aside in the
