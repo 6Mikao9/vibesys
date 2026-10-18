@@ -93,9 +93,24 @@ export const SEED: FakeBridgeSeed = {
       runs: {live: 1, ended_today: 2},
     },
     harnesses: [
-      {provider: 'claude', model: 'claude-opus-4-5', default: true},
-      {provider: 'claude', model: 'claude-sonnet-4-5', default: false},
-      {provider: 'codex', model: 'gpt-5-codex', default: true},
+      {
+        provider: 'claude',
+        model: 'claude-opus-4-5',
+        default: true,
+        display: {providerName: 'Claude Code', modelName: 'Opus 4.5'},
+      },
+      {
+        provider: 'claude',
+        model: 'claude-sonnet-4-5',
+        default: false,
+        display: {providerName: 'Claude Code', modelName: 'Sonnet 4.5'},
+      },
+      {
+        provider: 'codex',
+        model: 'gpt-5-codex',
+        default: true,
+        display: {providerName: 'Codex', modelName: 'GPT-5 Codex'},
+      },
     ],
     examples: {
       checkout: '/home/me/vibesys',
