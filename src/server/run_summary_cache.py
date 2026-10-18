@@ -38,7 +38,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from threading import Lock
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal
 
 from pydantic import (
@@ -57,6 +56,8 @@ from vs_project.api import ProjectError, atomic_write_bytes
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import BinaryIO
+
+    from vs_sim.api import Lock
 
 HEAD_BYTES: Final = 4096
 """How much of the journal's start the cache's first fingerprint covers."""
@@ -133,9 +134,9 @@ class _Remembered:
 class SummaryReader:
     """Reuse one validated fold across pages in one helper process."""
 
-    def __init__(self) -> None:
+    def __init__(self, lock: Lock) -> None:
         """Start with no remembered run."""
-        self._lock = Lock()
+        self._lock = lock
         self._remembered: _Remembered | None = None
 
     def summarize(self, journal: Path) -> Summarized:
