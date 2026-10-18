@@ -27,6 +27,7 @@ import {
   type MachineDescription,
   type PathEntry,
   parseHelperRequest,
+  type RunSummary,
   type UnreadableRecord,
 } from '@vibesys/contracts/host-helper';
 import {ConnectionError} from '../shell/helper-channel.js';
@@ -101,6 +102,8 @@ export interface FakeHost {
   readonly projects: Map<string, readonly string[]>;
   /** Directories and the directories in them. */
   readonly directories: Map<string, readonly string[]>;
+  /** The runs each project records (`runs.list`), with the digests it can read. */
+  readonly runHistory: Map<string, readonly RunSummary[]>;
   /** How each live run answers its run channel. */
   readonly runs: Map<string, RunServer>;
   /** Live runs this user may not connect to (`connect_denied`). */
@@ -224,6 +227,7 @@ export class FakeHelper {
     unverified: [],
     projects: new Map(),
     directories: new Map(),
+    runHistory: new Map(),
     runs: new Map(),
     denied: new Set(),
     logs: new Map(),
@@ -900,7 +904,13 @@ class HelperSession {
       this.#send({
         type: 'runs.list',
         request_id: id,
-        runs: {project_root: request.project, runs: []},
+        runs: {
+          project_root: request.project,
+          runs: (helper.host.runHistory.get(request.project) ?? []).map(run => {
+            const {digest: _digest, ...plain} = run;
+            return request.digest_runs?.includes(run.run_id) === true ? run : plain;
+          }),
+        },
       });
       return;
     }

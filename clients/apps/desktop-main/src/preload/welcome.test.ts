@@ -123,6 +123,10 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.readEvents(key, path, name, token, 1 + (token % 1000)),
       {kind: 'read-events', host, project: path, runId: name, from: token, max: 1 + (token % 1000)},
     ],
+    [
+      bridge => bridge.runDigests(key, path, [name]),
+      {kind: 'run-digests', host, project: path, runIds: [name]},
+    ],
     [bridge => bridge.preferences(), {kind: 'preferences'}],
     [bridge => bridge.setAppearance(appearance), {kind: 'set-appearance', appearance}],
     [bridge => bridge.setNotifications(force), {kind: 'set-notifications', enabled: force}],
