@@ -449,22 +449,26 @@ function adoptedAtEnd(
  */
 export type TraceArrival = 'arrived' | 'awaited' | 'none';
 
-export function traceArrival(state: RunPageState): TraceArrival {
-  if (state.record.kind === 'ended') {
-    if (state.summary.kind === 'reading') return 'awaited';
-    // The history is read into the fold page by page: until the last, the fold is a prefix, unless
-    // the summary already holds the run level whole (then only the transcript is awaited).
-    switch (state.history.kind) {
-      case 'reading':
-        return state.summary.kind === 'ready' ? 'arrived' : 'awaited';
-      case 'failed':
-      case 'unsupported':
-        return state.summary.kind === 'ready' ? 'arrived' : 'none';
-      case 'idle':
-      case 'read':
-        break;
-    }
+/** An ended run's recorded data, before falling back to the fold already on the page. */
+function endedTraceArrival(state: RunPageState): TraceArrival | null {
+  if (state.record.kind !== 'ended') return null;
+  if (state.summary.kind === 'reading') return 'awaited';
+  // A ready summary keeps the run level whole while its optional transcript is read or fails.
+  switch (state.history.kind) {
+    case 'reading':
+      return state.summary.kind === 'ready' ? 'arrived' : 'awaited';
+    case 'failed':
+    case 'unsupported':
+      return state.summary.kind === 'ready' ? 'arrived' : 'none';
+    case 'idle':
+    case 'read':
+      return null;
   }
+}
+
+export function traceArrival(state: RunPageState): TraceArrival {
+  const ended = endedTraceArrival(state);
+  if (ended !== null) return ended;
   const {trace} = state.run;
   if (state.session?.hasSnapshot === true || trace.base.sequence > 0 || trace.events.length > 0) {
     return 'arrived';
