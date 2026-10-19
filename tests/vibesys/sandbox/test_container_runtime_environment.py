@@ -64,6 +64,7 @@ class _RecordingBuildRunner:
     def __init__(self) -> None:
         self.argvs: list[tuple[str, ...]] = []
         self.selected_features: list[str] = []
+        self.built: set[str] = set()
 
     def run(
         self,
@@ -75,15 +76,19 @@ class _RecordingBuildRunner:
     ) -> subprocess.CompletedProcess[str]:
         del cwd, timeout, output
         self.argvs.append(tuple(argv))
+        result_tag = argv[-1].startswith("vibesys-agent-build:")
+        unbuilt = tuple(argv[1:3]) == ("image", "inspect") and result_tag
+        unbuilt = unbuilt and argv[-1] not in self.built
         if argv[1] == "build":
+            self.built.add(argv[list(argv).index("--tag") + 1])
             dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()
             self.selected_features = [
                 line.split()[1].rsplit("/", 1)[-1]
                 for line in dockerfile.splitlines()
                 if line.startswith("COPY ")
             ]
-        stdout = _IMAGE_ID if argv[1] == "image" else ""
-        return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
+        stdout = _IMAGE_ID if argv[1] == "image" and not unbuilt else ""
+        return subprocess.CompletedProcess(tuple(argv), 1 if unbuilt else 0, stdout, "")
 
 
 class _DaemonBackend:
