@@ -790,11 +790,7 @@ class HelperSession {
         this.#createProject(request);
         return;
       case 'checkout.inspect':
-        this.#send({
-          type: 'checkout.inspect',
-          request_id: id,
-          inspection: this.#helper.host.checkouts.get(request.path) ?? {state: 'not_found'},
-        });
+        this.#inspectCheckout(request);
         return;
       case 'harnesses.list':
         this.#harnesses(request);
@@ -826,6 +822,15 @@ class HelperSession {
         this.#send({type: 'logs.cancel', request_id: id, read_id: request.read_id});
         return;
     }
+  }
+
+  /** The inspection of a checkout the host holds, or `not_found` when it holds none there. */
+  #inspectCheckout(request: Extract<HelperRequest, {type: 'checkout.inspect'}>): void {
+    this.#send({
+      type: 'checkout.inspect',
+      request_id: request.request_id,
+      inspection: this.#helper.host.checkouts.get(request.path) ?? {state: 'not_found'},
+    });
   }
 
   /** The compute settings and agent login requests, which read or change what the host holds. */
