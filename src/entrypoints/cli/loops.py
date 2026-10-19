@@ -30,6 +30,7 @@ from vibesys.api import (
     RunRequest,
     RunResult,
     Runs,
+    RunStatus,
     boot_trace,
 )
 from vibesys.api.evolve import resolve_openevolve_options
@@ -418,9 +419,23 @@ def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
     else:
         sys.stdout.write(f"\n{request.orchestration.id} run stopped early.\n")
-        if result.failure is not None:
-            sys.stdout.write(f"{describe_failure(result.failure)}\n")
+        sys.stdout.write(f"{describe_early_stop(result)}\n")
         sys.exit(1)
+
+
+def describe_early_stop(result: RunResult) -> str:
+    """One line saying why a run that did not succeed ended: every such exit names a reason."""
+    if result.status is RunStatus.FAILED:
+        if result.failure is not None:
+            return describe_failure(result.failure)
+        return (
+            "Reason: the run failed and recorded no cause; its event log names the error that "
+            "ended it."
+        )
+    if result.stop_reason is not None:
+        # Core ended the run when the stop landed: a resume refuses it, so say so here.
+        return f"Reason: {result.stop_reason}. The run has ended; start a new run to go on."
+    return "Reason: the run was stopped on request."
 
 
 _FAILURE_HEADLINES = {

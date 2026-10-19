@@ -31,7 +31,7 @@ from vibesys.repository import (
     validate_experiment_name,
 )
 from vibesys.run.contracts import ProfilerKind, RunRequest
-from vibesys.run.core_run import ensure_not_legacy_resume
+from vibesys.run.core_run import ensure_resumable
 from vibesys.run.experiment_repo import origin_matches
 from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
@@ -101,6 +101,7 @@ __all__ = [
     "default_skill_roots",
     "derived_environment_name",
     "editor_image_plan",
+    "ensure_resumable",
     "experiment_origin_matches",
     "generate_experiment_name",
     "is_task_image_reference",
@@ -153,7 +154,7 @@ def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry
         specs, containerized=run_environment_uses_docker(request.run_environment)
     )
     if request.resume is not None and registration.plugin.core is not None:
-        ensure_not_legacy_resume(request.project_root, request.resume.run_id)
+        ensure_resumable(request.project_root, request.resume.run_id)
 
 
 def run_environment_uses_docker(spec: RunEnvironmentSpec | None) -> bool:
