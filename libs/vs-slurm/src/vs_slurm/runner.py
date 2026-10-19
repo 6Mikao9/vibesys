@@ -1832,6 +1832,8 @@ def _job_script(request: _JobScriptRequest) -> str:
     service = request.service
     phase_timing_root = request.phase_timing_root
     lines = ["#!/usr/bin/env bash", "set -uo pipefail", f"cd {shlex.quote(workspace.as_posix())}"]
+    # A sshd-built bash that sees these re-reads the login rc over the setup's exports (README).
+    lines.append("unset SSH_CLIENT SSH2_CLIENT")
     if phase_timing_root is not None:
         lines.append(f"mkdir -p {shlex.quote((workspace / phase_timing_root).as_posix())}")
     if setup_script:
