@@ -2024,6 +2024,7 @@
         "run_status_changed",
         "chat",
         "chat_thread_created",
+        "steer_proposed",
         "status_query",
         "control",
         "invocation_started",
@@ -5814,6 +5815,7 @@
                   "span_ended": "#/$defs/SpanEndedData",
                   "span_started": "#/$defs/SpanStartedData",
                   "span_updated": "#/$defs/SpanUpdatedData",
+                  "steer_proposed": "#/$defs/SteerProposedData",
                   "subprocess_output": "#/$defs/SubprocessOutputData",
                   "todo_update": "#/$defs/TodoUpdateData",
                   "tool_call": "#/$defs/ToolCallData",
@@ -5904,6 +5906,9 @@
                 },
                 {
                   "$ref": "#/$defs/ToolResultData"
+                },
+                {
+                  "$ref": "#/$defs/SteerProposedData"
                 },
                 {
                   "$ref": "#/$defs/TodoUpdateData"
@@ -7167,6 +7172,60 @@
       ],
       "title": "SteerMode",
       "type": "string"
+    },
+    "SteerProposal": {
+      "additionalProperties": false,
+      "description": "Guidance a chat agent suggests, in the fields of a ``SteerRequest``.\n\nIt carries no ``control_id`` and nothing in it reaches the run: only an operator's\n``command.control`` with a ``SteerRequest`` does. The tool that returns it is the\nagent's only steering tool, so the agent cannot send guidance.",
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/SteerTarget",
+          "default": {
+            "kind": "run",
+            "id": null
+          }
+        },
+        "mode": {
+          "$ref": "#/$defs/SteerMode",
+          "default": "next_turn"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "SteerProposal",
+      "type": "object"
+    },
+    "SteerProposedData": {
+      "additionalProperties": false,
+      "description": "A steer the chat agent suggests; the operator edits, sends or dismisses it.\n\nRecorded on the chat thread (the event header's ``chat_thread_id``) whose turn called\n``propose_steer``. It is a proposal only: nothing reaches the run until the operator sends\na ``command.control`` steer, which the proposal's fields prefill. ``proposal_id`` names it\nfor the client's card, and is unique within the run.",
+      "properties": {
+        "kind": {
+          "const": "steer_proposed",
+          "default": "steer_proposed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "proposal_id": {
+          "minLength": 1,
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "proposal": {
+          "$ref": "#/$defs/SteerProposal"
+        }
+      },
+      "required": [
+        "kind",
+        "proposal_id",
+        "proposal"
+      ],
+      "title": "SteerProposedData",
+      "type": "object"
     },
     "SteerRequest": {
       "additionalProperties": false,

@@ -22,7 +22,7 @@ from server.chat.session import (
 from server.chat.transcript import FileChatTranscriptStore
 from server.events import ChatThreadCreatedData, ChatThreadId
 from server.run_attachment import AgentSelection, RunAttachment
-from vibesys.api import AuxiliaryAgentLaunch
+from vibesys.api import AuxiliaryAgentLaunch, AuxiliarySkills
 from vs_sim.api import CloseOnce, ReleaseStack, utc_datetime
 
 if TYPE_CHECKING:
@@ -83,6 +83,7 @@ def build_chat_agent(
             model=selection.model,
             system_prompt=experiment_chat_system_prompt(),
             continuation_prompt=experiment_chat_continuation_prompt(),
+            skills=AuxiliarySkills.CHAT,
         )
     )
 
