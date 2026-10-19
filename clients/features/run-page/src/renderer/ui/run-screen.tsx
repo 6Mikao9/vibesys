@@ -51,11 +51,18 @@ import {
   timelineView,
   traceArrival,
   transcriptLoading,
+  unplacedRun,
   usageRecords,
   whoBySpan,
 } from '../../state/index.js';
 import {Hero} from './hero.js';
-import {HistoryLoading, InitialRunLoading, RunGone, RunLoadError} from './history-loading.js';
+import {
+  HistoryLoading,
+  InitialRunLoading,
+  RunGone,
+  RunLoadError,
+  RunUnplaced,
+} from './history-loading.js';
 import {DeepLevel, IdeasWorkspace, type LevelProps} from './levels.js';
 import {RunLevel} from './run-level.js';
 import {RunScrubber} from './run-scrubber.js';
@@ -402,9 +409,14 @@ function pendingRunScreen(
 ): JSX.Element | null {
   const header = <Header state={state} dispatch={dispatch} />;
   if (state.record.kind === 'unlisted') {
+    const unplaced = unplacedRun(state);
     return (
       <Screen density="compact" header={header}>
-        <InitialRunLoading stage="locating" />
+        {unplaced === null ? (
+          <InitialRunLoading stage="locating" />
+        ) : (
+          <RunUnplaced label={unplaced.label} words={unplaced.words} />
+        )}
       </Screen>
     );
   }
