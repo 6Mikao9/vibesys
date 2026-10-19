@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
-import {exampleCatalogueWithoutDetails} from '@vibesys/run-fixtures';
+import {exampleCatalogueWithoutDetails, queueRsCatalogue} from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
 import {
   installFakeBridge,
@@ -147,6 +147,29 @@ test('an example data structure: its structure, its workload, a goal with no dir
   expect(started).toMatchObject([{project: '~/vibesys-projects/stack', task: 'mpmc'}]);
 });
 
+test('an example of the real catalogue shows its goal like a project of the user: the file, the text, what it optimizes', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await open(page, {...SEED, newRun: {...newRun, examples: queueRsCatalogue}});
+  await choose(page, 'Start from', 'An example');
+  await proceed(page);
+  await choose(page, 'Domain', 'Data structures');
+  await proceed(page);
+  await choose(page, 'Structure', /queue-rs/);
+  await proceed(page);
+  await choose(page, 'Workload', /Multiple producers, multiple consumers/);
+  await proceed(page);
+  await expect(main(page)).toContainText('.vibesys/tasks/mpmc/OBJECTIVE.md');
+  await expect(main(page)).toContainText(
+    'Optimize a multi-producer, multi-consumer bounded FIFO queue',
+  );
+  await expect(main(page)).toContainText('Higher is better');
+  await expect(main(page)).toContainText('total_ops_per_sec');
+  await expect(main(page)).not.toContainText('Goal not shown here');
+});
+
 test('your own project: a recent one, its task, the agent on its machine, and the run starts', async ({
   page,
 }) => {
@@ -190,7 +213,7 @@ test('your own project: a recent one, its task, the agent on its machine, and th
   ]);
 });
 
-test('a machine whose VibeSys cannot read a goal says it is read when the run starts', async ({
+test('a machine whose VibeSys cannot read a goal says Needs an update, not that the goal is hidden', async ({
   page,
 }) => {
   const newRun = SEED.newRun;
@@ -202,27 +225,63 @@ test('a machine whose VibeSys cannot read a goal says it is read when the run st
       features: [...REQUIRED_HELPER_FEATURES, 'run_roles', 'example_catalogue'],
     },
   });
-  await expect(main(page)).toContainText('Goal not shown here');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(main(page)).toContainText('.vibesys/tasks/mpmc/OBJECTIVE.md');
+  await expect(main(page)).not.toContainText('Goal not shown here');
   await expect(main(page)).not.toContainText('Higher is better');
 });
 
 for (const width of [1440, 1000, 660]) {
-  test(`Back and the way on start at one top edge at ${width}px, a reason hanging below`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({width, height: 900});
-    // A page whose Continue is blocked (it gives a reason under it) and Review's Start run.
-    for (const name of ['domain', 'review']) {
-      await openAt(page, pageNamed(name));
-      expect(await page.evaluate(() => window.innerWidth)).toBe(width);
-      const forward = name === 'domain' ? 'Continue' : 'Start run';
-      const top = async (label: string) =>
-        (await main(page).getByRole('button', {name: label, exact: true}).boundingBox())?.y;
-      expect(await top('Back')).toBeDefined();
-      expect(await top('Back')).toBe(await top(forward));
-    }
-  });
+  for (const height of [900, 480]) {
+    test(`Back and Continue sit in one place on every step at ${width}px, ${height}px high`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({width, height});
+      // Five steps of different lengths: a short question, a list, the hardware tiles, Where
+      // (long) and Agent (long); the tall window leaves room, the low one makes them scroll.
+      const boxes: {back: unknown; next: unknown}[] = [];
+      for (const name of ['domain', 'model', 'hardware', 'where', 'agent', 'review']) {
+        await openAt(page, pageNamed(name));
+        expect(await page.evaluate(() => window.innerWidth)).toBe(width);
+        const back = await main(page)
+          .getByRole('button', {name: 'Back', exact: true})
+          .boundingBox();
+        // Review's way on is Start run, as wide as its words: only its edge is the same.
+        const next = await main(page)
+          .getByRole('button', {name: name === 'review' ? 'Start run' : 'Continue', exact: true})
+          .boundingBox();
+        expect(back).not.toBeNull();
+        expect(next).not.toBeNull();
+        boxes.push({
+          back,
+          next: name === 'review' ? {y: next?.y, height: next?.height} : next,
+        });
+        // Pinned inside the window, below the content, even when the content scrolls.
+        expect((next?.y ?? 0) + (next?.height ?? 0)).toBeLessThanOrEqual(height);
+      }
+      const [first, ...rest] = boxes;
+      const review = rest.pop();
+      for (const each of rest) expect(each).toEqual(first);
+      expect(review?.back).toEqual(first?.back);
+      const forward = first?.next as {y: number; height: number} | null;
+      expect(review?.next).toEqual({y: forward?.y, height: forward?.height});
+    });
+  }
 }
+
+test('a step draws no explanatory sentence under its question, and a blocked Continue no caption', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('start'));
+  await expect(main(page)).not.toContainText('Start from one of our examples');
+  await expect(main(page)).not.toContainText('A ready-made task');
+  await expect(main(page)).not.toContainText('Your own repository');
+  await expect(main(page)).not.toContainText('Answer the question above');
+  await expect(main(page).getByRole('button', {name: 'Continue'})).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+});
 
 test('the steps show their answers and go back to them; a later question waits for the earlier', async ({
   page,
@@ -382,7 +441,9 @@ test('a helper without the catalogue lists examples and their tasks, with no dom
   await expect(question(page, 'Which task?')).toBeVisible();
   await choose(page, 'Task', 'vllm');
   await proceed(page);
-  await expect(main(page)).toContainText('Goal not shown here');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(main(page)).toContainText('.vibesys/tasks/vllm/OBJECTIVE.md');
+  await expect(main(page)).not.toContainText('Goal not shown here');
 });
 
 test('a machine with no examples dims that start, and says so', async ({page}) => {
@@ -626,7 +687,7 @@ test('an agent for a role: closed until opened, chosen from the run harness, lis
   ]);
 });
 
-test('a machine whose VibeSys cannot run an agent per role says so on the Agent page', async ({
+test('a machine whose VibeSys cannot run an agent per role says Needs an update on that row, never beside an installed harness', async ({
   page,
 }) => {
   const newRun = SEED.newRun;
@@ -635,7 +696,13 @@ test('a machine whose VibeSys cannot run an agent per role says so on the Agent 
     ...SEED,
     newRun: {...newRun, features: [...REQUIRED_HELPER_FEATURES, 'run_roles']},
   });
-  await expect(main(page).getByText('Not supported on this machine')).toBeVisible();
+  // One status for the row that cannot be used; the harness card keeps saying it is installed.
+  const row = main(page).getByText('Use a different agent for a role').locator('..');
+  await expect(row).toContainText('Needs an update');
+  await expect(main(page).getByRole('radiogroup', {name: 'Harness'})).toContainText(
+    'Installed on host-b',
+  );
+  await expect(main(page).getByText('Not supported on this machine')).toHaveCount(0);
   await expect(main(page).getByRole('button', {name: /different agent for a role/})).toHaveCount(0);
 });
 
