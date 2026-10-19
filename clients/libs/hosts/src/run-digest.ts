@@ -24,6 +24,11 @@ export interface IdeaPoint {
   /** An improvement over the input (the digest's wording), null before the idea has a reading. */
   readonly ratio: number | null;
   readonly verdict: IdeaVerdict;
+  /**
+   * When the idea's result landed, in milliseconds, by the journal's clock; null when the journal
+   * gave no readable time (or the helper predates it). The time a kept idea became the best.
+   */
+  readonly at: number | null;
 }
 
 /**
@@ -74,7 +79,11 @@ function dashboardOf(summary: RunSummary, digest: RunDigest): RunDashboardEntry 
   const {dashboard} = digest;
   if (dashboard === undefined || dashboard === null) return null;
   return {
-    points: dashboard.points.map(({ratio, verdict}) => ({ratio, verdict})),
+    points: dashboard.points.map(({ratio, verdict, at}) => ({
+      ratio,
+      verdict,
+      at: at === undefined || at === null ? null : Date.parse(at),
+    })),
     pointsOmitted: dashboard.points_omitted,
     failedStreak: dashboard.failed_streak,
     lastEventAt: dashboard.last_event_at === null ? null : Date.parse(dashboard.last_event_at),

@@ -115,9 +115,12 @@ export type {
   StopOutcome,
   TaskGoal,
   TaskList,
+  TokenTally,
   TurnReply,
   UnreadableRecord,
   UsageRecord,
+  UsageWindowReply,
+  UsageWindowRequest,
 } from './generated/host-helper.generated.js';
 
 const STRICT: SchemaWalk = {documents: [hostHelperSchema], strict: true};

@@ -36,6 +36,7 @@ import {
   type RunSummary,
   type TaskGoal,
   type UnreadableRecord,
+  type UsageWindowReply,
 } from '@vibesys/contracts/host-helper';
 import {ConnectionError} from '../shell/helper-channel.js';
 import type {Link} from '../shell/link.js';
@@ -154,7 +155,34 @@ export interface FakeHost {
   logins: AgentLogin[];
   /** What `agent_logins.start` answers per provider; a provider not named has no login command. */
   readonly loginStarts: Map<string, LoginStarted | LoginUnavailable>;
+  /**
+   * What `usage.window` answers per project: the figures it holds, whatever the window. The reply
+   * echoes the window asked for and names as `missing_runs` the requested runs the project's
+   * `runHistory` does not list; a project not named here has spent nothing.
+   */
+  readonly usage: Map<string, UsageFigures>;
 }
+
+/** The figures of a `usage.window` reply that do not depend on which window was asked. */
+type UsageFigures = Omit<
+  UsageWindowReply,
+  'type' | 'request_id' | 'since' | 'until' | 'missing_runs'
+>;
+
+/** A project that spent nothing: the figures `usage.window` answers for a project with no entry. */
+const NO_USAGE: UsageFigures = {
+  spent_usd: 0,
+  spend_per_hour_usd: 0,
+  tokens: {input: null, cache_read: null, cache_write: null, output: null, reasoning: null},
+  turns: 0,
+  unpriced_turns: 0,
+  untimed_turns: 0,
+  new_bests: 0,
+  cost_per_new_best_usd: null,
+  by_run: [],
+  by_agent: [],
+  agents_omitted: 0,
+};
 
 /** `listing` as a helper answers a client that does not set `with_catalogue`. */
 function withoutTaskDetails(listing: ExampleList): ExampleList {
@@ -380,6 +408,7 @@ export class FakeHelper {
     clusterTests: new Map(),
     logins: [],
     loginStarts: new Map(),
+    usage: new Map(),
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -436,6 +465,7 @@ export class FakeHelper {
     'machine_compute',
     'agent_logins',
     'project_goal',
+    'usage_window',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -743,6 +773,7 @@ class HelperSession {
       case 'runs.events_for_span':
       case 'runs.read_tail':
       case 'runs.summary':
+      case 'usage.window':
         this.#readRunHistory(request);
         return;
       case 'machine.describe':
@@ -759,11 +790,7 @@ class HelperSession {
         this.#createProject(request);
         return;
       case 'checkout.inspect':
-        this.#send({
-          type: 'checkout.inspect',
-          request_id: id,
-          inspection: this.#helper.host.checkouts.get(request.path) ?? {state: 'not_found'},
-        });
+        this.#inspectCheckout(request);
         return;
       case 'harnesses.list':
         this.#harnesses(request);
@@ -795,6 +822,15 @@ class HelperSession {
         this.#send({type: 'logs.cancel', request_id: id, read_id: request.read_id});
         return;
     }
+  }
+
+  /** The inspection of a checkout the host holds, or `not_found` when it holds none there. */
+  #inspectCheckout(request: Extract<HelperRequest, {type: 'checkout.inspect'}>): void {
+    this.#send({
+      type: 'checkout.inspect',
+      request_id: request.request_id,
+      inspection: this.#helper.host.checkouts.get(request.path) ?? {state: 'not_found'},
+    });
   }
 
   /** The compute settings and agent login requests, which read or change what the host holds. */
@@ -845,6 +881,21 @@ class HelperSession {
         });
         return;
     }
+  }
+
+  /** The figures the host holds for the (known) project, in the window asked for. */
+  #usage(request: Extract<HelperRequest, {type: 'usage.window'}>): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    const known = new Set((host.runHistory.get(request.project) ?? []).map(run => run.run_id));
+    this.#send({
+      ...(host.usage.get(request.project) ?? NO_USAGE),
+      type: 'usage.window',
+      request_id: id,
+      since: request.since,
+      until: request.until,
+      missing_runs: [...new Set(request.run_ids)].filter(run => !known.has(run)),
+    });
   }
 
   #harnesses(request: Extract<HelperRequest, {type: 'harnesses.list'}>): void {
@@ -1215,16 +1266,27 @@ class HelperSession {
     });
   }
 
-  /** The fake host records no runs, so every run of a known project is unknown. */
+  /** The fake host records no runs, so every run of a known project is unknown; usage is what it holds. */
   #readRunHistory(
     request: Extract<
       HelperRequest,
-      {type: 'runs.read_events' | 'runs.events_for_span' | 'runs.read_tail' | 'runs.summary'}
+      {
+        type:
+          | 'runs.read_events'
+          | 'runs.events_for_span'
+          | 'runs.read_tail'
+          | 'runs.summary'
+          | 'usage.window';
+      }
     >,
   ): void {
     const id = request.request_id;
     if (!this.#helper.host.projects.has(request.project)) {
       this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
+      return;
+    }
+    if (request.type === 'usage.window') {
+      this.#usage(request);
       return;
     }
     if (request.type === 'runs.summary') {

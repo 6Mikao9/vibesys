@@ -221,7 +221,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_summary", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The host helper's `logs` feature: chunking, tails and the long poll over the LogReader role.
@@ -278,6 +278,12 @@ depends_on = ["server.host_api", "server.host_machine_facts", "vs_sim.api"]
 # What a run's tile draws (per-idea points, attention reason): contracts only. Pydantic only.
 path = "server.host_run_dashboard"
 depends_on = []
+
+[[modules]]
+# What runs spent in a window, summed from their usage records: a pure function. Light, and
+# loaded by the host helper on the first usage.window request, not for hello.
+path = "server.usage_window"
+depends_on = ["server.host_envelope", "server.host_run_summary"]
 
 [[modules]]
 # A run's digest (ideas, best ratio, duration, ending) folded from its journal in one pass.

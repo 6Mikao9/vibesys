@@ -33,6 +33,9 @@ import {
   type ListedRun,
   listedRuns,
   type RunDigestsReply,
+  type UsageWindowOutcome,
+  usageWindowEntry,
+  usageWindowRefusal,
   validHostPath,
 } from '@vibesys/hosts';
 import type {
@@ -534,6 +537,39 @@ export class Hosts {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read the runs of ${project}`);
+    }
+  }
+
+  /**
+   * What `runIds` of `project` on `id` spent in `[since, until)` (`usage.window`, feature
+   * `usage_window`), both in milliseconds; `unsupported` when the host's VibeSys does not offer it.
+   * `until` is "now" for the rate, as the helper reads no clock. A window or list the helper would
+   * refuse (see `usageWindowRefusal`) is a mistake of the caller and throws before any request.
+   */
+  async usageWindow(
+    id: HostId,
+    project: string,
+    runIds: readonly string[],
+    since: number,
+    until: number,
+  ): Promise<UsageWindowOutcome> {
+    const refusal = usageWindowRefusal(runIds, since, until);
+    if (refusal !== null) throw new Error(refusal);
+    await using lease = await this.connection(id);
+    try {
+      const reply = await lease.connection.request({
+        type: 'usage.window',
+        project,
+        run_ids: [...runIds],
+        since: new Date(since).toISOString(),
+        until: new Date(until).toISOString(),
+      });
+      return {kind: 'usage', usage: usageWindowEntry(reply)};
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not read what the runs of ${project} spent`);
     }
   }
 

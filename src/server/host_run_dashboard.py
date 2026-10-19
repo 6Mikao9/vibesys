@@ -44,12 +44,19 @@ class IdeaPoint(BaseModel):
     ``ratio`` is worded like ``RunDigest.adopted_ratio`` (an improvement over the input, for a
     ``min`` objective the input's value over the result's); ``None`` when the idea has no
     measurement against the input (it failed before one, or still works).
+
+    ``at`` is when the idea's result landed, by the journal's event clock: the time of the gate event
+    that last wrote the reading the idea is plotted by, else of the idea's last event; ``None`` when
+    the journal's event has no readable time. It is the one definition of when a ``kept`` idea became
+    the best (``usage.window`` counts new bests by it); the span clock orders the chart but is not a
+    time of day.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     ratio: float | None
     verdict: IdeaVerdict
+    at: AwareDatetime | None = None
 
 
 DASHBOARD_MAX_POINTS: Final = 64

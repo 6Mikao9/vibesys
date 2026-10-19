@@ -107,6 +107,8 @@ class HelperFeature(StrEnum):
     """``agent_logins.list`` and ``agent_logins.start``: each harness's login on the machine."""
     PROJECT_GOAL = "project_goal"
     """``project.task_goal``: a project's task goal text (``OBJECTIVE.md``) and its objectives."""
+    USAGE_WINDOW = "usage_window"
+    """``usage.window``: what a project's runs spent in a window of time, for the Usage page."""
 
 
 class HelperRequestBase(BaseModel):
