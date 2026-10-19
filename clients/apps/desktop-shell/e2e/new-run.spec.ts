@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import {exampleCatalogueWithoutDetails} from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
 import {
@@ -198,7 +199,7 @@ test('a machine whose VibeSys cannot read a goal says it is read when the run st
     ...SEED,
     newRun: {
       ...newRun,
-      features: ['run_options', 'preflight', 'examples', 'run_roles', 'example_catalogue'],
+      features: [...REQUIRED_HELPER_FEATURES, 'run_roles', 'example_catalogue'],
     },
   });
   await expect(main(page)).toContainText('Goal not shown here');
@@ -370,7 +371,7 @@ test('a helper without the catalogue lists examples and their tasks, with no dom
     newRun: {
       ...newRun,
       examples: exampleCatalogueWithoutDetails,
-      features: ['run_options', 'preflight', 'examples', 'run_roles'],
+      features: [...REQUIRED_HELPER_FEATURES, 'run_roles'],
     },
   });
   await choose(page, 'Start from', 'An example');
@@ -405,15 +406,44 @@ test('a machine whose VibeSys predates New run says so and is never asked to sta
     ...SEED,
     newRun: {...newRun, features: ['harnesses']},
   });
-  await expect(main(page)).toContainText(
-    'VibeSys on host-b is older than this app: update its checkout to start runs from here ' +
-      '(it lacks run_options, preflight, examples).',
-  );
+  await expect(main(page)).toContainText('VibeSys on host-b');
+  await expect(main(page)).toContainText('Needs an update');
   await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
   await start(page).click({force: true});
   const {started, preflights} = await fakeNewRun(page);
   expect(started).toEqual([]);
   expect(preflights).toEqual([]);
+});
+
+function withoutRunTrace() {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  return {
+    ...SEED,
+    newRun: {
+      ...newRun,
+      features: REQUIRED_HELPER_FEATURES.filter(feature => feature !== 'run_trace'),
+    },
+  };
+}
+
+test('a machine that serves everything but the run trace says Needs an update on Where', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('where'), withoutRunTrace());
+  await expect(main(page).getByText('Needs an update')).toBeVisible();
+});
+
+test('a machine that serves everything but the run trace says Needs an update on Review and never starts', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('review project'), withoutRunTrace());
+  await expect(main(page)).toContainText('VibeSys on host-b');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(start(page)).toHaveAttribute('aria-disabled', 'true');
+  await start(page).click({force: true});
+  const {started} = await fakeNewRun(page);
+  expect(started).toEqual([]);
 });
 
 test('Run again opens Review with the run as it was started', async ({page}) => {
@@ -548,7 +578,7 @@ test('a machine whose VibeSys does not report its roles says every role runs as 
   if (newRun === undefined) throw new Error('the seed has no New run helper');
   await openAt(page, pageNamed('review project'), {
     ...SEED,
-    newRun: {...newRun, features: ['run_options', 'preflight', 'examples']},
+    newRun: {...newRun, features: REQUIRED_HELPER_FEATURES},
   });
   await main(page).getByRole('button', {name: 'More options'}).click();
   await expect(page.getByText(/does not report its agent roles/)).toBeVisible();
@@ -603,7 +633,7 @@ test('a machine whose VibeSys cannot run an agent per role says so on the Agent 
   if (newRun === undefined) throw new Error('the seed has no New run helper');
   await openAt(page, pageNamed('agent project'), {
     ...SEED,
-    newRun: {...newRun, features: ['run_options', 'preflight', 'examples', 'run_roles']},
+    newRun: {...newRun, features: [...REQUIRED_HELPER_FEATURES, 'run_roles']},
   });
   await expect(main(page).getByText('Not supported on this machine')).toBeVisible();
   await expect(main(page).getByRole('button', {name: /different agent for a role/})).toHaveCount(0);
