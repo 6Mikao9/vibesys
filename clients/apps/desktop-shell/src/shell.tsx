@@ -37,7 +37,6 @@ import {
 import {
   type RunPageNavigation,
   type RunPagePage,
-  RunScreen,
   useRunPage,
 } from '@vibesys/feature-run-page/renderer';
 import {RUN_ROUTE, routeQuery, runRecord} from '@vibesys/feature-run-page/state';
@@ -63,6 +62,7 @@ import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
+import {RunWithChat} from './run-chat.js';
 import {runCounts, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
@@ -302,17 +302,7 @@ function RunRoute(props: {
       </Page>
     );
   }
-  return (
-    <RunScreen
-      state={page.state}
-      model={page.model}
-      whole={page.whole}
-      core={page.core}
-      route={page.route}
-      zoom={page.zoom}
-      dispatch={page.dispatch}
-    />
-  );
+  return <RunWithChat page={page} run={run} bridge={stores.bridge} />;
 }
 
 /** The unfinished New run the dashboard offers, or null when there is not one. */

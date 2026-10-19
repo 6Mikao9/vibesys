@@ -19,6 +19,7 @@ import {
   sameRecord,
   type ZoomEvent,
 } from '../../state/index.js';
+import type {LiveChat} from './live-session.js';
 import {createRunPageStore, type RunPageStore} from './store.js';
 import {useZoom} from './use-zoom.js';
 import {
@@ -56,6 +57,8 @@ export function useRunPage(options: RunPageOptions): {
   /** Where the screen is zoomed, and the way to move it. */
   readonly route: Route;
   readonly zoom: (event: ZoomEvent) => void;
+  /** The attached run's chat over its session. */
+  readonly chat: LiveChat;
 } | null {
   const {seed, record, bridge, navigation, schedule, page} = options;
   const [store, setStore] = useState<RunPageStore | null>(null);
@@ -119,5 +122,14 @@ export function useRunPage(options: RunPageOptions): {
   }, [store, detailSpan]);
   if (store === null || state === null || model === null) return null;
   if (whole === null) return null;
-  return {state, dispatch: store.dispatch, model, whole, core: state.run.core, route, zoom};
+  return {
+    state,
+    dispatch: store.dispatch,
+    model,
+    whole,
+    core: state.run.core,
+    route,
+    zoom,
+    chat: store.chat,
+  };
 }

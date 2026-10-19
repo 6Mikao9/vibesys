@@ -488,6 +488,26 @@ describe('core state projection', () => {
     ]);
   });
 
+  it('names the last chat thread from a snapshot, even a stale one, and keeps it when a later one names none', () => {
+    const current = reduceEvent(initialCoreState(), outputEvent(5, 'current'));
+    const named = reduceSnapshot(current, {
+      run_id: 'run',
+      status: 'running',
+      sequence: 4,
+      chat_threads: [{thread_id: 'thread-a', title: '', provider: 'codex', model: 'gpt-5'}],
+      last_chat_thread_id: 'thread-a',
+    } satisfies RunSnapshot);
+    expect(named.lastChatThreadId).toBe('thread-a');
+
+    const later = reduceSnapshot(named, {
+      run_id: 'run',
+      status: 'running',
+      sequence: 9,
+    } satisfies RunSnapshot);
+    expect(later.lastChatThreadId).toBe('thread-a');
+    expect(initialCoreState().lastChatThreadId).toBeNull();
+  });
+
   it('leaves a stale snapshot that projects no chat threads identity-preserving', () => {
     const current = reduceEvent(initialCoreState(), {...outputEvent(5, 'current'), run_id: 'run'});
     const stale = {run_id: 'run', status: 'running', sequence: 4} satisfies RunSnapshot;
@@ -1139,6 +1159,72 @@ describe('core state projection', () => {
       ]);
       expect(state.chatTranscript.every(item => item.turnId === undefined)).toBe(true);
     }
+  });
+
+  it('keeps each thread its questions and its proposed steers, once each', () => {
+    const asked = (sequence: number, threadId: string, text: string): RunEvent => ({
+      ...chatTitledEvent(sequence, threadId, ''),
+      text,
+    });
+    const proposed = (sequence: number, threadId: string, id: string): RunEvent => ({
+      ...baseEvent(sequence, 'steer_proposed'),
+      chat_thread_id: threadId,
+      data: {
+        kind: 'steer_proposed',
+        proposal_id: id,
+        proposal: {text: 'keep bf16', target: {kind: 'role', id: 'implementer'}, mode: 'standing'},
+      },
+    });
+    const events = [
+      asked(1, 'thread-a', 'what is best?'),
+      proposed(2, 'thread-a', 'p-1'),
+      proposed(3, 'thread-a', 'p-1'),
+      proposed(4, 'thread-b', 'p-2'),
+      asked(5, 'thread-a', 'why?'),
+    ];
+    let state = initialCoreState();
+    for (const item of [...events, events[1] as RunEvent]) state = reduceEvent(state, item);
+
+    expect(state.chatQuestions['thread-a']).toEqual([
+      {id: '1', text: 'what is best?'},
+      {id: '5', text: 'why?'},
+    ]);
+    expect(state.chatProposals['thread-a']).toEqual([
+      {
+        id: 'p-1',
+        sequence: 2,
+        text: 'keep bf16',
+        target: {kind: 'role', id: 'implementer'},
+        mode: 'standing',
+      },
+    ]);
+    expect(state.chatProposals['thread-b']?.map(proposal => proposal.id)).toEqual(['p-2']);
+    // A proposal is not an answer: it adds nothing to any transcript.
+    expect(state.chatTranscripts['thread-a']?.length).toBe(2);
+  });
+
+  it('keeps the steps of a steer the server reports by control id, once each', () => {
+    const step = (sequence: number, delivery: Record<string, unknown>): RunEvent =>
+      ({
+        ...baseEvent(sequence, 'steer_delivery' as RunEvent['type']),
+        data: {kind: 'steer_delivery', delivery},
+      }) as unknown as RunEvent;
+    const events = [
+      step(1, {state: 'queued', control_id: 'c-1', action: 'steer', mode: 'standing'}),
+      step(2, {state: 'in_force', control_id: 'c-1', role: 'implementer', attempt_id: 'a-3'}),
+      step(2, {state: 'in_force', control_id: 'c-1'}),
+      step(3, {state: 'refused', control_id: 'c-2', reason: 'no such role'}),
+    ];
+    let state = initialCoreState();
+    for (const item of events) state = reduceEvent(state, item);
+
+    expect(state.steerDeliveries.map(fact => [fact.step, fact.controlId])).toEqual([
+      ['queued', 'c-1'],
+      ['in_force', 'c-1'],
+      ['refused', 'c-2'],
+    ]);
+    expect(state.steerDeliveries[1]).toMatchObject({role: 'implementer', attemptId: 'a-3'});
+    expect(state.steerDeliveries[2]?.reason).toBe('no such role');
   });
 
   it('replays the thread list from creation events after the implicit default', () => {

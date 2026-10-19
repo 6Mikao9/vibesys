@@ -1,5 +1,6 @@
 import {
   Card,
+  ChatMessage,
   Collapsible,
   Message,
   type MessageVariant,
@@ -204,6 +205,15 @@ const THREAD: readonly ThreadItem[] = [
     text: 'accuracy check passed in 41s',
   },
   {
+    kind: 'node',
+    id: 'n1',
+    node: (
+      <Card>
+        <Text>A block of the caller’s own, with its own controls.</Text>
+      </Card>
+    ),
+  },
+  {
     kind: 'message',
     id: 'm5',
     author: 'Worker',
@@ -285,11 +295,25 @@ export const THREAD_ENTRIES: Readonly<
   Record<
     Extract<
       ComponentName,
-      'Collapsible' | 'Message' | 'ToolCall' | 'StructuredReply' | 'Thread' | 'TurnResult'
+      | 'ChatMessage'
+      | 'Collapsible'
+      | 'Message'
+      | 'ToolCall'
+      | 'StructuredReply'
+      | 'Thread'
+      | 'TurnResult'
     >,
     GalleryEntry
   >
 > = {
+  ChatMessage: {
+    render: () => (
+      <Stack>
+        <ChatMessage side="end" text="What is the best idea so far?" />
+        <ChatMessage side="start" text={REPLY} notice="Writing" />
+      </Stack>
+    ),
+  },
   Collapsible: {render: () => <CollapsibleDemo />},
   Message: {render: () => <MessageDemo />},
   ToolCall: {render: () => <ToolCallDemo />},
