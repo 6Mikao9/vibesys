@@ -12,6 +12,7 @@ import {
   installFakeMachineSettings,
   installFakeMachines,
   installFakeNewRun,
+  installFakeProjectRuns,
 } from './fake-bridge.js';
 import {FAKE_OFFER} from './fake-offer.js';
 import {STARTED_AT} from './started-at.js';
@@ -20,7 +21,6 @@ export interface FakeHostWindow extends Window {
   fakeHost: {
     readonly newRun: FakeNewRun;
     listing(listing: unknown): void;
-    toggleSidebar(): void;
     openSettings(): void;
     recent(runs: readonly unknown[]): void;
   };
@@ -75,6 +75,13 @@ export const SEED: FakeBridgeSeed = {
     ),
   ],
   recent: RECENT,
+  projectRuns: {
+    [`ssh:host-b|${PROJECT}`]: RECENT.map(({runId, task, attachedAt}) => ({
+      runId,
+      task,
+      createdAt: attachedAt,
+    })),
+  },
   machines: [
     {host: 'local', label: 'This Mac', checkout: '~/projs/vibesys'},
     {host: 'ssh:host-b', label: 'host-b', checkout: '/home/me/vibesys'},
@@ -119,10 +126,22 @@ export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<voi
   await page.addInitScript(installFakeMachines, seed);
   await page.addInitScript(installFakeMachineSettings, seed);
   await page.addInitScript(installFakeNewRun, seed);
+  await page.addInitScript(installFakeProjectRuns, seed);
   await page.goto('./shell.html');
   await expect(page.getByRole('navigation', {name: 'VibeSys'})).toBeVisible();
 }
 
+/** Opens the app and goes to New run by the rail, as a user starts a run. */
+export async function openNewRun(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
+  await open(page, seed);
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: 'New', exact: true})
+    .click();
+  await expect(page.getByRole('main')).toBeVisible();
+}
+
+/** The rail: the app's one navigation. */
 export const sidebar = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
 
 /**

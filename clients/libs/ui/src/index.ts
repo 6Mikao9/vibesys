@@ -83,6 +83,15 @@ export {
   type ToolLine,
 } from './components/narrative.js';
 export {NewBelow} from './components/new-below.js';
+export {
+  type ChartKeyItem,
+  OverviewGroup,
+  OverviewTile,
+  ResultChart,
+  ResultChartKey,
+  type SparkMark,
+  type SparkPoint,
+} from './components/overview-tiles.js';
 export {Pane, Panes, type PaneWidth} from './components/panes.js';
 export {
   type ParetoAxis,
@@ -109,6 +118,7 @@ export {
   type RowBar,
   type RowTrail,
 } from './components/pick-list.js';
+export {RailFrame, RailItem} from './components/rail.js';
 export {Breadcrumb, type Crumb, type Density, Screen} from './components/screen.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {SearchBox} from './components/search-box.js';

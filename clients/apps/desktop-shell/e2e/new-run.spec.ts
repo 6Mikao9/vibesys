@@ -2,10 +2,15 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {exampleCatalogueWithoutDetails} from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
-import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
+import {
+  installFakeBridge,
+  installFakeMachines,
+  installFakeNewRun,
+  installFakeProjectRuns,
+} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {choose, main, NEW_RUN_PAGES, openAt, proceed, question, steps} from './new-run-flow.js';
-import {type FakeHostWindow, open, PROJECT, SEED} from './world.js';
+import {type FakeHostWindow, openNewRun as open, PROJECT, SEED} from './world.js';
 
 const start = (page: Page) => main(page).getByRole('button', {name: 'Start run'});
 
@@ -313,30 +318,39 @@ test('changing the domain clears the questions of the old one, and Back returns 
   await expect(question(page, 'Which domain?')).toBeVisible();
 });
 
-test('an unfinished run is a draft: it is listed in the sidebar, kept across a reload, and discarded', async ({
+test('an unfinished run is a draft: it is offered on the Runs dashboard, kept across a reload, and discarded', async ({
   page,
 }) => {
   await open(page);
-  const sidebar = page.getByRole('navigation', {name: 'VibeSys'});
-  await expect(sidebar.getByText('Draft', {exact: true})).toHaveCount(0);
+  const rail = page.getByRole('navigation', {name: 'VibeSys'});
+  const home = async (): Promise<void> => {
+    await rail.getByRole('button', {name: /^Runs/}).click();
+    await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
+  };
+  await home();
+  await expect(main(page).getByText('Draft', {exact: true})).toHaveCount(0);
+  await rail.getByRole('button', {name: 'New', exact: true}).click();
   await choose(page, 'Start from', 'An example');
   await proceed(page);
   await choose(page, 'Domain', 'LLM serving');
   await proceed(page);
-  const draft = sidebar.getByRole('region', {name: 'Draft'});
-  await expect(draft).toContainText('3 of 8 · Model');
   // Leaving New run and coming back finds it where it was left.
-  await sidebar.getByRole('button', {name: 'Settings'}).click();
+  await home();
+  await expect(main(page)).toContainText('LLM serving');
+  await expect(main(page)).toContainText('3 of 8 · Model');
   await expect(question(page, 'Which model do you want to serve?')).toHaveCount(0);
-  await draft.getByRole('button', {name: 'LLM serving 3 of 8 \u00b7 Model'}).click();
+  await main(page).getByRole('button', {name: 'Open'}).click();
   await expect(question(page, 'Which model do you want to serve?')).toBeVisible();
   await page.reload();
+  await home();
+  await main(page).getByRole('button', {name: 'Open'}).click();
   await expect(question(page, 'Which model do you want to serve?')).toBeVisible();
   await expect(steps(page).getByRole('button', {name: /Domain/})).toContainText('LLM serving');
-  await draft.getByRole('button', {name: /More for/}).click();
-  await page.getByRole('menuitem', {name: 'Discard draft'}).click();
+  await home();
+  await main(page).getByRole('button', {name: 'Discard'}).click();
+  await expect(main(page).getByText('Draft', {exact: true})).toHaveCount(0);
+  await rail.getByRole('button', {name: 'New', exact: true}).click();
   await expect(question(page, 'What do you want to optimize?')).toBeVisible();
-  await expect(sidebar.getByRole('region', {name: 'Draft'})).toHaveCount(0);
 });
 
 test('Start over forgets the answers', async ({page}) => {
@@ -417,14 +431,12 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
   );
   const seed = {...SEED, recent};
   await page.addInitScript(installFakeBridge, seed);
+  await page.addInitScript(installFakeProjectRuns, seed);
   await page.addInitScript(installFakeMachines, seed);
   await page.addInitScript(installFakeNewRun, seed);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.goto('./shell.html');
-  await page
-    .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: /^\S+ queue-rs · spsc/})
-    .click();
+  await page.getByRole('main').getByRole('button', {name: /^spsc/}).click();
   await page.getByRole('button', {name: 'Run again', exact: true}).click();
   await expect(question(page, 'Ready to start?')).toBeVisible();
   await expect(main(page)).toContainText('Sonnet 4.5 · Claude Code');
@@ -664,6 +676,10 @@ test('More options starts closed, says what it holds, and stays as left on each 
   await more.click();
   await expect(main(page).getByLabel('Extra arguments')).toBeVisible();
   await page.reload();
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: 'New', exact: true})
+    .click();
   await expect(main(page).getByRole('button', {name: /More options/})).toHaveAttribute(
     'aria-expanded',
     'true',
@@ -719,6 +735,7 @@ test('a bridge call that throws is worded plainly, names what failed, and Try ag
   page,
 }) => {
   await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeProjectRuns, SEED);
   await page.addInitScript(installFakeMachines, SEED);
   await page.addInitScript(installFakeNewRun, SEED);
   // The agents' request is missing, as a bridge built before it would be.
@@ -735,7 +752,7 @@ test('a bridge call that throws is worded plainly, names what failed, and Try ag
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
-    .getByRole('button', {name: 'New run'})
+    .getByRole('button', {name: 'New', exact: true})
     .click();
 
   await expect(page.getByText(/Could not read the agents .* runs\./)).toBeVisible();

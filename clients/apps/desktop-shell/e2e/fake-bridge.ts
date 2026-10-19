@@ -34,7 +34,6 @@ export type CoreMethods =
   | 'onListing'
   | 'onRecent'
   | 'onPreferences'
-  | 'onToggleSidebar'
   | 'onOpenSettings';
 
 /** What `installFakeMachines` provides: the saved machines and the checkout and sign-in requests. */
@@ -91,6 +90,8 @@ export interface FakeBridgeSeed {
    * answers as an older helper would: it does not offer digests.
    */
   readonly digests?: Readonly<Record<string, unknown>>;
+  /** Hosts whose VibeSys is too old to offer digests, whatever `digests` holds. */
+  readonly digestless?: readonly string[];
   /**
    * What each machine lists of a project's runs (`runs.list`, as `ListedRun`s), by
    * `<host>|<project>`; a project not named is one the machine cannot list.
@@ -174,7 +175,6 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     sequence += 1;
     for (const listener of listeners[event] ?? []) listener({sequence, value});
   };
-  const toggleListeners: (() => void)[] = [];
   const settingsListeners: (() => void)[] = [];
   const ok = (value: unknown) => Promise.resolve({ok: true, value});
   const on = (event: string) => (listener: Listener) => {
@@ -213,18 +213,11 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       onListing: on('listing'),
       onRecent: on('recent'),
       onPreferences: on('preferences'),
-      onToggleSidebar: (listener: () => void) => {
-        toggleListeners.push(listener);
-      },
       onOpenSettings: (listener: () => void) => {
         settingsListeners.push(listener);
       },
     } satisfies FakeProvides<CoreMethods>,
     fakeHost: {
-      /** The application menu's "Toggle Sidebar". */
-      toggleSidebar: () => {
-        for (const listener of toggleListeners) listener();
-      },
       /** The application menu's "Settings…" (its Command-comma accelerator). */
       openSettings: () => {
         for (const listener of settingsListeners) listener();
@@ -289,8 +282,9 @@ export function installRequestBound(limit: number): void {
 export function installFakeDigests(seed: FakeBridgeSeed): void {
   const digests = seed.digests;
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
-    runDigests: (_host: string, _project: string, runIds: readonly string[]) => {
-      if (digests === undefined) return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
+    runDigests: (host: string, _project: string, runIds: readonly string[]) => {
+      if (digests === undefined || seed.digestless?.includes(host) === true)
+        return Promise.resolve({ok: true, value: {kind: 'unsupported'}});
       const runs = new Map(runIds.flatMap(id => (id in digests ? [[id, digests[id]]] : [])));
       return Promise.resolve({ok: true, value: {kind: 'digests', runs}});
     },
@@ -302,10 +296,41 @@ export function installFakeDigests(seed: FakeBridgeSeed): void {
  * project's runs on each machine (`seed.projectRuns`), or a failure for a project not named.
  */
 export function installFakeProjectRuns(seed: FakeBridgeSeed): void {
-  const listings = seed.projectRuns ?? {};
+  type Listed = {runId: string; name: string; task: string | null; createdAt: number};
+  type Server = {projectRoot: string; runId: string; startedAt: number};
+  const listings = seed.projectRuns;
+  // Without a seeded listing, a machine lists what its servers hold and what the user opened.
+  const derived = (host: string, project: string): Listed[] => {
+    const served = (seed.listings as {host: string; live?: Server[]; ended?: Server[]}[])
+      .filter(listing => listing.host === host)
+      .flatMap(listing => [...(listing.live ?? []), ...(listing.ended ?? [])])
+      .filter(run => run.projectRoot === project)
+      .map((run): [string, Listed] => [
+        run.runId,
+        {runId: run.runId, name: run.runId, task: null, createdAt: run.startedAt * 1000},
+      ]);
+    const opened = (seed.recent as (Listed & {host: string; project: string; attachedAt: number})[])
+      .filter(each => each.host === host && each.project === project)
+      .map((each): [string, Listed] => [
+        each.runId,
+        {
+          runId: each.runId,
+          name: each.task ?? each.runId,
+          task: each.task,
+          createdAt: each.attachedAt,
+        },
+      ]);
+    return [...new Map([...served, ...opened]).values()];
+  };
   Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
     projectRuns: (host: string, project: string) => {
-      const runs = listings[`${host}|${project}`];
+      const seeded =
+        listings === undefined ? derived(host, project) : listings[`${host}|${project}`];
+      // A seeded run without a name of its own is named by its task, else its id.
+      const runs = seeded?.map(run => {
+        const each = run as Partial<Listed> & {runId: string; task?: string | null};
+        return {...each, name: each.name ?? each.task ?? each.runId};
+      });
       return Promise.resolve(
         runs === undefined
           ? {ok: false, error: `Could not list the runs of ${project}`, authNeeded: false}

@@ -36,6 +36,7 @@ export type SizeToken =
   | 'control'
   | 'row'
   | 'sidebar'
+  | 'rail'
   | 'content'
   | 'content-wide'
   | 'content-narrow'
@@ -47,6 +48,7 @@ export type SizeToken =
   | 'column-figure'
   | 'column-metric'
   | 'column-chart'
+  | 'chart-height'
   | 'pane-list'
   | 'pane-outline'
   | 'pane-master'
@@ -71,6 +73,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   control: 40,
   row: 44,
   sidebar: 264,
+  rail: 64,
   content: 1060,
   'content-wide': 1100,
   'content-narrow': 900,
@@ -82,6 +85,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-figure': 320,
   'column-metric': 360,
   'column-chart': 288,
+  'chart-height': 88,
   'pane-list': 380,
   'pane-outline': 340,
   'pane-master': 480,
