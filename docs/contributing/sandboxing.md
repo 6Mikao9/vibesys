@@ -151,6 +151,12 @@ macOS when full read confinement matters.
   every other environment. The profiler server of `slurm` runs in the container
   with the image's `python3` and `pydantic`, importing the Slurm adapter from the
   read-only `libs` mount at its host path.
+- **Slurm evaluator tools are the operator's, on the cluster.** A cargo-git evaluator
+  tool is built where the evaluator runs for Local, Docker, Modal and SkyPilot. The
+  trusted work of `slurm` runs on a compute node, so the run builds no tool and mounts
+  none in the editor: `[vibesys.evaluator_tools]` names each declared binary's path on
+  the cluster, and the run fails before the editor opens when the table does not match
+  the package's declaration ([Remote Slurm execution](../remote-slurm-execution.md)).
 - **Metal on macOS runs on the host.** Docker on macOS cannot expose Metal/MPS,
   so a backend that declares itself host-only (`backend_is_host_only`, today
   Metal) runs its agent in the `host` environment on macOS: the host path

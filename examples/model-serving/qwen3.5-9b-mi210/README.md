@@ -31,8 +31,15 @@ qwen3.5-9b-mi210/
 
 VibeSys runs the accuracy checker against the candidate's server and
 `benchmark/run.py --mode quick` through the pinned
-`vibesys-evaluator-request-factory` package. Cargo-tool evaluator packages
-require the Local run environment.
+`vibesys-evaluator-request-factory` package. That package's `session_runner` is
+a Cargo tool: the Local run environment builds it on the host, and
+`--run-environment slurm` runs it from a path on the cluster that the operator
+file names, because the benchmark runs on a compute node:
+
+```toml
+[vibesys.evaluator_tools.request-factory]
+session_runner = "/shared/tools/session_runner"  # a build of the pinned revision
+```
 
 ```bash
 vibesys --runs-dir /work/vibesys-runs --local \

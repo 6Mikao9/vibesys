@@ -50,6 +50,7 @@ from vs_sandbox.api import (
     DockerSandbox,
     SandboxKind,
 )
+from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, EvaluatorToolLifecycleHooks
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
     SlurmPolicyError,
@@ -338,6 +339,110 @@ def test_slurm_prepares_a_go_only_evaluator_before_capturing_its_support_tree(
         assert cluster.plan.support_paths[".vibesys-evaluator-go-modules"] == cache_root
     finally:
         session.close()
+
+
+_TOOLS_CONFIG = (
+    _SLURM_CONFIG
+    + """
+[vibesys.evaluator_tools.check-tool]
+check = "/cluster/tools/check"
+"""
+)
+
+
+def _tool_requirements(tmp_path: Path) -> TrustedEvaluatorRequirements:
+    package_root = tmp_path / "evaluator-package"
+    package_root.mkdir(exist_ok=True)
+    return TrustedEvaluatorRequirements(
+        package_root=package_root,
+        tools={
+            "check-tool": CargoGitToolSpec(
+                kind="cargo-git",
+                git="https://example.com/tools/check.git",
+                rev="a" * 40,
+                package="check-tool",
+                bins=("check",),
+            )
+        },
+        tools_root=tmp_path / "operator-tools",
+    )
+
+
+def _tool_environment(tmp_path: Path, config_text: str) -> SlurmEnvironment:
+    config = tmp_path / "slurm-tools.toml"
+    config.write_text(config_text, encoding="utf-8")
+    return SlurmEnvironment(
+        load_slurm_operator_settings(config),
+        docker=DockerEnvironmentConfig(build_runner=FakeDockerBuildRunner()),
+    )
+
+
+def test_a_cargo_tool_runs_from_the_operators_cluster_path_and_is_never_built_here(
+    tmp_path: Path,
+) -> None:
+    backend = FakeComputeBackend(threads=SimThreads())
+    request = replace(
+        _request(
+            tmp_path,
+            backend,
+            accuracy=None,
+            benchmark='"${TOOL:check-tool/check}" --flag',
+        ),
+        evaluator_requirements=_tool_requirements(tmp_path),
+        system=idle_environment_system(),
+    )
+
+    session = open_run_environment(_tool_environment(tmp_path, _TOOLS_CONFIG), request)
+    try:
+        # Only the editor container is built: no host or Docker tool build, and no
+        # tool tree mounted into the editor or staged to the cluster.
+        assert [creation.kind for creation in backend.creations] == [SandboxKind.DOCKER]
+        assert not any(
+            isinstance(hook, EvaluatorToolLifecycleHooks)
+            for creation in backend.creations
+            for hook in creation.lifecycle_hooks
+        )
+        assert all(
+            resource.purpose != "evaluator tool"
+            for creation in backend.creations
+            for resource in creation.resources
+        )
+        cluster = session.view.cluster_evaluation
+        assert cluster is not None
+        assert cluster.plan.benchmark_command == ("/cluster/tools/check", "--flag")
+        assert ".vibesys-evaluator-tools" not in cluster.plan.support_paths
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize(
+    ("config_text", "key"),
+    [
+        (_SLURM_CONFIG, "vibesys.evaluator_tools.check-tool.check"),
+        (
+            _SLURM_CONFIG + '[vibesys.evaluator_tools.other]\nrun = "/cluster/other"\n',
+            "vibesys.evaluator_tools.other",
+        ),
+        (
+            _TOOLS_CONFIG + 'extra = "/cluster/extra"\n',
+            "vibesys.evaluator_tools.check-tool.extra",
+        ),
+    ],
+)
+def test_the_operators_tool_table_must_match_the_package_and_fails_before_the_editor_opens(
+    tmp_path: Path, config_text: str, key: str
+) -> None:
+    backend = FakeComputeBackend(threads=SimThreads())
+    request = replace(
+        _request(tmp_path, backend, accuracy=None, benchmark='"${TOOL:check-tool/check}"'),
+        evaluator_requirements=_tool_requirements(tmp_path),
+        system=idle_environment_system(),
+    )
+
+    with pytest.raises(SlurmPolicyError, match=key):
+        open_run_environment(_tool_environment(tmp_path, config_text), request)
+
+    assert backend.creations == []
 
 
 def _run_tokens(backend: DaemonBackend) -> list[str]:

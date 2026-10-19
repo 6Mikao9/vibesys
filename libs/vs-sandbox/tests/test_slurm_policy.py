@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, tool_token
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
     AgentGpuRequestError,
@@ -197,3 +199,107 @@ def test_a_ledger_whose_withdrawal_window_exceeds_a_claim_window_is_rejected_nam
 def test_without_a_ledger_any_transport_timeout_loads(tmp_path: Path) -> None:
     """The window bounds only matter to the ledger."""
     assert load_slurm_operator_settings(_ledger_file(tmp_path, 400, None)).policy.ledger is None
+
+
+_TOOL_NAMES = st.from_regex(r"[a-z][a-z0-9]{0,5}(-[a-z0-9]{1,4})?", fullmatch=True)
+_BIN_NAMES = st.from_regex(r"[a-z][a-z0-9]{0,5}(_[a-z0-9]{1,4})?", fullmatch=True)
+_PATHS = st.from_regex(r"/[a-z]{1,6}(/[a-z]{1,6}){0,2}", fullmatch=True)
+
+
+def _spec(bins: tuple[str, ...]) -> CargoGitToolSpec:
+    return CargoGitToolSpec(
+        kind="cargo-git",
+        git="https://example.com/tools/t.git",
+        rev="a" * 40,
+        package="pkg",
+        bins=bins,
+    )
+
+
+_DECLARED = st.dictionaries(
+    _TOOL_NAMES,
+    st.lists(_BIN_NAMES, min_size=1, max_size=3, unique=True).map(tuple),
+    max_size=3,
+)
+
+
+def _table(entries: dict[str, dict[str, str]]) -> str:
+    return "[vibesys]\n" + "".join(
+        f"[vibesys.evaluator_tools.{tool}]\n"
+        + "".join(f'{binary} = "{path}"\n' for binary, path in binaries.items())
+        for tool, binaries in entries.items()
+    )
+
+
+@given(declared=_DECLARED, data=st.data())
+@settings(max_examples=examples(pr=40, nightly=400), deadline=None)
+def test_a_complete_tool_table_maps_every_declared_binary_to_its_cluster_path(
+    declared: dict[str, tuple[str, ...]], data: st.DataObject
+) -> None:
+    """The operator's table is the only source of a tool's location on the cluster."""
+    entries = {
+        tool: {binary: data.draw(_PATHS) for binary in bins} for tool, bins in declared.items()
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "slurm.toml"
+        path.write_text('[slurm]\nname = "c"\n' + _table(entries), encoding="utf-8")
+        policy = load_slurm_policy(path)
+
+    assert policy.evaluator_tool_paths({tool: _spec(bins) for tool, bins in declared.items()}) == {
+        tool_token(tool, binary): entries[tool][binary]
+        for tool, bins in declared.items()
+        for binary in bins
+    }
+
+
+@given(declared=_DECLARED.filter(bool), data=st.data())
+@settings(max_examples=examples(pr=40, nightly=400), deadline=None)
+def test_a_declared_binary_without_a_path_is_rejected_naming_its_key(
+    declared: dict[str, tuple[str, ...]], data: st.DataObject
+) -> None:
+    """There is no fallback to building a tool when the operator names no path."""
+    tool = data.draw(st.sampled_from(sorted(declared)))
+    binary = data.draw(st.sampled_from(declared[tool]))
+    entries = {
+        name: {b: "/cluster/bin" for b in bins if (name, b) != (tool, binary)}
+        for name, bins in declared.items()
+    }
+    entries = {name: binaries for name, binaries in entries.items() if binaries}
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "slurm.toml"
+        path.write_text('[slurm]\nname = "c"\n' + _table(entries), encoding="utf-8")
+        policy = load_slurm_policy(path)
+
+    with pytest.raises(SlurmPolicyError, match=rf"vibesys\.evaluator_tools\.{tool}\.{binary} "):
+        policy.evaluator_tool_paths({name: _spec(bins) for name, bins in declared.items()})
+
+
+@given(declared=_DECLARED, tool=_TOOL_NAMES, binary=_BIN_NAMES)
+@settings(max_examples=examples(pr=40, nightly=400), deadline=None)
+def test_a_tool_or_binary_the_package_does_not_declare_is_rejected_naming_its_key(
+    declared: dict[str, tuple[str, ...]], tool: str, binary: str
+) -> None:
+    """An entry for something the evaluator package does not declare is an unknown key."""
+    if binary in declared.get(tool, ()):
+        return
+    entries = {name: dict.fromkeys(bins, "/cluster/bin") for name, bins in declared.items()}
+    entries.setdefault(tool, {})[binary] = "/cluster/bin"
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "slurm.toml"
+        path.write_text('[slurm]\nname = "c"\n' + _table(entries), encoding="utf-8")
+        policy = load_slurm_policy(path)
+
+    key = f"vibesys.evaluator_tools.{tool}" + ("" if tool not in declared else f".{binary}")
+    with pytest.raises(SlurmPolicyError, match=re.escape(key)):
+        policy.evaluator_tool_paths({name: _spec(bins) for name, bins in declared.items()})
+
+
+@pytest.mark.parametrize("path", ["relative/tool", "/a/../tool", "/a//tool", "tool", ""])
+def test_a_tool_path_must_be_absolute_and_normalized(tmp_path: Path, path: str) -> None:
+    file = tmp_path / "slurm.toml"
+    file.write_text(
+        f'[slurm]\nname = "c"\n[vibesys.evaluator_tools.t]\nrun = "{path}"\n', encoding="utf-8"
+    )
+
+    with pytest.raises(SlurmPolicyError, match=r"invalid settings: vibesys\.evaluator_tools$"):
+        load_slurm_policy(file)

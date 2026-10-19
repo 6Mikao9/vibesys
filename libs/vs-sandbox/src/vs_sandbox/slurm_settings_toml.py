@@ -9,6 +9,7 @@ its state directory, so every reader sees exactly the settings the run validated
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.slurm_policy import SlurmOperatorSettings
+
+
+_BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def render_slurm_operator_toml(settings: SlurmOperatorSettings) -> str:
@@ -38,15 +42,20 @@ def write_slurm_operator_toml(settings: SlurmOperatorSettings, path: Path) -> No
 def _emit_table(path: tuple[str, ...], table: Mapping[str, object], lines: list[str]) -> None:
     if lines:
         lines.append("")
-    lines.append(f"[{'.'.join(path)}]")
+    lines.append(f"[{'.'.join(_key(part) for part in path)}]")
     nested: list[tuple[str, Mapping[str, object]]] = []
     for key, value in table.items():
         if isinstance(value, dict):
             nested.append((key, value))
         else:
-            lines.append(f"{key} = {_value(value)}")
+            lines.append(f"{_key(key)} = {_value(value)}")
     for key, value in nested:
         _emit_table((*path, key), value, lines)
+
+
+def _key(key: str) -> str:
+    """Return *key* as a TOML key: bare when it may be, else a quoted string."""
+    return key if _BARE_KEY.fullmatch(key) else _value(key)
 
 
 def _value(value: object) -> str:

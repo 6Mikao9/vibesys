@@ -6,7 +6,7 @@ import hashlib
 import os
 import re
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
@@ -338,6 +338,15 @@ class TrustedEvaluatorRequirements:
                 message = "evaluator Go module root must be inside its package"
                 raise ValueError(message) from exc
 
+    def without_tools(self) -> TrustedEvaluatorRequirements:
+        """Return these requirements for a target that gets its tools elsewhere.
+
+        A run environment whose trusted work runs on a machine of its own (a
+        Slurm cluster) neither builds nor mounts tools on this host: the
+        operator names where each already exists. Everything else is kept.
+        """
+        return replace(self, tools={}, tools_root=None)
+
 
 @dataclass(frozen=True, slots=True)
 class PreparedTrustedEvaluator:
@@ -394,6 +403,9 @@ class TrustedEvaluationCommandPaths:
     python_executable: str
     runtime_package_root: str | None = None
     runtime_tools_root: Path | None = None
+    #: Where each declared tool binary already exists on the target, by its
+    #: ``${TOOL:...}`` token; takes the place of *runtime_tools_root*.
+    runtime_tool_paths: Mapping[str, str] | None = None
     runtime_go_module_cache_root: str | None = None
 
 
@@ -742,7 +754,9 @@ def _environment_command(
             message = "evaluator package execution requires a runtime package root"
             raise ValueError(message)
         replacements.append((str(requirements.package_root), runtime_package_root))
-    if requirements.tools:
+    if requirements.tools and paths.runtime_tool_paths is not None:
+        replacements.extend(paths.runtime_tool_paths.items())
+    elif requirements.tools:
         tools_root = paths.runtime_tools_root or required_evaluator_tools_root(
             requirements,
             paths.source_project_root,

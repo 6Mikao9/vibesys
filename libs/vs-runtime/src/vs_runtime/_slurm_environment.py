@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
@@ -48,7 +48,6 @@ from vs_runtime._run_environment_facts import (
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_GO_MODULES_ROOT,
-    REMOTE_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluationCommandPaths,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess, SandboxSession
@@ -482,6 +481,11 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Validate external policy before opening the editor container."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
+        # Every declared evaluator tool must have an operator-given path on the
+        # cluster; a missing or undeclared entry fails here, naming its key.
+        tool_paths = self._settings.policy.evaluator_tool_paths(
+            request.evaluator_requirements.tools
+        )
         if request.session_role is RunEnvironmentSessionRole.ROOT and isinstance(
             self._settings.config.transport, SlurmLocalTransport
         ):
@@ -503,12 +507,13 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 gpu_client=self._mode.gpu_client,
                 agent_gpu=self._mode.agent_gpu_facts,
             ),
-            partial(self._open, request),
+            partial(self._open, request, tool_paths),
         )
 
     def _open(
         self,
         request: RunEnvironmentRequest,
+        tool_paths: Mapping[str, str],
         presentation: RunEnvironmentPresentation,
     ) -> RunEnvironmentSession:
         config, policy, mode = self._settings.config, self._settings.policy, self._mode
@@ -523,13 +528,16 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 profiler_tree=profiler_tree,
                 workload_timeout_seconds=request.profile_timeout_seconds,
             )
-        # Trusted evaluator dependencies are prepared on the host before their
-        # immutable trees are captured in the cluster staging plan.
+        # The host builds only what it stages to the cluster (a Go module cache).
+        # Evaluator tools run on the cluster, where the operator already put them
+        # (``vibesys.evaluator_tools``), so the host neither builds them nor
+        # mounts them in the editor, whose own request therefore declares none.
         requirements = request.evaluator_requirements
-        if requirements.tools or requirements.go_module is not None:
-            _make_host_sandbox(request, ephemeral=True)
+        editor_request = replace(request, evaluator_requirements=requirements.without_tools())
+        if requirements.go_module is not None:
+            _make_host_sandbox(editor_request, ephemeral=True)
         plans = self._write_plans(
-            request, config, policy, profiler_tree, remote_profiling=remote_profiling
+            request, tool_paths, profiler_tree, remote_profiling=remote_profiling
         )
         gpu = mode.gpu_commands(request, self._job_confinement)
         brokers: list[HostBroker] = []
@@ -545,7 +553,7 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 brokers.append(commands)
                 launcher = write_client_launcher(request.log_dir / "slurm-gpu", mode.gpu_client)
                 extras = bridge_editor_extras(commands, launcher, env=mode.editor_env(launcher))
-            editor = self._docker.build_editor(request, extras)
+            editor = self._docker.build_editor(editor_request, extras)
             sandbox = editor.runner
             profiler_mcp = _remote_profiler_mcp(plans, transport_env, transport_resources)
             view = RunEnvironmentView(
@@ -581,12 +589,12 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     def _write_plans(
         self,
         request: RunEnvironmentRequest,
-        config: SlurmConfig,
-        policy: SlurmExecutionPolicy,
+        tool_paths: Mapping[str, str],
         profiler_tree: str | None,
         *,
         remote_profiling: bool,
     ) -> _ClusterPlans:
+        config, policy = self._settings.config, self._settings.policy
         requirements = request.evaluator_requirements
         remote = _prepare_evaluation_plan(
             request,
@@ -598,7 +606,7 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 runtime_package_root=(
                     ".vibesys-evaluator-package" if requirements.package_root is not None else None
                 ),
-                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+                runtime_tool_paths=tool_paths,
                 runtime_go_module_cache_root=(
                     str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
                     if requirements.go_module is not None
@@ -610,7 +618,6 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
             name: Path(path)
             for name, path in (
                 (".vibesys-evaluator-package", requirements.package_root),
-                (".vibesys-evaluator-tools", requirements.tools_root),
                 (
                     str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
                     (

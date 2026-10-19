@@ -44,6 +44,32 @@ completion under the profiler and is never signalled, so it must exit by itself.
 cannot capture (no profile command, or no remote profiling) is not offered profile
 workstreams, and its start log says so.
 
+### Evaluator tools (cargo-git packages)
+
+An evaluator package may declare tools built from Git (see
+[Cargo tools from Git](https://github.com/uw-syfi/vibesys/blob/main/resources/evaluators/README.md#cargo-tools-from-git)).
+Under `slurm` the trusted benchmark runs on a compute node, so a tool built on
+the machine that runs VibeSys would be the wrong binary: another machine, and
+possibly another libc or architecture. The run neither builds nor stages tools.
+The operator names where each declared binary already exists on the cluster, in
+a filesystem the compute nodes see (a shared install, or a build their setup
+script makes):
+
+```toml
+[vibesys.evaluator_tools.request-factory]
+session_runner = "/shared/tools/session_runner"
+```
+
+Each key is a tool the package declares and each inner key one of its declared
+binaries; each value is an absolute, normalized POSIX path on the cluster. The
+run checks the table before it opens the editor: a declared binary without a
+path, an entry for a tool or binary the package does not declare, or a relative
+path is an error that names the `vibesys.evaluator_tools` key. Nothing falls back
+to building the tool, and an operator file for a package without tools must
+omit the table. The tool token in the package's entrypoints (`${TOOL:...}`) is
+replaced by the operator's path in the command the job runs, and the editor
+container mounts no tool.
+
 ### Agent GPU commands (optional)
 
 On a host that is itself a Slurm submit node (`[slurm.transport] kind = "local"`),

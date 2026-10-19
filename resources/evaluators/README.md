@@ -118,6 +118,11 @@ mounts only the selected installation roots read-only into the agent sandbox.
 The Docker cache key includes the resolved local image ID, so changing a mutable
 tag does not reuse a binary built against the previous image. Both the builder
 and final sandbox use that immutable image ID.
+Slurm installs nothing: the trusted benchmark runs on a compute node, so the
+operator's Slurm file names each declared binary's existing path on the cluster
+(`[vibesys.evaluator_tools.<tool>]`, see
+[Remote Slurm execution](../../docs/remote-slurm-execution.md#evaluator-tools-cargo-git-packages)),
+and a missing or undeclared entry fails before the run starts.
 Modal installs inside the deployed serving container's per-evaluation staging
 directory, and SkyPilot installs in the remote job before invoking the
 evaluator. Every location uses the same content-addressed plan, normalized

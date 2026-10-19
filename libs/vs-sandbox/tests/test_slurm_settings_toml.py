@@ -79,8 +79,17 @@ _ledgers = st.builds(
     run_while_detached=st.booleans(),
     keep_jobs_on_stop=st.booleans(),
 )
+_posix_paths = st.from_regex(r"/[a-z]{1,6}(/[a-z]{1,6}){0,2}", fullmatch=True)
+# Tool and binary names include dotted ones, which a TOML key must quote.
+_tool_keys = st.from_regex(r"[a-z0-9]+([.-][a-z0-9]+)?", fullmatch=True)
+_evaluator_tools = st.dictionaries(
+    _tool_keys,
+    st.dictionaries(_tool_keys, _posix_paths, min_size=1, max_size=2),
+    max_size=2,
+)
 _policies = st.builds(
     SlurmExecutionPolicy,
+    evaluator_tools=_evaluator_tools,
     setup_script=st.none() | st.just("/opt/setup.sh"),
     service=st.none() | _services,
     agent_gpu=st.none() | _agent_gpus,

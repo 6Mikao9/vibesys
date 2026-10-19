@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from vs_sandbox.agent_gpu import AgentGpuConfig
+from vs_sandbox.evaluator_tools import tool_token
 from vs_slurm.api import (
     MAX_WITHDRAWAL_WINDOW_SECONDS,
     PORT_PLACEHOLDER,
@@ -30,7 +31,9 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
+
+    from vs_sandbox.evaluator_tools import CargoGitToolSpec
 
 _UV_PYTHON_COMMAND_LENGTH = 3
 
@@ -59,9 +62,33 @@ class SlurmPolicyError(ValueError):
             f"not through a {transport_kind!r} transport"
         )
 
+    @classmethod
+    def evaluator_tool_undeclared(cls, key: str, declared: Sequence[str]) -> SlurmPolicyError:
+        """Name an operator entry for a tool or binary the evaluator package does not declare."""
+        listed = ", ".join(declared) if declared else "none"
+        return cls(
+            f"{key} names something the evaluator package does not declare (declared: {listed})"
+        )
+
+    @classmethod
+    def evaluator_tool_missing(cls, key: str, tool: str, binary: str) -> SlurmPolicyError:
+        """Name the missing path of a declared evaluator tool binary."""
+        return cls(
+            f"{key} is required: the evaluator package declares binary {binary!r} of tool "
+            f"{tool!r}, and a Slurm run does not build tools on this host but runs the "
+            "path you give, on the cluster"
+        )
+
 
 class SlurmExecutionPolicy(BaseModel):
     """Commands and setup selected by VibeSys for jobs on a remote cluster.
+
+    ``evaluator_tools`` names, per evaluator tool and binary, the absolute path
+    where that binary already exists on the cluster. The trusted benchmark runs
+    on a compute node, so a tool built on this host would be the wrong machine
+    (another libc or architecture, and not the filesystem the job sees); the
+    operator provides each one, and :meth:`evaluator_tool_paths` checks the
+    table against what the evaluator package declares.
 
     ``agent_gpu``, when present, lets the agent run its own GPU commands as
     Slurm jobs (see :func:`agent_gpu_capability`). ``ledger``, when present
@@ -79,6 +106,7 @@ class SlurmExecutionPolicy(BaseModel):
     service: SlurmService | None = None
     accuracy_arguments: tuple[str, ...] = ()
     benchmark_arguments: tuple[str, ...] = ()
+    evaluator_tools: dict[str, dict[str, str]] = Field(default_factory=dict)
     agent_gpu: AgentGpuConfig | None = None
     ledger: LedgerPolicy | None = None
 
@@ -102,6 +130,25 @@ class SlurmExecutionPolicy(BaseModel):
             raise ValueError(  # noqa: TRY003  # lint-waiver: LW-930046 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
                 "setup_script must be an absolute normalized POSIX path"
             )
+        return value
+
+    @field_validator("evaluator_tools")
+    @classmethod
+    def _valid_evaluator_tool_paths(
+        cls, value: dict[str, dict[str, str]]
+    ) -> dict[str, dict[str, str]]:
+        for tool, binaries in value.items():
+            if not binaries:
+                message = f"evaluator_tools.{tool} names no binary"
+                raise ValueError(message)
+            for binary, path in binaries.items():
+                posix = PurePosixPath(path)
+                if not posix.is_absolute() or posix.as_posix() != path or ".." in posix.parts:
+                    message = (
+                        f"evaluator_tools.{tool}.{binary} must be an absolute normalized "
+                        "POSIX path on the cluster"
+                    )
+                    raise ValueError(message)
         return value
 
     @field_validator("accuracy_arguments", "benchmark_arguments", mode="before")
@@ -134,6 +181,37 @@ class SlurmExecutionPolicy(BaseModel):
         if parts and _is_python(parts[0]):
             return (self.remote_python, *parts[1:])
         return parts
+
+    def evaluator_tool_paths(self, tools: Mapping[str, CargoGitToolSpec]) -> dict[str, str]:
+        """Map each declared tool binary's token to its operator-given path on the cluster.
+
+        The table must match the declaration exactly: a tool or binary the
+        evaluator package does not declare, or a declared one without a path,
+        raises :class:`SlurmPolicyError` naming the ``vibesys.evaluator_tools``
+        key. Nothing falls back to building the tool.
+        """
+        declared = {name: spec.bins for name, spec in tools.items()}
+        prefix = "vibesys.evaluator_tools"
+        for tool, binaries in self.evaluator_tools.items():
+            if tool not in declared:
+                raise SlurmPolicyError.evaluator_tool_undeclared(
+                    f"{prefix}.{tool}", sorted(declared)
+                )
+            for binary in binaries:
+                if binary not in declared[tool]:
+                    raise SlurmPolicyError.evaluator_tool_undeclared(
+                        f"{prefix}.{tool}.{binary}", declared[tool]
+                    )
+        paths: dict[str, str] = {}
+        for tool, bins in declared.items():
+            for binary in bins:
+                path = self.evaluator_tools.get(tool, {}).get(binary)
+                if path is None:
+                    raise SlurmPolicyError.evaluator_tool_missing(
+                        f"{prefix}.{tool}.{binary}", tool, binary
+                    )
+                paths[tool_token(tool, binary)] = path
+        return paths
 
     def remote_service(self) -> SlurmService | None:
         """Return the configured service with its Python launcher translated."""
