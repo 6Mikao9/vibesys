@@ -63,6 +63,9 @@ export type NewRunMethods =
 /** What `installFakeUsage` provides: what a project's runs spent in a window. */
 export type UsageMethods = 'usageWindow';
 
+/** What `installFakeExampleDestination` provides: what an example's destination holds. */
+export type ExampleDestinationMethods = 'exampleDestination';
+
 /** What `installFakeMachineSettings` provides: each machine's clusters, clouds and agent logins. */
 export type MachineSettingsMethods =
   | 'compute'
@@ -135,6 +138,13 @@ export interface FakeBridgeSeed {
     readonly projects: Readonly<Record<string, readonly string[]>>;
     /** The goal of each task of the user's own projects, by `PROJECT TASK` (a space between). */
     readonly goals?: Readonly<Record<string, unknown>>;
+    /**
+     * What each example destination holds, by the destination as typed (feature `example_destination`);
+     * a destination not named is absent.
+     */
+    readonly destinations?: Readonly<
+      Record<string, {readonly state: string; readonly project: string | null}>
+    >;
     /** What the helper agreed to in `hello`; every feature New run uses (catalogue included) when not given. */
     readonly features?: readonly string[];
     /** The roles the helper reports for a run (feature `run_roles`); the multi roles when not given. */
@@ -333,7 +343,7 @@ export function installFakeProjectRuns(seed: FakeBridgeSeed): void {
       });
       return Promise.resolve(
         runs === undefined
-          ? {ok: false, error: `Could not list the runs of ${project}`, authNeeded: false}
+          ? {ok: false, error: 'Could not list the runs of the project', authNeeded: false}
           : {ok: true, value: runs},
       );
     },
@@ -518,6 +528,29 @@ export function installFakeMachineSettings(seed: FakeBridgeSeed): void {
 }
 
 /**
+ * The example destination half of the Fake, a further init script after `installFakeNewRun`: what
+ * each destination holds (`newRun.destinations`; absent unless seeded) for a helper that has
+ * `example_destination`, and `unsupported` for one that does not. A page that does not ask never
+ * needs it: New run asks only a helper that has the feature.
+ */
+export function installFakeExampleDestination(seed: FakeBridgeSeed): void {
+  const catalog = seed.newRun;
+  const offered = catalog?.features?.includes('example_destination') === true;
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
+    exampleDestination: (_host: string, _example: string, destination: string) =>
+      Promise.resolve({
+        ok: true,
+        value: offered
+          ? {
+              kind: 'offered',
+              value: catalog?.destinations?.[destination] ?? {state: 'absent', project: null},
+            }
+          : {kind: 'unsupported'},
+      }),
+  } satisfies FakeProvides<ExampleDestinationMethods>);
+}
+
+/**
  * The New run half of the Fake, as a second init script after `installFakeBridge`: it adds the
  * helper's New run answers to the bridge, and what they were asked to `fakeHost.newRun`.
  */
@@ -531,7 +564,7 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
   const refused = (error: string) => Promise.resolve({ok: false, error, authNeeded: false});
   const created = (project: string, tasks: readonly string[]) => {
     projects.set(project, tasks);
-    return ok({project, tasks});
+    return {project, tasks};
   };
   const insideRepository = (project: string) => project.includes('/vibesys/');
   const words = (text: string) => text.split(' ');
@@ -590,13 +623,15 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
       return goal === undefined ? refused(`${project} has no task ${task}.`) : offered(goal);
     },
     preflight,
-    createFromExample: (_host: string, example: string, destination: string) =>
-      created(
-        destination,
-        catalog?.examples.examples.find(each => each.name === example)?.tasks ?? [],
-      ),
+    // As a real host does, a destination that holds something is refused.
+    createFromExample: (_host: string, example: string, destination: string) => {
+      const held = catalog?.destinations?.[destination]?.state ?? 'absent';
+      const tasks = catalog?.examples.examples.find(each => each.name === example)?.tasks ?? [];
+      const made = ['absent', 'empty'].includes(held) ? created(destination, tasks) : null;
+      return ok(made === null ? {kind: 'taken'} : {kind: 'created', created: made});
+    },
     copyOut: (_host: string, source: string, destination: string) =>
-      created(destination, projects.get(source) ?? []),
+      ok(created(destination, projects.get(source) ?? [])),
     // As a real host does, a started run is listed as live from then on.
     startRun: (host: string, inputs: {project: string}) => {
       newRun.started.push(inputs);
