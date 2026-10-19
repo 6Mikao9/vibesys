@@ -352,7 +352,7 @@ depends_on = ["vibesys", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibe
 
 [[modules]]
 path = "vibesys.api.auxiliary"
-depends_on = ["vibesys.api.store"]
+depends_on = ["vibesys.api.store", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.api.store"
@@ -1222,7 +1222,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "ProfilerToolOffer", "
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]
-expose = ["resolve_skill_source_dirs", "validate_skill_tree"]
+expose = ["chat_skill_dirs", "resolve_skill_source_dirs", "validate_skill_tree"]
 from = ["vibesys.run.skill_sources"]
 
 [[interfaces]]
@@ -1303,7 +1303,7 @@ depends_on = ["vs_agent", "vibesys.orchestration.dynamic.search", "vibesys.orche
 [[modules]]
 path = "vibesys.api.wiring"
 visibility = ["launch", "entrypoints", "tests", "scripts"]
-depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.run", "vibesys.orchestration.skill_selection"]
+depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.run", "vibesys.run.skill_sources", "vibesys.orchestration.skill_selection"]
 
 [[modules]]
 path = "vs_runtime._runs"
@@ -1325,7 +1325,7 @@ expose = ["RunHandle", "Runs"]
 
 [[interfaces]]
 from = ["vibesys.api.wiring"]
-expose = ["AgentToolContext", "NativeProfilerPreflight", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
+expose = ["AgentToolContext", "NativeProfilerPreflight", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "chat_skill_dirs", "create_session", "platform_skill_selection"]
 
 [[interfaces]]
 from = ["vibesys.api.catalog"]

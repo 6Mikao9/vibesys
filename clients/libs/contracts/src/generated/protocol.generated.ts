@@ -326,6 +326,7 @@ export type EventType =
   | "run_status_changed"
   | "chat"
   | "chat_thread_created"
+  | "steer_proposed"
   | "status_query"
   | "control"
   | "invocation_started"
@@ -405,6 +406,7 @@ export type Data =
       | RoundFinishedData
       | ToolCallData
       | ToolResultData
+      | SteerProposedData
       | TodoUpdateData
       | UsageUpdateData
       | RateLimitUpdateData
@@ -563,15 +565,22 @@ export type Value2 =
       [k: string]: unknown;
     }
   | unknown[];
-export type Kind30 = "todo_update";
+export type Kind30 = "steer_proposed";
+export type ProposalId = string;
+export type Text5 = string;
+/**
+ * How a steer reaches the turns of its target.
+ */
+export type SteerMode1 = "next_turn" | "standing" | "interrupt";
+export type Kind31 = "todo_update";
 export type Content4 = string;
 export type Status1 = string;
 export type Todos = TodoItemData[];
-export type Kind31 = "usage_update";
+export type Kind32 = "usage_update";
 export type InputTokens1 = number;
 export type ContextWindow1 = number | null;
 export type Model6 = string | null;
-export type Kind32 = "rate_limit_update";
+export type Kind33 = "rate_limit_update";
 export type Provider6 = string | null;
 export type Window = string | null;
 export type Limit1 = string | null;
@@ -579,7 +588,7 @@ export type UsedFraction = number | null;
 export type ResetsAt = number | null;
 export type WindowMinutes = number | null;
 export type Exhausted = boolean;
-export type Kind33 = "quota_paused";
+export type Kind34 = "quota_paused";
 export type Provider7 = string;
 export type Condition = "quota_exhausted" | "rate_limited" | "unavailable";
 export type Detail1 = string;
@@ -588,30 +597,30 @@ export type ResumesAt = number | null;
 export type Policy = "pause" | "wait" | "fail" | "fallback";
 export type FallbackProvider = string | null;
 export type FallbackModel = string | null;
-export type Kind34 = "quota_resumed";
+export type Kind35 = "quota_resumed";
 export type Provider8 = string;
 export type Condition1 = ("quota_exhausted" | "rate_limited" | "unavailable") | null;
 export type Reason5 = "operator" | "wait_elapsed";
 export type WaitedSeconds = number;
-export type Kind35 = "quota_abandoned";
+export type Kind36 = "quota_abandoned";
 export type Provider9 = string;
 export type Condition2 = "quota_exhausted" | "rate_limited" | "unavailable";
 export type Detail2 = string;
 export type Reason6 = string;
 export type WaitedSeconds1 = number;
-export type Kind36 = "quota_waiting";
+export type Kind37 = "quota_waiting";
 export type Provider10 = string;
 export type ResumesAt1 = number | null;
-export type Kind37 = "quota_wait_cancelled";
+export type Kind38 = "quota_wait_cancelled";
 export type Provider11 = string;
 export type Reason7 = "resumed" | "paused";
-export type Kind38 = "provider_switched";
+export type Kind39 = "provider_switched";
 export type FromProvider = string;
 export type ToProvider = string;
 export type ToModel = string;
 export type Reason8 = "policy" | "operator";
 export type Detail3 = string;
-export type Kind39 = "gate_started";
+export type Kind40 = "gate_started";
 /**
  * Closed set of framework-owned gates a candidate passes through.
  */
@@ -623,7 +632,7 @@ export type Command = string | null;
  */
 export type FrameworkSource = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel = string | null;
-export type Kind40 = "gate_finished";
+export type Kind41 = "gate_finished";
 export type Recipe1 = string | null;
 export type Reused = boolean;
 export type Metric2 = string | null;
@@ -636,7 +645,7 @@ export type RoundLabel3 = string | null;
  */
 export type FrameworkSource1 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel1 = string | null;
-export type Kind41 = "workspace_snapshot";
+export type Kind42 = "workspace_snapshot";
 export type Label1 = string;
 export type Commit = string | null;
 export type Baseline = string | null;
@@ -645,7 +654,7 @@ export type ExcludedPaths = string[];
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource2 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind42 = "run_configured";
+export type Kind43 = "run_configured";
 export type RunLogPath = string;
 export type ProjectRoot = string;
 export type Model7 = string | null;
@@ -659,7 +668,7 @@ export type MaxUnmeasuredTurns = number | null;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource3 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind43 = "framework_warning";
+export type Kind44 = "framework_warning";
 export type Summary3 = string;
 export type Detail4 = string | null;
 /**
@@ -667,11 +676,11 @@ export type Detail4 = string | null;
  */
 export type FrameworkSource4 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel2 = string | null;
-export type Kind44 = "winner_selected";
+export type Kind45 = "winner_selected";
 export type Selection = "candidate" | "baseline";
 export type Revision3 = string;
 export type SettlementId = string | null;
-export type Kind45 = "measurement_compared";
+export type Kind46 = "measurement_compared";
 export type Metric3 = string;
 export type Unit3 = string | null;
 export type Direction2 = "max" | "min";
@@ -691,7 +700,7 @@ export type BaseSamples = number;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource5 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind46 = "workstream_finished";
+export type Kind47 = "workstream_finished";
 export type SetupFailure = boolean;
 export type Refunded = boolean;
 export type RepeatedError = boolean;
@@ -724,8 +733,8 @@ export type WorkstreamFailureKind =
 export type Role = string | null;
 export type Turns = number | null;
 export type Limit2 = number | null;
-export type Text5 = string;
-export type Kind47 = "turn_usage_recorded";
+export type Text6 = string;
+export type Kind48 = "turn_usage_recorded";
 export type InputTokens2 = number | null;
 export type CacheCreationInputTokens = number | null;
 export type CacheReadInputTokens = number | null;
@@ -733,9 +742,9 @@ export type OutputTokens = number | null;
 export type ReasoningOutputTokens = number | null;
 export type TotalCostUsd = number | null;
 export type DurationMs = number | null;
-export type Kind48 = "span_started";
-export type Kind49 = "span_updated";
-export type Kind50 = "span_ended";
+export type Kind49 = "span_started";
+export type Kind50 = "span_updated";
+export type Kind51 = "span_ended";
 /**
  * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
  */
@@ -831,7 +840,7 @@ export type Reset = boolean;
 export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Iterations = IterationSlice | IterationUnavailable | null;
-export type Kind51 = "page";
+export type Kind52 = "page";
 export type SchemaVersion = 1;
 export type RunId4 = string;
 export type ProjectionRevision = string;
@@ -857,7 +866,7 @@ export type Direction3 = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
-export type Kind52 = "unavailable";
+export type Kind53 = "unavailable";
 export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
@@ -920,17 +929,17 @@ export type ClientId19 = string;
 export type Code2 = string;
 export type Message2 = string;
 export type LogOwner = StartupStep | GateStage | ToolBuild | RunNarration;
-export type Kind53 = "startup_step";
+export type Kind54 = "startup_step";
 /**
  * Where an opening environment is, in the order it gets there.
  */
 export type EnvironmentStartupStage = "building_image" | "starting_container";
-export type Kind54 = "gate_stage";
+export type Kind55 = "gate_stage";
 export type ExecutionId2 = string;
 export type Attempt4 = number;
-export type Kind55 = "tool_build";
+export type Kind56 = "tool_build";
 export type Name3 = string;
-export type Kind56 = "run_narration";
+export type Kind57 = "run_narration";
 export type At = string;
 /**
  * A line's severity: the standard ``logging`` level at or below the record's.
@@ -1960,10 +1969,42 @@ export interface JsonResultPayload {
   value: Value2;
 }
 /**
+ * A steer the chat agent suggests; the operator edits, sends or dismisses it.
+ *
+ * Recorded on the chat thread (the event header's ``chat_thread_id``) whose turn called
+ * ``propose_steer``. It is a proposal only: nothing reaches the run until the operator sends
+ * a ``command.control`` steer, which the proposal's fields prefill. ``proposal_id`` names it
+ * for the client's card, and is unique within the run.
+ */
+export interface SteerProposedData {
+  kind: Kind30;
+  proposal_id: ProposalId;
+  proposal: SteerProposal;
+}
+/**
+ * Guidance a chat agent suggests, in the fields of a ``SteerRequest``.
+ *
+ * It carries no ``control_id`` and nothing in it reaches the run: only an operator's
+ * ``command.control`` with a ``SteerRequest`` does. The tool that returns it is the
+ * agent's only steering tool, so the agent cannot send guidance.
+ */
+export interface SteerProposal {
+  text: Text5;
+  target?: SteerTarget1;
+  mode?: SteerMode1;
+}
+/**
+ * Whom a steer is for: the whole run, or one role, attempt or item, by id.
+ */
+export interface SteerTarget1 {
+  kind?: SteerTargetKind;
+  id?: SubjectId | null;
+}
+/**
  * Current todo list reported by an agent.
  */
 export interface TodoUpdateData {
-  kind: Kind30;
+  kind: Kind31;
   todos?: Todos;
 }
 /**
@@ -1977,7 +2018,7 @@ export interface TodoItemData {
  * Token usage reported by the active model.
  */
 export interface UsageUpdateData {
-  kind: Kind31;
+  kind: Kind32;
   input_tokens: InputTokens1;
   context_window?: ContextWindow1;
   model?: Model6;
@@ -1990,7 +2031,7 @@ export interface UsageUpdateData {
  * ``None`` when it did not state them. ``resets_at`` is epoch seconds.
  */
 export interface RateLimitUpdateData {
-  kind: Kind32;
+  kind: Kind33;
   provider?: Provider6;
   window?: Window;
   limit?: Limit1;
@@ -2013,7 +2054,7 @@ export interface RateLimitUpdateData {
  * provider and model an operator may resume with, ``None`` when none is configured.
  */
 export interface QuotaPausedData {
-  kind: Kind33;
+  kind: Kind34;
   provider: Provider7;
   condition: Condition;
   detail: Detail1;
@@ -2032,7 +2073,7 @@ export interface QuotaPausedData {
  * on; otherwise the run's pause.
  */
 export interface QuotaResumedData {
-  kind: Kind34;
+  kind: Kind35;
   provider: Provider8;
   condition?: Condition1;
   reason?: Reason5;
@@ -2045,7 +2086,7 @@ export interface QuotaResumedData {
  * it ended without waiting, and in events recorded before the field existed).
  */
 export interface QuotaAbandonedData {
-  kind: Kind35;
+  kind: Kind36;
   provider: Provider9;
   condition: Condition2;
   detail: Detail2;
@@ -2060,7 +2101,7 @@ export interface QuotaAbandonedData {
  * policy's retry interval. A later request replaces this one.
  */
 export interface QuotaWaitingData {
-  kind: Kind36;
+  kind: Kind37;
   provider: Provider10;
   resumes_at?: ResumesAt1;
 }
@@ -2068,7 +2109,7 @@ export interface QuotaWaitingData {
  * The operator ended a wait for capacity: ``resumed`` the run now, or ``paused`` it again.
  */
 export interface QuotaWaitCancelledData {
-  kind: Kind37;
+  kind: Kind38;
   provider: Provider11;
   reason: Reason7;
 }
@@ -2080,7 +2121,7 @@ export interface QuotaWaitCancelledData {
  * carries the provider and model it actually ran on.
  */
 export interface ProviderSwitchedData {
-  kind: Kind38;
+  kind: Kind39;
   from_provider: FromProvider;
   to_provider: ToProvider;
   to_model: ToModel;
@@ -2091,7 +2132,7 @@ export interface ProviderSwitchedData {
  * One framework gate began evaluating the current candidate.
  */
 export interface GateStartedData {
-  kind: Kind39;
+  kind: Kind40;
   gate: GateKind;
   recipe?: Recipe;
   command?: Command;
@@ -2109,7 +2150,7 @@ export interface GateStartedData {
  * pass-fraction itself rather than the backend aggregating one.
  */
 export interface GateFinishedData {
-  kind: Kind40;
+  kind: Kind41;
   gate: GateKind;
   recipe?: Recipe1;
   reused?: Reused;
@@ -2130,7 +2171,7 @@ export interface GateFinishedData {
  * change carries ``excluded_paths``.
  */
 export interface WorkspaceSnapshotData {
-  kind: Kind41;
+  kind: Kind42;
   label?: Label1;
   commit?: Commit;
   baseline?: Baseline;
@@ -2144,7 +2185,7 @@ export interface WorkspaceSnapshotData {
  * ``max_unmeasured_turns``.
  */
 export interface RunConfiguredData {
-  kind: Kind42;
+  kind: Kind43;
   run_log_path: RunLogPath;
   project_root: ProjectRoot;
   model?: Model7;
@@ -2163,7 +2204,7 @@ export interface RunConfiguredData {
  * ``diagnostic`` field so diagnostic-oriented clients need no new handling.
  */
 export interface FrameworkWarningData {
-  kind: Kind43;
+  kind: Kind44;
   summary: Summary3;
   detail?: Detail4;
   source?: FrameworkSource4;
@@ -2173,7 +2214,7 @@ export interface FrameworkWarningData {
  * The run's result was chosen: a retained candidate, or the unchanged trusted input.
  */
 export interface WinnerSelectedData {
-  kind: Kind44;
+  kind: Kind45;
   selection: Selection;
   revision: Revision3;
   settlement_id?: SettlementId;
@@ -2182,7 +2223,7 @@ export interface WinnerSelectedData {
  * A candidate's measurement was compared with its base's. See ``vibesys.events``.
  */
 export interface MeasurementComparedData {
-  kind: Kind45;
+  kind: Kind46;
   metric: Metric3;
   unit?: Unit3;
   direction: Direction2;
@@ -2206,7 +2247,7 @@ export interface MeasurementComparedData {
  * specifically, profile and merge workstreams do not emit this event.
  */
 export interface WorkstreamFinishedData {
-  kind: Kind46;
+  kind: Kind47;
   setup_failure: SetupFailure;
   refunded: Refunded;
   repeated_error: RepeatedError;
@@ -2220,7 +2261,7 @@ export interface WorkstreamFailureData {
   role?: Role;
   turns?: Turns;
   limit?: Limit2;
-  text?: Text5;
+  text?: Text6;
 }
 /**
  * Settled token and cost accounting for one finished agent turn.
@@ -2228,7 +2269,7 @@ export interface WorkstreamFailureData {
  * See ``vibesys.events.TurnUsageData``.
  */
 export interface TurnUsageData {
-  kind: Kind47;
+  kind: Kind48;
   input_tokens?: InputTokens2;
   cache_creation_input_tokens?: CacheCreationInputTokens;
   cache_read_input_tokens?: CacheReadInputTokens;
@@ -2243,21 +2284,21 @@ export interface TurnUsageData {
  */
 export interface SpanStartedData {
   span: Span;
-  kind: Kind48;
+  kind: Kind49;
 }
 /**
  * A span changed.
  */
 export interface SpanUpdatedData {
   span: Span;
-  kind: Kind49;
+  kind: Kind50;
 }
 /**
  * A span ended.
  */
 export interface SpanEndedData {
   span: Span;
-  kind: Kind50;
+  kind: Kind51;
 }
 /**
  * One measured performance result in a run.
@@ -2362,7 +2403,7 @@ export interface ExperimentUpdate {
  * One bounded page, with enough identity to reject stale merges.
  */
 export interface IterationSlice {
-  kind?: Kind51;
+  kind?: Kind52;
   schema_version?: SchemaVersion;
   run_id: RunId4;
   projection_revision: ProjectionRevision;
@@ -2397,7 +2438,7 @@ export interface IterationMetric {
  * Typed absence, kept distinct from a supported empty tree.
  */
 export interface IterationUnavailable {
-  kind?: Kind52;
+  kind?: Kind53;
   schema_version?: SchemaVersion1;
   reason: IterationUnavailableReason;
   detail?: Detail5;
@@ -2529,7 +2570,7 @@ export interface ProtocolErrorMessage {
  */
 export interface StartupStep {
   span_id?: SpanId | null;
-  kind: Kind53;
+  kind: Kind54;
   stage: EnvironmentStartupStage;
 }
 /**
@@ -2537,7 +2578,7 @@ export interface StartupStep {
  */
 export interface GateStage {
   span_id?: SpanId | null;
-  kind: Kind54;
+  kind: Kind55;
   execution_id: ExecutionId2;
   gate: GateKind;
   attempt: Attempt4;
@@ -2547,7 +2588,7 @@ export interface GateStage {
  */
 export interface ToolBuild {
   span_id?: SpanId | null;
-  kind: Kind55;
+  kind: Kind56;
   name: Name3;
 }
 /**
@@ -2555,7 +2596,7 @@ export interface ToolBuild {
  */
 export interface RunNarration {
   span_id?: SpanId | null;
-  kind: Kind56;
+  kind: Kind57;
 }
 /**
  * One narration record, as one JSON line of a narration stream.
