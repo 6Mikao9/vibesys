@@ -114,6 +114,8 @@ export function OverviewTile(props: {
   readonly chart: ReactNode;
   readonly figures: string;
   readonly note: string | null;
+  /** The note whole, for the pointer when `note` is cut; `note` itself when omitted. */
+  readonly noteFull?: string | null;
   readonly status: {readonly tone: StatusTone; readonly label: string};
   readonly attention?: boolean;
   readonly hint?: string;
@@ -140,7 +142,7 @@ export function OverviewTile(props: {
             </Text>
           )}
         </span>
-        <span className="vs-overview-tile-line">
+        <span className="vs-overview-tile-line" title={props.facts}>
           <Text variant="small" tone="muted">
             {props.facts}
           </Text>
@@ -148,15 +150,20 @@ export function OverviewTile(props: {
         {props.chart === null ? null : (
           <span className="vs-overview-tile-chart">{props.chart}</span>
         )}
+        {props.note === null ? null : (
+          <span
+            className="vs-overview-tile-line vs-overview-tile-note"
+            title={props.noteFull ?? props.note}
+          >
+            <Text variant="small" tone={props.attention === true ? 'err' : 'muted'}>
+              {props.note}
+            </Text>
+          </span>
+        )}
         <span className="vs-overview-tile-foot">
           <span className="vs-overview-tile-figures">
             <Text variant="small" tone="muted">
               {props.figures}
-            </Text>
-          </span>
-          <span className="vs-overview-tile-line" title={props.note ?? undefined}>
-            <Text variant="small" tone={props.attention === true ? 'err' : 'muted'}>
-              {props.note ?? ''}
             </Text>
           </span>
           <Chip label={props.status.label} tone={props.status.tone} dot />

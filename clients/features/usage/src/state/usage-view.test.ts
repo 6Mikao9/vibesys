@@ -285,28 +285,28 @@ describe('usageView', () => {
   });
 });
 
-describe('the rows of runs that share a task', () => {
-  test('carry their run id to tell them apart, and a row with its own name carries none', () => {
+describe('the order of runs that cost the same', () => {
+  test('is total: equal costs fall in name order, then run order, whatever order they arrive in', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);
       const base = entry(random, 0);
-      const byRun = Array.from({length: 1 + random.int(8)}, (_, at) => ({
+      const byRun = Array.from({length: 2 + random.int(8)}, (_, at) => ({
         runId: `run-${at}`,
         task: random.pick(['spsc', 'mpmc', null]),
-        costUsd: cents(random, 1000),
+        costUsd: random.pick([1, 2]),
       }));
-      const view = usageView({
-        sources: [{host: 'local', project: '/p', usage: {...base, byRun}}],
-        names: NAMES,
-        unreachable: 0,
-        unsupported: 0,
-        runsLeftOut: 0,
-      });
-      for (const row of view.runs) {
-        const same = view.runs.filter(other => other.name === row.name).length;
-        expect(row.detail).toBe(same > 1 ? row.runId : null);
-      }
-      expect(new Set(view.runs.map(row => row.detail ?? row.name)).size).toBe(view.runs.length);
+      const view = (rows: typeof byRun) =>
+        usageView({
+          sources: [{host: 'local', project: '/p', usage: {...base, byRun: rows}}],
+          names: NAMES,
+          unreachable: 0,
+          unsupported: 0,
+          runsLeftOut: 0,
+        }).runs.map(row => row.key);
+
+      const shuffled = [...byRun].sort(() => random.next() - 0.5);
+
+      expect(view(shuffled)).toEqual(view(byRun));
     }
   });
 });
