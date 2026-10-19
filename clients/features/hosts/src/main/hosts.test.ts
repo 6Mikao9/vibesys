@@ -722,7 +722,7 @@ describe('Hosts.runDigests', () => {
   test('asks for the tile data of a helper that offers it, and an older helper is never sent the field', async () => {
     const dashboard = {
       points: [
-        {ratio: 1.4, verdict: 'kept' as const},
+        {ratio: 1.4, verdict: 'kept' as const, at: '2026-10-17T03:30:00Z'},
         {ratio: null, verdict: 'failed' as const},
       ],
       points_omitted: 2,
@@ -753,8 +753,8 @@ describe('Hosts.runDigests', () => {
       kind: 'read',
       dashboard: {
         points: [
-          {ratio: 1.4, verdict: 'kept'},
-          {ratio: null, verdict: 'failed'},
+          {ratio: 1.4, verdict: 'kept', at: Date.parse('2026-10-17T03:30:00Z')},
+          {ratio: null, verdict: 'failed', at: null},
         ],
         pointsOmitted: 2,
         failedStreak: 1,
@@ -794,6 +794,121 @@ describe('Hosts.runDigests', () => {
       kind: 'unsupported',
     });
     expect(link.helper.requests.filter(request => request.type === 'runs.list')).toEqual([]);
+  });
+});
+
+describe('Hosts.usageWindow', () => {
+  const SINCE = Date.parse('2026-10-17T00:00:00Z');
+  const UNTIL = Date.parse('2026-10-18T00:00:00Z');
+  const figures = {
+    spent_usd: 12.5,
+    spend_per_hour_usd: 0.75,
+    tokens: {input: 900, cache_read: null, cache_write: null, output: 40, reasoning: null},
+    turns: 7,
+    unpriced_turns: 1,
+    untimed_turns: 0,
+    new_bests: 5,
+    cost_per_new_best_usd: 2.5,
+    by_run: [{run_id: 'run-1', task: 'mpmc', cost_usd: 12.5}],
+    by_agent: [{role: 'implementer', harness: 'codex', model: null, cost_usd: 12.5, turns: 7}],
+    agents_omitted: 0,
+  };
+  const listed: RunSummary = {
+    run_id: 'run-1',
+    task: 'mpmc',
+    display_name: 'run',
+    created_at: '2026-10-17T03:00:00Z',
+    phase: null,
+    instance_id: null,
+  };
+
+  test('asks for the window in ISO time and returns the figures in the app terms', async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    link.helper.host.runHistory.set('/srv/project', [listed]);
+    link.helper.host.usage.set('/srv/project', figures);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    const reply = await subject.hosts.usageWindow(
+      LOCAL,
+      '/srv/project',
+      ['run-1', 'run-9'],
+      SINCE,
+      UNTIL,
+    );
+
+    expect(link.helper.requests.at(-1)).toMatchObject({
+      type: 'usage.window',
+      run_ids: ['run-1', 'run-9'],
+      since: '2026-10-17T00:00:00.000Z',
+      until: '2026-10-18T00:00:00.000Z',
+    });
+    expect(reply).toEqual({
+      kind: 'usage',
+      usage: {
+        since: SINCE,
+        until: UNTIL,
+        spentUsd: 12.5,
+        spendPerHourUsd: 0.75,
+        tokens: figures.tokens,
+        turns: 7,
+        unpricedTurns: 1,
+        untimedTurns: 0,
+        newBests: 5,
+        costPerNewBestUsd: 2.5,
+        byRun: [{runId: 'run-1', task: 'mpmc', costUsd: 12.5}],
+        byAgent: [{role: 'implementer', harness: 'codex', model: null, costUsd: 12.5, turns: 7}],
+        agentsOmitted: 0,
+        missingRuns: ['run-9'],
+      },
+    });
+  });
+
+  test('returns a typed unsupported outcome without sending the request', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('usage_window');
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(
+      subject.hosts.usageWindow(LOCAL, '/srv/project', [], SINCE, UNTIL),
+    ).resolves.toEqual({kind: 'unsupported'});
+    expect(link.helper.requests.filter(request => request.type === 'usage.window')).toEqual([]);
+  });
+
+  test('refuses a window or run list the helper would refuse, without sending it', async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+    const hours = (count: number) => SINCE + count * 3_600_000;
+
+    for (const [ids, since, until] of [
+      [[], UNTIL, SINCE],
+      [[], SINCE, SINCE],
+      [[], SINCE, hours(337)],
+      [Array.from({length: 101}, (_, at) => `run-${at}`), SINCE, UNTIL],
+      [[], Number.NaN, UNTIL],
+    ] as const) {
+      await expect(
+        subject.hosts.usageWindow(LOCAL, '/srv/project', ids, since, until),
+      ).rejects.toThrow();
+    }
+    await expect(
+      subject.hosts.usageWindow(LOCAL, '/srv/project', [], SINCE, hours(336)),
+    ).resolves.toMatchObject({kind: 'usage'});
+    expect(link.helper.requests.filter(request => request.type === 'usage.window')).toHaveLength(1);
+  });
+
+  test('a project the host does not have is an error, not an empty answer', async () => {
+    const link = new FakeLink();
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(
+      subject.hosts.usageWindow(LOCAL, '/srv/nowhere', [], SINCE, UNTIL),
+    ).rejects.toThrow();
   });
 });
 
