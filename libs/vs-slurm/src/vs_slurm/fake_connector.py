@@ -111,6 +111,8 @@ _STDIN_REQUIRED = "connector stdin must contain one request"
 _LOST_REPLY = "submit reply lost after scheduler acceptance"
 _LOST_CLAIM_REPLY = "claim reply lost before intent publication"
 _UNKNOWN_FAULT = "unknown scripted connector fault"
+_FOREIGN_JOB_ID = "1"
+"""The ended job ``collide_name`` gives an operation's name; no submission is allocated it."""
 
 
 def sacct_row(state: str, exit_code: str, *, parsable: bool) -> str:
@@ -597,6 +599,7 @@ class FakeConnector:
         self._plans: dict[str, _SubmitPlan] = {}
         self._jobs: dict[str, _ScheduledJob] = {}
         self._forgotten_names: set[str] = set()
+        self._collisions: set[str] = set()
         self._accept_callbacks: dict[str, Callable[[], None]] = {}
         self._dispatch_callbacks: dict[str, Callable[[], None]] = {}
         self._dispatched: set[str] = set()
@@ -616,11 +619,24 @@ class FakeConnector:
         self._refused_downloads.add(remote_name)
 
     def forget_name_history(self, operation_id: str | None = None) -> None:
-        """Expire name-based scheduler history while retaining numeric job observations."""
+        """Expire the name-based accounting history of ended jobs, keeping numeric observations.
+
+        As in Slurm, ``squeue -n`` still lists a queued or running job by its name, and
+        ``sacct --name`` still finds one; only a job that has ended is forgotten by name.
+        """
         suffix = hashlib.sha256(operation_id.encode()).hexdigest()[:32] if operation_id else None
         self._forgotten_names.update(
             name for name in self._jobs if suffix is None or name.endswith(suffix)
         )
+
+    def collide_name(self, operation_id: str) -> None:
+        """Give an ended foreign job this operation's scheduler name: ``sacct --name`` lists it too."""
+        self._collisions.add(hashlib.sha256(operation_id.encode()).hexdigest()[:32])
+
+    def has_live_job(self, operation_id: str) -> bool:
+        """Whether a scripted job of this operation is queued or running, read without advancing it."""
+        suffix = hashlib.sha256(operation_id.encode()).hexdigest()[:32]
+        return any(job.active for name, job in self._jobs.items() if name.endswith(suffix))
 
     def on_accept(self, operation_id: str, callback: Callable[[], None]) -> None:
         """Run a deterministic synchronization barrier after scheduler acceptance."""
@@ -809,15 +825,17 @@ class FakeConnector:
             name = tokens[tokens.index("-n") + 1]
             if name not in self._jobs:
                 return None
-            job = None if name in self._forgotten_names else self._jobs.get(name)
-            if job is not None and job.active:
+            job = self._jobs[name]
+            if job.active:
                 output = f"{job.job_id}\n"
         elif "--name" in tokens:
             name = tokens[tokens.index("--name") + 1]
+            foreign = _FOREIGN_JOB_ID + "\n" if name.rsplit("-", 1)[-1] in self._collisions else ""
             if name not in self._jobs:
-                return None
-            job = None if name in self._forgotten_names else self._jobs.get(name)
-            output = f"{job.job_id}\n" if job is not None else ""
+                return None if not foreign else _reply(foreign)
+            job = self._jobs[name]
+            forgotten = name in self._forgotten_names and not job.active
+            output = ("" if forgotten else f"{job.job_id}\n") + foreign
         else:
             job_id = tokens[1] if tokens[0] == "scancel" else tokens[tokens.index("-j") + 1]
             job = next((item for item in self._jobs.values() if item.job_id == job_id), None)
@@ -826,7 +844,7 @@ class FakeConnector:
             if job.purged and not job.active and tokens[0] in {"squeue", "scancel"}:
                 return _purged_reply(tokens[0], job.job_id)
             output = self._job_output(job, tokens)
-        return {"version": 1, "returncode": 0, "stdout": output, "stderr": ""}
+        return _reply(output)
 
     @staticmethod
     def _job_output(job: _ScheduledJob, tokens: list[str]) -> str:
@@ -849,6 +867,11 @@ class FakeConnector:
         output = sacct_row(job.status.value.upper(), "0:0", parsable="-P" in tokens)
         job.advance()
         return output
+
+
+def _reply(stdout: str) -> dict[str, object]:
+    """A scheduler program's successful answer."""
+    return {"version": 1, "returncode": 0, "stdout": stdout, "stderr": ""}
 
 
 def _purged_reply(program: str, job_id: str) -> dict[str, object]:

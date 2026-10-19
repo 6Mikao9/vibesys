@@ -262,6 +262,7 @@ class FakeCluster:
         self._pending: dict[str, str] = {}
         self._rejections: dict[str, tuple[str, str]] = {}
         self._expired_names: set[str] = set()
+        self._collisions: set[str] = set()
         self._outputs: dict[tuple[str, int, OutputStream], FakeByteSource] = {}
 
     def reopen(self) -> FakeCluster:
@@ -276,13 +277,33 @@ class FakeCluster:
         reopened._pending = self._pending
         reopened._rejections = self._rejections
         reopened._expired_names = self._expired_names
+        reopened._collisions = self._collisions
         reopened._outputs = self._outputs
         return reopened
 
     def forget_name_history(self, operation_id: str) -> None:
-        """Expire scheduler name lookup while retained acceptance stays recoverable."""
+        """Expire the name lookup of the operation's job once it has ended.
+
+        Retained acceptance stays recoverable. A queued or running job is still
+        found by its name, as ``squeue -n`` lists it in Slurm.
+        """
         validate_operation_id(operation_id)
         self._expired_names.add(operation_id)
+
+    def collide_name(self, operation_id: str) -> None:
+        """Give another scheduler job this operation's name, as a foreign submitter's would.
+
+        A lookup by name then finds two jobs, so it proves neither which job is the
+        operation's nor that none is: an inspect that needs it stays unknown.
+        """
+        validate_operation_id(operation_id)
+        self._collisions.add(operation_id)
+
+    def has_live_job(self, operation_id: str) -> bool:
+        """Whether the scheduler holds this operation's job queued or running, read without advancing it."""
+        with self._lock:
+            job = self._jobs.get(operation_id)
+            return job is not None and isinstance(self._peek(job), Queued | Running)
 
     def on_accept(self, operation_id: str, callback: Callable[[], None]) -> None:
         """Run a deterministic test barrier after external acceptance."""
@@ -493,10 +514,18 @@ class FakeCluster:
             return ClusterUnknown(
                 operation_id=target if isinstance(target, str) and not by_job_id else None,
                 reason="operation not found",
+                job_absent=self._absent_by_name(target, by_job_id=by_job_id),
             )
-        if job.operation_id in self._expired_names and not job.accepted_published and not by_job_id:
+        if self._ambiguous(job, by_job_id=by_job_id):
             return ClusterUnknown(
-                operation_id=job.operation_id, reason="submission acceptance unresolved"
+                operation_id=job.operation_id, reason="scheduler operation identity is ambiguous"
+            )
+        if self._forgotten(job, by_job_id=by_job_id):
+            # The name lookup forgot the ended job, and nothing else names it.
+            return ClusterUnknown(
+                operation_id=job.operation_id,
+                reason="submission acceptance unresolved",
+                job_absent=True,
             )
         job.acceptance_observed = True
         job.accepted_published = True
@@ -593,10 +622,13 @@ class FakeCluster:
                 return ClusterCancelRequested(operation_id=target)
             return ClusterUnknown(operation_id=None, reason="operation not found")
         self._cancelled.add(job.operation_id)
-        if self._unresolved(job, by_job_id=by_job_id):
+        if self._ambiguous(job, by_job_id=by_job_id):
             return ClusterUnknown(
-                operation_id=job.operation_id, reason="submission acceptance unresolved"
+                operation_id=job.operation_id, reason="scheduler operation identity is ambiguous"
             )
+        if self._forgotten(job, by_job_id=by_job_id):
+            # No job is found by the name: the cancel leaves only its tombstone, as production's.
+            return ClusterCancelRequested(operation_id=job.operation_id)
         if job.cancelled_at is None:
             job.cancelled_at = self.clock.now()
         observed = self._inspect(target, by_job_id=by_job_id)
@@ -607,9 +639,29 @@ class FakeCluster:
         )
 
     def _unresolved(self, job: _Job, *, by_job_id: bool) -> bool:
-        """Whether a cancel by name cannot find the job: its acceptance was never published."""
+        """Whether a lookup by name cannot find the job, which only that lookup can find."""
+        return self._ambiguous(job, by_job_id=by_job_id) or self._forgotten(
+            job, by_job_id=by_job_id
+        )
+
+    @staticmethod
+    def _by_name_only(job: _Job, *, by_job_id: bool) -> bool:
+        """Whether only the name finds the job: its acceptance was never published."""
+        return not job.accepted_published and not by_job_id
+
+    def _ambiguous(self, job: _Job, *, by_job_id: bool) -> bool:
+        """Whether the job is found only by a name another job also has (``collide_name``)."""
+        return job.operation_id in self._collisions and self._by_name_only(job, by_job_id=by_job_id)
+
+    def _forgotten(self, job: _Job, *, by_job_id: bool) -> bool:
+        """Whether the name lookup forgot the job: its history expired once it ended.
+
+        A queued or running job is still listed by name (``squeue -n``), as in Slurm.
+        """
         return (
-            job.operation_id in self._expired_names and not job.accepted_published and not by_job_id
+            job.operation_id in self._expired_names
+            and self._by_name_only(job, by_job_id=by_job_id)
+            and not isinstance(self._peek(job), Queued | Running)
         )
 
     def _stop(self, job: _Job | None) -> None:
@@ -778,6 +830,18 @@ class FakeCluster:
             except OSError as error:
                 failures.append(f"{target.remote_path}: {error}")
         return tuple(recovered), "; ".join(failures) or None
+
+    def _absent_by_name(self, target: ClusterTarget, *, by_job_id: bool) -> bool:
+        """Whether a name lookup proves that no job of this name exists, as in production.
+
+        No job was accepted under the name: its sbatch was rejected, it was
+        cancelled before it started, a cancel left only its tombstone, or it was
+        never submitted. Production reads no intent (or one that started no job)
+        and asks the scheduler by name, which finds nothing, so both call it
+        absent; a submission still on its way to sbatch may yet start a job. Only
+        a name another job also has (``collide_name``) proves nothing.
+        """
+        return isinstance(target, str) and not by_job_id and target not in self._collisions
 
     def _find(self, target: ClusterTarget, *, by_job_id: bool) -> _Job | None:
         if not isinstance(target, str):

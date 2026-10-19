@@ -87,7 +87,7 @@ def test_a_sweep_takes_up_the_mark_an_earlier_sweep_of_its_process_left_standing
         workspace = Path(directory)
         clock = ManualClock(NOW)
         cluster = FakeCluster(clock=clock)
-        ledger = _LosesTheFirstMark(project=PROJECT)
+        ledger = _LosesTheFirstMark(project=PROJECT, clock=ManualClock())
         request = SlurmBatchRequest(
             workspace=workspace, stages=(SlurmBatchStage(name="bench", command=("true",)),)
         )
@@ -217,9 +217,6 @@ def _submitted(
     return key, operation
 
 
-@pytest.mark.xfail(
-    strict=True, reason="r3206 LOW-D: two sweeps of one process overlap with one writer id"
-)
 def test_a_heartbeat_during_a_sweep_starts_no_second_sweep_of_the_process() -> None:
     """r3206 LOW-D: a later heartbeat's sweep undid the first sweep's mark as its own.
 
@@ -233,7 +230,7 @@ def test_a_heartbeat_during_a_sweep_starts_no_second_sweep_of_the_process() -> N
     with TemporaryDirectory() as directory:
         workspace = Path(directory)
         clock = ManualClock(NOW)
-        ledger = _LeasedAfterTheNextRead(project=PROJECT)
+        ledger = _LeasedAfterTheNextRead(project=PROJECT, clock=ManualClock())
         hooks: list[_Interleaving] = []
 
         def on_call(kind: ClusterCall) -> None:
@@ -259,3 +256,49 @@ def test_a_heartbeat_during_a_sweep_starts_no_second_sweep_of_the_process() -> N
 
         assert hooks[0].fired
         assert hooks[0].violations == []
+
+
+class _ListingFailsOnce(FakeEvaluationLedger):
+    """The Fake ledger, where the first listing of the project's requests fails."""
+
+    failed: bool = False
+
+    def list_keys(self) -> tuple[str, ...]:
+        if not self.failed:
+            self.failed = True
+            raise LedgerError.transport(ConnectionResetError("ssh: connection reset"))
+        return super().list_keys()
+
+
+def test_a_sweep_that_raises_leaves_the_next_due_sweep_to_run() -> None:
+    """r3223 LOW-4: a sweep's turn is released on every exit, an exception's too.
+
+    Were the claim kept, every later sweep of the process would return at once,
+    and no unleased request of the project would ever be withdrawn by it.
+    """
+    with TemporaryDirectory() as directory:
+        clock = ManualClock(NOW)
+        cluster = FakeCluster(clock=clock)
+        ledger = _ListingFailsOnce(project=PROJECT, clock=clock)
+        key, operation = _submitted(cluster, ledger, Path(directory), "unleased", "run-gone")
+        sweeper = SlurmLedgerAttachment(
+            ledger=ledger,
+            config=CONFIG,
+            project=PROJECT,
+            holder="run-sweeper",
+            policy=POLICY,
+            clock=clock,
+        )
+
+        with pytest.raises(LedgerError):
+            sweeper.sweep_if_due(cluster)
+        clock.advance(POLICY.lease_seconds)
+        swept = sweeper.sweep_if_due(cluster)
+
+        assert [type(outcome) for outcome in swept] == [Withdrawn]
+        entry = ledger.read(key)
+        assert entry is not None
+        assert entry.record.state is LedgerState.WITHDRAWN
+        observed = cluster.inspect(operation)
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status is SlurmJobStatus.CANCELLED

@@ -270,7 +270,7 @@ class _Run:
 class _World:
     clock: ManualClock = field(default_factory=lambda: ManualClock(1000.0))
     ledger: FakeEvaluationLedger = field(
-        default_factory=lambda: FakeEvaluationLedger(project=PROJECT)
+        default_factory=lambda: FakeEvaluationLedger(project=PROJECT, clock=ManualClock())
     )
     # How long a cancel confirms its job ended; the executor's own default unless set.
     cancel_confirmation_seconds: float = 120.0
