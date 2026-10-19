@@ -48,14 +48,19 @@ from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
+    ControlAction,
     ControlStatus,
     RefusalReason,
     RunControlTransitionKind,
+    SteerDelivery,
+    SteerDeliveryState,
     SteerMode,
     SteerRequest,
     SteerTarget,
     SteerTargetKind,
+    WithdrawRequest,
     create_run_control_channel,
+    known_steer_targets,
 )
 from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import SimThreads
@@ -292,6 +297,13 @@ def test_a_steer_whose_target_ends_before_the_run_takes_it_is_reported_dropped()
     (dropped,) = _drops(run)
     assert dropped.startswith("steer s1 ")
     assert "fake-judge" in dropped
+    # The step names the control and carries the bare reason, not the journal's sentence.
+    (step_,) = _steps(run, SteerDeliveryState.DROPPED)
+    assert step_.control_id == "s1"
+    assert step_.action is ControlAction.STEER
+    assert step_.reason is not None
+    assert "fake-judge" in step_.reason
+    assert not step_.reason.startswith("steer s1")
 
 
 @pytest.mark.parametrize(
@@ -334,6 +346,10 @@ def test_a_steer_core_drops_is_reported_once(reason: InputDropReason, report: st
 
     # Named by the id the operator sent it under, as a refusal at take is.
     assert _drops(run) == [report]
+    (step_,) = _steps(run, SteerDeliveryState.DROPPED)
+    assert step_.control_id == "s1"
+    assert step_.reason is not None
+    assert report.endswith(step_.reason)
 
 
 def test_a_steer_with_no_target_is_for_the_whole_run() -> None:
@@ -341,6 +357,15 @@ def test_a_steer_with_no_target_is_for_the_whole_run() -> None:
         "kind": "run",
         "id": None,
     }
+
+
+def _steps(run: _Run, state: SteerDeliveryState) -> list[SteerDelivery]:
+    """The steer steps of ``state`` the run reported, in order."""
+    return [
+        t.delivery
+        for t in run.sink.transitions
+        if t.delivery is not None and t.delivery.state is state
+    ]
 
 
 def _guidance_ends(run: _Run) -> list[str]:
@@ -404,6 +429,8 @@ def test_the_end_of_standing_guidance_is_reported_once_as_an_end_not_a_drop(
 
     assert _guidance_ends(run) == [f"standing guidance keep ended: {reason}"]
     assert _drops(run) == []
+    (step_,) = _steps(run, SteerDeliveryState.ENDED)
+    assert (step_.control_id, step_.reason) == ("keep", reason)
 
 
 def _guided(run: _Run) -> CoreState:
@@ -443,3 +470,69 @@ def test_guidance_whose_attempt_reopened_and_then_the_run_ended_is_reported_once
     run.bridge.poll(core, 4.0)
 
     assert _guidance_ends(run) == ["standing guidance keep ended: its attempt was reopened"]
+
+
+def test_a_withdrawal_of_nothing_standing_is_dropped_under_its_own_id() -> None:
+    run = _run()
+    core = _core()
+    run.bridge.poll(core, 1.0)
+    run.control.submit(WithdrawRequest(control_id="w1", withdraws="never-sent"))
+    run.bridge.poll(core, 2.0)
+
+    (queued,) = _steps(run, SteerDeliveryState.WITHDRAW_QUEUED)
+    assert (queued.control_id, queued.withdraws, queued.action) == (
+        "w1",
+        "never-sent",
+        ControlAction.WITHDRAW,
+    )
+    (dropped,) = _steps(run, SteerDeliveryState.DROPPED)
+    assert (dropped.control_id, dropped.action) == ("w1", ControlAction.WITHDRAW)
+
+
+def test_a_steer_queued_names_its_mode_and_target() -> None:
+    run = _run()
+    target = SteerTarget(kind=SteerTargetKind.ATTEMPT, id="live")
+    run.control.submit(
+        SteerRequest(control_id="keep", text="keep bf16", target=target, mode=SteerMode.STANDING)
+    )
+
+    (queued,) = _steps(run, SteerDeliveryState.QUEUED)
+    assert (queued.control_id, queued.mode, queued.target) == ("keep", SteerMode.STANDING, target)
+
+
+@given(target=_TARGETS)
+def test_the_known_targets_refuse_exactly_what_the_run_cannot_resolve(target: SteerTarget) -> None:
+    """The read model a reader of the run asks and the run's own resolution agree on every target."""
+    refusal = known_steer_targets(_core()).refusal(target)
+
+    assert (refusal is None) == (not isinstance(_expected(target), str))
+
+
+def test_the_known_targets_list_what_a_steer_may_name_and_a_refusal_offers_them() -> None:
+    known = known_steer_targets(_core())
+
+    assert known.roles == _DECLARED
+    assert known.ids(SteerTargetKind.ATTEMPT) == ("live", "parked")  # `done` has ended
+    assert known.items == tuple(f"item-{name}" for name in _ATTEMPTS)
+    assert known.ids(SteerTargetKind.RUN) == ()
+    for kind, bad in [
+        (SteerTargetKind.ROLE, "fake-judge"),
+        (SteerTargetKind.ATTEMPT, "unknown"),
+        (SteerTargetKind.ATTEMPT, "done"),
+        (SteerTargetKind.ITEM, "item-unknown"),
+    ]:
+        refusal = known.refusal(SteerTarget(kind=kind, id=bad))
+        assert refusal is not None
+        assert repr(bad) in refusal.reason
+        assert all(name in refusal.reason for name in known.ids(kind))
+
+
+def test_a_refusal_bounds_the_ids_it_offers() -> None:
+    attempts = {f"a{index}": AttemptPhase.ACTIVE for index in range(40)}
+    known = known_steer_targets(_core(attempts))
+
+    refusal = known.refusal(SteerTarget(kind=SteerTargetKind.ATTEMPT, id="missing"))
+
+    assert refusal is not None
+    assert "and 28 more" in refusal.reason
+    assert "a39" not in refusal.reason

@@ -8,7 +8,6 @@ export type Request =
   | SnapshotQuery
   | ChatQuery
   | ChatThreadCreateQuery
-  | ChatOptionsQuery
   | HistoryQuery
   | PerformanceQuery
   | ExperimentQuery
@@ -61,76 +60,71 @@ export type RequestId6 = string;
 export type ClientId6 = string;
 export type Timestamp6 = string;
 export type Type6 = "query.chat_thread_create";
-export type Provider = string | null;
-export type Model = string | null;
+export type Provider = string;
+export type Model = string;
 export type Title = string | null;
 export type ProtocolVersion7 = 1;
 export type RequestId7 = string;
 export type ClientId7 = string;
 export type Timestamp7 = string;
-export type Type7 = "query.chat_options";
+export type Type7 = "query.history";
 export type ProtocolVersion8 = 1;
 export type RequestId8 = string;
 export type ClientId8 = string;
 export type Timestamp8 = string;
-export type Type8 = "query.history";
+export type Type8 = "query.performance";
 export type ProtocolVersion9 = 1;
 export type RequestId9 = string;
 export type ClientId9 = string;
 export type Timestamp9 = string;
-export type Type9 = "query.performance";
+export type Type9 = "query.experiments";
+export type RunId = string;
+export type ProjectionId = string;
+export type Revision = number;
 export type ProtocolVersion10 = 1;
 export type RequestId10 = string;
 export type ClientId10 = string;
 export type Timestamp10 = string;
-export type Type10 = "query.experiments";
-export type RunId = string;
-export type ProjectionId = string;
-export type Revision = number;
-export type ProtocolVersion11 = 1;
-export type RequestId11 = string;
-export type ClientId11 = string;
-export type Timestamp11 = string;
-export type Type11 = "query.iterations";
+export type Type10 = "query.iterations";
 export type ExpectedStoreId1 = string | null;
 export type ParentId = string | null;
 export type Cursor = string | null;
 export type Limit = number;
+export type ProtocolVersion11 = 1;
+export type RequestId11 = string;
+export type ClientId11 = string;
+export type Timestamp11 = string;
+export type Type11 = "query.design";
 export type ProtocolVersion12 = 1;
 export type RequestId12 = string;
 export type ClientId12 = string;
 export type Timestamp12 = string;
-export type Type12 = "query.design";
+export type Type12 = "query.design_patch";
+export type Base = string;
+export type Head = string;
+export type Path = string;
 export type ProtocolVersion13 = 1;
 export type RequestId13 = string;
 export type ClientId13 = string;
 export type Timestamp13 = string;
-export type Type13 = "query.design_patch";
-export type Base = string;
-export type Head = string;
-export type Path = string;
-export type ProtocolVersion14 = 1;
-export type RequestId14 = string;
-export type ClientId14 = string;
-export type Timestamp14 = string;
-export type Type14 = "query.events";
+export type Type13 = "query.events";
 export type ExpectedStoreId2 = string | null;
 export type AfterSequence = number;
 export type BeforeSequence = number | null;
 export type TimeoutMs = number;
+export type ProtocolVersion14 = 1;
+export type RequestId14 = string;
+export type ClientId14 = string;
+export type Timestamp14 = string;
+export type Type14 = "subscribe";
+export type AfterSequence1 = number;
+export type Tail = number | null;
+export type StoreId = string;
 export type ProtocolVersion15 = 1;
 export type RequestId15 = string;
 export type ClientId15 = string;
 export type Timestamp15 = string;
-export type Type15 = "subscribe";
-export type AfterSequence1 = number;
-export type Tail = number | null;
-export type StoreId = string;
-export type ProtocolVersion16 = 1;
-export type RequestId16 = string;
-export type ClientId16 = string;
-export type Timestamp16 = string;
-export type Type16 = "command.control";
+export type Type15 = "command.control";
 export type ControlRequest =
   | SteerRequest
   | PauseRequest
@@ -174,10 +168,10 @@ export type Action6 = "cancel_item";
 export type ControlId7 = string;
 export type Action7 = "set_max_parallel";
 export type MaxParallel = number;
-export type ProtocolVersion17 = 1;
-export type RequestId17 = string;
-export type ClientId17 = string;
-export type Timestamp17 = string;
+export type ProtocolVersion16 = 1;
+export type RequestId16 = string;
+export type ClientId16 = string;
+export type Timestamp16 = string;
 export type Ok = boolean;
 export type Error = string | null;
 export type Id = string;
@@ -213,13 +207,7 @@ export type Effect = "none";
 export type Title1 = string;
 export type Provider1 = string;
 export type Model1 = string;
-export type Provider2 = string;
-export type Model2 = string;
-export type Source1 = "run" | "role" | "suggested";
-export type Default = boolean;
-export type Models = ChatModelOption[];
-export type Providers = ChatProviderOptions[];
-export type ProtocolVersion18 = 1;
+export type ProtocolVersion17 = 1;
 export type RunId1 = string;
 export type ProjectScope = string | null;
 export type Sequence = number;
@@ -250,8 +238,8 @@ export type Kind = "agent_execution_activity_changed";
 export type Mode2 = "thinking" | "responding" | "tool" | "waiting";
 export type Summary1 = string;
 export type Tool = string | null;
-export type Provider3 = string | null;
-export type Model3 = string | null;
+export type Provider2 = string | null;
+export type Model2 = string | null;
 export type ActiveExecutions = ActiveAgentExecution[];
 export type ChatThreads = ChatThreadInfo[];
 export type SpanId = string;
@@ -307,10 +295,10 @@ export type Objectives = TaskObjective[];
 export type CorrectnessCheck = string[];
 export type Name2 = string;
 export type Version = string;
-export type ProtocolVersion19 = 1;
+export type ProtocolVersion18 = 1;
 export type Sequence1 = number;
 export type RunId2 = string;
-export type Timestamp18 = string;
+export type Timestamp17 = string;
 /**
  * Wire event kinds persisted in the event log.
  */
@@ -327,6 +315,7 @@ export type EventType =
   | "chat"
   | "chat_thread_created"
   | "steer_proposed"
+  | "steer_delivery"
   | "status_query"
   | "control"
   | "invocation_started"
@@ -407,6 +396,7 @@ export type Data =
       | ToolCallData
       | ToolResultData
       | SteerProposedData
+      | SteerDeliveryData
       | TodoUpdateData
       | UsageUpdateData
       | RateLimitUpdateData
@@ -436,8 +426,8 @@ export type ThreadTitle = string | null;
 export type InvocationId1 = string | null;
 export type Kind3 = "chat_thread_created";
 export type Title3 = string;
-export type Provider4 = string;
-export type Model4 = string;
+export type Provider3 = string;
+export type Model3 = string;
 export type CreatedAt = string;
 export type Kind4 = "invocation_started";
 export type SystemPrompt = string;
@@ -449,8 +439,8 @@ export type Stage1 = string;
 export type Attempt1 = number | null;
 export type SystemPrompt1 = string;
 export type UserPrompt1 = string;
-export type Provider5 = string | null;
-export type Model5 = string | null;
+export type Provider4 = string | null;
+export type Model4 = string | null;
 export type ReasoningEffort = string | null;
 export type HarnessVersion = string | null;
 export type Kind7 = "agent_execution_finished";
@@ -458,7 +448,7 @@ export type Error2 = string | null;
 export type Kind8 = string;
 export type Kind9 = "output";
 export type Stream = "stdout" | "stderr";
-export type Source2 = string;
+export type Source1 = string;
 export type Content = string;
 export type Kind10 = "server_ready";
 export type SocketProtocol = "jsonl";
@@ -572,24 +562,40 @@ export type Text5 = string;
  * How a steer reaches the turns of its target.
  */
 export type SteerMode1 = "next_turn" | "standing" | "interrupt";
-export type Kind31 = "todo_update";
+export type Kind31 = "steer_delivery";
+/**
+ * Where one operator steer or withdrawal stands, as a client shows it.
+ */
+export type SteerDeliveryState =
+  "queued" | "withdraw_queued" | "reached" | "reached_mid_turn" | "in_force" | "dropped" | "ended" | "refused";
+export type ControlId8 = string | null;
+export type Action8 = "steer" | "withdraw";
+/**
+ * How a steer reaches the turns of its target.
+ */
+export type SteerMode2 = "next_turn" | "standing" | "interrupt";
+export type Withdraws1 = string | null;
+export type Role = string | null;
+export type AttemptId = string | null;
+export type Reason5 = string | null;
+export type Kind32 = "todo_update";
 export type Content4 = string;
 export type Status1 = string;
 export type Todos = TodoItemData[];
-export type Kind32 = "usage_update";
+export type Kind33 = "usage_update";
 export type InputTokens1 = number;
 export type ContextWindow1 = number | null;
-export type Model6 = string | null;
-export type Kind33 = "rate_limit_update";
-export type Provider6 = string | null;
+export type Model5 = string | null;
+export type Kind34 = "rate_limit_update";
+export type Provider5 = string | null;
 export type Window = string | null;
 export type Limit1 = string | null;
 export type UsedFraction = number | null;
 export type ResetsAt = number | null;
 export type WindowMinutes = number | null;
 export type Exhausted = boolean;
-export type Kind34 = "quota_paused";
-export type Provider7 = string;
+export type Kind35 = "quota_paused";
+export type Provider6 = string;
 export type Condition = "quota_exhausted" | "rate_limited" | "unavailable";
 export type Detail1 = string;
 export type ResetsAt1 = number | null;
@@ -597,30 +603,30 @@ export type ResumesAt = number | null;
 export type Policy = "pause" | "wait" | "fail" | "fallback";
 export type FallbackProvider = string | null;
 export type FallbackModel = string | null;
-export type Kind35 = "quota_resumed";
-export type Provider8 = string;
+export type Kind36 = "quota_resumed";
+export type Provider7 = string;
 export type Condition1 = ("quota_exhausted" | "rate_limited" | "unavailable") | null;
-export type Reason5 = "operator" | "wait_elapsed";
+export type Reason6 = "operator" | "wait_elapsed";
 export type WaitedSeconds = number;
-export type Kind36 = "quota_abandoned";
-export type Provider9 = string;
+export type Kind37 = "quota_abandoned";
+export type Provider8 = string;
 export type Condition2 = "quota_exhausted" | "rate_limited" | "unavailable";
 export type Detail2 = string;
-export type Reason6 = string;
+export type Reason7 = string;
 export type WaitedSeconds1 = number;
-export type Kind37 = "quota_waiting";
-export type Provider10 = string;
+export type Kind38 = "quota_waiting";
+export type Provider9 = string;
 export type ResumesAt1 = number | null;
-export type Kind38 = "quota_wait_cancelled";
-export type Provider11 = string;
-export type Reason7 = "resumed" | "paused";
-export type Kind39 = "provider_switched";
+export type Kind39 = "quota_wait_cancelled";
+export type Provider10 = string;
+export type Reason8 = "resumed" | "paused";
+export type Kind40 = "provider_switched";
 export type FromProvider = string;
 export type ToProvider = string;
 export type ToModel = string;
-export type Reason8 = "policy" | "operator";
+export type Reason9 = "policy" | "operator";
 export type Detail3 = string;
-export type Kind40 = "gate_started";
+export type Kind41 = "gate_started";
 /**
  * Closed set of framework-owned gates a candidate passes through.
  */
@@ -632,7 +638,7 @@ export type Command = string | null;
  */
 export type FrameworkSource = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel = string | null;
-export type Kind41 = "gate_finished";
+export type Kind42 = "gate_finished";
 export type Recipe1 = string | null;
 export type Reused = boolean;
 export type Metric2 = string | null;
@@ -645,7 +651,7 @@ export type RoundLabel3 = string | null;
  */
 export type FrameworkSource1 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel1 = string | null;
-export type Kind42 = "workspace_snapshot";
+export type Kind43 = "workspace_snapshot";
 export type Label1 = string;
 export type Commit = string | null;
 export type Baseline = string | null;
@@ -654,10 +660,10 @@ export type ExcludedPaths = string[];
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource2 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind43 = "run_configured";
+export type Kind44 = "run_configured";
 export type RunLogPath = string;
 export type ProjectRoot = string;
-export type Model7 = string | null;
+export type Model6 = string | null;
 export type Objective = string | null;
 export type SearchPolicy = string | null;
 export type BenchmarkContract = boolean;
@@ -668,7 +674,7 @@ export type MaxUnmeasuredTurns = number | null;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource3 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind44 = "framework_warning";
+export type Kind45 = "framework_warning";
 export type Summary3 = string;
 export type Detail4 = string | null;
 /**
@@ -676,11 +682,11 @@ export type Detail4 = string | null;
  */
 export type FrameworkSource4 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
 export type SourceLabel2 = string | null;
-export type Kind45 = "winner_selected";
+export type Kind46 = "winner_selected";
 export type Selection = "candidate" | "baseline";
 export type Revision3 = string;
 export type SettlementId = string | null;
-export type Kind46 = "measurement_compared";
+export type Kind47 = "measurement_compared";
 export type Metric3 = string;
 export type Unit3 = string | null;
 export type Direction2 = "max" | "min";
@@ -700,7 +706,7 @@ export type BaseSamples = number;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource5 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind47 = "workstream_finished";
+export type Kind48 = "workstream_finished";
 export type SetupFailure = boolean;
 export type Refunded = boolean;
 export type RepeatedError = boolean;
@@ -730,11 +736,11 @@ export type WorkstreamFailureKind =
   | "profile-capture-unavailable"
   | "turn-limit"
   | "repeated-turn";
-export type Role = string | null;
+export type Role1 = string | null;
 export type Turns = number | null;
 export type Limit2 = number | null;
 export type Text6 = string;
-export type Kind48 = "turn_usage_recorded";
+export type Kind49 = "turn_usage_recorded";
 export type InputTokens2 = number | null;
 export type CacheCreationInputTokens = number | null;
 export type CacheReadInputTokens = number | null;
@@ -742,9 +748,9 @@ export type OutputTokens = number | null;
 export type ReasoningOutputTokens = number | null;
 export type TotalCostUsd = number | null;
 export type DurationMs = number | null;
-export type Kind49 = "span_started";
-export type Kind50 = "span_updated";
-export type Kind51 = "span_ended";
+export type Kind50 = "span_started";
+export type Kind51 = "span_updated";
+export type Kind52 = "span_ended";
 /**
  * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
  */
@@ -767,7 +773,7 @@ export type HypothesisId = string;
 export type Identified = boolean;
 export type Title4 = string | null;
 export type Claim = string | null;
-export type Action8 = string | null;
+export type Action9 = string | null;
 export type FirstRound = number;
 export type LastRound = number;
 export type Round1 = number;
@@ -840,7 +846,7 @@ export type Reset = boolean;
 export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Iterations = IterationSlice | IterationUnavailable | null;
-export type Kind52 = "page";
+export type Kind53 = "page";
 export type SchemaVersion = 1;
 export type RunId4 = string;
 export type ProjectionRevision = string;
@@ -866,7 +872,7 @@ export type Direction3 = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
-export type Kind53 = "unavailable";
+export type Kind54 = "unavailable";
 export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
@@ -892,30 +898,30 @@ export type Patch = string | null;
 export type Truncated1 = boolean;
 export type ServerMessage =
   SubscribedMessage | EventMessage | EventBatchMessage | ActiveExecutionsChunkMessage | ProtocolErrorMessage;
-export type Type17 = "subscribed";
-export type RequestId18 = string;
-export type ClientId18 = string;
+export type Type16 = "subscribed";
+export type RequestId17 = string;
+export type ClientId17 = string;
 export type RunId5 = string;
 export type LatestSequence = number;
-export type Type18 = "event";
+export type Type17 = "event";
 /**
  * Event batch and cursor metadata sent to subscribers.
  */
 export type EventBatchMessage = EventBatchMessage1 | EventBatchMessage2;
-export type Type19 = "event_batch";
+export type Type18 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
 export type ActiveExecutionsCheckpointId = null;
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
 export type Rebootstrap = boolean;
-export type Type20 = "event_batch";
+export type Type19 = "event_batch";
 export type Events2 = RunEvent[];
 export type ThroughSequence1 = number;
 export type StoreId2 = string;
 export type HistoryAfterSequence1 = number;
 export type Rebootstrap1 = boolean;
-export type Type21 = "active_executions_chunk";
+export type Type20 = "active_executions_chunk";
 export type CheckpointId = string;
 export type ChunkIndex = number;
 export type ChunkCount = number;
@@ -923,23 +929,23 @@ export type Payload1 = string;
 export type ThroughSequence2 = number;
 export type StoreId3 = string;
 export type HistoryAfterSequence2 = number;
-export type Type22 = "protocol_error";
-export type RequestId19 = string | null;
-export type ClientId19 = string;
+export type Type21 = "protocol_error";
+export type RequestId18 = string | null;
+export type ClientId18 = string;
 export type Code2 = string;
 export type Message2 = string;
 export type LogOwner = StartupStep | GateStage | ToolBuild | RunNarration;
-export type Kind54 = "startup_step";
+export type Kind55 = "startup_step";
 /**
  * Where an opening environment is, in the order it gets there.
  */
 export type EnvironmentStartupStage = "building_image" | "starting_container";
-export type Kind55 = "gate_stage";
+export type Kind56 = "gate_stage";
 export type ExecutionId2 = string;
 export type Attempt4 = number;
-export type Kind56 = "tool_build";
+export type Kind57 = "tool_build";
 export type Name3 = string;
-export type Kind57 = "run_narration";
+export type Kind58 = "run_narration";
 export type At = string;
 /**
  * A line's severity: the standard ``logging`` level at or below the record's.
@@ -953,8 +959,8 @@ export type Candidate = string | null;
 export type MetricValue = number | null;
 export type VsBaseline = number | null;
 export type Agent = string;
-export type Role1 = string;
-export type Model8 = string | null;
+export type Role2 = string;
+export type Model7 = string | null;
 export type StartedBy = string[];
 export type Stage3 = string;
 export type MetricValue1 = number | null;
@@ -1069,8 +1075,9 @@ export interface ChatQuery {
 /**
  * Create a new experiment-chat thread with its own agent selection.
  *
- * Omitted fields resolve to the run's configured provider and model. The
- * response carries the resolved settings and thread identity.
+ * ``harness`` is a provider and model pair from the helper's ``harnesses.list`` catalogue,
+ * the same one New run draws on. Omitted, the thread runs the run's own provider and model.
+ * The response carries the resolved settings and thread identity.
  */
 export interface ChatThreadCreateQuery {
   protocol_version?: ProtocolVersion6;
@@ -1078,14 +1085,20 @@ export interface ChatThreadCreateQuery {
   client_id?: ClientId6;
   timestamp: Timestamp6;
   type: Type6;
-  provider?: Provider;
-  model?: Model;
+  harness?: HarnessChoice | null;
   title?: Title;
 }
 /**
- * Request the agent selections this run's experiment chat offers.
+ * One agent CLI provider and one model it runs.
  */
-export interface ChatOptionsQuery {
+export interface HarnessChoice {
+  provider: Provider;
+  model: Model;
+}
+/**
+ * Request persisted run history.
+ */
+export interface HistoryQuery {
   protocol_version?: ProtocolVersion7;
   request_id?: RequestId7;
   client_id?: ClientId7;
@@ -1093,9 +1106,9 @@ export interface ChatOptionsQuery {
   type: Type7;
 }
 /**
- * Request persisted run history.
+ * Request the run's performance history.
  */
-export interface HistoryQuery {
+export interface PerformanceQuery {
   protocol_version?: ProtocolVersion8;
   request_id?: RequestId8;
   client_id?: ClientId8;
@@ -1103,24 +1116,14 @@ export interface HistoryQuery {
   type: Type8;
 }
 /**
- * Request the run's performance history.
+ * Request the hypothesis-level experiment log for the attached run.
  */
-export interface PerformanceQuery {
+export interface ExperimentQuery {
   protocol_version?: ProtocolVersion9;
   request_id?: RequestId9;
   client_id?: ClientId9;
   timestamp: Timestamp9;
   type: Type9;
-}
-/**
- * Request the hypothesis-level experiment log for the attached run.
- */
-export interface ExperimentQuery {
-  protocol_version?: ProtocolVersion10;
-  request_id?: RequestId10;
-  client_id?: ClientId10;
-  timestamp: Timestamp10;
-  type: Type10;
   after?: ExperimentCursor | null;
 }
 /**
@@ -1140,11 +1143,11 @@ export interface ExperimentCursor {
  * An empty string is a real fence for the pre-attachment store.
  */
 export interface IterationQuery {
-  protocol_version?: ProtocolVersion11;
-  request_id?: RequestId11;
-  client_id?: ClientId11;
-  timestamp: Timestamp11;
-  type: Type11;
+  protocol_version?: ProtocolVersion10;
+  request_id?: RequestId10;
+  client_id?: ClientId10;
+  timestamp: Timestamp10;
+  type: Type10;
   expected_store_id?: ExpectedStoreId1;
   parent_id?: ParentId;
   cursor?: Cursor;
@@ -1158,11 +1161,11 @@ export interface IterationQuery {
  * of the round concluded.
  */
 export interface DesignQuery {
-  protocol_version?: ProtocolVersion12;
-  request_id?: RequestId12;
-  client_id?: ClientId12;
-  timestamp: Timestamp12;
-  type: Type12;
+  protocol_version?: ProtocolVersion11;
+  request_id?: RequestId11;
+  client_id?: ClientId11;
+  timestamp: Timestamp11;
+  type: Type11;
 }
 /**
  * Request one file's unified patch from a round's commit range.
@@ -1174,11 +1177,11 @@ export interface DesignQuery {
  * paths the design log filtered out.
  */
 export interface DesignPatchQuery {
-  protocol_version?: ProtocolVersion13;
-  request_id?: RequestId13;
-  client_id?: ClientId13;
-  timestamp: Timestamp13;
-  type: Type13;
+  protocol_version?: ProtocolVersion12;
+  request_id?: RequestId12;
+  client_id?: ClientId12;
+  timestamp: Timestamp12;
+  type: Type12;
   base: Base;
   head: Head;
   path: Path;
@@ -1192,11 +1195,11 @@ export interface DesignPatchQuery {
  * string is a real fence for the pre-attachment store.
  */
 export interface EventsQuery {
-  protocol_version?: ProtocolVersion14;
-  request_id?: RequestId14;
-  client_id?: ClientId14;
-  timestamp: Timestamp14;
-  type: Type14;
+  protocol_version?: ProtocolVersion13;
+  request_id?: RequestId13;
+  client_id?: ClientId13;
+  timestamp: Timestamp13;
+  type: Type13;
   expected_store_id?: ExpectedStoreId2;
   after_sequence?: AfterSequence;
   before_sequence?: BeforeSequence;
@@ -1206,11 +1209,11 @@ export interface EventsQuery {
  * Subscribe to run events, optionally replaying a recent tail.
  */
 export interface SubscribeRequest {
-  protocol_version?: ProtocolVersion15;
-  request_id?: RequestId15;
-  client_id?: ClientId15;
-  timestamp: Timestamp15;
-  type: Type15;
+  protocol_version?: ProtocolVersion14;
+  request_id?: RequestId14;
+  client_id?: ClientId14;
+  timestamp: Timestamp14;
+  type: Type14;
   after_sequence?: AfterSequence1;
   tail?: Tail;
   store_id?: StoreId;
@@ -1224,11 +1227,11 @@ export interface SubscribeRequest {
  * command rejects it (``WP-CAPABILITY-PROBE``).
  */
 export interface ControlCommand {
-  protocol_version?: ProtocolVersion16;
-  request_id?: RequestId16;
-  client_id?: ClientId16;
-  timestamp: Timestamp16;
-  type: Type16;
+  protocol_version?: ProtocolVersion15;
+  request_id?: RequestId15;
+  client_id?: ClientId15;
+  timestamp: Timestamp15;
+  type: Type15;
   control: ControlRequest;
 }
 /**
@@ -1339,17 +1342,16 @@ export interface SetMaxParallelRequest {
  * Response envelope for all protocol requests.
  */
 export interface Response {
-  protocol_version?: ProtocolVersion17;
-  request_id: RequestId17;
-  client_id?: ClientId17;
-  timestamp: Timestamp17;
+  protocol_version?: ProtocolVersion16;
+  request_id: RequestId16;
+  client_id?: ClientId16;
+  timestamp: Timestamp16;
   ok?: Ok;
   error?: Error;
   diagnostic?: Diagnostic | null;
   ack?: CommandAck | null;
   chat?: ChatResult | null;
   chat_thread?: ChatThreadInfo | null;
-  chat_options?: ChatOptions | null;
   snapshot?: RunSnapshot | null;
   events?: Events;
   performance?: Performance;
@@ -1409,31 +1411,10 @@ export interface ChatThreadInfo {
   model: Model1;
 }
 /**
- * All offered chat selections grouped by provider.
- */
-export interface ChatOptions {
-  providers?: Providers;
-}
-/**
- * One supported chat provider and its suggested models.
- */
-export interface ChatProviderOptions {
-  provider: Provider2;
-  models?: Models;
-}
-/**
- * One offered chat model and the source of its suggestion.
- */
-export interface ChatModelOption {
-  model: Model2;
-  source: Source1;
-  default?: Default;
-}
-/**
  * Current server projection of a run's public state.
  */
 export interface RunSnapshot {
-  protocol_version?: ProtocolVersion18;
+  protocol_version?: ProtocolVersion17;
   run_id: RunId1;
   project_scope?: ProjectScope;
   sequence: Sequence;
@@ -1442,6 +1423,7 @@ export interface RunSnapshot {
   round_label?: RoundLabel;
   active_executions?: ActiveExecutions;
   chat_threads?: ChatThreads;
+  last_chat_thread_id?: ChatThreadId | null;
   spans?: Spans;
   overview?: RunOverview | null;
 }
@@ -1457,8 +1439,8 @@ export interface ActiveAgentExecution {
   assignment: Assignment;
   started_at: StartedAt;
   activity: AgentExecutionActivityData;
-  provider?: Provider3;
-  model?: Model3;
+  provider?: Provider2;
+  model?: Model2;
 }
 /**
  * Complete current activity for an active agent execution.
@@ -1600,10 +1582,10 @@ export interface EvaluatorIdentity {
  * object, which lets ``EventStore`` replay history without copying it.
  */
 export interface RunEvent {
-  protocol_version?: ProtocolVersion19;
+  protocol_version?: ProtocolVersion18;
   sequence?: Sequence1;
   run_id?: RunId2;
-  timestamp: Timestamp18;
+  timestamp: Timestamp17;
   type: EventType;
   text?: Text4;
   diagnostic?: Diagnostic | null;
@@ -1639,8 +1621,8 @@ export interface ChatThreadCreatedData {
   kind: Kind3;
   thread_id: ChatThreadId;
   title?: Title3;
-  provider: Provider4;
-  model: Model4;
+  provider: Provider3;
+  model: Model3;
   created_at: CreatedAt;
 }
 /**
@@ -1672,8 +1654,8 @@ export interface AgentExecutionStartedData {
   system_prompt?: SystemPrompt1;
   user_prompt?: UserPrompt1;
   activity: AgentExecutionActivityData;
-  provider?: Provider5;
-  model?: Model5;
+  provider?: Provider4;
+  model?: Model4;
   reasoning_effort?: ReasoningEffort;
   harness_version?: HarnessVersion;
 }
@@ -1713,7 +1695,7 @@ export interface Value {
 export interface OutputData {
   kind: Kind9;
   stream: Stream;
-  source?: Source2;
+  source?: Source1;
   content: Content;
 }
 /**
@@ -2001,10 +1983,46 @@ export interface SteerTarget1 {
   id?: SubjectId | null;
 }
 /**
+ * One step in an operator steer's life, by the control id the operator sent it under.
+ *
+ * Carried by the steer-lifecycle run-control events (queued, reached a turn, in force,
+ * dropped, ended, withdrawal queued, refused); ``SteerDelivery`` is its one definition.
+ */
+export interface SteerDeliveryData {
+  kind: Kind31;
+  delivery: SteerDelivery;
+}
+/**
+ * One step in a steer's life: the facts a client needs to show it, by control id.
+ *
+ * ``control_id`` is the id the operator sent the steer or withdrawal under, so a client
+ * matches the step to its own send; None for a control sent without one. A step carries
+ * the facts its state names and no other: ``mode`` when queued, ``withdraws`` for a queued
+ * withdrawal, ``role`` when a turn took the steer, and ``reason`` when it ended unreached.
+ */
+export interface SteerDelivery {
+  state: SteerDeliveryState;
+  control_id?: ControlId8;
+  action?: Action8;
+  mode?: SteerMode2 | null;
+  target?: SteerTarget2 | null;
+  withdraws?: Withdraws1;
+  role?: Role;
+  attempt_id?: AttemptId;
+  reason?: Reason5;
+}
+/**
+ * Whom a steer is for: the whole run, or one role, attempt or item, by id.
+ */
+export interface SteerTarget2 {
+  kind?: SteerTargetKind;
+  id?: SubjectId | null;
+}
+/**
  * Current todo list reported by an agent.
  */
 export interface TodoUpdateData {
-  kind: Kind31;
+  kind: Kind32;
   todos?: Todos;
 }
 /**
@@ -2018,10 +2036,10 @@ export interface TodoItemData {
  * Token usage reported by the active model.
  */
 export interface UsageUpdateData {
-  kind: Kind32;
+  kind: Kind33;
   input_tokens: InputTokens1;
   context_window?: ContextWindow1;
-  model?: Model6;
+  model?: Model5;
 }
 /**
  * One rate-limit window a provider reported, as semantic data.
@@ -2031,8 +2049,8 @@ export interface UsageUpdateData {
  * ``None`` when it did not state them. ``resets_at`` is epoch seconds.
  */
 export interface RateLimitUpdateData {
-  kind: Kind33;
-  provider?: Provider6;
+  kind: Kind34;
+  provider?: Provider5;
   window?: Window;
   limit?: Limit1;
   used_fraction?: UsedFraction;
@@ -2054,8 +2072,8 @@ export interface RateLimitUpdateData {
  * provider and model an operator may resume with, ``None`` when none is configured.
  */
 export interface QuotaPausedData {
-  kind: Kind34;
-  provider: Provider7;
+  kind: Kind35;
+  provider: Provider6;
   condition: Condition;
   detail: Detail1;
   resets_at?: ResetsAt1;
@@ -2073,10 +2091,10 @@ export interface QuotaPausedData {
  * on; otherwise the run's pause.
  */
 export interface QuotaResumedData {
-  kind: Kind35;
-  provider: Provider8;
+  kind: Kind36;
+  provider: Provider7;
   condition?: Condition1;
-  reason?: Reason5;
+  reason?: Reason6;
   waited_seconds?: WaitedSeconds;
 }
 /**
@@ -2086,11 +2104,11 @@ export interface QuotaResumedData {
  * it ended without waiting, and in events recorded before the field existed).
  */
 export interface QuotaAbandonedData {
-  kind: Kind36;
-  provider: Provider9;
+  kind: Kind37;
+  provider: Provider8;
   condition: Condition2;
   detail: Detail2;
-  reason: Reason6;
+  reason: Reason7;
   waited_seconds?: WaitedSeconds1;
 }
 /**
@@ -2101,17 +2119,17 @@ export interface QuotaAbandonedData {
  * policy's retry interval. A later request replaces this one.
  */
 export interface QuotaWaitingData {
-  kind: Kind37;
-  provider: Provider10;
+  kind: Kind38;
+  provider: Provider9;
   resumes_at?: ResumesAt1;
 }
 /**
  * The operator ended a wait for capacity: ``resumed`` the run now, or ``paused`` it again.
  */
 export interface QuotaWaitCancelledData {
-  kind: Kind38;
-  provider: Provider11;
-  reason: Reason7;
+  kind: Kind39;
+  provider: Provider10;
+  reason: Reason8;
 }
 /**
  * The run replaced a provider by its fallback.
@@ -2121,18 +2139,18 @@ export interface QuotaWaitCancelledData {
  * carries the provider and model it actually ran on.
  */
 export interface ProviderSwitchedData {
-  kind: Kind39;
+  kind: Kind40;
   from_provider: FromProvider;
   to_provider: ToProvider;
   to_model: ToModel;
-  reason: Reason8;
+  reason: Reason9;
   detail: Detail3;
 }
 /**
  * One framework gate began evaluating the current candidate.
  */
 export interface GateStartedData {
-  kind: Kind40;
+  kind: Kind41;
   gate: GateKind;
   recipe?: Recipe;
   command?: Command;
@@ -2150,7 +2168,7 @@ export interface GateStartedData {
  * pass-fraction itself rather than the backend aggregating one.
  */
 export interface GateFinishedData {
-  kind: Kind41;
+  kind: Kind42;
   gate: GateKind;
   recipe?: Recipe1;
   reused?: Reused;
@@ -2171,7 +2189,7 @@ export interface GateFinishedData {
  * change carries ``excluded_paths``.
  */
 export interface WorkspaceSnapshotData {
-  kind: Kind42;
+  kind: Kind43;
   label?: Label1;
   commit?: Commit;
   baseline?: Baseline;
@@ -2185,10 +2203,10 @@ export interface WorkspaceSnapshotData {
  * ``max_unmeasured_turns``.
  */
 export interface RunConfiguredData {
-  kind: Kind43;
+  kind: Kind44;
   run_log_path: RunLogPath;
   project_root: ProjectRoot;
-  model?: Model7;
+  model?: Model6;
   objective?: Objective;
   search_policy?: SearchPolicy;
   benchmark_contract?: BenchmarkContract;
@@ -2204,7 +2222,7 @@ export interface RunConfiguredData {
  * ``diagnostic`` field so diagnostic-oriented clients need no new handling.
  */
 export interface FrameworkWarningData {
-  kind: Kind44;
+  kind: Kind45;
   summary: Summary3;
   detail?: Detail4;
   source?: FrameworkSource4;
@@ -2214,7 +2232,7 @@ export interface FrameworkWarningData {
  * The run's result was chosen: a retained candidate, or the unchanged trusted input.
  */
 export interface WinnerSelectedData {
-  kind: Kind45;
+  kind: Kind46;
   selection: Selection;
   revision: Revision3;
   settlement_id?: SettlementId;
@@ -2223,7 +2241,7 @@ export interface WinnerSelectedData {
  * A candidate's measurement was compared with its base's. See ``vibesys.events``.
  */
 export interface MeasurementComparedData {
-  kind: Kind46;
+  kind: Kind47;
   metric: Metric3;
   unit?: Unit3;
   direction: Direction2;
@@ -2247,7 +2265,7 @@ export interface MeasurementComparedData {
  * specifically, profile and merge workstreams do not emit this event.
  */
 export interface WorkstreamFinishedData {
-  kind: Kind47;
+  kind: Kind48;
   setup_failure: SetupFailure;
   refunded: Refunded;
   repeated_error: RepeatedError;
@@ -2258,7 +2276,7 @@ export interface WorkstreamFinishedData {
  */
 export interface WorkstreamFailureData {
   kind: WorkstreamFailureKind;
-  role?: Role;
+  role?: Role1;
   turns?: Turns;
   limit?: Limit2;
   text?: Text6;
@@ -2269,7 +2287,7 @@ export interface WorkstreamFailureData {
  * See ``vibesys.events.TurnUsageData``.
  */
 export interface TurnUsageData {
-  kind: Kind48;
+  kind: Kind49;
   input_tokens?: InputTokens2;
   cache_creation_input_tokens?: CacheCreationInputTokens;
   cache_read_input_tokens?: CacheReadInputTokens;
@@ -2284,21 +2302,21 @@ export interface TurnUsageData {
  */
 export interface SpanStartedData {
   span: Span;
-  kind: Kind49;
+  kind: Kind50;
 }
 /**
  * A span changed.
  */
 export interface SpanUpdatedData {
   span: Span;
-  kind: Kind50;
+  kind: Kind51;
 }
 /**
  * A span ended.
  */
 export interface SpanEndedData {
   span: Span;
-  kind: Kind51;
+  kind: Kind52;
 }
 /**
  * One measured performance result in a run.
@@ -2338,7 +2356,7 @@ export interface HypothesisEntry {
   identified?: Identified;
   title?: Title4;
   claim?: Claim;
-  action?: Action8;
+  action?: Action9;
   first_round: FirstRound;
   last_round: LastRound;
   rounds?: Rounds;
@@ -2403,7 +2421,7 @@ export interface ExperimentUpdate {
  * One bounded page, with enough identity to reject stale merges.
  */
 export interface IterationSlice {
-  kind?: Kind52;
+  kind?: Kind53;
   schema_version?: SchemaVersion;
   run_id: RunId4;
   projection_revision: ProjectionRevision;
@@ -2438,7 +2456,7 @@ export interface IterationMetric {
  * Typed absence, kept distinct from a supported empty tree.
  */
 export interface IterationUnavailable {
-  kind?: Kind53;
+  kind?: Kind54;
   schema_version?: SchemaVersion1;
   reason: IterationUnavailableReason;
   detail?: Detail5;
@@ -2496,9 +2514,9 @@ export interface DesignPatch {
  * Initial acknowledgment for an event subscription.
  */
 export interface SubscribedMessage {
-  type: Type17;
-  request_id: RequestId18;
-  client_id?: ClientId18;
+  type: Type16;
+  request_id: RequestId17;
+  client_id?: ClientId17;
   run_id: RunId5;
   latest_sequence: LatestSequence;
 }
@@ -2506,14 +2524,14 @@ export interface SubscribedMessage {
  * Single-event message for the legacy streaming protocol.
  */
 export interface EventMessage {
-  type: Type18;
+  type: Type17;
   event: RunEvent;
 }
 /**
  * Event batch and cursor metadata sent to subscribers.
  */
 export interface EventBatchMessage1 {
-  type: Type19;
+  type: Type18;
   events: Events1;
   through_sequence?: ThroughSequence;
   active_executions?: ActiveExecutions;
@@ -2526,7 +2544,7 @@ export interface EventBatchMessage1 {
  * Event batch and cursor metadata sent to subscribers.
  */
 export interface EventBatchMessage2 {
-  type: Type20;
+  type: Type19;
   events: Events2;
   through_sequence?: ThroughSequence1;
   active_executions: null;
@@ -2545,7 +2563,7 @@ export interface EventBatchMessage2 {
  * sequence space even when the batch itself was split into event frames.
  */
 export interface ActiveExecutionsChunkMessage {
-  type: Type21;
+  type: Type20;
   checkpoint_id: CheckpointId;
   chunk_index: ChunkIndex;
   chunk_count: ChunkCount;
@@ -2558,9 +2576,9 @@ export interface ActiveExecutionsChunkMessage {
  * Structured error envelope for protocol failures.
  */
 export interface ProtocolErrorMessage {
-  type: Type22;
-  request_id?: RequestId19;
-  client_id?: ClientId19;
+  type: Type21;
+  request_id?: RequestId18;
+  client_id?: ClientId18;
   code: Code2;
   message: Message2;
   diagnostic?: Diagnostic | null;
@@ -2570,7 +2588,7 @@ export interface ProtocolErrorMessage {
  */
 export interface StartupStep {
   span_id?: SpanId | null;
-  kind: Kind54;
+  kind: Kind55;
   stage: EnvironmentStartupStage;
 }
 /**
@@ -2578,7 +2596,7 @@ export interface StartupStep {
  */
 export interface GateStage {
   span_id?: SpanId | null;
-  kind: Kind55;
+  kind: Kind56;
   execution_id: ExecutionId2;
   gate: GateKind;
   attempt: Attempt4;
@@ -2588,7 +2606,7 @@ export interface GateStage {
  */
 export interface ToolBuild {
   span_id?: SpanId | null;
-  kind: Kind56;
+  kind: Kind57;
   name: Name3;
 }
 /**
@@ -2596,7 +2614,7 @@ export interface ToolBuild {
  */
 export interface RunNarration {
   span_id?: SpanId | null;
-  kind: Kind57;
+  kind: Kind58;
 }
 /**
  * One narration record, as one JSON line of a narration stream.
@@ -2649,8 +2667,8 @@ export interface AdoptionAttrs {
  */
 export interface AgentTurnAttrs {
   agent: Agent;
-  role: Role1;
-  model?: Model8;
+  role: Role2;
+  model?: Model7;
   started_by?: StartedBy;
 }
 /**

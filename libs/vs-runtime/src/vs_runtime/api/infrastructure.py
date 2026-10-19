@@ -213,6 +213,9 @@ from vs_runtime._run_control import (
     RunControlTransitionKind,
     RunStopped,
     RuntimeRunControlChannel,
+    SteerDelivery,
+    SteerDeliveryState,
+    SteerTurn,
 )
 from vs_runtime._run_end import recorded_ending
 from vs_runtime._run_environment import (
@@ -276,6 +279,7 @@ from vs_runtime._skills import (
     offered_skill_facts,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
+from vs_runtime._steer_delivery import SteerableAttempt, SteerTargets, known_steer_targets
 from vs_runtime._task_image_policy import (
     EditorImagePlan,
     TaskImageBuildStep,
@@ -673,10 +677,15 @@ __all__ = [
     "StartupOutputOpener",
     "StateBuildStore",
     "StateValidationPasses",
+    "SteerDelivery",
+    "SteerDeliveryState",
     "SteerMode",
     "SteerRequest",
     "SteerTarget",
     "SteerTargetKind",
+    "SteerTargets",
+    "SteerTurn",
+    "SteerableAttempt",
     "StopGraceError",
     "StopMode",
     "StopRequest",
@@ -750,6 +759,7 @@ __all__ = [
     "image_features",
     "install_capacity_gate",
     "job_failure",
+    "known_steer_targets",
     "load_evaluator_package",
     "load_skill_frontmatter",
     "make_run_environment_spec",
