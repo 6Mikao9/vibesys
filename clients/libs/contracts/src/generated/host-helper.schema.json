@@ -2719,7 +2719,8 @@
         "usage_window",
         "run_trace",
         "run_ending",
-        "chat_ended_runs"
+        "chat_ended_runs",
+        "chat_ended_run_questions"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -5826,6 +5827,18 @@
         "read_only": {
           "title": "Read Only",
           "type": "boolean"
+        },
+        "chat": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat"
         }
       },
       "required": [
@@ -5867,6 +5880,18 @@
           "minLength": 1,
           "title": "Run Id",
           "type": "string"
+        },
+        "with_chat": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Chat"
         }
       },
       "required": [
@@ -8725,6 +8750,9 @@
     },
     "examples.list": {
       "with_catalogue": "example_catalogue"
+    },
+    "run.reader": {
+      "with_chat": "chat_ended_run_questions"
     }
   }
 }

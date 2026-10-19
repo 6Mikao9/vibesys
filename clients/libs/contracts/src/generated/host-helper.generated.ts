@@ -276,6 +276,7 @@ export type DeadlineMs35 = number;
 export type Type35 = "run.reader";
 export type Project10 = string;
 export type RunId5 = string;
+export type WithChat = boolean | null;
 export type Message =
   | HelloReply
   | InstancesListReply
@@ -359,7 +360,8 @@ export type HelperFeature =
   | "usage_window"
   | "run_trace"
   | "run_ending"
-  | "chat_ended_runs";
+  | "chat_ended_runs"
+  | "chat_ended_run_questions";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -974,6 +976,7 @@ export type RequestId71 = string;
 export type Type71 = "run.reader";
 export type InstanceId6 = string;
 export type ReadOnly = boolean;
+export type Chat = boolean | null;
 export type Type72 = "instances.changed";
 export type WatchId3 = string;
 export type Type73 = "error";
@@ -1588,6 +1591,7 @@ export interface RunReaderRequest {
   type: Type35;
   project: Project10;
   run_id: RunId5;
+  with_chat?: WithChat;
 }
 /**
  * The negotiated version and features, and what will start runs on this host.
@@ -2877,6 +2881,7 @@ export interface RunReaderReply {
   type: Type71;
   instance_id: InstanceId6;
   read_only: ReadOnly;
+  chat?: Chat;
 }
 /**
  * A push on a watch: the listing as it is now, sent first and then on each change.

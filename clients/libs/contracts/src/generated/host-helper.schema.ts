@@ -2721,7 +2721,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "usage_window",
         "run_trace",
         "run_ending",
-        "chat_ended_runs"
+        "chat_ended_runs",
+        "chat_ended_run_questions"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -5828,6 +5829,18 @@ const hostHelperSchema: Record<string, unknown> = {
         "read_only": {
           "title": "Read Only",
           "type": "boolean"
+        },
+        "chat": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chat"
         }
       },
       "required": [
@@ -5869,6 +5882,18 @@ const hostHelperSchema: Record<string, unknown> = {
           "minLength": 1,
           "title": "Run Id",
           "type": "string"
+        },
+        "with_chat": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Chat"
         }
       },
       "required": [
@@ -8727,6 +8752,9 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "examples.list": {
       "with_catalogue": "example_catalogue"
+    },
+    "run.reader": {
+      "with_chat": "chat_ended_run_questions"
     }
   }
 };
