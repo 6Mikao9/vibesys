@@ -24,6 +24,7 @@ export {
   type ChartSpan,
   type ChartTick,
 } from './components/chart.js';
+export {ChatMessage} from './components/chat-message.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
 export {ChoiceTiles, type TileOption} from './components/choice-tiles.js';
 export {Collapsible} from './components/collapsible.js';
@@ -51,6 +52,7 @@ export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
 export {type AxisLabel, type PlacedLabel, placeLabels} from './components/label-fit.js';
 export {
   type Align,
+  Dock,
   Grid,
   type GridColumn,
   type Justify,

@@ -181,6 +181,52 @@ export interface ChatThread {
   readonly model: string | null;
 }
 
+/** A question put to a chat thread, as the terminal `chat` event recorded it. */
+export interface ChatQuestion {
+  /** The event's sequence as text, unique within the run. */
+  readonly id: string;
+  readonly text: string;
+}
+
+/**
+ * A steer a thread's agent proposed (`steer_proposed`): the fields a `SteerRequest` is prefilled
+ * with. Nothing here reached the run; only the operator's `command.control` does.
+ */
+export interface ChatProposal {
+  /** The server's id for the proposal, unique within the run. */
+  readonly id: string;
+  readonly sequence: number;
+  readonly text: string;
+  readonly target: {readonly kind: 'run' | 'role' | 'attempt' | 'item'; readonly id: string | null};
+  readonly mode: 'next_turn' | 'standing' | 'interrupt';
+}
+
+export type SteerDeliveryStep =
+  | 'queued'
+  | 'withdraw_queued'
+  | 'reached'
+  | 'reached_mid_turn'
+  | 'in_force'
+  | 'dropped'
+  | 'ended'
+  | 'refused';
+
+/** One step in a steer's life, as the server reported it. */
+export interface SteerDeliveryFact {
+  readonly sequence: number;
+  readonly step: SteerDeliveryStep;
+  /** The id the operator sent the steer or withdrawal under; null for a control sent without one. */
+  readonly controlId: string | null;
+  readonly action: 'steer' | 'withdraw' | null;
+  /** For a queued withdrawal: the control id of the steer it ends. */
+  readonly withdraws: string | null;
+  /** The role whose turn took the steer. */
+  readonly role: string | null;
+  readonly attemptId: string | null;
+  /** Why a steer ended unreached or was refused. */
+  readonly reason: string | null;
+}
+
 /** Backend diagnostic facts. Visibility and dismissal belong to the UI. */
 export interface CoreDiagnostic {
   readonly id: string | null;
@@ -310,6 +356,14 @@ export interface CoreState {
   readonly chatTranscripts: Readonly<Record<string, readonly TranscriptEntry[]>>;
   /** The default thread first, then created threads in replay order. */
   readonly chatThreads: readonly ChatThread[];
+  /** The thread the server last wrote to, from the snapshot; null before one names it. */
+  readonly lastChatThreadId: string | null;
+  /** The steps of operator steers' lives the server reported, in journal order. */
+  readonly steerDeliveries: readonly SteerDeliveryFact[];
+  /** Each thread's answered questions, in journal order, keyed by thread id. */
+  readonly chatQuestions: Readonly<Record<string, readonly ChatQuestion[]>>;
+  /** The steers each thread's agent proposed, in journal order, keyed by thread id. */
+  readonly chatProposals: Readonly<Record<string, readonly ChatProposal[]>>;
   readonly todos: readonly ExecutionTodos[];
   readonly usage: UsageMeter | null;
   readonly quota: QuotaState;
@@ -383,6 +437,10 @@ export function initialCoreState(): CoreState {
     // The default thread has no backend record, so it has no backend-owned
     // title either. Naming it is the consumer's job.
     chatThreads: [{id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null}],
+    lastChatThreadId: null,
+    steerDeliveries: [],
+    chatQuestions: {},
+    chatProposals: {},
     todos: [],
     usage: null,
     quota: {sequence: 0, pause: null, lastSwitch: null},
