@@ -145,6 +145,7 @@ from vs_core._strategy_operations import (
     VerifyParentRevisionBase,
 )
 from vs_core._turn_chain import TurnChain
+from vs_core._turn_holds import held_limit
 from vs_core._values import EncodingMismatchError, encode_json, share_unchanged, verify_encoding
 from vs_core._waitable import (
     SuspendedTurn,
@@ -540,6 +541,7 @@ from vs_core.types.records import (
     BlockedRecordStalled,
     BlockRequest,
     CancelOwnedResource,
+    CapacityHold,
     ChildLease,
     ChildObservationWatermark,
     DispatchAuthorized,
@@ -572,6 +574,7 @@ from vs_core.types.records import (
     RequestUndispatchable,
     RetryDue,
     TargetObservation,
+    TurnHeld,
     inherit,
     within,
 )
@@ -933,6 +936,7 @@ __all__ = [
     "CancelOwnedResource",
     "CancelTurn",
     "Capabilities",
+    "CapacityHold",
     "CaptureCommandBase",
     "CaptureSpec",
     "Channel",
@@ -1396,6 +1400,7 @@ __all__ = [
     "TurnEnded",
     "TurnFailureKind",
     "TurnFinished",
+    "TurnHeld",
     "TurnInputsReserved",
     "TurnObserved",
     "TurnRequested",
@@ -1475,6 +1480,7 @@ __all__ = [
     "evaluation_of",
     "evidence_view",
     "flow",
+    "held_limit",
     "hours",
     "inherit",
     "initial_state",

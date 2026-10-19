@@ -54,6 +54,10 @@ class TurnFailureKind(StrEnum):
     """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
     CANCELLED = "cancelled"
     """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    """Core ended the turn while the run's capacity gate held it for its provider (an outage,
+    a spent quota): no reply exists, and the turn's own work never failed. A strategy asks it
+    again without counting it against the role's lost turns."""
 
 
 def unset(value: object) -> bool:
@@ -615,7 +619,10 @@ MAX_CORRECTIONS = 5
 MAX_LOST_TURNS = 5
 """The most times any role may have a lost turn asked again."""
 MAX_REASK_CHAIN = MAX_CORRECTIONS + MAX_LOST_TURNS
-"""The longest chain of corrections and re-asks any role's bounds allow; core refuses a longer one."""
+"""The longest chain of corrections and re-asks any role's bounds allow; core refuses a longer one.
+
+A re-ask after a turn lost to its provider (``PROVIDER_UNAVAILABLE``) is no link of the chain:
+the run's capacity gate bounds an outage, by its budget and the pause that follows it."""
 
 
 class RequestRetries(Value):

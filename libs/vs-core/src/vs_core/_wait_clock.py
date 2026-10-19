@@ -39,6 +39,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from ._registry import ContractError
+from ._turn_holds import held_limit
 from .types.evaluation import OwnedJob, RegisteredOwnedJob
 from .types.job_observations import WaitEnd
 
@@ -190,6 +191,20 @@ def wait_bounds(
     return tuple(job_bound(job, stated(job), run, records.hosts) for job in jobs)
 
 
+def turn_bound(record: RequestRecord, run: RunState) -> Bound:
+    """When ``record``'s own limit ends it: its stated limit plus the capacity hold it is credited.
+
+    The rules are ``_turn_holds.held_limit``'s; a bound past the run deadline ends with the run,
+    and a parked hold lasts until the run ends. A record with no hold ends at its ``until``.
+    """
+    stated = record.until.at
+    if record.capacity_hold is None:
+        return Bound(at=stated, by=WaitEnd.LIMIT)
+    ceiling = Bound(at=max(run.deadline_at, stated), by=WaitEnd.RUN_END)
+    at = held_limit(stated, record.capacity_hold)
+    return Bound(at=at, by=WaitEnd.LIMIT) if at <= ceiling.at else ceiling
+
+
 def record_bound(
     record: RequestRecord,
     evaluation: EvaluationState,
@@ -198,14 +213,15 @@ def record_bound(
 ) -> Bound:
     """When ``record``'s limit ends it: at the earliest bound of an unfinished job it started.
 
-    A record that started no job (or whose jobs all ended) ends at its stated ``until``.
+    A record that started no job (or whose jobs all ended) ends at its own bound: its stated
+    ``until``, extended by the capacity hold of the turn it dispatches (``turn_bound``).
     """
     bounds = tuple(
         job_bound(job, record.until.at, run, hosts)
         for job in (*evaluation.jobs, *evaluation.registered_jobs)
         if source(job) == record.request_id and not job.terminal
     )
-    return _earliest(bounds, Bound(at=record.until.at, by=WaitEnd.LIMIT))
+    return _earliest(bounds, turn_bound(record, run))
 
 
 def notice_due(job: Job, before: float, limits: Limits) -> bool:

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_runtime.api.infrastructure import (
@@ -15,6 +16,7 @@ from vs_runtime.api.infrastructure import (
     GiveUp,
     Hold,
     OutagePolicy,
+    PauseFor,
     QuotaAction,
     QuotaPolicy,
     Switch,
@@ -242,7 +244,8 @@ def _quota_policy(action: QuotaAction) -> QuotaPolicy:
 def test_the_quota_policy_bounds_how_long_an_outage_is_waited_out(
     action: QuotaAction, stops: list[float]
 ) -> None:
-    """``pause`` and ``wait`` wait an outage out for the whole budget; ``fail`` and ``fallback``
+    """``pause`` and ``wait`` wait an outage out for the whole budget, then pause the run (S179):
+    ``pause`` for the operator, ``wait`` until it resumes by itself; ``fail`` and ``fallback``
     wait one backoff step, then fail or switch to the fallback.
 
     ``stops`` are the times each later stop took to come back (the send's own retries); the
@@ -261,8 +264,14 @@ def test_the_quota_policy_bounds_how_long_an_outage_is_waited_out(
         decision = decide_outage(policy, stop=stop, elapsed=elapsed, run_left=None)
 
     first = PROVIDER_OUTAGE.first_wait_seconds
-    if action in (QuotaAction.PAUSE, QuotaAction.WAIT):
-        assert policy == PROVIDER_OUTAGE
+    if action is QuotaAction.PAUSE:
+        assert policy == replace(PROVIDER_OUTAGE, pause_when_spent=True)
+        assert isinstance(decision, WaitFor | Hold)
+    elif action is QuotaAction.WAIT:
+        # ``wait`` resumes by itself once the budget is spent, one retry interval later.
+        retry = _quota_policy(action).retry_seconds
+        assert policy == replace(PROVIDER_OUTAGE, pause_when_spent=True, resume_after_seconds=retry)
+        assert decision == PauseFor(retry) or isinstance(decision, WaitFor)
     else:
         # One backoff step, then the policy's own end: a switch only under fallback.
         assert waits == [first]
@@ -297,3 +306,20 @@ def test_quota_give_up_reasons_state_durations_in_hours_minutes_and_seconds(
     assert late == GiveUp(
         f"capacity returns in {returns_in}, past the {describe_seconds(1e8)} still allowed"
     )
+
+
+@pytest.mark.regression
+@example(spent=3600.0, retry=300.0)
+@given(spent=seconds, retry=st.floats(min_value=1.0, max_value=86_400.0))
+def test_a_spent_outage_budget_resumes_by_itself_only_under_wait(
+    spent: float, retry: float
+) -> None:
+    """Past the budget ``wait`` pauses on a timed resume, as documented on ``QuotaAction.WAIT``;
+    ``pause`` waits for the operator. Before (review of #3283, MED-3), both waited for the
+    operator."""
+    elapsed = PROVIDER_OUTAGE.budget_seconds + spent
+    wait = outage_policy_for(QuotaPolicy(QuotaAction.WAIT, retry_seconds=retry))
+    pause = outage_policy_for(QuotaPolicy(QuotaAction.PAUSE, retry_seconds=retry))
+
+    assert decide_outage(wait, stop=9, elapsed=elapsed, run_left=None) == PauseFor(retry)
+    assert decide_outage(pause, stop=9, elapsed=elapsed, run_left=None) == Hold()
