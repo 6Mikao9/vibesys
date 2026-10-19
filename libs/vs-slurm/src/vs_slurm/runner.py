@@ -1335,6 +1335,9 @@ class _Transport(Protocol):
 
 
 class _ProcessTransport:
+    # Describes a program that exited nonzero; a transport may refine it.
+    _failed = staticmethod(SlurmError.transport_failed)
+
     def __init__(self, processes: Processes, timeout: float) -> None:
         self._processes = processes
         self._timeout = timeout
@@ -1363,9 +1366,7 @@ class _ProcessTransport:
             case ProcessOutcome(returncode=0, stdout=stdout, stderr=stderr):
                 return _TransportResponse(stdout=stdout.decode(), stderr=stderr.decode())
             case ProcessOutcome(returncode=returncode, stderr=stderr):
-                raise SlurmError.transport_failed(
-                    operation, returncode, stderr.decode(errors="replace")
-                )
+                raise self._failed(operation, returncode, stderr.decode(errors="replace"))
             case ProcessTimedOut():
                 raise SlurmError.transport_timed_out(operation)
             case ProcessGroupUnreaped(detail=detail):
@@ -1434,6 +1435,8 @@ class _RsyncTransport(_ProcessTransport):
 
 
 class _SshTransport(_RsyncTransport):
+    _failed = staticmethod(SlurmError.ssh_transport_failed)
+
     def __init__(
         self,
         config: SlurmSshTransport,
@@ -1443,7 +1446,7 @@ class _SshTransport(_RsyncTransport):
     ) -> None:
         super().__init__(
             config.rsync_command,
-            remote_shell=("-e", shlex.join(config.ssh_command)),
+            remote_shell=("-e", shlex.join(config.ssh_argv)),
             destination=f"{config.host}:",
             processes=processes,
             timeout=timeout,
@@ -1452,7 +1455,7 @@ class _SshTransport(_RsyncTransport):
 
     def exec(self, command: str) -> _TransportResponse:
         return self._run(
-            (*self._config.ssh_command, "--", self._config.host, command),
+            (*self._config.ssh_argv, "--", self._config.host, command),
             operation="exec",
         )
 

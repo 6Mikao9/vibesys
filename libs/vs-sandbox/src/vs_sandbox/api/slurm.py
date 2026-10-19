@@ -69,6 +69,7 @@ from vs_sandbox.slurm_ledger import (
     SlurmLedgerAttachment,
     open_ledger_attachment,
 )
+from vs_sandbox.slurm_ledger_evaluations import CLOSE_RELEASE_BOUND_S
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
     SlurmOperatorSettings,
@@ -105,6 +106,7 @@ HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
 
 __all__ = [
     "CANCELLED_BEFORE_SUBMISSION",
+    "CLOSE_RELEASE_BOUND_S",
     "COMMAND_BROKER_SOCKET_ENV",
     "COMMAND_BROKER_TOKEN_ENV",
     "GPU_ACTIVE_FRACTION_METRIC",

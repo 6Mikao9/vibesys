@@ -566,7 +566,12 @@ def _admission_signal(
 def _activation_signal(
     state: CoreState, signal: RegisterAttempt | AdmitAttempt | RecoveryReady
 ) -> tuple[Transition, tuple[Signal, ...]]:
-    """Admissions resolve canonical decisions; recovery only wakes scheduling."""
+    """Admissions resolve canonical decisions; recovery wakes scheduling.
+
+    A recovered run that closes under a cancel applies the cancel again first: a state
+    saved before a stop escalated (``_escalated``) holds a drain Finish and a cancel
+    recorded after it, with nothing cancelled. Applying a cancel twice changes nothing.
+    """
     if isinstance(signal, RecoveryReady):
         barrier = state.records.recovery
         if signal.epoch != barrier.epoch:
@@ -575,7 +580,10 @@ def _activation_signal(
             raise ContractError(
                 ("recovery", "phase"), "ready notification requires committed barrier proof"
             )
-        return Transition(state=state), (ClockAdvanced(now_at=state.run.now_at),)
+        wake = ClockAdvanced(now_at=state.run.now_at)
+        if _closing_under_cancel(state):
+            return Transition(state=state), (AdmissionControl(action="cancel"), wake)
+        return Transition(state=state), (wake,)
     return _admission_signal(state, signal)
 
 
@@ -1305,12 +1313,7 @@ def _escalated(before: CoreState, result: Transition, dispatch: Dispatch) -> Tra
     force when it commits (``_decision_signal``).
     """
     after = result.state
-    if (
-        stop_mode(before.run) is not StopMode.DRAIN
-        or stop_mode(after.run) is not StopMode.CANCEL
-        or after.run.status != RunStatus.CLOSING
-        or not isinstance(committed_stop(after.run), Proven)
-    ):
+    if stop_mode(before.run) is not StopMode.DRAIN or not _closing_under_cancel(after):
         return result
     cancelled = propagate(after, (AdmissionControl(action="cancel"),), dispatch)
     return cancelled.model_copy(
@@ -1318,6 +1321,15 @@ def _escalated(before: CoreState, result: Transition, dispatch: Dispatch) -> Tra
             "requests": (*result.requests, *cancelled.requests),
             "events": (*result.events, *cancelled.events),
         }
+    )
+
+
+def _closing_under_cancel(state: CoreState) -> bool:
+    """Whether the run is closing on a committed Finish, and its stop in force cancels."""
+    return (
+        state.run.status == RunStatus.CLOSING
+        and isinstance(committed_stop(state.run), Proven)
+        and stop_mode(state.run) is StopMode.CANCEL
     )
 
 

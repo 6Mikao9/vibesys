@@ -34,6 +34,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import (
+    CLOSE_RELEASE_BOUND_S,
     AttachPending,
     SharedSlurmAdmission,
     SlurmEvaluationExecutor,
@@ -123,6 +124,7 @@ class _Scheduler(FakeCluster):
 
     def __init__(self, clock: ManualClock) -> None:
         super().__init__(clock=clock)
+        self.manual = clock
         self.jobs: set[str] = set()
         self.queue_s = 100.0
         self.run_s = 100.0
@@ -142,6 +144,9 @@ class _Scheduler(FakeCluster):
         self.lose_submit_replies = 0
         # How many cancels never reach the scheduler, as over a broken connection.
         self.failing_cancels = 0
+        # How long each cancel takes on the clock, as on a sick controller; and how many came.
+        self.cancel_s = 0.0
+        self.cancels = 0
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -214,6 +219,8 @@ class _Scheduler(FakeCluster):
         by_job_id: bool = False,
         observed: ClusterObservation | None = None,
     ) -> ClusterCancelOutcome:
+        self.cancels += 1
+        self.manual.advance(self.cancel_s)
         if self.failing_cancels:
             self.failing_cancels -= 1
             return ClusterUnknown(operation_id=None, reason="ssh: connection reset by peer")
@@ -265,6 +272,8 @@ class _World:
     ledger: FakeEvaluationLedger = field(
         default_factory=lambda: FakeEvaluationLedger(project=PROJECT)
     )
+    # How long a cancel confirms its job ended; the executor's own default unless set.
+    cancel_confirmation_seconds: float = 120.0
     scheduler: _Scheduler = field(init=False)
 
     def __post_init__(self) -> None:
@@ -277,8 +286,9 @@ class _World:
         *,
         content: str = "print('bench')",
         sleeper: _ParkingSleeper | _ClockSleeper | None = None,
-        policy: LedgerPolicy = DEFAULT_POLICY,
+        policy: LedgerPolicy | None = DEFAULT_POLICY,
     ) -> _Run:
+        """A run of this world's executor; ``policy`` None: a run without the ledger."""
         workspace = root / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
         (workspace / "bench.py").write_text(content, encoding="utf-8")
@@ -302,8 +312,11 @@ class _World:
                 holder=holder,
                 policy=policy,
                 clock=self.clock,
-            ),
+            )
+            if policy is not None
+            else None,
             ledger_candidate="0f3c9e1",
+            cancel_confirmation_seconds=self.cancel_confirmation_seconds,
         )
         return _Run(executor, sleeper)
 
@@ -869,3 +882,87 @@ async def test_a_cancel_whose_withdrawal_ended_unknown_withdraws_it_when_tried_a
     assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
     assert world.entry_state() is LedgerState.WITHDRAWN
     await run.executor.close()
+
+
+def _tries_within_bound(cancel_s: float, lost: int) -> tuple[int, bool]:
+    """How many relinquish tries a close makes, and whether one cancelled the job.
+
+    Each case here ends within the relinquish's own retries; only the bound stops it.
+    """
+    tries = 0
+    while tries * cancel_s < CLOSE_RELEASE_BOUND_S:
+        tries += 1
+        if tries > lost:
+            return tries, True
+    return tries, False
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("cancel_s", "lost"),
+    [(CONFIG.transport_timeout_seconds, 10**6), (20.0, 10**6), (5.0, 1), (5.0, 0)],
+)
+async def test_a_close_on_a_sick_controller_gives_up_releasing_and_detaches(
+    tmp_path: Path, cancel_s: float, lost: int
+) -> None:
+    """periodic-1330 LOW-6: a SIGTERM's close relinquished every job, however long it took.
+
+    Each scancel takes ``cancel_s`` and the first ``lost`` are lost, so a relinquish ends
+    unknown and is tried again. A close starts no try once ``CLOSE_RELEASE_BOUND_S`` has
+    passed: it detaches what is left, as a run that keeps its jobs on a stop does, so the
+    job's record stays resumable and a later run cancels it. A try that is answered within
+    the bound cancels the job.
+    """
+    world = _World()
+    world.scheduler.queue_s = math.inf
+    run = world.run(tmp_path / "run-1", "run-1")
+    await _attached(run, "eval-1")
+    (operation,) = world.scheduler.jobs
+    world.scheduler.failing_cancels = lost
+    world.scheduler.cancel_s = cancel_s
+    tries, cancelled = _tries_within_bound(cancel_s, lost)
+
+    await asyncio.wait_for(run.executor.close(), timeout=_BOUND_S)
+
+    if cancelled:
+        assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+        return
+    assert world.scheduler.cancels == tries
+    assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
+    world.scheduler.failing_cancels = 0
+    restarted = world.run(tmp_path / "run-1", "run-1")
+    assert await restarted.executor.inspect("eval-1") is not None
+    await restarted.executor.cancel("eval-1")
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+    await restarted.executor.close()
+
+
+@pytest.mark.regression
+async def test_a_close_past_its_bound_still_cancels_a_job_from_before_the_ledger(
+    tmp_path: Path,
+) -> None:
+    """PR #3222 LOW-1: past the bound, a close detached a job that had no ledger entry.
+
+    The run submitted its job without the ledger and was resumed with it, so the job has
+    no ledger key and no ledger sweep will ever withdraw it: only this close can cancel
+    it. Its first scancel is lost and takes the whole bound; the close's next try must
+    still cancel the job, since giving up applies only to ledger releases.
+    """
+    # One confirmation inspect per cancel: the close never pauses between them.
+    world = _World(cancel_confirmation_seconds=CONFIG.poll_interval_seconds)
+    world.scheduler.queue_s = math.inf
+    without = world.run(tmp_path / "run-1", "run-1", policy=None)
+    await _attached(without, "eval-1")
+    (operation,) = world.scheduler.jobs
+    assert not world.ledger.list_keys()
+
+    resumed = world.run(tmp_path / "run-1", "run-1")
+    assert await resumed.executor.inspect("eval-1") is not None
+    world.scheduler.failing_cancels = 1
+    world.scheduler.cancel_s = CLOSE_RELEASE_BOUND_S
+
+    await asyncio.wait_for(resumed.executor.close(), timeout=_BOUND_S)
+
+    assert world.scheduler.cancels == 2
+    assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
+    await without.executor.close()

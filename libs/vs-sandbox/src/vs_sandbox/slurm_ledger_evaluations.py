@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
@@ -40,6 +40,32 @@ _LOG = logging.getLogger(__name__)
 # How many more times a relinquish whose outcome is unknown is tried before its
 # caller hears so; each try is a few ledger and cluster calls.
 _RELINQUISH_RETRIES = 3
+
+CLOSE_RELEASE_BOUND_S = 30.0
+"""How long an executor's close keeps starting ledger relinquishes, in seconds.
+
+A healthy controller relinquishes every job well within it. On one that does not answer,
+each try waits up to a transport call's limit and is retried, with no end but the
+retries. Past the bound, a close starts no further relinquish: a job left in the ledger is
+detached, as a run that keeps its jobs on a stop leaves it. Its record stays resumable,
+its ledger lease lapses, and the next run that opens the ledger reconciles it. A job with
+no ledger entry (attached before the ledger was enabled) is still cancelled.
+
+This bounds when relinquishes start, not how long the close takes. Typically the close
+ends within the bound plus one transport call: on a controller that does not answer, the
+first call that times out ends its try. There is no hard bound, because what is already
+under way finishes:
+
+- a relinquish in flight is a whole ledger withdrawal, up to 8 rounds of a read and then a
+  mark write, or an inspect, scancel and record;
+- after a withdrawal, and for a job with no ledger entry, the executor sends scancel and
+  confirms the job ended, up to ``cancel_confirmation_seconds`` worth of inspects;
+- tries already queued on the worker threads at the deadline still run.
+
+Each of these calls is bounded by ``transport_timeout_seconds``. In the extreme, a
+controller that answers every call just under that limit (110 s by default) keeps one job's
+release going for tens of calls, an hour or more. Correctness does not depend on the close
+ending: an interrupted withdrawal's mark expires and is undone."""
 
 
 class BlockingCalls(Protocol):
@@ -80,6 +106,15 @@ class LedgerEvaluations:
     job_timeout_seconds: int
     in_thread: BlockingCalls
     finish_in_thread: BlockingCalls
+    release_until: float | None = field(default=None, init=False)
+    """When a close stops starting releases (``give_up_releasing_after``); None: never."""
+
+    def give_up_releasing_after(self, seconds: float) -> None:
+        """Start no relinquish ``seconds`` from now; a job left in the ledger detaches."""
+        self.release_until = self.clock.now() + seconds
+
+    def _gave_up(self) -> bool:
+        return self.release_until is not None and self.clock.now() >= self.release_until
 
     async def attach(
         self,
@@ -215,12 +250,25 @@ class LedgerEvaluations:
         leaves even that. ``known`` is the request of the job the evaluation
         attached to (``attached``), as its executor recorded it; a job attached
         to before the operator enabled the ledger has none, and is cancelled by
-        the executor as before.
+        the executor as before. A close that gave up releasing
+        (``give_up_releasing_after``) starts no further relinquish and detaches
+        the job, which its ledger entry leaves to a later run; it still cancels a
+        job that has no entry.
         """
         if detaching:
             return Released.DETACHED
         if attached and known is None:
+            # Even past a close's bound: with no ledger entry, no sweep would withdraw it.
             return Released.CANCEL_HERE
+        if self._gave_up():
+            # Nor wait out another evaluation's guard on the request into a try.
+            return Released.DETACHED
+        return await self._release_from_ledger(handle_id, known, attached=attached)
+
+    async def _release_from_ledger(
+        self, handle_id: str, known: str | None, *, attached: bool
+    ) -> Released:
+        """Stop using this evaluation's request; relinquish it if no other run wants it."""
         ledger = self.ledger
         key = known if known is not None else ledger.request_of(handle_id)
         if key is None:
@@ -234,6 +282,8 @@ class LedgerEvaluations:
                     await self.finish_in_thread(ledger.release, known)
             elif sole:
                 outcome = await self._relinquish(key)
+                if outcome is None:
+                    return Released.DETACHED
                 if isinstance(outcome, WithdrawUnknown):
                     # Still used: a later cancel, or the stop, withdraws it again.
                     raise ExecutorCancellationUnknownError(handle_id)
@@ -242,7 +292,7 @@ class LedgerEvaluations:
             return Released.CANCEL_HERE
         return Released.DONE
 
-    async def _relinquish(self, key: str) -> WithdrawOutcome:
+    async def _relinquish(self, key: str) -> WithdrawOutcome | None:
         """Relinquish ``key``, trying again at once while its outcome is unknown.
 
         A scancel or ledger call lost over a broken connection undoes the
@@ -250,15 +300,21 @@ class LedgerEvaluations:
         again is safe; a stop that gave
         up after one lost call would leave the job queued for nobody. The tries
         do not pause: each is several remote calls, and the caller holds the
-        request's guard, which a pause would hold too.
+        request's guard, which a pause would hold too. None: a close gave up
+        releasing (``give_up_releasing_after``) before the outcome was known.
         """
-        outcome = await self.finish_in_thread(self.ledger.relinquish, self.cluster, key)
-        for _ in range(_RELINQUISH_RETRIES):
-            if not isinstance(outcome, WithdrawUnknown):
-                break
-            _LOG.warning("relinquishing ledger request %s again: %s", key[:12], outcome.reason)
+        unknown: WithdrawUnknown | None = None
+        for _ in range(1 + _RELINQUISH_RETRIES):
+            if self._gave_up():
+                _LOG.warning("left ledger request %s for the next run to reconcile", key[:12])
+                return None
+            if unknown is not None:
+                _LOG.warning("relinquishing ledger request %s again: %s", key[:12], unknown.reason)
             outcome = await self.finish_in_thread(self.ledger.relinquish, self.cluster, key)
-        return outcome
+            if not isinstance(outcome, WithdrawUnknown):
+                return outcome
+            unknown = outcome
+        return unknown
 
     async def let_go_of_ended(self, handle_id: str, known: str | None) -> None:
         """Stop using the request of an evaluation that ended, relinquishing it if last.
@@ -274,4 +330,4 @@ class LedgerEvaluations:
             _LOG.warning("could not let go of the ledger request of evaluation %s", handle_id)
 
 
-__all__ = ["BlockingCalls", "LedgerEvaluations", "Released"]
+__all__ = ["CLOSE_RELEASE_BOUND_S", "BlockingCalls", "LedgerEvaluations", "Released"]

@@ -45,7 +45,11 @@ from vs_sandbox.slurm_deadlines import (
     first_deadlines,
 )
 from vs_sandbox.slurm_deadlines import observe as observe_deadlines
-from vs_sandbox.slurm_ledger_evaluations import LedgerEvaluations, Released
+from vs_sandbox.slurm_ledger_evaluations import (
+    CLOSE_RELEASE_BOUND_S,
+    LedgerEvaluations,
+    Released,
+)
 from vs_sandbox.slurm_stage_output import CollectedStage, StageOutputFollower
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
@@ -850,7 +854,10 @@ class SlurmEvaluationExecutor:
         With the evaluation ledger, a cancel withdraws a request no other run wants
         (``_release``). When the ledger keeps jobs on a stop, closing detaches
         instead: every job keeps running, its record keeps it resumable, and its
-        lease lapses.
+        lease lapses. A close starts no ledger relinquish after
+        ``CLOSE_RELEASE_BOUND_S`` (a controller that does not answer) and detaches
+        those jobs the same way; work already under way still finishes, so this
+        bounds when releases start, not how long the close takes.
         """
         self._closing = True
         if self._ledger is not None and self._ledger.ledger.policy.keep_jobs_on_stop:
@@ -860,6 +867,8 @@ class SlurmEvaluationExecutor:
         active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
         # A cancel whose job is still tearing down returns with the evaluation
         # CANCELING; the durable record keeps the job for a later reconcile.
+        if self._ledger is not None:
+            self._ledger.give_up_releasing_after(CLOSE_RELEASE_BOUND_S)
         results = await asyncio.gather(
             *(self.cancel(handle_id) for handle_id in active), return_exceptions=True
         )
