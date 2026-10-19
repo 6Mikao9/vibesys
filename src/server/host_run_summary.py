@@ -10,7 +10,7 @@ these messages into the helper's request and reply unions and gates them behind
 ``HelperFeature.RUN_SUMMARY``.
 
 Public surface: ``RunsSummaryRequest``, ``RunsSummaryReply``, ``TurnReply``, ``TokenTally``,
-``SpanTokens``, ``UsageRecord``, ``TraceFormat``, ``trace_format``, the documents they
+``SpanTokens``, ``UsageRecord``, ``NO_TOKENS``, ``add_tokens``, ``TraceFormat``, ``trace_format``, the documents they
 pass through (``RunSpanDocument``, ``RunOverviewDocument``, ``ReplySchemaDocument``) and the
 limits and names ``RUN_SUMMARY_FILE``, ``RUN_SUMMARY_PAGE_MAX_BYTES`` and
 ``REPLY_SCHEMA_ID_PATTERN``.
@@ -132,6 +132,29 @@ class TokenTally(BaseModel):
     """Output tokens, reasoning included."""
     reasoning: NonNegativeInt | None
     """The part of ``output`` the provider reports as reasoning."""
+
+
+NO_TOKENS: Final = TokenTally(
+    input=None, cache_read=None, cache_write=None, output=None, reasoning=None
+)
+"""The tally of nothing spent: no count is reported yet."""
+
+
+def _sum(a: int | None, b: int | None) -> int | None:
+    if a is None:
+        return b
+    return a if b is None else a + b
+
+
+def add_tokens(a: TokenTally, b: TokenTally) -> TokenTally:
+    """``a`` and ``b`` summed count by count; a count neither reported stays unreported."""
+    return TokenTally(
+        input=_sum(a.input, b.input),
+        cache_read=_sum(a.cache_read, b.cache_read),
+        cache_write=_sum(a.cache_write, b.cache_write),
+        output=_sum(a.output, b.output),
+        reasoning=_sum(a.reasoning, b.reasoning),
+    )
 
 
 class SpanTokens(BaseModel):

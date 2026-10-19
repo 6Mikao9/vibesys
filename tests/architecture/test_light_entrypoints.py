@@ -79,6 +79,8 @@ ALLOWED_FIRST_PARTY = (
     "server.host_envelope",
     "server.host_run_dashboard",
     "server.host_run_summary",
+    "server.host_usage_window",
+    "server.usage_window",
     "server.run_summary",
     "server.run_summary_cache",
     "server.instances",

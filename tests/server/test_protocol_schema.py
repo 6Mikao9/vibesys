@@ -223,6 +223,7 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "agent_logins.list": "agent_logins",
         "agent_logins.start": "agent_logins",
         "project.task_goal": "project_goal",
+        "usage.window": "usage_window",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()

@@ -138,7 +138,7 @@ depends_on = ["server", "server.trace", "server.execution", "server.chat", "serv
 # the standard library only; tests/architecture/test_light_entrypoints.py keeps
 # the light entrypoints' import closure free of the engine.
 path = "server.host_api"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_summary"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_summary", "server.host_usage_window"]
 
 [[modules]]
 # The fields every helper request and reply carries. Pydantic only.
@@ -221,7 +221,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_events", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_usage_window", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The host helper's `logs` feature: chunking, tails and the long poll over the LogReader role.
@@ -278,6 +278,16 @@ depends_on = ["server.host_api", "server.host_machine_facts", "vs_sim.api"]
 # What a run's tile draws (per-idea points, attention reason): contracts only. Pydantic only.
 path = "server.host_run_dashboard"
 depends_on = []
+
+[[modules]]
+# The helper's usage.window messages: what runs spent in a window. Light: Pydantic and the contracts.
+path = "server.host_usage_window"
+depends_on = ["server.host_envelope", "server.host_run_summary"]
+
+[[modules]]
+# What runs spent in a window, summed from their usage records: a pure function. Light.
+path = "server.usage_window"
+depends_on = ["server.host_envelope", "server.host_run_summary", "server.host_usage_window"]
 
 [[modules]]
 # A run's digest (ideas, best ratio, duration, ending) folded from its journal in one pass.

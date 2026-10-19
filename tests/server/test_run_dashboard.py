@@ -53,6 +53,8 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
 _INPUT = 100.0
+_BASE = 1_790_000_000
+"""The journal time, in epoch seconds, of a scenario's time zero."""
 """The input's reading in every scenario: an idea's ratio is its reading over this."""
 
 
@@ -70,7 +72,7 @@ def _event(sequence: int, kind: str, at: float, data: dict[str, JsonValue]) -> b
         "protocol_version": 1,
         "sequence": sequence,
         "run_id": "20261010-120000-11111111-dynamic",
-        "timestamp": datetime.fromtimestamp(1_790_000_000 + at, UTC).isoformat(),
+        "timestamp": datetime.fromtimestamp(_BASE + at, UTC).isoformat(),
         "type": kind,
         "text": "",
         "data": {"kind": kind, **data},
@@ -129,6 +131,18 @@ def journal_of(ideas: list[_Idea], direction: str = "max") -> list[bytes]:
     return lines
 
 
+def _landed(ideas: list[_Idea], at: int) -> float:
+    """Where idea ``at`` is plotted: when its reading landed, else when it last moved."""
+    idea = ideas[at]
+    if idea.reading is not None:
+        return idea.landed
+    return 10.0 * at if idea.outcome == "running" else idea.landed + 1
+
+
+def _plot_order(ideas: list[_Idea]) -> list[int]:
+    return sorted(range(len(ideas)), key=lambda at: (_landed(ideas, at), at))
+
+
 def chart_of(ideas: list[_Idea], direction: str = "max") -> list[tuple[float | None, IdeaVerdict]]:
     """What the run page's chart says of ``ideas``, stated plainly.
 
@@ -138,13 +152,7 @@ def chart_of(ideas: list[_Idea], direction: str = "max") -> list[tuple[float | N
     running are the workstream's own outcome, whatever the reading.
     """
 
-    def landed(at: int) -> float:
-        idea = ideas[at]
-        if idea.reading is not None:
-            return idea.landed
-        return 10.0 * at if idea.outcome == "running" else idea.landed + 1
-
-    order = sorted(range(len(ideas)), key=lambda at: (landed(at), at))
+    order = _plot_order(ideas)
     standing = _INPUT if any(idea.reading is not None for idea in ideas) else None
     chart: list[tuple[float | None, IdeaVerdict]] = []
     for at in order:
@@ -197,6 +205,16 @@ def test_the_digests_points_are_the_run_pages_chart_over_any_run(
         assert ratio == pytest.approx(expected)
     assert digest.ideas == len(ideas)
     assert digest.dashboard.points_omitted == 0
+
+
+@given(ideas=_IDEAS)
+def test_each_point_says_when_its_result_landed_by_the_journals_clock(ideas: list[_Idea]) -> None:
+    digest = digest_journal(journal_of(ideas))
+
+    assert digest.dashboard is not None
+    got = [point.at for point in digest.dashboard.points]
+    want = [datetime.fromtimestamp(_BASE + _landed(ideas, at), UTC) for at in _plot_order(ideas)]
+    assert got == want
 
 
 @given(ideas=_IDEAS, direction=_DIRECTIONS)

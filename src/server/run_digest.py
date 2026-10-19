@@ -134,12 +134,15 @@ class _Gate(NamedTuple):
     value: float | None
     ratio: float | None
     at: float
+    wall: float | None
+    """When the journal event that last wrote the gate was recorded (epoch seconds)."""
 
 
 class _Measure(NamedTuple):
     value: float | None
     ratio: float | None
     at: float
+    wall: float | None
 
 
 class _Attempt(NamedTuple):
@@ -148,6 +151,7 @@ class _Attempt(NamedTuple):
     idea: str
     outcome: str
     at: float
+    wall: float | None
 
 
 class _Idea(NamedTuple):
@@ -156,6 +160,16 @@ class _Idea(NamedTuple):
     outcome: str
     measure: _Measure | None
     at: float
+    wall: float | None
+
+
+class _Plotted(NamedTuple):
+    """One point of the chart: the idea's verdict and measurement, and when its position landed."""
+
+    verdict: IdeaVerdict
+    measure: _Measure | None
+    wall: float | None
+    """The journal time of the reading that plots it, else of the idea's last move (epoch seconds)."""
 
 
 def _outcome(label: dict[str, JsonValue], span: dict[str, JsonValue]) -> str:
@@ -168,7 +182,11 @@ def _outcome(label: dict[str, JsonValue], span: dict[str, JsonValue]) -> str:
 
 def _last_measure(gates: list[_Gate]) -> _Measure | None:
     shown = [gate for gate in gates if gate.value is not None or gate.verdict is not None]
-    return None if not shown else _Measure(shown[-1].value, shown[-1].ratio, shown[-1].at)
+    return (
+        None
+        if not shown
+        else _Measure(shown[-1].value, shown[-1].ratio, shown[-1].at, shown[-1].wall)
+    )
 
 
 class _Fold:
@@ -209,7 +227,7 @@ class _Fold:
             self.rounds += 1
         elif kind in _SPAN_EVENTS:
             self.spans += 1
-            self._span(_object(data.get("span")))
+            self._span(_object(data.get("span")), _seconds(event))
         elif kind == "run_started":
             objective = _object(_object(data.get("overview")).get("objective"))
             self.minimize = objective.get("direction") == "min"
@@ -218,7 +236,7 @@ class _Fold:
         elif isinstance(kind, str) and kind in _CLOSINGS:
             self.closing = _CLOSINGS[kind]
 
-    def _span(self, span: dict[str, JsonValue]) -> None:
+    def _span(self, span: dict[str, JsonValue], wall: float | None) -> None:
         label = _object(span.get("label"))
         attrs = _attrs(label)
         span_id = span.get("id")
@@ -238,6 +256,7 @@ class _Fold:
                     idea,
                     _outcome(label, span),
                     _span_time(span),
+                    wall,
                 )
         elif label.get("kind") == "gate":
             verdict = label.get("verdict")
@@ -246,6 +265,7 @@ class _Fold:
                 _number(attrs.get("metric_value")),
                 _number(attrs.get("vs_baseline")),
                 _span_time(span),
+                wall,
             )
         elif label.get("kind") == "adoption":
             verdict = label.get("verdict")
@@ -312,10 +332,13 @@ class _Fold:
                 if (measure := _last_measure(gates_of.get(each, []))) is not None
             ]
             moved = max(self.attempts[each].at for each in attempt_ids)
-            found.append(_Idea(outcome, shown[-1] if shown else None, moved))
+            walls = [wall for each in attempt_ids if (wall := self.attempts[each].wall) is not None]
+            found.append(
+                _Idea(outcome, shown[-1] if shown else None, moved, max(walls, default=None))
+            )
         return found
 
-    def _chart(self) -> list[tuple[IdeaVerdict, _Measure | None]]:
+    def _chart(self) -> list[_Plotted]:
         """The run page's chart (``performanceFold``): each idea's verdict and measurement, in plot order.
 
         The ideas whose gate read a value are plotted in the order the readings ended (ties in the
@@ -337,7 +360,7 @@ class _Fold:
             measure = idea.measure
             return measure.at if measure and measure.value is not None else idea.at
 
-        chart: list[tuple[IdeaVerdict, _Measure | None]] = []
+        chart: list[_Plotted] = []
         for _, idea in sorted(enumerate(ideas), key=lambda each: (plotted_at(each[1]), each[0])):
             measure, value = idea.measure, idea.measure.value if idea.measure else None
             if idea.outcome == "running":
@@ -350,7 +373,8 @@ class _Fold:
                 verdict, standing = IdeaVerdict.KEPT, value
             else:
                 verdict = IdeaVerdict.NOT_BETTER
-            chart.append((verdict, measure))
+            landed = measure.wall if measure and measure.value is not None else idea.wall
+            chart.append(_Plotted(verdict, measure, landed))
         return chart
 
     def _improvement(self, measure: _Measure | None) -> float | None:
@@ -359,7 +383,7 @@ class _Fold:
             return None
         return 1 / measure.ratio if self.minimize and measure.ratio != 0 else measure.ratio
 
-    def _best_so_far_ratio(self, chart: list[tuple[IdeaVerdict, _Measure | None]]) -> float | None:
+    def _best_so_far_ratio(self, chart: list[_Plotted]) -> float | None:
         """What the run page headlines while the run works: the best idea so far, as a ratio.
 
         Before the run opens an adoption, the page's best is the last ``kept`` idea of the ``chart``.
@@ -368,13 +392,17 @@ class _Fold:
         """
         if self.adoptions:
             return None
-        kept = [measure for verdict, measure in chart if verdict is IdeaVerdict.KEPT]
+        kept = [each.measure for each in chart if each.verdict is IdeaVerdict.KEPT]
         return self._improvement(kept[-1]) if kept else None
 
-    def _dashboard(self, chart: list[tuple[IdeaVerdict, _Measure | None]]) -> RunDashboard:
+    def _dashboard(self, chart: list[_Plotted]) -> RunDashboard:
         points = [
-            IdeaPoint(ratio=self._improvement(measure), verdict=verdict)
-            for verdict, measure in chart
+            IdeaPoint(
+                ratio=self._improvement(each.measure),
+                verdict=each.verdict,
+                at=None if each.wall is None else datetime.fromtimestamp(each.wall, UTC),
+            )
+            for each in chart
         ]
         streak = 0
         for point in reversed(points):

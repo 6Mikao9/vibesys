@@ -142,6 +142,7 @@ from server.host_machine_facts import (
     RunCounts,
 )
 from server.host_preflight import BackendUnavailable, CheckId
+from server.host_run_dashboard import IdeaVerdict
 from server.host_run_events import (
     RunEventDocument,
     RunsEventsForSpanReply,
@@ -151,12 +152,14 @@ from server.host_run_events import (
     RunsReadTailReply,
     RunsReadTailRequest,
 )
+from server.host_usage_window import UsageWindowReply, UsageWindowRequest
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
     dial,
 )
 from server.run_digest import run_attention
+from server.usage_window import RunUsage, usage_window
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -851,6 +854,7 @@ def _answer(
             | RunsEventsForSpanRequest()
             | RunsReadTailRequest()
             | RunsSummaryRequest()
+            | UsageWindowRequest()
         ):
             reply = _run_history_reply(request, host)
         case (
@@ -1097,15 +1101,25 @@ def _run_history_reply(
     request: RunsReadEventsRequest
     | RunsEventsForSpanRequest
     | RunsReadTailRequest
-    | RunsSummaryRequest,
+    | RunsSummaryRequest
+    | UsageWindowRequest,
     host: HelperHost,
-) -> RunsReadEventsReply | RunsEventsForSpanReply | RunsReadTailReply | RunsSummaryReply:
+) -> (
+    RunsReadEventsReply
+    | RunsEventsForSpanReply
+    | RunsReadTailReply
+    | RunsSummaryReply
+    | UsageWindowReply
+):
     """Answer one read of a run's recorded history.
 
-    Its events (from a sequence, of a span, or the newest) or its summary.
+    Its events (from a sequence, of a span, or the newest), its summary, or what its turns spent
+    in a window.
     """
     if isinstance(request, RunsSummaryRequest):
         return _run_summary_reply(request, host)
+    if isinstance(request, UsageWindowRequest):
+        return _usage_window_reply(request, host)
     project = Path(_host_path(request.project, host.directories))
     if isinstance(request, RunsEventsForSpanRequest):
         span_page = host.projects.run_span_events(
@@ -1129,6 +1143,36 @@ def _run_history_reply(
             last_sequence=tail.last_sequence,
         )
     return _run_events_reply(request, host)
+
+
+def _usage_window_reply(request: UsageWindowRequest, host: HelperHost) -> UsageWindowReply:
+    """Answer what the named runs spent in the window, from each run's usage records.
+
+    A run's records are its summary's (``Projects.run_summary``, the cache beside the journal) and
+    its bests are the kept points of its digest, so each run costs a cache read and what its journal
+    gained since. A run the project does not have, or whose journal this machine does not hold, is
+    ``missing``.
+    """
+    project = Path(_host_path(request.project, host.directories))
+    root, known = host.projects.runs(project)
+    tasks = {run.run_id: run.task for run in known}
+    found: list[RunUsage] = []
+    missing: list[str] = []
+    for run_id in dict.fromkeys(request.run_ids):
+        try:
+            records = host.projects.run_summary(project, run_id).fold.records
+        except ProjectLookupError as error:
+            if error.code is not HelperErrorCode.UNKNOWN_RUN:
+                raise
+            missing.append(run_id)
+            continue
+        digest = host.projects.run_digest(root, run_id)
+        points = (
+            digest.dashboard.points if isinstance(digest, RunDigest) and digest.dashboard else ()
+        )
+        bests = [point.at for point in points if point.verdict is IdeaVerdict.KEPT and point.at]
+        found.append(RunUsage(run_id, tasks.get(run_id), records, bests))
+    return usage_window(request, found, missing)
 
 
 def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSummaryReply:

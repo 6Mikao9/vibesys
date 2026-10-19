@@ -14,9 +14,8 @@ does not know, or one it cannot parse, is ``UnreadableRecord``, never dropped
 and never a failure of the whole listing: two checkouts on one host share one
 registry.
 
-Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
-``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
-``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
+Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``, ``INSTANCE_ID_PATTERN``, ``InstanceId``,
+``RunId``, ``RunStatus``, ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
 ``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``RunClosing``,
 ``RunDigest``, ``RunDigestUnreadable``, ``one_line``,
 ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
@@ -31,7 +30,8 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 ``request_features``, ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
 members, the run history read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run
 history's messages (``server.host_run_events``), the run summary's messages
-(``server.host_run_summary``), the run tile's dashboard (``server.host_run_dashboard``), the
+(``server.host_run_summary``), the run tile's dashboard (``server.host_run_dashboard``), the usage
+window (``server.host_usage_window``), the
 machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardware``,
 ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
 ``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``, ``CheckoutFound``,
@@ -122,6 +122,7 @@ from server.host_run_events import (
     RunsReadTailRequest,
 )
 from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
+from server.host_usage_window import UsageWindowReply, UsageWindowRequest
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1
@@ -1165,6 +1166,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     ComputeRemoveClusterRequest: HelperFeature.MACHINE_COMPUTE,
     AgentLoginsListRequest: HelperFeature.AGENT_LOGINS,
     AgentLoginsStartRequest: HelperFeature.AGENT_LOGINS,
+    UsageWindowRequest: HelperFeature.USAGE_WINDOW,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -1240,7 +1242,8 @@ HelperRequest = Annotated[
     | ComputeRemoveClusterRequest
     | AgentLoginsListRequest
     | AgentLoginsStartRequest
-    | ProjectTaskGoalRequest,
+    | ProjectTaskGoalRequest
+    | UsageWindowRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1798,6 +1801,7 @@ HelperReply = (
     | AgentLoginsListReply
     | AgentLoginsStartReply
     | ProjectTaskGoalReply
+    | UsageWindowReply
 )
 """A request's result; its ``type`` is the request's."""
 
