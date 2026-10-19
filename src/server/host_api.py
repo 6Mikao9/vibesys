@@ -30,9 +30,9 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 ``request_features``, ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
 members, the run history read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run
 history's messages (``server.host_run_events``), the run summary's messages
-(``server.host_run_summary``), the run tile's dashboard (``server.host_run_dashboard``), the usage
-window (``server.host_usage_window``), the
-machine facts (``server.host_machine_facts``: ``Accelerator``, ``Gpu``, ``Hardware``,
+(``server.host_run_summary``, which also holds the usage window's), the run tile's dashboard
+(``server.host_run_dashboard``), the machine facts (``server.host_machine_facts``: ``Accelerator``,
+``Gpu``, ``Hardware``,
 ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
 ``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``, ``CheckoutFound``,
 ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage`` and its
@@ -121,8 +121,12 @@ from server.host_run_events import (
     RunsReadTailReply,
     RunsReadTailRequest,
 )
-from server.host_run_summary import RunsSummaryReply, RunsSummaryRequest
-from server.host_usage_window import UsageWindowReply, UsageWindowRequest
+from server.host_run_summary import (
+    RunsSummaryReply,
+    RunsSummaryRequest,
+    UsageWindowReply,
+    UsageWindowRequest,
+)
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1

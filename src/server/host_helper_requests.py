@@ -152,14 +152,13 @@ from server.host_run_events import (
     RunsReadTailReply,
     RunsReadTailRequest,
 )
-from server.host_usage_window import UsageWindowReply, UsageWindowRequest
+from server.host_run_summary import UsageWindowReply, UsageWindowRequest
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
     dial,
 )
 from server.run_digest import run_attention
-from server.usage_window import RunUsage, usage_window
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -172,6 +171,7 @@ if TYPE_CHECKING:
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
+    from server.usage_window import RunUsage
     from vs_project.api import OperatorDialer
     from vs_sim.api import Clock, Connection
 
@@ -1153,6 +1153,12 @@ def _usage_window_reply(request: UsageWindowRequest, host: HelperHost) -> UsageW
     gained since. A run the project does not have, or whose journal this machine does not hold, is
     ``missing``.
     """
+    # lint-waiver: LW-271612 [PLC0415]; the helper answers hello without loading the aggregation.
+    # > `server.usage_window` is a module the helper's start-up budget
+    # > (`tests/e2e/test_host_helper.py`) has no room for, and only a `usage.window` request needs
+    # > it; the request and reply messages stay with the other messages so `host_api` can name them.
+    from server.usage_window import RunUsage, usage_window  # noqa: PLC0415
+
     project = Path(_host_path(request.project, host.directories))
     root, known = host.projects.runs(project)
     tasks = {run.run_id: run.task for run in known}
