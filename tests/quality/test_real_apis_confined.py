@@ -1761,6 +1761,10 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         ParseKind.FAKE,
         "the flow test kit's state round trip",
     ),
+    "libs/vs-core/src/vs_core/testing/persisted_schema.py": (
+        ParseKind.OWN_STORE,
+        "persisted-shape snapshots that its own schema_snapshot wrote, tracked in the repository",
+    ),
     "libs/vs-decode/src/vs_decode/_decode.py": (
         ParseKind.DECODER,
         "the bounded, strict decode every other module goes through",
@@ -1768,10 +1772,6 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
     "libs/vs-evaluation/src/vs_evaluation/testing.py": (
         ParseKind.FAKE,
         "the in-memory evaluation store's values",
-    ),
-    "libs/vs-runtime/src/vs_runtime/_core_record.py": (
-        ParseKind.OWN_STORE,
-        "core records this runtime persisted",
     ),
     "libs/vs-runtime/src/vs_runtime/_receipt_store.py": (
         ParseKind.OWN_STORE,

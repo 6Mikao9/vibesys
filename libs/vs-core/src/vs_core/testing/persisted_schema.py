@@ -19,6 +19,8 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
+from pydantic import JsonValue, TypeAdapter
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -26,6 +28,7 @@ type Schema = dict[str, object]
 
 _DROPPED: Final = frozenset({"title", "description", "examples"})
 """Keywords that say nothing about which documents a schema accepts."""
+_JSON: Final = TypeAdapter(JsonValue)
 _ROOT: Final = "$root"
 _DEFS: Final = "#/$defs/"
 _LOWER: Final = ("minimum", "exclusiveMinimum", "minLength", "minItems", "minProperties")
@@ -128,10 +131,10 @@ def parse_schema_snapshot(text: str) -> SchemaSnapshot:
                 version = tuple(int(part) for part in rest.split("."))
             elif "." in location and marker in {"required", "optional"}:
                 name, _, field = location.partition(".")
-                fields.setdefault(name, {})[field] = _as_dict(json.loads(body))
+                fields.setdefault(name, {})[field] = _as_dict(_JSON.validate_json(body))
                 required.setdefault(name, []).extend([field] if marker == "required" else [])
             else:
-                classes[location] = _as_dict(json.loads(rest))
+                classes[location] = _as_dict(_JSON.validate_json(rest))
         except ValueError as error:
             message = f"line {number} of the snapshot is malformed: {line[:80]!r}"
             raise ValueError(message) from error
