@@ -941,6 +941,7 @@ const runEventSchema: Record<string, unknown> = {
         "configuration_failed",
         "run_started",
         "run_startup_progress",
+        "workspace_root_probe",
         "experiments_changed",
         "iterations_changed",
         "run_interrupted",
@@ -2487,7 +2488,8 @@ const runEventSchema: Record<string, unknown> = {
       "enum": [
         "budget_exhausted",
         "deadline",
-        "no_result"
+        "no_result",
+        "run_environment_unavailable"
       ],
       "title": "RunFailureKind",
       "type": "string"
@@ -3904,6 +3906,122 @@ const runEventSchema: Record<string, unknown> = {
     "WireSpan": {
       "$ref": "#/$defs/Span"
     },
+    "WorkspaceRootProbeData": {
+      "additionalProperties": false,
+      "description": "The run's probe of its local Slurm workspace root, which runs beside the run.\n\nThe probe is a small Slurm job that proves the compute nodes share the root the run\nstages into. The run starts without it; each Slurm submission (a trusted evaluation,\nan agent's GPU job) waits for it. ``queued``: the probe job ``job_id`` still waits in\nthe scheduler's queue, for the scheduler's ``pending_reason`` (None when it gave\nnone), after ``waited_seconds`` of at most ``queue_timeout_seconds``; it is reported\nat once, then on a bounded cadence or when the reason changes. ``retrying``: an\nattempt ended with ``failure`` without saying anything about the root (the queue\nnever scheduled it), and attempt number ``attempt`` follows in ``retry_in_seconds``;\nSlurm work keeps waiting. ``proven``: Slurm work goes ahead. ``failed``: every Slurm\nsubmission of the run is refused with ``failure``, and the run ends as failed.",
+      "properties": {
+        "kind": {
+          "const": "workspace_root_probe",
+          "default": "workspace_root_probe",
+          "title": "Kind",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "retrying",
+            "proven",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Job Id"
+        },
+        "pending_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pending Reason"
+        },
+        "waited_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Waited Seconds"
+        },
+        "queue_timeout_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Queue Timeout Seconds"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure"
+        },
+        "attempt": {
+          "anyOf": [
+            {
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt"
+        },
+        "retry_in_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry In Seconds"
+        }
+      },
+      "required": [
+        "kind",
+        "state"
+      ],
+      "title": "WorkspaceRootProbeData",
+      "type": "object"
+    },
     "WorkspaceSnapshotData": {
       "additionalProperties": false,
       "description": "A Git tracker outcome: a snapshot, baseline, or exclusion change.\n\nExactly one aspect is populated per event: a snapshot attempt carries\n``label`` (``commit`` is None when there was nothing to commit), a\ntrusted-input baseline carries ``baseline``, and a snapshot-exclusion\nchange carries ``excluded_paths``.",
@@ -4267,6 +4385,7 @@ const runEventSchema: Record<string, unknown> = {
               "turn_usage_recorded": "#/$defs/TurnUsageData",
               "usage_update": "#/$defs/UsageUpdateData",
               "winner_selected": "#/$defs/WinnerSelectedData",
+              "workspace_root_probe": "#/$defs/WorkspaceRootProbeData",
               "workspace_snapshot": "#/$defs/WorkspaceSnapshotData",
               "workstream_finished": "#/$defs/WorkstreamFinishedData"
             },
@@ -4380,6 +4499,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/QuotaWaitCancelledData"
+            },
+            {
+              "$ref": "#/$defs/WorkspaceRootProbeData"
             },
             {
               "$ref": "#/$defs/ProviderSwitchedData"

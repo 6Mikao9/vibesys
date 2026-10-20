@@ -228,7 +228,18 @@ from .transport_broker import (
     slurm_transport_broker_available,
     slurm_transport_broker_policy,
 )
-from .workspace_probe import probe_workspace_root
+from .workspace_probe import (
+    WorkspaceRootProbeQueued,
+    WorkspaceRootProbeWatch,
+    probe_workspace_root,
+)
+from .workspace_proof import (
+    WorkspaceRootProbeFailed,
+    WorkspaceRootProbeProven,
+    WorkspaceRootProbeReport,
+    WorkspaceRootProbeRetrying,
+    WorkspaceRootProof,
+)
 
 __all__ = [
     "BATCH_RESULT_LAYOUT",
@@ -381,6 +392,13 @@ __all__ = [
     "WithdrawalUndone",
     "Withdrawer",
     "Withdrawn",
+    "WorkspaceRootProbeFailed",
+    "WorkspaceRootProbeProven",
+    "WorkspaceRootProbeQueued",
+    "WorkspaceRootProbeReport",
+    "WorkspaceRootProbeRetrying",
+    "WorkspaceRootProbeWatch",
+    "WorkspaceRootProof",
     "advance",
     "advance_with_notice",
     "check_transition",

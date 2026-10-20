@@ -49,6 +49,7 @@ class CoreEventType(StrEnum):
 
     RUN_STARTED = "run_started"
     RUN_STARTUP_PROGRESS = "run_startup_progress"
+    WORKSPACE_ROOT_PROBE = "workspace_root_probe"
     EXPERIMENTS_CHANGED = "experiments_changed"
     ITERATIONS_CHANGED = "iterations_changed"
     RUN_FINISHED = "run_finished"
@@ -371,6 +372,47 @@ class RunStartupProgressData(EventPayload):
         return self
 
 
+class WorkspaceRootProbeData(EventPayload):
+    """The run's probe of its local Slurm workspace root, which runs beside the run.
+
+    The probe is a small Slurm job that proves the compute nodes share the root the run
+    stages into. The run starts without it; each Slurm submission (a trusted evaluation,
+    an agent's GPU job) waits for it. ``queued``: the probe job ``job_id`` still waits in
+    the scheduler's queue, for the scheduler's ``pending_reason`` (None when it gave
+    none), after ``waited_seconds`` of at most ``queue_timeout_seconds``; it is reported
+    at once, then on a bounded cadence or when the reason changes. ``retrying``: an
+    attempt ended with ``failure`` without saying anything about the root (the queue
+    never scheduled it), and attempt number ``attempt`` follows in ``retry_in_seconds``;
+    Slurm work keeps waiting. ``proven``: Slurm work goes ahead. ``failed``: every Slurm
+    submission of the run is refused with ``failure``, and the run ends as failed.
+    """
+
+    kind: Literal["workspace_root_probe"] = "workspace_root_probe"
+    state: Literal["queued", "retrying", "proven", "failed"]
+    job_id: str | None = None
+    pending_reason: str | None = None
+    waited_seconds: FiniteFloat | None = Field(default=None, ge=0)
+    queue_timeout_seconds: FiniteFloat | None = Field(default=None, ge=1)
+    failure: str | None = None
+    attempt: int | None = Field(default=None, ge=2)
+    retry_in_seconds: FiniteFloat | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _fields_follow_the_state(self) -> WorkspaceRootProbeData:
+        queued = self.state == "queued"
+        if queued != (self.job_id is not None and self.waited_seconds is not None):
+            message = "job_id and waited_seconds are set exactly when the probe is queued"
+            raise ValueError(message)
+        if (self.state in {"failed", "retrying"}) != (self.failure is not None):
+            message = "failure is set exactly when the probe failed or retries"
+            raise ValueError(message)
+        retrying = self.state == "retrying"
+        if retrying != (self.attempt is not None and self.retry_in_seconds is not None):
+            message = "attempt and retry_in_seconds are set exactly when the probe retries"
+            raise ValueError(message)
+        return self
+
+
 class RunFailureKind(StrEnum):
     """Why a run failed to meet its goal, whether or not it preserved a partial result."""
 
@@ -381,6 +423,9 @@ class RunFailureKind(StrEnum):
     NO_RESULT = "no_result"
     """Core recorded no terminal strategy result, or the strategy failed before exhausting its
     workstream budget."""
+    RUN_ENVIRONMENT_UNAVAILABLE = "run_environment_unavailable"
+    """The run environment could run none of the run's work (a local Slurm root its probe
+    could not prove shared), so the run stopped; ``reason`` is the environment's error."""
 
 
 class RunFailure(BaseModel):
@@ -1077,6 +1122,7 @@ CoreEventData = Annotated[
     | QuotaAbandonedData
     | QuotaWaitingData
     | QuotaWaitCancelledData
+    | WorkspaceRootProbeData
     | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData

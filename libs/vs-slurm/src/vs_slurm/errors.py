@@ -247,7 +247,17 @@ class SlurmSubmissionRejectedError(SlurmError):
 
 
 class SlurmWorkspaceRootProbeError(SlurmError):
-    """The startup probe could not prove the configured workspace root shared."""
+    """The startup probe could not prove the configured workspace root shared.
+
+    ``retryable`` says that the failure says nothing about the root: the scheduler never
+    started the job, or the run stopped it. A run retries such a probe for as long as it
+    goes on; every other failure is lasting.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        """Keep ``message`` and whether a later attempt could still prove the root."""
+        super().__init__(message)
+        self.retryable = retryable
 
     @classmethod
     def job_failed(cls, job_id: str, exit_code: int | None) -> SlurmWorkspaceRootProbeError:
@@ -298,9 +308,20 @@ class SlurmWorkspaceRootProbeError(SlurmError):
         return cls(
             "Slurm `remote_workspace_root` startup probe failed: "
             f"probe job {job_id} was never scheduled. It waited {waited_seconds:.0f} s in the "
-            f"queue{why} for {request}, and VibeSys cancelled it. Start the run again when "
-            f"the cluster has room for that request (a resumed run retries the probe), or "
-            f"raise {setting} to let it wait longer"
+            f"queue{why} for {request}, and VibeSys cancelled it. The run retries the probe, "
+            f"and its Slurm work waits for it; raise {setting} to let each attempt wait "
+            "longer",
+            retryable=True,
+        )
+
+    @classmethod
+    def stopped(cls, job_id: str | None) -> SlurmWorkspaceRootProbeError:
+        """Describe a probe the run stopped before it proved the root."""
+        job = "before its job was submitted" if job_id is None else f"and cancelled job {job_id}"
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: the run stopped "
+            f"{job}; a resumed run retries the probe",
+            retryable=True,
         )
 
     @classmethod
