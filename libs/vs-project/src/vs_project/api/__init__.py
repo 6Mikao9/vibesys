@@ -115,9 +115,13 @@ from vs_project._state_models import FakeStateModels, validate_state_namespace
 from vs_project._state_store import FakeStateStore, FakeStateStores, LocalStateStore
 from vs_project._store_operations import StoreFile
 from vs_project._task_files import (
+    DEFAULT_READY_TIMEOUT_SECONDS,
     OBJECTIVES_NAME,
+    PORT_PLACEHOLDER,
     AcceleratorVendor,
     CatalogueInput,
+    ComparisonInput,
+    ComparisonName,
     ExampleDomain,
     HardwareInput,
     ModelMaker,
@@ -126,6 +130,7 @@ from vs_project._task_files import (
     ParetoInput,
     ServedModelInput,
     WorkloadInput,
+    check_comparisons_are_distinct,
     load_objectives,
 )
 from vs_project.api.git_repository import (
@@ -174,12 +179,14 @@ __all__ = [
     "COMMIT_IDENTITY_NAME",
     "CONTROL_HELLO_MAX_BYTES",
     "DEFAULT_GIT_BACKEND",
+    "DEFAULT_READY_TIMEOUT_SECONDS",
     "GIT_BACKEND_ENV",
     "INBOX_FORMAT",
     "LPRINT_LOGGER",
     "MAX_SOCKET_PATH_BYTES",
     "OBJECTIVES_NAME",
     "OPERATOR_KEY_NAME",
+    "PORT_PLACEHOLDER",
     "PROJECT_SCHEMA_VERSION",
     "RUN_SCHEMA_VERSION",
     "AcceleratorVendor",
@@ -193,6 +200,8 @@ __all__ = [
     "CommitOutcome",
     "CommitSubject",
     "Committed",
+    "ComparisonInput",
+    "ComparisonName",
     "ConfigurationRoot",
     "Conflict",
     "ConflictReason",
@@ -294,6 +303,7 @@ __all__ = [
     "UnsafeProjectPathError",
     "WorkloadInput",
     "atomic_write_bytes",
+    "check_comparisons_are_distinct",
     "create_operator_key",
     "decode_state_document",
     "ended_unapplied",
