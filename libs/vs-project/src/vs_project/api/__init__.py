@@ -131,6 +131,8 @@ from vs_project._task_files import (
     ServedModelInput,
     WorkloadInput,
     check_comparisons_are_distinct,
+    comparison_directory,
+    comparison_namespace,
     load_objectives,
 )
 from vs_project.api.git_repository import (
@@ -304,6 +306,8 @@ __all__ = [
     "WorkloadInput",
     "atomic_write_bytes",
     "check_comparisons_are_distinct",
+    "comparison_directory",
+    "comparison_namespace",
     "create_operator_key",
     "decode_state_document",
     "ended_unapplied",
