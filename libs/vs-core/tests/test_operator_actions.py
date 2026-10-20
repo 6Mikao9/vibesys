@@ -26,11 +26,12 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 import vs_core.api as core
+from vs_core.api.testing import Answer, Failed, Succeeded
 
 from .test_attempt_retirement import REDUCERS as QUEUED_REOPEN_REDUCERS
 from .test_attempt_retirement import reopen_fixture as queued_reopen_fixture
 from .test_reopen_kernel_bridge import reopen_fixture
-from .toy_agent_search import LIMITS, Config, ToyHost, run_toy
+from .toy_agent_search import LIMITS, Config, ToyHost, run_toy, summary
 
 if TYPE_CHECKING:
     # test-isolation: the trace type is test support published at vs_core.testing; vs_core.api carries no test support.
@@ -653,3 +654,87 @@ def test_cancelling_a_parked_attempt_retires_its_queued_reopening() -> None:
     later = core.step(after, admitted, reducers=QUEUED_REOPEN_REDUCERS)
     assert later.state.attempts == after.attempts
     assert later.requests == ()
+
+
+@dataclass
+class _CancelWhileWaiting(ToyHost):
+    """The operator cancels an attempt while its turn is suspended on its own evaluation.
+
+    It acts at the first poll of the job the suspended turn waits on, which reports running
+    for far longer than the run lasts unless core ends it: ``polls_after`` counts the polls
+    of that job after the cancel. A job core cancels reports ended failed at its next poll, as
+    a scheduler does.
+    """
+
+    sent: list[core.ControlInput] = field(default_factory=list)
+    job: core.ResourceId | None = None
+    polls_after: int = 0
+    cancelled: set[core.ResourceId] = field(default_factory=set)
+
+    def __call__(self, request: core.Request, state: core.CoreState) -> Answer:
+        match request:
+            case core.CancelOwnedJob():
+                self.cancelled.add(request.resource_id)
+                return Succeeded(resource_id=request.resource_id)
+            case core.ObserveOwnedJob() if request.resource_id in self.cancelled:
+                return Failed(accepted=True)
+            case _:
+                return super().__call__(request, state)
+
+    def during_turn(
+        self, request: core.Request, state: core.CoreState
+    ) -> tuple[core.CoreEvent, ...]:
+        events = super().during_turn(request, state)
+        if not isinstance(request, core.ObserveOwnedJob):
+            return events
+        if self.sent:
+            self.polls_after += int(request.resource_id == self.job)
+            return events
+        if not any(
+            row.phase == core.ContinuationPhase.WAITING for row in state.evaluation.continuations
+        ):
+            return events
+        owned = next(
+            row
+            for row in state.evaluation.jobs
+            if isinstance(row, core.OwnedJob) and row.resource_id == request.resource_id
+        )
+        control = _action("op", "cancel_attempt", attempt=owned.scope.owner.root)
+        self.sent.append(control)
+        self.job = request.resource_id
+        return (core.RunControlEvent(control=control, now_at=state.run.now_at), *events)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("role", ["implementer", "judge"])
+def test_a_cancel_ends_a_turn_suspended_on_its_evaluation_and_withdraws_the_evaluation(
+    role: str,
+) -> None:
+    """S191: a cancelled attempt whose turn waited left the search waiting for a resume.
+
+    Core retired the wait silently, so the suspended turn heard nothing until the run's
+    deadline and its slot stayed held. The ask must end at once with a typed refusal, the job
+    it waited on must be stopped, and the attempt must close cancelled.
+    """
+    host = _CancelWhileWaiting(waits=(True,), polls=(10_000,), roles=(role,))
+
+    trace = run_toy(host, Config(workstreams=2, in_flight=1))
+
+    assert host.sent, "no turn suspended on its evaluation"
+    assert trace.finished, "the run did not end"
+    (control,) = host.sent
+    name = _cancelled(control)
+    (cancelled,) = [item for item in summary(trace).done if item.key == name]
+    assert cancelled.failed == (role,)
+    assert host.polls_after <= 1, "the evaluation the turn waited on was not withdrawn"
+    refused = [
+        event
+        for event in trace.events
+        if isinstance(event, core.ResumeRefused)
+        and event.reason == core.ResumeRefusal.ATTEMPT_CLOSED
+    ]
+    assert len(refused) == 1
+    # the slot went to the other workstream, which ran before the run's deadline
+    other = next(item for item in summary(trace).done if item.key != name)
+    assert other.opened
+    assert other.closed

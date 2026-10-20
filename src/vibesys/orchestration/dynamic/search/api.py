@@ -88,7 +88,13 @@ from vibesys.orchestration.dynamic.search._queue import (
     SlotVerdict,
     Submission,
 )
-from vibesys.orchestration.dynamic.search._reports import InputOverdue, Released
+from vibesys.orchestration.dynamic.search._reports import (
+    InputOverdue,
+    Opened,
+    Released,
+    Resuming,
+    Suspended,
+)
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume
 from vibesys.orchestration.dynamic.search._roles import (
     IMPLEMENTER,
@@ -195,6 +201,7 @@ __all__ = [
     "MergeableRow",
     "MetricRow",
     "NoPlan",
+    "Opened",
     "Outline",
     "OutlinePrompt",
     "Outlined",
@@ -225,6 +232,7 @@ __all__ = [
     "RenderedArtifacts",
     "Result",
     "ResumeStage",
+    "Resuming",
     "ReviewEvaluation",
     "ReviewPrompt",
     "RoundRecord",
@@ -237,6 +245,7 @@ __all__ = [
     "StepState",
     "StrayUnapplied",
     "Submission",
+    "Suspended",
     "Verdict",
     "VerifyParentRevision",
     "ViolationCode",
