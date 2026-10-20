@@ -383,3 +383,101 @@ def test_an_unset_uncompared_is_left_out_of_the_result_serialization(
     plain = core.RunResultProposal(outcome=outcome, reason="r")
     assert "uncompared" not in json.loads(plain.model_dump_json())
     assert plain == core.RunResultProposal.model_validate_json(plain.model_dump_json())
+
+
+# -- who stopped the run decides how it ends -------------------------------------------------------
+
+
+@pytest.mark.parametrize("adoption", ["adopted", "refused", "verify-failed", "no-winner"])
+@pytest.mark.parametrize("requester", ["operator", "deadline", "environment"])
+def test_the_operator_pauses_the_deadline_ends_and_the_run_environment_fails_the_run(
+    requester: str, adoption: str
+) -> None:
+    """Regression (sweep F2): a run its environment stopped ended ``stopped``, like a pause.
+
+    The run environment stops the run when it can run none of the run's work (a probe that
+    failed for good). That ending is a failure, whatever the adoption did; the operator's stop
+    stays a cancelled pause, and the deadline's a cancelled end.
+    """
+    control = {
+        "operator": "stop",
+        "deadline": core.DEADLINE_STOP,
+        "environment": core.ENVIRONMENT_STOP,
+    }[requester]
+
+    async def ended(ctx: core.Flow, _config: Config) -> core.NoWinner | None:
+        ctx.choose(kept("a"))
+        await ctx.stopped
+        return core.NoWinner(reason="gave up") if adoption == "no-winner" else None
+
+    run = start(ended, adopting=adoption == "adopted")
+    run.stop(control, mode=core.StopMode.CANCEL)
+    if adoption == "refused":
+        run.fail(run.expect(core.ProposeWinner), core.FailureReason.REFUSED)
+    elif adoption == "verify-failed":
+        run.refuse_adoption(
+            run.expect(core.ProposeWinner), core.AdoptionFailureReason.VERIFY_FAILED
+        )
+    result = result_of(run, "cancel")
+    first = result.reason.split(":", 1)[0]
+    if requester == "environment":
+        assert (result.outcome, first) == ("failure", core.EndReason.FAILED.value)
+    elif requester == "operator":
+        assert (result.outcome, first) == ("cancelled", core.EndReason.STOPPED.value)
+    else:
+        failed = adoption == "verify-failed"
+        assert result.outcome == ("failure" if failed else "cancelled")
+        assert first == ("adoption-failed" if failed else core.EndReason.DEADLINE.value)
+
+
+_STOP_IDS = {
+    "operator": "stop",
+    "deadline": core.DEADLINE_STOP,
+    "environment": core.ENVIRONMENT_STOP,
+}
+_HOST_ENDINGS = {"deadline": core.EndReason.DEADLINE, "environment": core.EndReason.FAILED}
+
+
+@pytest.mark.parametrize("operator", [core.StopMode.DRAIN, core.StopMode.CANCEL])
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("operator", "environment"),
+        ("operator", "deadline"),
+        ("environment", "operator"),
+        ("deadline", "operator"),
+        ("environment", "deadline"),
+        ("deadline", "environment"),
+    ],
+)
+@pytest.mark.parametrize("window", ["while-adopting", "before-the-ending"])
+def test_the_first_host_stop_names_the_ending_whatever_stop_came_before_or_after(
+    begin: Begin, first: str, second: str, operator: core.StopMode, window: str
+) -> None:
+    """Regression (review follow-up 1 of #3327): the first stop alone named the ending.
+
+    The operator stopped the run, then its environment failed for good while the run wound down
+    (the ending was adopting). The result said ``stopped``, a resumable pause, while its controls
+    said no resume reopens it. A host stop (the deadline's, the environment's) is a verdict and
+    an operator's stop a pause, so the first host stop names the ending, whichever came first,
+    and whether the second arrived while the ending adopted or before the ending began.
+    """
+
+    async def ended(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(kept("a"))
+        await ctx.stopped
+        if window == "before-the-ending":
+            await ctx.timer(5.0)  # the root winds down; the second stop arrives meanwhile
+
+    run = begin(ended, adopting=False)
+    for requester in (first, second):
+        mode = operator if requester == "operator" else core.StopMode.CANCEL
+        run.stop(_STOP_IDS[requester], mode=mode)
+    if window == "before-the-ending":
+        run.advance_to(5.0)
+    run.adopt(run.expect(core.ProposeWinner))
+    result = run.finished.result if run.finished is not None else None
+    assert result is not None
+    ending = _HOST_ENDINGS[first if first != "operator" else second]
+    outcome = "failure" if ending is core.EndReason.FAILED else "cancelled"
+    assert (result.outcome, result.reason.split(":", 1)[0]) == (outcome, ending.value)

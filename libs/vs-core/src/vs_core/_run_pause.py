@@ -32,6 +32,19 @@ An operator's stop is a pause (``reopens_on_resume``); the deadline's is the run
 spent, and it ends the run for good.
 """
 
+ENVIRONMENT_STOP: Final = "run-environment"
+"""The identity of the stop the host delivers when the run environment can run none of the run's
+work (a local Slurm root its probe could not prove shared).
+
+Like the deadline's, it is the host's verdict and not a pause: a resume would meet the same
+environment, so it ends the run failed, for good. No operator control can carry it: the host
+records operators' controls under ``op-`` and ``control-`` identities.
+"""
+
+FINAL_STOPS: Final = frozenset({DEADLINE_STOP, ENVIRONMENT_STOP})
+"""The host's own stops: once one stands, no resume lifts it (``control_refusal``) and no
+resume reopens the run it ended (``reopens_after``)."""
+
 
 class ControlRefusedError(ContractError):
     """Core refuses ``control`` in the run's state as it stands (``control_refusal``).
@@ -118,7 +131,9 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
     withdrawal; it takes an operator action that can change something
     (``action_refusal_kind``), also while it stops or cleans up; and a run that recorded a
     stop takes no pause, and a resume only until its ending commits: that resume lifts the stop
-    (`stop_standing`).
+    (`stop_standing`). No resume lifts one of the host's own stops (``FINAL_STOPS``): the
+    deadline's time is spent and the environment's failure would recur, so once one stands it
+    stands until the run ends, across a restart and an explicit resume alike.
     """
     run = state.run
     if run.status == RunStatus.TERMINAL:
@@ -150,13 +165,26 @@ def stop_standing(run: RunState) -> bool:
     (`control_refusal`). While the ending's cleanup runs (the run is closing) nothing lifts
     it; once it is terminal a resume reopens the run (`reopens_on_resume`).
     """
-    standing = False
-    for recorded in run.controls:
+    standing, _final = _stops_after(run.controls)
+    return standing
+
+
+def _stops_after(controls: Sequence[ControlInput]) -> tuple[bool, bool]:
+    """Whether a stop stands after ``controls``, and whether one of the host's own stands.
+
+    The one fold of the run's stops: a stop stands from when it is recorded until a resume
+    follows it. Core refuses a resume while a host stop stands (``_pause_refusal``), so such a
+    resume is never recorded; one a run recorded before that rule (a lifted deadline) still
+    lifts, so a stored run reads as it always did.
+    """
+    standing = final = False
+    for recorded in controls:
         if recorded.action == "stop":
             standing = True
+            final = final or recorded.control_id.root in FINAL_STOPS
         elif recorded.action == "resume":
-            standing = False
-    return standing
+            standing = final = False
+    return standing, final
 
 
 def reopens_on_resume(run: RunState) -> bool:
@@ -167,7 +195,7 @@ def reopens_on_resume(run: RunState) -> bool:
     the run, so the run stays resumable: the explicit resume that opens it takes the stop back
     and reopens the run (`reopened`), which goes on from what it holds. Every other ending is
     final: a result of the run itself, a refused or blocked run, and the deadline's stop (the
-    time the run was given is spent).
+    time the run was given is spent), and the run environment's stop (it can run nothing).
     """
     return reopens_after(run.status, run.result, run.controls)
 
@@ -178,15 +206,8 @@ def reopens_after(
     """`reopens_on_resume` from the three facts it reads: a reader of a record needs no more."""
     if status != RunStatus.TERMINAL or result is None or result.outcome != "cancelled":
         return False
-    standing = False
-    by_deadline = False
-    for recorded in controls:
-        if recorded.action == "stop":
-            standing = True
-            by_deadline = by_deadline or recorded.control_id.root == DEADLINE_STOP
-        elif recorded.action == "resume":
-            standing = by_deadline = False
-    return standing and not by_deadline
+    standing, final = _stops_after(controls)
+    return standing and not final
 
 
 def reopened(run: RunState) -> RunState:
@@ -208,7 +229,15 @@ def reopened(run: RunState) -> RunState:
 
 def _pause_refusal(run: RunState, control: ControlInput) -> ControlRefusedError | None:
     lifts = control.action == "resume" and control.when != "capacity_returns"
-    if stop_standing(run) and not lifts:
+    standing, final = _stops_after(run.controls)
+    if final and lifts:
+        # The host's stop is its verdict, not a pause: a resume would meet the same spent
+        # deadline or the same failed environment. Lifting it would leave the run going on
+        # with nothing to stop it again, since core takes a repeated stop as already recorded.
+        return ControlRefusedError(
+            control, ("run", "controls"), "the host stopped the run; no resume lifts its stop"
+        )
+    if standing and not lifts:
         # A pause would change nothing an operator could see before the search ends the run;
         # only an explicit resume (which lifts the stop) is taken.
         return ControlRefusedError(
