@@ -277,6 +277,12 @@ class LaunchedSession:
         self.timeout = timeout
         self.log = log
         self.closed = False
+        self.context_tokens: int | None = None
+        """The tokens the conversation's context held after its last completed turn.
+
+        Read from agentshim's ``TurnResult.context_tokens``: the last model call's prompt plus
+        its output, not the turn's summed usage. ``None`` when the provider did not say.
+        """
         self._turn: CapacityStops | None = None
 
     def track(self, turn: CapacityStops | None) -> None:
@@ -391,6 +397,7 @@ def _run_turn(
         live.steers.end_turn()
 
     result = turn.result
+    live.context_tokens = result.context_tokens
     usage = shim_translation.usage_from(
         result.usage,
         cost_usd=result.cost_usd,
