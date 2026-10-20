@@ -14,9 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
-import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -66,7 +65,7 @@ def _default(spec: Spec) -> object:
 
 
 def _specs() -> st.SearchStrategy[Spec]:
-    def build(kind: Kind, required: bool, hi: int | None, lo: int | None, count: int) -> Spec:
+    def build(kind: Kind, hi: int | None, lo: int | None, count: int, *, required: bool) -> Spec:
         spec = Spec(
             kind, required, hi=hi, lo=lo if kind == "int" else None, members=_MEMBERS[:count]
         )
@@ -75,10 +74,10 @@ def _specs() -> st.SearchStrategy[Spec]:
     return st.builds(
         build,
         st.sampled_from(("int", "str", "lit", "enum", "opt", "list")),
-        st.booleans(),
         st.sampled_from((None, 3, 8)),
         st.sampled_from((None, -5, 0)),
         st.integers(1, 3),
+        required=st.booleans(),
     )
 
 
@@ -93,7 +92,7 @@ def _annotation(name: str, spec: Spec) -> object:
         case "str":
             return str
         case "lit":
-            return Literal[spec.members]
+            return Literal.__getitem__(spec.members)
         case "enum":
             return StrEnum(f"{name.title()}Kind", {m: m for m in spec.members})
         case "opt":
@@ -103,17 +102,18 @@ def _annotation(name: str, spec: Spec) -> object:
 
 
 def _model(fields: Model, *, name: str = "Inner") -> type[BaseModel]:
-    definitions: dict[str, object] = {}
+    definitions: dict[str, Any] = {}
     for field, spec in fields.items():
-        limits: dict[str, int] = {}
-        if spec.kind == "int":
-            limits = {k: v for k, v in (("le", spec.hi), ("ge", spec.lo)) if v is not None}
-        elif spec.kind in {"str", "list"} and spec.hi is not None:
-            limits = {"max_length": spec.hi}
-        default = ... if spec.required else spec.default
-        definitions[field] = (_annotation(field, spec), Field(default, **limits))
+        bounded = spec.kind == "int"
+        field_info = Field(
+            ... if spec.required else spec.default,
+            le=spec.hi if bounded else None,
+            ge=spec.lo if bounded else None,
+            max_length=spec.hi if spec.kind in {"str", "list"} else None,
+        )
+        definitions[field] = (_annotation(field, spec), field_info)
     config = ConfigDict(extra="forbid", frozen=True)
-    return create_model(name, __config__=config, **definitions)  # type: ignore[call-overload]
+    return create_model(name, __config__=config, **definitions)
 
 
 def _root(inner: type[BaseModel]) -> type[BaseModel]:
@@ -203,37 +203,43 @@ def _incompatible(fields: Model, data: st.DataObject) -> tuple[Model, str]:
     rest = {n: s for n, s in fields.items() if n != field}
     match change:
         case "remove":
-            return rest, field
+            changed, named = rest, field
         case "retype":
             kind: Kind = "str" if spec.kind == "int" else "int"
-            return {
-                **fields,
-                field: replace(
-                    spec,
-                    kind=kind,
-                    hi=None,
-                    lo=None,
-                    default=None if spec.required else _default(replace(spec, kind=kind)),
-                ),
-            }, field
+            changed, named = (
+                {
+                    **fields,
+                    field: replace(
+                        spec,
+                        kind=kind,
+                        hi=None,
+                        lo=None,
+                        default=None if spec.required else _default(replace(spec, kind=kind)),
+                    ),
+                },
+                field,
+            )
         case "add-required":
-            return {**fields, "zeta": spec}, "zeta"
+            changed, named = {**fields, "zeta": spec}, "zeta"
         case "require":
-            return {**fields, field: replace(spec, required=True, default=None)}, field
+            changed, named = {**fields, field: replace(spec, required=True, default=None)}, field
         case "default":
-            return {**fields, field: replace(spec, default="x")}, field
+            changed, named = {**fields, field: replace(spec, default="x")}, field
         case "tighten":
-            return {**fields, field: replace(spec, hi=2 if spec.hi is None else spec.hi - 1)}, field
+            changed, named = (
+                {**fields, field: replace(spec, hi=2 if spec.hi is None else spec.hi - 1)},
+                field,
+            )
         case "shrink":
-            return {**fields, field: replace(spec, members=spec.members[:-1])}, field
+            changed, named = {**fields, field: replace(spec, members=spec.members[:-1])}, field
         case _:
-            return {**fields, field: replace(spec, kind="int")}, field
+            changed, named = {**fields, field: replace(spec, kind="int")}, field
+    return changed, named
 
 
 _EXAMPLES = settings(max_examples=examples(pr=60, nightly=600), deadline=None)
 
 
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="checker not implemented yet")
 @_EXAMPLES
 @given(fields=_models(), data=st.data())
 def test_a_change_every_old_document_survives_is_accepted(
@@ -246,7 +252,6 @@ def test_a_change_every_old_document_survives_is_accepted(
         new.model_validate(document)
 
 
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="checker not implemented yet")
 @_EXAMPLES
 @given(fields=_models(), data=st.data())
 def test_a_change_some_old_document_may_not_survive_is_reported_at_its_field(
@@ -257,7 +262,6 @@ def test_a_change_some_old_document_may_not_survive_is_reported_at_its_field(
     assert any(problem.path == f"inner.{field}" for problem in found), found
 
 
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="snapshot not implemented yet")
 @_EXAMPLES
 @given(fields=_models(), version=st.tuples(st.integers(1, 99), st.integers(0, 9)))
 def test_a_snapshot_reads_back_as_the_schema_it_was_written_from(
@@ -270,7 +274,6 @@ def test_a_snapshot_reads_back_as_the_schema_it_was_written_from(
     assert schema_incompatibilities(parsed.schema, schema) == ()
 
 
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="snapshot not implemented yet")
 @_EXAMPLES
 @given(fields=_models(), first=_specs(), second=_specs())
 def test_two_changes_that_each_add_a_field_merge_as_the_union_of_their_lines(
@@ -288,7 +291,6 @@ def test_two_changes_that_each_add_a_field_merge_as_the_union_of_their_lines(
     assert lines(both) == (lines(one) | lines(two)) - (base - lines(one)) - (base - lines(two))
 
 
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="snapshot not implemented yet")
 @_EXAMPLES
 @given(fields=_models(), data=st.data())
 def test_a_snapshot_keeping_its_version_must_keep_every_old_document(
@@ -310,7 +312,6 @@ def test_a_snapshot_keeping_its_version_must_keep_every_old_document(
     )
 
 
-@pytest.mark.xfail(raises=NotImplementedError, strict=True, reason="snapshot not implemented yet")
 def test_a_snapshot_that_is_dropped_or_lowers_its_version_is_refused() -> None:
     base = schema_snapshot("record", (4, 1), _schema({"alpha": Spec("int", required=True)}))
     lowered = schema_snapshot("record", (3, 9), _schema({"alpha": Spec("int", required=True)}))

@@ -46,9 +46,17 @@ def _decode(document: object) -> None:
 
 def _at(document: object, path: tuple[str | int, ...]) -> dict[str, object]:
     for key in path:
-        document = document[key]  # type: ignore[index]
+        document = _child(document, key)
     assert isinstance(document, dict)
     return document
+
+
+def _child(node: object, key: str | int) -> object:
+    if isinstance(node, dict):
+        return node[key]
+    assert isinstance(node, list)
+    assert isinstance(key, int)
+    return node[key]
 
 
 @pytest.mark.xfail(strict=True, reason="a same-version field from a newer VibeSys is not named yet")
@@ -91,7 +99,10 @@ def test_an_unknown_key_anywhere_is_accepted_or_refused_as_from_a_newer_vibesys(
     try:
         _decode(document)
     except core.ContractError as refused:
-        assert _NEWER in str(refused) or "added_later" not in str(refused)
+        message = str(refused)
+    else:
+        return
+    assert _NEWER in message or "added_later" not in message
 
 
 def test_an_older_envelope_with_an_unknown_field_is_not_blamed_on_a_newer_vibesys() -> None:

@@ -25,7 +25,6 @@ from vs_core.api.testing import FAKE_REGISTRY
 from .test_comparison_statistic import VALUES, compared
 
 _FIXTURES = Path(__file__).parent / "envelopes"
-_VERSIONS = Path(__file__).parent / "envelope_schema_versions.txt"
 _SUPPORTED_SINCE = 34
 """The oldest version a run was promised to resume from; lowering support edits this line."""
 _FILES = sorted(_FIXTURES.glob("v*-*.json"))
@@ -124,16 +123,4 @@ def test_every_version_from_the_oldest_supported_has_a_migration_and_a_fixture()
     assert not uncovered, (
         f"save a fixture envelope of version {uncovered} with the code of that version "
         f"(tests/envelopes/v<version>-<case>.json)"
-    )
-
-
-def test_every_supported_version_has_its_shape_pinned() -> None:
-    pinned = {
-        int(line.split()[0])
-        for line in _VERSIONS.read_text(encoding="utf-8").splitlines()
-        if line and not line.startswith("#")
-    }
-    assert (
-        set(range(core.OLDEST_SUPPORTED_ENVELOPE_VERSION, core.ENVELOPE_SCHEMA_VERSION + 1))
-        <= pinned
     )

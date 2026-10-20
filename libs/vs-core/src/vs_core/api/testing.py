@@ -41,6 +41,7 @@ from vs_core.testing.liveness import Budget, End, Journal, Violation, assert_liv
 from vs_core.testing.persisted_schema import (
     Incompatibility,
     SchemaSnapshot,
+    assert_schema_snapshot,
     parse_schema_snapshot,
     schema_incompatibilities,
     schema_snapshot,
@@ -77,6 +78,7 @@ __all__ = [
     "Violation",
     "assert_live",
     "assert_schema_pinned",
+    "assert_schema_snapshot",
     "code_changed",
     "drive",
     "fake_search",
