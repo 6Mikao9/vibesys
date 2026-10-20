@@ -101,8 +101,8 @@ COMBINE_MIN_PARTS = 2
 class CombineSource(Value):
     """One part of a combine as it was fixed at scheduling: its revision and its own change.
 
-    ``built_on`` is the main revision the part's tree includes (`RunRecord.main_base_at`), so
-    ``built_on..revision`` is the part's own change against main; ``metric`` is its trusted
+    ``built_on`` is where the part's own change against main starts (`RunRecord.main_base_at`):
+    a main, or a merged candidate the part was built on. ``built_on..revision`` is that change; ``metric`` is its trusted
     headline, when it had one.
     """
 
@@ -178,11 +178,16 @@ class BlockerKind(StrEnum):
     REJECTED = "rejected"
     NO_REPLY = "no_reply"
     REPLY_REJECTED = "reply_rejected"
-    """The reply broke a rule only the run can check: ``stray`` names the offending entries."""
+    """The reply broke a rule only the run can check: ``stray`` names the offending entries.
+
+    Only an older build refused a reply so; it is kept so that build's checkpoints decode."""
 
 
 class StrayUnapplied(Value):
-    """An ``unapplied`` entry of an implementer's reply that names no part of its combine."""
+    """An ``unapplied`` entry of an implementer's reply that names no part of its combine.
+
+    Only an older build's ``REPLY_REJECTED`` blocker holds one (see `RoundRecord.unattributed`).
+    """
 
     index: int = Field(ge=0)
     """The entry's position in the reply's ``unapplied`` list."""
@@ -195,7 +200,7 @@ class Blocker(Value):
 
     ``FAILED`` is the implementer's own account (its summary and the next step it names).
     ``REJECTED`` is the reviewer's feedback on a candidate that was not measured.
-    ``REPLY_REJECTED`` is a reply the run refused (``stray`` says why). ``NO_REPLY`` is
+    ``REPLY_REJECTED`` is a reply an older build refused (``stray`` says why). ``NO_REPLY`` is
     a turn that returned nothing usable: ``ended`` or ``turn_failure`` say how, and ``digest``
     fingerprints the diagnostic the executor printed. ``revision`` and ``digest`` are what the
     framework observed, and the only facts that make another turn worth asking.
@@ -368,6 +373,9 @@ class RoundRecord(Value):
     """Whether the implementer asked to keep this direction and the lease allows it."""
     unapplied: tuple[UnappliedPart, ...] = ()
     """For a combine: what the implementer said it could not apply, naming one of its parts."""
+    unattributed: tuple[UnappliedPart, ...] = ()
+    """The implementer's ``unapplied`` entries that named no part of a combine (any entry,
+    outside one): kept as it wrote them, and not read as a part left out."""
 
 
 class HypothesisRecord(Value):
@@ -406,10 +414,10 @@ class FinishedWork(Value):
     proof: Proof | None = None
     """For a profile workstream: the evidence and decoded readings its history row shows."""
     main_base: RevisionRef | None = None
-    """The main revision the workstream's tree included: the main it caught up with, else the
-    one its parent's tree included. Git history does not say it: under read-only git a catch-up
-    applies main's change without recording main as an ancestor. None in a record kept by an
-    older build."""
+    """Where the workstream's own change against main started when it was scheduled: the main it
+    caught up with, else its parent's start (`RunRecord.main_base_at`, a main or a merged
+    candidate). Git history does not say it: under read-only git a catch-up applies main's change
+    without recording main as an ancestor. None in a record kept by an older build."""
 
 
 # -- the run's main revision and its merges -------------------------------------------------------
@@ -418,8 +426,9 @@ class FinishedWork(Value):
 class MergeSource(Value):
     """One candidate a merge applies: the hypothesis and the exact revision, fixed at scheduling.
 
-    ``built_on`` is the main revision the candidate's tree includes, so ``built_on..revision`` is
-    its own change; None only in a merge scheduled by an older build.
+    ``built_on`` is where the candidate's own change against main starts (a main, or a merged
+    candidate it was built on), so ``built_on..revision`` is that change; None only in a merge
+    scheduled by an older build.
     """
 
     hypothesis_id: str

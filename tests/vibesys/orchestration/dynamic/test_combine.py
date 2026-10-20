@@ -55,6 +55,7 @@ from vibesys.orchestration.dynamic.search.api import (
     PlannerPrompt,
     ProfileHistoryRow,
     PromptTemplate,
+    RoundRecord,
     WorkKind,
     WorkPlan,
     best_part,
@@ -122,9 +123,16 @@ def _implemented(
     return asked
 
 
-def _merged(host: Host, merge_id: str, hypothesis: str, commit: str) -> MergePrompt:
-    """Plan a merge of ``hypothesis`` and have its merger commit ``commit``; what it was asked."""
-    _plan(host, merge(merge_id, hypothesis))
+def _merged(
+    host: Host, merge_id: str, hypothesis: str | tuple[str, ...], commit: str
+) -> MergePrompt:
+    """Plan a merge of ``hypothesis`` (one or several) and have its merger commit ``commit``.
+
+    What the merger was asked. The commit may hold edits of the merger's own (a fix-up): the
+    record cannot tell, so no diff may take a merge commit as a tree's starting point.
+    """
+    names = (hypothesis,) if isinstance(hypothesis, str) else hypothesis
+    _plan(host, merge(merge_id, *names))
     _start(host)
     (asked,) = host.open(RequestTurn, label="merger")
     context = asked.context
@@ -237,42 +245,6 @@ def test_what_the_implementer_could_not_apply_reaches_the_planner(*, restarting:
     assert composite is not None
     assert [item.model_dump() for item in composite.unapplied] == [dropped]
     assert "the prefix-cache hunk" in render(PromptTemplate.PORTFOLIO, after)
-
-
-@MODES
-def test_an_unapplied_entry_naming_no_part_refuses_the_reply_and_names_the_field(
-    *, restarting: bool
-) -> None:
-    host, offer = _two_parts_that_lost(restarting=restarting, throughputs=LOST)
-    revisions = {row.hypothesis_id: row.revision.revision_id.root for row in offer.buildable}
-    pair = [(name, revisions[name]) for name in ("h1", "h2")]
-    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(combine("k1", *pair)))
-    _start(host)
-    kept = {"hypothesis_id": "h2", "part": "the cache hunk", "why": "conflicts with h1"}
-    stray = {"hypothesis_id": "the scheduler part", "part": "all of it", "why": "a typo"}
-    reply = ImplementerResult.model_validate_json(implemented(unapplied=[kept, stray]))
-    checkpoint = Retained(revision=RevisionRef.of_git_commit("c3"))
-    host.run.reply(turn_about(host, "implementer", "k1"), reply, checkpoint=checkpoint)
-
-    # No judge and no measurement: the implementer is asked again, told which field was wrong.
-    assert not host.open(RequestTurn, label="judge")
-    again = turn_about(host, "implementer", "k1").context
-    assert isinstance(again, ImplementPrompt)
-    assert [(item.index, item.hypothesis_id) for item in again.reply_rejected] == [
-        (1, "the scheduler part")
-    ]
-    text = _flat(render(PromptTemplate.IMPLEMENT, again))
-    assert "unapplied`[1].hypothesis_id names `the scheduler part`" in text, text
-    assert "(`h1`, `h2`)" in text
-    fixed = ImplementerResult.model_validate_json(implemented(unapplied=[kept]))
-    checkpoint = Retained(revision=RevisionRef.of_git_commit("c4"))
-    host.run.reply(turn_about(host, "implementer", "k1"), fixed, checkpoint=checkpoint)
-    host.run.reply(turn_about(host, "judge", "k1"), ReviewResult.model_validate_json(reviewed()))
-    _settle(host)
-    after = _plan(host, implement("h3"))
-    composite = getattr(_row(after, "k1"), "composite", None)
-    assert composite is not None
-    assert [item.model_dump() for item in composite.unapplied] == [kept]
 
 
 def _combine_of(*parts: ParentSnapshot) -> WorkPlan:
@@ -451,3 +423,254 @@ def test_the_parts_verdict_is_the_composite_against_the_raw_best_part_in_any_ord
     shuffled = list(parts)
     order.shuffle(shuffled)
     assert versus_parts((row,), tuple(shuffled), space) is got
+
+
+STRAY = {"hypothesis_id": "the scheduler part", "part": "all of it", "why": "a typo"}
+
+
+def _reply(
+    host: Host, hypothesis: str, candidate: str, unapplied: list[dict[str, str]] | None = None
+) -> None:
+    """The implementer of ``hypothesis`` answers with ``candidate``, listing ``unapplied``."""
+    reply = ImplementerResult.model_validate_json(implemented(unapplied=unapplied or []))
+    checkpoint = Retained(revision=RevisionRef.of_git_commit(candidate))
+    host.run.reply(turn_about(host, "implementer", hypothesis), reply, checkpoint=checkpoint)
+
+
+def _last_round(host: Host, hypothesis: str) -> RoundRecord:
+    """The latest round of ``hypothesis`` in the record the search published."""
+    record = host.record
+    assert record is not None
+    (found,) = (item for item in record.hypotheses if item.hypothesis_id == hypothesis)
+    return found.rounds[-1]
+
+
+def _judged(host: Host, hypothesis: str, *, passed: bool = True) -> None:
+    verdict = ReviewResult.model_validate_json(reviewed(passed=passed))
+    host.run.reply(turn_about(host, "judge", hypothesis), verdict)
+
+
+@MODES
+def test_a_stray_unapplied_entry_on_the_last_turn_still_has_the_composite_measured(
+    *, restarting: bool
+) -> None:
+    host, offer = _two_parts_that_lost(restarting=restarting, throughputs={**LOST, "c4": 300.0})
+    revisions = {row.hypothesis_id: row.revision.revision_id.root for row in offer.buildable}
+    pair = [(name, revisions[name]) for name in ("h1", "h2")]
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(combine("k1", *pair)))
+    _start(host)
+    _reply(host, "k1", "c3")
+    _judged(host, "k1", passed=False)  # the first of the two turns ends without a measurement
+    kept = {"hypothesis_id": "h2", "part": "the cache hunk", "why": "conflicts with h1"}
+    _reply(host, "k1", "c4", unapplied=[kept, STRAY])
+    _judged(host, "k1")
+    _settle(host)
+
+    after = _plan(host, implement("h3"))
+    last = _last_round(host, "k1")
+    assert last.candidate == RevisionRef.of_git_commit("c4")
+    assert [row.value for row in last.metrics] == [300.0]
+    composite = getattr(_row(after, "k1"), "composite", None)
+    assert composite is not None
+    assert composite.verdict.value == "better"
+    # The entry naming no part is kept as the implementer wrote it, not reported against a part.
+    assert [item.model_dump() for item in composite.unapplied] == [kept]
+    assert [item.model_dump() for item in last.unattributed] == [STRAY]
+
+
+@MODES
+def test_an_unapplied_entry_outside_a_combine_is_kept_and_the_candidate_measured(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=4), restarting=restarting, throughputs={"c1": 200.0})
+    _plan(host, implement("h1"))
+    _start(host)
+    _reply(host, "h1", "c1", unapplied=[STRAY])
+    _judged(host, "h1")
+    _settle(host)
+
+    _plan(host, implement("h2"))
+    last = _last_round(host, "h1")
+    assert [row.value for row in last.metrics] == [200.0]
+    assert last.unapplied == ()
+    assert [item.model_dump() for item in last.unattributed] == [STRAY]
+
+
+# The stories below play main's merges under read-only agent git, where a diff is applied with
+# `git apply --reject`. A merger may edit the tree beyond applying its sources (a fix-up F that
+# its prompt asks for), and the record cannot see it. So a tree's own change never starts at a
+# merge commit: diffing a merge commit against a tree that lacks F removes F cleanly. It starts
+# at the latest merged candidate the tree was built on; main holds that candidate, F and every
+# other change a merge brought in.
+FIXUP = {"c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 200.0, "c5": 250.0, "c6": 300.0, "c7": 300.0}
+
+
+@MODES
+def test_a_merger_fix_up_survives_the_merges_and_the_catch_up_of_children_of_what_it_merged(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=14), restarting=restarting, throughputs=FIXUP)
+    first = _plan(host, implement("h1"))
+    base = first.base_revision.revision_id.root
+    _implemented(host, "h1", "c1")
+    on_c1 = {"parent_hypothesis_id": "h1", "parent_revision": "c1"}
+    _plan(host, implement("h3", **on_c1))
+    _implemented(host, "h3", "c2")
+    _plan(host, implement("h4", **on_c1))
+    _implemented(host, "h4", "c3", "inconclusive")
+    _merged(host, "m1", "h1", "c4")  # c4: the input, h1's change and the merger's fix-up F
+
+    # h3's own change starts at c1, which main c4 holds: F stays, and h1 is not applied again.
+    merging = _flat(
+        render(PromptTemplate.MERGE, _merged(host, "m2", "h3", "c5"), agent_git_writable=False)
+    )
+    assert "`git diff c1 c2 | git apply --reject`" in merging, merging
+    assert "git diff c4 " not in merging
+    assert f"git diff {base} " not in merging
+
+    # h4 goes on: it catches up with everything main gained since c1, F and h3's change included.
+    _plan(host, implement("h4", continue_hypothesis=True))
+    asked = _implemented(host, "h4", "c6")
+    assert asked.rebase_onto == RevisionRef.of_git_commit("c5")
+    caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
+    assert "`git diff c1 c5 | git apply --reject`" in caught_up, caught_up
+
+    # Its tree now holds main c5, so its own change starts there.
+    final = _flat(
+        render(PromptTemplate.MERGE, _merged(host, "m3", "h4", "c7"), agent_git_writable=False)
+    )
+    assert "`git diff c5 c6 | git apply --reject`" in final, final
+
+
+PARTLY = {"c1": 200.0, "c2": 210.0, "c3": 40.0, "c4": 260.0, "c5": 40.0}
+
+
+@MODES
+def test_a_child_of_one_source_of_a_merge_catches_up_with_the_others_from_its_parent(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=12), restarting=restarting, throughputs=PARTLY)
+    first = _plan(host, implement("h1"))
+    base = first.base_revision.revision_id.root
+    _implemented(host, "h1", "c1")
+    _plan(host, implement("h2"))
+    _implemented(host, "h2", "c2")
+    _plan(host, implement("h3", parent_hypothesis_id="h1", parent_revision="c1"))
+    _implemented(host, "h3", "c3", "inconclusive")
+    _merged(host, "m1", ("h1", "h2"), "c4")
+
+    # h3's tree holds c1 but not c2: its catch-up starts at c1 and so carries h2's change and
+    # whatever the merger added, never h1's again (from the input) and never nothing (from c4).
+    _plan(host, implement("h3", continue_hypothesis=True))
+    asked = _implemented(host, "h3", "c5", "inconclusive")
+    caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
+    assert "`git diff c1 c4 | git apply --reject`" in caught_up, caught_up
+    assert f"git diff {base} " not in caught_up
+
+
+CHAIN = {"c1": 200.0, "c2": 210.0, "c3": 40.0, "c4": 260.0, "c5": 40.0}
+
+
+@MODES
+def test_a_child_of_the_later_of_two_merged_sources_on_one_line_starts_at_the_later(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=12), restarting=restarting, throughputs=CHAIN)
+    _plan(host, implement("h1"))
+    _implemented(host, "h1", "c1")
+    _plan(host, implement("h2", parent_hypothesis_id="h1", parent_revision="c1"))
+    _implemented(host, "h2", "c2")
+    _plan(host, implement("h3", parent_hypothesis_id="h2", parent_revision="c2"))
+    _implemented(host, "h3", "c3", "inconclusive")
+    _merged(host, "m1", ("h1", "h2"), "c4")
+
+    # c2 holds c1: starting at c1 would apply h2's change again.
+    _plan(host, implement("h3", continue_hypothesis=True))
+    asked = _implemented(host, "h3", "c5", "inconclusive")
+    caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
+    assert "`git diff c2 c4 | git apply --reject`" in caught_up, caught_up
+
+
+LATE = {"c1": 300.0, "c2": 250.0, "c3": 40.0, "c4": 250.0, "c5": 300.0, "c6": 40.0}
+
+
+@MODES
+def test_merging_an_ancestor_after_its_descendant_does_not_move_a_childs_start_back(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=14), restarting=restarting, throughputs=LATE)
+    _plan(host, implement("h1"))
+    _implemented(host, "h1", "c1")
+    _plan(host, implement("h2", parent_hypothesis_id="h1", parent_revision="c1"))
+    _implemented(host, "h2", "c2")
+    _plan(host, implement("h3", parent_hypothesis_id="h2", parent_revision="c2"))
+    _implemented(host, "h3", "c3", "inconclusive")
+    _merged(host, "m1", "h2", "c4")  # main holds c2, so c1 too
+    _merged(host, "m2", "h1", "c5")  # c1's own change starts at the input, not at c2
+
+    # h3's start stays c2: c1 holds less, and starting there would apply h2's change again.
+    _plan(host, implement("h3", continue_hypothesis=True))
+    asked = _implemented(host, "h3", "c6", "inconclusive")
+    caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
+    assert "`git diff c2 c5 | git apply --reject`" in caught_up, caught_up
+
+
+ON_K1 = {"c1": 150.0, "c2": 120.0, "c3": 300.0, "c4": 400.0, "c5": 150.0, "c6": 400.0}
+
+
+LEFT_OUT = {"hypothesis_id": "h1", "part": "all of it", "why": "conflicts with h2"}
+MISNAMED = {**LEFT_OUT, "hypothesis_id": "the h1 part"}
+
+
+@MODES
+@pytest.mark.parametrize(
+    "reported",
+    [
+        pytest.param((), id="applied"),
+        pytest.param((LEFT_OUT,), id="dropped"),
+        pytest.param((MISNAMED,), id="misnamed"),
+    ],
+)
+def test_a_child_of_a_combine_whose_part_was_merged_starts_at_that_part(
+    *, restarting: bool, reported: tuple[dict[str, str], ...]
+) -> None:
+    host = begin(config(max_rounds=14), restarting=restarting, throughputs=ON_K1)
+    first = _plan(host, implement("h1"))
+    base = first.base_revision.revision_id.root
+    _implemented(host, "h1", "c1")
+    _plan(host, implement("h2"))
+    _implemented(host, "h2", "c2")
+    _plan(host, combine("k1", ("h1", "c1"), ("h2", "c2")))
+    _start(host)
+    _reply(host, "k1", "c3", unapplied=list(reported))
+    _judged(host, "k1")
+    _settle(host)
+    _plan(host, implement("h5", parent_hypothesis_id="k1", parent_revision="c3"))
+    _implemented(host, "h5", "c4")
+    _merged(host, "m1", "h1", "c5")
+
+    merging = _flat(
+        render(PromptTemplate.MERGE, _merged(host, "m2", "h5", "c6"), agent_git_writable=False)
+    )
+    # The composite applied c1's change onto the input, so h5's tree holds c1, which main holds.
+    # A part the implementer left out is not in the tree: starting at it would revert it. An
+    # entry naming no part may be a misnamed dropped part, so then no part counts as applied.
+    start = base if reported else "c1"
+    assert f"`git diff {start} c4 | git apply --reject`" in merging, merging
+
+
+@MODES
+def test_an_unapplied_entry_naming_no_part_is_shown_on_the_composite_row(
+    *, restarting: bool
+) -> None:
+    host, offer = _two_parts_that_lost(restarting=restarting, throughputs=LOST)
+    revisions = {row.hypothesis_id: row.revision.revision_id.root for row in offer.buildable}
+    pair = [(name, revisions[name]) for name in ("h1", "h2")]
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(combine("k1", *pair)))
+    _start(host)
+    _reply(host, "k1", "c3", unapplied=[STRAY])
+    _judged(host, "k1")
+    _settle(host)
+
+    shown = _flat(render(PromptTemplate.PORTFOLIO, _plan(host, implement("h3"))))
+    assert "Not attributed to a part: `the scheduler part`: all of it (a typo)" in shown, shown
