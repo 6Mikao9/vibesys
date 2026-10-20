@@ -24,11 +24,14 @@ from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_core.api import (
     CaptureCommandBase,
+    EndReason,
     Finish,
+    Measure,
     Operation,
     RequestTurn,
     Retained,
     RevisionRef,
+    RunResultProposal,
     Settle,
     StartAttempt,
     Wait,
@@ -112,6 +115,93 @@ def bases(host: SerialHost) -> list[RevisionRef]:
         for item in host.run.decisions
         if isinstance(item, Wait) and isinstance(item.request, StartAttempt)
     ]
+
+
+def input_measurements(host: SerialHost) -> int:
+    """How many times the run asked core to measure the input."""
+    return sum(
+        isinstance(item, Wait)
+        and isinstance(item.request, Measure)
+        and item.request.plan.purpose == "baseline"
+        for item in host.run.decisions
+    )
+
+
+def adopted(host: SerialHost) -> RunResultProposal:
+    """The result of a run that adopted a retained candidate."""
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    assert finish.result.outcome == "success", finish.result.reason
+    assert finish.result.selection is not None
+    assert finish.result.selection.kind == "retained_candidate"
+    return finish.result
+
+
+def uncompared(result: RunResultProposal) -> bool:
+    """Whether the run says its adopted candidate was never compared with the input."""
+    return result.uncompared
+
+
+# -- the input's measurement -----------------------------------------------------------------
+
+
+@SEARCHES
+@MODES
+def test_an_input_measurement_lost_twice_ends_adopted_without_an_input_comparison(
+    *, search: str, restarting: bool
+) -> None:
+    """A lost measurement shows nothing about the input, so it is taken once more, then stands.
+
+    Both attempts are lost, so there is no bar: the candidate that passes its gates is adopted,
+    and the run says it was never compared with the input.
+    """
+    host = start(search, restarting=restarting, baseline="lost")
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain()
+
+    assert input_measurements(host) == host.input_measurements == 2
+    assert uncompared(adopted(host))
+    assert_flow_closed(host)
+
+
+@SEARCHES
+@MODES
+def test_an_input_measurement_lost_once_is_taken_again_and_the_winner_is_compared_with_it(
+    *, search: str, restarting: bool
+) -> None:
+    """The second measurement succeeds, so the candidate is compared with the input as usual."""
+    host = start(search, restarting=restarting, baseline="lost", input_recovers=True)
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain()
+
+    assert input_measurements(host) == host.input_measurements == 2
+    assert not uncompared(adopted(host))
+    assert_flow_closed(host)
+
+
+@SEARCHES
+@MODES
+def test_an_uncompared_run_that_ends_on_its_deadline_still_says_it_was_never_compared(
+    *, search: str, restarting: bool
+) -> None:
+    """H1: the deadline ends the run after an uncompared candidate was chosen; the mark stays."""
+    host = start(search, restarting=restarting, config={"max_rounds": 3}, baseline="lost")
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain_until_turn(PLANNER)
+    host.run.stop("deadline")
+    host.drain()
+
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    assert finish.result.outcome == "cancelled"
+    assert finish.result.reason.startswith(EndReason.DEADLINE.value)
+    assert finish.result.selection is not None
+    assert finish.result.selection.kind == "retained_candidate"
+    assert finish.result.uncompared
+    assert_flow_closed(host)
 
 
 # -- the designer ----------------------------------------------------------------------------

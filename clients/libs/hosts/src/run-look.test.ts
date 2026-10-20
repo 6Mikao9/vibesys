@@ -44,6 +44,28 @@ describe('endedLook', () => {
     expect(endedLook(ended('force_stopped'))?.tone).toBe('neutral');
   });
 
+  test('an ending that adopted an uncompared candidate says so and is never a plain success', () => {
+    const uncompared = (outcome: Outcome): Pick<HostRun, 'phase' | 'end'> => ({
+      phase: 'completed',
+      end: {outcome, reason: 'why', resumable: false, uncompared: true},
+    });
+    expect(endedLook(uncompared('adopted'))).toEqual({
+      kind: 'finished',
+      label: 'Finished · adopted without an input comparison',
+      tone: 'warn',
+    });
+    expect(endedLook(uncompared('deadline'))).toEqual({
+      kind: 'finished',
+      label: 'Time limit reached · adopted without an input comparison',
+      tone: 'warn',
+    });
+    expect(endedLook(uncompared('stopped'))).toEqual({
+      kind: 'stopped',
+      label: 'Stopped · adopted without an input comparison',
+      tone: 'warn',
+    });
+  });
+
   test('every outcome has its own label', () => {
     const labels = Object.keys(OUTCOMES).map(
       outcome => endedLook(ended(outcome as Outcome))?.label,

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Literal
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import TypeAdapter
 from tests.vibesys.orchestration.dynamic._values import (
     config,
     evidence_of,
@@ -26,6 +27,7 @@ from tests.vibesys.orchestration.dynamic._values import (
 )
 
 from vibesys.candidates.api import (
+    Baseline,
     InputFailure,
     InputFailureKind,
     InputReading,
@@ -33,6 +35,7 @@ from vibesys.candidates.api import (
     NotConfigured,
     Unmeasurable,
     trusted,
+    uncompared,
 )
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import StrategyReason
@@ -58,7 +61,7 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkstreamDone,
     WorkstreamStart,
 )
-from vs_core.api import INPUT, Kept, NoWinner, ObservationStatus
+from vs_core.api import INPUT, Kept, NoWinner, ObservationStatus, Uncompared
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -194,7 +197,8 @@ def _check(run: RunRecord, trace: Trace) -> None:
         assert leader.revision.revision_id.root in trace.eligible_candidates
     assert (leader is INPUT) == (not run.eligible_rounds())
     if run.eligible_rounds():
-        assert run.ending() is None
+        compared = run.baseline is None or not uncompared(run.baseline)
+        assert run.ending() == (None if compared else Uncompared())
     snapshot = run.snapshot()
     assert RunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
     # resumed after a code change from what it checkpoints, the record is the same record
@@ -341,7 +345,16 @@ INPUTS = {
             kind=InputFailureKind.NO_EVIDENCE, status=ObservationStatus.FAILED, output=""
         )
     ),
-    "accuracy failed": Measured(reading=InputReading(accuracy_passed=False)),
+    "accuracy failed": Unmeasurable(
+        failure=InputFailure(
+            kind=InputFailureKind.ACCURACY_FAILED, stage="correctness", output="hung"
+        ),
+        reading=InputReading(accuracy_passed=False),
+    ),
+    # A checkpoint written before S173 held a failed accuracy check as a measured input.
+    "accuracy failed before S173": TypeAdapter(Baseline).validate_json(
+        '{"kind":"measured","reading":{"accuracy_passed":false}}'
+    ),
 }
 
 
@@ -367,7 +380,8 @@ def test_a_search_ends_without_a_winner_only_when_no_candidate_stands_and_the_in
 
     ending = run.ending()
     if candidates:
-        assert ending is None  # a winner stands
+        # a winner stands; one never compared with the input says so
+        assert ending == (Uncompared() if uncompared(baseline) else None)
     elif trusted(baseline) and not planner_gave_up:
         assert ending is None  # the trusted input stands
     else:

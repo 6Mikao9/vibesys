@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .common import (
     AssessmentKind,
@@ -21,6 +21,7 @@ from .common import (
     SchemaRef,
     SettlementId,
     Value,
+    unset,
 )
 from .evaluation import EvidenceRef
 
@@ -112,6 +113,16 @@ class RunResultProposal(Value):
     outcome: Literal["success", "failure", "blocked", "cancelled"]
     reason: str = Field(min_length=1)
     selection: Selection | None = None
+    uncompared: bool = Field(default=False, exclude_if=unset)
+    """The selection is a candidate never compared with the input: the input had no reading to
+    compare it with, so it was judged on the task's gates alone. It holds however the run ended."""
+
+    @model_validator(mode="after")
+    def _uncompared_only_of_a_candidate(self) -> RunResultProposal:
+        if self.uncompared and not isinstance(self.selection, RetainedCandidate):
+            message = "uncompared is set only when the selection is a retained candidate"
+            raise ValueError(message)
+        return self
 
 
 class AdoptionFailureReason(StrEnum):

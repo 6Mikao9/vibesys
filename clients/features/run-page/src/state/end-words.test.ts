@@ -216,6 +216,16 @@ describe('the ended banner', () => {
     expect(endedView(read)?.reason).toMatch(/^Adopted the candidate from round /);
   });
 
+  test('says an adopted candidate was never compared with the input, however the run ended', () => {
+    for (const outcome of ['adopted', 'deadline', 'stopped'] as const) {
+      const words = endReason(outcome, `${outcome}: adopted: c1`, null, 'max', true);
+      expect(words).toContain('adopted without an input comparison');
+      expect(endReason(outcome, `${outcome}: adopted: c1`, null, 'max')).not.toContain(
+        'input comparison',
+      );
+    }
+  });
+
   test('shows a failure’s own message', () => {
     expect(endReason('failed', 'W6’s benchmark timed out after 300 s.', null, 'max')).toBe(
       'W6’s benchmark timed out after 300 s.',

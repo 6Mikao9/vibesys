@@ -83,6 +83,7 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
+    INPUT_MEASUREMENT_FAILED = "input_measurement_failed"
     MEASUREMENT_COMPARED = "measurement_compared"
     COMPARISONS_READ = "comparisons_read"
     WORKSTREAM_FINISHED = "workstream_finished"
@@ -430,6 +431,8 @@ class RunEndingData(EventPayload):
     without one (an error, or a stop that left work unsettled). ``resumable`` is whether a
     resume continues it: its record is not terminal. ``rounds_finished`` counts its
     workstreams (rounds) that reached their end. ``summary`` is core's account of the result.
+    ``uncompared`` is whether the result adopted a candidate never compared with the input (it
+    failed its own measurement), however the run ended.
     """
 
     kind: Literal["run_ending"] = "run_ending"
@@ -437,6 +440,7 @@ class RunEndingData(EventPayload):
     summary: str = ""
     resumable: bool
     rounds_finished: NonNegativeInt
+    uncompared: bool = False
 
 
 ExperimentsChangeReason = Literal[
@@ -822,6 +826,41 @@ class WinnerSelectedData(EventPayload):
     settlement_id: str | None = None
 
 
+class InputMeasurementFailureKind(StrEnum):
+    """Why the run's input revision failed its own trusted measurement. Closed.
+
+    Mirrors ``vibesys.candidates.api.InputFailureKind`` member-for-member: a frozen wire
+    vocabulary the candidates library's own enum can't silently rename underneath.
+    """
+
+    NO_EVIDENCE = "no-evidence"
+    READINGS_REFUSED = "readings-refused"
+    READINGS_UNDECODABLE = "readings-undecodable"
+    ACCURACY_FAILED = "accuracy-failed"
+    BENCHMARK_FAILED = "benchmark-failed"
+    WAIT_ENDED = "wait-ended"
+
+
+class InputMeasurementFailedData(EventPayload):
+    """The run's input revision failed its trusted measurement, so it has no trusted baseline.
+
+    ``failure`` says how, ``stage`` names the gate stage whose reading failed (None when no
+    stage reading did), and ``summary`` is the redacted tail of what that stage printed.
+    ``attempts`` is 2 when the first failure showed no fault of the input and it was measured
+    again. ``compared`` is whether candidates are still compared with the input: its accuracy
+    check failed but its benchmark passed, so its numbers stay the bar. Otherwise candidates are
+    judged on the task's gates alone, and a run that adopts one ends "adopted without an input
+    comparison". Emitted once per run, when core first commits the failure; the run goes on.
+    """
+
+    kind: Literal["input_measurement_failed"] = "input_measurement_failed"
+    failure: InputMeasurementFailureKind
+    stage: str | None = None
+    summary: str = ""
+    attempts: int = Field(default=1, ge=1)
+    compared: bool = False
+
+
 class MeasurementComparedData(EventPayload):
     """A candidate's measurement was compared with its base's: ratio, noise and verdict.
 
@@ -1045,6 +1084,7 @@ CoreEventData = Annotated[
     | RunConfiguredData
     | FrameworkWarningData
     | WinnerSelectedData
+    | InputMeasurementFailedData
     | MeasurementComparedData
     | ComparisonsReadData
     | WorkstreamFinishedData

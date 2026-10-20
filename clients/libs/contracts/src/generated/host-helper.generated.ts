@@ -433,6 +433,7 @@ export type RunEndOutcome =
 export type Reason = string;
 export type Resumable = boolean;
 export type ResumeFromRound = number | null;
+export type Uncompared = boolean;
 export type Hostname = string;
 export type ProtocolVersion1 = 1;
 export type VibesysVersion1 = string;
@@ -500,6 +501,7 @@ export type DurationS = number | null;
 export type Summary = string;
 export type Resumable1 = boolean;
 export type RoundsFinished = number;
+export type Uncompared1 = boolean;
 /**
  * The journal's last word on a run: the terminal event it ends with, if it has one.
  */
@@ -1662,9 +1664,8 @@ export interface LiveInstanceRecord {
 /**
  * A run's lifecycle status with the detail its status needs.
  *
- * ``stage`` (and, when the stage reports it, ``progress``) says where a
- * ``starting`` run is; ``reason`` says why a ``failed`` one ended. None of
- * them is present for any other status.
+ * ``stage`` (and, when the stage reports it, ``progress``) says where a ``starting`` run is;
+ * ``reason`` says why a ``failed`` one ended. None of them is present for any other status.
  */
 export interface RunPhase {
   status: RunStatus;
@@ -1694,15 +1695,17 @@ export interface FailureReason {
 /**
  * How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.
  *
- * ``resumable`` says whether a resume continues the run: its durable record exists and
- * is not terminal. ``resume_from_round`` is the round that resume starts at, when the
- * server knew it (a crashed server did not say).
+ * ``resumable`` says whether a resume continues the run: its durable record exists and is not
+ * terminal. ``resume_from_round`` is the round that resume starts at, when the server knew it
+ * (a crashed server did not say). ``uncompared``: the run adopted a candidate never compared
+ * with the input (it failed its own measurement), whichever ``outcome`` ended it.
  */
 export interface EndRecord {
   outcome: RunEndOutcome;
   reason: Reason;
   resumable: Resumable;
   resume_from_round?: ResumeFromRound;
+  uncompared?: Uncompared;
 }
 /**
  * A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none.
@@ -1860,13 +1863,15 @@ export interface RunDigest {
  * How a run's durable record stood as it ended, as its server reports it to the record.
  *
  * ``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended
- * without one; ``summary`` is core's account of that result.
+ * without one; ``summary`` is core's account of that result and ``uncompared`` its fact that
+ * the adopted candidate was never compared with the input.
  */
 export interface RunEndingFact {
   outcome: RunEndOutcome | null;
   summary?: Summary;
   resumable: Resumable1;
   rounds_finished: RoundsFinished;
+  uncompared?: Uncompared1;
 }
 /**
  * What a run's tile draws, folded from the journal in the digest's pass.

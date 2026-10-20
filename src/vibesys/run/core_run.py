@@ -57,10 +57,14 @@ _UNFINISHED_REASON = "the run ended without recording a result"
 
 @dataclass(frozen=True)
 class RunEnd:
-    """How a run ended: its status and, for a failure, the data that says why."""
+    """How a run ended: its status and, for a failure, the data that says why.
+
+    ``uncompared`` is whether it adopted a candidate never compared with the input.
+    """
 
     status: RunStatus
     failure: RunFailure | None = None
+    uncompared: bool = False
 
 
 class CoreRunRefusedError(RuntimeError):
@@ -220,7 +224,9 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
     status = _status_of(outcome.result, shell)
     return RunEnd(
-        status, _failure_of(outcome.result, shell) if status is RunStatus.FAILED else None
+        status,
+        _failure_of(outcome.result, shell) if status is RunStatus.FAILED else None,
+        uncompared=outcome.result is not None and outcome.result.uncompared,
     )
 
 
@@ -238,6 +244,7 @@ def run_ending(shell: CoreRuntime) -> RunEndingData:
         rounds_finished=sum(
             1 for attempt in core.attempts.attempts if attempt.phase == AttemptPhase.TERMINAL
         ),
+        uncompared=result is not None and result.uncompared,
     )
 
 
@@ -258,6 +265,15 @@ def _ended_by(result: RunResultProposal, ending: EndReason) -> bool:
     return result.reason.split(":", 1)[0] == ending.value
 
 
+class OperatorStopped(RunStopped):
+    """The operator's stop ended the run; it carries what the run's result recorded of it."""
+
+    def __init__(self, reason: str, *, uncompared: bool) -> None:
+        """Keep ``reason`` as the message and whether the adopted candidate was never compared."""
+        super().__init__(reason)
+        self.uncompared = uncompared
+
+
 def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatus:
     """Map the run's recorded result to the status a plugin returns.
 
@@ -269,7 +285,9 @@ def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatu
     if result is None:
         return RunStatus.FAILED
     if _ended_by(result, EndReason.STOPPED):
-        raise RunStopped(result.reason)  # the session reports why it stopped
+        raise OperatorStopped(
+            result.reason, uncompared=result.uncompared
+        )  # the session reports why it stopped
     kept = _ended_by(result, EndReason.DEADLINE) and _adopted_candidate(shell) is not None
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 

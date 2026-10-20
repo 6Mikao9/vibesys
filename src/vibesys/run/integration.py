@@ -15,6 +15,8 @@ from vibesys.events import (
     ExperimentsChangedData,
     FrameworkSource,
     FrameworkWarningData,
+    InputMeasurementFailedData,
+    InputMeasurementFailureKind,
     InvocationFinishedData,
     InvocationStartedData,
     IterationsChangedData,
@@ -35,6 +37,7 @@ from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
 from vs_core.api import FlowDriver, FlowState, RunTrace, SpanChange, span_changes
 from vs_project.api import git_repositories
+from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api.core import RuntimeRecord, new_comparisons, new_runaways, winner_selection
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
@@ -212,6 +215,28 @@ class _RoundFailureProjection(Protocol):
     def operator_text(self) -> str | None: ...
 
 
+class _InputFailureProjection(Protocol):
+    """Product shape of why the input failed its measurement, as ``InputFailureSummary`` has it.
+
+    Structural for the same reason as `_RoundFailureProjection`.
+    """
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def stage(self) -> str | None: ...
+
+    @property
+    def output(self) -> str: ...
+
+    @property
+    def attempts(self) -> int: ...
+
+    @property
+    def compared(self) -> bool: ...
+
+
 class _RoundProjection(Protocol):
     """Product facts needed to translate one projected round into events."""
 
@@ -262,6 +287,11 @@ class _RunProjection(Protocol):
 
     @property
     def projection(self) -> Mapping[str, object] | None: ...
+
+    @property
+    def input_failure(self) -> _InputFailureProjection | None:
+        """Why the input failed its trusted measurement; None while pending or measured."""
+        ...
 
 
 class CommittedStateProjector(Protocol):
@@ -321,6 +351,25 @@ def _emit_core_commit_events(
         data=ExperimentsChangedData(
             reason="round_persisted" if new_round_numbers else "active_hypothesis_changed",
             revision=after.experiment_revision,
+        ),
+    )
+
+
+INPUT_FAILURE_TAIL_CHARS = 1000
+"""How much of the failed stage's output the operator's event carries, after redaction."""
+
+
+def _emit_input_measurement_failed(events: EventJournal, after: _InputFailureProjection) -> None:
+    """Emit ``INPUT_MEASUREMENT_FAILED`` for the failure ``after`` describes."""
+    events.emit(
+        CoreEventType.INPUT_MEASUREMENT_FAILED,
+        status=EventStatus.FAILED,
+        data=InputMeasurementFailedData(
+            failure=InputMeasurementFailureKind(after.kind),
+            stage=after.stage,
+            summary=redact_diagnostic_tail(after.output, max_chars=INPUT_FAILURE_TAIL_CHARS),
+            attempts=after.attempts,
+            compared=after.compared,
         ),
     )
 
@@ -513,6 +562,8 @@ class _CoreCommitObserver:
         """The last view that was built, which the next commit's events are diffed against."""
         self._seeded = False
         self._failing = False
+        self._input_announced: bool | None = None
+        """Whether the run's input failure was announced; None until this process first asks."""
 
     def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
         """Publish the durable state hint before the events derived from it.
@@ -533,6 +584,7 @@ class _CoreCommitObserver:
             self._report_failed_projection(current, after.projection_failure)
         elif after is not None:
             _emit_core_commit_events(self._integration.events, self._shown, after)
+            self._announce_input_failure(after)
             self._shown, self._seeded, self._failing = after, True, False
         _emit_winner_selected(
             self._integration.events,
@@ -549,6 +601,26 @@ class _CoreCommitObserver:
                 new_runaways(previous if isinstance(previous, RuntimeRecord) else None, current),
             )
         _emit_span_changes(self._integration.events, _run_trace(previous), _run_trace(current))
+
+    def _announce_input_failure(self, after: _RunProjection) -> None:
+        """Announce the input's failed measurement once per run, judged by the run's journal.
+
+        The failure is a fact of the committed record, so it is announced on the first commit
+        that holds it. Whether it was announced is a fact of the run's durable event journal,
+        not of the record: a restarted process that loads a record holding the failure does
+        not announce it again, and one whose record an earlier version wrote, before the
+        announcement existed, announces it now.
+        """
+        failed = after.input_failure
+        if failed is None:
+            return
+        if self._input_announced is None:
+            self._input_announced = self._integration.events.has_recorded(
+                CoreEventType.INPUT_MEASUREMENT_FAILED
+            )
+        if not self._input_announced:
+            _emit_input_measurement_failed(self._integration.events, failed)
+            self._input_announced = True
 
     def _report_failed_projection(self, current: BaseModel, failure: str) -> None:
         if self._failing:

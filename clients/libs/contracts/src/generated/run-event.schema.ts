@@ -984,6 +984,7 @@ const runEventSchema: Record<string, unknown> = {
         "run_configured",
         "framework_warning",
         "winner_selected",
+        "input_measurement_failed",
         "measurement_compared",
         "comparisons_read",
         "workstream_finished",
@@ -1292,6 +1293,68 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "GateStartedData",
       "type": "object"
+    },
+    "InputMeasurementFailedData": {
+      "additionalProperties": false,
+      "description": "The run's input failed its trusted measurement, so the run has no trusted baseline.\n\nMirrors ``vibesys.events.InputMeasurementFailedData`` field for field.",
+      "properties": {
+        "kind": {
+          "const": "input_measurement_failed",
+          "default": "input_measurement_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "failure": {
+          "$ref": "#/$defs/InputMeasurementFailureKind"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "attempts": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "compared": {
+          "default": false,
+          "title": "Compared",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "failure"
+      ],
+      "title": "InputMeasurementFailedData",
+      "type": "object"
+    },
+    "InputMeasurementFailureKind": {
+      "description": "Why the run's input failed its own trusted measurement. Closed.\n\nSee ``vibesys.events.InputMeasurementFailureKind``, which this mirrors member-for-member.",
+      "enum": [
+        "no-evidence",
+        "readings-refused",
+        "readings-undecodable",
+        "accuracy-failed",
+        "benchmark-failed",
+        "wait-ended"
+      ],
+      "title": "InputMeasurementFailureKind",
+      "type": "string"
     },
     "InvocationFinishedData": {
       "additionalProperties": false,
@@ -2300,7 +2363,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunEndingData": {
       "additionalProperties": false,
-      "description": "How a core run's durable record stands as the run ends, emitted once just before its end.\n\n``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended\nwithout one (an error, or a stop that left work unsettled). ``resumable`` is whether a\nresume continues it: its record is not terminal. ``rounds_finished`` counts its\nworkstreams (rounds) that reached their end. ``summary`` is core's account of the result.",
+      "description": "How a core run's durable record stands as the run ends, emitted once just before its end.\n\n``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended\nwithout one (an error, or a stop that left work unsettled). ``resumable`` is whether a\nresume continues it: its record is not terminal. ``rounds_finished`` counts its\nworkstreams (rounds) that reached their end. ``summary`` is core's account of the result.\n``uncompared`` is whether the result adopted a candidate never compared with the input (it\nfailed its own measurement), however the run ended.",
       "properties": {
         "kind": {
           "const": "run_ending",
@@ -2331,6 +2394,11 @@ const runEventSchema: Record<string, unknown> = {
           "minimum": 0,
           "title": "Rounds Finished",
           "type": "integer"
+        },
+        "uncompared": {
+          "default": false,
+          "title": "Uncompared",
+          "type": "boolean"
         }
       },
       "required": [
@@ -4163,6 +4231,7 @@ const runEventSchema: Record<string, unknown> = {
               "framework_warning": "#/$defs/FrameworkWarningData",
               "gate_finished": "#/$defs/GateFinishedData",
               "gate_started": "#/$defs/GateStartedData",
+              "input_measurement_failed": "#/$defs/InputMeasurementFailedData",
               "invocation_finished": "#/$defs/InvocationFinishedData",
               "invocation_started": "#/$defs/InvocationStartedData",
               "iterations_changed": "#/$defs/IterationsChangedData",
@@ -4332,6 +4401,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/WinnerSelectedData"
+            },
+            {
+              "$ref": "#/$defs/InputMeasurementFailedData"
             },
             {
               "$ref": "#/$defs/MeasurementComparedData"

@@ -8,7 +8,8 @@ every step, so the choice itself is proven to survive a restart.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from hypothesis import example, given
@@ -92,6 +93,31 @@ def test_the_last_choice_is_the_one_adopted(begin: Begin) -> None:
     result = result_of(run)
     assert (result.outcome, result.selection) == ("success", selection_of(kept("b")))
     assert result.reason.startswith("adopted")
+
+
+@pytest.mark.parametrize("chosen", [True, False], ids=["a-candidate", "nothing"])
+def test_an_uncompared_return_says_so_only_of_an_adopted_candidate(
+    begin: Begin, *, chosen: bool
+) -> None:
+    """A root that had no input reading to compare with says its adopted candidate is uncompared.
+
+    Keeping the input needs no comparison, so a run that chose nothing still keeps the input.
+    """
+
+    async def uncompared(ctx: core.Flow, _config: Config) -> core.Uncompared:
+        if chosen:
+            ctx.choose(kept("a"))
+        return core.Uncompared()
+
+    result = result_of(begin(uncompared))
+    assert result.outcome == "success"
+    if chosen:
+        assert result.selection == selection_of(kept("a"))
+        assert result.reason == "adopted: a"
+        assert result.uncompared
+    else:
+        assert result.selection == BASELINE
+        assert result.reason.startswith("kept-input")
 
 
 def test_choosing_the_input_after_a_candidate_takes_the_candidate_back(begin: Begin) -> None:
@@ -219,6 +245,34 @@ def test_the_deadline_control_cancels_the_run_with_its_own_reason(begin: Begin) 
     assert result.reason.startswith("deadline")
 
 
+@pytest.mark.parametrize("ending", [None, "stop", "deadline"], ids=["returned", "stop", "deadline"])
+@pytest.mark.parametrize("chosen", [True, False], ids=["a-candidate", "nothing"])
+def test_an_uncompared_adoption_is_a_field_of_the_result_however_the_run_ends(
+    begin: Begin, *, ending: str | None, chosen: bool
+) -> None:
+    """The mark is a fact of the result, not of its reason's first word, so a stop keeps it.
+
+    A run ends by its root returning, an operator's stop or the deadline; whichever it is, a
+    result that adopted a candidate the root returned ``Uncompared`` for says so, and one that
+    kept the input does not (keeping the input needs no comparison).
+    """
+
+    async def uncompared(ctx: core.Flow, _config: Config) -> core.Uncompared:
+        if chosen:
+            ctx.choose(kept("a"))
+        if ending is not None:
+            await ctx.stopped
+        return core.Uncompared()
+
+    run = begin(uncompared)
+    if ending is not None:
+        run.stop(ending)
+    result = result_of(run)
+    assert result.selection == (selection_of(kept("a")) if chosen else BASELINE)
+    assert result.outcome == ("success" if ending is None else "cancelled")
+    assert result.uncompared is chosen
+
+
 def test_a_stop_with_no_choice_cancels_with_the_input(begin: Begin) -> None:
     async def waiting(ctx: core.Flow, _config: Config) -> None:
         await ctx.stopped
@@ -319,3 +373,13 @@ def test_a_stopped_run_whose_proposal_core_refuses_is_cancelled_not_failed() -> 
     result = result_of(run)
     assert result.outcome == "cancelled"
     assert result.reason == "stopped: adoption-failed: refused"
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled"])
+def test_an_unset_uncompared_is_left_out_of_the_result_serialization(
+    outcome: Literal["success", "failure", "cancelled"],
+) -> None:
+    """Decision digests and version 38 documents hold no ``uncompared`` key for a compared run."""
+    plain = core.RunResultProposal(outcome=outcome, reason="r")
+    assert "uncompared" not in json.loads(plain.model_dump_json())
+    assert plain == core.RunResultProposal.model_validate_json(plain.model_dump_json())

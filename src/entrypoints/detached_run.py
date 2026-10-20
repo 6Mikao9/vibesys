@@ -156,6 +156,7 @@ def end_record(
         reason=reason,
         resumable=resumable,
         resume_from_round=ending.rounds_finished + 1 if ending is not None and resumable else None,
+        uncompared=ending is not None and ending.outcome is outcome and ending.uncompared,
     )
 
 

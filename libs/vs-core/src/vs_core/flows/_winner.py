@@ -62,6 +62,17 @@ class NoWinner(Value):
     keep_choice: bool = False
 
 
+class Uncompared(Value):
+    """What a root flow returns when its chosen candidate was never compared with the input.
+
+    The input has no reading to compare with (its own measurement failed), so the candidate was
+    judged on the task's gates alone. The framework adopts the last choice as usual, and the
+    result of a run that adopts a candidate says it was never compared
+    (``RunResultProposal.uncompared``), however the run ended (its root returning, a stop or
+    the deadline); a run whose choice is still the input ends as it would have.
+    """
+
+
 class Kept(Value):
     """A candidate a closed workspace retained: what ``ctx.choose`` can name."""
 
@@ -176,13 +187,14 @@ def _selection_name(selection: Selection) -> str:
     return "the input"
 
 
-async def conclude(kit: Kit, returned: NoWinner | None) -> None:
+async def conclude(kit: Kit, returned: NoWinner | Uncompared | None) -> None:
     """End the run: adopt the last choice (unless there is no winner), then finish.
 
     A stop or a deadline makes the result ``cancelled`` (a proposal core refuses because the run
     is closing included); a failed adoption or a ``NoWinner`` is a ``failure`` with a typed reason,
     unless the operator stopped the run: a stop is a pause the operator can lift, so its ending
     is ``cancelled`` whatever the adoption did, and a resume reopens the run.
+    An ``Uncompared`` return marks an adopted candidate's result as never compared with the input.
     """
     stopped = _stop_ending(kit)
     result = await _result(kit, returned, stopped)
@@ -215,7 +227,7 @@ async def _no_winner(kit: Kit, returned: NoWinner, stopped: EndReason | None) ->
 
 
 async def _result(
-    kit: Kit, returned: NoWinner | None, stopped: EndReason | None
+    kit: Kit, returned: NoWinner | Uncompared | None, stopped: EndReason | None
 ) -> RunResultProposal:
     if isinstance(returned, NoWinner):
         return await _no_winner(kit, returned, stopped)
@@ -235,8 +247,15 @@ async def _result(
         return RunResultProposal(outcome="failure", reason=detail)
     kind = EndReason.KEPT_INPUT if isinstance(selection, TrustedBaseline) else EndReason.ADOPTED
     detail = reason_text(kind, _selection_name(selection))
+    # Keeping the input needs no comparison; a candidate the root never compared says so.
+    uncompared = isinstance(returned, Uncompared) and isinstance(selection, RetainedCandidate)
     if stopped is not None:
         return RunResultProposal(
-            outcome="cancelled", reason=reason_text(stopped, detail), selection=selection
+            outcome="cancelled",
+            reason=reason_text(stopped, detail),
+            selection=selection,
+            uncompared=uncompared,
         )
-    return RunResultProposal(outcome="success", reason=detail, selection=selection)
+    return RunResultProposal(
+        outcome="success", reason=detail, selection=selection, uncompared=uncompared
+    )

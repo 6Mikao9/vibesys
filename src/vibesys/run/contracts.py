@@ -165,6 +165,9 @@ class RunResult(BaseModel):
     succeeded: bool
     status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED] = RunStatus.FAILED
     failure: RunFailure | None = None
+    uncompared: bool = False
+    """The run adopted a candidate never compared with the input: the input failed its own
+    measurement, so the candidate was judged on the task's gates alone."""
     stop_reason: str | None = None
     """Why a stopped run stopped, as its record says; None when the stop left no reason."""
 
@@ -211,6 +214,29 @@ class RoundFailureSummary(BaseModel):
     text: str = ""
     operator_text: str | None = None
     """Credential-safe projection used only by the public run event."""
+
+
+class InputFailureSummary(BaseModel):
+    """Why the run's input revision failed its own trusted measurement, strategy-neutral.
+
+    Like `RoundFailureSummary`, ``kind`` carries a policy enum's value (the candidates
+    library's ``InputFailureKind``), not the enum; ``INPUT_MEASUREMENT_FAILED``'s wiring turns it
+    back into the wire's ``InputMeasurementFailureKind``. ``stage`` names the gate stage whose
+    reading failed, when one did; ``output`` is what that stage printed, unredacted, so it is
+    redacted before it reaches an event.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: str
+    stage: str | None = None
+    output: str = ""
+    attempts: int = Field(default=1, ge=1, le=2)
+    """How many times the input was measured: twice when the first failure showed no fault of
+    the input and it was measured again."""
+    compared: bool = False
+    """Whether candidates are still compared with the input: its benchmark passed although its
+    accuracy check failed, so its numbers stay the bar."""
 
 
 class RoundSummary(BaseModel):
@@ -438,6 +464,8 @@ class PluginProjection(BaseModel):
     )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
+    input_failure: InputFailureSummary | None = None
+    """Why the input failed its trusted measurement; None while it is pending or measured."""
 
 
 class RunView(BaseModel):
@@ -454,6 +482,8 @@ class RunView(BaseModel):
     )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
+    input_failure: InputFailureSummary | None = None
+    """Why the input failed its trusted measurement; None while it is pending or measured."""
 
     @property
     def projection_failure(self) -> str | None:
@@ -468,6 +498,7 @@ class RunView(BaseModel):
 
 
 __all__ = [
+    "InputFailureSummary",
     "IterationKind",
     "IterationMetric",
     "IterationProjection",

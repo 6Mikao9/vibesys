@@ -47,6 +47,7 @@ export {
   type EndedRunStatus,
   type ExecutionTodos,
   hasRunEnded,
+  type InputMeasurementFailure,
   initialCoreState,
   type MeasurementComparison,
   type ProviderSwitch,
