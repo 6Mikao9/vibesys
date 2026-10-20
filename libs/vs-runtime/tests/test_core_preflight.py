@@ -199,7 +199,6 @@ def test_an_envelope_of_an_unsupported_version_names_the_vibesys_that_wrote_it(
     )
 
 
-@pytest.mark.xfail(strict=True, reason="a same-version field from a newer VibeSys is not named yet")
 @pytest.mark.parametrize("holder", ["envelope", "record"])
 def test_a_record_with_a_field_a_newer_vibesys_added_names_the_vibesys_that_wrote_it(
     tmp_path: Path, holder: str

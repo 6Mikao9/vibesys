@@ -27,6 +27,9 @@ from .test_comparison_statistic import VALUES, compared
 _FIXTURES = Path(__file__).parent / "envelopes"
 _SUPPORTED_SINCE = 34
 """The oldest version a run was promised to resume from; lowering support edits this line."""
+_REWRITES_SINCE = 42
+"""From this version on a compatible shape change keeps the version
+(``scripts/check_persisted_schema_compat.py``), so every later migration rewrites data."""
 _FILES = sorted(_FIXTURES.glob("v*-*.json"))
 _Envelope = core.RunEnvelope[core.FlowState]
 
@@ -123,4 +126,26 @@ def test_every_version_from_the_oldest_supported_has_a_migration_and_a_fixture()
     assert not uncovered, (
         f"save a fixture envelope of version {uncovered} with the code of that version "
         f"(tests/envelopes/v<version>-<case>.json)"
+    )
+
+
+def test_every_migration_since_compatible_changes_keep_the_version_rewrites_its_fixture() -> None:
+    """A step that only renumbers is a compatible change that should have kept the version.
+
+    A meaning change (the same shape read differently) is no exception: its fixture holds the
+    data the step rewrites.
+    """
+    renumbering = []
+    for version, step in core.ENVELOPE_MIGRATIONS.items():
+        if version < _REWRITES_SINCE:
+            continue
+        fixtures = [
+            json.loads(p.read_text(encoding="utf-8")) for p in _FILES if _version(p) == version
+        ]
+        if not any({**step(dict(f)), "schema_version": version} != f for f in fixtures):
+            renumbering.append(version)
+    assert not renumbering, (
+        f"the migrations of envelope versions {renumbering} rewrite none of their fixtures: drop "
+        "the version raise if every saved envelope decodes as is, or save a fixture holding the "
+        "data the step rewrites"
     )

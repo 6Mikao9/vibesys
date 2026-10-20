@@ -12,12 +12,9 @@ import json
 from pathlib import Path
 
 import pytest
-from hypothesis import example, given, settings
-from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import FAKE_REGISTRY
-from vs_sim.api.testing import examples
 
 _Envelope = core.RunEnvelope[core.FlowState]
 _SAVED = (Path(__file__).parent / "envelopes" / "v41-floor.json").read_text(encoding="utf-8")
@@ -59,7 +56,6 @@ def _child(node: object, key: str | int) -> object:
     return node[key]
 
 
-@pytest.mark.xfail(strict=True, reason="a same-version field from a newer VibeSys is not named yet")
 @pytest.mark.parametrize(
     "path",
     [(), ("core",), ("core", "evaluation", "comparisons", 0)],
@@ -75,7 +71,6 @@ def test_a_field_this_vibesys_does_not_know_is_refused_as_written_by_a_newer_one
     assert "added_later" in str(refused.value)
 
 
-@pytest.mark.xfail(strict=True, reason="a same-version value from a newer VibeSys is not named yet")
 def test_a_closed_set_member_this_vibesys_does_not_know_is_refused_as_written_by_a_newer_one() -> (
     None
 ):
@@ -85,24 +80,18 @@ def test_a_closed_set_member_this_vibesys_does_not_know_is_refused_as_written_by
         _decode(document)
 
 
-_OBJECTS = _objects(_CURRENT)
-
-
-@pytest.mark.xfail(strict=True, reason="a same-version field from a newer VibeSys is not named yet")
-@settings(max_examples=examples(pr=20, nightly=200), deadline=None)
-@given(index=st.integers(0, len(_OBJECTS) - 1))
-@example(index=0)
-def test_an_unknown_key_anywhere_is_accepted_or_refused_as_from_a_newer_vibesys(index: int) -> None:
-    """Some objects are free-form (option maps); everywhere else the key names a newer writer."""
-    document = json.loads(json.dumps(_CURRENT))
-    _at(document, _OBJECTS[index])["added_later"] = 1
-    try:
-        _decode(document)
-    except core.ContractError as refused:
-        message = str(refused)
-    else:
-        return
-    assert _NEWER in message or "added_later" not in message
+def test_an_unknown_key_in_any_object_is_accepted_or_refused_as_from_a_newer_vibesys() -> None:
+    """Every object of a saved run, exhaustively: free-form ones (option maps) take the key."""
+    misread = []
+    for path in _objects(_CURRENT):
+        document = json.loads(json.dumps(_CURRENT))
+        _at(document, path)["added_later"] = 1
+        try:
+            _decode(document)
+        except core.ContractError as refused:
+            if _NEWER not in str(refused) or "added_later" not in str(refused):
+                misread.append((path, str(refused)))
+    assert not misread, misread[:3]
 
 
 def test_an_older_envelope_with_an_unknown_field_is_not_blamed_on_a_newer_vibesys() -> None:
