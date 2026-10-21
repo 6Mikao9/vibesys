@@ -748,7 +748,17 @@ def test_store_schema_cannot_import_search_strategy_contracts(package: str) -> N
     pending = (
         [message.desc().file for message in _MESSAGES.values()]
         if package == "store"
-        else [p.core_control.ControlInput.desc().file]
+        else [
+            message.desc().file
+            for message in (
+                p.core_control.ControlInput,
+                p.core_leaves.Observation,
+                p.core_history.AttemptEvaluationHistory,
+                p.core_contracts.OperationWire,
+                p.core_failures.Failed,
+                p.core_agent_facts.ProtocolContext,
+            )
+        ]
     )
     seen: set[str] = set()
     while pending:
