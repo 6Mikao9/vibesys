@@ -46,9 +46,11 @@ from vs_proto._generated.vibesys.api.v1.host_pb import (
     WatchRunsRequest,
     WatchRunsResponse,
 )
+from vs_proto._generated.vibesys.core.v1 import agent_facts_pb as core_agent_facts
 from vs_proto._generated.vibesys.core.v1 import common_pb as core_common
 from vs_proto._generated.vibesys.core.v1 import contracts_pb as core_contracts
 from vs_proto._generated.vibesys.core.v1 import control_pb as core_control
+from vs_proto._generated.vibesys.core.v1 import failures_pb as core_failures
 from vs_proto._generated.vibesys.core.v1 import history_pb as core_history
 from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
@@ -323,9 +325,11 @@ __all__ = [
     "WorkstreamAttrs",
     "WorkstreamFailure",
     "WorkstreamFailureKind",
+    "core_agent_facts",
     "core_common",
     "core_contracts",
     "core_control",
+    "core_failures",
     "core_history",
     "core_leaves",
     "core_value_options",

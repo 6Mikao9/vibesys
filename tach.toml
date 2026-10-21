@@ -1966,7 +1966,7 @@ expose = ["host_call"]
 [[modules]]
 path = "vs_core._generated"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._corevalue", "vs_core._retry_policy", "vs_core._leaf_behavior", "vs_core._revision_ref", "vs_core._history_behavior", "vs_core._generated.vibesys.core.v1.leaves_cv", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+depends_on = ["vs_core._corevalue", "vs_core._retry_policy", "vs_core._leaf_behavior", "vs_core._revision_ref", "vs_core._history_behavior", "vs_core._evidence_behavior", "vs_core._generated.vibesys.core.v1.leaves_cv", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core._generated"]
@@ -2043,3 +2043,12 @@ depends_on = ["vs_core._corevalue", "vs_core._generated.vibesys.core.v1.common_c
 [[interfaces]]
 from = ["vs_core._history_behavior"]
 expose = ["TerminalFacts", "HistoryCursor"]
+
+[[modules]]
+path = "vs_core._evidence_behavior"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.leaves_cv"]
+
+[[interfaces]]
+from = ["vs_core._evidence_behavior"]
+expose = ["EvidenceIdentity"]

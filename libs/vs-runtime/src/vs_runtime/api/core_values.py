@@ -10,11 +10,15 @@ from typing import TYPE_CHECKING, Any, cast
 
 from vs_core.api import TimestampValue
 from vs_proto.api import Timestamp, validate
+from vs_runtime._core_values.vibesys.core.v1.agent_facts_boundary import DECODERS as AGENT_DECODERS
+from vs_runtime._core_values.vibesys.core.v1.agent_facts_boundary import ENCODERS as AGENT_ENCODERS
 from vs_runtime._core_values.vibesys.core.v1.common_boundary import DECODERS as COMMON_DECODERS
 from vs_runtime._core_values.vibesys.core.v1.common_boundary import ENCODERS as COMMON_ENCODERS
 from vs_runtime._core_values.vibesys.core.v1.contracts_boundary import DECODERS as CONTRACT_DECODERS
 from vs_runtime._core_values.vibesys.core.v1.contracts_boundary import ENCODERS as CONTRACT_ENCODERS
 from vs_runtime._core_values.vibesys.core.v1.control_boundary import DECODERS, ENCODERS
+from vs_runtime._core_values.vibesys.core.v1.failures_boundary import DECODERS as FAILURE_DECODERS
+from vs_runtime._core_values.vibesys.core.v1.failures_boundary import ENCODERS as FAILURE_ENCODERS
 from vs_runtime._core_values.vibesys.core.v1.history_boundary import DECODERS as HISTORY_DECODERS
 from vs_runtime._core_values.vibesys.core.v1.history_boundary import ENCODERS as HISTORY_ENCODERS
 from vs_runtime._core_values.vibesys.core.v1.leaves_boundary import DECODERS as LEAF_DECODERS
@@ -33,6 +37,8 @@ _ENCODERS = {
     **LEAF_ENCODERS,
     **HISTORY_ENCODERS,
     **CONTRACT_ENCODERS,
+    **FAILURE_ENCODERS,
+    **AGENT_ENCODERS,
     TimestampValue: encode_timestamp,
 }
 _DECODERS = {
@@ -41,6 +47,8 @@ _DECODERS = {
     **LEAF_DECODERS,
     **HISTORY_DECODERS,
     **CONTRACT_DECODERS,
+    **FAILURE_DECODERS,
+    **AGENT_DECODERS,
     Timestamp: decode_timestamp,
 }
 

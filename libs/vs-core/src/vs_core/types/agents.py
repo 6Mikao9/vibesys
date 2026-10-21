@@ -7,10 +7,11 @@ set per agent by its ``Role``. These are the values both sides share.
 
 from __future__ import annotations
 
-from typing import Literal
-
-from pydantic import model_validator
-
+from vs_core._generated.vibesys.core.v1.agent_facts_cv import (
+    ProtocolContext,
+    ReplyCorrection,
+    ResumeFacts,
+)
 from vs_core._generated.vibesys.core.v1.leaves_cv import (
     Backoff,
     ChargeClass,
@@ -26,16 +27,9 @@ from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
 )
 
 from .common import (
-    ContractValidationError,
     InvocationRef,
-    RevisionRef,
     Value,
 )
-from .evaluation import EvidenceRef, settling_named
-from .evaluation_history import RepeatedFailureGuidance
-from .job_observations import WaitEnd
-from .measurement import Comparison
-from .until import ReplyError
 
 """The charge class of a turn request: a role's own (free or paid), a correction or a resume."""
 
@@ -51,52 +45,6 @@ class Correction(Value):
     of: InvocationRef
 
 
-class ResumeFacts(Value):
-    """What the resume prompt of a suspended turn is built from."""
-
-    kind: Literal["resume"] = "resume"
-    agent: str
-    retained: RevisionRef | None
-    ended_by: WaitEnd | None
-    """The bound that ended the wait before every evaluation was terminal; None when every
-    one was. ``QUEUE_BUDGET`` means every evaluation was terminal or cancelled for its queue
-    budget."""
-    queue_budget_spent: bool = False
-    """Whether core cancelled an awaited evaluation that waited in its queue past its queue
-    budget: it never ran."""
-    evidence: tuple[EvidenceRef, ...] = ()
-    repeated_failure: RepeatedFailureGuidance | None = None
-    comparisons: tuple[Comparison, ...] = ()
-    """What the attempt's candidates measured against their base: the ratio, the noise and the
-    verdict the framework reached, so the agent need not work them out from a lone number.
-    Those the awaited evaluations measured, and any other whose verdict changed since the
-    attempt's last resume."""
-    settling: tuple[str, ...] = ()
-    """The candidate inputs of ``comparisons`` the framework still has runs under way for: their
-    verdicts are provisional."""
-
-    @model_validator(mode="after")
-    def budget_end_names_a_spent_budget(self) -> ResumeFacts:
-        """A wait ended by a queue budget spent one; a wait that ended terminal spent none."""
-        if (self.ended_by is WaitEnd.QUEUE_BUDGET and not self.queue_budget_spent) or (
-            self.ended_by is None and self.queue_budget_spent
-        ):
-            raise ContractValidationError(
-                "queue_budget_spent", "must agree with what ended the wait"
-            )
-        settling_named(self.comparisons, self.settling)
-        return self
-
-
-class ReplyCorrection(Value):
-    """What the correction prompt of an invalid reply is built from."""
-
-    kind: Literal["reply-correction"] = "reply-correction"
-    role: str
-    errors: tuple[ReplyError, ...]
-
-
-type ProtocolContext = ReplyCorrection | ResumeFacts | WaitUnrecorded
 """The contexts of the exchanges core starts: what their templates render."""
 
 __all__ = [

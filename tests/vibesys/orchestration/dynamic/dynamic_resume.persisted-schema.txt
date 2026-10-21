@@ -66,7 +66,6 @@ CombineSource.built_on required {"$ref":"#/$defs/RevisionRef"}
 CombineSource.hypothesis_id required {"type":"string"}
 CombineSource.metric optional {"anyOf":[{"$ref":"#/$defs/MetricRow"},{"type":"null"}],"default":null}
 CombineSource.revision required {"$ref":"#/$defs/RevisionRef"}
-Count {"minimum":0,"type":"integer"}
 DecisionId {"additionalProperties":false,"type":"object"}
 DecisionId.kind optional {"const":"decision","default":"decision","type":"string"}
 DecisionId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
@@ -116,7 +115,7 @@ EvidenceRef.environment_digest required {"type":"string"}
 EvidenceRef.evaluator_digest required {"type":"string"}
 EvidenceRef.evidence_id required {"$ref":"#/$defs/EvidenceId"}
 EvidenceRef.kind required {"$ref":"#/$defs/EvidenceKind"}
-EvidenceRef.observation_sequence required {"$ref":"#/$defs/Count"}
+EvidenceRef.observation_sequence required {"minimum":0,"type":"integer"}
 EvidenceRef.provenance required {"enum":["trusted","self-report"],"type":"string"}
 EvidenceRef.purpose required {"enum":["baseline","local-validation","official","profile"],"type":"string"}
 EvidenceRef.reading optional {"anyOf":[{"$ref":"#/$defs/Reading"},{"type":"null"}],"default":null}
@@ -358,8 +357,9 @@ RejectionCode {"enum":["stale-view","identity-conflict","unknown-kind","unknown-
 ReplyError {"additionalProperties":false,"type":"object"}
 ReplyError.code required {"$ref":"#/$defs/ReplyErrorCode"}
 ReplyError.message optional {"default":"","maxLength":500,"type":"string"}
-ReplyError.path required {"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array"}
+ReplyError.path required {"items":{"$ref":"#/$defs/ReplyPathPart"},"type":"array"}
 ReplyErrorCode {"enum":["missing","unexpected","wrong-type","invalid-value","not-json"],"type":"string"}
+ReplyPathPart {"anyOf":[{"type":"string"},{"type":"integer"}]}
 RequestId {"additionalProperties":false,"type":"object"}
 RequestId.kind optional {"const":"request","default":"request","type":"string"}
 RequestId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}

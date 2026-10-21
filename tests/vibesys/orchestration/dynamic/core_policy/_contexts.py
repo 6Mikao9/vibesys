@@ -47,6 +47,7 @@ from vs_core.api import (
     InvocationId,
     InvocationRef,
     ObservationStatus,
+    ProtocolContext,
     RevisionId,
     RevisionRef,
     SessionId,
@@ -387,7 +388,7 @@ OUTLINE_PROMPTS = st.builds(
     ),
 )
 ROLES = ("implementer", "judge", "profiler", "merger")
-CONTEXTS: dict[Template, st.SearchStrategy[BaseModel | WaitUnrecorded]] = {
+CONTEXTS: dict[Template, st.SearchStrategy[BaseModel | ProtocolContext]] = {
     PromptTemplate.PORTFOLIO: PLANNER_PROMPTS,
     PromptTemplate.PORTFOLIO_CORRECTION: PLANNER_CORRECTIONS,
     PromptTemplate.IMPLEMENT: IMPLEMENT_PROMPTS,

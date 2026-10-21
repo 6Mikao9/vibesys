@@ -1,0 +1,89 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/value_options.proto";
+import "vibesys/core/v1/vocabulary.proto";
+import "vibesys/core/v1/leaves.proto";
+import "vibesys/core/v1/history.proto";
+import "vibesys/core/v1/failures.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+enum EvidencePurpose {
+  option (core_enum) = {literal: true, inline: true};
+  EVIDENCE_PURPOSE_UNSPECIFIED = 0;
+  EVIDENCE_PURPOSE_BASELINE = 1;
+  EVIDENCE_PURPOSE_LOCAL_VALIDATION = 2 [(core_member).spelling = "local-validation"];
+  EVIDENCE_PURPOSE_OFFICIAL = 3;
+  EVIDENCE_PURPOSE_PROFILE = 4;
+}
+
+enum EvidenceProvenance {
+  option (core_enum) = {literal: true, inline: true};
+  EVIDENCE_PROVENANCE_UNSPECIFIED = 0;
+  EVIDENCE_PROVENANCE_TRUSTED = 1;
+  EVIDENCE_PROVENANCE_SELF_REPORT = 2 [(core_member).spelling = "self-report"];
+}
+
+// Positive source acceptance, retained unchanged when evidence enters the ledger.
+message EvidenceAcceptanceReceipt {
+  option (buf.validate.message).cel = {id: "EvidenceAcceptanceReceipt.acceptance", message: "observation: positive source acceptance required", expression: "this.observation.accepted && this.observation.status != 6"};
+  Observation observation = 1 [(buf.validate.field).required = true];
+}
+
+// Evidence identity and its original source proof, independent of later job updates.
+message EvidenceRef {
+  option (core_value).mixin = "vs_core._evidence_behavior.EvidenceIdentity";
+  option (buf.validate.message).cel = {id: "EvidenceRef.acceptance", message: "acceptance_receipt: source, scope, sequence and status must match evidence", expression: "!has(this.acceptance_receipt) || (this.acceptance_receipt.observation.request_id == this.source_request && this.acceptance_receipt.observation.scope == this.scope && this.acceptance_receipt.observation.sequence == this.observation_sequence && this.acceptance_receipt.observation.status == this.status)"};
+  EvidenceId evidence_id = 1 [(buf.validate.field).required = true];
+  EvidenceKind kind = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  EvidencePurpose purpose = 3 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  Scope scope = 4 [(buf.validate.field).required = true];
+  RequestId source_request = 5 [(buf.validate.field).required = true];
+  RevisionRef candidate = 6 [(buf.validate.field).required = true];
+  string observation_sequence = 7 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field) = {integer: true, explicit: true}];
+  string evaluator_digest = 8 [(core_field).explicit = true];
+  string workload_digest = 9 [(core_field).explicit = true];
+  string environment_digest = 10 [(core_field).explicit = true];
+  EvidenceProvenance provenance = 11 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  ObservationStatus status = 12 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  repeated ArtifactRef artifacts = 13;
+  EvidenceAcceptanceReceipt acceptance_receipt = 14;
+  RequestId reused_from = 15 [(core_field).omit_unset = true];
+  Reading reading = 16 [(core_field).omit_unset = true];
+  optional string unmet_requirement = 17 [(core_field).omit_unset = true];
+}
+
+// Data for continuing a suspended turn, without prompt text or dispatch authority.
+message ResumeFacts {
+  option (buf.validate.message).cel = {id: "ResumeFacts.queue", message: "queue_budget_spent: must agree with what ended the wait", expression: "(this.ended_by != 2 || this.queue_budget_spent) && (this.ended_by != 0 || !this.queue_budget_spent)"};
+  option (buf.validate.message).cel = {id: "ResumeFacts.settling_ids", message: "settling: names an input of no comparison, or twice", expression: "this.settling.unique()"};
+  option (buf.validate.message).cel = {id: "ResumeFacts.settling", message: "settling: names an input of no comparison, or twice", expression: "this.settling.all(s, this.comparisons.exists(c, c.candidate_input == s))"};
+  string kind = 1 [(buf.validate.field).string.const = "resume"];
+  string agent = 2 [(core_field).explicit = true];
+  RevisionRef retained = 3 [(core_field).explicit = true];
+  WaitEnd ended_by = 4 [(buf.validate.field).enum.defined_only = true, (core_field).explicit = true];
+  bool queue_budget_spent = 5;
+  repeated EvidenceRef evidence = 6;
+  RepeatedFailureGuidance repeated_failure = 7;
+  repeated Comparison comparisons = 8;
+  repeated string settling = 9;
+}
+
+message ReplyCorrection {
+  string kind = 1 [(buf.validate.field).string.const = "reply-correction"];
+  string role = 2 [(core_field).explicit = true];
+  repeated ReplyError errors = 3 [(core_field).explicit = true];
+}
+
+message ProtocolContext {
+  option (core_value).union = true;
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    ReplyCorrection correction = 1;
+    ResumeFacts resume = 2;
+    WaitUnrecorded unrecorded = 3;
+  }
+}

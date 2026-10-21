@@ -32,6 +32,7 @@ def cel(expression: str, message: DescMessage) -> str:
     Proto enum comparisons use numbers; the value API uses persisted string spellings.
     Presence of a union member becomes an isinstance check on the closed union.
     """
+    _source_calls(expression, message)
     text = _decimals(expression, message)
     text = re.sub(r"size\((this\.[\w.]+)\)", r"len(\1)", text)
     fields = {f.name: f for f in message.fields}
@@ -76,6 +77,7 @@ def cel(expression: str, message: DescMessage) -> str:
     except SyntaxError as error:
         raise GenerationError(message.type_name, f"unsupported CEL {expression!r}") from error
     _validate_calls(tree, message, expression)
+    _validate_names(tree, message)
     allowed = (
         ast.Expression,
         ast.BoolOp,
@@ -196,16 +198,64 @@ def _paths(expression: str, message: DescMessage) -> dict[str, DescField]:
     bindings = {"this": message}
     for match in re.finditer(r"this\.(\w+)\.(?:all|filter|exists|map)\((\w+),", expression):
         field = _field_at(message, [match[1]])
-        if (
-            field
-            and isinstance(field.value, DescFieldValueList)
-            and isinstance(field.value.element, DescMessage)
-        ):
+        if field and isinstance(field.value, DescFieldValueList):
             bindings[match[2]] = field.value.element
     found = {}
     for match in re.finditer(r"\b(\w+)\.([\w.]+)", expression):
         if match[1] in bindings:
-            field = _field_at(bindings[match[1]], match[2].split("."))
-            if field is not None:
-                found[match[0]] = field
+            owner = bindings[match[1]]
+            parts = match[2].split(".")
+            field = _field_at(owner, parts) if isinstance(owner, DescMessage) else None
+            if field is None:
+                receiver = (
+                    _field_at(owner, parts[:-1])
+                    if isinstance(owner, DescMessage) and len(parts) > 1
+                    else None
+                )
+                if (
+                    parts[-1] in {"all", "filter", "exists", "map", "unique"}
+                    and receiver
+                    and isinstance(receiver.value, DescFieldValueList)
+                ):
+                    continue
+                raise GenerationError(message.type_name, f"unsupported CEL path {match[0]}")
+            found[match[0]] = field
     return found
+
+
+def _source_calls(expression: str, message: DescMessage) -> None:
+    """Python helpers are emitted by the compiler, never accepted as CEL functions."""
+    supported = {"has", "size", "string", "int", "all", "exists", "filter", "map", "unique"}
+    for function in re.findall(r"\b(\w+)\s*\(", expression):
+        if function not in supported:
+            raise GenerationError(message.type_name, f"unsupported CEL function {function}")
+
+
+def _validate_names(tree: ast.AST, message: DescMessage) -> None:
+    """Every local name has lexical scope from its collection macro."""
+    allowed = {"self", "len", "set", "isinstance", "all", "any", "tuple", "str", "cel_integer"}
+    for field in message.fields:
+        if isinstance(field.value, DescFieldValueMessage) and is_union(field.value.message):
+            allowed.update(type_of(member) for member in union_members(field.value.message))
+    _Names(allowed, message).visit(tree)
+
+
+class _Names(ast.NodeVisitor):
+    def __init__(self, allowed: set[str], message: DescMessage) -> None:
+        self.allowed = allowed
+        self.message = message
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Load) and node.id not in self.allowed:
+            raise GenerationError(self.message.type_name, f"unbound CEL name {node.id}")
+
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
+        outer = self.allowed
+        self.allowed = set(outer)
+        for generator in node.generators:
+            self.visit(generator.iter)
+            self.allowed.add(generator.target.id)
+            for condition in generator.ifs:
+                self.visit(condition)
+        self.visit(node.elt)
+        self.allowed = outer

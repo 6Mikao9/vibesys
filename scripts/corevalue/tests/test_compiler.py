@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from protobuf import Oneof
 
 from scripts.corevalue.api import (
     GenerationError,
@@ -17,8 +18,14 @@ from scripts.corevalue.api import (
     compile_values,
 )
 from scripts.corevalue.tests.api import MapValue, encode
+from vs_proto.api import (
+    core_contracts,
+    core_history,
+    core_leaves,
+    core_value_options,
+    validation_rules,
+)
 from vs_proto.api import core_control as core_state
-from vs_proto.api import core_leaves, core_value_options, validation_rules
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -121,4 +128,97 @@ def test_scalar_aliases_reject_collisions_and_invalid_names(
     )
     message = replace(original, fields=[*original.fields[:-1], replace(field, proto=proto)])
     with pytest.raises(GenerationError, match="WaitOn"):
+        compiler(replace(original.file, messages=[message]))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "this.records.all(r, missing.ordinal > 0)",
+        "this.records.all(r, this.records.exists(p, p.ordinal == r.ordinal)) && r.ordinal > 0",
+        "this.records.all(r, r.misspelled > 0)",
+        "this.misspelled.unique()",
+        "len(this.records) > 0",
+    ],
+)
+def test_unknown_history_names_and_python_helpers_fail_closed(
+    compiler: Callable[[DescFile], str],
+    expression: str,
+) -> None:
+    original = core_history.AttemptEvaluationHistory.desc()
+    proto = type(original.proto).from_binary(original.proto.to_binary())
+    proto.options[validation_rules.ext_message] = validation_rules.MessageRules(
+        cel=[validation_rules.Rule(id="unsupported", expression=expression, message="bad history")]
+    )
+    with pytest.raises(GenerationError, match="AttemptEvaluationHistory"):
+        compiler(replace(original.file, messages=[replace(original, proto=proto)]))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+def test_scalar_union_arms_cannot_overlap_runtime_domains(
+    compiler: Callable[[DescFile], str],
+) -> None:
+    original = core_contracts.PureOptionValue.desc()
+    integer = original.fields[1]
+    proto = type(integer.proto).from_binary(integer.proto.to_binary())
+    proto.options[core_value_options.ext_core_field] = core_value_options.ValueFieldOptions()
+    members = [original.fields[0], replace(integer, proto=proto), *original.fields[2:]]
+    message = replace(original, fields=members, oneofs=[replace(original.oneofs[0], fields=members)])
+    with pytest.raises(GenerationError, match="overlapping"):
+        compiler(replace(original.file, messages=[message]))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+def test_union_wrapper_rules_cannot_become_decode_only(compiler: Callable[[DescFile], str]) -> None:
+    original = core_contracts.PureOptionValue.desc()
+    proto = type(original.proto).from_binary(original.proto.to_binary())
+    proto.options[validation_rules.ext_message] = validation_rules.MessageRules(
+        cel=[
+            validation_rules.Rule(
+                id="union.rule", expression="size(this.text) > 0", message="nonempty"
+            )
+        ]
+    )
+    with pytest.raises(GenerationError, match="union wrapper"):
+        compiler(replace(original.file, messages=[replace(original, proto=proto)]))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+@pytest.mark.parametrize("base", ["MissingValue", "PureOptionValue"])
+def test_inheritance_requires_a_declared_record_base(
+    compiler: Callable[[DescFile], str],
+    base: str,
+) -> None:
+    original = core_contracts.OperationDescriptor.desc()
+    proto = type(original.proto).from_binary(original.proto.to_binary())
+    proto.options[core_value_options.ext_core_value] = core_value_options.ValueMessageOptions(
+        base=base
+    )
+    with pytest.raises(GenerationError, match="base value"):
+        compiler(replace(original.file, messages=[replace(original, proto=proto)]))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+def test_inherited_fields_cannot_silently_disappear(compiler: Callable[[DescFile], str]) -> None:
+    original = core_contracts.OperationDescriptor.desc()
+    message = replace(original, fields=list(original.fields[1:]))
+    # Keep the base in the file so this fails on the inherited contract itself.
+    messages = [message if m.name == original.name else m for m in original.file.messages]
+    with pytest.raises(GenerationError, match="kind: inherited contract"):
+        compiler(replace(original.file, messages=messages))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+def test_enum_subsets_cannot_include_unspecified_or_unknown_values(
+    compiler: Callable[[DescFile], str],
+) -> None:
+    original = core_history.RepeatedFailureGuidance.desc()
+    reason = original.fields[0]
+    proto = type(reason.proto).from_binary(reason.proto.to_binary())
+    proto.options[validation_rules.ext_field] = validation_rules.FieldRules(
+        type=Oneof("enum", validation_rules.EnumRules(defined_only=True, in_=[0, 999]))
+    )
+    message = replace(original, fields=[replace(reason, proto=proto), *original.fields[1:]])
+    with pytest.raises(GenerationError, match="unrepresented"):
         compiler(replace(original.file, messages=[message]))

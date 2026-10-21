@@ -461,7 +461,7 @@ EvidenceRef.environment_digest required {"type":"string"}
 EvidenceRef.evaluator_digest required {"type":"string"}
 EvidenceRef.evidence_id required {"$ref":"#/$defs/EvidenceId"}
 EvidenceRef.kind required {"$ref":"#/$defs/EvidenceKind"}
-EvidenceRef.observation_sequence required {"$ref":"#/$defs/Count"}
+EvidenceRef.observation_sequence required {"minimum":0,"type":"integer"}
 EvidenceRef.provenance required {"enum":["trusted","self-report"],"type":"string"}
 EvidenceRef.purpose required {"enum":["baseline","local-validation","official","profile"],"type":"string"}
 EvidenceRef.reading optional {"anyOf":[{"$ref":"#/$defs/Reading"},{"type":"null"}],"default":null}
@@ -486,7 +486,7 @@ Failed.decision optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}
 Failed.digest optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Failed.errors optional {"default":[],"items":{"$ref":"#/$defs/ReplyError"},"type":"array"}
 Failed.kind optional {"const":"failed","default":"failed","type":"string"}
-Failed.limit_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+Failed.limit_at optional {"anyOf":[{"minimum":0.0,"type":"number"},{"type":"null"}],"default":null}
 Failed.reason required {"$ref":"#/$defs/FailureReason"}
 Failed.refusal optional {"anyOf":[{"$ref":"#/$defs/WaitRefusal"},{"type":"null"}],"default":null}
 Failed.turn optional {"anyOf":[{"$ref":"#/$defs/InvocationRef"},{"type":"null"}],"default":null}
@@ -945,8 +945,9 @@ RepeatedFailureGuidance.traceback_signature optional {"anyOf":[{"minLength":1,"t
 ReplyError {"additionalProperties":false,"type":"object"}
 ReplyError.code required {"$ref":"#/$defs/ReplyErrorCode"}
 ReplyError.message optional {"default":"","maxLength":500,"type":"string"}
-ReplyError.path required {"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array"}
+ReplyError.path required {"items":{"$ref":"#/$defs/ReplyPathPart"},"type":"array"}
 ReplyErrorCode {"enum":["missing","unexpected","wrong-type","invalid-value","not-json"],"type":"string"}
+ReplyPathPart {"anyOf":[{"type":"string"},{"type":"integer"}]}
 Request {"discriminator":{"mapping":{"adopt_revision":"#/$defs/AdoptionRequest","block_request":"#/$defs/ReconciliationRequest","cancel_owned_job":"#/$defs/EvaluationRequest","cancel_owned_resource":"#/$defs/ReconciliationRequest","cancel_turn":"#/$defs/SessionRequest","close_attempt_scope":"#/$defs/WorkspaceRequest","close_session":"#/$defs/SessionRequest","collect_evidence":"#/$defs/EvaluationRequest","discard_workspace":"#/$defs/WorkspaceRequest","dispatch_turn":"#/$defs/SessionRequest","ensure_session":"#/$defs/SessionRequest","ensure_workspace":"#/$defs/WorkspaceRequest","execute_registered_operation":"#/$defs/RegisteredOperationRequest","inspect_owned_job":"#/$defs/EvaluationRequest","inspect_request":"#/$defs/ReconciliationRequest","inspect_turn":"#/$defs/SessionRequest","observe_owned_job":"#/$defs/EvaluationRequest","restore_revision":"#/$defs/WorkspaceRequest","resume_session_turn":"#/$defs/SessionRequest","retain_revision":"#/$defs/WorkspaceRequest","snapshot_and_retain":"#/$defs/WorkspaceRequest","snapshot_and_retain_run":"#/$defs/SessionRequest","submit_measurement":"#/$defs/EvaluationRequest","verify_adoption":"#/$defs/AdoptionRequest"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/WorkspaceRequest"},{"$ref":"#/$defs/SessionRequest"},{"$ref":"#/$defs/EvaluationRequest"},{"$ref":"#/$defs/AdoptionRequest"},{"$ref":"#/$defs/RegisteredOperationRequest"},{"$ref":"#/$defs/ReconciliationRequest"}]}
 RequestId {"additionalProperties":false,"type":"object"}
 RequestId.kind optional {"const":"request","default":"request","type":"string"}

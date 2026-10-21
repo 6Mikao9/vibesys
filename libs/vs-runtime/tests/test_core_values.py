@@ -205,10 +205,12 @@ def _leaf_seeds() -> dict[str, object]:
         **json.loads(path.read_text()),
         **json.loads(path.with_name("history-seeds.json").read_text()),
         **json.loads(path.with_name("contract-seeds.json").read_text()),
+        **json.loads(path.with_name("failure-seeds.json").read_text()),
+        **json.loads(path.with_name("agent-seeds.json").read_text()),
     }
 
 
-@pytest.mark.parametrize("fixture", ["leaves", "history", "contracts"])
+@pytest.mark.parametrize("fixture", ["leaves", "history", "contracts", "failures", "agent-facts"])
 def test_shared_leaf_differential_fixtures_preserve_old_acceptance_and_json(fixture: str) -> None:
     path = Path(__file__).parent / "fixtures" / "core-values" / f"{fixture}.json"
     for case in json.loads(path.read_text()):

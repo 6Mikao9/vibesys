@@ -83,7 +83,12 @@ def _message(message: object) -> None:
         raise GenerationError(
             message.type_name, "nested declarations must be moved to a top-level message"
         )
+    _base_shape(message)
     if is_union(message):
+        if extension(message, rules.ext_message):
+            raise GenerationError(
+                message.type_name, "union wrapper cannot carry message validation"
+            )
         _union_domains(message)
         members = union_members(message)
         oneof = next(iter(message.oneofs))
@@ -249,3 +254,20 @@ def _enum_subset(field: object, typed: object) -> None:
         raise GenerationError(
             field.parent.type_name, f"{field.name}: enum subset contains unrepresented members"
         )
+
+
+def _base_shape(message: DescMessage) -> None:
+    """A nominal base is local and every inherited field keeps its original contract."""
+    config = extension(message, options.ext_core_value)
+    if not config or not config.base:
+        return
+    base = next((m for m in message.file.messages if m.name == config.base), None)
+    if base is None or is_union(base) or is_null(base):
+        raise GenerationError(message.type_name, f"unsupported base value: {config.base}")
+    fields = {field.name: field for field in message.fields}
+    for field in base.fields:
+        inherited = fields.get(field.name)
+        if inherited is None or field_shape(inherited) != field_shape(field):
+            raise GenerationError(
+                message.type_name, f"{field.name}: inherited contract differs from base"
+            )

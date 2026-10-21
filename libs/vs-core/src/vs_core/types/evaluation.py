@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
+from vs_core._generated.vibesys.core.v1.agent_facts_cv import EvidenceAcceptanceReceipt, EvidenceRef
+
 from .common import (
     ArtifactRef,
     ContinuationId,
@@ -38,7 +40,7 @@ from .evaluation_history import (
     RepeatedFailureGuidance,
 )
 from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
-from .measurement import BaseClaim, BaseRef, Comparison, CoreRun, Reading, Runaway, Sample
+from .measurement import BaseClaim, BaseRef, Comparison, CoreRun, Runaway, Sample
 from .until import FailureReason, Within
 from .waits import WaitOn
 
@@ -160,92 +162,6 @@ class MeasurementPlan(Value):
         wait that asks for it, capped at this bound for an agent's own submission.
         """
         return self.queue_allowance + sum(stage.execution_budget for stage in self.stages)
-
-
-class EvidenceAcceptanceReceipt(Value):
-    """Frozen observation accepted when its exact evidence entered the ledger.
-
-    Evaluation A validates source, scope, sequence and measurement identity at
-    insertion. Later job observations never replace this original receipt.
-    Historical evidence without a receipt grants no independently verifiable
-    acceptance authority to settlement.
-    """
-
-    observation: Observation
-
-    @model_validator(mode="after")
-    def positive_acceptance(self) -> EvidenceAcceptanceReceipt:
-        """Unknown or rejected acceptance cannot certify evidence ingestion."""
-        if not self.observation.accepted or self.observation.status == ObservationStatus.UNKNOWN:
-            raise ContractValidationError("observation", "positive source acceptance required")
-        return self
-
-
-class EvidenceRef(Value):
-    """Evidence ref lifecycle contract."""
-
-    evidence_id: EvidenceId
-    kind: EvidenceKind
-    purpose: Literal["baseline", "local-validation", "official", "profile"]
-    scope: Scope
-    source_request: RequestId
-    candidate: RevisionRef
-    observation_sequence: Count
-    evaluator_digest: str
-    workload_digest: str
-    environment_digest: str
-    provenance: Literal["trusted", "self-report"]
-    status: ObservationStatus
-    artifacts: tuple[ArtifactRef, ...] = ()
-    acceptance_receipt: EvidenceAcceptanceReceipt | None = None
-    reused_from: RequestId | None = Field(default=None, exclude_if=unset)
-    """The earlier submission whose finished job this record re-reads; None for a new run.
-
-    A reused record names its own submission as ``source_request`` and its own purpose and
-    candidate, but no new job ran: it is the result of ``reused_from``'s job, which core
-    checked carries the same evidence id and status (`vs_core._measurement_reuse`).
-    """
-
-    reading: Reading | None = Field(default=None, exclude_if=unset)
-    """The benchmark record's headline reading, as the trusted record states it.
-
-    Set by the runtime on a benchmark record only. Core keeps it so that the decisions over
-    samples (`vs_core._comparison`) are pure state that a resume replays, instead of numbers
-    held only in the runtime's ledger. An official measurement's record enters core's ledger
-    stating the mean of the samples that answer it (`vs_core._comparison.as_answer`), and the
-    headline a reader decodes from any record is this reading, so ranking reads the value the
-    comparison states. A run's own reading is its ``Sample``'s.
-    """
-
-    unmet_requirement: str | None = Field(default=None, exclude_if=unset)
-    """The capability the evaluator named as unmet on a failed benchmark record, if it named one.
-
-    Set by the runtime from the evaluator's `requirement_not_met` error. It says the revision
-    lacks something the task requires, so measuring that revision again cannot help: core takes
-    no further run of it (`vs_core._base_runs.requirement_unmet`). Kept on the ref, as
-    ``reading`` is, so that decision is pure state a resume replays.
-    """
-
-    @property
-    def key(self) -> EvidenceKey:
-        """Run-wide identity: evidence IDs are unique only within a source request."""
-        return EvidenceKey(source_request=self.source_request, evidence_id=self.evidence_id)
-
-    @model_validator(mode="after")
-    def original_acceptance(self) -> EvidenceRef:
-        """Bind historical source proof without inferring absent authority."""
-        if self.acceptance_receipt is not None:
-            observation = self.acceptance_receipt.observation
-            if (
-                observation.request_id != self.source_request
-                or observation.scope != self.scope
-                or observation.sequence != self.observation_sequence
-                or observation.status != self.status
-            ):
-                raise ContractValidationError(
-                    "acceptance_receipt", "source, scope, sequence and status must match evidence"
-                )
-        return self
 
 
 class ObservePacing(Value):
@@ -1322,3 +1238,63 @@ class MeasurementPlanError(ValueError):
     def __init__(self, path: str, detail: str) -> None:
         """Name the invalid stage or deadline field."""
         super().__init__(f"{path}: {detail}")
+
+
+__all__ = [
+    "AgentCall",
+    "AgentMeasurementRequested",
+    "AgentRejection",
+    "CancelOwnedJob",
+    "CollectEvidence",
+    "Continuation",
+    "ContinuationJobsChanged",
+    "ContinuationPhase",
+    "ContinuationReopenRequested",
+    "ContinuationRetireRequested",
+    "ContinuationScopeReopened",
+    "DeadlineReached",
+    "EvaluationEvent",
+    "EvaluationRequest",
+    "EvaluationState",
+    "EvidenceAcceptanceReceipt",
+    "EvidenceRef",
+    "HistoricalSubmissionReceipt",
+    "InspectOwnedJob",
+    "JobFactsBeforeObservation",
+    "JobObserved",
+    "JobQueued",
+    "JobTerminationRequested",
+    "JobWaitLapsed",
+    "JobsDrainRequested",
+    "MeasurementIdentity",
+    "MeasurementPlan",
+    "MeasurementPlanError",
+    "MeasurementRequested",
+    "MeasurementResult",
+    "MeasurementStage",
+    "MeasurementStageIdentity",
+    "MeasurementSubmissionEnded",
+    "MeasurementSubmissionObserved",
+    "ObservationsDue",
+    "ObserveOwnedJob",
+    "ObservePacing",
+    "ObservedJobFacts",
+    "OwnedJob",
+    "PreparedSubmissionReceipt",
+    "RegisteredJobObserved",
+    "RegisteredJobRequested",
+    "RegisteredOwnedJob",
+    "ResumeAuthorizationReceipt",
+    "ResumeAuthorized",
+    "ResumeRefusal",
+    "ResumeRefused",
+    "RunJobsCancelRequested",
+    "SnapshotResultRef",
+    "StageRequirements",
+    "SubmissionBudget",
+    "SubmissionReceipt",
+    "SubmitMeasurement",
+    "TurnSuspended",
+    "UnobservedJobFacts",
+    "settling_named",
+]

@@ -200,7 +200,7 @@ pnpm_packages = []
 
 [[cases]]
 name = "shared value behavior selects Python checks"
-paths = ["libs/vs-core/src/vs_core/_leaf_behavior.py", "libs/vs-core/src/vs_core/_revision_ref.py", "libs/vs-core/src/vs_core/_history_behavior.py"]
+paths = ["libs/vs-core/src/vs_core/_leaf_behavior.py", "libs/vs-core/src/vs_core/_revision_ref.py", "libs/vs-core/src/vs_core/_history_behavior.py", "libs/vs-core/src/vs_core/_evidence_behavior.py"]
 jobs = ["python"]
 [cases.collections]
 native_languages = []

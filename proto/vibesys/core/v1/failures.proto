@@ -1,0 +1,49 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/value_options.proto";
+import "vibesys/core/v1/vocabulary.proto";
+import "vibesys/core/v1/leaves.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+// A reply path preserves string keys and arbitrary-precision integer positions.
+message ReplyPathPart {
+  option (core_value).union = true;
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    string key = 1;
+    string index = 2 [(buf.validate.field).string.pattern = "^(0|-?[1-9][0-9]*)$", (core_field).integer = true];
+  }
+}
+
+message ReplyError {
+  repeated ReplyPathPart path = 1 [(core_field).explicit = true];
+  ReplyErrorCode code = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  string message = 3 [(buf.validate.field).string.max_len = 500, (core_field) = {default_json: "\"\"", constant_name: "REPLY_ERROR_MESSAGE_LIMIT", constant_rule: "max_len"}];
+}
+
+// A request ended without a result, carrying exactly the fields its reason allows.
+message Failed {
+  option (buf.validate.message).cel = {id: "Failed.watch", message: "watch: must match reason", expression: "(this.reason == 2 || this.reason == 3) == has(this.watch)"};
+  option (buf.validate.message).cel = {id: "Failed.limit", message: "limit_at: must match reason", expression: "(this.reason == 1 || this.reason == 10) == has(this.limit_at)"};
+  option (buf.validate.message).cel = {id: "Failed.cause", message: "cause: must match reason", expression: "(this.reason == 4) == (this.cause != 0)"};
+  option (buf.validate.message).cel = {id: "Failed.errors", message: "errors: must match reason", expression: "(this.reason == 6) == (size(this.errors) > 0)"};
+  option (buf.validate.message).cel = {id: "Failed.turn_failure", message: "turn_failure: must match reason", expression: "(this.reason == 8) == (this.turn_failure != 0)"};
+  option (buf.validate.message).cel = {id: "Failed.refusal", message: "refusal: must match reason", expression: "(this.reason == 9) == (this.refusal != 0)"};
+  option (buf.validate.message).cel = {id: "Failed.turn", message: "turn: does not belong to reason", expression: "!has(this.turn) || this.reason == 1 || this.reason == 5 || this.reason == 6 || this.reason == 8 || this.reason == 9"};
+  option (buf.validate.message).cel = {id: "Failed.digest", message: "digest: does not belong to reason", expression: "!has(this.digest) || this.reason == 8"};
+  string kind = 1 [(buf.validate.field).string.const = "failed"];
+  FailureReason reason = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  DecisionId decision = 3;
+  Watch watch = 4;
+  optional double limit_at = 5 [(buf.validate.field).double = {gte: 0, finite: true}];
+  RejectionCode cause = 6 [(buf.validate.field).enum.defined_only = true];
+  repeated ReplyError errors = 7;
+  InvocationRef turn = 8;
+  TurnFailureKind turn_failure = 9 [(buf.validate.field).enum.defined_only = true];
+  optional string digest = 10;
+  WaitRefusal refusal = 11 [(buf.validate.field).enum.defined_only = true];
+}
