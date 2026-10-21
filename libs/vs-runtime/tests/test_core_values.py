@@ -15,7 +15,7 @@ from pydantic import TypeAdapter, ValidationError
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits, sample_retries
-from vs_proto.api import LegacyEvent, core_common, core_leaves, core_vocabulary
+from vs_proto.api import LegacyEvent, core_agent_facts, core_common, core_leaves, core_vocabulary
 from vs_proto.api import ValidationError as ProtoValidationError
 from vs_proto.api import core_control as core_state
 from vs_runtime.api.core_values import from_proto, to_proto, value_types
@@ -306,3 +306,45 @@ def test_generated_set_values_have_canonical_json_and_protobuf(abilities: list[s
     assert left.model_dump_json() == right.model_dump_json()
     assert to_proto(left).to_binary() == to_proto(right).to_binary()
     assert from_proto(to_proto(left)) == left
+
+
+@given(
+    field=st.sampled_from(["request_id", "scope", "sequence", "status", "accepted"]),
+    sequence=st.integers(min_value=1, max_value=10**100),
+)
+def test_evidence_acceptance_proof_matches_its_original_source_at_both_boundaries(
+    field: str, sequence: int
+) -> None:
+    seed = _leaf_seeds()["EvidenceRef"]
+    value = TypeAdapter(core.EvidenceRef).validate_json(json.dumps(seed))
+    message = to_proto(value)
+    assert isinstance(message, core_agent_facts.EvidenceRef)
+    receipt = message.acceptance_receipt
+    assert receipt is not None
+    observation = receipt.observation
+    assert observation is not None
+    if field == "request_id":
+        observation.request_id = core_common.RequestId(root="other", kind="request")
+    elif field == "scope":
+        assert observation.scope is not None
+        observation.scope.generation = str(sequence)
+    elif field == "sequence":
+        observation.sequence = str(sequence)
+    elif field == "status":
+        observation.status = core_vocabulary.ObservationStatus.FAILED
+    else:
+        observation.accepted = False
+    with pytest.raises(ProtoValidationError):
+        from_proto(message)
+    payload = json.loads(value.model_dump_json())
+    changed = payload["acceptance_receipt"]["observation"]
+    if field == "request_id":
+        changed[field] = {"root": "other", "kind": "request"}
+    elif field == "scope":
+        changed[field]["generation"] = sequence
+    elif field == "sequence":
+        changed[field] = sequence
+    else:
+        changed[field] = "failed" if field == "status" else False
+    with pytest.raises(ValidationError):
+        TypeAdapter(core.EvidenceRef).validate_json(json.dumps(payload))
