@@ -264,6 +264,19 @@ def _base_shape(message: DescMessage) -> None:
     base = next((m for m in message.file.messages if m.name == config.base), None)
     if base is None or is_union(base) or is_null(base):
         raise GenerationError(message.type_name, f"unsupported base value: {config.base}")
+    positions = {m.name: index for index, m in enumerate(message.file.messages)}
+    if config.mixin or positions[base.name] >= positions[message.name]:
+        raise GenerationError(
+            message.type_name, "base value must precede its child without a second mixin"
+        )
+    base_checks = extension(base, rules.ext_message)
+    child_checks = extension(message, rules.ext_message)
+    inherited_rules = {rule.expression for rule in base_checks.cel} if base_checks else set()
+    declared_rules = {rule.expression for rule in child_checks.cel} if child_checks else set()
+    if inherited_rules - declared_rules:
+        raise GenerationError(
+            message.type_name, "inherited CEL must also be declared on the child proto"
+        )
     fields = {field.name: field for field in message.fields}
     for field in base.fields:
         inherited = fields.get(field.name)

@@ -164,7 +164,9 @@ def test_scalar_union_arms_cannot_overlap_runtime_domains(
     proto = type(integer.proto).from_binary(integer.proto.to_binary())
     proto.options[core_value_options.ext_core_field] = core_value_options.ValueFieldOptions()
     members = [original.fields[0], replace(integer, proto=proto), *original.fields[2:]]
-    message = replace(original, fields=members, oneofs=[replace(original.oneofs[0], fields=members)])
+    message = replace(
+        original, fields=members, oneofs=[replace(original.oneofs[0], fields=members)]
+    )
     with pytest.raises(GenerationError, match="overlapping"):
         compiler(replace(original.file, messages=[message]))
 
@@ -222,3 +224,29 @@ def test_enum_subsets_cannot_include_unspecified_or_unknown_values(
     message = replace(original, fields=[replace(reason, proto=proto), *original.fields[1:]])
     with pytest.raises(GenerationError, match="unrepresented"):
         compiler(replace(original.file, messages=[message]))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+def test_inherited_cel_cannot_silently_disappear(compiler: Callable[[DescFile], str]) -> None:
+    original = core_history.AttemptEvaluationRecord.desc()
+    proto = type(original.proto).from_binary(original.proto.to_binary())
+    proto.options[validation_rules.ext_message] = validation_rules.MessageRules()
+    messages = [
+        replace(m, proto=proto) if m.name == original.name else m for m in original.file.messages
+    ]
+    with pytest.raises(GenerationError, match="inherited CEL"):
+        compiler(replace(original.file, messages=messages))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+def test_cyclic_or_forward_bases_fail_before_emission(compiler: Callable[[DescFile], str]) -> None:
+    original = core_contracts.OperationDescriptor.desc()
+    proto = type(original.proto).from_binary(original.proto.to_binary())
+    proto.options[core_value_options.ext_core_value] = core_value_options.ValueMessageOptions(
+        base=original.name
+    )
+    messages = [
+        replace(m, proto=proto) if m.name == original.name else m for m in original.file.messages
+    ]
+    with pytest.raises(GenerationError, match="base value must precede"):
+        compiler(replace(original.file, messages=messages))
