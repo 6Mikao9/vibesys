@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.support.fake_github import signed_in_github
 from tests.support.task_project import DEFAULT_TASK, task_path, write_task
 
 from entrypoints import cli
 from entrypoints.cli.config import load_config_and_skills
+from entrypoints.cli.loops import validated_run_request
 from entrypoints.cli.preflight import (
     ACCELERATOR_UNAVAILABLE,
     AGENT_IMAGES_COMMAND,
@@ -194,9 +196,52 @@ def test_the_agent_image_is_ok_once_built_here_and_a_warning_before(
     ids=["docker", "modal", "host"],
 )
 def test_whether_a_run_needs_docker_comes_from_its_environment(
-    *, spec: RunEnvironmentSpec, expected: bool
+    tmp_path: Path, *, spec: RunEnvironmentSpec, expected: bool
 ) -> None:
-    assert run_environment_uses_docker(spec) is expected
+    args = cli.parse_cli_invocation(_argv(tmp_path, "--backend", "cpu", "--profiler", "none")).args
+    request, _config = validated_run_request(args, ScriptedProbe(lambda _argv: None))
+    request = request.model_copy(update={"run_environment": spec})
+    assert run_environment_uses_docker(request) is expected
+
+
+@pytest.mark.regression
+@example(backend=ComputeBackend.METAL, environment=None)
+@given(
+    backend=st.sampled_from(list(ComputeBackend)),
+    environment=st.sampled_from([None, "docker", "host", "modal"]),
+)
+def test_preflight_checks_docker_only_for_the_resolved_environment(
+    tmp_path_factory: pytest.TempPathFactory, backend: ComputeBackend, environment: str | None
+) -> None:
+    """The requested Docker default must not override host-only backend resolution."""
+    root = tmp_path_factory.mktemp("resolved-environment")
+    args = cli.parse_cli_invocation(
+        _argv(root, "--backend", backend.value, "--profiler", "none")
+    ).args
+    request, _config = validated_run_request(args, ScriptedProbe(lambda _argv: None))
+    spec = None if environment is None else RunEnvironmentSpec(environment)
+    request = request.model_copy(update={"run_environment": spec})
+    expected = environment != "host" and not (
+        sys.platform == "darwin"
+        and backend is ComputeBackend.METAL
+        and environment in {None, "docker"}
+    )
+    assert run_environment_uses_docker(request) is expected
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Metal derives the host environment on macOS")
+def test_metal_preflight_starts_no_agent_image_probe(tmp_path: Path) -> None:
+    probe = ScriptedProbe(lambda _argv: None)
+    report = preflight_report(
+        _argv(tmp_path, "--backend", "metal"),
+        lambda argv: cli.parse_cli_invocation(argv).args,
+        probe,
+    )
+    assert report.settings == SettingsValid()
+    assert report.backend is Backend.METAL
+    assert report.uses_docker is False
+    assert report.agent_image.detail.startswith("not needed")
+    assert not any(call[0] == "docker" for call in probe.calls)
 
 
 def test_a_run_that_needs_no_docker_needs_no_agent_image(tmp_path: Path) -> None:
