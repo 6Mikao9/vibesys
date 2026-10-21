@@ -17,7 +17,7 @@ from vs_core._corevalue import (
     omit_unset,
     resolve_value,
 )
-from vs_core._leaf_behavior import MeasurementFailurePolicy
+from vs_core._retry_policy import MeasurementFailurePolicy
 
 
 class CheckpointDecline(StrEnum):

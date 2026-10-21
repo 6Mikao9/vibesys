@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol, Self
 
 from vs_core._corevalue import CoreValue
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import ObservationStatus
 
 
 class BackoffPolicy:
@@ -19,28 +20,23 @@ class BackoffPolicy:
         return min(self.cap, self.first * 2**drops)
 
 
-class MeasurementFailurePolicy:
-    """Retry classification of a conclusive submission failure."""
-
-    @property
-    def retryable(self) -> bool:
-        """Retry only failures attributable to infrastructure or ambiguous evidence."""
-        return self in ("infrastructure", "ambiguous")
-
-
 class ObservationFacts:
     """Derived retry and descendant facts of an external observation."""
 
     __slots__ = ()
     terminal: bool
-    status: str
+    status: ObservationStatus
     children: tuple
     child_manifest: _ChildMembers | None
 
     @property
     def retryable(self) -> bool:
         """Nonterminal nonacceptance permits another dispatch."""
-        return not self.terminal and self.status in ("failed", "rejected", "cancelled")
+        return not self.terminal and self.status in (
+            ObservationStatus.FAILED,
+            ObservationStatus.REJECTED,
+            ObservationStatus.CANCELLED,
+        )
 
     @property
     def descendants(self) -> tuple:

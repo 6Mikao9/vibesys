@@ -241,7 +241,7 @@ enum WaitEnd {
 // it can run no such work at all (a local Slurm root its probe could not prove shared).
 // It is nobody's candidate's fault, and no retry can succeed, so it is never retried.
 enum MeasurementFailure {
-  option (core_enum).mixin = "vs_core._leaf_behavior.MeasurementFailurePolicy";
+  option (core_enum).mixin = "vs_core._retry_policy.MeasurementFailurePolicy";
 
   MEASUREMENT_FAILURE_UNSPECIFIED = 0;
   MEASUREMENT_FAILURE_WORKLOAD = 1;

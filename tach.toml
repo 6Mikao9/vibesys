@@ -1988,16 +1988,16 @@ depends_on = []
 
 [[interfaces]]
 from = ["vs_core._retry_policy"]
-expose = ["RequestRetryPolicy"]
+expose = ["RequestRetryPolicy", "MeasurementFailurePolicy"]
 
 [[modules]]
 path = "vs_core._leaf_behavior"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._corevalue"]
+depends_on = ["vs_core._corevalue", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core._leaf_behavior"]
-expose = ["BackoffPolicy", "ObservationFacts", "MeasurementFailurePolicy", "WaitDuration", "TaskRequirements"]
+expose = ["BackoffPolicy", "ObservationFacts", "WaitDuration", "TaskRequirements"]
 
 [[modules]]
 path = "vs_core._revision_ref"
@@ -2020,7 +2020,7 @@ expose = [".*"]
 [[modules]]
 path = "vs_core._generated.vibesys.core.v1.vocabulary_cv"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._leaf_behavior", "vs_core._corevalue"]
+depends_on = ["vs_core._retry_policy", "vs_core._corevalue"]
 
 [[interfaces]]
 from = ["vs_core._generated.vibesys.core.v1.vocabulary_cv"]

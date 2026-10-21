@@ -2057,14 +2057,14 @@ const file_vibesys_core_v1_vocabulary_proto_rawDesc = "" +
 	"\x14WAIT_END_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eWAIT_END_LIMIT\x10\x01\x12\x19\n" +
 	"\x15WAIT_END_QUEUE_BUDGET\x10\x02\x12\x14\n" +
-	"\x10WAIT_END_RUN_END\x10\x03*\xb3\x02\n" +
+	"\x10WAIT_END_RUN_END\x10\x03*\xb2\x02\n" +
 	"\x12MeasurementFailure\x12#\n" +
 	"\x1fMEASUREMENT_FAILURE_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cMEASUREMENT_FAILURE_WORKLOAD\x10\x01\x12&\n" +
 	"\"MEASUREMENT_FAILURE_INFRASTRUCTURE\x10\x02\x12!\n" +
 	"\x1dMEASUREMENT_FAILURE_AMBIGUOUS\x10\x03\x12\x1f\n" +
 	"\x1bMEASUREMENT_FAILURE_UNKNOWN\x10\x04\x123\n" +
-	"/MEASUREMENT_FAILURE_RUN_ENVIRONMENT_UNAVAILABLE\x10\x05\x1a5\xd2\xf3\x181\x1a/vs_core._leaf_behavior.MeasurementFailurePolicy*\xd8\x03\n" +
+	"/MEASUREMENT_FAILURE_RUN_ENVIRONMENT_UNAVAILABLE\x10\x05\x1a4\xd2\xf3\x180\x1a.vs_core._retry_policy.MeasurementFailurePolicy*\xd8\x03\n" +
 	"\bWaitKind\x12\x19\n" +
 	"\x15WAIT_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11WAIT_KIND_SESSION\x10\x01\x122\n" +
