@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast
 
 from vs_core.api import (
+    CoreValue,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
@@ -92,7 +93,7 @@ def trusted_record(
 class _Request:
     ordinal = 1
 
-    def __init__(self, subject: str, context: BaseModel) -> None:
+    def __init__(self, subject: str, context: BaseModel | CoreValue) -> None:
         self.subject = subject
         self.context = context
         # A search's prompt context names its template; core's exchanges name theirs by kind.
@@ -112,7 +113,7 @@ class PromptRender:
     def render(
         self,
         root: Path,
-        context: BaseModel,
+        context: BaseModel | CoreValue,
         *,
         subject: str = "implementer",
         held: Held | None = None,

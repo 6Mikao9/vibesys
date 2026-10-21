@@ -75,7 +75,7 @@ def test_asking_again_for_a_candidate_already_evaluated_is_not_another_evaluatio
 
 
 def test_the_default_limit_is_a_count_of_dozens_never_a_handful() -> None:
-    assert core.TaskTerms.model_fields["runaway_evaluations"].default >= 20
+    assert core.TaskTerms.model_json_schema()["properties"]["runaway_evaluations"]["default"] >= 20
 
 
 def test_a_task_cannot_declare_a_limit_below_one() -> None:

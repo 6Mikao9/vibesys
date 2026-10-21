@@ -26,6 +26,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
+from pydantic import TypeAdapter
+
 from vs_core._ids import IdScheme
 from vs_core._registry import ContractError, OperationRegistration, OperationRegistry
 from vs_core.types.common import OperationSchemaRef, StrategyId
@@ -46,6 +48,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_core._corevalue import CoreValue
     from vs_core._strategy_operations import StrategyOperations
     from vs_core.types.common import RunFacts, SchemaRef
     from vs_core.types.search import Event, RunView
@@ -281,10 +284,10 @@ class FlowDriver[C]:
         return new, [*restarted, *decisions]
 
     @staticmethod
-    def published[M: BaseModel](state: FlowState, model: type[M]) -> M | None:
+    def published[M: BaseModel | CoreValue](state: FlowState, model: type[M]) -> M | None:
         """The record the flows last published (``ctx.publish``), or None if none yet."""
         text = state.live.published
-        return None if text is None else model.model_validate_json(text)
+        return None if text is None else TypeAdapter(model).validate_json(text)
 
     @staticmethod
     def trace(state: FlowState) -> RunTrace:

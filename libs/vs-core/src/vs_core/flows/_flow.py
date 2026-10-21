@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_core._corevalue import CoreValue
     from vs_core.types.settlement import Selection
 
     from ._labels import Label, LabelFields, SpanKind
@@ -265,11 +266,11 @@ class Flow:
         if not isinstance(self._run.choice, RetainedCandidate):
             self._run.chose(TrustedBaseline(revision=self.facts.baseline), label)
 
-    def publish(self, record: BaseModel) -> None:
+    def publish(self, record: BaseModel | CoreValue) -> None:
         """Replace the flow's published record: what status views and tests read of a run."""
         self._run.published = record.model_dump_json()
 
-    def published[M: BaseModel](self, model: type[M]) -> M | None:
+    def published[M: BaseModel | CoreValue](self, model: type[M]) -> M | None:
         """What the run last published (`publish`), as ``model``; None before any publish.
 
         A restart keeps it, so a root that resumes on changed code reads there what the run had

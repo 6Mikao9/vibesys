@@ -556,7 +556,7 @@ class FlowRun[C]:
         for asked in [item for item in self._open if self._owned(item.request)]:
             self.finish_operation(asked, self._perform(asked.request))
 
-    def published[M: BaseModel](self, model: type[M]) -> M | None:
+    def published[M: BaseModel | CoreValue](self, model: type[M]) -> M | None:
         """What the flow last published with ``ctx.publish``, as ``model``."""
         return self.driver.published(self.state, model)
 

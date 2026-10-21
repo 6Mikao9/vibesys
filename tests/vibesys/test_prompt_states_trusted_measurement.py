@@ -22,7 +22,7 @@ from vibesys.orchestration.evolve.core_policy.api import prompts as evolve_promp
 from vibesys.orchestration.evolve.search.api import JudgePrompt as EvolveJudgePrompt
 from vibesys.orchestration.evolve.search.api import evolve
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vs_core.api import EvidenceRef, ResumeFacts
+from vs_core.api import CoreValue, EvidenceRef, ResumeFacts
 from vs_evaluation.api import EvaluationStageOutcome, EvidenceOutcome, TrustedEvidence
 from vs_runtime.api import RunFacts
 from vs_sim.api.testing import examples
@@ -55,7 +55,7 @@ def _record(
 def _render(
     root: Path,
     roots: tuple[Path, ...],
-    context: BaseModel,
+    context: BaseModel | CoreValue,
     held: tuple[EvidenceRef, TrustedEvidence],
     variables: Mapping[str, object] | None = None,
 ) -> str:
