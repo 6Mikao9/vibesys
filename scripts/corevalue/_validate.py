@@ -114,6 +114,7 @@ def _field(field: object) -> None:
     config = extension(field, options.ext_core_field)
     if config and config.frozen_set and not isinstance(field.value, DescFieldValueList):
         raise GenerationError(path, "immutable set requires a repeated field")
+    _null_presence(field)
     rule = rule_of(field)
     if rule is None:
         return
@@ -284,3 +285,22 @@ def _base_shape(message: DescMessage) -> None:
             raise GenerationError(
                 message.type_name, f"{field.name}: inherited contract differs from base"
             )
+
+
+def _null_presence(field: object) -> None:
+    """None is a scalar-union value, never an ambiguous optional message sentinel."""
+    if is_union(field.parent) or not isinstance(field.value, DescFieldValueMessage):
+        return
+    target = field.value.message
+    if is_null(target):
+        raise GenerationError(field.parent.type_name, "null markers require a scalar union arm")
+    rule = rule_of(field)
+    if (
+        is_union(target)
+        and not (rule and rule.required)
+        and any(
+            isinstance(member.value, DescFieldValueMessage) and is_null(member.value.message)
+            for member in union_members(target)
+        )
+    ):
+        raise GenerationError(field.parent.type_name, "optional null union loses wire presence")

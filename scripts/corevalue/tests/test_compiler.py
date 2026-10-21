@@ -250,3 +250,21 @@ def test_cyclic_or_forward_bases_fail_before_emission(compiler: Callable[[DescFi
     ]
     with pytest.raises(GenerationError, match="base value must precede"):
         compiler(replace(original.file, messages=messages))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+@pytest.mark.parametrize("shape", ["optional_union", "direct_null"])
+def test_null_representations_cannot_lose_wire_presence(
+    compiler: Callable[[DescFile], str], shape: str
+) -> None:
+    original = core_contracts.PureOption.desc()
+    field = original.fields[1]
+    proto = type(field.proto).from_binary(field.proto.to_binary())
+    if shape == "optional_union":
+        proto.options[validation_rules.ext_field] = validation_rules.FieldRules()
+        field = replace(field, proto=proto)
+    else:
+        field = replace(field, value=replace(field.value, message=core_contracts.NullValue.desc()))
+    message = replace(original, fields=[original.fields[0], field])
+    with pytest.raises(GenerationError, match="null"):
+        compiler(replace(original.file, messages=[message]))
