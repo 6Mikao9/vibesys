@@ -38,19 +38,20 @@ export async function provisionGateway(
   const bytes = await artifact(target);
   const digest = createHash('sha256').update(bytes).digest('hex');
   const binary = `"$HOME/${GATEWAY_DIRECTORY}/vibesysd"`;
-  const matches =
-    `[ -f ${binary} ] && [ "$(wc -c < ${binary} | tr -d ' ')" = '${bytes.length}' ] && ` +
-    `[ "$(if command -v sha256sum >/dev/null 2>&1; then sha256sum ${binary}; else shasum -a 256 ${binary}; fi | cut -d ' ' -f 1)" = '${digest}' ]`;
-  if (!force && (await run(`if ${matches}; then printf match; fi`)) === 'match') return;
+  const matches = (path: string) =>
+    `[ -f ${path} ] && [ "$(wc -c < ${path} | tr -d ' ')" = '${bytes.length}' ] && ` +
+    `[ "$(if command -v sha256sum >/dev/null 2>&1; then sha256sum ${path}; else shasum -a 256 ${path}; fi | cut -d ' ' -f 1)" = '${digest}' ]`;
+  if (!force && (await run(`if ${matches(binary)}; then printf match; fi`)) === 'match') return;
   const temporary = `"$HOME/${GATEWAY_DIRECTORY}/.vibesysd-${randomUUID()}"`;
   await run(
     `umask 077; mkdir -p "$HOME/${GATEWAY_DIRECTORY}" && ` +
       `trap 'rm -f ${temporary}' EXIT HUP INT TERM; ` +
       `command -v gzip >/dev/null 2>&1 || { printf 'gateway provisioning requires gzip\\n' >&2; exit 1; }; ` +
-      `gzip -dc > ${temporary} && chmod 700 ${temporary} && mv -f ${temporary} ${binary}`,
+      `gzip -dc > ${temporary} && ${matches(temporary)} && ` +
+      `chmod 700 ${temporary} && mv -f ${temporary} ${binary}`,
     await compress(bytes),
   );
-  if ((await run(`if ${matches}; then printf match; fi`)) !== 'match') {
+  if ((await run(`if ${matches(binary)}; then printf match; fi`)) !== 'match') {
     throw new Error(`gateway artifact verification failed for ${target}`);
   }
 }
