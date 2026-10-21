@@ -34,7 +34,7 @@ from vs_issue_tracker.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vs_core.api import CoreValue
+    from vs_core.api.search import CoreValue
 
 ROADMAP = roadmap_operation_registrations()
 """The roadmap's operations, owned by the tracker library (read, put items)."""

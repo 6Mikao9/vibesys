@@ -12,8 +12,16 @@ from pydantic import BaseModel
 from vibesys.orchestration.issue_queue.search._config import IssueQueueConfig
 from vibesys.orchestration.issue_queue.search._values import Failure, FailureKind, JobEndedError
 from vibesys.orchestration.issue_queue.search._writes import Writes
-from vs_core.api import CoreValue
-from vs_core.api.search import Again, Failed, Flow, GaveUp, OperationRequest, RetryPolicy, Tries
+from vs_core.api.search import (
+    Again,
+    CoreValue,
+    Failed,
+    Flow,
+    GaveUp,
+    OperationRequest,
+    RetryPolicy,
+    Tries,
+)
 from vs_issue_tracker.api import (
     AppliedChanges,
     ApplyIssueChanges,

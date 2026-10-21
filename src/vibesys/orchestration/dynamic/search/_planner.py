@@ -34,9 +34,9 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
 )
 from vibesys.search_spans.api import PLANNING_CALL, PlanningAttrs, turn_label
-from vs_core.api import CoreValue
 from vs_core.api.search import (
     Again,
+    CoreValue,
     Failed,
     FailureReason,
     Flow,
