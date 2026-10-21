@@ -296,10 +296,11 @@ class HostSandbox(WorkspaceSandbox):
     #: private writable tmpfs in the namespace, next to ``/tmp``.
     temp_dirs: tuple[str, ...] = ()
 
+    isolates_candidate_workspaces: ClassVar[bool] = True
+
     #: The namespace binds neither the runtime root nor a pathname socket outside the
     #: view. It shares the host's network namespace, so abstract sockets and loopback
     #: TCP stay reachable (see :attr:`WorkspaceSandbox.claims_operator_control_boundary`).
-    isolates_candidate_workspaces: ClassVar[bool] = True
     claims_operator_control_boundary: ClassVar[bool] = True
 
     def __post_init__(self) -> None:
