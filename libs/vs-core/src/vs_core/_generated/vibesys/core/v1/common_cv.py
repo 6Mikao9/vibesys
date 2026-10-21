@@ -29,6 +29,8 @@ class RunStatus(StrEnum):
     CLOSING = "closing"
     TERMINAL = "terminal"
     BLOCKED = "blocked"
+    DRAINING = "draining"
+    PARKED = "parked"
 
 
 class PauseOwner(StrEnum):
@@ -65,6 +67,7 @@ type ControlAction = Literal[
     "cancel_attempt",
     "cancel_item",
     "set_max_parallel",
+    "park",
 ]
 
 

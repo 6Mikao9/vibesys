@@ -17,12 +17,22 @@ def encode_RunStatus(v: values.RunStatus | None) -> pb.RunStatus:
         "closing": pb.RunStatus.CLOSING,
         "terminal": pb.RunStatus.TERMINAL,
         "blocked": pb.RunStatus.BLOCKED,
+        "draining": pb.RunStatus.DRAINING,
+        "parked": pb.RunStatus.PARKED,
     }.get(v, pb.RunStatus.UNSPECIFIED)
 
 
 def decode_RunStatus(v: pb.RunStatus) -> values.RunStatus:
     return values.RunStatus(
-        {1: "running", 2: "paused", 3: "closing", 4: "terminal", 5: "blocked"}[v]
+        {
+            1: "running",
+            2: "paused",
+            3: "closing",
+            4: "terminal",
+            5: "blocked",
+            6: "draining",
+            7: "parked",
+        }[v]
     )
 
 
@@ -78,6 +88,7 @@ def encode_ControlAction(
         "cancel_attempt",
         "cancel_item",
         "set_max_parallel",
+        "park",
     ]
     | None,
 ) -> pb.ControlAction:
@@ -90,6 +101,7 @@ def encode_ControlAction(
         "cancel_attempt": pb.ControlAction.CANCEL_ATTEMPT,
         "cancel_item": pb.ControlAction.CANCEL_ITEM,
         "set_max_parallel": pb.ControlAction.SET_MAX_PARALLEL,
+        "park": pb.ControlAction.PARK,
     }.get(v, pb.ControlAction.UNSPECIFIED)
 
 
@@ -104,6 +116,7 @@ def decode_ControlAction(
     "cancel_attempt",
     "cancel_item",
     "set_max_parallel",
+    "park",
 ]:
     return cast(
         Literal[
@@ -115,6 +128,7 @@ def decode_ControlAction(
             "cancel_attempt",
             "cancel_item",
             "set_max_parallel",
+            "park",
         ],
         {
             1: "pause",
@@ -125,6 +139,7 @@ def decode_ControlAction(
             6: "cancel_attempt",
             7: "cancel_item",
             8: "set_max_parallel",
+            9: "park",
         }[v],
     )
 
