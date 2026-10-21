@@ -123,6 +123,10 @@ path = "examples/model-serving/qwen3.5-9b-mi210"
 path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
 
 [[example]]
+path = "examples/model-serving/repositories/lithos-metal"
+external_repo = true
+
+[[example]]
 path = "examples/model-serving/repositories/sglang"
 external_repo = true
 

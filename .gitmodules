@@ -56,3 +56,8 @@
 	url = https://github.com/vibesys-playground/rpcstack.git
 	branch = vibesys
 	shallow = true
+[submodule "examples/model-serving/repositories/lithos-metal"]
+	path = examples/model-serving/repositories/lithos-metal
+	url = https://github.com/vibesys-playground/lithos-metal.git
+	branch = vibesys
+	shallow = true
