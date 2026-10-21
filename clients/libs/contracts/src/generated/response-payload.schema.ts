@@ -1546,7 +1546,7 @@ const responsePayloadSchema: Record<string, unknown> = {
       "type": "string"
     },
     "Seconds": {
-      "minimum": 0,
+      "minimum": 0.0,
       "type": "number"
     },
     "Span": {

@@ -2736,7 +2736,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "Seconds": {
-      "minimum": 0,
+      "minimum": 0.0,
       "type": "number"
     },
     "ServerReadyData": {
