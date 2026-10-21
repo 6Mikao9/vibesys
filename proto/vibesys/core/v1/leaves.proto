@@ -59,7 +59,7 @@ enum JobProgressState {
 
 
 // Full identity of one evidence record: the request that produced it plus its ID.
-// 
+//
 // EvidenceId alone is only unique within one source request, so two jobs can
 // report the same ID. Every ledger, settlement and continuation lookup keys on
 // this pair.
@@ -70,7 +70,7 @@ message EvidenceKey {
 }
 
 // Immutable revision identity.
-// 
+//
 // Core compares digest as an opaque equality key. Producers that mint a ref from
 // a git commit use of_git_commit, which makes revision_id the commit and digest
 // `git-commit:<commit>`; consumers that must trust the scheme read git_commit,
@@ -100,7 +100,7 @@ message DependencyRef {
 }
 
 // Canonical guarded reopen target bound to a registered payload.
-// 
+//
 // The operation is run-scoped. Its target must be the exact parked attempt,
 // and resolved_cancelled_jobs must equal the continuation cancellation set.
 // A newer park authority invalidates older reopen acknowledgements.
@@ -126,7 +126,7 @@ message TaskObjective {
 }
 
 // Authoritative set of every transitive descendant at one observation.
-// 
+//
 // members lists all descendants, not only direct children. basis says how the
 // executor knows it: "enumerated" from the live process or resource tree, or
 // "lifecycle-closed" because the closed handle can admit no descendant (members
@@ -139,7 +139,7 @@ message ChildManifest {
 }
 
 // External facts correlated by request, scope, generation and episode.
-// 
+//
 // children_complete explicitly claims an authoritative manifest; an empty
 // children tuple alone does not prove it. child_manifest, when present, is
 // that manifest: it must contain every child, only an observation that claims
@@ -174,7 +174,7 @@ message Observation {
 }
 
 // Authoritative charge and bounded, deduplicated refund proof.
-// 
+//
 // Historical aggregate proof preserves consumed migration budget only. It
 // grants no dispatch authority and cannot receive a new refund without exact
 // live charge correspondence. Unsupported ADMISSION refunds require positive
@@ -212,7 +212,7 @@ message WorkspaceRef {
 }
 
 // Immutable execution payload for an input occurrence reserved by Sessions B.
-// 
+//
 // Sessions A validates the exact ID/artifact manifest against InputRecord before
 // dispatch. The operation wire remains canonical and is never rewritten to
 // transport inputs. Equal artifacts with distinct occurrence IDs stay distinct.
@@ -231,7 +231,7 @@ message Reading {
 }
 
 // The revision a candidate is compared with, and what the evaluation reads there.
-// 
+//
 // Both facts together or neither: a base without its measured input could not be matched to
 // its own samples.
 message BaseRef {
@@ -240,7 +240,7 @@ message BaseRef {
 }
 
 // One framework run of one measured input: the unit of measurement, always traceable.
-// 
+//
 // A sample is built only from a run that ended conclusively with a trusted benchmark reading,
 // and requires the ``commit`` it measured and the ``measured_input`` digest (#2961). The
 // ``base`` is set on a candidate's sample and names the revision it is compared with.
@@ -259,7 +259,7 @@ message Sample {
 }
 
 // A run core itself asked for, on a candidate's behalf, in its scope.
-// 
+//
 // No decision and no agent call asked for it, so this record is its origin: core admitted it
 // so that ``candidate`` (the run whose result needed it) has a comparison with a measured
 // base. Its plan says which side it measures: the base, or (under no declared floor) the
@@ -273,7 +273,7 @@ message CoreRun {
 }
 
 // A run of the strategy's own that core counts as samples of a base once it ends.
-// 
+//
 // The strategy measures the run's input before any agent works, from a plan that names no
 // measured input. When an agent's evaluation then needs that base while the run is still
 // going, core starts no second run of it: it claims the running one, so its result becomes the
@@ -284,7 +284,7 @@ message BaseClaim {
 }
 
 // An attempt whose agent has asked for an unusual number of evaluations.
-// 
+//
 // A warning and nothing more: it is recorded once per scope, when the count of the scope's
 // admitted evaluations first reaches ``limit``, and it never refuses a call.
 message Runaway {
@@ -294,7 +294,7 @@ message Runaway {
 }
 
 // A candidate's samples compared with its base's: the ratio, its noise and the verdict.
-// 
+//
 // ``ratio`` is the candidate's mean over the base's, as measured; ``direction`` says which
 // way is better, so ``better`` is a ratio above one for ``max`` and below one for ``min``.
 // ``noise`` is one standard error of the ratio, and a verdict needs two of them: the
@@ -318,7 +318,7 @@ message Comparison {
 }
 
 // A candidate's comparison with its base as a flow reads it from the run's view.
-// 
+//
 // ``settling`` is true while a run that will feed the comparison has not ended (core's own
 // run of the base, or of the candidate's input, that a close call earned): the comparison
 // changes when it lands, so it is not yet the one a verdict may rest on
@@ -330,7 +330,7 @@ message StatedComparison {
 }
 
 // A run that fed a comparison ended, and no run that feeds it is under way any more.
-// 
+//
 // Core reports it at the end of the run, so a flow that waits for the comparison to settle
 // (``ctx.evaluation.measure_compared``) wakes when the comparison it would read is final, and
 // not at a poll. It names the comparison only: the run's view states it
@@ -343,7 +343,7 @@ message ComparisonSettled {
 }
 
 // Current nonterminal job progress, retaining absent measurements as None.
-// 
+//
 // Sequence and time must match the carrying observation. Older observations
 // cannot replace newer progress; changed payload at equal sequence conflicts.
 // Stage IDs must belong to the owner's validated stage registry.
@@ -359,7 +359,7 @@ message JobProgress {
 }
 
 // Frozen progress of one unfinished dependency when the bound that ended it passed.
-// 
+//
 // A wait ends a job either with the wait itself (its earliest bound) or alone, when the
 // job's own queue budget runs out while its siblings go on (``QUEUE_BUDGET``).
 message JobTimeout {
@@ -370,7 +370,7 @@ message JobTimeout {
 }
 
 // Immutable wait-all timeout evidence, separate from job termination.
-// 
+//
 // Freeze before applying observations at or beyond the deadline. unfinished
 // names each unfinished dependency once, in continuation order. Late results
 // may resolve cleanup but never rewrite this value or resume authorization.
@@ -393,7 +393,7 @@ message WaitSubject {
 }
 
 // The requests, waiting entities and timer one waiter waits on; any one of them wakes it.
-// 
+//
 // The transition that makes an entity wait writes this value in the same step, naming
 // exactly what can end the wait: requests by identity, other waiting entities whose own
 // progress carries this one (``subjects``), and a core time the shell's clock reaches.
@@ -420,7 +420,7 @@ message Backoff {
 }
 
 // The templates of the exchanges core itself starts with a role's agent.
-// 
+//
 // Each names a template file the renderer reads; the wording is the template's. A role needs
 // exactly the exchanges it can meet (see ``Role``), and a missing one is a declaration error.
 message Exchanges {
@@ -460,7 +460,7 @@ message WhileAlive {
 }
 
 // A duration on the run clock, plus the watches that may end the wait earlier.
-// 
+//
 // ``limit`` is relative to the time core accepts the wait (an agent turn's requests count it
 // from their dispatch instead: see ``FromDispatch``). A limit of zero or less is
 // refused by core (``Failed(REFUSED)``); the type does not forbid it so that a bypassed
@@ -472,7 +472,7 @@ message Within {
 }
 
 // Internal: ``limit`` seconds counted from the instant the shell dispatches the request.
-// 
+//
 // A request waits for the shell's free slot before it runs, and the time it waits is not
 // the work's. Core therefore keeps the request open until the run deadline while it is
 // queued, and stamps ``Until(at=dispatch time + limit)`` when ``DispatchAuthorized``
@@ -502,7 +502,7 @@ message EvaluationStageResult {
 }
 
 // Failed benchmark partial and the explicit comparison interval containing it.
-// 
+//
 // The measurement owner validates the rate and interval against its typed
 // outcome. Absence of this value cannot prove a repeated measurement failure.
 message BenchmarkFailure {
@@ -513,7 +513,7 @@ message BenchmarkFailure {
 }
 
 // Immutable preceding-submission cursor captured at resume publication.
-// 
+//
 // Zero identifies the beginning; otherwise submission_id names the exact
 // ordinal. A missing ID never stands in for a nonempty historical cursor.
 message EvaluationHistoryCursor {
@@ -523,7 +523,7 @@ message EvaluationHistoryCursor {
 }
 
 // External admission observation, distinct from cleanup and resume authority.
-// 
+//
 // Only reopened proves positive admission. closed and unknown do not authorize
 // a successor invocation; unknown retains the new capacity episode and fences.
 // The enclosing observation supplies exact request, scope, generation and episode.
@@ -546,4 +546,3 @@ message Checkpoint {
     Declined declined = 2;
   }
 }
-

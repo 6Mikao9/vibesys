@@ -131,7 +131,7 @@ enum DependencyStatus {
 }
 
 // Separate currencies with different admission and refund semantics.
-// 
+//
 // ADMISSION charges accepted registration including queued starts. ATTEMPT
 // charges a paid invocation or failed setup cycle without an existing paid
 // charge. TURN charges one logical invocation, regardless of max_turns or
@@ -198,7 +198,7 @@ enum EventKind {
 }
 
 // Which side of the noise a candidate's result falls on, against its base.
-// 
+//
 // ``INCONCLUSIVE`` is no side: the samples held give no estimate of the noise (too few runs a
 // side, or runs that all read alike), so the ratio is neither a gain nor within the noise.
 enum ComparisonVerdict {
@@ -210,7 +210,7 @@ enum ComparisonVerdict {
 }
 
 // What a comparison says of a plan's expected effect, a minimum ratio over the base.
-// 
+//
 // The framework derives it (`vs_core._comparison.effect_verdict`); no agent states it.
 enum EffectVerdict {
   EFFECT_VERDICT_UNSPECIFIED = 0;
@@ -221,7 +221,7 @@ enum EffectVerdict {
 }
 
 // What ended a wait on a job: every wait ends by exactly one of these, or by a stop.
-// 
+//
 // Closed. The bound of every wait is a time (``_wait_clock.Bound``), never absent; this
 // names the rule that set it.
 enum WaitEnd {
@@ -232,11 +232,11 @@ enum WaitEnd {
 }
 
 // Submission failure classification; unknown never proves workload rejection.
-// 
+//
 // ``AMBIGUOUS`` is a failure the evidence cannot assign to the candidate or to the
 // machinery. The backend decides how often it measures such a failure again, within its
 // declared bound and core's hard cap; what reaches core is final.
-// 
+//
 // ``RUN_ENVIRONMENT_UNAVAILABLE`` is a measurement the run environment refused because
 // it can run no such work at all (a local Slurm root its probe could not prove shared).
 // It is nobody's candidate's fault, and no retry can succeed, so it is never retried.
@@ -268,7 +268,7 @@ enum WaitKind {
 }
 
 // What a role's first turn in a session costs the run's budget.
-// 
+//
 // A turn that works on a candidate costs one ``ATTEMPT`` (and a turn); a turn that does not
 // (a judge, a planner) costs only a ``TURN``. Corrections and resumes cost a turn.
 enum Charge {
@@ -343,4 +343,3 @@ enum AttemptTerminalReason {
   ATTEMPT_TERMINAL_REASON_HISTORY_UNAVAILABLE = 3 [(core_member).spelling = "history-unavailable"];
   ATTEMPT_TERMINAL_REASON_NO_NEW_EVALUATION = 4 [(core_member).spelling = "no-new-evaluation"];
 }
-
