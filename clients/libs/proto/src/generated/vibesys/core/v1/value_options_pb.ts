@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/core/v1/value_options.proto.
  */
 export const file_vibesys_core_v1_value_options: GenFile = /*@__PURE__*/
-  fileDesc("CiN2aWJlc3lzL2NvcmUvdjEvdmFsdWVfb3B0aW9ucy5wcm90bxIPdmliZXN5cy5jb3JlLnYxIo8BChNWYWx1ZU1lc3NhZ2VPcHRpb25zEg0KBXVuaW9uGAEgASgIEhUKDWRpc2NyaW1pbmF0b3IYAiABKAkSDQoFbWl4aW4YAyABKAkSDAoEYmFzZRgEIAEoCRI1Cgljb25zdGFudHMYBSADKAsyIi52aWJlc3lzLmNvcmUudjEuVmFsdWVSdWxlQ29uc3RhbnQiLwoRVmFsdWVSdWxlQ29uc3RhbnQSDAoEbmFtZRgBIAEoCRIMCgRydWxlGAIgASgJIrUBChFWYWx1ZUZpZWxkT3B0aW9ucxIQCghleHBsaWNpdBgBIAEoCBIPCgdpbnRlZ2VyGAIgASgIEhUKDWNvbnN0YW50X25hbWUYAyABKAkSFQoNY29uc3RhbnRfcnVsZRgEIAEoCRIZCgxkZWZhdWx0X2pzb24YBSABKAlIAIgBARISCgpvbWl0X3Vuc2V0GAYgASgIEg8KB2FsaWFzZXMYByADKAlCDwoNX2RlZmF1bHRfanNvbiJCChBWYWx1ZUVudW1PcHRpb25zEg8KB2xpdGVyYWwYASABKAgSDgoGaW5saW5lGAIgASgIEg0KBW1peGluGAMgASgJIioKFlZhbHVlRW51bU1lbWJlck9wdGlvbnMSEAoIc3BlbGxpbmcYASABKAk6ZgoKY29yZV92YWx1ZRIfLmdvb2dsZS5wcm90b2J1Zi5NZXNzYWdlT3B0aW9ucxi4jgMgASgLMiQudmliZXN5cy5jb3JlLnYxLlZhbHVlTWVzc2FnZU9wdGlvbnNSCWNvcmVWYWx1ZTpiCgpjb3JlX2ZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxi5jgMgASgLMiIudmliZXN5cy5jb3JlLnYxLlZhbHVlRmllbGRPcHRpb25zUgljb3JlRmllbGQ6XgoJY29yZV9lbnVtEhwuZ29vZ2xlLnByb3RvYnVmLkVudW1PcHRpb25zGLqOAyABKAsyIS52aWJlc3lzLmNvcmUudjEuVmFsdWVFbnVtT3B0aW9uc1IIY29yZUVudW06bQoLY29yZV9tZW1iZXISIS5nb29nbGUucHJvdG9idWYuRW51bVZhbHVlT3B0aW9ucxi7jgMgASgLMicudmliZXN5cy5jb3JlLnYxLlZhbHVlRW51bU1lbWJlck9wdGlvbnNSCmNvcmVNZW1iZXJCP1o9Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9jb3JlL3YxO2NvcmV2MWIGcHJvdG8z", [file_google_protobuf_descriptor]);
+  fileDesc("CiN2aWJlc3lzL2NvcmUvdjEvdmFsdWVfb3B0aW9ucy5wcm90bxIPdmliZXN5cy5jb3JlLnYxIrgBChNWYWx1ZU1lc3NhZ2VPcHRpb25zEg0KBXVuaW9uGAEgASgIEhUKDWRpc2NyaW1pbmF0b3IYAiABKAkSDQoFbWl4aW4YAyABKAkSDAoEYmFzZRgEIAEoCRI1Cgljb25zdGFudHMYBSADKAsyIi52aWJlc3lzLmNvcmUudjEuVmFsdWVSdWxlQ29uc3RhbnQSGQoRbmFycm93X3N1YmNsYXNzZXMYBiABKAgSDAoEbnVsbBgHIAEoCCIvChFWYWx1ZVJ1bGVDb25zdGFudBIMCgRuYW1lGAEgASgJEgwKBHJ1bGUYAiABKAkiyQEKEVZhbHVlRmllbGRPcHRpb25zEhAKCGV4cGxpY2l0GAEgASgIEg8KB2ludGVnZXIYAiABKAgSFQoNY29uc3RhbnRfbmFtZRgDIAEoCRIVCg1jb25zdGFudF9ydWxlGAQgASgJEhkKDGRlZmF1bHRfanNvbhgFIAEoCUgAiAEBEhIKCm9taXRfdW5zZXQYBiABKAgSDwoHYWxpYXNlcxgHIAMoCRISCgpmcm96ZW5fc2V0GAggASgIQg8KDV9kZWZhdWx0X2pzb24iQgoQVmFsdWVFbnVtT3B0aW9ucxIPCgdsaXRlcmFsGAEgASgIEg4KBmlubGluZRgCIAEoCBINCgVtaXhpbhgDIAEoCSIqChZWYWx1ZUVudW1NZW1iZXJPcHRpb25zEhAKCHNwZWxsaW5nGAEgASgJOmYKCmNvcmVfdmFsdWUSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMYuI4DIAEoCzIkLnZpYmVzeXMuY29yZS52MS5WYWx1ZU1lc3NhZ2VPcHRpb25zUgljb3JlVmFsdWU6YgoKY29yZV9maWVsZBIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYuY4DIAEoCzIiLnZpYmVzeXMuY29yZS52MS5WYWx1ZUZpZWxkT3B0aW9uc1IJY29yZUZpZWxkOl4KCWNvcmVfZW51bRIcLmdvb2dsZS5wcm90b2J1Zi5FbnVtT3B0aW9ucxi6jgMgASgLMiEudmliZXN5cy5jb3JlLnYxLlZhbHVlRW51bU9wdGlvbnNSCGNvcmVFbnVtOm0KC2NvcmVfbWVtYmVyEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMYu44DIAEoCzInLnZpYmVzeXMuY29yZS52MS5WYWx1ZUVudW1NZW1iZXJPcHRpb25zUgpjb3JlTWVtYmVyQj9aPWdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvY29yZS92MTtjb3JldjFiBnByb3RvMw", [file_google_protobuf_descriptor]);
 
 /**
  * Representation metadata only. Validation belongs to buf.validate rules.
@@ -54,6 +54,20 @@ export type ValueMessageOptions = Message<"vibesys.core.v1.ValueMessageOptions">
    * @generated from field: repeated vibesys.core.v1.ValueRuleConstant constants = 5;
    */
   constants: ValueRuleConstant[];
+
+  /**
+   * Rebuild a subclass as this base when a field promises the base representation.
+   *
+   * @generated from field: bool narrow_subclasses = 6;
+   */
+  narrowSubclasses: boolean;
+
+  /**
+   * An empty wire marker represented as Python None inside a scalar union.
+   *
+   * @generated from field: bool null = 7;
+   */
+  null: boolean;
 };
 
 /**
@@ -136,6 +150,13 @@ export type ValueFieldOptions = Message<"vibesys.core.v1.ValueFieldOptions"> & {
    * @generated from field: repeated string aliases = 7;
    */
   aliases: string[];
+
+  /**
+   * Immutable set semantics, including canonical JSON and wire ordering.
+   *
+   * @generated from field: bool frozen_set = 8;
+   */
+  frozenSet: boolean;
 };
 
 /**

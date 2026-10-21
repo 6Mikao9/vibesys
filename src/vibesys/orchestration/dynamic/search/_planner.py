@@ -34,6 +34,7 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
 )
 from vibesys.search_spans.api import PLANNING_CALL, PlanningAttrs, turn_label
+from vs_core.api import CoreValue
 from vs_core.api.search import (
     Again,
     Failed,
@@ -135,7 +136,7 @@ async def _handed_off(
         return outcome
     request = handoff_request(number, outcome.check, merges)
 
-    async def write(tries: Tries[Failed]) -> BaseModel | Failed | Again[Failed]:
+    async def write(tries: Tries[Failed]) -> BaseModel | CoreValue | Failed | Again[Failed]:
         del tries
         written = await ctx.owners.perform(request, within=ctx.task.terms.operation_seconds)
         if isinstance(written, Failed) and written.reason in _UNKNOWN_WRITE:

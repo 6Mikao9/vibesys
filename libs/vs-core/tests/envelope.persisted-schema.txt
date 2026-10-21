@@ -757,6 +757,7 @@ MessageDelivered.kind optional {"const":"message_delivered","default":"message_d
 MessageDropped {"additionalProperties":false,"type":"object"}
 MessageDropped.drop required {"$ref":"#/$defs/InputDropped"}
 MessageDropped.kind optional {"const":"message_dropped","default":"message_dropped","type":"string"}
+NullValue {"type":"null"}
 Observation {"additionalProperties":false,"type":"object"}
 Observation.accepted optional {"default":false,"type":"boolean"}
 Observation.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -865,7 +866,8 @@ ProposeWinner.scope required {"$ref":"#/$defs/Scope"}
 ProposeWinner.selection required {"$ref":"#/$defs/Selection"}
 PureOption {"additionalProperties":false,"type":"object"}
 PureOption.key required {"minLength":1,"type":"string"}
-PureOption.value required {"anyOf":[{"type":"string"},{"type":"integer"},{"type":"number"},{"type":"boolean"},{"type":"null"}]}
+PureOption.value required {"$ref":"#/$defs/PureOptionValue"}
+PureOptionValue {"anyOf":[{"type":"string"},{"type":"integer"},{"type":"number"},{"type":"boolean"},{"$ref":"#/$defs/NullValue"}]}
 Reading {"additionalProperties":false,"type":"object"}
 Reading.direction optional {"anyOf":[{"enum":["max","min"],"type":"string"},{"type":"null"}],"default":null}
 Reading.metric required {"minLength":1,"type":"string"}
@@ -929,8 +931,9 @@ Rejected.path required {"items":{"anyOf":[{"type":"string"},{"type":"integer"}]}
 Rejected.retry_after optional {"anyOf":[{"$ref":"#/$defs/DependencyRef"},{"type":"null"}],"default":null}
 RejectionCode {"enum":["stale-view","identity-conflict","unknown-kind","unknown-schema","undeclared-operation","capability","ownership","generation","closed-scope","budget","dependency","evidence","already-settled","not-implemented-in-kernel"],"type":"string"}
 ReleaseDependency {"additionalProperties":false,"type":"object"}
-ReleaseDependency.identity required {"anyOf":[{"$ref":"#/$defs/SessionId"},{"$ref":"#/$defs/ResourceId"},{"$ref":"#/$defs/RequestId"},{"$ref":"#/$defs/OperationId"}]}
+ReleaseDependency.identity required {"$ref":"#/$defs/ReleaseIdentity"}
 ReleaseDependency.kind required {"enum":["session","job","workspace","operation","request"],"type":"string"}
+ReleaseIdentity {"anyOf":[{"$ref":"#/$defs/SessionId"},{"$ref":"#/$defs/ResourceId"},{"$ref":"#/$defs/RequestId"},{"$ref":"#/$defs/OperationId"}]}
 RepeatedFailureGuidance {"additionalProperties":false,"type":"object"}
 RepeatedFailureGuidance.consecutive_failures required {"minimum":1,"type":"integer"}
 RepeatedFailureGuidance.cursor required {"$ref":"#/$defs/EvaluationHistoryCursor"}
@@ -958,7 +961,7 @@ RequestRecord.failure optional {"anyOf":[{"$ref":"#/$defs/Failed"},{"type":"null
 RequestRecord.lifecycle required {"$ref":"#/$defs/LifecycleClass"}
 RequestRecord.limit_from_dispatch optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
 RequestRecord.observation optional {"anyOf":[{"$ref":"#/$defs/Observation"},{"type":"null"}],"default":null}
-RequestRecord.outcome optional {"anyOf":[{"$ref":"#/$defs/BaseModel"},{"type":"null"}],"default":null}
+RequestRecord.outcome optional {"anyOf":[{"$ref":"#/$defs/TypedOutcome"},{"type":"null"}],"default":null}
 RequestRecord.outcome_json optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 RequestRecord.outcome_schema optional {"anyOf":[{"$ref":"#/$defs/SchemaRef"},{"type":"null"}],"default":null}
 RequestRecord.payload_digest required {"type":"string"}
@@ -1162,7 +1165,7 @@ SearchDeclaration.required optional {"default":[],"items":{"enum":["park","inter
 SearchDeclaration.required_operations optional {"default":[],"items":{"$ref":"#/$defs/OperationSchemaRef"},"type":"array"}
 SearchDeclaration.roles optional {"default":[],"items":{"$ref":"#/$defs/RoleId"},"type":"array"}
 SearchDeclaration.strategy_id required {"$ref":"#/$defs/StrategyId"}
-Seconds {"minimum":0,"type":"number"}
+Seconds {"minimum":0.0,"type":"number"}
 Selection {"discriminator":{"mapping":{"retained_candidate":"#/$defs/RetainedCandidate","trusted_baseline":"#/$defs/TrustedBaseline"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/RetainedCandidate"},{"$ref":"#/$defs/TrustedBaseline"}]}
 SessionAcquisitionGroup {"additionalProperties":false,"type":"object"}
 SessionAcquisitionGroup.admission_id required {"$ref":"#/$defs/DecisionId"}
@@ -1351,13 +1354,13 @@ TaskStage.stage_id required {"minLength":1,"type":"string"}
 TaskTerms {"additionalProperties":false,"type":"object"}
 TaskTerms.accuracy_gated optional {"default":[],"items":{"$ref":"#/$defs/EvidenceKind"},"type":"array"}
 TaskTerms.accuracy_stage optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
-TaskTerms.base_staleness optional {"default":21600.0,"exclusiveMinimum":0,"type":"number"}
+TaskTerms.base_staleness optional {"default":21600.0,"exclusiveMinimum":0.0,"type":"number"}
 TaskTerms.benchmark_stage optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
 TaskTerms.measured required {"items":{"type":"string"},"type":"array"}
 TaskTerms.objectives optional {"default":[],"items":{"$ref":"#/$defs/TaskObjective"},"type":"array"}
-TaskTerms.operation_seconds required {"exclusiveMinimum":0,"type":"number"}
+TaskTerms.operation_seconds required {"exclusiveMinimum":0.0,"type":"number"}
 TaskTerms.profile_fields optional {"default":[],"items":{"type":"string"},"type":"array"}
-TaskTerms.queue_allowance required {"minimum":0,"type":"number"}
+TaskTerms.queue_allowance required {"minimum":0.0,"type":"number"}
 TaskTerms.recipe required {"$ref":"#/$defs/ArtifactRef"}
 TaskTerms.relative_noise optional {"default":0.0,"exclusiveMaximum":1.0,"minimum":0.0,"type":"number"}
 TaskTerms.runaway_evaluations optional {"default":40,"minimum":1,"type":"integer"}
@@ -1404,6 +1407,7 @@ TurnSpec.workspace required {"anyOf":[{"$ref":"#/$defs/WorkspaceRef"},{"$ref":"#
 TurnYielded {"additionalProperties":false,"type":"object"}
 TurnYielded.continuation required {"$ref":"#/$defs/Continuation"}
 TurnYielded.kind optional {"const":"turn_yielded","default":"turn_yielded","type":"string"}
+TypedOutcome {"$ref":"#/$defs/BaseModel"}
 Until {"additionalProperties":false,"type":"object"}
 Until.at required {"minimum":0.0,"type":"number"}
 Until.watches optional {"default":[],"items":{"$ref":"#/$defs/Watch"},"type":"array"}

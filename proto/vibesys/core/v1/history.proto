@@ -1,0 +1,65 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/value_options.proto";
+import "vibesys/core/v1/vocabulary.proto";
+import "vibesys/core/v1/leaves.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+// Owner-normalized scientific facts from one conclusive terminal observation.
+message EvaluationTerminalFacts {
+  option (core_value) = {narrow_subclasses: true, mixin: "vs_core._history_behavior.TerminalFacts"};
+  option (buf.validate.message).cel = {id: "EvaluationTerminalFacts.stages", message: "stages: duplicate stage ID", expression: "this.stages.map(s, s.stage_id).unique()"};
+  repeated EvaluationStageResult stages = 1;
+  optional string traceback_signature = 2 [(buf.validate.field).string.min_len = 1];
+  BenchmarkFailure failed_benchmark = 3;
+  bool accuracy_passed = 4;
+}
+
+// An ordered submission and the unchanged observation establishing its terminal facts.
+message AttemptEvaluationRecord {
+  option (core_value).base = "EvaluationTerminalFacts";
+  option (buf.validate.message).cel = {id: "AttemptEvaluationRecord.stages", message: "stages: duplicate stage ID", expression: "this.stages.map(s, s.stage_id).unique()"};
+  option (buf.validate.message).cel = {id: "AttemptEvaluationRecord.source", message: "terminal_observation: submission/scope mismatch", expression: "this.terminal_observation.request_id == this.submission_id && this.terminal_observation.scope == this.scope"};
+  option (buf.validate.message).cel = {id: "AttemptEvaluationRecord.terminal", message: "terminal_observation: requires conclusive terminal fact", expression: "this.terminal_observation.terminal && this.terminal_observation.status != 2 && this.terminal_observation.status != 6"};
+  option (buf.validate.message).cel = {id: "AttemptEvaluationRecord.execution", message: "terminal_observation: nonacceptance cannot prove scientific execution facts", expression: "this.terminal_observation.accepted || ((this.terminal_observation.status == 3 || this.terminal_observation.status == 4 || this.terminal_observation.status == 5) && size(this.stages) == 0 && !has(this.traceback_signature) && !has(this.failed_benchmark) && !this.accuracy_passed)"};
+  repeated EvaluationStageResult stages = 1;
+  optional string traceback_signature = 2 [(buf.validate.field).string.min_len = 1];
+  BenchmarkFailure failed_benchmark = 3;
+  bool accuracy_passed = 4;
+  string ordinal = 5 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field) = {integer: true, explicit: true}];
+  RequestId submission_id = 6 [(buf.validate.field).required = true];
+  Scope scope = 7 [(buf.validate.field).required = true];
+  Observation terminal_observation = 8 [(buf.validate.field).required = true];
+}
+
+// Ordered durable records with the exact prepared-submission coverage manifest.
+message AttemptEvaluationHistory {
+  option (core_value).mixin = "vs_core._history_behavior.HistoryCursor";
+  option (buf.validate.message).cel = {id: "AttemptEvaluationHistory.ids", message: "records: duplicate submission ID", expression: "this.records.map(r, r.submission_id.root).unique()"};
+  option (buf.validate.message).cel = {id: "AttemptEvaluationHistory.coverage_ids", message: "covered_submissions: duplicate submission ID", expression: "this.covered_submissions.map(s, s.root).unique()"};
+  // Compare canonical decimal strings before conversion so an arbitrary-precision ordinal
+  // outside the manifest is refused without asking CEL to narrow it to an int64.
+  option (buf.validate.message).cel = {id: "AttemptEvaluationHistory.ordinal", message: "records: submission differs from coverage ordinal", expression: "this.records.all(r, size(r.ordinal) < size(string(size(this.covered_submissions))) || (size(r.ordinal) == size(string(size(this.covered_submissions))) && r.ordinal <= string(size(this.covered_submissions)))) && this.records.all(r, this.covered_submissions[int(r.ordinal) - 1] == r.submission_id)"};
+  option (buf.validate.message).cel = {id: "AttemptEvaluationHistory.order", message: "records: ordinals must be unique and increasing", expression: "this.records.map(r, r.submission_id) == this.covered_submissions.filter(s, this.records.exists(r, r.submission_id == s))"};
+  option (buf.validate.message).cel = {id: "AttemptEvaluationHistory.complete", message: "covered_submissions: complete history differs from records", expression: "this.availability != 1 || this.records.map(r, r.submission_id) == this.covered_submissions"};
+  EvaluationHistoryAvailability availability = 1 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field).default_json = "\"unavailable\""];
+  repeated RequestId covered_submissions = 2;
+  repeated AttemptEvaluationRecord records = 3;
+}
+
+// Durable failure evidence passed to a continuation prompt; no dispatch authority.
+message RepeatedFailureGuidance {
+  option (buf.validate.message).cel = {id: "RepeatedFailureGuidance.streak", message: "consecutive_failures: exceeds preceding submissions", expression: "size(this.consecutive_failures) < size(this.cursor.ordinal) || (size(this.consecutive_failures) == size(this.cursor.ordinal) && this.consecutive_failures <= this.cursor.ordinal)"};
+  option (buf.validate.message).cel = {id: "RepeatedFailureGuidance.traceback", message: "traceback_signature: required for repeated traceback", expression: "this.reason != 1 || has(this.traceback_signature)"};
+  option (buf.validate.message).cel = {id: "RepeatedFailureGuidance.benchmark", message: "failed_benchmark: required for repeated measurement", expression: "this.reason != 2 || has(this.failed_benchmark)"};
+  AttemptTerminalReason reason = 1 [(buf.validate.field).enum = {defined_only: true, in: [1, 2]}];
+  string consecutive_failures = 2 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field) = {integer: true, explicit: true}];
+  string limit = 3 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field) = {integer: true, explicit: true}];
+  EvaluationHistoryCursor cursor = 4 [(buf.validate.field).required = true];
+  optional string traceback_signature = 5 [(buf.validate.field).string.min_len = 1];
+  BenchmarkFailure failed_benchmark = 6;
+}

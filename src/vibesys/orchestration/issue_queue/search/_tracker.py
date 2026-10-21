@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from vibesys.orchestration.issue_queue.search._config import IssueQueueConfig
 from vibesys.orchestration.issue_queue.search._values import Failure, FailureKind, JobEndedError
 from vibesys.orchestration.issue_queue.search._writes import Writes
+from vs_core.api import CoreValue
 from vs_core.api.search import Again, Failed, Flow, GaveUp, OperationRequest, RetryPolicy, Tries
 from vs_issue_tracker.api import (
     AppliedChanges,
@@ -30,11 +31,11 @@ def _unavailable(doing: str, detail: str) -> Failure:
 
 async def perform(
     ctx: Flow, config: IssueQueueConfig, request: OperationRequest, doing: str
-) -> BaseModel | Failure:
+) -> BaseModel | CoreValue | Failure:
     """The owner's outcome for ``request``, sent again while its effect stays unknown."""
     seconds = ctx.task.terms.operation_seconds
 
-    async def attempt(_tries: Tries[str]) -> BaseModel | Again[str]:
+    async def attempt(_tries: Tries[str]) -> BaseModel | CoreValue | Again[str]:
         outcome = await ctx.owners.perform(request, within=seconds)
         return Again(reason=outcome.reason.value) if isinstance(outcome, Failed) else outcome
 
@@ -81,7 +82,7 @@ async def write(ctx: Flow, config: IssueQueueConfig, writes: Writes, doing: str)
     return outcome
 
 
-def _status(outcome: BaseModel) -> str:
+def _status(outcome: BaseModel | CoreValue) -> str:
     if isinstance(outcome, BoardSnapshot | AppliedChanges):
         return f"{outcome.status}: {outcome.detail}" if outcome.detail else outcome.status
     return f"unexpected outcome {type(outcome).__name__}"

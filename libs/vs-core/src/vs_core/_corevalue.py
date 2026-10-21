@@ -11,7 +11,7 @@ from dataclasses import Field as DataclassField
 from dataclasses import fields, replace
 from functools import cache
 from types import GenericAlias, MappingProxyType
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Self, get_args
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, get_args
 
 from pydantic import ConfigDict, Field, GetCoreSchemaHandler, TypeAdapter
 from pydantic.dataclasses import dataclass, is_pydantic_dataclass, rebuild_dataclass
@@ -70,7 +70,7 @@ class CoreValue:
         mode: Literal["python", "json"] = "python",
         exclude: set[str] | None = None,
         round_trip: bool = False,
-    ) -> dict[str, object]:
+    ) -> dict[str, Any]:
         return adapter(type(self)).dump_python(
             self, mode=mode, exclude=exclude, round_trip=round_trip
         )
@@ -79,8 +79,8 @@ class CoreValue:
         return adapter(type(self)).dump_json(self).decode()
 
     @classmethod
-    def model_validate(cls, value: object) -> Self:
-        return adapter(cls).validate_python(value)
+    def model_validate(cls, value: object, *, strict: bool | None = None) -> Self:
+        return adapter(cls).validate_python(value, strict=strict)
 
     @classmethod
     def model_validate_json(cls, value: str | bytes) -> Self:
@@ -226,3 +226,8 @@ def resolve_value(cls: type[CoreValue]) -> None:
         expected = "Pydantic dataclass"
         raise ValueTypeError(expected, cls.__name__)
     rebuild_dataclass(cls)
+
+
+def cel_integer(value: int) -> int:
+    """Preserve CEL's checked int64 conversion after a rule bounds a decimal ordinal."""
+    return bounded_integer(value, minimum=-(2**63), maximum=2**63 - 1)

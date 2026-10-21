@@ -12,7 +12,11 @@ from vs_core.api import TimestampValue
 from vs_proto.api import Timestamp, validate
 from vs_runtime._core_values.vibesys.core.v1.common_boundary import DECODERS as COMMON_DECODERS
 from vs_runtime._core_values.vibesys.core.v1.common_boundary import ENCODERS as COMMON_ENCODERS
+from vs_runtime._core_values.vibesys.core.v1.contracts_boundary import DECODERS as CONTRACT_DECODERS
+from vs_runtime._core_values.vibesys.core.v1.contracts_boundary import ENCODERS as CONTRACT_ENCODERS
 from vs_runtime._core_values.vibesys.core.v1.control_boundary import DECODERS, ENCODERS
+from vs_runtime._core_values.vibesys.core.v1.history_boundary import DECODERS as HISTORY_DECODERS
+from vs_runtime._core_values.vibesys.core.v1.history_boundary import ENCODERS as HISTORY_ENCODERS
 from vs_runtime._core_values.vibesys.core.v1.leaves_boundary import DECODERS as LEAF_DECODERS
 from vs_runtime._core_values.vibesys.core.v1.leaves_boundary import ENCODERS as LEAF_ENCODERS
 from vs_runtime._corevalue_wkt import decode_timestamp, encode_timestamp
@@ -23,8 +27,22 @@ if TYPE_CHECKING:
     from protobuf import Message
 
 
-_ENCODERS = {**COMMON_ENCODERS, **ENCODERS, **LEAF_ENCODERS, TimestampValue: encode_timestamp}
-_DECODERS = {**COMMON_DECODERS, **DECODERS, **LEAF_DECODERS, Timestamp: decode_timestamp}
+_ENCODERS = {
+    **COMMON_ENCODERS,
+    **ENCODERS,
+    **LEAF_ENCODERS,
+    **HISTORY_ENCODERS,
+    **CONTRACT_ENCODERS,
+    TimestampValue: encode_timestamp,
+}
+_DECODERS = {
+    **COMMON_DECODERS,
+    **DECODERS,
+    **LEAF_DECODERS,
+    **HISTORY_DECODERS,
+    **CONTRACT_DECODERS,
+    Timestamp: decode_timestamp,
+}
 
 
 def to_proto(value: object) -> Message:

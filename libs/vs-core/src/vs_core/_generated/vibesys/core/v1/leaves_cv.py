@@ -5,7 +5,7 @@ from enum import StrEnum
 from functools import partial
 from typing import Annotated, ClassVar, Literal, final
 
-from pydantic import AfterValidator, ConfigDict, Field
+from pydantic import AfterValidator, ConfigDict, Field, field_serializer
 from pydantic.dataclasses import dataclass
 
 from vs_core._corevalue import (
@@ -13,6 +13,7 @@ from vs_core._corevalue import (
     FrozenMap,
     TimestampValue,
     bounded_integer,
+    cel_integer,
     omit_unset,
     resolve_value,
 )
@@ -186,7 +187,7 @@ class ScopeReopenNormalization(CoreValue):
             len(set(p.root for p in self.resolved_cancelled_jobs))
             == len(self.resolved_cancelled_jobs)
         ):
-            raise ValueError("duplicate resource ID")
+            raise ValueError("resolved_cancelled_jobs: duplicate resource ID")
 
     __hash__ = CoreValue.cached_hash
 
@@ -242,7 +243,7 @@ class ChildManifest(CoreValue):
     def __post_init__(self) -> None:
         """Enforce the proto message rules at construction as well as decode."""
         if not (len(set(p.root for p in self.members)) == len(self.members)):
-            raise ValueError("duplicate resource ID")
+            raise ValueError("members: duplicate resource ID")
 
     __hash__ = CoreValue.cached_hash
 
@@ -340,7 +341,10 @@ class ChargeReceipt(CoreValue):
         """Enforce the proto message rules at construction as well as decode."""
         if not (
             len(str(self.refunded)) < len(str(self.charged))
-            or (len(str(self.refunded)) == len(str(self.charged)) and self.refunded <= self.charged)
+            or (
+                len(str(self.refunded)) == len(str(self.charged))
+                and str(self.refunded) <= str(self.charged)
+            )
         ):
             raise ValueError("refunded exceeds charged amount")
         if not (
@@ -348,7 +352,7 @@ class ChargeReceipt(CoreValue):
         ):
             raise ValueError("TURN charges never refund")
         if not (len(set(p.root for p in self.refund_sources)) == len(self.refund_sources)):
-            raise ValueError("duplicate refund authority")
+            raise ValueError("refund_sources: duplicate refund authority")
 
     __hash__ = CoreValue.cached_hash
 
@@ -729,7 +733,7 @@ class TimedOut(CoreValue):
         if not (all((j.at <= self.reached_at) for j in self.unfinished)):
             raise ValueError("job bound follows reached_at")
         if not (len(set(p.resource_id.root for p in self.unfinished)) == len(self.unfinished)):
-            raise ValueError("duplicate resource ID")
+            raise ValueError("unfinished: duplicate resource ID")
 
     __hash__ = CoreValue.cached_hash
 
@@ -776,11 +780,39 @@ class WaitOn(CoreValue):
             all(
                 (
                     len(
-                        [
+                        tuple(
                             p
                             for p in self.subjects
-                            if (p.kind == s.kind and p.identity == s.identity)
-                        ]
+                            if (
+                                {
+                                    "session": 1,
+                                    "recovery-check": 2,
+                                    "owned-job": 3,
+                                    "release-dependency": 4,
+                                    "yield-publication": 5,
+                                    "interrupt": 6,
+                                    "refund": 7,
+                                    "dispatch": 8,
+                                    "retry": 9,
+                                    "turn-acquisition": 10,
+                                    "blocked-record": 11,
+                                }.get(p.kind, 0)
+                                == {
+                                    "session": 1,
+                                    "recovery-check": 2,
+                                    "owned-job": 3,
+                                    "release-dependency": 4,
+                                    "yield-publication": 5,
+                                    "interrupt": 6,
+                                    "refund": 7,
+                                    "dispatch": 8,
+                                    "retry": 9,
+                                    "turn-acquisition": 10,
+                                    "blocked-record": 11,
+                                }.get(s.kind, 0)
+                                and p.identity == s.identity
+                            )
+                        )
                     )
                     == 1
                 )

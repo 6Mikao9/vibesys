@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import OperationDescriptor, OperationRequest, SearchDeclaration
+    from vs_core.api import CoreValue, OperationDescriptor, OperationRequest, SearchDeclaration
     from vs_runtime._core_requests import ExecutionContext
 
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 class Applied:
     """The owner proves the effect landed and supplies the outcome it produced."""
 
-    outcome: BaseModel | Mapping[str, object]
+    outcome: BaseModel | CoreValue | Mapping[str, object]
 
 
 @dataclass(frozen=True)
@@ -70,7 +70,7 @@ class OperationOwner(Protocol):
 
     async def execute(
         self, request: OperationRequest, context: ExecutionContext
-    ) -> BaseModel | Mapping[str, object]: ...
+    ) -> BaseModel | CoreValue | Mapping[str, object]: ...
 
     async def inspect(self, request: OperationRequest, context: ExecutionContext) -> Inspection: ...
 

@@ -105,7 +105,7 @@ message DependencyRef {
 // and resolved_cancelled_jobs must equal the continuation cancellation set.
 // A newer park authority invalidates older reopen acknowledgements.
 message ScopeReopenNormalization {
-  option (buf.validate.message).cel = {id: "ScopeReopenNormalization.resolved_cancelled_jobs", expression: "this.resolved_cancelled_jobs.map(x, x.root).unique()", message: "duplicate resource ID"};
+  option (buf.validate.message).cel = {id: "ScopeReopenNormalization.resolved_cancelled_jobs", expression: "this.resolved_cancelled_jobs.map(x, x.root).unique()", message: "resolved_cancelled_jobs: duplicate resource ID"};
   string kind = 1 [(buf.validate.field).string = {const: "scope_reopen"}, (core_field) = {default_json: "\"scope_reopen\""}];
   AttemptRef attempt = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
   ContinuationId continuation_id = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
@@ -133,7 +133,7 @@ message TaskObjective {
 // may then be empty). Core requires every member to be owned and released
 // before it accepts the release as complete.
 message ChildManifest {
-  option (buf.validate.message).cel = {id: "ChildManifest.members", expression: "this.members.map(x, x.root).unique()", message: "duplicate resource ID"};
+  option (buf.validate.message).cel = {id: "ChildManifest.members", expression: "this.members.map(x, x.root).unique()", message: "members: duplicate resource ID"};
   repeated ResourceId members = 1;
   ChildManifestBasis basis = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
 }
@@ -182,7 +182,7 @@ message Observation {
 message ChargeReceipt {
   option (buf.validate.message).cel = {id: "ChargeReceipt.refunded", expression: "size(this.refunded) < size(this.charged) || (size(this.refunded) == size(this.charged) && this.refunded <= this.charged)", message: "refunded exceeds charged amount"};
   option (buf.validate.message).cel = {id: "ChargeReceipt.turn", expression: "this.kind != 3 || this.refunded == \"0\"", message: "TURN charges never refund"};
-  option (buf.validate.message).cel = {id: "ChargeReceipt.sources", expression: "this.refund_sources.map(x, x.root).unique()", message: "duplicate refund authority"};
+  option (buf.validate.message).cel = {id: "ChargeReceipt.sources", expression: "this.refund_sources.map(x, x.root).unique()", message: "refund_sources: duplicate refund authority"};
   ChargeId charge_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
   ChargeKind kind = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
   InvocationId invocation_id = 3;
@@ -378,7 +378,7 @@ message JobTimeout {
 message TimedOut {
   option (buf.validate.message).cel = {id: "TimedOut.deadline", expression: "this.reached_at >= this.deadline_at", message: "reached_at precedes deadline_at"};
   option (buf.validate.message).cel = {id: "TimedOut.bounds", expression: "this.unfinished.all(j, j.at <= this.reached_at)", message: "job bound follows reached_at"};
-  option (buf.validate.message).cel = {id: "TimedOut.ids", expression: "this.unfinished.map(j, j.resource_id.root).unique()", message: "duplicate resource ID"};
+  option (buf.validate.message).cel = {id: "TimedOut.ids", expression: "this.unfinished.map(j, j.resource_id.root).unique()", message: "unfinished: duplicate resource ID"};
   string kind = 1 [(buf.validate.field).string = {const: "timed_out"}, (core_field) = {default_json: "\"timed_out\""}];
   double deadline_at = 2 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
   double reached_at = 3 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];

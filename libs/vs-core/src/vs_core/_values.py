@@ -51,6 +51,7 @@ def validate_immutable_schema(model: type[BaseModel | CoreValue]) -> None:
 def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[type]) -> None:
     if isinstance(annotation, TypeAliasType):
         annotation = annotation.__value__
+    annotation = type(None) if annotation is None else annotation
     origin = get_origin(annotation)
     arguments = get_args(annotation)
     if origin is Annotated:

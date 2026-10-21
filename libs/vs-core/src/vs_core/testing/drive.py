@@ -104,6 +104,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_core._corevalue import CoreValue
     from vs_core.api import EvaluationTerminalFacts, RequestId, SchemaRef
     from vs_core.types.evaluation import Continuation, EvidenceRef
 
@@ -114,7 +115,7 @@ class Succeeded:
 
     revision: RevisionRef | None = None
     resource_id: ResourceId | None = None
-    outcome: BaseModel | None = None
+    outcome: BaseModel | CoreValue | None = None
     output_json: str | None = None
     evidence: tuple[EvidenceRef, ...] = ()
     facts: EvaluationTerminalFacts | None = None

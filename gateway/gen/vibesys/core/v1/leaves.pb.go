@@ -3493,25 +3493,25 @@ const file_vibesys_core_v1_leaves_proto_rawDesc = "" +
 	"\vdecision_id\x18\x01 \x01(\v2\x1b.vibesys.core.v1.DecisionIdR\n" +
 	"decisionId\x129\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\v2\x1a.vibesys.core.v1.RequestIdR\trequestId\"\xaa\x04\n" +
+	"request_id\x18\x02 \x01(\v2\x1a.vibesys.core.v1.RequestIdR\trequestId\"\xc4\x04\n" +
 	"\x18ScopeReopenNormalization\x12;\n" +
 	"\x04kind\x18\x01 \x01(\tB'\xbaH\x10r\x0e\n" +
 	"\fscope_reopen\xca\xf3\x18\x10*\x0e\"scope_reopen\"R\x04kind\x12C\n" +
 	"\aattempt\x18\x02 \x01(\v2\x1b.vibesys.core.v1.AttemptRefB\f\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\b\x01R\aattempt\x12V\n" +
 	"\x0fcontinuation_id\x18\x03 \x01(\v2\x1f.vibesys.core.v1.ContinuationIdB\f\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\b\x01R\x0econtinuationId\x12O\n" +
 	"\x0epark_authority\x18\x04 \x01(\v2\x1a.vibesys.core.v1.RequestIdB\f\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\b\x01R\rparkAuthority\x12[\n" +
-	"\x17resolved_cancelled_jobs\x18\x05 \x03(\v2\x1b.vibesys.core.v1.ResourceIdB\x06\xca\xf3\x18\x02\b\x01R\x15resolvedCancelledJobs:\x85\x01\xbaH\x81\x01\x1a\x7f\n" +
-	"0ScopeReopenNormalization.resolved_cancelled_jobs\x12\x15duplicate resource ID\x1a4this.resolved_cancelled_jobs.map(x, x.root).unique()\"n\n" +
+	"\x17resolved_cancelled_jobs\x18\x05 \x03(\v2\x1b.vibesys.core.v1.ResourceIdB\x06\xca\xf3\x18\x02\b\x01R\x15resolvedCancelledJobs:\x9f\x01\xbaH\x9b\x01\x1a\x98\x01\n" +
+	"0ScopeReopenNormalization.resolved_cancelled_jobs\x12.resolved_cancelled_jobs: duplicate resource ID\x1a4this.resolved_cancelled_jobs.map(x, x.root).unique()\"n\n" +
 	"\tTaskStage\x12\"\n" +
 	"\bstage_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\astageId\x12=\n" +
 	"\x11execution_seconds\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x10executionSeconds\"\x85\x01\n" +
 	"\rTaskObjective\x12\x1b\n" +
 	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12W\n" +
-	"\tdirection\x18\x02 \x01(\x0e2'.vibesys.core.v1.TaskObjectiveDirectionB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\tdirection\"\xee\x01\n" +
+	"\tdirection\x18\x02 \x01(\x0e2'.vibesys.core.v1.TaskObjectiveDirectionB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\tdirection\"\xf7\x01\n" +
 	"\rChildManifest\x125\n" +
 	"\amembers\x18\x01 \x03(\v2\x1b.vibesys.core.v1.ResourceIdR\amembers\x12K\n" +
-	"\x05basis\x18\x02 \x01(\x0e2#.vibesys.core.v1.ChildManifestBasisB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\x05basis:Y\xbaHV\x1aT\n" +
-	"\x15ChildManifest.members\x12\x15duplicate resource ID\x1a$this.members.map(x, x.root).unique()\"\xa2\n" +
+	"\x05basis\x18\x02 \x01(\x0e2#.vibesys.core.v1.ChildManifestBasisB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\x05basis:b\xbaH_\x1a]\n" +
+	"\x15ChildManifest.members\x12\x1emembers: duplicate resource ID\x1a$this.members.map(x, x.root).unique()\"\xa2\n" +
 	"\n" +
 	"\vObservation\x12A\n" +
 	"\bevent_id\x18\x01 \x01(\v2\x18.vibesys.core.v1.EventIdB\f\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\b\x01R\aeventId\x12G\n" +
@@ -3539,7 +3539,7 @@ const file_vibesys_core_v1_leaves_proto_rawDesc = "" +
 	"diagnostic:\xbe\x02\xbaH\x8d\x02\x1av\n" +
 	"\x14Observation.manifest\x12)child_manifest requires children_complete\x1a3!has(this.child_manifest) || this.children_complete\x1a\x92\x01\n" +
 	"\x14Observation.coverage\x12%child_manifest omits a reported child\x1aS!has(this.child_manifest) || this.children.all(c, c in this.child_manifest.members)\xc2\xf3\x18)\x1a'vs_core._leaf_behavior.ObservationFactsB\x11\n" +
-	"\x0f_measured_input\"\x9e\a\n" +
+	"\x0f_measured_input\"\xae\a\n" +
 	"\rChargeReceipt\x12D\n" +
 	"\tcharge_id\x18\x01 \x01(\v2\x19.vibesys.core.v1.ChargeIdB\f\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\b\x01R\bchargeId\x12A\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1b.vibesys.core.v1.ChargeKindB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\x04kind\x12B\n" +
@@ -3548,10 +3548,10 @@ const file_vibesys_core_v1_leaves_proto_rawDesc = "" +
 	"\acharged\x18\x05 \x01(\tB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\b\x01\x10\x01R\acharged\x12=\n" +
 	"\brefunded\x18\x06 \x01(\tB!\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x05\x10\x01*\x010R\brefunded\x12A\n" +
 	"\x0erefund_sources\x18\a \x03(\v2\x1a.vibesys.core.v1.RequestIdR\rrefundSources\x12G\n" +
-	"\x10historical_proof\x18\b \x01(\v2\x1c.vibesys.core.v1.ArtifactRefR\x0fhistoricalProof:\xf5\x02\xbaH\xf1\x02\x1a\xb3\x01\n" +
+	"\x10historical_proof\x18\b \x01(\v2\x1c.vibesys.core.v1.ArtifactRefR\x0fhistoricalProof:\x85\x03\xbaH\x81\x03\x1a\xb3\x01\n" +
 	"\x16ChargeReceipt.refunded\x12\x1frefunded exceeds charged amount\x1axsize(this.refunded) < size(this.charged) || (size(this.refunded) == size(this.charged) && this.refunded <= this.charged)\x1aW\n" +
-	"\x12ChargeReceipt.turn\x12\x19TURN charges never refund\x1a&this.kind != 3 || this.refunded == \"0\"\x1a`\n" +
-	"\x15ChargeReceipt.sources\x12\x1aduplicate refund authority\x1a+this.refund_sources.map(x, x.root).unique()\"\x83\x01\n" +
+	"\x12ChargeReceipt.turn\x12\x19TURN charges never refund\x1a&this.kind != 3 || this.refunded == \"0\"\x1ap\n" +
+	"\x15ChargeReceipt.sources\x12*refund_sources: duplicate refund authority\x1a+this.refund_sources.map(x, x.root).unique()\"\x83\x01\n" +
 	"\tHostFence\x12>\n" +
 	"\ahost_id\x18\x01 \x01(\v2\x17.vibesys.core.v1.HostIdB\f\xbaH\x03\xc8\x01\x01\xca\xf3\x18\x02\b\x01R\x06hostId\x126\n" +
 	"\x05epoch\x18\x02 \x01(\tB \xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x04\b\x01\x10\x01R\x05epoch\"K\n" +
@@ -3662,7 +3662,7 @@ const file_vibesys_core_v1_leaves_proto_rawDesc = "" +
 	"resourceId\x128\n" +
 	"\bprogress\x18\x02 \x01(\v2\x1c.vibesys.core.v1.JobProgressR\bprogress\x12:\n" +
 	"\x02by\x18\x03 \x01(\x0e2\x18.vibesys.core.v1.WaitEndB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\x02by\x12&\n" +
-	"\x02at\x18\x04 \x01(\x01B\x16\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xca\xf3\x18\x02\b\x01R\x02at\"\xdb\x04\n" +
+	"\x02at\x18\x04 \x01(\x01B\x16\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xca\xf3\x18\x02\b\x01R\x02at\"\xe7\x04\n" +
 	"\bTimedOut\x125\n" +
 	"\x04kind\x18\x01 \x01(\tB!\xbaH\rr\v\n" +
 	"\ttimed_out\xca\xf3\x18\r*\v\"timed_out\"R\x04kind\x127\n" +
@@ -3673,10 +3673,10 @@ const file_vibesys_core_v1_leaves_proto_rawDesc = "" +
 	"\x02by\x18\x04 \x01(\x0e2\x18.vibesys.core.v1.WaitEndB\x17\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\t*\a\"limit\"R\x02by\x12E\n" +
 	"\n" +
 	"unfinished\x18\x05 \x03(\v2\x1b.vibesys.core.v1.JobTimeoutB\b\xbaH\x05\x92\x01\x02\b\x01R\n" +
-	"unfinished:\x9d\x02\xbaH\x99\x02\x1aY\n" +
+	"unfinished:\xa9\x02\xbaH\xa5\x02\x1aY\n" +
 	"\x11TimedOut.deadline\x12\x1freached_at precedes deadline_at\x1a#this.reached_at >= this.deadline_at\x1a`\n" +
-	"\x0fTimedOut.bounds\x12\x1cjob bound follows reached_at\x1a/this.unfinished.all(j, j.at <= this.reached_at)\x1aZ\n" +
-	"\fTimedOut.ids\x12\x15duplicate resource ID\x1a3this.unfinished.map(j, j.resource_id.root).unique()\"r\n" +
+	"\x0fTimedOut.bounds\x12\x1cjob bound follows reached_at\x1a/this.unfinished.all(j, j.at <= this.reached_at)\x1af\n" +
+	"\fTimedOut.ids\x12!unfinished: duplicate resource ID\x1a3this.unfinished.map(j, j.resource_id.root).unique()\"r\n" +
 	"\vWaitSubject\x12?\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x19.vibesys.core.v1.WaitKindB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\x04kind\x12\"\n" +
 	"\bidentity\x18\x02 \x01(\tB\x06\xca\xf3\x18\x02\b\x01R\bidentity\"\x90\x04\n" +

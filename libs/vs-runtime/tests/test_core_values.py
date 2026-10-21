@@ -210,11 +210,16 @@ def test_nominal_identity_domains_cannot_be_substituted(
 @cache
 def _leaf_seeds() -> dict[str, object]:
     path = Path(__file__).parent / "fixtures" / "core-values" / "leaf-seeds.json"
-    return json.loads(path.read_text())
+    return {
+        **json.loads(path.read_text()),
+        **json.loads(path.with_name("history-seeds.json").read_text()),
+        **json.loads(path.with_name("contract-seeds.json").read_text()),
+    }
 
 
-def test_shared_leaf_differential_fixtures_preserve_old_acceptance_and_json() -> None:
-    path = Path(__file__).parent / "fixtures" / "core-values" / "leaves.json"
+@pytest.mark.parametrize("fixture", ["leaves", "history", "contracts"])
+def test_shared_leaf_differential_fixtures_preserve_old_acceptance_and_json(fixture: str) -> None:
+    path = Path(__file__).parent / "fixtures" / "core-values" / f"{fixture}.json"
     for case in json.loads(path.read_text()):
         cls = getattr(core, case["type"])
         if case["accepted"]:
@@ -278,3 +283,33 @@ def test_wait_dependencies_are_nonempty_and_unique_in_both_representations(
         )
         with pytest.raises(ProtoValidationError):
             from_proto(message)
+
+
+@given(
+    scalar=st.none()
+    | st.booleans()
+    | st.integers()
+    | st.text(max_size=40)
+    | st.floats(allow_nan=False, allow_infinity=False),
+)
+def test_scalar_union_members_preserve_exact_python_domains(scalar: object) -> None:
+    value = core.PureOption.model_validate({"key": "option", "value": scalar})
+    restored = from_proto(to_proto(value))
+    assert restored == value
+    assert isinstance(restored, core.PureOption)
+    assert type(restored.value) is type(value.value)
+    assert TypeAdapter(core.PureOption).validate_json(value.model_dump_json()) == value
+
+
+@given(
+    abilities=st.lists(
+        st.sampled_from(["park", "interrupt", "steer", "suspend", "profile-capture"])
+    )
+)
+def test_generated_set_values_have_canonical_json_and_protobuf(abilities: list[str]) -> None:
+    left = core.Capabilities.model_validate({"lifecycle": abilities}, strict=False)
+    right = core.Capabilities.model_validate({"lifecycle": list(reversed(abilities))}, strict=False)
+    assert left == right
+    assert left.model_dump_json() == right.model_dump_json()
+    assert to_proto(left).to_binary() == to_proto(right).to_binary()
+    assert from_proto(to_proto(left)) == left

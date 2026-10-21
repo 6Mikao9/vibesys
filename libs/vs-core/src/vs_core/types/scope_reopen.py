@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import ClassVar, Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import model_validator
+
+from vs_core._generated.vibesys.core.v1.contracts_cv import ScopedAdmissionReopenOutcome
 
 from .common import (
     AttemptRef,
@@ -12,23 +14,9 @@ from .common import (
     LifecycleClass,
     RequestId,
     ResourceId,
-    Scope,
     ScopeReopenNormalization,
-    Value,
 )
 from .strategy import OperationRequest
-
-
-class ScopedAdmissionReopenOutcome(Value):
-    """External admission observation, distinct from cleanup and resume authority.
-
-    Only reopened proves positive admission. closed and unknown do not authorize
-    a successor invocation; unknown retains the new capacity episode and fences.
-    The enclosing observation supplies exact request, scope, generation and episode.
-    """
-
-    scope: Scope
-    admission: Literal["reopened", "closed", "unknown"]
 
 
 class ScopedAdmissionReopen(OperationRequest):
@@ -43,7 +31,7 @@ class ScopedAdmissionReopen(OperationRequest):
 
     kind: Literal["evaluation.scope.reopen"] = "evaluation.scope.reopen"
     lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
-    outcome_model: ClassVar[type[BaseModel]] = ScopedAdmissionReopenOutcome
+    outcome_model: ClassVar[type[ScopedAdmissionReopenOutcome]] = ScopedAdmissionReopenOutcome
 
     attempt: AttemptRef
     continuation_id: ContinuationId
@@ -60,3 +48,6 @@ class ScopedAdmissionReopen(OperationRequest):
             resolved_cancelled_jobs=self.resolved_cancelled_jobs,
         )
         return self
+
+
+__all__ = ["ScopedAdmissionReopen", "ScopedAdmissionReopenOutcome"]

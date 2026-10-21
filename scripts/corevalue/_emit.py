@@ -5,6 +5,7 @@ from __future__ import annotations
 from inspect import cleandoc
 from typing import TYPE_CHECKING
 
+from protobuf import DescFieldValueScalar
 from protobuf.plugin import get_comments
 
 from scripts.corevalue._cel import cel
@@ -15,6 +16,7 @@ from scripts.corevalue._schema import (
     Options,
     extension,
     field_shape,
+    is_null,
     is_union,
     members,
     name,
@@ -47,10 +49,10 @@ def value_file(file: DescFile, settings: Options | None = None) -> str:
         "",
         "from typing import Annotated, ClassVar, Literal, final",
         "from enum import StrEnum",
-        "from pydantic import AfterValidator, ConfigDict, Field",
+        "from pydantic import AfterValidator, ConfigDict, Field, field_serializer",
         "from functools import partial",
         "from pydantic.dataclasses import dataclass",
-        "from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue, bounded_integer, omit_unset, resolve_value",
+        "from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue, bounded_integer, omit_unset, resolve_value, cel_integer",
         *imports,
         "",
     ]
@@ -60,9 +62,15 @@ def value_file(file: DescFile, settings: Options | None = None) -> str:
         lines.extend(_enum(enum))
     lines.extend(_scalar_aliases(messages))
     for message in messages:
+        if is_null(message):
+            lines.extend([f"type {name(message)} = None", ""])
+            continue
         if is_union(message):
             opts = extension(message, options.ext_core_value)
-            union = " | ".join(type_of(f) for f in union_members(message))
+            union = " | ".join(
+                _annotation(f)[0] if isinstance(f.value, DescFieldValueScalar) else type_of(f)
+                for f in union_members(message)
+            )
             annotation = (
                 f"Annotated[{union}, Field(discriminator={opts.discriminator!r})]"
                 if opts.discriminator
@@ -80,9 +88,12 @@ def value_file(file: DescFile, settings: Options | None = None) -> str:
             for child in messages
         ):
             lines.append("@final")
+        narrowing = (
+            ", revalidate_instances='subclass-instances'" if opts and opts.narrow_subclasses else ""
+        )
         lines.extend(
             [
-                "@dataclass(frozen=True, slots=True, kw_only=True, config=ConfigDict(extra='forbid', strict=True, validate_default=True))",
+                f"@dataclass(frozen=True, slots=True, kw_only=True, config=ConfigDict(extra='forbid', strict=True, validate_default=True{narrowing}))",
                 f"class {name(message)}({bases}):",
                 f"    {doc(message)!r}",
             ]
@@ -94,6 +105,7 @@ def value_file(file: DescFile, settings: Options | None = None) -> str:
         for f in fields:
             annotation, default = _annotation(f)
             lines.append(f"    {f.local_name}: {annotation}" + (f" = {default}" if default else ""))
+        lines.extend(_set_serializers(fields))
         checks = extension(message, rules.ext_message)
         if checks and checks.cel:
             lines.extend(
@@ -112,7 +124,11 @@ def value_file(file: DescFile, settings: Options | None = None) -> str:
                     ]
                 )
         lines.extend(["", "    __hash__ = CoreValue.cached_hash", ""])
-    lines.extend(f"resolve_value({name(message)})" for message in messages if not is_union(message))
+    lines.extend(
+        f"resolve_value({name(message)})"
+        for message in messages
+        if not is_union(message) and not is_null(message)
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -171,4 +187,22 @@ def _scalar_aliases(messages: list) -> list[str]:
             if config:
                 for alias in config.aliases:
                     lines.extend([f"type {alias} = {_annotation(field)[0]}", ""])
+    return lines
+
+
+def _set_serializers(fields: list) -> list[str]:
+    """Unordered value sets keep the same deterministic JSON spelling as the wire."""
+    lines = []
+    for field in fields:
+        config = extension(field, options.ext_core_field)
+        if config and config.frozen_set:
+            lines.extend(
+                [
+                    "",
+                    f"    @field_serializer({field.local_name!r}, when_used='json')",
+                    f"    def _sorted_{field.local_name}(self, value: frozenset) -> list:",
+                    '        """Canonical ordering for an immutable set."""',
+                    "        return sorted(value)",
+                ]
+            )
     return lines

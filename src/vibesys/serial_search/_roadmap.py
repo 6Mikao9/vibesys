@@ -34,6 +34,8 @@ from vs_issue_tracker.api import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vs_core.api import CoreValue
+
 ROADMAP = roadmap_operation_registrations()
 """The roadmap's operations, owned by the tracker library (read, put items)."""
 
@@ -49,10 +51,10 @@ class RoadmapUnavailable(Value):
 
 async def _perform(
     ctx: Flow, request: OperationRequest, doing: str
-) -> BaseModel | RoadmapUnavailable:
+) -> BaseModel | CoreValue | RoadmapUnavailable:
     seconds = ctx.task.terms.operation_seconds
 
-    async def attempt(_tries: Tries[str]) -> BaseModel | Again[str]:
+    async def attempt(_tries: Tries[str]) -> BaseModel | CoreValue | Again[str]:
         outcome = await ctx.owners.perform(request, within=seconds)
         return Again(reason=outcome.reason.value) if isinstance(outcome, Failed) else outcome
 
@@ -69,7 +71,7 @@ def _refused(outcome: RoadmapSnapshot | RoadmapItemsPut, doing: str) -> RoadmapU
     return RoadmapUnavailable(reason=f"{doing}: {detail}")
 
 
-def _unexpected(outcome: BaseModel, doing: str) -> RoadmapUnavailable:
+def _unexpected(outcome: BaseModel | CoreValue, doing: str) -> RoadmapUnavailable:
     return RoadmapUnavailable(reason=f"{doing}: unexpected outcome {type(outcome).__name__}")
 
 

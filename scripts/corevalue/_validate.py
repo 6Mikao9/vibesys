@@ -20,6 +20,7 @@ from scripts.corevalue._schema import (
     GenerationError,
     extension,
     field_shape,
+    is_null,
     is_union,
     name,
     options,
@@ -43,8 +44,8 @@ _RESERVED = frozenset(
 _SCALAR_RULES = {
     "string": {"const", "min_len", "max_len", "pattern"},
     "bytes": {"min_len", "max_len"},
-    "enum": {"defined_only", "not_in"},
-    "repeated": {"min_items", "max_items"},
+    "enum": {"defined_only", "not_in", "in"},
+    "repeated": {"min_items", "max_items", "items"},
 }
 _NUMERIC_RULES = {"gt", "gte", "lt", "lte", "finite"}
 
@@ -73,6 +74,8 @@ def validate_file(file: object) -> None:
 
 
 def _message(message: object) -> None:
+    if is_null(message) and (message.fields or extension(message, rules.ext_message)):
+        raise GenerationError(message.type_name, "null marker must be empty and have no rules")
     nested = [
         m for m in message.nested_messages if not (m.proto.options and m.proto.options.map_entry)
     ]
@@ -81,16 +84,15 @@ def _message(message: object) -> None:
             message.type_name, "nested declarations must be moved to a top-level message"
         )
     if is_union(message):
+        _union_domains(message)
         members = union_members(message)
         oneof = next(iter(message.oneofs))
         config = extension(oneof, rules.ext_oneof)
         if not config or not config.required:
             raise GenerationError(message.type_name, "a union wrapper must have a required oneof")
         for field in members:
-            if not isinstance(field.value, DescFieldValueMessage):
-                raise GenerationError(
-                    message.type_name, f"{field.name}: union members must be messages"
-                )
+            if not isinstance(field.value, DescFieldValueMessage | DescFieldValueScalar):
+                raise GenerationError(message.type_name, f"{field.name}: unsupported union member")
     elif any(not all(f.proto.proto3_optional for f in oneof.fields) for oneof in message.oneofs):
         raise GenerationError(message.type_name, "oneofs must use a closed union wrapper")
     for field in message.fields:
@@ -104,6 +106,9 @@ def _field(field: object) -> None:
         raise GenerationError(path, "field collides with a generated value method")
     for kind in _elements(field.value):
         _reference(kind, path, field.parent.file)
+    config = extension(field, options.ext_core_field)
+    if config and config.frozen_set and not isinstance(field.value, DescFieldValueList):
+        raise GenerationError(path, "immutable set requires a repeated field")
     rule = rule_of(field)
     if rule is None:
         return
@@ -111,6 +116,8 @@ def _field(field: object) -> None:
     if extra:
         raise GenerationError(path, f"unsupported field rules: {sorted(extra)}")
     if rule.type:
+        _enum_subset(field, rule.type)
+        _item_rule(field, rule.type)
         value = rule.type.value
         allowed = _SCALAR_RULES.get(rule.type.field, _NUMERIC_RULES)
         unknown = {f.name for f in value} - allowed
@@ -174,3 +181,71 @@ def _aliases(message: DescMessage, claimed: set[str]) -> None:
         if config:
             for alias in config.aliases:
                 _alias(field, alias, claimed)
+
+
+def _item_rule(field: object, typed: object) -> None:
+    """Repeated enum rules must agree with the generated closed element domain."""
+    if typed.field != "repeated" or typed.value.items is None:
+        return
+    item = typed.value.items
+    if (
+        not isinstance(field.value, DescFieldValueList)
+        or not isinstance(field.value.element, DescEnum)
+        or item.type is None
+        or item.type.field != "enum"
+        or {f.name for f in item} != {"enum"}
+        or {f.name for f in item.type.value} != {"defined_only", "not_in"}
+        or not item.type.value.defined_only
+        or item.type.value.not_in != [0]
+    ):
+        raise GenerationError(
+            field.parent.type_name, f"{field.name}: unsupported repeated item rules"
+        )
+
+
+def _union_domains(message: DescMessage) -> None:
+    """Exact runtime types must identify a unique oneof arm without guessing."""
+    config = extension(message, options.ext_core_value)
+    domains = set()
+    for field in union_members(message):
+        domain = _union_domain(field)
+        if domain in domains:
+            raise GenerationError(message.type_name, "union members have overlapping value domains")
+        if config.discriminator and not isinstance(field.value, DescFieldValueMessage):
+            raise GenerationError(
+                message.type_name, "a discriminated union requires message members"
+            )
+        domains.add(domain)
+
+
+def _union_domain(field: object) -> object:
+    value = field.value
+    if isinstance(value, DescFieldValueMessage):
+        if is_union(value.message):
+            raise GenerationError(
+                field.parent.type_name, "nested union wrappers require flattening"
+            )
+        return type(None) if is_null(value.message) else value.message.type_name
+    config = extension(field, options.ext_core_field)
+    if isinstance(value, DescFieldValueScalar):
+        if config and config.integer:
+            return int
+        return {
+            ScalarType.STRING: str,
+            ScalarType.BYTES: bytes,
+            ScalarType.BOOL: bool,
+            ScalarType.DOUBLE: float,
+            ScalarType.FLOAT: float,
+        }.get(value.scalar, int)
+    raise GenerationError(field.parent.type_name, f"{field.name}: unsupported union domain")
+
+
+def _enum_subset(field: object, typed: object) -> None:
+    """A selected enum domain must contain only represented nonzero members."""
+    if typed.field != "enum" or not typed.value.in_:
+        return
+    represented = {value.number for value in field.value.enum.values if value.number != 0}
+    if set(typed.value.in_) - represented:
+        raise GenerationError(
+            field.parent.type_name, f"{field.name}: enum subset contains unrepresented members"
+        )

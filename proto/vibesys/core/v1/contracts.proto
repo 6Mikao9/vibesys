@@ -1,0 +1,146 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/value_options.proto";
+import "vibesys/core/v1/vocabulary.proto";
+import "vibesys/core/v1/leaves.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+// An explicit null alternative in a required scalar union.
+message NullValue {
+  option (core_value).null = true;
+}
+
+// Preserve exact scalar domains, including arbitrary-precision signed integers.
+message PureOptionValue {
+  option (core_value).union = true;
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    string text = 1;
+    string integer = 2 [(buf.validate.field).string.pattern = "^(0|-?[1-9][0-9]*)$", (core_field).integer = true];
+    double real = 3 [(buf.validate.field).double.finite = true];
+    bool flag = 4;
+    NullValue null = 5;
+  }
+}
+
+message PureOption {
+  string key = 1 [(buf.validate.field).string.min_len = 1];
+  PureOptionValue value = 2 [(buf.validate.field).required = true];
+}
+
+// The schema and lifecycle identity of one registered operation.
+message OperationSchemaRef {
+  option (core_value).narrow_subclasses = true;
+  string kind = 1 [(buf.validate.field).string.min_len = 1];
+  SchemaRef request_schema = 2 [(buf.validate.field).required = true];
+  SchemaRef outcome_schema = 3 [(buf.validate.field).required = true];
+  LifecycleClass lifecycle = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+}
+
+message OperationDescriptor {
+  option (core_value).base = "OperationSchemaRef";
+  option (buf.validate.message).cel = {id: "OperationDescriptor.pool", message: "resource_pool: only owned jobs declare a pool, and every owned job requires one", expression: "(this.lifecycle == 3) == has(this.resource_pool)"};
+  option (buf.validate.message).cel = {id: "OperationDescriptor.revision", message: "revision_authority: revision mutations require idempotent writes", expression: "this.revision_authority == 1 || this.lifecycle == 2"};
+  option (buf.validate.message).cel = {id: "OperationDescriptor.reopen", message: "normalization: scope reopen requires inspectable non-revision idempotent write", expression: "this.normalization != 2 || (this.lifecycle == 2 && this.inspect && !has(this.resource_pool) && this.revision_authority == 1)"};
+  string kind = 1 [(buf.validate.field).string.min_len = 1];
+  SchemaRef request_schema = 2 [(buf.validate.field).required = true];
+  SchemaRef outcome_schema = 3 [(buf.validate.field).required = true];
+  LifecycleClass lifecycle = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  OperationNormalizationKind normalization = 5 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field).default_json = "\"none\""];
+  bool inspect = 6;
+  bool cancel = 7;
+  bool watch = 8;
+  PoolId resource_pool = 9;
+  RevisionAuthority revision_authority = 10 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field).default_json = "\"none\""];
+}
+
+message Capabilities {
+  repeated LifecycleCapability lifecycle = 1 [(core_field).frozen_set = true, (buf.validate.field).repeated.items.enum = {defined_only: true, not_in: 0}];
+  repeated OperationDescriptor operations = 2;
+}
+
+message TaskTerms {
+  option (core_value).mixin = "vs_core._leaf_behavior.TaskRequirements";
+  option (buf.validate.message).cel = {id: "TaskTerms.measured", message: "measured: names stages the task lacks", expression: "this.measured.all(m, this.stages.exists(s, s.stage_id == m))"};
+  option (buf.validate.message).cel = {id: "TaskTerms.accuracy", message: "measured: names stages the task lacks", expression: "!has(this.accuracy_stage) || this.stages.exists(s, s.stage_id == this.accuracy_stage)"};
+  option (buf.validate.message).cel = {id: "TaskTerms.benchmark", message: "measured: names stages the task lacks", expression: "!has(this.benchmark_stage) || this.stages.exists(s, s.stage_id == this.benchmark_stage)"};
+  ArtifactRef recipe = 1 [(buf.validate.field).required = true];
+  repeated TaskStage stages = 2 [(core_field).explicit = true];
+  repeated string measured = 3 [(core_field).explicit = true];
+  double queue_allowance = 4 [(buf.validate.field).double = {gte: 0, finite: true}];
+  optional string accuracy_stage = 5 [(buf.validate.field).string.min_len = 1];
+  optional string benchmark_stage = 6 [(buf.validate.field).string.min_len = 1];
+  repeated EvidenceKind accuracy_gated = 7 [(buf.validate.field).repeated.items.enum = {defined_only: true, not_in: 0}];
+  double operation_seconds = 8 [(buf.validate.field).double = {gt: 0, finite: true}];
+  repeated TaskObjective objectives = 9;
+  double relative_noise = 10 [(buf.validate.field).double = {gte: 0, lt: 1}, (core_field).default_json = "0.0"];
+  double base_staleness = 11 [(buf.validate.field).double = {gt: 0, finite: true}, (core_field).default_json = "21600.0"];
+  string runaway_evaluations = 12 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field) = {integer: true, default_json: "40"}];
+  repeated string profile_fields = 13;
+}
+
+message RunFacts {
+  string objective = 1 [(core_field).explicit = true];
+  repeated PureOption options = 2;
+  repeated PureOption constraints = 3;
+  RevisionRef baseline = 4 [(buf.validate.field).required = true];
+  string evaluator_digest = 5 [(core_field).explicit = true];
+  string workload_digest = 6 [(core_field).explicit = true];
+  string environment_digest = 7 [(core_field).explicit = true];
+  bool dedicated_measurement_resources = 8 [(core_field).omit_unset = true];
+  repeated ArtifactRef artifacts = 9;
+  TaskTerms task = 10;
+}
+
+enum ReleaseKind {
+  option (core_enum) = {literal: true, inline: true};
+  RELEASE_KIND_UNSPECIFIED = 0;
+  RELEASE_KIND_SESSION = 1;
+  RELEASE_KIND_JOB = 2;
+  RELEASE_KIND_WORKSPACE = 3;
+  RELEASE_KIND_OPERATION = 4;
+  RELEASE_KIND_REQUEST = 5;
+}
+
+message ReleaseIdentity {
+  option (core_value).union = true;
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    SessionId session = 1;
+    ResourceId resource = 2;
+    RequestId request = 3;
+    OperationId operation = 4;
+  }
+}
+
+message ReleaseDependency {
+  option (buf.validate.message).cel = {id: "ReleaseDependency.session", message: "identity: identity type mismatch", expression: "this.kind != 1 || has(this.identity.session)"};
+  option (buf.validate.message).cel = {id: "ReleaseDependency.job", message: "identity: identity type mismatch", expression: "this.kind != 2 || has(this.identity.resource)"};
+  option (buf.validate.message).cel = {id: "ReleaseDependency.workspace", message: "identity: identity type mismatch", expression: "this.kind != 3 || has(this.identity.request)"};
+  option (buf.validate.message).cel = {id: "ReleaseDependency.operation", message: "identity: identity type mismatch", expression: "this.kind != 4 || has(this.identity.operation)"};
+  option (buf.validate.message).cel = {id: "ReleaseDependency.request", message: "identity: identity type mismatch", expression: "this.kind != 5 || has(this.identity.request)"};
+  ReleaseKind kind = 1 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  ReleaseIdentity identity = 2 [(buf.validate.field).required = true];
+}
+
+message OperationWire {
+  OperationSchemaRef schema_ref = 1 [(buf.validate.field).required = true];
+  string payload_json = 2 [(core_field).explicit = true];
+}
+
+enum ScopedAdmissionReopenOutcomeAdmission {
+  option (core_enum) = {literal: true, inline: true};
+  SCOPED_ADMISSION_REOPEN_OUTCOME_ADMISSION_UNSPECIFIED = 0;
+  SCOPED_ADMISSION_REOPEN_OUTCOME_ADMISSION_REOPENED = 1;
+  SCOPED_ADMISSION_REOPEN_OUTCOME_ADMISSION_CLOSED = 2;
+  SCOPED_ADMISSION_REOPEN_OUTCOME_ADMISSION_UNKNOWN = 3;
+}
+
+message ScopedAdmissionReopenOutcome {
+  Scope scope = 1 [(buf.validate.field).required = true];
+  ScopedAdmissionReopenOutcomeAdmission admission = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+}

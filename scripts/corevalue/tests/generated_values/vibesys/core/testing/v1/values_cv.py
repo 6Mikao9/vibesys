@@ -6,10 +6,10 @@ from __future__ import annotations
 
 from typing import Annotated, ClassVar, Literal, final
 from enum import StrEnum
-from pydantic import AfterValidator, ConfigDict, Field
+from pydantic import AfterValidator, ConfigDict, Field, field_serializer
 from functools import partial
 from pydantic.dataclasses import dataclass
-from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue, bounded_integer, omit_unset, resolve_value
+from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue, bounded_integer, omit_unset, resolve_value, cel_integer
 
 
 @final

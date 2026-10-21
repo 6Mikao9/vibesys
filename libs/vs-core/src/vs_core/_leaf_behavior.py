@@ -67,3 +67,16 @@ class WaitDuration(CoreValue):
 class _ChildMembers(Protocol):
     @property
     def members(self) -> tuple: ...
+
+
+class TaskRequirements:
+    """Derive adoption requirements from declared task stages."""
+
+    __slots__ = ()
+    accuracy_stage: str | None
+    measured: tuple[str, ...]
+
+    @property
+    def requires_accuracy_proof(self) -> bool:
+        """Only a measured accuracy gate requires an accepted proof."""
+        return self.accuracy_stage is not None and self.accuracy_stage in self.measured

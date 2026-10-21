@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
-from pydantic import ConfigDict, Field, model_validator
-
+from vs_core._generated.vibesys.core.v1.history_cv import (
+    AttemptEvaluationHistory,
+    AttemptEvaluationRecord,
+    EvaluationTerminalFacts,
+    RepeatedFailureGuidance,
+)
 from vs_core._generated.vibesys.core.v1.leaves_cv import (
     BenchmarkFailure,
     EvaluationHistoryCursor,
@@ -16,182 +18,6 @@ from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
     EvaluationHistoryAvailability,
     EvaluationStageOutcome,
 )
-
-from .common import (
-    ContractValidationError,
-    Observation,
-    ObservationStatus,
-    RequestId,
-    Scope,
-    Value,
-)
-
-
-class EvaluationTerminalFacts(Value):
-    """Owner-normalized scientific facts from one conclusive terminal observation.
-
-    Executors supply values, not history ordinals or coverage authority. Records A
-    forwards these unchanged to Measurements A, which validates canonical source,
-    scope and stage identities before constructing the durable history record.
-    Absent facts on accepted execution mean history is unavailable, never empty.
-    """
-
-    # Fields declared with this class hold exactly this class (a subclass instance is rebuilt as
-    # one on validation), so one remembered JSON text per instance holds wherever it sits.
-    model_config = ConfigDict(revalidate_instances="subclass-instances")
-
-    stages: tuple[EvaluationStageResult, ...] = ()
-    traceback_signature: str | None = Field(default=None, min_length=1)
-    failed_benchmark: BenchmarkFailure | None = None
-    accuracy_passed: bool = False
-
-    @model_validator(mode="after")
-    def distinct_stages(self) -> EvaluationTerminalFacts:
-        """A stage has exactly one scientific result in its terminal payload."""
-        if len({stage.stage_id for stage in self.stages}) != len(self.stages):
-            raise ContractValidationError("stages", "duplicate stage ID")
-        return self
-
-    def validate_observation(self, observation: Observation) -> None:
-        """Scientific execution facts require accepted conclusive terminal source.
-
-        External observation carriers call this at their strict ingress boundary.
-        Positive nonacceptance preserves history accounting without this payload.
-        """
-        if (
-            not observation.accepted
-            or not observation.terminal
-            or observation.status in (ObservationStatus.PENDING, ObservationStatus.UNKNOWN)
-        ):
-            raise ContractValidationError(
-                "evaluation_result", "requires accepted conclusive terminal observation"
-            )
-
-
-class AttemptEvaluationRecord(EvaluationTerminalFacts):
-    """One ordered attempt submission with its conclusive terminal fact.
-
-    Measurement A appends once after validating canonical submission, scope,
-    stages and typed outcome. The observation is retained unchanged; a later
-    job update cannot rewrite traceback, partial benchmark or accuracy facts.
-    Accuracy success can reset a failure streak only when accuracy_passed is
-    positively true. Diagnostic text alone is never a traceback signature.
-    """
-
-    ordinal: int = Field(ge=1)
-    submission_id: RequestId
-    scope: Scope
-    terminal_observation: Observation
-
-    @model_validator(mode="after")
-    def terminal_receipt(self) -> AttemptEvaluationRecord:
-        """Require exact terminal source and unique stage identities."""
-        observation = self.terminal_observation
-        if observation.request_id != self.submission_id or observation.scope != self.scope:
-            raise ContractValidationError("terminal_observation", "submission/scope mismatch")
-        if not observation.terminal or observation.status in (
-            ObservationStatus.PENDING,
-            ObservationStatus.UNKNOWN,
-        ):
-            raise ContractValidationError(
-                "terminal_observation", "requires conclusive terminal fact"
-            )
-        if not observation.accepted and (
-            observation.status
-            not in (
-                ObservationStatus.FAILED,
-                ObservationStatus.REJECTED,
-                ObservationStatus.CANCELLED,
-            )
-            or self.stages
-            or self.traceback_signature is not None
-            or self.failed_benchmark is not None
-            or self.accuracy_passed
-        ):
-            raise ContractValidationError(
-                "terminal_observation", "nonacceptance cannot prove scientific execution facts"
-            )
-        return self
-
-
-class AttemptEvaluationHistory(Value):
-    """Ordered durable records plus explicit owner-issued coverage manifest.
-
-    Attempts A stores updates issued by Measurements A. COMPLETE requires every
-    prepared submission for the attempt through covered_submissions to have
-    exactly one record, in preparation order. The leaf checks this manifest
-    against canonical submission receipts; absence defaults to UNAVAILABLE,
-    including migration, and can never authorize another evaluation or resume.
-    """
-
-    availability: EvaluationHistoryAvailability = EvaluationHistoryAvailability.UNAVAILABLE
-    covered_submissions: tuple[RequestId, ...] = ()
-    records: tuple[AttemptEvaluationRecord, ...] = ()
-
-    @model_validator(mode="after")
-    def ordered_coverage(self) -> AttemptEvaluationHistory:
-        """Reject duplicates, holes and falsely complete submission coverage."""
-        ids = tuple(record.submission_id for record in self.records)
-        if len(set(ids)) != len(ids):
-            raise ContractValidationError("records", "duplicate submission ID")
-        ordinals = tuple(record.ordinal for record in self.records)
-        if ordinals != tuple(sorted(set(ordinals))):
-            raise ContractValidationError("records", "ordinals must be unique and increasing")
-        if len(set(self.covered_submissions)) != len(self.covered_submissions):
-            raise ContractValidationError("covered_submissions", "duplicate submission ID")
-        if any(
-            record.ordinal > len(self.covered_submissions)
-            or self.covered_submissions[record.ordinal - 1] != record.submission_id
-            for record in self.records
-        ):
-            raise ContractValidationError("records", "submission differs from coverage ordinal")
-        if self.availability == EvaluationHistoryAvailability.COMPLETE and (
-            ids != self.covered_submissions or ordinals != tuple(range(1, len(ids) + 1))
-        ):
-            raise ContractValidationError(
-                "covered_submissions", "complete history differs from records"
-            )
-        return self
-
-    @property
-    def cursor(self) -> EvaluationHistoryCursor:
-        """Project the last prepared identity without claiming terminal coverage."""
-        if not self.covered_submissions:
-            return EvaluationHistoryCursor()
-        return EvaluationHistoryCursor(
-            ordinal=len(self.covered_submissions), submission_id=self.covered_submissions[-1]
-        )
-
-
-class RepeatedFailureGuidance(Value):
-    """Typed facts for strategy templates; no prompt text or dispatch authority."""
-
-    reason: Literal[
-        AttemptTerminalReason.REPEATED_TRACEBACK, AttemptTerminalReason.REPEATED_MEASUREMENT
-    ]
-    consecutive_failures: int = Field(ge=1)
-    limit: int = Field(ge=1)
-    cursor: EvaluationHistoryCursor
-    traceback_signature: str | None = Field(default=None, min_length=1)
-    failed_benchmark: BenchmarkFailure | None = None
-
-    @model_validator(mode="after")
-    def reason_evidence(self) -> RepeatedFailureGuidance:
-        """Require the failure fact and enough recorded submissions for its streak."""
-        if self.consecutive_failures > self.cursor.ordinal:
-            raise ContractValidationError("consecutive_failures", "exceeds preceding submissions")
-        if (
-            self.reason == AttemptTerminalReason.REPEATED_TRACEBACK
-            and self.traceback_signature is None
-        ):
-            raise ContractValidationError("traceback_signature", "required for repeated traceback")
-        if (
-            self.reason == AttemptTerminalReason.REPEATED_MEASUREMENT
-            and self.failed_benchmark is None
-        ):
-            raise ContractValidationError("failed_benchmark", "required for repeated measurement")
-        return self
-
 
 __all__ = [
     "AttemptEvaluationHistory",

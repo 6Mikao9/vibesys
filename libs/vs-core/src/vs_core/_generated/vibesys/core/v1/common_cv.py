@@ -5,7 +5,7 @@ from enum import StrEnum
 from functools import partial
 from typing import Annotated, ClassVar, Literal, final
 
-from pydantic import AfterValidator, ConfigDict, Field
+from pydantic import AfterValidator, ConfigDict, Field, field_serializer
 from pydantic.dataclasses import dataclass
 
 from vs_core._corevalue import (
@@ -13,6 +13,7 @@ from vs_core._corevalue import (
     FrozenMap,
     TimestampValue,
     bounded_integer,
+    cel_integer,
     omit_unset,
     resolve_value,
 )

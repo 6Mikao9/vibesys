@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from protobuf import DescFile
 
 
-_ValueMessageOptionsFields: TypeAlias = Literal["union", "discriminator", "mixin", "base", "constants"]
+_ValueMessageOptionsFields: TypeAlias = Literal["union", "discriminator", "mixin", "base", "constants", "narrow_subclasses", "null"]
 
 class ValueMessageOptions(Message[_ValueMessageOptionsFields]):
     """
@@ -58,9 +58,21 @@ class ValueMessageOptions(Message[_ValueMessageOptionsFields]):
             ```proto
             repeated vibesys.core.v1.ValueRuleConstant constants = 5;
             ```
+        narrow_subclasses:
+            Rebuild a subclass as this base when a field promises the base representation.
+
+            ```proto
+            bool narrow_subclasses = 6;
+            ```
+        null:
+            An empty wire marker represented as Python None inside a scalar union.
+
+            ```proto
+            bool null = 7;
+            ```
     """
 
-    __slots__ = ("union", "discriminator", "mixin", "base", "constants")
+    __slots__ = ("union", "discriminator", "mixin", "base", "constants", "narrow_subclasses", "null")
 
     if TYPE_CHECKING:
 
@@ -72,6 +84,8 @@ class ValueMessageOptions(Message[_ValueMessageOptionsFields]):
             mixin: str = "",
             base: str = "",
             constants: list[ValueRuleConstant] | None = None,
+            narrow_subclasses: bool = False,
+            null: bool = False,
         ) -> None:
             pass
 
@@ -80,6 +94,8 @@ class ValueMessageOptions(Message[_ValueMessageOptionsFields]):
         mixin: str
         base: str
         constants: list[ValueRuleConstant]
+        narrow_subclasses: bool
+        null: bool
 
 _ValueRuleConstantFields: TypeAlias = Literal["name", "rule"]
 
@@ -115,7 +131,7 @@ class ValueRuleConstant(Message[_ValueRuleConstantFields]):
         name: str
         rule: str
 
-_ValueFieldOptionsFields: TypeAlias = Literal["explicit", "integer", "constant_name", "constant_rule", "default_json", "omit_unset", "aliases"]
+_ValueFieldOptionsFields: TypeAlias = Literal["explicit", "integer", "constant_name", "constant_rule", "default_json", "omit_unset", "aliases", "frozen_set"]
 
 class ValueFieldOptions(Message[_ValueFieldOptionsFields]):
     """
@@ -165,9 +181,15 @@ class ValueFieldOptions(Message[_ValueFieldOptionsFields]):
             ```proto
             repeated string aliases = 7;
             ```
+        frozen_set:
+            Immutable set semantics, including canonical JSON and wire ordering.
+
+            ```proto
+            bool frozen_set = 8;
+            ```
     """
 
-    __slots__ = ("explicit", "integer", "constant_name", "constant_rule", "default_json", "omit_unset", "aliases")
+    __slots__ = ("explicit", "integer", "constant_name", "constant_rule", "default_json", "omit_unset", "aliases", "frozen_set")
 
     if TYPE_CHECKING:
 
@@ -181,6 +203,7 @@ class ValueFieldOptions(Message[_ValueFieldOptionsFields]):
             default_json: str | None = None,
             omit_unset: bool = False,
             aliases: list[str] | None = None,
+            frozen_set: bool = False,
         ) -> None:
             pass
 
@@ -191,6 +214,7 @@ class ValueFieldOptions(Message[_ValueFieldOptionsFields]):
         default_json: str
         omit_unset: bool
         aliases: list[str]
+        frozen_set: bool
 
 _ValueEnumOptionsFields: TypeAlias = Literal["literal", "inline", "mixin"]
 
@@ -298,7 +322,7 @@ extend google.protobuf.EnumValueOptions { optional vibesys.core.v1.ValueEnumMemb
 
 
 _DESC = file_desc(
-    b'\n#vibesys/core/v1/value_options.proto\x12\x0fvibesys.core.v1\x1a google/protobuf/descriptor.proto"\xbd\x01\n\x13ValueMessageOptions\x12\x14\n\x05union\x18\x01 \x01(\x08R\x05union\x12$\n\rdiscriminator\x18\x02 \x01(\tR\rdiscriminator\x12\x14\n\x05mixin\x18\x03 \x01(\tR\x05mixin\x12\x12\n\x04base\x18\x04 \x01(\tR\x04base\x12@\n\tconstants\x18\x05 \x03(\x0b2".vibesys.core.v1.ValueRuleConstantR\tconstants";\n\x11ValueRuleConstant\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n\x04rule\x18\x02 \x01(\tR\x04rule"\x85\x02\n\x11ValueFieldOptions\x12\x1a\n\x08explicit\x18\x01 \x01(\x08R\x08explicit\x12\x18\n\x07integer\x18\x02 \x01(\x08R\x07integer\x12#\n\rconstant_name\x18\x03 \x01(\tR\x0cconstantName\x12#\n\rconstant_rule\x18\x04 \x01(\tR\x0cconstantRule\x12&\n\x0cdefault_json\x18\x05 \x01(\tH\x00R\x0bdefaultJson\x88\x01\x01\x12\x1d\n\nomit_unset\x18\x06 \x01(\x08R\tomitUnset\x12\x18\n\x07aliases\x18\x07 \x03(\tR\x07aliasesB\x0f\n\r_default_json"Z\n\x10ValueEnumOptions\x12\x18\n\x07literal\x18\x01 \x01(\x08R\x07literal\x12\x16\n\x06inline\x18\x02 \x01(\x08R\x06inline\x12\x14\n\x05mixin\x18\x03 \x01(\tR\x05mixin"4\n\x16ValueEnumMemberOptions\x12\x1a\n\x08spelling\x18\x01 \x01(\tR\x08spelling:f\n\ncore_value\x18\xb8\x8e\x03 \x01(\x0b2$.vibesys.core.v1.ValueMessageOptions\x12\x1f.google.protobuf.MessageOptionsR\tcoreValue:b\n\ncore_field\x18\xb9\x8e\x03 \x01(\x0b2".vibesys.core.v1.ValueFieldOptions\x12\x1d.google.protobuf.FieldOptionsR\tcoreField:^\n\tcore_enum\x18\xba\x8e\x03 \x01(\x0b2!.vibesys.core.v1.ValueEnumOptions\x12\x1c.google.protobuf.EnumOptionsR\x08coreEnum:m\n\x0bcore_member\x18\xbb\x8e\x03 \x01(\x0b2\'.vibesys.core.v1.ValueEnumMemberOptions\x12!.google.protobuf.EnumValueOptionsR\ncoreMemberB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
+    b'\n#vibesys/core/v1/value_options.proto\x12\x0fvibesys.core.v1\x1a google/protobuf/descriptor.proto"\xfe\x01\n\x13ValueMessageOptions\x12\x14\n\x05union\x18\x01 \x01(\x08R\x05union\x12$\n\rdiscriminator\x18\x02 \x01(\tR\rdiscriminator\x12\x14\n\x05mixin\x18\x03 \x01(\tR\x05mixin\x12\x12\n\x04base\x18\x04 \x01(\tR\x04base\x12@\n\tconstants\x18\x05 \x03(\x0b2".vibesys.core.v1.ValueRuleConstantR\tconstants\x12+\n\x11narrow_subclasses\x18\x06 \x01(\x08R\x10narrowSubclasses\x12\x12\n\x04null\x18\x07 \x01(\x08R\x04null";\n\x11ValueRuleConstant\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n\x04rule\x18\x02 \x01(\tR\x04rule"\xa4\x02\n\x11ValueFieldOptions\x12\x1a\n\x08explicit\x18\x01 \x01(\x08R\x08explicit\x12\x18\n\x07integer\x18\x02 \x01(\x08R\x07integer\x12#\n\rconstant_name\x18\x03 \x01(\tR\x0cconstantName\x12#\n\rconstant_rule\x18\x04 \x01(\tR\x0cconstantRule\x12&\n\x0cdefault_json\x18\x05 \x01(\tH\x00R\x0bdefaultJson\x88\x01\x01\x12\x1d\n\nomit_unset\x18\x06 \x01(\x08R\tomitUnset\x12\x18\n\x07aliases\x18\x07 \x03(\tR\x07aliases\x12\x1d\n\nfrozen_set\x18\x08 \x01(\x08R\tfrozenSetB\x0f\n\r_default_json"Z\n\x10ValueEnumOptions\x12\x18\n\x07literal\x18\x01 \x01(\x08R\x07literal\x12\x16\n\x06inline\x18\x02 \x01(\x08R\x06inline\x12\x14\n\x05mixin\x18\x03 \x01(\tR\x05mixin"4\n\x16ValueEnumMemberOptions\x12\x1a\n\x08spelling\x18\x01 \x01(\tR\x08spelling:f\n\ncore_value\x18\xb8\x8e\x03 \x01(\x0b2$.vibesys.core.v1.ValueMessageOptions\x12\x1f.google.protobuf.MessageOptionsR\tcoreValue:b\n\ncore_field\x18\xb9\x8e\x03 \x01(\x0b2".vibesys.core.v1.ValueFieldOptions\x12\x1d.google.protobuf.FieldOptionsR\tcoreField:^\n\tcore_enum\x18\xba\x8e\x03 \x01(\x0b2!.vibesys.core.v1.ValueEnumOptions\x12\x1c.google.protobuf.EnumOptionsR\x08coreEnum:m\n\x0bcore_member\x18\xbb\x8e\x03 \x01(\x0b2\'.vibesys.core.v1.ValueEnumMemberOptions\x12!.google.protobuf.EnumValueOptionsR\ncoreMemberB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
     [
         descriptor_pb.desc(),
     ],

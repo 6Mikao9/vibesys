@@ -5,7 +5,13 @@ from __future__ import annotations
 import ast
 import re
 
-from protobuf import DescFieldValueEnum, DescFieldValueMessage, DescMessage
+from protobuf import (
+    DescField,
+    DescFieldValueEnum,
+    DescFieldValueList,
+    DescFieldValueMessage,
+    DescMessage,
+)
 
 from scripts.corevalue._schema import (
     GenerationError,
@@ -28,7 +34,6 @@ def cel(expression: str, message: DescMessage) -> str:
     """
     text = _decimals(expression, message)
     text = re.sub(r"size\((this\.[\w.]+)\)", r"len(\1)", text)
-    text = _macros(text, message)
     fields = {f.name: f for f in message.fields}
     text = re.sub(
         r"this\.(\w+)\.map\((\w+), \2\.([\w.]+)\)\.unique\(\)",
@@ -41,6 +46,8 @@ def cel(expression: str, message: DescMessage) -> str:
         r"(len(set(\1)) == len(\1))",
         text,
     )
+
+    text = _macros(text, message)
 
     def present(match: re.Match[str]) -> str:
         """Present."""
@@ -58,10 +65,10 @@ def cel(expression: str, message: DescMessage) -> str:
         raise GenerationError(message.type_name, f"unsupported presence path {match[1]}")
 
     text = re.sub(r"has\(this\.([\w.]+)\)", present, text)
-    for field in fields.values():
+    for path, field in _paths(expression, message).items():
         if isinstance(field.value, DescFieldValueEnum):
             table = {spelling: number for _, spelling, number in members(field.value.enum)}
-            text = re.sub(rf"\bthis\.{field.name}\b", f"{table!r}.get(self.{field.name}, 0)", text)
+            text = re.sub(rf"\b{re.escape(path)}\b", f"{table!r}.get({path}, 0)", text)
     text = text.replace("this.", "self.").replace("&&", " and ").replace("||", " or ")
     text = re.sub(r"!(?!=)", "not ", text).strip()
     try:
@@ -95,6 +102,10 @@ def cel(expression: str, message: DescMessage) -> str:
         ast.Call,
         ast.GeneratorExp,
         ast.ListComp,
+        ast.Subscript,
+        ast.BinOp,
+        ast.Sub,
+        ast.Add,
         ast.comprehension,
         ast.Store,
     )
@@ -112,6 +123,9 @@ def _validate_calls(tree: ast.AST, message: DescMessage, expression: str) -> Non
                 "set",
                 "isinstance",
                 "all",
+                "any",
+                "tuple",
+                "cel_integer",
                 "str",
             }
             table = (
@@ -125,7 +139,7 @@ def _validate_calls(tree: ast.AST, message: DescMessage, expression: str) -> Non
 
 def _macros(text: str, message: DescMessage) -> str:
     """Lower list predicates and filters with their CEL lexical variable scope."""
-    pattern = re.compile(r"(this\.[\w.]+)\.(all|filter)\((\w+), ")
+    pattern = re.compile(r"(this\.[\w.]+)\.(all|filter|exists|map)\((\w+), ")
     while match := pattern.search(text):
         start = match.end()
         end = start
@@ -136,25 +150,62 @@ def _macros(text: str, message: DescMessage) -> str:
         if depth:
             raise GenerationError(message.type_name, "unclosed CEL list expression")
         body = _macros(text[start : end - 1], message)
-        expression = (
-            f"all(({body}) for {match[3]} in {match[1]})"
-            if match[2] == "all"
-            else f"[{match[3]} for {match[3]} in {match[1]} if ({body})]"
-        )
+        expression = _macro(match[2], match[3], match[1], body)
         text = text[: match.start()] + expression + text[end:]
     # size() may contain a lowered filter; it has CEL's ordinary list length semantics.
-    return text.replace("size(", "len(")
+    return text.replace("size(", "len(").replace("string(", "str(")
 
 
 def _decimals(expression: str, message: DescMessage) -> str:
+    """CEL sees decimal strings; core stores unbounded integers with the same domain."""
     text = expression
-    for field in message.fields:
+    for path, field in _paths(expression, message).items():
         config = extension(field, options.ext_core_field)
         if config and config.integer:
-            text = text.replace(f"size(this.{field.name})", f"len(str(this.{field.name}))")
-            text = text.replace(f'this.{field.name} == "0"', f"this.{field.name} == 0")
+            text = re.sub(rf"\b{re.escape(path)}\b", f"str({path})", text)
+            text = text.replace(f"int(str({path}))", f"cel_integer({path})")
+            text = text.replace(f"has(str({path}))", f"has({path})")
+            text = text.replace(f'str({path}) == "0"', f"{path} == 0")
     if '"' in text or "'" in text:
         raise GenerationError(
             message.type_name, "CEL string literals require an explicit compiler binding"
         )
     return text
+
+
+def _macro(kind: str, variable: str, collection: str, body: str) -> str:
+    """CEL collection macros preserve order and compare using tuple value semantics."""
+    if kind == "filter":
+        return f"tuple({variable} for {variable} in {collection} if ({body}))"
+    function = {"all": "all", "exists": "any", "map": "tuple"}[kind]
+    return f"{function}(({body}) for {variable} in {collection})"
+
+
+def _field_at(message: DescMessage, path: list[str]) -> DescField | None:
+    """Resolve a scalar path against descriptors, including imported message fields."""
+    field = next((f for f in message.fields if f.name == path[0]), None)
+    if field is None or len(path) == 1:
+        return field
+    if isinstance(field.value, DescFieldValueMessage):
+        return _field_at(field.value.message, path[1:])
+    return None
+
+
+def _paths(expression: str, message: DescMessage) -> dict[str, DescField]:
+    """Resolve root and macro-variable paths before changing their representation."""
+    bindings = {"this": message}
+    for match in re.finditer(r"this\.(\w+)\.(?:all|filter|exists|map)\((\w+),", expression):
+        field = _field_at(message, [match[1]])
+        if (
+            field
+            and isinstance(field.value, DescFieldValueList)
+            and isinstance(field.value.element, DescMessage)
+        ):
+            bindings[match[2]] = field.value.element
+    found = {}
+    for match in re.finditer(r"\b(\w+)\.([\w.]+)", expression):
+        if match[1] in bindings:
+            field = _field_at(bindings[match[1]], match[2].split("."))
+            if field is not None:
+                found[match[0]] = field
+    return found

@@ -103,6 +103,12 @@ def is_union(message: DescMessage) -> bool:
     return bool(opts and opts.union)
 
 
+def is_null(message: DescMessage) -> bool:
+    """An empty marker whose immutable value is None."""
+    opts = extension(message, options.ext_core_value)
+    return bool(opts and opts.null)
+
+
 def union_members(message: DescMessage) -> list[DescField]:
     """Union members."""
     oneofs = list(message.oneofs)
@@ -175,7 +181,7 @@ def _scalar_shape(field: DescField, *, explicit: bool) -> tuple[str, str, list[s
     default = ""
     constraints = []
     if config and config.integer:
-        patterns = {"^(0|[1-9][0-9]*)$": "ge=0", "^[1-9][0-9]*$": "ge=1"}
+        patterns = {"^(0|[1-9][0-9]*)$": "ge=0", "^[1-9][0-9]*$": "ge=1", "^(0|-?[1-9][0-9]*)$": ""}
         if (
             not rule
             or not rule.type
@@ -187,7 +193,9 @@ def _scalar_shape(field: DescField, *, explicit: bool) -> tuple[str, str, list[s
                 f"{field.name}: integer requires a canonical nonnegative decimal string rule",
             )
         ann = "int"
-        constraints = [patterns[rule.type.value.pattern]]
+        constraints = (
+            [patterns[rule.type.value.pattern]] if patterns[rule.type.value.pattern] else []
+        )
     elif rule and rule.type:
         value = rule.type.value
         constraints = _constraints(value)
@@ -210,18 +218,29 @@ def _field_shape(field: DescField) -> tuple[str, str, list[str]]:
     match field.value:
         case DescFieldValueMessage():
             required = rule and rule.required
-            return (ann, "", []) if required else (ann + " | None", "None", [])
-        case DescFieldValueList():
+            return (ann, "", []) if required else (ann + " | None", "" if explicit else "None", [])
+        case DescFieldValueList(element=element):
+            as_set = bool(config and config.frozen_set)
             return (
-                ann,
-                "" if explicit else "()",
+                f"frozenset[{element_type(element)}]" if as_set else ann,
+                "" if explicit else "frozenset()" if as_set else "()",
                 _constraints(rule.type.value) if rule and rule.type else [],
             )
         case DescFieldValueMap():
             return ann, "" if explicit else "FrozenMap()", []
-        case DescFieldValueEnum():
-            required = rule and rule.type and 0 in rule.type.value.not_in
-            return (ann, "", []) if required else (ann + " | None", "None", [])
+        case DescFieldValueEnum(enum=enum):
+            if rule and rule.type and rule.type.value.in_:
+                allowed = rule.type.value.in_
+                selected = [
+                    f"{name(enum)}.{member}"
+                    for member, _, number in members(enum)
+                    if number in allowed
+                ]
+                ann = f"Literal[{', '.join(selected)}]"
+            required = (
+                rule and rule.type and (0 in rule.type.value.not_in or bool(rule.type.value.in_))
+            )
+            return (ann, "", []) if required else (ann + " | None", "" if explicit else "None", [])
         case _:
             return _scalar_shape(field, explicit=explicit)
 

@@ -17,6 +17,10 @@ message ValueMessageOptions {
   string base = 4;
   // Export a named numeric bound from a CEL rule for existing callers.
   repeated ValueRuleConstant constants = 5;
+  // Rebuild a subclass as this base when a field promises the base representation.
+  bool narrow_subclasses = 6;
+  // An empty wire marker represented as Python None inside a scalar union.
+  bool null = 7;
 }
 message ValueRuleConstant {
   string name = 1;
@@ -37,6 +41,8 @@ message ValueFieldOptions {
   bool omit_unset = 6;
   // Export scalar aliases from this field's authoritative validation.
   repeated string aliases = 7;
+  // Immutable set semantics, including canonical JSON and wire ordering.
+  bool frozen_set = 8;
 }
 message ValueEnumOptions {
   // Preserve a string-literal API instead of introducing an enum at call sites.

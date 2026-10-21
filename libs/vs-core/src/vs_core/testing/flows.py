@@ -104,6 +104,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_core._corevalue import CoreValue
     from vs_core.api import (
         Decision,
         Flow,
@@ -535,7 +536,7 @@ class FlowRun[C]:
         self._timeline.append(f"{asked.decision.root}:{event.kind}")
         self.send(event)
 
-    def finish_operation(self, asked: Asked, outcome: BaseModel) -> None:
+    def finish_operation(self, asked: Asked, outcome: BaseModel | CoreValue) -> None:
         """An operation the search asked for ended with ``outcome`` (verify, interpret evidence)."""
         request = asked.request
         if not isinstance(request, Operation):
@@ -683,7 +684,7 @@ class FlowRun[C]:
             )
         )
 
-    def _operation_result(self, request: object, outcome: BaseModel) -> OperationResult:
+    def _operation_result(self, request: object, outcome: BaseModel | CoreValue) -> OperationResult:
         encoded = self.registry.encode(request)  # ty: ignore[invalid-argument-type]
         result = OperationResult(
             operation_id=OperationId(root=f"operation-{self._sequence}"),
