@@ -12,7 +12,7 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-from vs_proto.api import RUN_LOG_MAGIC, Keyframe, LegacyEvent, Oneof, Record, RunHead
+from vs_proto.api import RUN_LOG_MAGIC, Keyframe, MetricPoint, Oneof, Record, RunHead, Timestamp
 from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame, fold_skeleton
 from vs_sim.api import yield_now
 from vs_sim.api.testing import (
@@ -32,7 +32,12 @@ def initial_records() -> list[Record]:
 
 
 def event(seq: int) -> Record:
-    return Record(seq=seq, epoch=1, body=Oneof("legacy_event", LegacyEvent(json=str(seq))))
+    return Record(
+        seq=seq,
+        epoch=1,
+        at=Timestamp(seconds=seq),
+        body=Oneof("metric", MetricPoint(series="progress", value=float(seq))),
+    )
 
 
 def head(root: Path) -> int:
@@ -91,7 +96,7 @@ def test_first_pending_append_sets_deadline_without_debouncing(tmp_path: Path) -
     run_virtual(clock, exercise())
 
 
-@pytest.mark.parametrize("boundary", ["commit", "lifecycle", "close"])
+@pytest.mark.parametrize("boundary", ["commit", "lifecycle", "epoch", "close"])
 def test_explicit_boundary_invalidates_old_timer(tmp_path: Path, boundary: str) -> None:
     clock = VirtualClock()
 
@@ -102,8 +107,8 @@ def test_explicit_boundary_invalidates_old_timer(tmp_path: Path, boundary: str) 
             writer.append(record)
         writer.append(event(3))
         await clock.sleep(0.06)
-        if boundary == "lifecycle":
-            ending = templates[-1]
+        if boundary in {"lifecycle", "epoch"}:
+            ending = Record.from_binary(templates[-1 if boundary == "lifecycle" else 0].to_binary())
             ending.seq = 4
             writer.append(ending)
             assert head(tmp_path) == 4

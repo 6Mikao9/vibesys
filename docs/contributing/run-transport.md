@@ -22,22 +22,22 @@ model viewers read. It is written as the design. Parts not built yet are marked 
 
 ## Status
 
-Everything is unbuilt except the file inbox (`libs/vs-project/src/vs_project/_control_inbox.py`) and
-the log streams.
-The migration phases are in [Migration](#migration).
+The existing transport remains the default. The gateway and record viewer are opt-in per host.
+The migration phases are in [Migration](#migration); this table distinguishes the implemented
+read path and journal projection from the native core and control work still to come.
 
 | Part | Status | Phase |
 |---|---|---|
-| `vibesys.store.v1` and `vibesys.api.v1` protos, codegen, CI (`buf breaking`) | unbuilt | 1 |
-| Go gateway `vibesysd`: `Hello`, `Tail` | unbuilt | 1 |
-| Electron provisioning of the gateway; one HTTP/2 connection per host behind a per-host switch | unbuilt | 1 |
-| Converter follower: live JSONL journal into `run.log` (`LegacyEvent` records) | unbuilt | 1 |
-| Store records for every event kind ([inventory](#event-inventory)) | unbuilt | 2 |
-| Skeleton keyframes, `run.head`, `~/.vibesys/runs/<run_id>` link | unbuilt | 2 |
-| `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | unbuilt | 2 |
-| Conversion of existing JSONL runs and `store.json` envelopes | unbuilt | 2 |
-| Core state as generated types, `state.pb`, native `run.log` writes | unbuilt | 3 |
-| Intents as records (`IntentState`), pause/park, relaunch epochs | unbuilt | 3 |
+| `vibesys.store.v1` and `vibesys.api.v1` protos, codegen, CI (`buf breaking`) | built; schema hashes derive from embedded descriptors | 1 |
+| Go gateway `vibesysd`: `Hello`, `Tail` | built | 1 |
+| Electron provisioning of the gateway; one HTTP/2 connection per host behind a per-host switch | built; uploads are verified before publication; cold bulk uploads can still fail on some SSH routes | 1 |
+| Live JSONL journal projection into `run.log` | built as a tee installed before journal attachment; emits typed records | 1 |
+| Store records for every event kind ([inventory](#event-inventory)) | schemas and typed journal projection built; the native core producer remains unbuilt | 2 |
+| Skeleton keyframes, `run.head`, `~/.vibesys/runs/<run_id>` link | writers, discovery and converted head/keyframe publication built; legacy-only epochs have no native headline | 2 |
+| `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
+| Conversion of existing JSONL runs and `store.json` envelopes | typed JSONL conversion built, including blob storage for large events and repair of incomplete mirrors; pre-trace journals are skipped, unsupported historical events are rejected, and `store.json` migration remains unbuilt | 2 |
+| Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
+| Intents as records (`IntentState`), pause/park, relaunch epochs | schemas built; native execution and recovery remain unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | unbuilt | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |
@@ -99,7 +99,7 @@ and storage stalls can delay completion beyond that interval.
 entrypoints supply the real implementations and tests supply simulated ones.
 `FileRunLogWriter.append` retains its signature and now acknowledges a write, not
 durability. `commit()` is the explicit durability boundary, including for an epoch
-end not represented by a lifecycle record. `LegacyRunLogTee.commit()` forwards that
+end not represented by a lifecycle record. `RunLogTee.commit()` forwards that
 boundary. The tee takes ownership of a configured `FileRunLogWriter`, so the
 live journal can supply its run's clock, loop and locks even when preparation
 runs off-loop. Synchronous offline producers have no event loop and must commit
@@ -469,6 +469,26 @@ attached as a blob, including an oversized interim JSON reply under role `reply`
 1 MiB record cap is enforced by the log writer and reader, which can measure the actual bytes;
 protovalidate cannot measure encoded protobuf size. Declaration resolution and validation of an
 `Any` payload against its declared attrs type require the epoch descriptors at the read boundary.
+
+The journal bridge amends `EpochStarted` as it discovers declarations: consumers replace
+an epoch by its number, and each amendment retains the earlier declarations. Historical
+journals without a checkout fingerprint explicitly set `provenance_known` to false.
+They do not invent a checkout identity.
+
+Transcript streams contain unsigned-varint-length-prefixed `TranscriptEntry` messages,
+defined in
+[`transcript.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/transcript.proto).
+Each text, tool-call or tool-result entry holds inline content or a `BlobRef`. The turn's
+whole-span replacement seals the stream's final byte length when the turn ends.
+For older string attrs without a blob alternative, the bridge writes `blob:<sha256>`
+and a `BlobAttached` whose role names the field path; an oversized interim reply instead
+omits its inline JSON and uses the `reply` attachment.
+
+Built-in strategy attrs always use their declared search message. A historical custom
+span kind with no known schema declares `google.protobuf.StringValue` and preserves its
+exact JSON text. Historical strategy facts without a reliable span owner become
+`Notice.UNATTRIBUTED_EVENT` with typed `detail`; old gate stages without an owner use
+`GateSubject.UNATTRIBUTED`. Neither path invents a workstream or an input-gate identity.
 
 Notes on the records:
 
