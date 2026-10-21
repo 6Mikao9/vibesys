@@ -161,16 +161,19 @@ Bubblewrap and Seatbelt provide this capability; Landlock cannot enforce the
 protected project paths and does not. An unconfined host session or a borrowed
 run-owned agent session cannot advertise it. Container environments retain
 their existing requirement for an independently owned container session.
-`RunEnvironmentView` derives the capability from these facts; the dynamic
-planning and workspace-resource tests cover admission and refusal.
+`RunEnvironmentView` derives the capability from these facts.
+`test_enforced_host_candidates_have_independent_sessions` covers host admission;
+`test_an_environment_without_candidate_sandboxes_is_refused_naming_it_and_why`
+covers the combinations of confinement and borrowed-session facts.
 
 The host accelerator is shared across those worktrees. The run's workspace
 resource factory gives every host trusted executor one shared admission gate:
 build, accuracy and benchmark stages run one at a time, including the input
 measurement and agent-requested evaluations. Waiting for admission is
 cancellable; a running command is drained before its admission is released.
-Agent coding can proceed concurrently. The trusted evaluation tests cover
-serialization and cancellation. This gate coordinates one run, not other runs
+Agent coding can proceed concurrently.
+`test_host_evaluation_admission_covers_root_and_candidates_and_releases_on_cancel`
+covers serialization and cancellation. This gate coordinates one run, not other runs
 or arbitrary accelerator commands an agent launches; coordination with other
 host device users remains the operator's responsibility (unenforced: external
 processes are outside the run's ownership).
