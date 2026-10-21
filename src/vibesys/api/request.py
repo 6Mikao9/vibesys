@@ -169,21 +169,18 @@ def validate_run_request(
         provider=request.cli_provider,
         allow_unvetted_model=request.allow_unvetted_model,
     )
-    require_one_login_per_container(
-        specs, containerized=run_environment_uses_docker(request.run_environment)
-    )
+    require_one_login_per_container(specs, containerized=run_environment_uses_docker(request))
     if not read_only and request.resume is not None and registration.plugin.core is not None:
         ensure_resumable(request.project_root, request.resume.run_id)
 
 
-def run_environment_uses_docker(spec: RunEnvironmentSpec | None) -> bool:
-    """Whether a run in `spec`'s run environment starts local Docker containers.
+def run_environment_uses_docker(request: RunRequest) -> bool:
+    """Whether the resolved run starts Docker containers for its agents or candidates.
 
-    Read from the environment `spec` selects (the default one for `None`, as a run resolves
-    it), as `supported_profilers` reads its profilers, so a caller never names a concrete
-    environment.
+    Backend and platform derivation must precede reading the environment's facts,
+    just as at launch. A requested default can resolve to a host environment.
     """
-    return build_run_environment(spec or make_run_environment_spec()).uses_docker
+    return _run_environment_of(request).uses_docker
 
 
 @dataclass(frozen=True)

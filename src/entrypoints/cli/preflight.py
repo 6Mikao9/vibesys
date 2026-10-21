@@ -182,14 +182,14 @@ def _resolved_report(
         # The run stops on this before its image build, seconds after it starts.
         return PreflightReport(
             settings=_shortfall_settings(shortfall, args.input_bundle.task_name, request),
-            uses_docker=run_environment_uses_docker(request.run_environment),
+            uses_docker=run_environment_uses_docker(request),
             agent_image=_not_checked(CheckId.AGENT_IMAGE),
             evaluator=_not_checked(CheckId.EVALUATOR_AVAILABLE),
             backend=backend,
             roles=roles,
         )
     return valid_report(
-        uses_docker=run_environment_uses_docker(request.run_environment),
+        uses_docker=run_environment_uses_docker(request),
         bundle=args.input_bundle,
         probe=probe,
         roles=roles,
