@@ -234,6 +234,9 @@ class WorkspaceSandbox(ABC):
     #: ``tests/e2e/test_control_socket_reachability_e2e.py`` probes every one of these
     #: answers, the gaps pinned.
     claims_operator_control_boundary: ClassVar[bool]
+    #: Whether separate workspace profiles enforce candidate write and protected-path isolation.
+    #: Landlock cannot enforce the nested project policy and keeps the default refusal.
+    isolates_candidate_workspaces: ClassVar[bool] = False
 
     def _refuse_operator_root(self, backend: str, granted: Iterable[Path | str]) -> None:
         """Raise ``SandboxUnavailableError`` if any of ``granted`` reaches the operator root."""
@@ -292,6 +295,8 @@ class HostSandbox(WorkspaceSandbox):
     #: ``TMPDIR``/``TMP``/``TEMP`` at (see :func:`_host_temp_dirs`). Each gets a
     #: private writable tmpfs in the namespace, next to ``/tmp``.
     temp_dirs: tuple[str, ...] = ()
+
+    isolates_candidate_workspaces: ClassVar[bool] = True
 
     #: The namespace binds neither the runtime root nor a pathname socket outside the
     #: view. It shares the host's network namespace, so abstract sockets and loopback
@@ -605,6 +610,7 @@ class SeatbeltSandbox(WorkspaceSandbox):
     if full read-confinement is required.
     """
 
+    isolates_candidate_workspaces: ClassVar[bool] = True
     sandbox_exec_path: str = field(kw_only=True)
     system_read_roots: tuple[str, ...] = _MACOS_SYSTEM_READ_ROOTS
 

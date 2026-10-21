@@ -205,7 +205,7 @@ class AgentPaths:
 class ParallelCandidateObstacle(StrEnum):
     """The closed set of reasons a session cannot open one session per candidate."""
 
-    NO_OWN_CONTAINER = "no_own_container"
+    NO_OWN_CONFINEMENT = "no_own_confinement"
     BORROWED_SESSION = "borrowed_session"
 
 
@@ -233,6 +233,8 @@ class RunEnvironmentView:
     cli_sandboxed: bool = False
     # Agent clients borrow the run-owned sandbox and bridge.
     share_agent_session: bool = False
+    # Established by HostEnvironment only after validating enforced workspace confinement.
+    host_candidate_isolation: bool = False
     host_device_reselect: bool = True
     # Coarse environment label for diagnostics and adapter selection:
     # ``"host"`` | ``"docker"`` | ``"modal"`` | ``"skypilot"`` | ``"slurm"``.
@@ -285,21 +287,19 @@ class RunEnvironmentView:
     def parallel_candidate_obstacle(self) -> ParallelCandidateObstacle | None:
         """Why this session cannot open an isolated session per candidate, or ``None``.
 
-        A candidate session is a second session of the same environment, so it
-        has its own sandbox exactly when the agent's CLI runs in a container
-        this session starts (``cli_sandboxed``) and agent clients do not borrow
-        the run-owned sandbox and bridge (``share_agent_session``). Nothing
-        declares the answer: it follows from those two facts.
+        A candidate gets a linked worktree and a new environment session. The session
+        must own its container or validate host confinement that enforces the candidate
+        workspace and protected paths. Borrowed agent sessions cannot isolate candidates.
         """
-        if not self.cli_sandboxed:
-            return ParallelCandidateObstacle.NO_OWN_CONTAINER
+        if not (self.cli_sandboxed or self.host_candidate_isolation):
+            return ParallelCandidateObstacle.NO_OWN_CONFINEMENT
         if self.share_agent_session:
             return ParallelCandidateObstacle.BORROWED_SESSION
         return None
 
     @property
     def supports_parallel_candidate_evaluation(self) -> bool:
-        """Whether each candidate can get its own worktree and container session."""
+        """Whether each candidate can get its own worktree and independently confined agent."""
         return self.parallel_candidate_obstacle is None
 
     @property
@@ -707,13 +707,20 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Fail with ``SandboxUnavailableError`` when host confinement is unavailable."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="host")
-        self._build_sandbox(request.workspace, env={}, require_enforcement=True)
-        return _PreparedRunEnvironment(HostEnvironmentFacts(), partial(self._open, request))
+        confinement = self._build_sandbox(request.workspace, env={}, require_enforcement=True)
+        isolated = confinement is not None and confinement.isolates_candidate_workspaces
+        return _PreparedRunEnvironment(
+            HostEnvironmentFacts(), partial(self._open, request, host_candidate_isolation=isolated)
+        )
 
     def _open(
-        self, request: RunEnvironmentRequest, presentation: RunEnvironmentPresentation
+        self,
+        request: RunEnvironmentRequest,
+        presentation: RunEnvironmentPresentation,
+        *,
+        host_candidate_isolation: bool,
     ) -> RunEnvironmentSession:
-        """Create a host sandbox and its agent path view."""
+        """Create a host command runner and its validated agent confinement facts."""
         del presentation
         materialize_effective_objective(request)
         document, grants = outside_objective(request.objective, request.log_dir)
@@ -731,6 +738,7 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                     # The host sandbox binds a linked worktree's metadata read-only too.
                     workspace_git_writable=git_metadata_mounts(request.workspace).agent_writable,
                     agent_host_resources=grants,
+                    host_candidate_isolation=host_candidate_isolation,
                 ),
             )
         )
