@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import closing
 from dataclasses import dataclass, replace
@@ -45,7 +46,15 @@ from vs_sandbox.api import (
     ProjectPathPolicy,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
+from vs_sim.api import DISCARD
+from vs_sim.api.testing import (
+    GatedBlockingRunner,
+    InlineBlockingRunner,
+    ManualClock,
+    Sim,
+    SimThreads,
+    arrival,
+)
 
 if TYPE_CHECKING:
     from typing import TextIO
@@ -120,7 +129,10 @@ def _unexpected_resume(
     raise AssertionError
 
 
-def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("host_isolation", [False, True])
+def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(
+    tmp_path: Path, *, host_isolation: bool
+) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -133,7 +145,12 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     def open_session(_request: RunEnvironmentRequest) -> RunEnvironmentSession:
         session = _Session(
             FakeCommandRunner(),
-            RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True, cli_sandboxed=True),
+            RunEnvironmentView(
+                paths=AgentPaths(),
+                workspace_git_writable=True,
+                cli_sandboxed=not host_isolation,
+                host_candidate_isolation=host_isolation,
+            ),
         )
         opened_sessions.append(session)
         return session
@@ -175,6 +192,12 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     candidate_path = candidate.path
     assert candidate_path.is_dir()
     assert candidate.revision == revision
+    sibling = factory.create_candidate("candidate-2", revision)
+    assert sibling.path != candidate_path != root
+    (candidate_path / "candidate.py").write_text("VALUE = 2\n")
+    assert (sibling.path / "candidate.py").read_text() == "VALUE = 1\n"
+    sibling.close()
+    assert candidate_path.exists()
     assert factory.supports_parallel_candidates
     assert not factory.root.try_restore("missing-revision", clean=True)
     assert events == [WorkspaceRestoreFailed("missing-revision")]
@@ -438,3 +461,108 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
     assert "weights.bin" in factory.root.baseline_drift(entries).removed
     environment.close()
     project.close()
+
+
+@pytest.mark.parametrize("stage", ["accuracy", "benchmark", "build"])
+@pytest.mark.parametrize("cancel_waiter", [False, True])
+def test_host_evaluation_admission_covers_root_and_candidates_and_releases_on_cancel(
+    tmp_path: Path, sim: Sim, stage: str, *, cancel_waiter: bool
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "candidate.py").write_text("VALUE = 1\n")
+    (root / "evaluation.py").write_text("# trusted evaluator\n")
+    threads = sim.threads()
+    blocking = GatedBlockingRunner(held=True)
+    runners: list[FakeCommandRunner] = []
+
+    def open_session(_request: RunEnvironmentRequest) -> RunEnvironmentSession:
+        runner = FakeCommandRunner(threads=threads)
+        runners.append(runner)
+        return _Session(
+            runner,
+            RunEnvironmentView(
+                paths=AgentPaths(accuracy_command="check", benchmark_command="measure"),
+                workspace_git_writable=True,
+                host_candidate_isolation=True,
+            ),
+        )
+
+    with (
+        open_project_run_resources(
+            replace(_project_request(root), trusted_input_paths=("evaluation.py",)),
+            effects=_effects(),
+            resolve_resume=_unexpected_resume,
+        ) as project,
+        closing(
+            open_run_environment_resources(
+                RunEnvironmentRequest(
+                    log_dir=project.logger.log_dir,
+                    workspace=root,
+                    ref_dir=None,
+                    backend=FakeComputeBackend(threads=threads),
+                    agent_backend="scripted",
+                    cli_provider="codex",
+                    run_id="workspace-resource-test",
+                    framework_root=tmp_path,
+                    clock=sim.clock,
+                    system=idle_environment_system(),
+                ),
+                open_session,
+                clock=sim.clock,
+            )
+        ) as environment,
+    ):
+        factory = WorkspaceResourceFactory(
+            project,
+            environment,
+            evaluation_plan=TrustedEvaluationPlan(accuracy_command="check"),
+            memory_paths=(),
+            skill_source_dirs=(),
+            skill_selection=NULL_SKILL_SELECTION,
+            host_resources=(),
+            events=lambda _event: None,
+            threads=threads,
+            blocking=blocking,
+        )
+        root_resource = factory.root
+        revision = root_resource.revision
+        assert revision is not None
+        with closing(factory.create_candidate("candidate-1", revision)) as candidate:
+
+            async def scenario() -> None:
+                running = asyncio.create_task(root_resource.trusted_accuracy(None, DISCARD))
+                await blocking.wait_in_flight(1, running)
+                entered = asyncio.Event()
+
+                async def queued() -> object:
+                    entered.set()
+                    match stage:
+                        case "accuracy":
+                            return await candidate.trusted_accuracy(None, DISCARD)
+                        case "benchmark":
+                            return await candidate.trusted_benchmark(None, frozenset(), DISCARD)
+                        case _:
+                            return await candidate.candidate_build(DISCARD)
+
+                waiting = asyncio.create_task(queued())
+                await arrival(entered.wait(), waiting)
+                assert not waiting.done()
+                assert runners[1].calls == []
+                if cancel_waiter:
+                    waiting.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await waiting
+                running.cancel()
+                blocking.release()
+                with pytest.raises(asyncio.CancelledError):
+                    await running
+                if not cancel_waiter:
+                    await waiting
+                # A cancelled waiter and an active cancelled command leave admission usable.
+                result = await candidate.trusted_accuracy(None, DISCARD)
+                assert result.passed
+                assert len(runners[0].calls) <= 1
+                assert blocking.max_in_flight == 1
+
+            sim.run(scenario(), threads=threads)

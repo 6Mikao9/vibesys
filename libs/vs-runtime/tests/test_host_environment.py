@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 from vs_project.api import RunEnvironmentRecord
 from vs_runtime.api.infrastructure import (
     HostEnvironment,
+    RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSpec,
     build_run_environment,
@@ -22,6 +23,8 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import (
     ComputeBackend,
+    HostSandbox,
+    LandlockSandbox,
     ProjectPathPolicy,
     SandboxUnavailableError,
     SeatbeltSandbox,
@@ -194,3 +197,39 @@ def test_a_host_record_is_not_migrated_to_docker_on_any_platform(platform: str) 
         log=lambda _: None,
     )
     assert (run_environment_record(relaunch) == record) is (platform == "darwin")
+
+
+@pytest.mark.regression
+def test_enforced_host_candidates_have_independent_sessions(tmp_path: Path) -> None:
+    """A host-only run must pass dynamic's candidate-isolation admission without Docker."""
+    builder = _FakeHostSandboxes(available=True)
+    environment = HostEnvironment(build_sandbox=builder)
+    sessions = []
+    for name in ("root", "candidate-a", "candidate-b"):
+        request = _request(tmp_path / name)
+        request.workspace.mkdir(parents=True)
+        session = environment.prepare(request).open(RunEnvironmentPresentation(prompt_notes=""))
+        sessions.append(session)
+        assert not session.view.cli_sandboxed
+        assert session.view.supports_parallel_candidate_evaluation
+        assert session.view.parallel_candidate_obstacle is None
+        assert not session.view.agent_git_writable
+    assert len({session.sandbox.id for session in sessions}) == 3
+    assert builder.requests == [True, True, True]
+    for session in sessions:
+        session.close()
+
+
+@pytest.mark.parametrize("enforced", [False, True])
+def test_host_admission_uses_the_confinement_guarantee(tmp_path: Path, *, enforced: bool) -> None:
+    request = _request(tmp_path)
+    request.workspace.mkdir(parents=True)
+    confinement = (
+        HostSandbox(workspace=request.workspace, bwrap_path="bwrap")
+        if enforced
+        else LandlockSandbox(workspace=request.workspace, operator_root=Path("/operator/runtime"))
+    )
+    environment = HostEnvironment(build_sandbox=lambda *_args, **_kwargs: confinement)
+    with environment.prepare(request).open(RunEnvironmentPresentation(prompt_notes="")) as session:
+        assert session.view.supports_parallel_candidate_evaluation is enforced
+        assert (session.view.parallel_candidate_obstacle is None) is enforced

@@ -152,6 +152,34 @@ the project and declared resources. Seatbelt allows broad reads and denies the
 project's ancestor trees and all writes outside the project; use the default Docker run environment on
 macOS when full read confinement matters.
 
+## Host candidate isolation and evaluation admission
+
+Candidate isolation does not require a container. A host environment that has
+validated enforced candidate confinement can open a linked worktree per
+candidate and construct an independent confinement scoped to that worktree.
+Bubblewrap and Seatbelt provide this capability; Landlock cannot enforce the
+protected project paths and does not. An unconfined host session or a borrowed
+run-owned agent session cannot advertise it. Container environments retain
+their existing requirement for an independently owned container session.
+`RunEnvironmentView` derives the capability from these facts; the dynamic
+planning and workspace-resource tests cover admission and refusal.
+
+The host accelerator is shared across those worktrees. The run's workspace
+resource factory gives every host trusted executor one shared admission gate:
+build, accuracy and benchmark stages run one at a time, including the input
+measurement and agent-requested evaluations. Waiting for admission is
+cancellable; a running command is drained before its admission is released.
+Agent coding can proceed concurrently. The trusted evaluation tests cover
+serialization and cancellation. This gate coordinates one run, not other runs
+or arbitrary accelerator commands an agent launches; coordination with other
+host device users remains the operator's responsibility (unenforced: external
+processes are outside the run's ownership).
+
+Host isolation retains Seatbelt's limits described below: broad reads outside
+denied ancestor trees, shared host temporary directories and host networking.
+It does not claim a container's security boundary. Trusted gates keep the
+existing protected-input integrity checks and execute outside agent confinement.
+
 ## Known limits
 
 - **Brokered Slurm work is not in a container.** The agent of `slurm` runs

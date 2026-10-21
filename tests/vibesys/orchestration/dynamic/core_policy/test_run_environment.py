@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     candidate_environment,
@@ -19,14 +19,17 @@ from vibesys.errors import ConfigurationError
 from vs_sim.api.testing import examples
 
 
-@settings(max_examples=examples(pr=8, nightly=100))
+@pytest.mark.regression
+@example(kind="host", cli_sandboxed=False, host_candidate_isolation=True, share_agent_session=False)
+@settings(max_examples=examples(pr=16, nightly=100))
 @given(
     kind=st.sampled_from(["skypilot", "metal", "custom-env"]),
     cli_sandboxed=st.booleans(),
     share_agent_session=st.booleans(),
+    host_candidate_isolation=st.booleans(),
 )
 def test_an_environment_without_candidate_sandboxes_is_refused_naming_it_and_why(
-    kind: str, *, cli_sandboxed: bool, share_agent_session: bool
+    kind: str, *, cli_sandboxed: bool, host_candidate_isolation: bool, share_agent_session: bool
 ) -> None:
     with tempfile.TemporaryDirectory() as directory:
         run = resolved(Path(directory))
@@ -34,10 +37,13 @@ def test_an_environment_without_candidate_sandboxes_is_refused_naming_it_and_why
             run.environment,
             env_kind=kind,
             cli_sandboxed=cli_sandboxed,
+            host_candidate_isolation=host_candidate_isolation,
             share_agent_session=share_agent_session,
         )
         run = replace(run, environment=environment)
-        if environment.supports_parallel_candidate_evaluation:
+        expected = (cli_sandboxed or host_candidate_isolation) and not share_agent_session
+        assert environment.supports_parallel_candidate_evaluation is expected
+        if expected:
             plan_of(run)
             return
         with pytest.raises(ConfigurationError, match="isolated candidate sandboxes") as raised:
