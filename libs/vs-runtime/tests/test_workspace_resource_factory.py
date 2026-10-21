@@ -463,10 +463,11 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
     project.close()
 
 
+@pytest.mark.parametrize("host_isolation", [False, True])
 @pytest.mark.parametrize("stage", ["accuracy", "benchmark", "build"])
 @pytest.mark.parametrize("cancel_waiter", [False, True])
 def test_host_evaluation_admission_covers_root_and_candidates_and_releases_on_cancel(
-    tmp_path: Path, sim: Sim, stage: str, *, cancel_waiter: bool
+    tmp_path: Path, sim: Sim, stage: str, *, cancel_waiter: bool, host_isolation: bool
 ) -> None:
     root = tmp_path / "project"
     root.mkdir()
@@ -484,7 +485,8 @@ def test_host_evaluation_admission_covers_root_and_candidates_and_releases_on_ca
             RunEnvironmentView(
                 paths=AgentPaths(accuracy_command="check", benchmark_command="measure"),
                 workspace_git_writable=True,
-                host_candidate_isolation=True,
+                host_candidate_isolation=host_isolation,
+                cli_sandboxed=not host_isolation,
             ),
         )
 
@@ -547,14 +549,17 @@ def test_host_evaluation_admission_covers_root_and_candidates_and_releases_on_ca
 
                 waiting = asyncio.create_task(queued())
                 await arrival(entered.wait(), waiting)
+                if not host_isolation:
+                    await blocking.wait_in_flight(2, waiting)
                 assert not waiting.done()
                 assert runners[1].calls == []
                 if cancel_waiter:
                     waiting.cancel()
-                    with pytest.raises(asyncio.CancelledError):
-                        await waiting
                 running.cancel()
                 blocking.release()
+                if cancel_waiter:
+                    with pytest.raises(asyncio.CancelledError):
+                        await waiting
                 with pytest.raises(asyncio.CancelledError):
                     await running
                 if not cancel_waiter:
@@ -563,6 +568,6 @@ def test_host_evaluation_admission_covers_root_and_candidates_and_releases_on_ca
                 result = await candidate.trusted_accuracy(None, DISCARD)
                 assert result.passed
                 assert len(runners[0].calls) <= 1
-                assert blocking.max_in_flight == 1
+                assert blocking.max_in_flight == (1 if host_isolation else 2)
 
             sim.run(scenario(), threads=threads)
