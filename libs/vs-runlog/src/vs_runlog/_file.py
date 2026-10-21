@@ -8,6 +8,7 @@ import os
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from itertools import islice
 from typing import TYPE_CHECKING, BinaryIO, Self
 
 if TYPE_CHECKING:
@@ -253,6 +254,13 @@ class FileRunLogWriter:
             target = self.sequence
             self._request_commit(target)
             self._wait_committed(target)
+
+    def read(self) -> tuple[Record, ...]:
+        """Copy the committed prefix under writer coordination for epoch recovery."""
+        with self._condition:
+            self._check_open()
+            with self._path.open("rb") as stream:
+                return tuple(islice(RunLogReader(stream), self._committed_seq))
 
     def _request_commit(
         self, target: int, *, checkpoint: bool = False, closing: bool = False
