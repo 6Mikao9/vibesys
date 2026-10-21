@@ -31,7 +31,7 @@ from vs_core.api import (
     RevisionRef,
     Until,
 )
-from vs_project.api import Project
+from vs_project.api import Project, StateValue
 from vs_runtime.api.core import (
     REQUEST_DISPATCH,
     ExecutionContext,
@@ -78,7 +78,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import OperationRequest, Request
-    from vs_project.api import StateNamespace
+    from vs_project.api import StateNamespace, StateValue
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
 # (`--depth=nightly`) searches deeper.
@@ -113,7 +113,7 @@ class CrashingStore(ReceiptStore):
         super().__init__(namespace, SimThreads())
         self._crash_at = crash_at
 
-    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+    def replace(self, family: str, part: str, key: str, receipt: StateValue) -> None:
         sealing = family == "executions" and part == "execution"
         if sealing and self._crash_at == "before_result":
             raise SimulatedCrashError

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final, Literal, get_args, get_origin, overload
 
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
+from ._corevalue import CoreValue
 from ._envelope_migrations import (
     OLDEST_SUPPORTED_ENVELOPE_VERSION,
     upgrade_envelope_document,
@@ -109,7 +110,7 @@ class OperationRegistration:
 
     descriptor: OperationDescriptor
     request_model: type[OperationRequest]
-    outcome_model: type[BaseModel]
+    outcome_model: type[BaseModel | CoreValue]
     normalize_turn: Callable[[OperationRequest], TurnSpec] | None = None
     normalize_scope_reopen: Callable[[OperationRequest], ScopeReopenNormalization] | None = None
     normalize_measurement: Callable[[OperationRequest], MeasurementIdentity] | None = None
@@ -263,7 +264,7 @@ class OperationRegistry:
         self.decode(target)
         return target
 
-    def encode_outcome(self, schema: OperationSchemaRef, outcome: BaseModel) -> str:
+    def encode_outcome(self, schema: OperationSchemaRef, outcome: BaseModel | CoreValue) -> str:
         """Validate exact registered outcome identity before durable serialization."""
         entry = self._find(schema)
         if type(outcome) is not entry.outcome_model:
@@ -283,7 +284,9 @@ class OperationRegistry:
             payload["target"] = target_payload
         return type(event).model_validate(payload, context={"operation_registry": self})
 
-    def decode_outcome(self, schema: OperationSchemaRef, payload_json: str) -> BaseModel:
+    def decode_outcome(
+        self, schema: OperationSchemaRef, payload_json: str
+    ) -> BaseModel | CoreValue:
         """Give the strategy the owning library's validated outcome value."""
         return self._find(schema).outcome_model.model_validate_json(payload_json)
 
@@ -557,7 +560,7 @@ def _validate_envelope_version(version: object) -> None:
     )
 
 
-def _normalize[M: BaseModel](
+def _normalize[M: BaseModel | CoreValue](
     request: OperationRequest,
     normalizer: Callable[[OperationRequest], M],
     model: type[M],
@@ -577,7 +580,7 @@ def _normalize[M: BaseModel](
     if not immutable:
         raise ContractError(path, "normalizer must return deeply immutable value")
     try:
-        return model.model_validate_json(normalized.model_dump_json())
+        return TypeAdapter(model).validate_json(TypeAdapter(model).dump_json(normalized))
     except (AttributeError, TypeError, ValueError) as error:
         raise ContractError(path, str(error)) from error
 

@@ -58,6 +58,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
+    StateValue,
     git_repositories,
 )
 from vs_project.api.testing import run_execution_record
@@ -529,7 +530,7 @@ class _FailingStore(ReceiptStore):
         self.fail_release_mark = False
         self.fail_bind = False
 
-    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+    def replace(self, family: str, part: str, key: str, receipt: StateValue) -> None:
         if self.fail_done and family == "executions":
             message = "host died before recording the result"
             raise OSError(message)

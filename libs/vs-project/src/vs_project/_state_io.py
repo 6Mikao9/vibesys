@@ -7,9 +7,9 @@ import os
 import tempfile
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import TypeAdapter
 
 from vs_decode.api import Unreadable, UnreadableKind, ValidationOptions, decode_json, read_json
 from vs_project._framework_writes import FRAMEWORK_WRITES
@@ -24,6 +24,20 @@ if TYPE_CHECKING:
 
 STATE_DOCUMENT_MAX_BYTES = 256 * 1024 * 1024
 """The largest state document read; far past any the framework writes."""
+
+
+class StateValue(Protocol):
+    """A validated record with the JSON serialization used by project state.
+
+    Both generated immutable values and legacy Pydantic records implement this
+    boundary. Loading always validates against the concrete class the caller supplies.
+    """
+
+    def model_dump(
+        self, *, mode: Literal["python", "json"] = "python", round_trip: bool = False
+    ) -> dict[str, Any]:
+        """Project the record to its declared JSON shape."""
+        ...
 
 
 def publish_run_link(link: Path, directory: Path) -> Path:
@@ -43,7 +57,7 @@ def publish_run_link(link: Path, directory: Path) -> Path:
     return link
 
 
-def _serialize_state_model(model: BaseModel) -> bytes:
+def _serialize_state_model(model: StateValue) -> bytes:
     """Return canonical JSON bytes for a typed state model."""
     try:
         content = json.dumps(
@@ -66,7 +80,7 @@ def _serialize_json_object(value: dict[str, object], *, subject: str) -> bytes:
     return f"{content}\n".encode()
 
 
-def _atomic_write_model(path: Path, model: BaseModel) -> None:
+def _atomic_write_model(path: Path, model: StateValue) -> None:
     """Serialize and atomically replace a typed state model."""
     _atomic_write_bytes(path, _serialize_state_model(model))
 
@@ -273,11 +287,11 @@ def _read_json_object(path: Path) -> dict[str, object]:
     return raw
 
 
-def _load_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
+def _load_model[ModelT: StateValue](path: Path, model_type: type[ModelT]) -> ModelT:
     """Load and strictly validate a required metadata model."""
     decoded = read_json(
         path,
-        model_type,
+        TypeAdapter(model_type),
         max_bytes=STATE_DOCUMENT_MAX_BYTES,
         options=ValidationOptions(strict=True),
     )
@@ -292,7 +306,7 @@ def _load_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> Mode
             raise ProjectStateError.invalid_metadata(path, decoded.details("metadata"))
 
 
-def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
+def _load_state_model[ModelT: StateValue](path: Path, model_type: type[ModelT]) -> ModelT:
     """Load and strictly validate a required operational-state model."""
     try:
         content = path.read_bytes()
@@ -303,7 +317,7 @@ def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -
     return decode_state_document(model_type, content, source=path)
 
 
-def decode_state_document[ModelT: BaseModel](
+def decode_state_document[ModelT: StateValue](
     model_type: type[ModelT],
     data: bytes | str,
     *,
@@ -329,7 +343,7 @@ def decode_state_document[ModelT: BaseModel](
             raise StateDocumentDamagedError.unsupported_version(source, found, readable[-1])
     decoded = decode_json(
         data,
-        model_type,
+        TypeAdapter(model_type),
         source=str(source),
         max_bytes=STATE_DOCUMENT_MAX_BYTES,
         options=ValidationOptions(strict=True, context=context),

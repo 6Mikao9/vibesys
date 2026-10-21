@@ -191,8 +191,17 @@ pnpm_packages = ["@vibesys/feature-run-intents"]
 
 [[cases]]
 name = "core value compiler and generated values select regeneration and Python checks"
-paths = ["scripts/corevalue/_emit.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/control_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/control_boundary.py"]
+paths = ["scripts/corevalue/_emit.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/control_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/control_boundary.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/leaves_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/leaves_boundary.py"]
 jobs = ["proto", "python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "shared value behavior selects Python checks"
+paths = ["libs/vs-core/src/vs_core/_leaf_behavior.py", "libs/vs-core/src/vs_core/_revision_ref.py"]
+jobs = ["python"]
 [cases.collections]
 native_languages = []
 native_targets = []

@@ -41,6 +41,7 @@ from vibesys.orchestration.dynamic.search.api import (
 from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate, core_protocol_variables
 from vs_core.api import (
     ComparisonPolicy,
+    CoreValue,
     EvidenceId,
     EvidenceKind,
     InvocationId,
@@ -386,7 +387,7 @@ OUTLINE_PROMPTS = st.builds(
     ),
 )
 ROLES = ("implementer", "judge", "profiler", "merger")
-CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
+CONTEXTS: dict[Template, st.SearchStrategy[BaseModel | WaitUnrecorded]] = {
     PromptTemplate.PORTFOLIO: PLANNER_PROMPTS,
     PromptTemplate.PORTFOLIO_CORRECTION: PLANNER_CORRECTIONS,
     PromptTemplate.IMPLEMENT: IMPLEMENT_PROMPTS,
@@ -434,7 +435,7 @@ CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
 
 
 def variables(
-    context: BaseModel,
+    context: BaseModel | CoreValue,
     *,
     agent_evaluation: bool = False,
     notes: str = "",
@@ -460,7 +461,7 @@ def variables(
     }
 
 
-def render(template: Template, context: BaseModel, **options: bool | str) -> str:
+def render(template: Template, context: BaseModel | CoreValue, **options: bool | str) -> str:
     """The prompt production renders for ``context``, under strict undefined variables."""
     return RENDERER.render_template(TEMPLATE_FILES[template], **variables(context, **options))  # ty: ignore[invalid-argument-type]
 

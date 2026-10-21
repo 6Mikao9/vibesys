@@ -60,6 +60,7 @@ from vs_core.api import (
     OperationId,
     OperationResult,
     ProposeWinner,
+    ProtocolContext,
     RejectionCode,
     RenderedArtifacts,
     RenderRoleArtifactsBase,
@@ -241,7 +242,7 @@ class Asked:
     request: Work | Finish
     until: Within | None
     """The limit of a wait; None for a ``Finish``, which core answers only by refusing it."""
-    context: Value | None = None
+    context: Value | ProtocolContext | None = None
     """For a turn request: the context its prompt was rendered from."""
     template: str | None = None
     """For a turn request: the template its prompt was rendered with."""
@@ -292,7 +293,7 @@ class FlowRun[C]:
         """Every decision the search issued, in order."""
         self._open: list[Asked] = []
         self._sleeps: list[Seconds] = []
-        self._prompts: dict[ArtifactId, tuple[str, Value]] = {}
+        self._prompts: dict[ArtifactId, tuple[str, Value | ProtocolContext]] = {}
         self._owners: dict[str, Callable[[OperationRequest], BaseModel]] = {}
         self._queue: list[Event] = []
         self.finished: Finish | None = None
@@ -647,7 +648,7 @@ class FlowRun[C]:
                     self.finished = decision
                     self._open.append(Asked(decision.decision_id, decision, None))
 
-    def _prompt(self, request: Work) -> tuple[str | None, Value | None]:
+    def _prompt(self, request: Work) -> tuple[str | None, Value | ProtocolContext | None]:
         if isinstance(request, RequestTurn) and request.turn.prompts:
             found = self._prompts.get(request.turn.prompts[0].artifact_id)
             if found is not None:

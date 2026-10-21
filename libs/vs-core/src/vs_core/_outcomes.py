@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, InstanceOf, PrivateAttr, SerializeAsAny
 
+from ._corevalue import CoreValue
 from ._values import canonical_json
 from .types.common import ExecuteRegisteredOperation, OperationSchemaRef, Value
 
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
 class OutcomeValue(Value):
     """Value-only codec proof travels with observations and callback values."""
 
-    _outcome_proof: BaseModel | None = PrivateAttr(default=None)
+    _outcome_proof: BaseModel | CoreValue | None = PrivateAttr(default=None)
     _schema_proof: OperationSchemaRef | None = PrivateAttr(default=None)
 
     @property
@@ -44,7 +45,9 @@ def _schema(value: BaseModel) -> OperationSchemaRef | None:
     )
 
 
-def prove_outcome[M: BaseModel](value: M, outcome: BaseModel, schema: OperationSchemaRef) -> M:
+def prove_outcome[M: BaseModel](
+    value: M, outcome: BaseModel | CoreValue, schema: OperationSchemaRef
+) -> M:
     """Attach pure validated codec facts to a newly constructed value."""
     object.__setattr__(
         value,
@@ -102,9 +105,14 @@ def bind_outcome[M: BaseModel](value: M, info: ValidationInfo) -> M:
     )
 
 
-def _without_registry[M: BaseModel](value: M, payload: str | None, outcome: BaseModel | None) -> M:
+def _without_registry[M: BaseModel](
+    value: M, payload: str | None, outcome: BaseModel | CoreValue | None
+) -> M:
     if outcome is not None:
         return value
     if payload is not None or getattr(value, "kind", None) == "operation_result":
         raise OutcomeCodecError("context")
     return value
+
+
+type TypedOutcome = SerializeAsAny[BaseModel | InstanceOf[CoreValue]]

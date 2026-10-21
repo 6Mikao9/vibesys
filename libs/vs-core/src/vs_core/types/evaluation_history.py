@@ -2,79 +2,29 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
+from vs_core._generated.vibesys.core.v1.leaves_cv import (
+    BenchmarkFailure,
+    EvaluationHistoryCursor,
+    EvaluationStageResult,
+)
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
+    AttemptTerminalReason,
+    EvaluationHistoryAvailability,
+    EvaluationStageOutcome,
+)
+
 from .common import (
     ContractValidationError,
-    Count,
     Observation,
     ObservationStatus,
     RequestId,
     Scope,
     Value,
 )
-
-
-class EvaluationHistoryAvailability(StrEnum):
-    """Unavailable history cannot prove an empty or successful history."""
-
-    COMPLETE = "complete"
-    UNAVAILABLE = "unavailable"
-
-
-class EvaluationStageOutcome(StrEnum):
-    """Scientific stage result, independent of external execution success."""
-
-    PASSED = "passed"
-    FAILED = "failed"
-    UNKNOWN = "unknown"
-
-
-class EvaluationStageResult(Value):
-    """One validated stage result from the accepted terminal submission fact."""
-
-    stage_id: str = Field(min_length=1)
-    outcome: EvaluationStageOutcome
-
-
-class BenchmarkFailure(Value):
-    """Failed benchmark partial and the explicit comparison interval containing it.
-
-    The measurement owner validates the rate and interval against its typed
-    outcome. Absence of this value cannot prove a repeated measurement failure.
-    """
-
-    partial_rate: float = Field(ge=0, allow_inf_nan=False)
-    rate_lower: float = Field(ge=0, allow_inf_nan=False)
-    rate_upper: float = Field(ge=0, allow_inf_nan=False)
-
-    @model_validator(mode="after")
-    def contained_rate(self) -> BenchmarkFailure:
-        """Reject reversed intervals and partials outside their comparison range."""
-        if not self.rate_lower <= self.partial_rate <= self.rate_upper:
-            raise ContractValidationError("partial_rate", "outside declared rate range")
-        return self
-
-
-class EvaluationHistoryCursor(Value):
-    """Immutable preceding-submission cursor captured at resume publication.
-
-    Zero identifies the beginning; otherwise submission_id names the exact
-    ordinal. A missing ID never stands in for a nonempty historical cursor.
-    """
-
-    ordinal: Count = 0
-    submission_id: RequestId | None = None
-
-    @model_validator(mode="after")
-    def exact_cursor(self) -> EvaluationHistoryCursor:
-        """Require identity precisely when the cursor names a submission."""
-        if (self.ordinal == 0) != (self.submission_id is None):
-            raise ContractValidationError("submission_id", "must match cursor ordinal")
-        return self
 
 
 class EvaluationTerminalFacts(Value):
@@ -213,15 +163,6 @@ class AttemptEvaluationHistory(Value):
         )
 
 
-class AttemptTerminalReason(StrEnum):
-    """Durable continuation exhaustion, distinct from resource release."""
-
-    REPEATED_TRACEBACK = "repeated-traceback"
-    REPEATED_MEASUREMENT = "repeated-measurement"
-    HISTORY_UNAVAILABLE = "history-unavailable"
-    NO_NEW_EVALUATION = "no-new-evaluation"
-
-
 class RepeatedFailureGuidance(Value):
     """Typed facts for strategy templates; no prompt text or dispatch authority."""
 
@@ -250,3 +191,17 @@ class RepeatedFailureGuidance(Value):
         ):
             raise ContractValidationError("failed_benchmark", "required for repeated measurement")
         return self
+
+
+__all__ = [
+    "AttemptEvaluationHistory",
+    "AttemptEvaluationRecord",
+    "AttemptTerminalReason",
+    "BenchmarkFailure",
+    "EvaluationHistoryAvailability",
+    "EvaluationHistoryCursor",
+    "EvaluationStageOutcome",
+    "EvaluationStageResult",
+    "EvaluationTerminalFacts",
+    "RepeatedFailureGuidance",
+]

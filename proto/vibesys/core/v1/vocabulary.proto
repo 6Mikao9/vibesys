@@ -1,0 +1,346 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "vibesys/core/v1/value_options.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+// Why an invocation checkpoint was not taken, so a decline is never silent.
+enum CheckpointDecline {
+  CHECKPOINT_DECLINE_UNSPECIFIED = 0;
+  CHECKPOINT_DECLINE_WRITER_ACTIVE = 1;
+  CHECKPOINT_DECLINE_UNAUTHORIZED = 2;
+  CHECKPOINT_DECLINE_UNCHARGED = 3;
+  CHECKPOINT_DECLINE_NOT_ACTIVE = 4;
+  CHECKPOINT_DECLINE_SNAPSHOT_FAILED = 5;
+}
+
+// Why a turn ended without a usable reply, as a closed set strategies match on.
+enum TurnFailureKind {
+  TURN_FAILURE_KIND_UNSPECIFIED = 0;
+  TURN_FAILURE_KIND_PROVIDER_FAILED = 1;
+  TURN_FAILURE_KIND_TRANSPORT_LOST = 2;
+  TURN_FAILURE_KIND_CANCELLED = 3;
+  TURN_FAILURE_KIND_PROVIDER_UNAVAILABLE = 4;
+}
+
+// Closed set of revision digest schemes; a digest is `<scheme>:<value>`.
+enum DigestScheme {
+  DIGEST_SCHEME_UNSPECIFIED = 0;
+  DIGEST_SCHEME_GIT_COMMIT = 1 [(core_member).spelling = "git-commit"];
+}
+
+// Lifecycle class lifecycle contract.
+enum LifecycleClass {
+  LIFECYCLE_CLASS_UNSPECIFIED = 0;
+  LIFECYCLE_CLASS_QUERY = 1;
+  LIFECYCLE_CLASS_IDEMPOTENT_WRITE = 2 [(core_member).spelling = "idempotent_external_write"];
+  LIFECYCLE_CLASS_OWNED_JOB = 3 [(core_member).spelling = "owned_long_running_job"];
+  LIFECYCLE_CLASS_SESSION_TURN = 4;
+}
+
+// Closed measurement kinds used for eligibility requirements.
+enum EvidenceKind {
+  EVIDENCE_KIND_UNSPECIFIED = 0;
+  EVIDENCE_KIND_CORRECTNESS = 1;
+  EVIDENCE_KIND_BENCHMARK = 2;
+  EVIDENCE_KIND_PROFILING = 3;
+}
+
+// Closed semantic assessment kinds, distinct from evidence production.
+enum AssessmentKind {
+  ASSESSMENT_KIND_UNSPECIFIED = 0;
+  ASSESSMENT_KIND_CORRECTNESS = 1;
+  ASSESSMENT_KIND_BENCHMARK = 2;
+  ASSESSMENT_KIND_PROFILING = 3;
+  ASSESSMENT_KIND_LOCAL_VALIDATION = 4 [(core_member).spelling = "local-validation"];
+}
+
+// Observation status lifecycle contract.
+enum ObservationStatus {
+  OBSERVATION_STATUS_UNSPECIFIED = 0;
+  OBSERVATION_STATUS_SUCCEEDED = 1;
+  OBSERVATION_STATUS_PENDING = 2;
+  OBSERVATION_STATUS_CANCELLED = 3;
+  OBSERVATION_STATUS_REJECTED = 4;
+  OBSERVATION_STATUS_FAILED = 5;
+  OBSERVATION_STATUS_UNKNOWN = 6;
+}
+
+// Rejection code lifecycle contract.
+enum RejectionCode {
+  REJECTION_CODE_UNSPECIFIED = 0;
+  REJECTION_CODE_STALE_VIEW = 1 [(core_member).spelling = "stale-view"];
+  REJECTION_CODE_IDENTITY_CONFLICT = 2 [(core_member).spelling = "identity-conflict"];
+  REJECTION_CODE_UNKNOWN_KIND = 3 [(core_member).spelling = "unknown-kind"];
+  REJECTION_CODE_UNKNOWN_SCHEMA = 4 [(core_member).spelling = "unknown-schema"];
+  REJECTION_CODE_UNDECLARED_OPERATION = 5 [(core_member).spelling = "undeclared-operation"];
+  REJECTION_CODE_CAPABILITY = 6;
+  REJECTION_CODE_OWNERSHIP = 7;
+  REJECTION_CODE_GENERATION = 8;
+  REJECTION_CODE_CLOSED_SCOPE = 9 [(core_member).spelling = "closed-scope"];
+  REJECTION_CODE_BUDGET = 10;
+  REJECTION_CODE_DEPENDENCY = 11;
+  REJECTION_CODE_EVIDENCE = 12;
+  REJECTION_CODE_ALREADY_SETTLED = 13 [(core_member).spelling = "already-settled"];
+  REJECTION_CODE_NOT_IMPLEMENTED_IN_KERNEL = 14 [(core_member).spelling = "not-implemented-in-kernel"];
+}
+
+// Area lifecycle contract.
+enum Area {
+  AREA_UNSPECIFIED = 0;
+  AREA_SCHEDULING = 1;
+  AREA_ATTEMPTS = 2;
+  AREA_SESSIONS = 3;
+  AREA_EVALUATION = 4;
+  AREA_SETTLEMENT = 5;
+  AREA_RECORDS = 6;
+}
+
+// Explicit workspace authority, never inferred from operation kind names.
+enum RevisionAuthority {
+  REVISION_AUTHORITY_UNSPECIFIED = 0;
+  REVISION_AUTHORITY_NONE = 1;
+  REVISION_AUTHORITY_SNAPSHOT = 2;
+  REVISION_AUTHORITY_RETAIN = 3;
+  REVISION_AUTHORITY_RESTORE = 4;
+  REVISION_AUTHORITY_DISCARD = 5;
+}
+
+// Closed normalization routes; pure normalizers live outside state.
+enum OperationNormalizationKind {
+  OPERATION_NORMALIZATION_KIND_UNSPECIFIED = 0;
+  OPERATION_NORMALIZATION_KIND_NONE = 1;
+  OPERATION_NORMALIZATION_KIND_SCOPE_REOPEN = 2;
+}
+
+// Terminal semantic decision outcome, independent of dispatch acceptance.
+enum CompletionStatus {
+  COMPLETION_STATUS_UNSPECIFIED = 0;
+  COMPLETION_STATUS_SUCCEEDED = 1;
+  COMPLETION_STATUS_FAILED = 2;
+  COMPLETION_STATUS_CANCELLED = 3;
+}
+
+// Readiness of durable completion and request dependencies.
+enum DependencyStatus {
+  DEPENDENCY_STATUS_UNSPECIFIED = 0;
+  DEPENDENCY_STATUS_PENDING = 1;
+  DEPENDENCY_STATUS_SUCCEEDED = 2;
+  DEPENDENCY_STATUS_FAILED = 3;
+}
+
+// Separate currencies with different admission and refund semantics.
+// 
+// ADMISSION charges accepted registration including queued starts. ATTEMPT
+// charges a paid invocation or failed setup cycle without an existing paid
+// charge. TURN charges one logical invocation, regardless of max_turns or
+// charge class, and never refunds.
+enum ChargeKind {
+  CHARGE_KIND_UNSPECIFIED = 0;
+  CHARGE_KIND_ADMISSION = 1;
+  CHARGE_KIND_ATTEMPT = 2;
+  CHARGE_KIND_TURN = 3;
+}
+
+// Setup classification; unknown acceptance requires inspection.
+enum SetupFailureKind {
+  SETUP_FAILURE_KIND_UNSPECIFIED = 0;
+  SETUP_FAILURE_KIND_TRANSIENT = 1;
+  SETUP_FAILURE_KIND_PERMANENT = 2;
+  SETUP_FAILURE_KIND_UNSUPPORTED = 3;
+  SETUP_FAILURE_KIND_UNKNOWN = 4;
+}
+
+// Workspace mode lifecycle contract.
+enum WorkspaceMode {
+  WORKSPACE_MODE_UNSPECIFIED = 0;
+  WORKSPACE_MODE_EXCLUSIVE_ROOT = 1 [(core_member).spelling = "exclusive-root"];
+  WORKSPACE_MODE_ISOLATED_CHILD = 2 [(core_member).spelling = "isolated-child"];
+  WORKSPACE_MODE_READ_ONLY_REVISION = 3 [(core_member).spelling = "read-only-revision"];
+}
+
+// What a ``Wait`` can ask for, plus the clock wake-up.
+enum WorkKind {
+  WORK_KIND_UNSPECIFIED = 0;
+  WORK_KIND_REQUEST_TURN = 1;
+  WORK_KIND_START_ATTEMPT = 2;
+  WORK_KIND_WITHDRAW = 3;
+  WORK_KIND_MEASURE = 4;
+  WORK_KIND_PROPOSE_WINNER = 5;
+  WORK_KIND_OPERATION = 6;
+  WORK_KIND_WAKE_AT = 7;
+}
+
+// The kinds of event a search receives, past tense, one per thing that happened.
+enum EventKind {
+  EVENT_KIND_UNSPECIFIED = 0;
+  EVENT_KIND_WORKSPACE_OPENED = 1;
+  EVENT_KIND_WORKSPACE_CLOSED = 2;
+  EVENT_KIND_TURN_FINISHED = 3;
+  EVENT_KIND_MEASUREMENT_FINISHED = 4;
+  EVENT_KIND_OPERATION_FINISHED = 5;
+  EVENT_KIND_ADOPTION_FINISHED = 6;
+  EVENT_KIND_STOP_REQUESTED = 7;
+  EVENT_KIND_STOP_LIFTED = 8;
+  EVENT_KIND_TIME_REACHED = 9;
+  EVENT_KIND_FAILED = 10;
+  EVENT_KIND_MESSAGE_DELIVERED = 11;
+  EVENT_KIND_MESSAGE_DROPPED = 12;
+  EVENT_KIND_INTERRUPTED = 13;
+  EVENT_KIND_TURN_ENDED = 14;
+  EVENT_KIND_TURN_YIELDED = 15;
+  EVENT_KIND_YIELD_FAILED = 16;
+  EVENT_KIND_RESUME_READY = 17;
+  EVENT_KIND_RESUME_FAILED = 18;
+  EVENT_KIND_CHECKPOINT_KNOWN = 19;
+  EVENT_KIND_COMPARISON_SETTLED = 20;
+}
+
+// Which side of the noise a candidate's result falls on, against its base.
+// 
+// ``INCONCLUSIVE`` is no side: the samples held give no estimate of the noise (too few runs a
+// side, or runs that all read alike), so the ratio is neither a gain nor within the noise.
+enum ComparisonVerdict {
+  COMPARISON_VERDICT_UNSPECIFIED = 0;
+  COMPARISON_VERDICT_BETTER = 1;
+  COMPARISON_VERDICT_WITHIN_NOISE = 2;
+  COMPARISON_VERDICT_WORSE = 3;
+  COMPARISON_VERDICT_INCONCLUSIVE = 4;
+}
+
+// What a comparison says of a plan's expected effect, a minimum ratio over the base.
+// 
+// The framework derives it (`vs_core._comparison.effect_verdict`); no agent states it.
+enum EffectVerdict {
+  EFFECT_VERDICT_UNSPECIFIED = 0;
+  EFFECT_VERDICT_SUPPORTED = 1;
+  EFFECT_VERDICT_WITHIN_NOISE = 2;
+  EFFECT_VERDICT_DISPROVEN = 3;
+  EFFECT_VERDICT_INCONCLUSIVE = 4;
+}
+
+// What ended a wait on a job: every wait ends by exactly one of these, or by a stop.
+// 
+// Closed. The bound of every wait is a time (``_wait_clock.Bound``), never absent; this
+// names the rule that set it.
+enum WaitEnd {
+  WAIT_END_UNSPECIFIED = 0;
+  WAIT_END_LIMIT = 1;
+  WAIT_END_QUEUE_BUDGET = 2;
+  WAIT_END_RUN_END = 3;
+}
+
+// Submission failure classification; unknown never proves workload rejection.
+// 
+// ``AMBIGUOUS`` is a failure the evidence cannot assign to the candidate or to the
+// machinery. The backend decides how often it measures such a failure again, within its
+// declared bound and core's hard cap; what reaches core is final.
+// 
+// ``RUN_ENVIRONMENT_UNAVAILABLE`` is a measurement the run environment refused because
+// it can run no such work at all (a local Slurm root its probe could not prove shared).
+// It is nobody's candidate's fault, and no retry can succeed, so it is never retried.
+enum MeasurementFailure {
+  option (core_enum).mixin = "vs_core._leaf_behavior.MeasurementFailurePolicy";
+
+  MEASUREMENT_FAILURE_UNSPECIFIED = 0;
+  MEASUREMENT_FAILURE_WORKLOAD = 1;
+  MEASUREMENT_FAILURE_INFRASTRUCTURE = 2;
+  MEASUREMENT_FAILURE_AMBIGUOUS = 3;
+  MEASUREMENT_FAILURE_UNKNOWN = 4;
+  MEASUREMENT_FAILURE_RUN_ENVIRONMENT_UNAVAILABLE = 5;
+}
+
+// What is waiting.
+enum WaitKind {
+  WAIT_KIND_UNSPECIFIED = 0;
+  WAIT_KIND_SESSION = 1;
+  WAIT_KIND_RECOVERY_CHECK = 2 [(core_member).spelling = "recovery-check"];
+  WAIT_KIND_OWNED_JOB = 3 [(core_member).spelling = "owned-job"];
+  WAIT_KIND_RELEASE_DEPENDENCY = 4 [(core_member).spelling = "release-dependency"];
+  WAIT_KIND_YIELD_PUBLICATION = 5 [(core_member).spelling = "yield-publication"];
+  WAIT_KIND_INTERRUPT = 6;
+  WAIT_KIND_REFUND = 7;
+  WAIT_KIND_DISPATCH = 8;
+  WAIT_KIND_RETRY = 9;
+  WAIT_KIND_TURN_ACQUISITION = 10 [(core_member).spelling = "turn-acquisition"];
+  WAIT_KIND_BLOCKED_RECORD = 11 [(core_member).spelling = "blocked-record"];
+}
+
+// What a role's first turn in a session costs the run's budget.
+// 
+// A turn that works on a candidate costs one ``ATTEMPT`` (and a turn); a turn that does not
+// (a judge, a planner) costs only a ``TURN``. Corrections and resumes cost a turn.
+enum Charge {
+  CHARGE_UNSPECIFIED = 0;
+  CHARGE_ATTEMPT = 1 [(core_member).spelling = "paid"];
+  CHARGE_TURN = 2 [(core_member).spelling = "free"];
+}
+
+// The failures of a reply that core may ask the agent to correct, within ``corrections``.
+enum Correctable {
+  CORRECTABLE_UNSPECIFIED = 0;
+  CORRECTABLE_INVALID_REPLY = 1 [(core_member).spelling = "invalid-reply"];
+  CORRECTABLE_UNRECORDED_WAIT = 2 [(core_member).spelling = "unrecorded-wait"];
+}
+
+// Why a requested piece of work ended without a result. Closed: no free-text reasons.
+enum FailureReason {
+  FAILURE_REASON_UNSPECIFIED = 0;
+  FAILURE_REASON_TIMED_OUT = 1 [(core_member).spelling = "timed-out"];
+  FAILURE_REASON_WORKSPACE_CLOSED = 2 [(core_member).spelling = "workspace-closed"];
+  FAILURE_REASON_OWNER_GONE = 3 [(core_member).spelling = "owner-gone"];
+  FAILURE_REASON_REFUSED = 4;
+  FAILURE_REASON_LOST = 5;
+  FAILURE_REASON_INVALID_REPLY = 6 [(core_member).spelling = "invalid-reply"];
+  FAILURE_REASON_RENDER_FAILED = 7 [(core_member).spelling = "render-failed"];
+  FAILURE_REASON_TURN_FAILED = 8 [(core_member).spelling = "turn-failed"];
+  FAILURE_REASON_WAIT_REFUSED = 9 [(core_member).spelling = "wait-refused"];
+  FAILURE_REASON_QUEUE_BUDGET_SPENT = 10 [(core_member).spelling = "queue-budget-spent"];
+  FAILURE_REASON_OUT_OF_BUDGET = 11 [(core_member).spelling = "out-of-budget"];
+  FAILURE_REASON_MEASUREMENT_UNTRUSTED = 12 [(core_member).spelling = "measurement-untrusted"];
+}
+
+// Why a turn that asked to wait for its evaluations was not suspended. Closed.
+enum WaitRefusal {
+  WAIT_REFUSAL_UNSPECIFIED = 0;
+  WAIT_REFUSAL_NOT_OFFERED = 1 [(core_member).spelling = "not-offered"];
+  WAIT_REFUSAL_NOT_RECORDED = 2 [(core_member).spelling = "not-recorded"];
+  WAIT_REFUSAL_NOT_PUBLISHED = 3 [(core_member).spelling = "not-published"];
+  WAIT_REFUSAL_NOT_RESUMABLE = 4 [(core_member).spelling = "not-resumable"];
+}
+
+// Why a reply did not validate against the agent's reply model. Closed.
+enum ReplyErrorCode {
+  REPLY_ERROR_CODE_UNSPECIFIED = 0;
+  REPLY_ERROR_CODE_MISSING = 1;
+  REPLY_ERROR_CODE_UNEXPECTED = 2;
+  REPLY_ERROR_CODE_WRONG_TYPE = 3 [(core_member).spelling = "wrong-type"];
+  REPLY_ERROR_CODE_INVALID_VALUE = 4 [(core_member).spelling = "invalid-value"];
+  REPLY_ERROR_CODE_NOT_JSON = 5 [(core_member).spelling = "not-json"];
+}
+
+// Unavailable history cannot prove an empty or successful history.
+enum EvaluationHistoryAvailability {
+  EVALUATION_HISTORY_AVAILABILITY_UNSPECIFIED = 0;
+  EVALUATION_HISTORY_AVAILABILITY_COMPLETE = 1;
+  EVALUATION_HISTORY_AVAILABILITY_UNAVAILABLE = 2;
+}
+
+// Scientific stage result, independent of external execution success.
+enum EvaluationStageOutcome {
+  EVALUATION_STAGE_OUTCOME_UNSPECIFIED = 0;
+  EVALUATION_STAGE_OUTCOME_PASSED = 1;
+  EVALUATION_STAGE_OUTCOME_FAILED = 2;
+  EVALUATION_STAGE_OUTCOME_UNKNOWN = 3;
+}
+
+// Durable continuation exhaustion, distinct from resource release.
+enum AttemptTerminalReason {
+  ATTEMPT_TERMINAL_REASON_UNSPECIFIED = 0;
+  ATTEMPT_TERMINAL_REASON_REPEATED_TRACEBACK = 1 [(core_member).spelling = "repeated-traceback"];
+  ATTEMPT_TERMINAL_REASON_REPEATED_MEASUREMENT = 2 [(core_member).spelling = "repeated-measurement"];
+  ATTEMPT_TERMINAL_REASON_HISTORY_UNAVAILABLE = 3 [(core_member).spelling = "history-unavailable"];
+  ATTEMPT_TERMINAL_REASON_NO_NEW_EVALUATION = 4 [(core_member).spelling = "no-new-evaluation"];
+}
+

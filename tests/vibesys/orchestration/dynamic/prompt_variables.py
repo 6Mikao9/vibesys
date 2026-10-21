@@ -17,7 +17,9 @@ from vibesys.orchestration.dynamic.search.api import dynamic
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vs_core.api import CoreValue
 
-def context_variables(context: BaseModel) -> dict[str, object]:
+
+def context_variables(context: BaseModel | CoreValue) -> dict[str, object]:
     """The context's fields (minus ``template``) and its ``reply``, as production renders."""
     return variables_of(context, dynamic.reply_schemas)

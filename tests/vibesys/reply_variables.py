@@ -17,12 +17,12 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import SchemaRef
+    from vs_core.api import CoreValue, SchemaRef
     from vs_prompts.api import ReplyFields
 
 
 def context_variables(
-    context: BaseModel, replies: Mapping[SchemaRef, type[BaseModel]]
+    context: BaseModel | CoreValue, replies: Mapping[SchemaRef, type[BaseModel]]
 ) -> dict[str, object]:
     """The context's fields (minus ``template``) and its reply variables."""
     variables: dict[str, object] = {

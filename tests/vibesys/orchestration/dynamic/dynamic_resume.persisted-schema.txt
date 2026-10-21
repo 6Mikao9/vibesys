@@ -42,7 +42,7 @@ AttemptId.kind optional {"const":"attempt","default":"attempt","type":"string"}
 AttemptId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 AttemptRef {"additionalProperties":false,"type":"object"}
 AttemptRef.attempt_id required {"$ref":"#/$defs/AttemptId"}
-AttemptRef.generation required {"$ref":"#/$defs/Generation"}
+AttemptRef.generation required {"minimum":0,"type":"integer"}
 Baseline {"oneOf":[{"$ref":"#/$defs/Measured"},{"$ref":"#/$defs/Unmeasurable"},{"$ref":"#/$defs/NotConfigured"},{"$ref":"#/$defs/_MeasuredBeforeS173"}]}
 Blocker {"additionalProperties":false,"type":"object"}
 Blocker.digest optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
@@ -155,7 +155,6 @@ FinishedWork.proof optional {"anyOf":[{"$ref":"#/$defs/Proof"},{"type":"null"}],
 FinishedWork.readings optional {"default":[],"items":{"$ref":"#/$defs/AcceptedReading"},"type":"array"}
 FinishedWork.sequence required {"exclusiveMinimum":0,"type":"integer"}
 Finite {"type":"number"}
-Generation {"minimum":0,"type":"integer"}
 HypothesisOutcome {"enum":["continue","supported","nominated","disproven","implementation_failed","inconclusive","blocked"],"type":"string"}
 HypothesisRecord {"additionalProperties":false,"type":"object"}
 HypothesisRecord.combined_from optional {"default":[],"items":{"$ref":"#/$defs/CombineSource"},"type":"array"}
@@ -254,13 +253,13 @@ Observation.children_complete optional {"default":false,"type":"boolean"}
 Observation.diagnostic optional {"default":"","type":"string"}
 Observation.event_id required {"$ref":"#/$defs/EventId"}
 Observation.measured_input optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
-Observation.observed_at required {"$ref":"#/$defs/Seconds"}
+Observation.observed_at required {"minimum":0.0,"type":"number"}
 Observation.released optional {"default":false,"type":"boolean"}
 Observation.request_id required {"$ref":"#/$defs/RequestId"}
 Observation.resource_id optional {"anyOf":[{"$ref":"#/$defs/ResourceId"},{"type":"null"}],"default":null}
 Observation.revision optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
 Observation.scope required {"$ref":"#/$defs/Scope"}
-Observation.sequence required {"$ref":"#/$defs/Count"}
+Observation.sequence required {"minimum":0,"type":"integer"}
 Observation.status required {"$ref":"#/$defs/ObservationStatus"}
 Observation.terminal optional {"default":false,"type":"boolean"}
 ObservationStatus {"enum":["succeeded","pending","cancelled","rejected","failed","unknown"],"type":"string"}
@@ -323,11 +322,11 @@ Queued {"additionalProperties":false,"type":"object"}
 Queued.order required {"exclusiveMinimum":0,"type":"integer"}
 Queued.submission required {"$ref":"#/$defs/Submission"}
 Reading {"additionalProperties":false,"type":"object"}
-Reading.direction optional {"anyOf":[{"$ref":"#/$defs/Direction"},{"type":"null"}],"default":null}
+Reading.direction optional {"anyOf":[{"enum":["max","min"],"type":"string"},{"type":"null"}],"default":null}
 Reading.metric required {"minLength":1,"type":"string"}
 Reading.repetitions optional {"default":1,"minimum":1,"type":"integer"}
 Reading.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
-Reading.value required {"$ref":"#/$defs/Finite"}
+Reading.value required {"type":"number"}
 RecordState {"additionalProperties":false,"type":"object"}
 RecordState.accepted required {"items":{"$ref":"#/$defs/WorkPlan"},"type":"array"}
 RecordState.baseline required {"anyOf":[{"$ref":"#/$defs/Baseline"},{"type":"null"}]}
@@ -401,7 +400,6 @@ Scope {"additionalProperties":false,"type":"object"}
 Scope.generation required {"minimum":0,"type":"integer"}
 Scope.owner required {"$ref":"#/$defs/ScopeOwner"}
 ScopeOwner {"discriminator":{"mapping":{"attempt":"#/$defs/AttemptId","run":"#/$defs/RunId"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/RunId"},{"$ref":"#/$defs/AttemptId"}]}
-Seconds {"minimum":0,"type":"number"}
 SessionId {"additionalProperties":false,"type":"object"}
 SessionId.kind optional {"const":"session","default":"session","type":"string"}
 SessionId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}

@@ -15,6 +15,8 @@ from pydantic import (
     model_validator,
 )
 
+from vs_core._corevalue import CoreValue
+
 from .attempts import AttemptBudget, WorkspacePlan
 from .common import (
     AttemptId,
@@ -154,7 +156,7 @@ class OperationRequest(Value):
 
     kind: str = Field(min_length=1)
     lifecycle: LifecycleClass
-    outcome_model: ClassVar[type[BaseModel]]
+    outcome_model: ClassVar[type[BaseModel | CoreValue]]
 
 
 class Operation(DecisionBase):

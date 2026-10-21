@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from vs_core.api import ContractError, HostFence
-from vs_project.api import StateDocumentDamagedError
+from vs_project.api import StateDocumentDamagedError, StateValue
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -198,7 +198,7 @@ class ReceiptStore:
                     self._depth = 0
                     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
-    def load[ReceiptT: BaseModel](
+    def load[ReceiptT: StateValue](
         self, family: str, part: str, key: str, model: type[ReceiptT]
     ) -> ReceiptT | None:
         """The recorded receipt, or None when nothing was recorded.
@@ -212,7 +212,7 @@ class ReceiptStore:
             message = f"{family} {part} receipt is unreadable"
             raise ReceiptCorruptError(message) from error
 
-    def record_once(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+    def record_once(self, family: str, part: str, key: str, receipt: StateValue) -> None:
         """Durably record the receipt; identical replays pass, a different payload conflicts."""
         with self.exclusive():
             prior = self.load(family, part, key, type(receipt))
@@ -222,12 +222,12 @@ class ReceiptStore:
                 raise ContractError(("request_id",), f"same {part} identity with another payload")
             self._namespace.save(self._path(family, part, key), receipt)
 
-    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+    def replace(self, family: str, part: str, key: str, receipt: StateValue) -> None:
         """Durably overwrite a record that is defined to change over time."""
         with self.exclusive():
             self._namespace.save(self._path(family, part, key), receipt)
 
-    def modify[ReceiptT: BaseModel, ResultT](
+    def modify[ReceiptT: StateValue, ResultT](
         self,
         family: str,
         part: str,

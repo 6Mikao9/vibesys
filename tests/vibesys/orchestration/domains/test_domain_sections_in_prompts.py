@@ -42,7 +42,7 @@ from vibesys.orchestration.issue_queue.search import api as plain_api
 from vibesys.orchestration.multi.search import api as multi_api
 from vibesys.orchestration.single.search import api as single_api
 from vibesys.serial_search.api import PlanPrompt
-from vs_core.api import RevisionId, RevisionRef
+from vs_core.api import CoreValue, RevisionId, RevisionRef
 from vs_project.api import OrchestrationDescriptor
 from vs_prompts.api import TemplateRenderer
 
@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from vibesys.plugin_registration import OrchestrationRegistration
     from vs_runtime.api import CorePlan, OrchestrationPlugin, RunFacts
 
-_RolePrompts = tuple[tuple[DomainRole, "BaseModel"], ...]
+_RolePrompts = tuple[tuple[DomainRole, "BaseModel | CoreValue"], ...]
 _CRITERIA = "criteria"
 _REV = RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1")
 _ROUND: dict[str, JsonValue] = {
@@ -116,7 +116,7 @@ class _Strategy:
 
 
 @cache
-def _example(template: PromptTemplate) -> BaseModel:
+def _example(template: PromptTemplate) -> BaseModel | CoreValue:
     """The simplest context the dynamic search generates for ``template``."""
     return find(CONTEXTS[template], lambda _: True)
 
@@ -267,7 +267,7 @@ def _plan(strategy: _Strategy, domain: DomainName, root: Path) -> CorePlan:
     )
 
 
-def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel) -> str:
+def _render(strategy: _Strategy, plan: CorePlan, context: BaseModel | CoreValue) -> str:
     if strategy.name == "dynamic":
         template = PromptTemplate(context.model_dump()["template"])
         return RENDERER.render_template(

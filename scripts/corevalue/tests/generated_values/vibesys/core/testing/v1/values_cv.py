@@ -9,7 +9,7 @@ from enum import StrEnum
 from pydantic import AfterValidator, ConfigDict, Field
 from functools import partial
 from pydantic.dataclasses import dataclass
-from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue, bounded_integer
+from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue, bounded_integer, omit_unset, resolve_value
 
 
 @final
@@ -24,3 +24,5 @@ class MapValue(CoreValue):
     marked: FrozenMap[str, TimestampValue] = FrozenMap()
 
     __hash__ = CoreValue.cached_hash
+
+resolve_value(MapValue)

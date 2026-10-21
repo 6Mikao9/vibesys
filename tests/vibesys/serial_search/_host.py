@@ -61,7 +61,7 @@ from vs_issue_tracker.api import FakeRoadmap, PutRoadmapItems, ReadRoadmap
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vs_core.api import SearchDef, Settlement
+    from vs_core.api import CoreValue, SearchDef, Settlement
     from vs_core.api.testing import Asked, FakeView, FlowRun
 
 TERMS = TaskTerms(
@@ -469,7 +469,7 @@ class SerialHost:
 
     def _operation(self, asked: Asked, request: Operation) -> None:
         typed = request.request
-        outcome: BaseModel
+        outcome: BaseModel | CoreValue
         if isinstance(typed, InterpretEvidenceBase):
             outcome = typed.outcome_model.model_validate(
                 {

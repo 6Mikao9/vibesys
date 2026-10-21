@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 from enum import StrEnum
-from typing import TYPE_CHECKING, ClassVar, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import pytest
 from hypothesis import given
@@ -101,8 +102,27 @@ def _registry(
             outcome_model=core.ScopedAdmissionReopenOutcome,
             normalize_scope_reopen=reopen_normalizer,
         )
-        request = core.ScopedAdmissionReopen(**_reopen().model_dump(exclude={"kind"}))
+        request = core.ScopedAdmissionReopen.model_validate(_reopen().model_dump(exclude={"kind"}))
     return core.OperationRegistry((registration,)), request
+
+
+def _unchecked(
+    valid: core.TurnSpec | core.ScopeReopenNormalization,
+    update: dict[str, Any] | None = None,
+    *,
+    missing: bool = False,
+) -> core.TurnSpec | core.ScopeReopenNormalization:
+    # Deliberately corrupt the extension's result: generated constructors and copies
+    # validate eagerly, but the registry must still reject objects forged without them.
+    if isinstance(valid, core.CoreValue):
+        value = object.__new__(type(valid))
+        if not missing:
+            for field in fields(valid):
+                object.__setattr__(
+                    value, field.name, (update or {}).get(field.name, getattr(valid, field.name))
+                )
+        return value
+    return type(valid).model_construct() if missing else valid.model_copy(update=update)
 
 
 def _bad_result(family: Literal["turn", "reopen"], bad: BadNormalization) -> object:
@@ -115,7 +135,7 @@ def _bad_result(family: Literal["turn", "reopen"], bad: BadNormalization) -> obj
         case BadNormalization.WRONG_MODEL:
             return Outcome()
         case BadNormalization.MISSING_FIELDS:
-            return type(valid).model_construct()
+            return _unchecked(valid, missing=True)
         case BadNormalization.INVALID_VALUE:
             update = (
                 {"max_turns": 0}
@@ -127,10 +147,10 @@ def _bad_result(family: Literal["turn", "reopen"], bad: BadNormalization) -> obj
                     )
                 }
             )
-            return valid.model_copy(update=update)
+            return _unchecked(valid, update)
         case BadNormalization.MUTABLE_VALUE:
             update = {"prompts": []} if family == "turn" else {"resolved_cancelled_jobs": []}
-            return valid.model_copy(update=update)
+            return _unchecked(valid, update)
 
 
 @pytest.mark.parametrize("family", ["turn", "reopen"])

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from protobuf import (
@@ -156,6 +157,8 @@ def _constraints(value: object) -> list[str]:
         ("min_len", "min_length"),
         ("max_len", "max_length"),
         ("pattern", "pattern"),
+        ("min_items", "min_length"),
+        ("max_items", "max_length"),
     ]:
         if hasattr(value, proto) and value.has_field(proto):
             found.append(f"{python}={getattr(value, proto)!r}")
@@ -192,13 +195,13 @@ def _scalar_shape(field: DescField, *, explicit: bool) -> tuple[str, str, list[s
             ann = f"Literal[{value.const!r}]"
             default = repr(value.const)
     if field.proto.proto3_optional:
-        return ann + " | None", "None", constraints
+        return ann + " | None", "" if explicit else "None", constraints
     if rule is None and not explicit:
         default = {"str": "''", "bytes": "b''", "bool": "False", "float": "0.0"}.get(ann, "0")
     return ann, default, constraints
 
 
-def field_shape(field: DescField) -> tuple[str, str, list[str]]:
+def _field_shape(field: DescField) -> tuple[str, str, list[str]]:
     """Annotation, default expression and scalar constraints, from proto rules only."""
     ann = type_of(field)
     rule = rule_of(field)
@@ -209,7 +212,11 @@ def field_shape(field: DescField) -> tuple[str, str, list[str]]:
             required = rule and rule.required
             return (ann, "", []) if required else (ann + " | None", "None", [])
         case DescFieldValueList():
-            return ann, "" if explicit else "()", []
+            return (
+                ann,
+                "" if explicit else "()",
+                _constraints(rule.type.value) if rule and rule.type else [],
+            )
         case DescFieldValueMap():
             return ann, "" if explicit else "FrozenMap()", []
         case DescFieldValueEnum():
@@ -217,3 +224,56 @@ def field_shape(field: DescField) -> tuple[str, str, list[str]]:
             return (ann, "", []) if required else (ann + " | None", "None", [])
         case _:
             return _scalar_shape(field, explicit=explicit)
+
+
+def field_shape(field: DescField) -> tuple[str, str, list[str]]:
+    """Apply the descriptor's legacy default without changing its validation domain."""
+    ann, default, constraints = _field_shape(field)
+    config = extension(field, options.ext_core_field)
+    if config and config.has_field("default_json"):
+        try:
+            value = json.loads(config.default_json)
+        except ValueError as error:
+            raise GenerationError(
+                field.parent.type_name, f"{field.name}: invalid default JSON"
+            ) from error
+        if not isinstance(value, str | int | float | bool) and value is not None:
+            raise GenerationError(field.parent.type_name, f"{field.name}: unsupported default")
+        _default_type(field, value)
+        if config.explicit:
+            raise GenerationError(
+                field.parent.type_name, f"{field.name}: explicit field has a default"
+            )
+        if isinstance(field.value, DescFieldValueEnum):
+            opts = extension(field.value.enum, options.ext_core_enum)
+            default = (
+                repr(value) if opts and opts.literal else f"{name(field.value.enum)}({value!r})"
+            )
+        else:
+            default = repr(value)
+    return ann, default, constraints
+
+
+def _default_type(field: DescField, value: object) -> None:
+    """Reject representation defaults that the declared scalar cannot hold."""
+    config = extension(field, options.ext_core_field)
+    valid = False
+    match field.value:
+        case DescFieldValueEnum(enum=enum):
+            valid = value in [spelling for _, spelling, _ in members(enum)]
+        case DescFieldValueScalar(scalar=kind):
+            expected = (
+                (int,)
+                if config.integer
+                else {
+                    ScalarType.STRING: (str,),
+                    ScalarType.BOOL: (bool,),
+                    ScalarType.DOUBLE: (float, int),
+                    ScalarType.FLOAT: (float, int),
+                }.get(kind, (int,))
+            )
+            valid = type(value) in expected
+    if not valid:
+        raise GenerationError(
+            field.parent.type_name, f"{field.name}: default does not match scalar type"
+        )

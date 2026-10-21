@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import OperationRequest, SchemaRef
+    from vs_core.api import CoreValue, OperationRequest, SchemaRef
     from vs_prompts.api import ReplyFields, TemplateRenderer
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._core_requests import ExecutionContext
@@ -61,7 +61,7 @@ _UNREAD: Mapping[str, object] = {
 
 
 def reply_variable(
-    context: BaseModel, replies: Mapping[SchemaRef, type[BaseModel]]
+    context: BaseModel | CoreValue, replies: Mapping[SchemaRef, type[BaseModel]]
 ) -> Mapping[str, ReplyFields]:
     """The reply template variables of a prompt context, or nothing for a turn without a reply.
 
@@ -92,7 +92,7 @@ class RenderRequest(Protocol):
     template: str
     subject: str
     ordinal: int
-    context: BaseModel
+    context: BaseModel | CoreValue
 
 
 class RenderArtifactsOwner:

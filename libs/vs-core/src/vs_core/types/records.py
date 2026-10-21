@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Annotated, Literal, Self, assert_never
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
+from pydantic import Field, ValidationInfo, model_validator
 
-from vs_core._outcomes import OutcomeCodecError, OutcomeValue, bind_outcome
+from vs_core._outcomes import OutcomeCodecError, OutcomeValue, TypedOutcome, bind_outcome
 
 from .attempts import (
     CloseAttemptScope,
@@ -257,7 +257,7 @@ class RequestRecord(OutcomeValue):
     suspension: Continuation | None = None
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
-    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
+    outcome: TypedOutcome | None = Field(default=None, exclude=True)
     retry_count: Count = 0
     retry_at: Seconds | None = None
     """Core time at which the request goes out again after a retryable failure, else None."""
@@ -616,7 +616,7 @@ class OperationView(Value):
     phase: RequestPhase
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
-    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
+    outcome: TypedOutcome | None = Field(default=None, exclude=True)
 
 
 class RequestPrepared(Value):
@@ -686,7 +686,7 @@ class TargetObservation(OutcomeValue):
     outcome_json: str | None = None
     reply_errors: tuple[ReplyError, ...] = ()
     """What a rejected turn reply got wrong, field by field, for the correction that follows."""
-    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
+    outcome: TypedOutcome | None = Field(default=None, exclude=True)
     operation_schema: OperationSchemaRef | None = None
     reissue: ReissueProof | None = None
     """Why core may send the inspected request out again, when the executor can prove it."""
@@ -771,7 +771,7 @@ class RequestObserved(OutcomeValue):
     outcome_schema: SchemaRef | None = None
     outcome_json: str | None = None
     reply_errors: tuple[ReplyError, ...] = ()
-    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
+    outcome: TypedOutcome | None = Field(default=None, exclude=True)
     evidence: tuple[EvidenceRef, ...] = ()
     revision: RevisionRef | None = None
     operation_schema: OperationSchemaRef | None = None
@@ -904,7 +904,7 @@ class OperationResult(OutcomeValue):
     outcome_json: str | None = None
     # The wire omits this derived field. The after-validator requires and restores
     # the registered subtype before a callback can escape the codec.
-    outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
+    outcome: TypedOutcome | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def registered_outcome(self, info: ValidationInfo) -> OperationResult:

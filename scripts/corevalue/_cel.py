@@ -7,7 +7,15 @@ import re
 
 from protobuf import DescFieldValueEnum, DescFieldValueMessage, DescMessage
 
-from scripts.corevalue._schema import GenerationError, is_union, members, type_of, union_members
+from scripts.corevalue._schema import (
+    GenerationError,
+    extension,
+    is_union,
+    members,
+    options,
+    type_of,
+    union_members,
+)
 
 _MEMBER_PATH_LENGTH = 2
 
@@ -18,15 +26,19 @@ def cel(expression: str, message: DescMessage) -> str:
     Proto enum comparisons use numbers; the value API uses persisted string spellings.
     Presence of a union member becomes an isinstance check on the closed union.
     """
-    if '"' in expression or "'" in expression:
-        raise GenerationError(
-            message.type_name, "CEL string literals require an explicit compiler binding"
-        )
-    text = expression
+    text = _decimals(expression, message)
+    text = re.sub(r"size\((this\.[\w.]+)\)", r"len(\1)", text)
+    text = _macros(text, message)
     fields = {f.name: f for f in message.fields}
     text = re.sub(
         r"this\.(\w+)\.map\((\w+), \2\.([\w.]+)\)\.unique\(\)",
         r"(len(set(p.\3 for p in self.\1)) == len(self.\1))",
+        text,
+    )
+
+    text = re.sub(
+        r"(this\.[\w.]+)\.unique\(\)",
+        r"(len(set(\1)) == len(\1))",
         text,
     )
 
@@ -82,6 +94,7 @@ def cel(expression: str, message: DescMessage) -> str:
         ast.List,
         ast.Call,
         ast.GeneratorExp,
+        ast.ListComp,
         ast.comprehension,
         ast.Store,
     )
@@ -94,7 +107,13 @@ def _validate_calls(tree: ast.AST, message: DescMessage, expression: str) -> Non
     """Only the calls introduced by the compiler may enter constructor code."""
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            named = isinstance(node.func, ast.Name) and node.func.id in {"len", "set", "isinstance"}
+            named = isinstance(node.func, ast.Name) and node.func.id in {
+                "len",
+                "set",
+                "isinstance",
+                "all",
+                "str",
+            }
             table = (
                 isinstance(node.func, ast.Attribute)
                 and node.func.attr == "get"
@@ -102,3 +121,40 @@ def _validate_calls(tree: ast.AST, message: DescMessage, expression: str) -> Non
             )
             if not (named or table):
                 raise GenerationError(message.type_name, f"unsupported CEL call in {expression!r}")
+
+
+def _macros(text: str, message: DescMessage) -> str:
+    """Lower list predicates and filters with their CEL lexical variable scope."""
+    pattern = re.compile(r"(this\.[\w.]+)\.(all|filter)\((\w+), ")
+    while match := pattern.search(text):
+        start = match.end()
+        end = start
+        depth = 1
+        while end < len(text) and depth:
+            depth += (text[end] == "(") - (text[end] == ")")
+            end += 1
+        if depth:
+            raise GenerationError(message.type_name, "unclosed CEL list expression")
+        body = _macros(text[start : end - 1], message)
+        expression = (
+            f"all(({body}) for {match[3]} in {match[1]})"
+            if match[2] == "all"
+            else f"[{match[3]} for {match[3]} in {match[1]} if ({body})]"
+        )
+        text = text[: match.start()] + expression + text[end:]
+    # size() may contain a lowered filter; it has CEL's ordinary list length semantics.
+    return text.replace("size(", "len(")
+
+
+def _decimals(expression: str, message: DescMessage) -> str:
+    text = expression
+    for field in message.fields:
+        config = extension(field, options.ext_core_field)
+        if config and config.integer:
+            text = text.replace(f"size(this.{field.name})", f"len(str(this.{field.name}))")
+            text = text.replace(f'this.{field.name} == "0"', f"this.{field.name} == 0")
+    if '"' in text or "'" in text:
+        raise GenerationError(
+            message.type_name, "CEL string literals require an explicit compiler binding"
+        )
+    return text

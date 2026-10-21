@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_core.api import CoreValue
+
 # The distinctive note a run environment contributes; no template wording contains it.
 _NOTES = "ZQ-ENV-NOTE: reach the gate with the gate client; GPU commands run on the host."
 
@@ -54,7 +56,9 @@ def _plan_variables(root: Path, notes: str) -> dict[str, object]:
     return dict(plan.prompt_variables)
 
 
-def _render(template: PromptTemplate, context: BaseModel, run_variables: dict[str, object]) -> str:
+def _render(
+    template: PromptTemplate, context: BaseModel | CoreValue, run_variables: dict[str, object]
+) -> str:
     variables = context_variables(context)
     return RENDERER.render_template(TEMPLATE_FILES[template], **{**run_variables, **variables})
 

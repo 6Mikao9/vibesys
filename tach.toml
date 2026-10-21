@@ -1481,7 +1481,7 @@ expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict
 [[modules]]
 path = "vs_core.types"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core.types.common", "vs_core._outcomes"]
+depends_on = ["vs_core.types.common", "vs_core._outcomes", "vs_core._generated", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv", "vs_core._corevalue"]
 
 [[interfaces]]
 from = ["vs_core.types"]
@@ -1490,7 +1490,7 @@ expose = ["[a-z_]+\\.[A-Z].*", "sessions\\.(session_waits|session_may_wait|turn_
 [[modules]]
 path = "vs_core.types.common"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._generated", "vs_core._values"]
+depends_on = ["vs_core._corevalue", "vs_core._generated", "vs_core._values", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core.types.common"]
@@ -1508,11 +1508,11 @@ expose = ["canonical_json", "deeply_immutable", "digest", "emit_fragment", "enco
 [[modules]]
 path = "vs_core._outcomes"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core.types.common", "vs_core._values"]
+depends_on = ["vs_core.types.common", "vs_core._values", "vs_core._corevalue"]
 
 [[interfaces]]
 from = ["vs_core._outcomes"]
-expose = ["OutcomeCodecError", "OutcomeValue", "bind_outcome", "prove_outcome"]
+expose = ["OutcomeCodecError", "OutcomeValue", "TypedOutcome", "bind_outcome", "prove_outcome"]
 [[modules]]
 path = "vibesys.orchestration.issue_queue.models"
 layer = "loops"
@@ -1966,7 +1966,7 @@ expose = ["host_call"]
 [[modules]]
 path = "vs_core._generated"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._corevalue", "vs_core._retry_policy"]
+depends_on = ["vs_core._corevalue", "vs_core._retry_policy", "vs_core._leaf_behavior", "vs_core._revision_ref", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core._generated"]
@@ -1979,7 +1979,7 @@ depends_on = []
 
 [[interfaces]]
 from = ["vs_core._corevalue"]
-expose = ["CoreValue", "FrozenMap", "TimestampValue", "bounded_integer"]
+expose = ["CoreValue", "FrozenMap", "TimestampValue", "bounded_integer", "omit_unset", "ContractValidationError", "resolve_value"]
 
 [[modules]]
 path = "vs_core._retry_policy"
@@ -1989,3 +1989,39 @@ depends_on = []
 [[interfaces]]
 from = ["vs_core._retry_policy"]
 expose = ["RequestRetryPolicy"]
+
+[[modules]]
+path = "vs_core._leaf_behavior"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._corevalue"]
+
+[[interfaces]]
+from = ["vs_core._leaf_behavior"]
+expose = ["BackoffPolicy", "ObservationFacts", "MeasurementFailurePolicy", "WaitDuration"]
+
+[[modules]]
+path = "vs_core._revision_ref"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._corevalue", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+
+[[interfaces]]
+from = ["vs_core._revision_ref"]
+expose = ["RevisionReference"]
+
+[[modules]]
+path = "vs_core._generated.vibesys.core.v1.common_cv"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._corevalue"]
+
+[[interfaces]]
+from = ["vs_core._generated.vibesys.core.v1.common_cv"]
+expose = [".*"]
+
+[[modules]]
+path = "vs_core._generated.vibesys.core.v1.vocabulary_cv"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._leaf_behavior", "vs_core._corevalue"]
+
+[[interfaces]]
+from = ["vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+expose = [".*"]

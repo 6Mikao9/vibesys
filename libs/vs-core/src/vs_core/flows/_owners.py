@@ -22,6 +22,7 @@ from vs_core.types.until import Failed, Within
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vs_core._corevalue import CoreValue
     from vs_core.types.common import Seconds
 
     from ._kit import Kit
@@ -37,7 +38,7 @@ class Owners:
 
     async def perform(
         self, request: OperationRequest, *, within: Seconds | Within, label: Label | None = None
-    ) -> BaseModel | Failed:
+    ) -> BaseModel | CoreValue | Failed:
         """Have the owner perform ``request``: its typed outcome, or the failure that ended the wait.
 
         ``request`` must be of a kind the search registered with ``owned=``; ``label`` labels the

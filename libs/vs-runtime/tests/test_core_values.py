@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError, fields
+from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from hypothesis import example, given
@@ -14,7 +15,7 @@ from pydantic import TypeAdapter, ValidationError
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits, sample_retries
-from vs_proto.api import LegacyEvent, core_common
+from vs_proto.api import LegacyEvent, core_common, core_leaves, core_vocabulary
 from vs_proto.api import ValidationError as ProtoValidationError
 from vs_proto.api import core_control as core_state
 from vs_runtime.api.core_values import from_proto, to_proto, value_types
@@ -58,7 +59,12 @@ def _sample(cls: type[core.CoreValue], root: str, count: int) -> core.CoreValue:
     }
     if issubclass(cls, core.Identity):
         return cls(root=root)
-    return values[cls]()
+    if cls in values:
+        return values[cls]()
+    source = _leaf_seeds()[cls.__name__]
+    return TypeAdapter(cls).validate_json(
+        json.dumps(source).replace('"root": "x"', '"root": ' + json.dumps(root))
+    )
 
 
 @pytest.mark.parametrize("cls", value_types())
@@ -199,3 +205,76 @@ def test_nominal_identity_domains_cannot_be_substituted(
     else:
         with pytest.raises(ValidationError):
             target.model_validate(value)
+
+
+@cache
+def _leaf_seeds() -> dict[str, object]:
+    path = Path(__file__).parent / "fixtures" / "core-values" / "leaf-seeds.json"
+    return json.loads(path.read_text())
+
+
+def test_shared_leaf_differential_fixtures_preserve_old_acceptance_and_json() -> None:
+    path = Path(__file__).parent / "fixtures" / "core-values" / "leaves.json"
+    for case in json.loads(path.read_text()):
+        cls = getattr(core, case["type"])
+        if case["accepted"]:
+            value = TypeAdapter(cls).validate_json(case["source"])
+            assert json.loads(value.model_dump_json()) == case["output"], case
+            assert from_proto(to_proto(value)) == value
+        else:
+            with pytest.raises(ValidationError):
+                TypeAdapter(cls).validate_json(case["source"])
+
+
+@given(
+    charged=st.integers(min_value=0, max_value=10**100),
+    refunded=st.integers(min_value=0, max_value=10**100),
+    turn=st.booleans(),
+)
+def test_charge_bounds_preserve_arbitrary_precision_at_both_boundaries(
+    charged: int, refunded: int, *, turn: bool
+) -> None:
+    fields: dict[str, Any] = {
+        "charge_id": core.ChargeId(root="charge"),
+        "kind": core.ChargeKind.TURN if turn else core.ChargeKind.ATTEMPT,
+        "charged": charged,
+        "refunded": refunded,
+    }
+    valid = refunded <= charged and (not turn or refunded == 0)
+    if valid:
+        value = core.ChargeReceipt(**fields)
+        assert from_proto(to_proto(value)) == value
+    else:
+        with pytest.raises(ValidationError):
+            core.ChargeReceipt(**fields)
+        message = core_leaves.ChargeReceipt(
+            charge_id=core_common.ChargeId(root="charge", kind="charge"),
+            kind=core_vocabulary.ChargeKind.TURN if turn else core_vocabulary.ChargeKind.ATTEMPT,
+            charged=str(charged),
+            refunded=str(refunded),
+        )
+        with pytest.raises(ProtoValidationError):
+            from_proto(message)
+
+
+@given(
+    names=st.lists(_ROOT, max_size=8),
+    timer=st.none() | st.floats(min_value=0, max_value=10**10, allow_nan=False),
+)
+def test_wait_dependencies_are_nonempty_and_unique_in_both_representations(
+    names: list[str], timer: float | None
+) -> None:
+    requests = tuple(core.RequestId(root=name) for name in names)
+    valid = len(set(names)) == len(names) and (bool(names) or timer is not None)
+    if valid:
+        value = core.WaitOn(requests=requests, timer=timer)
+        assert from_proto(to_proto(value)) == value
+    else:
+        with pytest.raises(ValidationError):
+            core.WaitOn(requests=requests, timer=timer)
+        message = core_leaves.WaitOn(
+            requests=[core_common.RequestId(root=name, kind="request") for name in names],
+            timer=timer,
+        )
+        with pytest.raises(ProtoValidationError):
+            from_proto(message)

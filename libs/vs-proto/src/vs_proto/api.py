@@ -48,7 +48,9 @@ from vs_proto._generated.vibesys.api.v1.host_pb import (
 )
 from vs_proto._generated.vibesys.core.v1 import common_pb as core_common
 from vs_proto._generated.vibesys.core.v1 import control_pb as core_control
+from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
+from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
 from vs_proto._generated.vibesys.search.v1.attrs_pb import (
     AdoptionAttrs,
     BaselineAttrs,
@@ -321,7 +323,9 @@ __all__ = [
     "WorkstreamFailureKind",
     "core_common",
     "core_control",
+    "core_leaves",
     "core_value_options",
+    "core_vocabulary",
     "schema_hash",
     "validate",
     "validation_rules",

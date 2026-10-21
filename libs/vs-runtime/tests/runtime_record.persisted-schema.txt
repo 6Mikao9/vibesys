@@ -169,7 +169,7 @@ AttemptReady.attempt required {"$ref":"#/$defs/AttemptRef"}
 AttemptReady.kind optional {"const":"attempt_ready","default":"attempt_ready","type":"string"}
 AttemptRef {"additionalProperties":false,"type":"object"}
 AttemptRef.attempt_id required {"$ref":"#/$defs/AttemptId"}
-AttemptRef.generation required {"$ref":"#/$defs/Generation"}
+AttemptRef.generation required {"minimum":0,"type":"integer"}
 AttemptRegistered {"additionalProperties":false,"type":"object"}
 AttemptRegistered.budget required {"$ref":"#/$defs/AttemptBudget"}
 AttemptRegistered.initial_sessions optional {"default":[],"items":{"$ref":"#/$defs/SessionSpec"},"type":"array"}
@@ -229,9 +229,9 @@ BaseRef {"additionalProperties":false,"type":"object"}
 BaseRef.commit required {"$ref":"#/$defs/RevisionRef"}
 BaseRef.measured_input required {"minLength":1,"type":"string"}
 BenchmarkFailure {"additionalProperties":false,"type":"object"}
-BenchmarkFailure.partial_rate required {"minimum":0,"type":"number"}
-BenchmarkFailure.rate_lower required {"minimum":0,"type":"number"}
-BenchmarkFailure.rate_upper required {"minimum":0,"type":"number"}
+BenchmarkFailure.partial_rate required {"minimum":0.0,"type":"number"}
+BenchmarkFailure.rate_lower required {"minimum":0.0,"type":"number"}
+BenchmarkFailure.rate_upper required {"minimum":0.0,"type":"number"}
 BlockRequest {"additionalProperties":false,"type":"object"}
 BlockRequest.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 BlockRequest.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -269,7 +269,7 @@ CancelTurn.kind optional {"const":"cancel_turn","default":"cancel_turn","type":"
 CancelTurn.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 CancelTurn.scope required {"$ref":"#/$defs/Scope"}
 Capabilities {"additionalProperties":false,"type":"object"}
-Capabilities.lifecycle optional {"default":[],"items":{"$ref":"#/$defs/LifecycleCapability"},"type":"array","uniqueItems":true}
+Capabilities.lifecycle optional {"default":[],"items":{"enum":["park","interrupt","steer","suspend","profile-capture"],"type":"string"},"type":"array","uniqueItems":true}
 Capabilities.operations optional {"default":[],"items":{"$ref":"#/$defs/OperationDescriptor"},"type":"array"}
 CapacityHold {"additionalProperties":false,"type":"object"}
 CapacityHold.budget required {"$ref":"#/$defs/Seconds"}
@@ -284,12 +284,12 @@ ChargeId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 ChargeKind {"enum":["admission","attempt","turn"],"type":"string"}
 ChargeReceipt {"additionalProperties":false,"type":"object"}
 ChargeReceipt.charge_id required {"$ref":"#/$defs/ChargeId"}
-ChargeReceipt.charged required {"$ref":"#/$defs/Count"}
+ChargeReceipt.charged required {"minimum":0,"type":"integer"}
 ChargeReceipt.historical_proof optional {"anyOf":[{"$ref":"#/$defs/ArtifactRef"},{"type":"null"}],"default":null}
 ChargeReceipt.invocation_id optional {"anyOf":[{"$ref":"#/$defs/InvocationId"},{"type":"null"}],"default":null}
 ChargeReceipt.kind required {"$ref":"#/$defs/ChargeKind"}
 ChargeReceipt.refund_sources optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
-ChargeReceipt.refunded optional {"$ref":"#/$defs/Count","default":0}
+ChargeReceipt.refunded optional {"default":0,"minimum":0,"type":"integer"}
 ChargeReceipt.source_request optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 Checkpoint {"discriminator":{"mapping":{"declined":"#/$defs/Declined","retained":"#/$defs/Retained"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/Retained"},{"$ref":"#/$defs/Declined"}]}
 CheckpointDecline {"enum":["writer_active","unauthorized","uncharged","not_active","snapshot_failed"],"type":"string"}
@@ -353,16 +353,16 @@ Command {"discriminator":{"mapping":{"finish":"#/$defs/Finish","measure":"#/$def
 Comparison {"additionalProperties":false,"type":"object"}
 Comparison.base required {"$ref":"#/$defs/RevisionRef"}
 Comparison.base_input required {"minLength":1,"type":"string"}
-Comparison.base_samples required {"$ref":"#/$defs/Count"}
-Comparison.base_value required {"$ref":"#/$defs/vs_core__types__measurement__Finite__1"}
+Comparison.base_samples required {"minimum":0,"type":"integer"}
+Comparison.base_value required {"type":"number"}
 Comparison.candidate required {"$ref":"#/$defs/RevisionRef"}
 Comparison.candidate_input required {"minLength":1,"type":"string"}
-Comparison.candidate_samples required {"$ref":"#/$defs/Count"}
-Comparison.candidate_value required {"$ref":"#/$defs/vs_core__types__measurement__Finite__1"}
-Comparison.direction required {"$ref":"#/$defs/Direction"}
+Comparison.candidate_samples required {"minimum":0,"type":"integer"}
+Comparison.candidate_value required {"type":"number"}
+Comparison.direction required {"enum":["max","min"],"type":"string"}
 Comparison.metric required {"minLength":1,"type":"string"}
-Comparison.noise required {"$ref":"#/$defs/vs_core__types__measurement__Finite__2"}
-Comparison.ratio required {"$ref":"#/$defs/vs_core__types__measurement__Finite__1"}
+Comparison.noise required {"minimum":0.0,"type":"number"}
+Comparison.ratio required {"type":"number"}
 Comparison.scope required {"$ref":"#/$defs/Scope"}
 Comparison.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Comparison.verdict required {"$ref":"#/$defs/ComparisonVerdict"}
@@ -437,7 +437,7 @@ ControlInput.withdraws optional {"anyOf":[{"$ref":"#/$defs/InputId"},{"type":"nu
 CoreRun {"additionalProperties":false,"type":"object"}
 CoreRun.candidate required {"$ref":"#/$defs/RequestId"}
 CoreRun.candidate_input required {"minLength":1,"type":"string"}
-CoreRun.fresh_when_asked required {"$ref":"#/$defs/Count"}
+CoreRun.fresh_when_asked required {"minimum":0,"type":"integer"}
 CoreRun.request_id required {"$ref":"#/$defs/RequestId"}
 CoreRun.scope required {"$ref":"#/$defs/Scope"}
 CoreState {"additionalProperties":false,"type":"object"}
@@ -475,7 +475,6 @@ Declined.reason required {"$ref":"#/$defs/CheckpointDecline"}
 DependencyRef {"additionalProperties":false,"type":"object"}
 DependencyRef.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 DependencyRef.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
-Direction {"enum":["max","min"],"type":"string"}
 DiscardWorkspace {"additionalProperties":false,"type":"object"}
 DiscardWorkspace.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 DiscardWorkspace.attempt required {"$ref":"#/$defs/AttemptRef"}
@@ -519,7 +518,7 @@ EnsureWorkspace.scope required {"$ref":"#/$defs/Scope"}
 EvaluationEvent {"discriminator":{"mapping":{"agent_measurement_requested":"#/$defs/AgentMeasurementRequested","continuation_jobs_changed":"#/$defs/ContinuationJobsChanged","continuation_reopen_requested":"#/$defs/ContinuationReopenRequested","continuation_retire_requested":"#/$defs/ContinuationRetireRequested","continuation_scope_reopened":"#/$defs/ContinuationScopeReopened","deadline_reached":"#/$defs/DeadlineReached","job_observed":"#/$defs/JobObserved","job_termination_requested":"#/$defs/JobTerminationRequested","job_wait_lapsed":"#/$defs/JobWaitLapsed","jobs_drain_requested":"#/$defs/JobsDrainRequested","measurement_requested":"#/$defs/MeasurementRequested","measurement_submission_ended":"#/$defs/MeasurementSubmissionEnded","measurement_submission_observed":"#/$defs/MeasurementSubmissionObserved","observations_due":"#/$defs/ObservationsDue","registered_job_observed":"#/$defs/RegisteredJobObserved","registered_job_requested":"#/$defs/RegisteredJobRequested","run_jobs_cancel_requested":"#/$defs/RunJobsCancelRequested","turn_suspended":"#/$defs/TurnSuspended"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/RegisteredJobObserved"},{"$ref":"#/$defs/RegisteredJobRequested"},{"$ref":"#/$defs/MeasurementRequested"},{"$ref":"#/$defs/AgentMeasurementRequested"},{"$ref":"#/$defs/JobObserved"},{"$ref":"#/$defs/TurnSuspended"},{"$ref":"#/$defs/DeadlineReached"},{"$ref":"#/$defs/ObservationsDue"},{"$ref":"#/$defs/JobWaitLapsed"},{"$ref":"#/$defs/ContinuationJobsChanged"},{"$ref":"#/$defs/JobTerminationRequested"},{"$ref":"#/$defs/ContinuationRetireRequested"},{"$ref":"#/$defs/ContinuationReopenRequested"},{"$ref":"#/$defs/ContinuationScopeReopened"},{"$ref":"#/$defs/JobsDrainRequested"},{"$ref":"#/$defs/RunJobsCancelRequested"},{"$ref":"#/$defs/MeasurementSubmissionObserved"},{"$ref":"#/$defs/MeasurementSubmissionEnded"}]}
 EvaluationHistoryAvailability {"enum":["complete","unavailable"],"type":"string"}
 EvaluationHistoryCursor {"additionalProperties":false,"type":"object"}
-EvaluationHistoryCursor.ordinal optional {"$ref":"#/$defs/Count","default":0}
+EvaluationHistoryCursor.ordinal optional {"default":0,"minimum":0,"type":"integer"}
 EvaluationHistoryCursor.submission_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 EvaluationRequest {"discriminator":{"mapping":{"cancel_owned_job":"#/$defs/CancelOwnedJob","collect_evidence":"#/$defs/CollectEvidence","inspect_owned_job":"#/$defs/InspectOwnedJob","observe_owned_job":"#/$defs/ObserveOwnedJob","submit_measurement":"#/$defs/SubmitMeasurement"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/SubmitMeasurement"},{"$ref":"#/$defs/ObserveOwnedJob"},{"$ref":"#/$defs/InspectOwnedJob"},{"$ref":"#/$defs/CancelOwnedJob"},{"$ref":"#/$defs/CollectEvidence"}]}
 EvaluationStageOutcome {"enum":["passed","failed","unknown"],"type":"string"}
@@ -544,7 +543,7 @@ EvaluationTerminalFacts.failed_benchmark optional {"anyOf":[{"$ref":"#/$defs/Ben
 EvaluationTerminalFacts.stages optional {"default":[],"items":{"$ref":"#/$defs/EvaluationStageResult"},"type":"array"}
 EvaluationTerminalFacts.traceback_signature optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
 EventCursor {"additionalProperties":false,"type":"object"}
-EventCursor.sequence required {"$ref":"#/$defs/Count"}
+EventCursor.sequence required {"minimum":0,"type":"integer"}
 EventId {"additionalProperties":false,"type":"object"}
 EventId.kind optional {"const":"event","default":"event","type":"string"}
 EventId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
@@ -642,7 +641,7 @@ HostEpoch.alive_at required {"$ref":"#/$defs/Seconds"}
 HostEpoch.epoch required {"$ref":"#/$defs/Count"}
 HostEpoch.started_at required {"$ref":"#/$defs/Seconds"}
 HostFence {"additionalProperties":false,"type":"object"}
-HostFence.epoch required {"$ref":"#/$defs/Count"}
+HostFence.epoch required {"minimum":0,"type":"integer"}
 HostFence.host_id required {"$ref":"#/$defs/HostId"}
 HostId {"additionalProperties":false,"type":"object"}
 HostId.kind optional {"const":"host","default":"host","type":"string"}
@@ -868,12 +867,12 @@ JobObserved.operator_diagnostic optional {"default":"","type":"string"}
 JobObserved.progress optional {"anyOf":[{"$ref":"#/$defs/JobProgress"},{"type":"null"}],"default":null}
 JobObserved.resource_id required {"$ref":"#/$defs/ResourceId"}
 JobProgress {"additionalProperties":false,"type":"object"}
-JobProgress.estimated_start_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
-JobProgress.observation_sequence required {"$ref":"#/$defs/Count"}
-JobProgress.observed_at required {"$ref":"#/$defs/Seconds"}
+JobProgress.estimated_start_at optional {"anyOf":[{"minimum":0.0,"type":"number"},{"type":"null"}],"default":null}
+JobProgress.observation_sequence required {"minimum":0,"type":"integer"}
+JobProgress.observed_at required {"minimum":0.0,"type":"number"}
 JobProgress.pending_reason optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
-JobProgress.queued_s optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
-JobProgress.ran_s optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+JobProgress.queued_s optional {"anyOf":[{"minimum":0.0,"type":"number"},{"type":"null"}],"default":null}
+JobProgress.ran_s optional {"anyOf":[{"minimum":0.0,"type":"number"},{"type":"null"}],"default":null}
 JobProgress.stage_id optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
 JobProgress.state required {"enum":["pending","running","unknown"],"type":"string"}
 JobQueued {"additionalProperties":false,"type":"object"}
@@ -889,7 +888,7 @@ JobTerminationRequested.cause required {"enum":["deadline","retirement"],"type":
 JobTerminationRequested.kind optional {"const":"job_termination_requested","default":"job_termination_requested","type":"string"}
 JobTerminationRequested.resource_id required {"$ref":"#/$defs/ResourceId"}
 JobTimeout {"additionalProperties":false,"type":"object"}
-JobTimeout.at required {"$ref":"#/$defs/Seconds"}
+JobTimeout.at required {"minimum":0.0,"type":"number"}
 JobTimeout.by required {"$ref":"#/$defs/WaitEnd"}
 JobTimeout.progress optional {"anyOf":[{"$ref":"#/$defs/JobProgress"},{"type":"null"}],"default":null}
 JobTimeout.resource_id required {"$ref":"#/$defs/ResourceId"}
@@ -903,9 +902,7 @@ JobsDrainRequested.disposition required {"enum":["park","cancel","settle"],"type
 JobsDrainRequested.kind optional {"const":"jobs_drain_requested","default":"jobs_drain_requested","type":"string"}
 JobsDrainRequested.scope required {"$ref":"#/$defs/Scope"}
 JournaledEvent {"discriminator":{"mapping":{"adoption_finished":"#/$defs/AdoptionFinished","checkpoint_known":"#/$defs/CheckpointKnown","comparison_settled":"#/$defs/ComparisonSettled","failed":"#/$defs/Failed","interrupted":"#/$defs/Interrupted","measurement_finished":"#/$defs/MeasurementFinished","message_delivered":"#/$defs/MessageDelivered","message_dropped":"#/$defs/MessageDropped","resume_failed":"#/$defs/ResumeFailed","resume_ready":"#/$defs/ResumeReady","stop_lifted":"#/$defs/StopLifted","stop_requested":"#/$defs/StopRequested","time_reached":"#/$defs/TimeReached","turn_ended":"#/$defs/TurnEnded","turn_yielded":"#/$defs/TurnYielded","workspace_closed":"#/$defs/WorkspaceClosed","workspace_opened":"#/$defs/WorkspaceOpened","yield_failed":"#/$defs/YieldFailed"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/WorkspaceOpened"},{"$ref":"#/$defs/WorkspaceClosed"},{"$ref":"#/$defs/MeasurementFinished"},{"$ref":"#/$defs/AdoptionFinished"},{"$ref":"#/$defs/StopRequested"},{"$ref":"#/$defs/StopLifted"},{"$ref":"#/$defs/TimeReached"},{"$ref":"#/$defs/MessageDelivered"},{"$ref":"#/$defs/MessageDropped"},{"$ref":"#/$defs/Interrupted"},{"$ref":"#/$defs/TurnEnded"},{"$ref":"#/$defs/TurnYielded"},{"$ref":"#/$defs/YieldFailed"},{"$ref":"#/$defs/ResumeReady"},{"$ref":"#/$defs/ResumeFailed"},{"$ref":"#/$defs/CheckpointKnown"},{"$ref":"#/$defs/ComparisonSettled"},{"$ref":"#/$defs/Failed"}]}
-LifecycleCapability {"enum":["park","interrupt","steer","suspend","profile-capture"],"type":"string"}
 LifecycleClass {"enum":["query","idempotent_external_write","owned_long_running_job","session_turn"],"type":"string"}
-Limit {"type":"number"}
 Limits {"additionalProperties":false,"type":"object"}
 Limits.cancellation_bound required {"minimum":0.0,"type":"number"}
 Limits.cleanup_bound required {"exclusiveMinimum":0.0,"type":"number"}
@@ -1023,13 +1020,13 @@ Observation.children_complete optional {"default":false,"type":"boolean"}
 Observation.diagnostic optional {"default":"","type":"string"}
 Observation.event_id required {"$ref":"#/$defs/EventId"}
 Observation.measured_input optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
-Observation.observed_at required {"$ref":"#/$defs/Seconds"}
+Observation.observed_at required {"minimum":0.0,"type":"number"}
 Observation.released optional {"default":false,"type":"boolean"}
 Observation.request_id required {"$ref":"#/$defs/RequestId"}
 Observation.resource_id optional {"anyOf":[{"$ref":"#/$defs/ResourceId"},{"type":"null"}],"default":null}
 Observation.revision optional {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"type":"null"}],"default":null}
 Observation.scope required {"$ref":"#/$defs/Scope"}
-Observation.sequence required {"$ref":"#/$defs/Count"}
+Observation.sequence required {"minimum":0,"type":"integer"}
 Observation.status required {"$ref":"#/$defs/ObservationStatus"}
 Observation.terminal optional {"default":false,"type":"boolean"}
 ObservationStatus {"enum":["succeeded","pending","cancelled","rejected","failed","unknown"],"type":"string"}
@@ -1076,7 +1073,7 @@ OperationId.kind optional {"const":"operation","default":"operation","type":"str
 OperationId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 OperationNormalizationKind {"enum":["none","scope_reopen"],"type":"string"}
 OperationRef {"additionalProperties":false,"type":"object"}
-OperationRef.generation required {"$ref":"#/$defs/Generation"}
+OperationRef.generation required {"minimum":0,"type":"integer"}
 OperationRef.operation_id required {"$ref":"#/$defs/OperationId"}
 OperationRequest {"additionalProperties":false,"type":"object"}
 OperationRequest.kind required {"minLength":1,"type":"string"}
@@ -1156,11 +1153,11 @@ ReacquisitionReady.attempt required {"$ref":"#/$defs/AttemptRef"}
 ReacquisitionReady.kind optional {"const":"reacquisition_ready","default":"reacquisition_ready","type":"string"}
 ReacquisitionReady.request_id required {"$ref":"#/$defs/RequestId"}
 Reading {"additionalProperties":false,"type":"object"}
-Reading.direction optional {"anyOf":[{"$ref":"#/$defs/Direction"},{"type":"null"}],"default":null}
+Reading.direction optional {"anyOf":[{"enum":["max","min"],"type":"string"},{"type":"null"}],"default":null}
 Reading.metric required {"minLength":1,"type":"string"}
 Reading.repetitions optional {"default":1,"minimum":1,"type":"integer"}
 Reading.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
-Reading.value required {"$ref":"#/$defs/vs_core__types__measurement__Finite__1"}
+Reading.value required {"type":"number"}
 ReconciliationRequest {"discriminator":{"mapping":{"block_request":"#/$defs/BlockRequest","cancel_owned_resource":"#/$defs/CancelOwnedResource","inspect_request":"#/$defs/InspectRequest"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/InspectRequest"},{"$ref":"#/$defs/CancelOwnedResource"},{"$ref":"#/$defs/BlockRequest"}]}
 Recorded {"additionalProperties":false,"type":"object"}
 Recorded.decision required {"$ref":"#/$defs/DecisionId"}
@@ -1490,8 +1487,8 @@ RunStatus {"enum":["running","paused","closing","terminal","blocked"],"type":"st
 RunTrace {"additionalProperties":false,"type":"object"}
 RunTrace.spans optional {"default":[],"items":{"$ref":"#/$defs/Span"},"type":"array"}
 Runaway {"additionalProperties":false,"type":"object"}
-Runaway.evaluations required {"$ref":"#/$defs/Count"}
-Runaway.limit required {"$ref":"#/$defs/Count"}
+Runaway.evaluations required {"minimum":0,"type":"integer"}
+Runaway.limit required {"minimum":0,"type":"integer"}
 Runaway.scope required {"$ref":"#/$defs/Scope"}
 Sample {"additionalProperties":false,"type":"object"}
 Sample.base optional {"anyOf":[{"$ref":"#/$defs/BaseRef"},{"type":"null"}],"default":null}
@@ -1501,7 +1498,7 @@ Sample.evaluation required {"minLength":1,"type":"string"}
 Sample.gates required {"items":{"type":"string"},"type":"array"}
 Sample.host required {"minLength":1,"type":"string"}
 Sample.measured_input required {"minLength":1,"type":"string"}
-Sample.observed_at required {"$ref":"#/$defs/Seconds"}
+Sample.observed_at required {"minimum":0.0,"type":"number"}
 Sample.reading required {"$ref":"#/$defs/Reading"}
 Sample.run required {"$ref":"#/$defs/RequestId"}
 Sample.scope required {"$ref":"#/$defs/Scope"}
@@ -1544,9 +1541,9 @@ ScopeReopenRequested.kind optional {"const":"scope_reopen_requested","default":"
 ScopeReopenRequested.normalization required {"$ref":"#/$defs/ScopeReopenNormalization"}
 ScopeReopenRequested.request required {"$ref":"#/$defs/ExecuteRegisteredOperation"}
 SearchDeclaration {"additionalProperties":false,"type":"object"}
-SearchDeclaration.optional optional {"default":[],"items":{"$ref":"#/$defs/LifecycleCapability"},"type":"array","uniqueItems":true}
+SearchDeclaration.optional optional {"default":[],"items":{"enum":["park","interrupt","steer","suspend","profile-capture"],"type":"string"},"type":"array","uniqueItems":true}
 SearchDeclaration.optional_operations optional {"default":[],"items":{"$ref":"#/$defs/OperationSchemaRef"},"type":"array"}
-SearchDeclaration.required optional {"default":[],"items":{"$ref":"#/$defs/LifecycleCapability"},"type":"array","uniqueItems":true}
+SearchDeclaration.required optional {"default":[],"items":{"enum":["park","interrupt","steer","suspend","profile-capture"],"type":"string"},"type":"array","uniqueItems":true}
 SearchDeclaration.required_operations optional {"default":[],"items":{"$ref":"#/$defs/OperationSchemaRef"},"type":"array"}
 SearchDeclaration.roles optional {"default":[],"items":{"$ref":"#/$defs/RoleId"},"type":"array"}
 SearchDeclaration.strategy_id required {"$ref":"#/$defs/StrategyId"}
@@ -1767,7 +1764,7 @@ TaskObjective {"additionalProperties":false,"type":"object"}
 TaskObjective.direction required {"enum":["max","min"],"type":"string"}
 TaskObjective.name required {"minLength":1,"type":"string"}
 TaskStage {"additionalProperties":false,"type":"object"}
-TaskStage.execution_seconds required {"minimum":0,"type":"number"}
+TaskStage.execution_seconds required {"minimum":0.0,"type":"number"}
 TaskStage.stage_id required {"minLength":1,"type":"string"}
 TaskTerms {"additionalProperties":false,"type":"object"}
 TaskTerms.accuracy_gated optional {"default":[],"items":{"$ref":"#/$defs/EvidenceKind"},"type":"array"}
@@ -1788,10 +1785,10 @@ TimeReached.kind optional {"const":"time_reached","default":"time_reached","type
 TimeReached.time required {"$ref":"#/$defs/Seconds"}
 TimedOut {"additionalProperties":false,"type":"object"}
 TimedOut.by optional {"$ref":"#/$defs/WaitEnd","default":"limit"}
-TimedOut.deadline_at required {"$ref":"#/$defs/Seconds"}
+TimedOut.deadline_at required {"minimum":0.0,"type":"number"}
 TimedOut.kind optional {"const":"timed_out","default":"timed_out","type":"string"}
-TimedOut.reached_at required {"$ref":"#/$defs/Seconds"}
-TimedOut.unfinished required {"items":{"$ref":"#/$defs/JobTimeout"},"minItems":1,"type":"array"}
+TimedOut.reached_at required {"minimum":0.0,"type":"number"}
+TimedOut.unfinished optional {"default":[],"items":{"$ref":"#/$defs/JobTimeout"},"minItems":1,"type":"array"}
 TrustedBaseline {"additionalProperties":false,"type":"object"}
 TrustedBaseline.kind optional {"const":"trusted_baseline","default":"trusted_baseline","type":"string"}
 TrustedBaseline.revision required {"$ref":"#/$defs/RevisionRef"}
@@ -1849,7 +1846,7 @@ UnobservedJobFacts {"additionalProperties":false,"type":"object"}
 UnobservedJobFacts.kind optional {"const":"unobserved","default":"unobserved","type":"string"}
 UnobservedJobFacts.resource_id required {"$ref":"#/$defs/ResourceId"}
 Until {"additionalProperties":false,"type":"object"}
-Until.at required {"$ref":"#/$defs/Seconds"}
+Until.at required {"minimum":0.0,"type":"number"}
 Until.watches optional {"default":[],"items":{"$ref":"#/$defs/Watch"},"type":"array"}
 VerifyAdoption {"additionalProperties":false,"type":"object"}
 VerifyAdoption.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -1868,7 +1865,7 @@ WaitKind {"enum":["session","recovery-check","owned-job","release-dependency","y
 WaitOn {"additionalProperties":false,"type":"object"}
 WaitOn.requests optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
 WaitOn.subjects optional {"default":[],"items":{"$ref":"#/$defs/WaitSubject"},"type":"array"}
-WaitOn.timer optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+WaitOn.timer optional {"anyOf":[{"minimum":0.0,"type":"number"},{"type":"null"}],"default":null}
 WaitRefusal {"enum":["not-offered","not-recorded","not-published","not-resumable"],"type":"string"}
 WaitSubject {"additionalProperties":false,"type":"object"}
 WaitSubject.identity required {"type":"string"}
@@ -1897,7 +1894,7 @@ Withdraw.kind optional {"const":"withdraw","default":"withdraw","type":"string"}
 Withdraw.scope required {"$ref":"#/$defs/Scope"}
 Withdraw.target required {"anyOf":[{"$ref":"#/$defs/AttemptRef"},{"$ref":"#/$defs/InvocationRef"},{"$ref":"#/$defs/OperationRef"}]}
 Within {"additionalProperties":false,"type":"object"}
-Within.limit required {"$ref":"#/$defs/Limit"}
+Within.limit required {"type":"number"}
 Within.watches optional {"default":[],"items":{"$ref":"#/$defs/Watch"},"type":"array"}
 Work {"discriminator":{"mapping":{"measure":"#/$defs/Measure","operation":"#/$defs/Operation","propose_winner":"#/$defs/ProposeWinner","request_turn":"#/$defs/RequestTurn","start_attempt":"#/$defs/StartAttempt","withdraw":"#/$defs/Withdraw"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/RequestTurn"},{"$ref":"#/$defs/StartAttempt"},{"$ref":"#/$defs/Withdraw"},{"$ref":"#/$defs/Measure"},{"$ref":"#/$defs/ProposeWinner"},{"$ref":"#/$defs/Operation"}]}
 WorkspaceClosed {"additionalProperties":false,"type":"object"}
@@ -1932,5 +1929,3 @@ YieldPublicationFailed.invocation required {"$ref":"#/$defs/InvocationRef"}
 YieldPublicationFailed.kind optional {"const":"yield_publication_failed","default":"yield_publication_failed","type":"string"}
 YieldPublicationFailed.reason required {"$ref":"#/$defs/CheckpointFailure"}
 _SchemaVersion {"const":1,"type":"integer"}
-vs_core__types__measurement__Finite__1 {"type":"number"}
-vs_core__types__measurement__Finite__2 {"minimum":0,"type":"number"}

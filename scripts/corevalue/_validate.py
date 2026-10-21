@@ -13,13 +13,16 @@ from protobuf import (
     ScalarType,
 )
 
+from scripts.corevalue._cel import cel
 from scripts.corevalue._constants import constants
 from scripts.corevalue._imports import foreign_types
 from scripts.corevalue._schema import (
     GenerationError,
     extension,
+    field_shape,
     is_union,
     name,
+    options,
     rule_of,
     rules,
     union_members,
@@ -41,6 +44,7 @@ _SCALAR_RULES = {
     "string": {"const", "min_len", "max_len", "pattern"},
     "bytes": {"min_len", "max_len"},
     "enum": {"defined_only", "not_in"},
+    "repeated": {"min_items", "max_items"},
 }
 _NUMERIC_RULES = {"gt", "gte", "lt", "lte", "finite"}
 
@@ -58,10 +62,14 @@ def validate_file(file: object) -> None:
             raise GenerationError(file.name, f"generated name collision: {generated}")
         claimed.add(generated)
     for message in file.messages:
+        _aliases(message, claimed)
         _message(message)
         checks = extension(message, rules.ext_message)
         if checks and {f.name for f in checks} - {"cel"}:
             raise GenerationError(message.type_name, "unsupported message validation options")
+        if checks:
+            for rule in checks.cel:
+                cel(rule.expression, message)
 
 
 def _message(message: object) -> None:
@@ -87,6 +95,7 @@ def _message(message: object) -> None:
         raise GenerationError(message.type_name, "oneofs must use a closed union wrapper")
     for field in message.fields:
         _field(field)
+        field_shape(field)
 
 
 def _field(field: object) -> None:
@@ -146,3 +155,22 @@ def _reference(kind: object, path: str, file: object) -> None:
         and kind.file.proto.package != file.proto.package
     ):
         raise GenerationError(path, "imported enum requires an explicit value package")
+
+
+def _alias(field: object, alias: str, claimed: set[str]) -> None:
+    """A published scalar alias comes from exactly one required scalar rule."""
+    path = f"{field.parent.type_name}.{field.name}"
+    if not alias.isidentifier() or not alias[0].isupper() or alias in claimed:
+        raise GenerationError(path, f"invalid or duplicate scalar alias: {alias}")
+    if not isinstance(field.value, DescFieldValueScalar) or field.proto.proto3_optional:
+        raise GenerationError(path, "scalar alias requires a nonnullable scalar field")
+    claimed.add(alias)
+
+
+def _aliases(message: DescMessage, claimed: set[str]) -> None:
+    """Register each scalar alias in the generated file's closed namespace."""
+    for field in message.fields:
+        config = extension(field, options.ext_core_field)
+        if config:
+            for alias in config.aliases:
+                _alias(field, alias, claimed)

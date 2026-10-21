@@ -30,9 +30,7 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, Self
 
-from pydantic import (
-    BaseModel,
-)
+from pydantic import TypeAdapter
 
 import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
@@ -49,6 +47,7 @@ from vs_project._manifests import (
 )
 from vs_project._state_io import (
     STATE_DOCUMENT_MAX_BYTES,
+    StateValue,
     _atomic_write_model,
     _atomic_write_text,
     _load_model,
@@ -438,7 +437,7 @@ class StateNamespace:
         _validate_project_state_path(self._namespace_root)
         self._validated_root()
 
-    def load[ModelT: BaseModel](
+    def load[ModelT: StateValue](
         self,
         relative_path: str | PurePosixPath,
         model_type: type[ModelT],
@@ -447,7 +446,7 @@ class StateNamespace:
         path = self._resolve_file(relative_path)
         return _load_state_model(path, model_type)
 
-    def load_optional[ModelT: BaseModel](
+    def load_optional[ModelT: StateValue](
         self,
         relative_path: str | PurePosixPath,
         model_type: type[ModelT],
@@ -463,7 +462,7 @@ class StateNamespace:
         except StateModelNotFoundError:
             return None
 
-    def save(self, relative_path: str | PurePosixPath, model: BaseModel) -> None:
+    def save(self, relative_path: str | PurePosixPath, model: StateValue) -> None:
         """Atomically serialize one state model at a safe relative path."""
         self.apply(self.transition(relative_path, model))
 
@@ -553,7 +552,7 @@ class StateNamespace:
             (StateFile(relative_path=relative, contents=contents),),
         )
 
-    def slot[ModelT: BaseModel](
+    def slot[ModelT: StateValue](
         self,
         relative_path: str | PurePosixPath,
         model_type: type[ModelT],
@@ -564,7 +563,7 @@ class StateNamespace:
     def transition(
         self,
         relative_path: str | PurePosixPath,
-        model: BaseModel | None,
+        model: StateValue | None,
     ) -> StateTransition:
         """Prepare an immutable replacement or deletion without applying it."""
         self._resolve_file(relative_path)
@@ -715,7 +714,7 @@ class StateNamespace:
         return _contained_without_symlinks(root, path, kind=f"{self._kind} state file")
 
 
-class StateSlot[ModelT: BaseModel]:
+class StateSlot[ModelT: StateValue]:
     """One schema-bound state file within a namespace.
 
     Externally reconstructed transitions must pass through this boundary before
@@ -806,7 +805,7 @@ class StateSlot[ModelT: BaseModel]:
             raise ProjectStateError.serialized_transition_document_not_object()
         model = decode_json(
             json.dumps(document),
-            self._model_type,
+            TypeAdapter(self._model_type),
             source="serialized state transition",
             max_bytes=STATE_DOCUMENT_MAX_BYTES,
             options=ValidationOptions(strict=True),
@@ -828,7 +827,7 @@ class StateSlot[ModelT: BaseModel]:
         if transition._next_document is not None:  # noqa: SLF001  # lint-waiver: LW-008232 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             replacement = decode_json(
                 transition._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008233 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
-                self._model_type,
+                TypeAdapter(self._model_type),
                 source=str(expected_path),
                 max_bytes=STATE_DOCUMENT_MAX_BYTES,
                 options=ValidationOptions(strict=True),

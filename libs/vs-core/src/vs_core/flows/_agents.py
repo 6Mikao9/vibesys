@@ -262,7 +262,7 @@ class _Ask:
         self.role = session.role
         self.until = until
         self.revision = revision
-        self.input: Value = prompt
+        self.input: Value | ProtocolContext = prompt
         follows = prompt.of if isinstance(prompt, Correction) else None
         self.charge: ChargeClass = "correction" if follows is not None else self.role.charge.value
         self.template = self.role.prompt

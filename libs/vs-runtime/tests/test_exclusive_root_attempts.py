@@ -55,10 +55,8 @@ from .test_workspace_requests import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pydantic import BaseModel
-
     from vs_core.api import AttemptRef, Request, RevisionRef
-    from vs_project.api import GitRepository
+    from vs_project.api import GitRepository, StateValue
     from vs_runtime.api.infrastructure import RuntimeWorkspace
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
@@ -99,7 +97,7 @@ class MortalStore(ReceiptStore):
         self._tick()
         return super().modify(*args, **kwargs)
 
-    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+    def replace(self, family: str, part: str, key: str, receipt: StateValue) -> None:
         self._tick()
         super().replace(family, part, key, receipt)
 

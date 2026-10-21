@@ -200,13 +200,20 @@ def _enum(enum: DescEnum) -> list[str]:
     decoded = repr({number: spelling for _, spelling, number in entries})
     opts = extension(enum, options.ext_core_enum)
     result = (
-        f"cast(values.{n}, {decoded}[v])" if opts and opts.literal else f"values.{n}({decoded}[v])"
+        f"cast(Literal[{', '.join(repr(v) for _, v, _ in entries)}], {decoded}[v])"
+        if opts and opts.literal
+        else f"values.{n}({decoded}[v])"
+    )
+    annotation = (
+        f"Literal[{', '.join(repr(v) for _, v, _ in entries)}]"
+        if opts and opts.literal
+        else f"values.{n}"
     )
     return [
-        f"def encode_{n}(v: values.{n} | None) -> pb.{n}:",
+        f"def encode_{n}(v: {annotation} | None) -> pb.{n}:",
         f"    return {encoded}.get(v, pb.{n}.UNSPECIFIED)",
         "",
-        f"def decode_{n}(v: pb.{n}) -> values.{n}:",
+        f"def decode_{n}(v: pb.{n}) -> {annotation}:",
         f"    return {result}",
         "",
     ]

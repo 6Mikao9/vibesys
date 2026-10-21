@@ -7,17 +7,28 @@ set per agent by its ``Role``. These are the values both sides share.
 
 from __future__ import annotations
 
-from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import model_validator
+
+from vs_core._generated.vibesys.core.v1.leaves_cv import (
+    Backoff,
+    ChargeClass,
+    Checkpoint,
+    Declined,
+    Exchanges,
+    Retained,
+    WaitUnrecorded,
+)
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
+    Charge,
+    Correctable,
+)
 
 from .common import (
-    CheckpointDecline,
     ContractValidationError,
     InvocationRef,
     RevisionRef,
-    Seconds,
     Value,
 )
 from .evaluation import EvidenceRef, settling_named
@@ -26,55 +37,7 @@ from .job_observations import WaitEnd
 from .measurement import Comparison
 from .until import ReplyError
 
-
-class Backoff(Value):
-    """Run-clock wait before a lost turn is asked again; each further ask doubles it."""
-
-    first: Seconds
-    cap: Seconds
-
-    def delay(self, drops: int) -> float:
-        """Seconds to wait before re-asking a turn already lost ``drops`` times."""
-        return min(self.cap, self.first * 2**drops)
-
-
-type ChargeClass = Literal["free", "paid", "correction", "resume"]
 """The charge class of a turn request: a role's own (free or paid), a correction or a resume."""
-
-
-class Charge(StrEnum):
-    """What a role's first turn in a session costs the run's budget.
-
-    A turn that works on a candidate costs one ``ATTEMPT`` (and a turn); a turn that does not
-    (a judge, a planner) costs only a ``TURN``. Corrections and resumes cost a turn.
-    """
-
-    ATTEMPT = "paid"
-    TURN = "free"
-
-
-class Correctable(StrEnum):
-    """The failures of a reply that core may ask the agent to correct, within ``corrections``."""
-
-    INVALID_REPLY = "invalid-reply"
-    """The reply breaks the role's model."""
-    UNRECORDED_WAIT = "unrecorded-wait"
-    """The reply says it waits for evaluations but the run recorded no wait."""
-
-
-class Exchanges(Value):
-    """The templates of the exchanges core itself starts with a role's agent.
-
-    Each names a template file the renderer reads; the wording is the template's. A role needs
-    exactly the exchanges it can meet (see ``Role``), and a missing one is a declaration error.
-    """
-
-    correction: str | None = None
-    """Asks the agent to fix an invalid reply (renders a ``ReplyCorrection``)."""
-    resume: str | None = None
-    """Continues a turn that waited for evaluations (renders a ``ResumeFacts``)."""
-    wait_unrecorded: str | None = None
-    """Tells the agent its wait was not recorded (renders a ``WaitUnrecorded``)."""
 
 
 class Correction(Value):
@@ -133,29 +96,21 @@ class ReplyCorrection(Value):
     errors: tuple[ReplyError, ...]
 
 
-class WaitUnrecorded(Value):
-    """What the prompt is built from when a reply waited and the run recorded no wait."""
-
-    kind: Literal["wait-unrecorded"] = "wait-unrecorded"
-    role: str
-
-
 type ProtocolContext = ReplyCorrection | ResumeFacts | WaitUnrecorded
 """The contexts of the exchanges core starts: what their templates render."""
 
-
-class Retained(Value):
-    """Core retained the exact revision this turn produced."""
-
-    kind: Literal["retained"] = "retained"
-    revision: RevisionRef
-
-
-class Declined(Value):
-    """Core declined or failed this turn's checkpoint."""
-
-    kind: Literal["declined"] = "declined"
-    reason: CheckpointDecline
-
-
-type Checkpoint = Annotated[Retained | Declined, Field(discriminator="kind")]
+__all__ = [
+    "Backoff",
+    "Charge",
+    "ChargeClass",
+    "Checkpoint",
+    "Correctable",
+    "Correction",
+    "Declined",
+    "Exchanges",
+    "ProtocolContext",
+    "ReplyCorrection",
+    "ResumeFacts",
+    "Retained",
+    "WaitUnrecorded",
+]

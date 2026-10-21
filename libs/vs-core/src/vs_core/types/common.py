@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
@@ -15,6 +14,7 @@ from pydantic import (
     model_validator,
 )
 
+from vs_core._corevalue import ContractValidationError
 from vs_core._generated.vibesys.core.v1.common_cv import (
     IDENTITY_PATTERN,
     ArtifactId,
@@ -63,6 +63,46 @@ from vs_core._generated.vibesys.core.v1.control_cv import (
     RoleInputTarget,
     RunPause,
     ScopeInputTarget,
+)
+from vs_core._generated.vibesys.core.v1.leaves_cv import (
+    AttemptRef,
+    ChargeReceipt,
+    ChildManifest,
+    Count,
+    DependencyRef,
+    EventCursor,
+    EvidenceKey,
+    Generation,
+    HostFence,
+    LifecycleCapability,
+    Observation,
+    OperationRef,
+    ReservedInputOccurrence,
+    RevisionNumber,
+    RevisionRef,
+    ScopeReopenNormalization,
+    Seconds,
+    TaskObjective,
+    TaskStage,
+    WorkspaceRef,
+)
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
+    Area,
+    AssessmentKind,
+    ChargeKind,
+    CheckpointDecline,
+    CompletionStatus,
+    DependencyStatus,
+    DigestScheme,
+    EvidenceKind,
+    LifecycleClass,
+    ObservationStatus,
+    OperationNormalizationKind,
+    RejectionCode,
+    RevisionAuthority,
+    SetupFailureKind,
+    TurnFailureKind,
+    WorkspaceMode,
 )
 from vs_core._values import deeply_immutable, emit_fragment
 
@@ -180,45 +220,6 @@ __all__ = [
 ]
 
 
-class CheckpointDecline(StrEnum):
-    """Why an invocation checkpoint was not taken, so a decline is never silent."""
-
-    WRITER_ACTIVE = "writer_active"
-    """Another writer of the attempt's workspace has not ended, so a snapshot would
-    be torn. The later writer's own terminal turn requests the checkpoint; when that turn
-    ends without earning one (it failed or was cancelled), core asks again for the last
-    declined one, and a ``Retained`` then follows the ``Declined``."""
-
-    UNAUTHORIZED = "unauthorized"
-    """Neither an interruption claim nor a terminal write turn authorizes it."""
-
-    UNCHARGED = "uncharged"
-    """The invocation has no live charge in this attempt, so it is not this
-    attempt's work."""
-
-    NOT_ACTIVE = "not_active"
-    """The attempt is not active; its closure retains the workspace itself."""
-
-    SNAPSHOT_FAILED = "snapshot_failed"
-    """The executor ended the snapshot request without a retained revision. Closure
-    still retains the workspace, so the attempt can release."""
-
-
-class TurnFailureKind(StrEnum):
-    """Why a turn ended without a usable reply, as a closed set strategies match on."""
-
-    PROVIDER_FAILED = "provider_failed"
-    """The executor ended the turn: the provider refused it, or its reply broke the schema."""
-    TRANSPORT_LOST = "transport_lost"
-    """Acceptance stayed unknown after inspection, so core released the turn unfinished."""
-    CANCELLED = "cancelled"
-    """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
-    PROVIDER_UNAVAILABLE = "provider_unavailable"
-    """Core ended the turn while the run's capacity gate held it for its provider (an outage,
-    a spent quota): no reply exists, and the turn's own work never failed. A strategy asks it
-    again without counting it against the role's lost turns."""
-
-
 def unset(value: object) -> bool:
     """Whether an optional field is unset (None) or a flag is off, so serialization leaves it out.
 
@@ -272,160 +273,17 @@ class Value(BaseModel):
         return emit_fragment(self, handler, info.context)
 
 
-type Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
-type Count = Annotated[int, Field(ge=0)]
-type Generation = Annotated[int, Field(ge=0)]
-type RevisionNumber = Annotated[int, Field(ge=0)]
-type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "profile-capture"]
 """Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
-
-
-class EvidenceKey(Value):
-    """Full identity of one evidence record: the request that produced it plus its ID.
-
-    EvidenceId alone is only unique within one source request, so two jobs can
-    report the same ID. Every ledger, settlement and continuation lookup keys on
-    this pair.
-    """
-
-    kind: Literal["evidence_key"] = "evidence_key"
-    source_request: RequestId
-    evidence_id: EvidenceId
-
-
-class DigestScheme(StrEnum):
-    """Closed set of revision digest schemes; a digest is `<scheme>:<value>`."""
-
-    GIT_COMMIT = "git-commit"
-
-
-class RevisionRef(Value):
-    """Immutable revision identity.
-
-    Core compares digest as an opaque equality key. Producers that mint a ref from
-    a git commit use of_git_commit, which makes revision_id the commit and digest
-    `git-commit:<commit>`; consumers that must trust the scheme read git_commit,
-    which is None unless digest names the same commit as revision_id.
-    """
-
-    revision_id: RevisionId
-    digest: str = Field(min_length=1)
-
-    @classmethod
-    def of_git_commit(cls, commit: str) -> RevisionRef:
-        """Mint the canonical ref for one git commit."""
-        if not commit or commit != commit.strip() or ":" in commit:
-            raise ContractValidationError("commit", "must be a bare commit id")
-        return cls(
-            revision_id=RevisionId(root=commit), digest=f"{DigestScheme.GIT_COMMIT}:{commit}"
-        )
-
-    @property
-    def git_commit(self) -> str | None:
-        """The commit this ref names, or None when digest is not its git-commit digest."""
-        prefix = f"{DigestScheme.GIT_COMMIT}:"
-        if not self.digest.startswith(prefix):
-            return None
-        commit = self.digest.removeprefix(prefix)
-        return commit if commit and commit == self.revision_id.root else None
 
 
 THIS_RUN = Scope(owner=RunId(root="this-run"), generation=0)
 """The scope a search names for work the run itself owns. Core replaces it with the run's own."""
 
 
-class AttemptRef(Value):
-    """Attempt ref lifecycle contract."""
-
-    attempt_id: AttemptId
-    generation: Generation
-
-
-class OperationRef(Value):
-    """Operation ref lifecycle contract."""
-
-    operation_id: OperationId
-    generation: Generation
-
-
-class DependencyRef(Value):
-    """Dependency ref lifecycle contract."""
-
-    decision_id: DecisionId | None = None
-    request_id: RequestId | None = None
-
-
-class LifecycleClass(StrEnum):
-    """Lifecycle class lifecycle contract."""
-
-    QUERY = "query"
-    IDEMPOTENT_WRITE = "idempotent_external_write"
-    OWNED_JOB = "owned_long_running_job"
-    SESSION_TURN = "session_turn"
-
-
-class EvidenceKind(StrEnum):
-    """Closed measurement kinds used for eligibility requirements."""
-
-    CORRECTNESS = "correctness"
-    BENCHMARK = "benchmark"
-    PROFILING = "profiling"
-
-
-class AssessmentKind(StrEnum):
-    """Closed semantic assessment kinds, distinct from evidence production."""
-
-    CORRECTNESS = "correctness"
-    BENCHMARK = "benchmark"
-    PROFILING = "profiling"
-    LOCAL_VALIDATION = "local-validation"
-
-
-class ObservationStatus(StrEnum):
-    """Observation status lifecycle contract."""
-
-    SUCCEEDED = "succeeded"
-    PENDING = "pending"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    FAILED = "failed"
-    UNKNOWN = "unknown"
-
-
 RETRYABLE_FAILURES = frozenset(
     {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
 )
 """Statuses that, on a non-terminal observation, say the executor did not run the request."""
-
-
-class RejectionCode(StrEnum):
-    """Rejection code lifecycle contract."""
-
-    STALE_VIEW = "stale-view"
-    IDENTITY_CONFLICT = "identity-conflict"
-    UNKNOWN_KIND = "unknown-kind"
-    UNKNOWN_SCHEMA = "unknown-schema"
-    UNDECLARED_OPERATION = "undeclared-operation"
-    CAPABILITY = "capability"
-    OWNERSHIP = "ownership"
-    GENERATION = "generation"
-    CLOSED_SCOPE = "closed-scope"
-    BUDGET = "budget"
-    DEPENDENCY = "dependency"
-    EVIDENCE = "evidence"
-    ALREADY_SETTLED = "already-settled"
-    NOT_IMPLEMENTED_IN_KERNEL = "not-implemented-in-kernel"
-
-
-class Area(StrEnum):
-    """Area lifecycle contract."""
-
-    SCHEDULING = "scheduling"
-    ATTEMPTS = "attempts"
-    SESSIONS = "sessions"
-    EVALUATION = "evaluation"
-    SETTLEMENT = "settlement"
-    RECORDS = "records"
 
 
 class KernelNotImplementedError(Exception):
@@ -457,45 +315,6 @@ class OperationSchemaRef(Value):
     request_schema: SchemaRef
     outcome_schema: SchemaRef
     lifecycle: LifecycleClass
-
-
-class RevisionAuthority(StrEnum):
-    """Explicit workspace authority, never inferred from operation kind names."""
-
-    NONE = "none"
-    SNAPSHOT = "snapshot"
-    RETAIN = "retain"
-    RESTORE = "restore"
-    DISCARD = "discard"
-
-
-class OperationNormalizationKind(StrEnum):
-    """Closed normalization routes; pure normalizers live outside state."""
-
-    NONE = "none"
-    SCOPE_REOPEN = "scope_reopen"
-
-
-class ScopeReopenNormalization(Value):
-    """Canonical guarded reopen target bound to a registered payload.
-
-    The operation is run-scoped. Its target must be the exact parked attempt,
-    and resolved_cancelled_jobs must equal the continuation cancellation set.
-    A newer park authority invalidates older reopen acknowledgements.
-    """
-
-    kind: Literal["scope_reopen"] = "scope_reopen"
-    attempt: AttemptRef
-    continuation_id: ContinuationId
-    park_authority: RequestId
-    resolved_cancelled_jobs: tuple[ResourceId, ...]
-
-    @model_validator(mode="after")
-    def unique_resolutions(self) -> ScopeReopenNormalization:
-        """Reject duplicate cancellation-resolution claims at ingress."""
-        if len(set(self.resolved_cancelled_jobs)) != len(self.resolved_cancelled_jobs):
-            raise ContractValidationError("resolved_cancelled_jobs", "duplicate resource ID")
-        return self
 
 
 class OperationDescriptor(OperationSchemaRef):
@@ -532,14 +351,6 @@ class OperationDescriptor(OperationSchemaRef):
                 "normalization", "scope reopen requires inspectable non-revision idempotent write"
             )
         return self
-
-
-class ContractValidationError(ValueError):
-    """Invalid immutable value, identifying the exact field and violated contract."""
-
-    def __init__(self, path: str, detail: str) -> None:
-        """Name the offending field without masking a plausible default."""
-        super().__init__(f"{path}: {detail}")
 
 
 class OperationDescriptorError(ValueError):
@@ -581,20 +392,6 @@ class PureOption(Value):
 
     key: str = Field(min_length=1)
     value: str | int | Annotated[float, Field(allow_inf_nan=False)] | bool | None
-
-
-class TaskStage(Value):
-    """One stage the task can measure and the seconds its execution may take."""
-
-    stage_id: str = Field(min_length=1)
-    execution_seconds: float = Field(ge=0, allow_inf_nan=False)
-
-
-class TaskObjective(Value):
-    """One axis the task compares candidates on, and which way is better."""
-
-    name: str = Field(min_length=1)
-    direction: Literal["max", "min"]
 
 
 class TaskTerms(Value):
@@ -701,22 +498,6 @@ OPERATOR_ACTIONS: frozenset[ControlAction] = frozenset(
 """The typed operator actions on core entities, which core applies alike in every search."""
 
 
-class CompletionStatus(StrEnum):
-    """Terminal semantic decision outcome, independent of dispatch acceptance."""
-
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class DependencyStatus(StrEnum):
-    """Readiness of durable completion and request dependencies."""
-
-    PENDING = "pending"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-
-
 class RequestBase(Value):
     """Canonical I/O record correlation, including the current occupancy episode.
 
@@ -734,137 +515,6 @@ class RequestBase(Value):
     admission_id: DecisionId | None = None
 
 
-class ChildManifest(Value):
-    """Authoritative set of every transitive descendant at one observation.
-
-    members lists all descendants, not only direct children. basis says how the
-    executor knows it: "enumerated" from the live process or resource tree, or
-    "lifecycle-closed" because the closed handle can admit no descendant (members
-    may then be empty). Core requires every member to be owned and released
-    before it accepts the release as complete.
-    """
-
-    members: tuple[ResourceId, ...] = ()
-    basis: Literal["enumerated", "lifecycle-closed"]
-
-    @model_validator(mode="after")
-    def distinct_members(self) -> ChildManifest:
-        """A resource appears at most once in the manifest."""
-        if len(set(self.members)) != len(self.members):
-            raise ContractValidationError("members", "duplicate resource ID")
-        return self
-
-
-class Observation(Value):
-    """External facts correlated by request, scope, generation and episode.
-
-    children_complete explicitly claims an authoritative manifest; an empty
-    children tuple alone does not prove it. child_manifest, when present, is
-    that manifest: it must contain every child, only an observation that claims
-    children_complete may carry it, and consumers read descendants, never
-    children alone, when proving release. A children_complete claim without a
-    manifest stays accepted for producers that predate it. Install discovered child ownership
-    before removing provisional request ownership. Unknown acceptance or missing
-    identity never proves release. revision is the revision a snapshot or retain
-    request produced or retained, as the executor saw it; a caller-supplied
-    revision on a derived event is accepted only when it equals this one.
-    """
-
-    event_id: EventId
-    request_id: RequestId
-    scope: Scope
-    sequence: Count
-    observed_at: Seconds
-    status: ObservationStatus
-    resource_id: ResourceId | None = None
-    revision: RevisionRef | None = None
-    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
-    """The digest of what an evaluation reads at ``revision``, when the runtime computed it."""
-    accepted: bool = False
-    terminal: bool = False
-    released: bool = False
-    children: tuple[ResourceId, ...] = ()
-    children_complete: bool = False
-    child_manifest: ChildManifest | None = None
-    admission_id: DecisionId | None = None
-    diagnostic: str = ""
-
-    @property
-    def retryable(self) -> bool:
-        """A failure the executor reports as not run and not final: send the request again."""
-        return not self.terminal and self.status in RETRYABLE_FAILURES
-
-    @property
-    def descendants(self) -> tuple[ResourceId, ...]:
-        """Discovered children plus every manifest member, without duplicates."""
-        manifest = () if self.child_manifest is None else self.child_manifest.members
-        return tuple(dict.fromkeys((*self.children, *manifest)))
-
-    @model_validator(mode="after")
-    def manifest_covers_children(self) -> Observation:
-        """A manifest is a complete claim and cannot omit a reported child."""
-        if self.child_manifest is None:
-            return self
-        if not self.children_complete:
-            raise ContractValidationError("child_manifest", "requires children_complete")
-        if not set(self.children) <= set(self.child_manifest.members):
-            raise ContractValidationError("child_manifest", "omits a reported child")
-        return self
-
-
-class ChargeKind(StrEnum):
-    """Separate currencies with different admission and refund semantics.
-
-    ADMISSION charges accepted registration including queued starts. ATTEMPT
-    charges a paid invocation or failed setup cycle without an existing paid
-    charge. TURN charges one logical invocation, regardless of max_turns or
-    charge class, and never refunds.
-    """
-
-    ADMISSION = "admission"
-    ATTEMPT = "attempt"
-    TURN = "turn"
-
-
-class ChargeReceipt(Value):
-    """Authoritative charge and bounded, deduplicated refund proof.
-
-    Historical aggregate proof preserves consumed migration budget only. It
-    grants no dispatch authority and cannot receive a new refund without exact
-    live charge correspondence. Unsupported ADMISSION refunds require positive
-    nonacceptance and drained ownership; ATTEMPT refunds need bounded authority.
-    """
-
-    charge_id: ChargeId
-    kind: ChargeKind
-    invocation_id: InvocationId | None = None
-    source_request: RequestId | None = None
-    charged: Count
-    refunded: Count = 0
-    refund_sources: tuple[RequestId, ...] = ()
-    historical_proof: ArtifactRef | None = None
-
-    @model_validator(mode="after")
-    def bounded_refund(self) -> ChargeReceipt:
-        """Reject over-refunds, repeated authority and any TURN refund."""
-        if self.refunded > self.charged:
-            raise ContractValidationError("refunded", "exceeds charged amount")
-        if self.kind == ChargeKind.TURN and self.refunded:
-            raise ContractValidationError("refunded", "TURN charges never refund")
-        if len(set(self.refund_sources)) != len(self.refund_sources):
-            raise ContractValidationError("refund_sources", "duplicate refund authority")
-        return self
-
-
-class SetupFailureKind(StrEnum):
-    """Setup classification; unknown acceptance requires inspection."""
-
-    TRANSIENT = "transient"
-    PERMANENT = "permanent"
-    UNSUPPORTED = "unsupported"
-    UNKNOWN = "unknown"
-
-
 def validate_setup_failure(observation: Observation, failure: SetupFailureKind) -> None:
     """Classification requires terminal failure and grants no acceptance proof.
 
@@ -879,41 +529,12 @@ def validate_setup_failure(observation: Observation, failure: SetupFailureKind) 
         raise ContractValidationError("setup_failure", "requires terminal setup failure")
 
 
-class HostFence(Value):
-    """Host fence lifecycle contract."""
-
-    host_id: HostId
-    epoch: Count
-
-
-class EventCursor(Value):
-    """Event cursor lifecycle contract."""
-
-    sequence: Count
-
-
 class IdentityTypeError(ValueError):
     """Different identity domains cannot be substituted."""
 
     def __init__(self) -> None:
         """Report a domain mismatch at validation ingress."""
         super().__init__("identity type mismatch")
-
-
-class WorkspaceMode(StrEnum):
-    """Workspace mode lifecycle contract."""
-
-    EXCLUSIVE_ROOT = "exclusive-root"
-    ISOLATED_CHILD = "isolated-child"
-    READ_ONLY_REVISION = "read-only-revision"
-
-
-class WorkspaceRef(Value):
-    """Workspace ref lifecycle contract."""
-
-    scope: Scope
-    revision: RevisionRef
-    mode: WorkspaceMode
 
 
 class ReleaseDependency(Value):
@@ -942,18 +563,6 @@ class OperationWire(Value):
 
     schema_ref: OperationSchemaRef
     payload_json: str
-
-
-class ReservedInputOccurrence(Value):
-    """Immutable execution payload for an input occurrence reserved by Sessions B.
-
-    Sessions A validates the exact ID/artifact manifest against InputRecord before
-    dispatch. The operation wire remains canonical and is never rewritten to
-    transport inputs. Equal artifacts with distinct occurrence IDs stay distinct.
-    """
-
-    input_id: InputId
-    artifact: ArtifactRef
 
 
 class ExecuteRegisteredOperation(RequestBase):

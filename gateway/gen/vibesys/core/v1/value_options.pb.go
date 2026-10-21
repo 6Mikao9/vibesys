@@ -164,8 +164,14 @@ type ValueFieldOptions struct {
 	// counters were unbounded Python ints; int64 would reject previously valid envelopes.
 	Integer bool `protobuf:"varint,2,opt,name=integer,proto3" json:"integer,omitempty"`
 	// Export one scalar rule value, such as an identity pattern, without duplicating it.
-	ConstantName  string `protobuf:"bytes,3,opt,name=constant_name,json=constantName,proto3" json:"constant_name,omitempty"`
-	ConstantRule  string `protobuf:"bytes,4,opt,name=constant_rule,json=constantRule,proto3" json:"constant_rule,omitempty"`
+	ConstantName string `protobuf:"bytes,3,opt,name=constant_name,json=constantName,proto3" json:"constant_name,omitempty"`
+	ConstantRule string `protobuf:"bytes,4,opt,name=constant_rule,json=constantRule,proto3" json:"constant_rule,omitempty"`
+	// An explicit legacy constructor default, encoded as JSON and validated by the field.
+	DefaultJson *string `protobuf:"bytes,5,opt,name=default_json,json=defaultJson,proto3,oneof" json:"default_json,omitempty"`
+	// Preserve omission of absent optional fields in the persisted JSON envelope.
+	OmitUnset bool `protobuf:"varint,6,opt,name=omit_unset,json=omitUnset,proto3" json:"omit_unset,omitempty"`
+	// Export scalar aliases from this field's authoritative validation.
+	Aliases       []string `protobuf:"bytes,7,rep,name=aliases,proto3" json:"aliases,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -228,12 +234,35 @@ func (x *ValueFieldOptions) GetConstantRule() string {
 	return ""
 }
 
+func (x *ValueFieldOptions) GetDefaultJson() string {
+	if x != nil && x.DefaultJson != nil {
+		return *x.DefaultJson
+	}
+	return ""
+}
+
+func (x *ValueFieldOptions) GetOmitUnset() bool {
+	if x != nil {
+		return x.OmitUnset
+	}
+	return false
+}
+
+func (x *ValueFieldOptions) GetAliases() []string {
+	if x != nil {
+		return x.Aliases
+	}
+	return nil
+}
+
 type ValueEnumOptions struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Preserve a string-literal API instead of introducing an enum at call sites.
 	Literal bool `protobuf:"varint,1,opt,name=literal,proto3" json:"literal,omitempty"`
 	// Keep the literal inline in the legacy JSON Schema instead of emitting a named reference.
-	Inline        bool `protobuf:"varint,2,opt,name=inline,proto3" json:"inline,omitempty"`
+	Inline bool `protobuf:"varint,2,opt,name=inline,proto3" json:"inline,omitempty"`
+	// Pure enum behavior, with no schema or validation rules.
+	Mixin         string `protobuf:"bytes,3,opt,name=mixin,proto3" json:"mixin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -280,6 +309,13 @@ func (x *ValueEnumOptions) GetInline() bool {
 		return x.Inline
 	}
 	return false
+}
+
+func (x *ValueEnumOptions) GetMixin() string {
+	if x != nil {
+		return x.Mixin
+	}
+	return ""
 }
 
 type ValueEnumMemberOptions struct {
@@ -399,15 +435,21 @@ const file_vibesys_core_v1_value_options_proto_rawDesc = "" +
 	"\tconstants\x18\x05 \x03(\v2\".vibesys.core.v1.ValueRuleConstantR\tconstants\";\n" +
 	"\x11ValueRuleConstant\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
-	"\x04rule\x18\x02 \x01(\tR\x04rule\"\x93\x01\n" +
+	"\x04rule\x18\x02 \x01(\tR\x04rule\"\x85\x02\n" +
 	"\x11ValueFieldOptions\x12\x1a\n" +
 	"\bexplicit\x18\x01 \x01(\bR\bexplicit\x12\x18\n" +
 	"\ainteger\x18\x02 \x01(\bR\ainteger\x12#\n" +
 	"\rconstant_name\x18\x03 \x01(\tR\fconstantName\x12#\n" +
-	"\rconstant_rule\x18\x04 \x01(\tR\fconstantRule\"D\n" +
+	"\rconstant_rule\x18\x04 \x01(\tR\fconstantRule\x12&\n" +
+	"\fdefault_json\x18\x05 \x01(\tH\x00R\vdefaultJson\x88\x01\x01\x12\x1d\n" +
+	"\n" +
+	"omit_unset\x18\x06 \x01(\bR\tomitUnset\x12\x18\n" +
+	"\aaliases\x18\a \x03(\tR\aaliasesB\x0f\n" +
+	"\r_default_json\"Z\n" +
 	"\x10ValueEnumOptions\x12\x18\n" +
 	"\aliteral\x18\x01 \x01(\bR\aliteral\x12\x16\n" +
-	"\x06inline\x18\x02 \x01(\bR\x06inline\"4\n" +
+	"\x06inline\x18\x02 \x01(\bR\x06inline\x12\x14\n" +
+	"\x05mixin\x18\x03 \x01(\tR\x05mixin\"4\n" +
 	"\x16ValueEnumMemberOptions\x12\x1a\n" +
 	"\bspelling\x18\x01 \x01(\tR\bspelling:f\n" +
 	"\n" +
@@ -464,6 +506,7 @@ func file_vibesys_core_v1_value_options_proto_init() {
 	if File_vibesys_core_v1_value_options_proto != nil {
 		return
 	}
+	file_vibesys_core_v1_value_options_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

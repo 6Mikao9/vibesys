@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from vs_core.api import (
         CoreState,
+        CoreValue,
         EvidenceRequirements,
         OperationRegistry,
         Request,
@@ -122,7 +123,7 @@ class SerialExecutors(Executors):
 
     def _operation(self, request: ExecuteRegisteredOperation) -> Answer:
         typed = _SEARCHES[self.search].registry().decode(request.operation)
-        outcome: BaseModel
+        outcome: BaseModel | CoreValue
         if isinstance(typed, ReadRoadmap | PutRoadmapItems):
             outcome = RoadmapOwner(self.roadmap).perform(typed)
         elif isinstance(typed, RenderRoleArtifactsBase):

@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_core.api import RequestBase
+    from vs_project.api import StateValue
     from vs_runtime.api.core import AccessGuardedWorkspace, SessionResolver
     from vs_runtime.api.executor_contexts import RevocableLease
 
@@ -274,7 +275,7 @@ class CrashOnReplace(ReceiptStore):
     request's result) comes after the journal wrote the outcome.
     """
 
-    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+    def replace(self, family: str, part: str, key: str, receipt: StateValue) -> None:
         del family, part, key, receipt
         raise SystemExit
 

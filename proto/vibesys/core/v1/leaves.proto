@@ -1,0 +1,549 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/value_options.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/vocabulary.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+enum Direction {
+  option (core_enum) = {literal: true, inline: true};
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_MAX = 1 [(core_member).spelling = "max"];
+  DIRECTION_MIN = 2 [(core_member).spelling = "min"];
+}
+
+enum ChargeClass {
+  option (core_enum) = {literal: true, inline: true};
+  CHARGE_CLASS_UNSPECIFIED = 0;
+  CHARGE_CLASS_FREE = 1 [(core_member).spelling = "free"];
+  CHARGE_CLASS_PAID = 2 [(core_member).spelling = "paid"];
+  CHARGE_CLASS_CORRECTION = 3 [(core_member).spelling = "correction"];
+  CHARGE_CLASS_RESUME = 4 [(core_member).spelling = "resume"];
+}
+
+enum LifecycleCapability {
+  option (core_enum) = {literal: true, inline: true};
+  LIFECYCLE_CAPABILITY_UNSPECIFIED = 0;
+  LIFECYCLE_CAPABILITY_PARK = 1 [(core_member).spelling = "park"];
+  LIFECYCLE_CAPABILITY_INTERRUPT = 2 [(core_member).spelling = "interrupt"];
+  LIFECYCLE_CAPABILITY_STEER = 3 [(core_member).spelling = "steer"];
+  LIFECYCLE_CAPABILITY_SUSPEND = 4 [(core_member).spelling = "suspend"];
+  LIFECYCLE_CAPABILITY_PROFILE_CAPTURE = 5 [(core_member).spelling = "profile-capture"];
+}
+
+enum TaskObjectiveDirection {
+  option (core_enum) = {literal: true, inline: true};
+  TASK_OBJECTIVE_DIRECTION_UNSPECIFIED = 0;
+  TASK_OBJECTIVE_DIRECTION_MAX = 1 [(core_member).spelling = "max"];
+  TASK_OBJECTIVE_DIRECTION_MIN = 2 [(core_member).spelling = "min"];
+}
+
+enum ChildManifestBasis {
+  option (core_enum) = {literal: true, inline: true};
+  CHILD_MANIFEST_BASIS_UNSPECIFIED = 0;
+  CHILD_MANIFEST_BASIS_ENUMERATED = 1 [(core_member).spelling = "enumerated"];
+  CHILD_MANIFEST_BASIS_LIFECYCLE_CLOSED = 2 [(core_member).spelling = "lifecycle-closed"];
+}
+
+enum JobProgressState {
+  option (core_enum) = {literal: true, inline: true};
+  JOB_PROGRESS_STATE_UNSPECIFIED = 0;
+  JOB_PROGRESS_STATE_PENDING = 1 [(core_member).spelling = "pending"];
+  JOB_PROGRESS_STATE_RUNNING = 2 [(core_member).spelling = "running"];
+  JOB_PROGRESS_STATE_UNKNOWN = 3 [(core_member).spelling = "unknown"];
+}
+
+
+
+// Full identity of one evidence record: the request that produced it plus its ID.
+// 
+// EvidenceId alone is only unique within one source request, so two jobs can
+// report the same ID. Every ledger, settlement and continuation lookup keys on
+// this pair.
+message EvidenceKey {
+  string kind = 1 [(buf.validate.field).string = {const: "evidence_key"}, (core_field) = {default_json: "\"evidence_key\""}];
+  RequestId source_request = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  EvidenceId evidence_id = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+}
+
+// Immutable revision identity.
+// 
+// Core compares digest as an opaque equality key. Producers that mint a ref from
+// a git commit use of_git_commit, which makes revision_id the commit and digest
+// `git-commit:<commit>`; consumers that must trust the scheme read git_commit,
+// which is None unless digest names the same commit as revision_id.
+message RevisionRef {
+  option (core_value).mixin = "vs_core._revision_ref.RevisionReference";
+  RevisionId revision_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string digest = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+// Attempt ref lifecycle contract.
+message AttemptRef {
+  AttemptId attempt_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string generation = 2 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true, aliases: "Generation"}];
+}
+
+// Operation ref lifecycle contract.
+message OperationRef {
+  OperationId operation_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string generation = 2 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+}
+
+// Dependency ref lifecycle contract.
+message DependencyRef {
+  DecisionId decision_id = 1;
+  RequestId request_id = 2;
+}
+
+// Canonical guarded reopen target bound to a registered payload.
+// 
+// The operation is run-scoped. Its target must be the exact parked attempt,
+// and resolved_cancelled_jobs must equal the continuation cancellation set.
+// A newer park authority invalidates older reopen acknowledgements.
+message ScopeReopenNormalization {
+  option (buf.validate.message).cel = {id: "ScopeReopenNormalization.resolved_cancelled_jobs", expression: "this.resolved_cancelled_jobs.map(x, x.root).unique()", message: "duplicate resource ID"};
+  string kind = 1 [(buf.validate.field).string = {const: "scope_reopen"}, (core_field) = {default_json: "\"scope_reopen\""}];
+  AttemptRef attempt = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  ContinuationId continuation_id = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  RequestId park_authority = 4 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  repeated ResourceId resolved_cancelled_jobs = 5 [(core_field) = {explicit: true}];
+}
+
+// One stage the task can measure and the seconds its execution may take.
+message TaskStage {
+  string stage_id = 1 [(buf.validate.field).string = {min_len: 1}];
+  double execution_seconds = 2 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+
+// One axis the task compares candidates on, and which way is better.
+message TaskObjective {
+  string name = 1 [(buf.validate.field).string = {min_len: 1}];
+  TaskObjectiveDirection direction = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+}
+
+// Authoritative set of every transitive descendant at one observation.
+// 
+// members lists all descendants, not only direct children. basis says how the
+// executor knows it: "enumerated" from the live process or resource tree, or
+// "lifecycle-closed" because the closed handle can admit no descendant (members
+// may then be empty). Core requires every member to be owned and released
+// before it accepts the release as complete.
+message ChildManifest {
+  option (buf.validate.message).cel = {id: "ChildManifest.members", expression: "this.members.map(x, x.root).unique()", message: "duplicate resource ID"};
+  repeated ResourceId members = 1;
+  ChildManifestBasis basis = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+}
+
+// External facts correlated by request, scope, generation and episode.
+// 
+// children_complete explicitly claims an authoritative manifest; an empty
+// children tuple alone does not prove it. child_manifest, when present, is
+// that manifest: it must contain every child, only an observation that claims
+// children_complete may carry it, and consumers read descendants, never
+// children alone, when proving release. A children_complete claim without a
+// manifest stays accepted for producers that predate it. Install discovered child ownership
+// before removing provisional request ownership. Unknown acceptance or missing
+// identity never proves release. revision is the revision a snapshot or retain
+// request produced or retained, as the executor saw it; a caller-supplied
+// revision on a derived event is accepted only when it equals this one.
+message Observation {
+  option (core_value).mixin = "vs_core._leaf_behavior.ObservationFacts";
+  option (buf.validate.message).cel = {id: "Observation.manifest", expression: "!has(this.child_manifest) || this.children_complete", message: "child_manifest requires children_complete"};
+  option (buf.validate.message).cel = {id: "Observation.coverage", expression: "!has(this.child_manifest) || this.children.all(c, c in this.child_manifest.members)", message: "child_manifest omits a reported child"};
+  EventId event_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  RequestId request_id = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  Scope scope = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string sequence = 4 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true, aliases: "Count", aliases: "RevisionNumber"}];
+  double observed_at = 5 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true, aliases: "Seconds"}];
+  ObservationStatus status = 6 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  ResourceId resource_id = 7;
+  RevisionRef revision = 8;
+  optional string measured_input = 9 [(buf.validate.field).string = {min_len: 1}, (core_field) = {omit_unset: true}];
+  bool accepted = 10;
+  bool terminal = 11;
+  bool released = 12;
+  repeated ResourceId children = 13;
+  bool children_complete = 14;
+  ChildManifest child_manifest = 15;
+  DecisionId admission_id = 16;
+  string diagnostic = 17;
+}
+
+// Authoritative charge and bounded, deduplicated refund proof.
+// 
+// Historical aggregate proof preserves consumed migration budget only. It
+// grants no dispatch authority and cannot receive a new refund without exact
+// live charge correspondence. Unsupported ADMISSION refunds require positive
+// nonacceptance and drained ownership; ATTEMPT refunds need bounded authority.
+message ChargeReceipt {
+  option (buf.validate.message).cel = {id: "ChargeReceipt.refunded", expression: "size(this.refunded) < size(this.charged) || (size(this.refunded) == size(this.charged) && this.refunded <= this.charged)", message: "refunded exceeds charged amount"};
+  option (buf.validate.message).cel = {id: "ChargeReceipt.turn", expression: "this.kind != 3 || this.refunded == \"0\"", message: "TURN charges never refund"};
+  option (buf.validate.message).cel = {id: "ChargeReceipt.sources", expression: "this.refund_sources.map(x, x.root).unique()", message: "duplicate refund authority"};
+  ChargeId charge_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  ChargeKind kind = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  InvocationId invocation_id = 3;
+  RequestId source_request = 4;
+  string charged = 5 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+  string refunded = 6 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, default_json: "0"}];
+  repeated RequestId refund_sources = 7;
+  ArtifactRef historical_proof = 8;
+}
+
+// Host fence lifecycle contract.
+message HostFence {
+  HostId host_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string epoch = 2 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+}
+
+// Event cursor lifecycle contract.
+message EventCursor {
+  string sequence = 1 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+}
+
+// Workspace ref lifecycle contract.
+message WorkspaceRef {
+  Scope scope = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  RevisionRef revision = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  WorkspaceMode mode = 3 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+}
+
+// Immutable execution payload for an input occurrence reserved by Sessions B.
+// 
+// Sessions A validates the exact ID/artifact manifest against InputRecord before
+// dispatch. The operation wire remains canonical and is never rewritten to
+// transport inputs. Equal artifacts with distinct occurrence IDs stay distinct.
+message ReservedInputOccurrence {
+  InputId input_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  ArtifactRef artifact = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+}
+
+// A run's headline reading of the benchmark stage, as the trusted record states it.
+message Reading {
+  string metric = 1 [(buf.validate.field).string = {min_len: 1}];
+  double value = 2 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true, aliases: "Finite"}];
+  Direction direction = 3 [(buf.validate.field).enum = {defined_only: true}];
+  optional string unit = 4;
+  string repetitions = 5 [(buf.validate.field).string = {pattern: "^[1-9][0-9]*$"}, (core_field) = {integer: true, default_json: "1"}];
+}
+
+// The revision a candidate is compared with, and what the evaluation reads there.
+// 
+// Both facts together or neither: a base without its measured input could not be matched to
+// its own samples.
+message BaseRef {
+  RevisionRef commit = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string measured_input = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+// One framework run of one measured input: the unit of measurement, always traceable.
+// 
+// A sample is built only from a run that ended conclusively with a trusted benchmark reading,
+// and requires the ``commit`` it measured and the ``measured_input`` digest (#2961). The
+// ``base`` is set on a candidate's sample and names the revision it is compared with.
+message Sample {
+  RequestId run = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  Scope scope = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  RevisionRef commit = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string measured_input = 4 [(buf.validate.field).string = {min_len: 1}];
+  string evaluation = 5 [(buf.validate.field).string = {min_len: 1}];
+  repeated string gates = 6 [(core_field) = {explicit: true}];
+  string host = 7 [(buf.validate.field).string = {min_len: 1}];
+  bool dedicated_resources = 8 [(core_field) = {explicit: true}];
+  Reading reading = 9 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  double observed_at = 10 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+  BaseRef base = 11;
+}
+
+// A run core itself asked for, on a candidate's behalf, in its scope.
+// 
+// No decision and no agent call asked for it, so this record is its origin: core admitted it
+// so that ``candidate`` (the run whose result needed it) has a comparison with a measured
+// base. Its plan says which side it measures: the base, or (under no declared floor) the
+// candidate's own input again (`vs_core._comparison`).
+message CoreRun {
+  RequestId request_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  Scope scope = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  RequestId candidate = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string candidate_input = 4 [(buf.validate.field).string = {min_len: 1}];
+  string fresh_when_asked = 5 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+}
+
+// A run of the strategy's own that core counts as samples of a base once it ends.
+// 
+// The strategy measures the run's input before any agent works, from a plan that names no
+// measured input. When an agent's evaluation then needs that base while the run is still
+// going, core starts no second run of it: it claims the running one, so its result becomes the
+// base's samples (``base``) when it ends, and the candidate's comparison follows.
+message BaseClaim {
+  RequestId request_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  BaseRef base = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+}
+
+// An attempt whose agent has asked for an unusual number of evaluations.
+// 
+// A warning and nothing more: it is recorded once per scope, when the count of the scope's
+// admitted evaluations first reaches ``limit``, and it never refuses a call.
+message Runaway {
+  Scope scope = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string evaluations = 2 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+  string limit = 3 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+}
+
+// A candidate's samples compared with its base's: the ratio, its noise and the verdict.
+// 
+// ``ratio`` is the candidate's mean over the base's, as measured; ``direction`` says which
+// way is better, so ``better`` is a ratio above one for ``max`` and below one for ``min``.
+// ``noise`` is one standard error of the ratio, and a verdict needs two of them: the
+// statistic is in ``vs_core._comparison``.
+message Comparison {
+  Scope scope = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string metric = 2 [(buf.validate.field).string = {min_len: 1}];
+  optional string unit = 3;
+  Direction direction = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  RevisionRef candidate = 5 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string candidate_input = 6 [(buf.validate.field).string = {min_len: 1}];
+  RevisionRef base = 7 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string base_input = 8 [(buf.validate.field).string = {min_len: 1}];
+  double candidate_value = 9 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double base_value = 10 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double ratio = 11 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double noise = 12 [(buf.validate.field).double = {finite: true, gte: 0}];
+  ComparisonVerdict verdict = 13 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  string candidate_samples = 14 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+  string base_samples = 15 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+}
+
+// A candidate's comparison with its base as a flow reads it from the run's view.
+// 
+// ``settling`` is true while a run that will feed the comparison has not ended (core's own
+// run of the base, or of the candidate's input, that a close call earned): the comparison
+// changes when it lands, so it is not yet the one a verdict may rest on
+// (`vs_core._comparison.comparison_settling`).
+message StatedComparison {
+  Comparison comparison = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  bool settling = 2 [(core_field) = {explicit: true}];
+  optional double answer_until = 3 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {omit_unset: true}];
+}
+
+// A run that fed a comparison ended, and no run that feeds it is under way any more.
+// 
+// Core reports it at the end of the run, so a flow that waits for the comparison to settle
+// (``ctx.evaluation.measure_compared``) wakes when the comparison it would read is final, and
+// not at a poll. It names the comparison only: the run's view states it
+// (``RunView.comparisons``), or no longer does when its base went stale meanwhile.
+message ComparisonSettled {
+  string kind = 1 [(buf.validate.field).string = {const: "comparison_settled"}, (core_field) = {default_json: "\"comparison_settled\""}];
+  Scope scope = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string candidate_input = 3 [(buf.validate.field).string = {min_len: 1}];
+  string base_input = 4 [(buf.validate.field).string = {min_len: 1}];
+}
+
+// Current nonterminal job progress, retaining absent measurements as None.
+// 
+// Sequence and time must match the carrying observation. Older observations
+// cannot replace newer progress; changed payload at equal sequence conflicts.
+// Stage IDs must belong to the owner's validated stage registry.
+message JobProgress {
+  string observation_sequence = 1 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+  double observed_at = 2 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+  JobProgressState state = 3 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  optional string stage_id = 4 [(buf.validate.field).string = {min_len: 1}];
+  optional double queued_s = 5 [(buf.validate.field).double = {gte: 0, finite: true}];
+  optional double ran_s = 6 [(buf.validate.field).double = {gte: 0, finite: true}];
+  optional string pending_reason = 7;
+  optional double estimated_start_at = 8 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+
+// Frozen progress of one unfinished dependency when the bound that ended it passed.
+// 
+// A wait ends a job either with the wait itself (its earliest bound) or alone, when the
+// job's own queue budget runs out while its siblings go on (``QUEUE_BUDGET``).
+message JobTimeout {
+  ResourceId resource_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  JobProgress progress = 2;
+  WaitEnd by = 3 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  double at = 4 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+}
+
+// Immutable wait-all timeout evidence, separate from job termination.
+// 
+// Freeze before applying observations at or beyond the deadline. unfinished
+// names each unfinished dependency once, in continuation order. Late results
+// may resolve cleanup but never rewrite this value or resume authorization.
+// Waiting, inspection and timeout authorization create no execution charge.
+message TimedOut {
+  option (buf.validate.message).cel = {id: "TimedOut.deadline", expression: "this.reached_at >= this.deadline_at", message: "reached_at precedes deadline_at"};
+  option (buf.validate.message).cel = {id: "TimedOut.bounds", expression: "this.unfinished.all(j, j.at <= this.reached_at)", message: "job bound follows reached_at"};
+  option (buf.validate.message).cel = {id: "TimedOut.ids", expression: "this.unfinished.map(j, j.resource_id.root).unique()", message: "duplicate resource ID"};
+  string kind = 1 [(buf.validate.field).string = {const: "timed_out"}, (core_field) = {default_json: "\"timed_out\""}];
+  double deadline_at = 2 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+  double reached_at = 3 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+  WaitEnd by = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {default_json: "\"limit\""}];
+  repeated JobTimeout unfinished = 5 [(buf.validate.field).repeated = {min_items: 1}];
+}
+
+// One waiting entity: what kind of wait it is and the identity ``OpenWait.subject`` names.
+message WaitSubject {
+  WaitKind kind = 1 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  string identity = 2 [(core_field) = {explicit: true}];
+}
+
+// The requests, waiting entities and timer one waiter waits on; any one of them wakes it.
+// 
+// The transition that makes an entity wait writes this value in the same step, naming
+// exactly what can end the wait: requests by identity, other waiting entities whose own
+// progress carries this one (``subjects``), and a core time the shell's clock reaches.
+// Nothing is inferred later. Applying an answer of one of the requests wakes the waiter,
+// which moves on or waits again; a waiter that needs several answers waits again on the ones
+// still open. A named entity carries the waiter only while its own recorded wait does, and
+// which kinds may name which is fixed and acyclic (``MAY_WAIT_ON`` in ``_waits``), so the
+// chain of waits always ends at a request or a timer. A wait on nothing is no wait, so an
+// empty one is refused.
+message WaitOn {
+  option (buf.validate.message).cel = {id: "WaitOn.dependency", expression: "size(this.requests) > 0 || size(this.subjects) > 0 || has(this.timer)", message: "a wait names a dependency"};
+  option (buf.validate.message).cel = {id: "WaitOn.requests", expression: "this.requests.map(x, x.root).unique()", message: "duplicate request"};
+  option (buf.validate.message).cel = {id: "WaitOn.subjects", expression: "this.subjects.all(s, size(this.subjects.filter(p, p.kind == s.kind && p.identity == s.identity)) == 1)", message: "duplicate wait subject"};
+  repeated RequestId requests = 1;
+  repeated WaitSubject subjects = 2;
+  optional double timer = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+
+// Run-clock wait before a lost turn is asked again; each further ask doubles it.
+message Backoff {
+  option (core_value).mixin = "vs_core._leaf_behavior.BackoffPolicy";
+  double first = 1 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+  double cap = 2 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+}
+
+// The templates of the exchanges core itself starts with a role's agent.
+// 
+// Each names a template file the renderer reads; the wording is the template's. A role needs
+// exactly the exchanges it can meet (see ``Role``), and a missing one is a declaration error.
+message Exchanges {
+  optional string correction = 1;
+  optional string resume = 2;
+  optional string wait_unrecorded = 3;
+}
+
+// What the prompt is built from when a reply waited and the run recorded no wait.
+message WaitUnrecorded {
+  string kind = 1 [(buf.validate.field).string = {const: "wait-unrecorded"}, (core_field) = {default_json: "\"wait-unrecorded\""}];
+  string role = 2 [(core_field) = {explicit: true}];
+}
+
+// Core retained the exact revision this turn produced.
+message Retained {
+  string kind = 1 [(buf.validate.field).string = {const: "retained"}, (core_field) = {default_json: "\"retained\""}];
+  RevisionRef revision = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+}
+
+// Core declined or failed this turn's checkpoint.
+message Declined {
+  string kind = 1 [(buf.validate.field).string = {const: "declined"}, (core_field) = {default_json: "\"declined\""}];
+  CheckpointDecline reason = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+}
+
+// End the wait with ``WORKSPACE_CLOSED`` when this workspace stops being open.
+message WhileOpen {
+  string kind = 1 [(buf.validate.field).string = {const: "while_open"}, (core_field) = {default_json: "\"while_open\""}];
+  AttemptRef workspace = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+}
+
+// End the wait with ``OWNER_GONE`` when this job is no longer alive.
+message WhileAlive {
+  string kind = 1 [(buf.validate.field).string = {const: "while_alive"}, (core_field) = {default_json: "\"while_alive\""}];
+  ResourceId job = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+}
+
+// A duration on the run clock, plus the watches that may end the wait earlier.
+// 
+// ``limit`` is relative to the time core accepts the wait (an agent turn's requests count it
+// from their dispatch instead: see ``FromDispatch``). A limit of zero or less is
+// refused by core (``Failed(REFUSED)``); the type does not forbid it so that a bypassed
+// value still reaches the runtime check instead of failing on construction.
+message Within {
+  option (core_value).mixin = "vs_core._leaf_behavior.WaitDuration";
+  double limit = 1 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true, aliases: "Limit"}];
+  repeated Watch watches = 2;
+}
+
+// Internal: ``limit`` seconds counted from the instant the shell dispatches the request.
+// 
+// A request waits for the shell's free slot before it runs, and the time it waits is not
+// the work's. Core therefore keeps the request open until the run deadline while it is
+// queued, and stamps ``Until(at=dispatch time + limit)`` when ``DispatchAuthorized``
+// arrives with the time the shell dispatched it (that time is journaled with the event, so
+// replay stamps the same instant).
+message FromDispatch {
+  string kind = 1 [(buf.validate.field).string = {const: "from_dispatch"}, (core_field) = {default_json: "\"from_dispatch\""}];
+  double limit = 2 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  repeated Watch watches = 3;
+}
+
+// Internal: this request ends when the decision that caused it ends (same ``Until``).
+message Inherited {
+  string kind = 1 [(buf.validate.field).string = {const: "inherited"}, (core_field) = {default_json: "\"inherited\""}];
+}
+
+// What core stored when it accepted a ``Within``: an absolute time and the watches.
+message Until {
+  double at = 1 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+  repeated Watch watches = 2;
+}
+
+// One validated stage result from the accepted terminal submission fact.
+message EvaluationStageResult {
+  string stage_id = 1 [(buf.validate.field).string = {min_len: 1}];
+  EvaluationStageOutcome outcome = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+}
+
+// Failed benchmark partial and the explicit comparison interval containing it.
+// 
+// The measurement owner validates the rate and interval against its typed
+// outcome. Absence of this value cannot prove a repeated measurement failure.
+message BenchmarkFailure {
+  option (buf.validate.message).cel = {id: "BenchmarkFailure.rate", expression: "this.rate_lower <= this.partial_rate && this.partial_rate <= this.rate_upper", message: "partial_rate outside declared rate range"};
+  double partial_rate = 1 [(buf.validate.field).double = {gte: 0, finite: true}];
+  double rate_lower = 2 [(buf.validate.field).double = {gte: 0, finite: true}];
+  double rate_upper = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+
+// Immutable preceding-submission cursor captured at resume publication.
+// 
+// Zero identifies the beginning; otherwise submission_id names the exact
+// ordinal. A missing ID never stands in for a nonempty historical cursor.
+message EvaluationHistoryCursor {
+  option (buf.validate.message).cel = {id: "EvaluationHistoryCursor.identity", expression: "(this.ordinal == \"0\") != has(this.submission_id)", message: "submission_id must match cursor ordinal"};
+  string ordinal = 1 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, default_json: "0"}];
+  RequestId submission_id = 2;
+}
+
+// External admission observation, distinct from cleanup and resume authority.
+// 
+// Only reopened proves positive admission. closed and unknown do not authorize
+// a successor invocation; unknown retains the new capacity episode and fences.
+// The enclosing observation supplies exact request, scope, generation and episode.
+
+
+message Watch {
+  option (core_value) = {union: true, discriminator: "kind"};
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    WhileOpen whileopen = 1;
+    WhileAlive whilealive = 2;
+  }
+}
+
+message Checkpoint {
+  option (core_value) = {union: true, discriminator: "kind"};
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    Retained retained = 1;
+    Declined declined = 2;
+  }
+}
+

@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_core.api import RequestBase, Scope, WorkspaceRef
+    from vs_project.api import StateValue
     from vs_runtime.api.infrastructure import RuntimeWorkspace
 
 
@@ -152,7 +153,7 @@ class FaultingAccessStore(ReceiptStore):
             return None
         return super().load(family, part, key, model)
 
-    def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
+    def replace(self, family: str, part: str, key: str, receipt: StateValue) -> None:
         if self.fault is StoreFault.RECEIPT_WRITE and family == "session-access":
             self.fault = StoreFault.NONE
             message = "access receipt write failed"
