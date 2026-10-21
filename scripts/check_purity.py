@@ -302,7 +302,9 @@ PURE_EXPORTS = {
         }
     ),
     "pydantic.fields": frozenset({"FieldInfo"}),
-    "pydantic.dataclasses": frozenset({"dataclass"}),
+    # Resolve generated forward annotations and compile their deterministic in-memory schemas.
+    # Like TypeAdapter, these operations perform no external I/O.
+    "pydantic.dataclasses": frozenset({"dataclass", "is_pydantic_dataclass", "rebuild_dataclass"}),
     "pydantic.json_schema": frozenset({"GenerateJsonSchema", "JsonSchemaValue"}),
     "re": frozenset(
         {

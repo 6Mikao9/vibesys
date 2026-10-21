@@ -201,10 +201,11 @@ allowlist = []
 
 [tool.vibesys.contract_sot]
 # Phase 3 generates the core types from these protos and deletes the hand-written
-# copies. Only this generated Attempt is temporarily exempt from the copy rule;
-# imports and all other copies remain checked. Proto regenerate-and-diff guards it.
+# copies. Exact generated wire bindings are exempt from the name-based copy rule;
+# imports and all other copies remain checked. Proto regenerate-and-diff guards them.
 # A directory exclusion would hide unrelated copies and legacy imports.
 copy_waivers = [
+    { path = "libs/vs-proto/src/vs_proto/_generated/vibesys/core/v1/leaves_pb.py", symbol = "TimedOut", reason = "Generated wire binding for the proto-owned vs_core.api.TimedOut; check_proto verifies its source and generated value." },
     { path = "libs/vs-proto/src/vs_proto/_generated/vibesys/store/v1/span_pb.py", symbol = "Attempt", reason = "Run transport v2 phase 3 generates core types from proto and deletes hand-written copies (#3332)." },
 ]
 
