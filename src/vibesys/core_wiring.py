@@ -166,7 +166,9 @@ def operation_catalog(operations: StrategyOperations, ports: OperationPorts) -> 
 
 
 _OBSTACLE_WORDING: Mapping[ParallelCandidateObstacle, str] = {
-    ParallelCandidateObstacle.NO_OWN_CONTAINER: "its agent does not run in a container of its own",
+    ParallelCandidateObstacle.NO_OWN_CONFINEMENT: (
+        "its agent does not run in a container of its own or independently enforced host confinement"
+    ),
     ParallelCandidateObstacle.BORROWED_SESSION: (
         "its agent clients borrow the run-owned sandbox and bridge"
     ),

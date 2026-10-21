@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -120,6 +121,9 @@ class WorkspaceResourceFactory:
         self._threads = threads
         self._blocking = blocking
         self._root_agent_environment_opener = root_agent_environment_opener
+        self._evaluation_admission = (
+            asyncio.Lock() if environment.view.host_candidate_isolation else None
+        )
 
     @property
     def root(self) -> RuntimeWorkspaceResource:
@@ -229,6 +233,7 @@ class WorkspaceResourceFactory:
             model_requests=self._model_requests,
             threads=self._threads,
             blocking=self._blocking,
+            admission=self._evaluation_admission,
         )
         host_resources = (*self._host_resources, *environment.view.agent_host_resources)
         if environment.request.objective is not None:

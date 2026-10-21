@@ -82,7 +82,7 @@ def _refusal_text(obstacle: ParallelCandidateObstacle, *, loop: str = "serial") 
 
 
 def test_an_environment_that_cannot_is_refused_naming_the_loop_and_the_obstacle() -> None:
-    text = _refusal_text(ParallelCandidateObstacle.NO_OWN_CONTAINER)
+    text = _refusal_text(ParallelCandidateObstacle.NO_OWN_CONFINEMENT)
     assert "serial loop" in text
     assert "'local'" in text
     assert "its agent does not run in a container of its own" in text

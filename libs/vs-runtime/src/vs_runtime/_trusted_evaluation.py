@@ -525,6 +525,7 @@ class RuntimeTrustedEvaluation:
         model_requests: ModelRequestReconciler | None,
         threads: Threads,
         blocking: BlockingRunner,
+        admission: asyncio.Lock | None,
     ) -> None:
         self._plan = plan
         self._threads = threads
@@ -533,7 +534,7 @@ class RuntimeTrustedEvaluation:
         self._sandbox = sandbox
         self._git = git
         self._model_requests = model_requests
-        self._lock = asyncio.Lock()
+        self._lock = admission if admission is not None else asyncio.Lock()
 
     async def accuracy(
         self, *, command_override: str | None = None, output: OutputSink
@@ -1184,11 +1185,15 @@ def create_trusted_evaluation_executor(  # noqa: PLR0913  # lint-waiver: LW-2601
     model_requests: ModelRequestReconciler | None = None,
     threads: Threads,
     blocking: BlockingRunner,
+    admission: asyncio.Lock | None = None,
 ) -> TrustedEvaluationExecutor:
     """Bind trusted evaluation mechanism to one owned workspace.
 
     Each operation runs on ``blocking``; ``threads`` makes the event that cancels it.
+    A shared ``admission`` serializes stages across workspaces on one host device.
+    Cancellation drains a running command before releasing admission; queued work can
+    cancel without starting a worker. Without it, only this workspace is serialized.
     """
     return RuntimeTrustedEvaluation(
-        plan, workspace, sandbox, git, model_requests, threads, blocking
+        plan, workspace, sandbox, git, model_requests, threads, blocking, admission
     )
