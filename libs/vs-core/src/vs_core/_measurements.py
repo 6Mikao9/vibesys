@@ -14,7 +14,6 @@ from . import _wait_clock
 from ._base_runs import after_run, base_of, record_samples, with_base
 from ._comparison import (
     as_answer,
-    moment_of,
     run_reading,
 )
 from ._deadlines import resolve_until
@@ -392,7 +391,7 @@ def _admitted(
         for row in context.records.records
     ):
         return AreaChange(state=state)
-    run = reused_run(state, event.scope, plan, identity.value, moment_of(context.run))
+    run = reused_run(state, event.scope, plan, identity.value)
     reuses = None if run is None else run.submission_id
     base = base_of(context, event.scope, plan) if event.compared else None
     origin_of = Origin(event.scope, origin.value.decision_id, reuses=reuses, base=base)

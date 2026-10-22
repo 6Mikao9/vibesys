@@ -16,11 +16,13 @@ of these hold:
   except for the purpose (`MeasurementIdentity.measures_same_input`), and the run kept the
   same stages with the same execution budgets, queue allowance and stage policy;
 - they ended conclusively: terminal, released, accepted, every record trusted and accepted by
-  core, and any failure the candidate's own (a workload failure), never the machinery's;
-- the samples held have a fresh comparison with the base that is no close call: when they are
-  a close call, one more run narrows the noise, and when no base sample is fresh (stale,
-  failed or still running) they have no verdict at all (`official_needs_samples`); either
-  way the official measurement runs afresh.
+  core, and any failure the candidate's own (a workload failure), never the machinery's.
+
+A trusted run of a revision is that revision's measurement: one run per submitted commit. The
+official measurement never adds a run because the samples held are a close call against the
+base or the base has no fresh sample. The comparison's own reruns (`remeasures_candidate`,
+`remeasures_base`) narrow the noise and land as further samples of the same measurement, which
+the official answer then states (`as_answer`); they are not a second official check.
 
 Every conclusive run of one measured input is a sample of one measurement
 (`vs_core._comparison`). The rule never picks the best of them, and it never refuses because
@@ -46,7 +48,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._comparison import Measured, Moment, evaluation_of, official_needs_samples, run_reading
+from ._comparison import run_reading
 from .types.common import ObservationStatus, RevisionRef
 from .types.evaluation import (
     MEASUREMENT_DIAGNOSTIC_LIMIT,
@@ -233,12 +235,11 @@ def reused_run(
     scope: Scope,
     plan: MeasurementPlan,
     identity: MeasurementIdentity,
-    moment: Moment,
 ) -> OwnedJob | None:
     """The scope's run that carries the answer to the official measurement ``plan``, or None.
 
-    None for any other purpose, once the identity has a submission of its own, when the scope
-    holds no conclusive run of this input, and when the samples held leave a close call.
+    None for any other purpose, once the identity has a submission of its own, and when the
+    scope holds no conclusive run of this input.
     """
     if (
         plan.evaluation_lease is not None
@@ -261,10 +262,6 @@ def reused_run(
         and _conclusive(state, job)
     )
     if not sources:
-        return None
-    if plan.measured_input is not None and official_needs_samples(
-        state, scope, Measured(evaluation_of(identity), plan.measured_input), moment
-    ):
         return None
     failed = next((job for job in sources if job.status != ObservationStatus.SUCCEEDED), None)
     return failed if failed is not None else sources[0]

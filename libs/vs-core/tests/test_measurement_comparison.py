@@ -778,18 +778,21 @@ def test_a_verdict_from_a_zero_noise_under_a_declared_floor_is_no_close_call() -
 @pytest.mark.regression
 @pytest.mark.parametrize("floor", [FLOOR, 0.0])
 @pytest.mark.parametrize("cause", ["stale", "failed"])
-def test_an_official_check_whose_base_has_no_fresh_sample_runs_afresh(
+def test_an_official_check_whose_base_has_no_fresh_sample_is_answered_by_the_samples_held(
     floor: float, cause: str
 ) -> None:
-    """With no fresh base sample there is no verdict, so the agent's run does not answer.
+    """A trusted run of a revision is its measurement, whether or not the base can be compared.
 
     The agent's one run is decisive against the base under a declared floor, and a close call
     without one. Then the base's samples go stale, or the base's only run failed (it gives no
-    sample). Before, no comparison meant "nothing to ask for", and the official check reused
-    the agent's single run, which then became the ranked answer on no comparison at all.
+    sample), so the candidate has no comparison. The official check still adds no run: one
+    trusted measurement per submitted commit. Whether the candidate beats the input is
+    decided by the strategy from the answer's readings, and the comparison catches up when
+    the base is measured again.
     """
     lab = Lab.of("a", floor=floor)
     asked = lab.call("a", "c1", "input-1")
+    (agent_run,) = (r for r in asked if r.plan.purpose == "local-validation")
     if cause == "stale":
         lab.measure({"input-1": 300.0, "base": 100.0})
         lab.advance(STALENESS + 1.0)
@@ -802,7 +805,7 @@ def test_an_official_check_whose_base_has_no_fresh_sample_runs_afresh(
     now = core.moment_of(lab.state.run)
     assert core.latest_comparisons(lab.state.evaluation, lab.scopes["a"], ["input-1"], now) == ()
     check = final_check(lab, "a", "c1", "input-1")
-    assert check.reuses is None, "the official check runs afresh"
+    assert check.reuses == agent_run.request_id, "the official check is the agent's run"
 
 
 def final_check(
@@ -834,22 +837,44 @@ def final_check(
     return submission
 
 
-def test_the_final_check_of_a_close_call_adds_its_own_sample_to_the_same_measurement() -> None:
-    """Another run of the input the agent measured: the same measurement, the same base."""
+def test_the_final_check_of_a_close_call_is_answered_by_the_samples_held() -> None:
+    """A close call earns the comparison its own reruns, never a second official run."""
     lab = Lab.of("a")
-    lab.call("a", "close", "input-1")
+    first = lab.call("a", "close", "input-1")[0]
     lab.measure({"input-1": 101.0, "base": 100.0})
+    assert core.close_call(lab.comparisons()[-1])
     check = final_check(lab, "a", "close", "input-1")
-    assert check.reuses is None, "a close call is not settled by the samples held"
-    assert check.request_id is not None
-    lab.ended.add(check.request_id.root)
-    lab.state = ended_with(lab.state, check, 102.0)
-    sample = lab.state.evaluation.samples[-1]
-    assert sample.run == check.request_id
-    assert sample.base == core.BaseRef(
-        commit=core.initial_state().run.facts.baseline, measured_input="base"
+    assert check.reuses == first.request_id, "a close call does not call for another run"
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(
+    candidate=st.floats(min_value=1.0, max_value=400.0),
+    stale=st.booleans(),
+    floor=st.sampled_from([FLOOR, 0.0]),
+)
+@example(candidate=101.0, stale=False, floor=0.0)
+@example(candidate=300.0, stale=True, floor=FLOOR)
+def test_a_submitted_commit_is_measured_by_exactly_one_job_whatever_the_comparison_says(
+    *, candidate: float, stale: bool, floor: float
+) -> None:
+    """The agent's evaluation and the strategy's official check of a commit share one job.
+
+    Whether the agent's reading is decisive, a close call or compared with a base gone stale,
+    the official measurement adds no run of the candidate: before, a close call or an
+    uncomparable base made it submit a second job on the same revision and recipe. (A close
+    call's own reruns are the comparison's samples, not a second official check.)
+    """
+    lab = Lab.of("a", floor=floor)
+    (agent_run,) = (
+        r for r in lab.call("a", "c1", "input-1") if r.plan.purpose == "local-validation"
     )
-    assert lab.comparisons()[-1].candidate_samples == 2
+    lab.measure({"input-1": candidate, "base": 100.0})
+    if stale:
+        lab.advance(STALENESS + 1.0)
+    check = final_check(lab, "a", "c1", "input-1")
+    assert check.reuses == agent_run.request_id, "a second job was submitted for the revision"
 
 
 def test_the_final_check_of_a_decisive_result_is_answered_by_the_samples_held() -> None:
@@ -965,35 +990,27 @@ def test_three_runs_a_side_without_a_declared_floor_give_a_verdict() -> None:
 
 @pytest.mark.regression
 @settings(max_examples=examples(pr=20, nightly=200))
-@given(official=st.floats(min_value=1.0, max_value=400.0), reused=st.booleans())
-@example(official=80.0, reused=False)
-@example(official=80.0, reused=True)
-def test_a_failed_official_record_keeps_the_reading_its_run_reported(
-    *, official: float, reused: bool
-) -> None:
+@given(official=st.floats(min_value=1.0, max_value=400.0))
+@example(official=80.0)
+def test_a_failed_official_record_keeps_the_reading_its_run_reported(*, official: float) -> None:
     """The official answer states the samples' mean only for a record that passed.
 
     A benchmark can report its metrics and then fail a check, so its FAILED record carries a
     reading. Before, the official record was restated as the mean of the runs that passed, so
-    a failed run read as a passing number. Without ``reused`` the official check runs afresh
-    and fails; with it the agent's own run of the input failed, and the official measurement
-    re-reads that run, as the reuse rule prefers a failed run.
+    a failed run read as a passing number. The agent's own run of the input failed, and the
+    official measurement re-reads that run, as the reuse rule prefers a failed run.
     """
     lab = Lab.of("a")
     lab.call("a", "c1", "input-1")
-    lab.measure({"input-1": 200.0 if reused else 101.0, "base": 100.0})
-    if reused:
-        asked = lab.call("a", "c2", "input-1")
-        (failing,) = (r for r in asked if r.plan.purpose == "local-validation")
-        assert failing.request_id is not None
-        lab.ended.add(failing.request_id.root)
-        lab.state = ended_with(lab.state, failing, official, failed=True)
-        lab.measure({"base": 100.0})
-        check = final_check(lab, "a", "c2", "input-1")
-        assert check.reuses == failing.request_id
-    else:
-        check = final_check(lab, "a", "c1", "input-1")
-        assert check.reuses is None, "a close call runs afresh"
+    lab.measure({"input-1": 200.0, "base": 100.0})
+    asked = lab.call("a", "c2", "input-1")
+    (failing,) = (r for r in asked if r.plan.purpose == "local-validation")
+    assert failing.request_id is not None
+    lab.ended.add(failing.request_id.root)
+    lab.state = ended_with(lab.state, failing, official, failed=True)
+    lab.measure({"base": 100.0})
+    check = final_check(lab, "a", "c2", "input-1")
+    assert check.reuses == failing.request_id
     assert check.request_id is not None
     lab.ended.add(check.request_id.root)
     lab.state = ended_with(lab.state, check, official, reused=check.reuses, failed=True)
@@ -1172,19 +1189,19 @@ def finished_for_search(
 def test_a_finished_measurement_reaches_the_search_with_the_comparison_of_its_candidate() -> None:
     """The search that asked is told what the candidate compares to, not only its evidence.
 
-    The agent's own run and the strategy's final check are samples of one input, so the
-    comparison the check's result carries is over both."""
+    The strategy's final check is answered by the agent's run of the input, so the comparison
+    the check's result carries is the one that run makes."""
     lab = Lab.of("a")
     lab.call("a", "close", "input-1")
     lab.measure({"input-1": 101.0, "base": 100.0})
     check = final_check(lab, "a", "close", "input-1")
     assert check.request_id is not None
     lab.ended.add(check.request_id.root)
-    done = ended_transition(lab.state, check, 102.0)
+    done = ended_transition(lab.state, check, 101.0, reused=check.reuses)
     (finished,) = finished_for_search(lab.state, done)
     assert finished.comparison is not None
-    assert finished.comparison.candidate_samples == 2
-    assert finished.comparison.ratio == pytest.approx(1.015)
+    assert finished.comparison.candidate_samples == 1
+    assert finished.comparison.ratio == pytest.approx(1.01)
     assert finished.comparison.base == core.initial_state().run.facts.baseline
     lab.state = done.state
     assert finished.comparison == lab.comparisons()[-1]

@@ -236,11 +236,10 @@ recorded and its spread shows in the noise, but it is not refused.
 Samples of one input are aggregated: nothing is picked among them and nothing is
 refused because there are several, so re-running an input until a run suits the
 agent gains nothing. The strategy's official measurement of an input the attempt
-already measured is answered from those samples, and runs afresh when a
-comparison with the base is a close call that one more sample would narrow, or
-when no fresh sample of the base is held (its runs went stale or failed), so there
-is no comparison at all. Either
-way, the official result's headline objective states the mean of the samples of the
+already measured is answered from those samples, whatever the comparison with the
+base says: a trusted run of a revision is that revision's measurement, one per
+submitted commit. A close call earns the base and the candidate more runs of their own
+(see below), which join the same measurement. The official result's headline objective states the mean of the samples of the
 input held when the result is stored, the value its comparison states then, and
 that mean is the candidate's headline value in ranking. A task's other objectives
 (for example p99 latency beside throughput) are the answering run's own values: a
@@ -280,8 +279,8 @@ three runs each and those runs differ, and then the bar is the Student-t
 quantile at the floor of the Welch-Satterthwaite degrees of freedom (between
 4.30 noises at the fewest runs and 2.04 with many), which keeps false verdicts
 near 5% whatever the two spreads and counts. Until then the
-result is `inconclusive` (never `within_noise`, whatever the ratio) and a close call: the base takes up to two more runs,
-and the official check runs afresh. The agent's evaluation tool and the resumed turn
+result is `inconclusive` (never `within_noise`, whatever the ratio) and a close call: the base takes up to two more runs and the candidate's input
+up to three in all, and the official check adds none. The agent's evaluation tool and the resumed turn
 report the comparison the base's fresh samples make, and the run's events carry
 each one logged as `measurement_compared`.
 
