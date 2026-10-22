@@ -412,7 +412,8 @@ class EpochVersion(Message[_EpochVersionFields]):
     A stored keyframe carries epoch.descriptors inline. The gateway replaces them
     with descriptors_sha256 on the wire (SkeletonResponse.descriptor_sets), since
     every epoch of a run usually repeats one set. Exactly one of the two names the
-    descriptors of an epoch that has any.
+    descriptors of an epoch that has any. The wire form is not valid under the
+    EpochStarted descriptor rules until a reader has restored them.
 
     ```proto
     message vibesys.store.v1.EpochVersion

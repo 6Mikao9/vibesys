@@ -572,7 +572,8 @@ func (x *MetricVersion) GetPoint() *MetricPoint {
 // A stored keyframe carries epoch.descriptors inline. The gateway replaces them
 // with descriptors_sha256 on the wire (SkeletonResponse.descriptor_sets), since
 // every epoch of a run usually repeats one set. Exactly one of the two names the
-// descriptors of an epoch that has any.
+// descriptors of an epoch that has any. The wire form is not valid under the
+// EpochStarted descriptor rules until a reader has restored them.
 type EpochVersion struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Seq               uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`

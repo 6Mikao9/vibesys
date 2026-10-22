@@ -13,6 +13,7 @@ import {
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
 import {createActor, fromCallback, fromPromise} from 'xstate';
+import {DescriptorCache} from './descriptors.js';
 import {
   type LoadProgress,
   loadProgress,
@@ -143,13 +144,14 @@ export function gatewayReader(
   cache: ContentCache,
   schedule: ScheduleTimeout,
 ): GatewayReader {
+  const descriptors = new DescriptorCache();
   return {
     watch(runId, receive, records) {
       const actor = createActor(
         runObservationMachine.provide({
           actors: {
             history: fromCallback<ObservationEvent, ObservationOperation>(({input}) => {
-              const loader = startSkeletonLoader(transport, schedule, input, records);
+              const loader = startSkeletonLoader(transport, schedule, input, records, descriptors);
               const subscription = loader.subscribe(snapshot =>
                 input.receive({
                   type: 'read',
