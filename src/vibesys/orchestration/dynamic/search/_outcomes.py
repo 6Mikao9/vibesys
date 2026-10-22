@@ -9,6 +9,8 @@ round, parent and settlement the search records. Nothing here awaits or reads th
 
 from dataclasses import dataclass, field
 
+from pydantic import Field
+
 from vibesys.candidates.api import STOPPED as STOPPED_TEXT
 from vibesys.candidates.api import (
     Baseline,
@@ -197,11 +199,21 @@ class MergeReport(Value):
     revision: RevisionRef | None = None
 
 
+def _empty(value: tuple[object, ...]) -> bool:
+    """Whether a tuple field was left empty, so a checkpoint omits it."""
+    return not value
+
+
 class Evidence(Value):
-    """The trusted readings of a candidate, and the evidence they were decoded from."""
+    """The trusted readings of a candidate, and the evidence they were decoded from.
+
+    ``readings`` are what settlement, a parent offer, adoption and main use. ``shown`` is
+    those plus a benchmark that is not accuracy-verified, so a round can display it.
+    """
 
     readings: tuple[AcceptedReading, ...] = ()
     proof: Proof | None = None
+    shown: tuple[AcceptedReading, ...] = Field(default=(), exclude_if=_empty)
 
 
 class Closing(Value):
@@ -600,7 +612,7 @@ def _failing_tail(done: WorkstreamDone) -> str:
     not the agent's summary, is what tells the next agent why the candidate failed.
     """
     accuracy = reading_of(done.evidence.readings, EvidenceKind.CORRECTNESS)
-    benchmark = reading_of(done.evidence.readings, EvidenceKind.BENCHMARK)
+    benchmark = _benchmark_reading(done)
     for seen in (benchmark, accuracy):
         if seen is not None and not seen.passed and seen.feedback:
             return seen.feedback
@@ -611,7 +623,7 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
     """The round an implement workstream adds to its hypothesis."""
     start = done.start
     accuracy = reading_of(done.evidence.readings, EvidenceKind.CORRECTNESS)
-    benchmark = reading_of(done.evidence.readings, EvidenceKind.BENCHMARK)
+    benchmark = _benchmark_reading(done)
     result = done.result
     outcome = None if result is None else result.candidate.outcome
     next_step = "" if result is None else result.candidate.next_step
@@ -641,6 +653,18 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
         unapplied=() if result is None else result.candidate.unapplied,
         unattributed=() if result is None else result.candidate.unattributed,
     )
+
+
+def _benchmark_reading(done: WorkstreamDone) -> AcceptedReading | None:
+    """The decisive benchmark, or an unverified one when no decisive benchmark exists.
+
+    The unverified reading is what the round shows. Settlement reads ``readings`` only,
+    so it never treats that benchmark as the revision's result.
+    """
+    decisive = reading_of(done.evidence.readings, EvidenceKind.BENCHMARK)
+    if decisive is not None:
+        return decisive
+    return reading_of(done.evidence.shown, EvidenceKind.BENCHMARK)
 
 
 def snapshot_of(done: WorkstreamDone) -> ParentSnapshot | None:

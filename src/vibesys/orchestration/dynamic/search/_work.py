@@ -7,6 +7,7 @@ after a code change goes on from its checkpoint (``at``) rather than doing it ag
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.orchestration.dynamic.models import MergeOutcomeKind, MergeResult
 from vibesys.orchestration.dynamic.search._briefs import merge_prompt, profile_prompt
+from vibesys.orchestration.dynamic.search._composition import ComposedJobs
 from vibesys.orchestration.dynamic.search._implement import (
     Conversation,
     implement_until_measurable,
@@ -173,8 +174,16 @@ async def measured(  # noqa: PLR0913  # lint-waiver: LW-271017 [PLR0913]; each a
     A workstream resumed with its measurement in hand interprets it without measuring again.
     """
     if at is not None and at.at(ResumeStage.MEASURED) and at.measurement is not None:
-        found = at.measurement
+        composed = ComposedJobs(decisive=at.measurement, unverified=at.unverified)
     else:
-        found = await measurement_of(ctx, w, ws, work, revision)
-        mark(ctx, w, work, ResumeStage.MEASURED, result=result, measurement=found)
-    return await evidence_of(ctx, w, ws, revision, found)
+        composed = await measurement_of(ctx, w, ws, work, revision)
+        mark(
+            ctx,
+            w,
+            work,
+            ResumeStage.MEASURED,
+            result=result,
+            measurement=composed.decisive,
+            unverified=composed.unverified,
+        )
+    return await evidence_of(ctx, w, ws, revision, composed)

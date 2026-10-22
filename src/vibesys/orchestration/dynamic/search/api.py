@@ -5,6 +5,11 @@ from vibesys.candidates.api import review_evaluations as evaluations
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, implement_prompt, tail
 from vibesys.orchestration.dynamic.search._budget import budget
+from vibesys.orchestration.dynamic.search._composition import (
+    ComposedJobs,
+    MeasuredJob,
+    compose_jobs,
+)
 from vibesys.orchestration.dynamic.search._config import MAX_WIDTH, DynamicConfig
 from vibesys.orchestration.dynamic.search._context import best_part, versus_parts
 from vibesys.orchestration.dynamic.search._handoff import (
@@ -170,6 +175,7 @@ __all__ = [
     "Closing",
     "CombinePick",
     "CombineSource",
+    "ComposedJobs",
     "CompositeRow",
     "DropReason",
     "Dropped",
@@ -195,6 +201,7 @@ __all__ = [
     "MainLine",
     "MainMeasurement",
     "MainState",
+    "MeasuredJob",
     "MergeOutcome",
     "MergePrompt",
     "MergeRecord",
@@ -263,6 +270,7 @@ __all__ = [
     "blocked_failure",
     "bounded",
     "budget",
+    "compose_jobs",
     "dynamic",
     "ended_by",
     "evaluations",

@@ -17,6 +17,11 @@ from vibesys.candidates.api import (
     with_first_attempt,
 )
 from vibesys.metrics import AcceptedReading, accept_readings
+from vibesys.orchestration.dynamic.search._composition import (
+    ComposedJobs,
+    MeasuredJob,
+    compose_jobs,
+)
 from vibesys.orchestration.dynamic.search._ids import INPUT_MEASURED
 from vibesys.orchestration.dynamic.search._operations import EvidenceReadings
 from vibesys.orchestration.dynamic.search._outcomes import (
@@ -42,12 +47,13 @@ from vibesys.orchestration.dynamic.search._values import (
 )
 from vibesys.search_spans.api import GATE, GateAttrs
 from vs_core.api.search import (
+    EvidenceKind,
+    EvidenceRef,
     Failed,
     Flow,
     MeasurementPurpose,
     MeasurementRecipe,
     MeasurementResult,
-    ObservationStatus,
     RevisionRef,
     Source,
     Stopped,
@@ -195,7 +201,7 @@ async def a_slot(ctx: Flow, w: WorkstreamStart, work: Work, revision: RevisionRe
 
 async def measurement_of(
     ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work, revision: RevisionRef
-) -> MeasurementResult:
+) -> ComposedJobs:
     """Measure ``revision`` with the trusted evaluations; what the evidence says is `evidence_of`.
 
     The measurement is dispatched only once a slot is bound to it and the input's measurement
@@ -227,17 +233,19 @@ async def measurement_of(
         stopped = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.STOPPED)
         raise WorkEndedError(stopped) from None
     lists = _stage_lists(ctx, w, ws, revision, names)
-    results: list[MeasurementResult] = []
-    found: MeasurementResult | Failed
+    jobs: list[MeasuredJob] = []
+    found: ComposedJobs | Failed
     for stages in lists:
         plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=stages)
         one = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(stages))
         if isinstance(one, Failed):
             found = one
             break
-        results.append(one)
+        jobs.append(MeasuredJob(plan=plan, result=one))
     else:
-        found = _combined(results)
+        found = compose_jobs(
+            tuple(jobs), recipe_digest=recipe.recipe.digest, accuracy_stage=recipe.accuracy_stage
+        )
     shown = tuple(dict.fromkeys(stage for stages in lists for stage in stages))
     gate = ctx.operation_span
     if gate is not None:
@@ -265,35 +273,24 @@ def _stage_lists(
     return requested or (names,)
 
 
-def _combined(results: list[MeasurementResult]) -> MeasurementResult:
-    """One result whose evidence is every list's, so a later reader sees each gate."""
-    if len(results) == 1:
-        return results[0]
-    failed = next(
-        (item for item in results if item.status is not ObservationStatus.SUCCEEDED), None
-    )
-    return results[-1].model_copy(
-        update={
-            "source_request": None,
-            "evidence": tuple(ref for item in results for ref in item.evidence),
-            "status": results[-1].status if failed is None else failed.status,
-            "failure": None if failed is None else failed.failure,
-            "diagnostic": "\n".join(item.diagnostic for item in results if item.diagnostic),
-        }
-    )
-
-
 async def evidence_of(
-    ctx: Flow, w: WorkstreamStart, ws: Workspace, revision: RevisionRef, found: MeasurementResult
+    ctx: Flow, w: WorkstreamStart, ws: Workspace, revision: RevisionRef, composed: ComposedJobs
 ) -> Evidence:
-    """Release the slot ``found`` held and decode what its trusted evidence says of ``revision``.
+    """Release the slot the measurement held and decode what it says of ``revision``.
 
-    Releasing a slot is idempotent, so a workstream resumed with its measurement releases it again.
+    ``composed.decisive`` is what settlement reads. ``composed.unverified`` benchmarks are
+    decoded into ``shown`` and stay out of those readings. Releasing a slot is idempotent,
+    so a workstream resumed with its measurement releases it again.
     """
     ctx.channel(REPORTS).send(Released(key=w.key))
+    found = composed.decisive
     purpose = purpose_of(w)
     keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose=purpose)
-    if not keys:
+    decisive = tuple(item for item in found.evidence if item.key in keys)
+    shown = decisive + _shown(
+        composed.unverified, found=found, revision=revision, decisive=decisive
+    )
+    if not shown:
         none = Failure(
             kind=FailureKind.NO_TRUSTED_EVIDENCE,
             status=found.status,
@@ -301,8 +298,33 @@ async def evidence_of(
             operator_output=found.operator_diagnostic,
         )
         raise WorkEndedError(none)
-    proof = Proof(refs=tuple(item for item in found.evidence if item.key in keys))
-    return Evidence(readings=await interpret(ctx, ws, proof), proof=proof)
+    readings = await interpret(ctx, ws, Proof(refs=shown))
+    decisive_keys = {item.key for item in decisive}
+    return Evidence(
+        readings=tuple(item for item in readings if item.key in decisive_keys),
+        proof=None if not decisive else Proof(refs=decisive),
+        shown=readings,
+    )
+
+
+def _shown(
+    unverified: tuple[EvidenceRef, ...],
+    *,
+    found: MeasurementResult,
+    revision: RevisionRef,
+    decisive: tuple[EvidenceRef, ...],
+) -> tuple[EvidenceRef, ...]:
+    """Benchmark records of ``revision`` that are shown and not decided from."""
+    held = {item.key for item in decisive}
+    return tuple(
+        item
+        for item in unverified
+        if item.key not in held
+        and item.kind is EvidenceKind.BENCHMARK
+        and item.provenance == "trusted"
+        and item.scope == found.scope
+        and item.candidate == revision
+    )
 
 
 async def interpret(ctx: Flow, ws: Workspace, proof: Proof) -> tuple[AcceptedReading, ...]:
