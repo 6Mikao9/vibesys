@@ -192,6 +192,7 @@ def representative_context() -> dict[str, object]:
         "candidate_snapshot_id",
         "constraints",
         "current_round_location",
+        "detail",
         "domain_implementer",
         "domain_judge",
         "domain_orchestrator",

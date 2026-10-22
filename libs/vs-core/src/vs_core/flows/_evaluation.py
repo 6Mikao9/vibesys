@@ -22,7 +22,7 @@ from vs_core._strategy_operations import (
 from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value
 from vs_core.types.evaluation import EvidenceRef, MeasurementPlan, MeasurementResult
 from vs_core.types.measurement import Comparison, ComparisonSettled, StatedComparison
-from vs_core.types.search import MeasurementFinished, OperationFinished
+from vs_core.types.search import MeasuredPlan, MeasurementFinished, OperationFinished
 from vs_core.types.strategy import Measure, Operation
 from vs_core.types.until import Failed, Within
 
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 _REFS = TypeAdapter(tuple[EvidenceRef, ...])
 _REVISION = TypeAdapter(RevisionRef | None)
 _STATED = TypeAdapter(StatedComparison | None)
+_STAGE_LISTS = TypeAdapter(tuple[tuple[str, ...], ...])
 
 
 class CaptureSpec(Value):
@@ -266,6 +267,19 @@ class Evaluation:
                 message = f"an operation ended with {unexpected.kind}"
                 raise ContractError(("evaluation", "capture"), message)
 
+    def requested_stages(
+        self, workspace: Workspace, revision: RevisionRef
+    ) -> tuple[tuple[str, ...], ...]:
+        """Stage lists agents of this workspace already submitted for ``revision``.
+
+        Each tuple is one local-validation plan, in the order its stages run. Empty means
+        the agents submitted none, so the caller runs the task's own measured stages.
+        """
+        return self._kit.read(
+            lambda view: _requested_stages(view.measured_plans, workspace.ref, revision),
+            _STAGE_LISTS,
+        )
+
     def taken(self, workspace: Workspace, revision: RevisionRef) -> tuple[EvidenceRef, ...]:
         """The trusted evaluations the workspace's agents took of ``revision`` themselves."""
         return self._kit.read(
@@ -297,6 +311,20 @@ def _attempt_evaluations(
         and item.scope.generation == attempt.generation
     )
     return tuple(sorted(held, key=lambda item: item.observation_sequence))
+
+
+def _requested_stages(
+    plans: tuple[MeasuredPlan, ...], attempt: AttemptRef, revision: RevisionRef
+) -> tuple[tuple[str, ...], ...]:
+    return tuple(
+        plan.stage_ids
+        for plan in plans
+        if plan.purpose == "local-validation"
+        and plan.candidate == revision
+        and plan.scope.owner == attempt.attempt_id
+        and plan.scope.generation == attempt.generation
+        and plan.stage_ids
+    )
 
 
 def _taken(

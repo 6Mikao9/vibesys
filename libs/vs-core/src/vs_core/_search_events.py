@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from ._comparison import comparison_of_result, moment_of, stated_comparisons
 from ._registry import ContractError
 from .types.attempts import AttemptExhausted, CheckpointResolved
-from .types.common import Scope
+from .types.common import RevisionRef, Scope
 from .types.evaluation import MeasurementResult, ResumeAuthorized, ResumeRefused, TurnSuspended
 from .types.kernel import ControlChanged, StopLiftRecorded
 from .types.kinds import EventKind
@@ -32,6 +32,7 @@ from .types.search import (
     Discarded,
     DiscardReason,
     Interrupted,
+    MeasuredPlan,
     MeasurementFinished,
     MessageDelivered,
     MessageDropped,
@@ -76,7 +77,29 @@ def run_view(core: CoreState) -> RunView:
         measurements=core.evaluation.evidence,
         settlements=core.settlement.settlements,
         comparisons=stated_comparisons(core.evaluation, moment_of(run)),
+        measured_plans=_measured_plans(core),
     )
+
+
+def _measured_plans(core: CoreState) -> tuple[MeasuredPlan, ...]:
+    """Admitted plans whose candidate is a revision, skipping a job that only re-reads one."""
+    plans: list[MeasuredPlan] = []
+    for job in core.evaluation.jobs:
+        candidate = job.plan.candidate
+        if job.reuses is not None or not isinstance(candidate, RevisionRef):
+            continue
+        stage_ids = tuple(stage.stage_id for stage in job.plan.stages)
+        if not stage_ids:
+            continue
+        plans.append(
+            MeasuredPlan(
+                scope=job.scope,
+                candidate=candidate,
+                purpose=job.plan.purpose,
+                stage_ids=stage_ids,
+            )
+        )
+    return tuple(plans)
 
 
 def _record(core: CoreState, request_id: RequestId) -> RequestRecord:

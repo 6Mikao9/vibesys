@@ -47,6 +47,7 @@ from vs_core.api.search import (
     MeasurementPurpose,
     MeasurementRecipe,
     MeasurementResult,
+    ObservationStatus,
     RevisionRef,
     Source,
     Stopped,
@@ -225,18 +226,61 @@ async def measurement_of(
         # a reviewed candidate the stop kept from its measurement is kept, as a dropped one is
         stopped = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.STOPPED)
         raise WorkEndedError(stopped) from None
-    plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=names)
-    found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
+    lists = _stage_lists(ctx, w, ws, revision, names)
+    results: list[MeasurementResult] = []
+    found: MeasurementResult | Failed
+    for stages in lists:
+        plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=stages)
+        one = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(stages))
+        if isinstance(one, Failed):
+            found = one
+            break
+        results.append(one)
+    else:
+        found = _combined(results)
+    shown = tuple(dict.fromkeys(stage for stages in lists for stage in stages))
     gate = ctx.operation_span
     if gate is not None:
-        stage = ",".join(names)
+        stage = ",".join(shown)
         work.gate = (gate, stage)
-        ctx.label(GATE, span=gate, title=" + ".join(names), attrs=GateAttrs(stage=stage))
+        ctx.label(GATE, span=gate, title=" + ".join(shown), attrs=GateAttrs(stage=stage))
     ctx.channel(REPORTS).send(Released(key=w.key))
     if isinstance(found, Failed):
         ctx.channel(REPORTS).send(Released(key=w.key))
         raise ended_by(found, None)
     return found
+
+
+def _stage_lists(
+    ctx: Flow,
+    w: WorkstreamStart,
+    ws: Workspace,
+    revision: RevisionRef,
+    names: tuple[str, ...],
+) -> tuple[tuple[str, ...], ...]:
+    """The official plans to run: each agent submission, or the task's stages when it made none."""
+    if w.plan.kind is WorkKind.PROFILE:
+        return (names,)
+    requested = ctx.evaluation.requested_stages(ws, revision)
+    return requested or (names,)
+
+
+def _combined(results: list[MeasurementResult]) -> MeasurementResult:
+    """One result whose evidence is every list's, so a later reader sees each gate."""
+    if len(results) == 1:
+        return results[0]
+    failed = next(
+        (item for item in results if item.status is not ObservationStatus.SUCCEEDED), None
+    )
+    return results[-1].model_copy(
+        update={
+            "source_request": None,
+            "evidence": tuple(ref for item in results for ref in item.evidence),
+            "status": results[-1].status if failed is None else failed.status,
+            "failure": None if failed is None else failed.failure,
+            "diagnostic": "\n".join(item.diagnostic for item in results if item.diagnostic),
+        }
+    )
 
 
 async def evidence_of(

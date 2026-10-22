@@ -22,6 +22,7 @@ from vs_evaluation.agent_models import (
     SocketSuccess,
     SubmitCall,
     SubmittedReply,
+    TrustedEvalStep,
     WaitCall,
     WaitReply,
 )
@@ -141,6 +142,7 @@ __all__ = [
     "StoredEvaluation",
     "SubmitCall",
     "SubmittedReply",
+    "TrustedEvalStep",
     "TrustedEvidence",
     "WaitCall",
     "WaitReply",

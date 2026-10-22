@@ -259,6 +259,15 @@ class AttemptSummary(Value):
         )
 
 
+class MeasuredPlan(Value):
+    """One measurement core already admitted, as stage ids in the order it will run them."""
+
+    scope: Scope
+    candidate: RevisionRef
+    purpose: Literal["baseline", "local-validation", "official", "profile"]
+    stage_ids: tuple[str, ...]
+
+
 class RunView(Value):
     """What a search may read about the run, and nothing it could write.
 
@@ -279,6 +288,12 @@ class RunView(Value):
     comparisons: tuple[StatedComparison, ...] = ()
     """Every candidate input's comparison with its base as it stands now, and whether it is
     still settling; one per scope, candidate input and base input."""
+    measured_plans: tuple[MeasuredPlan, ...] = ()
+    """Plans core has admitted, so a search can repeat a stage list it did not choose.
+
+    Empty in a run view saved before the search repeated an agent's own stage list: the
+    search then measures the task's own stages.
+    """
 
 
 class DiscardReason(StrEnum):
