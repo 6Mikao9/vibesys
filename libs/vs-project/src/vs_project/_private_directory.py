@@ -52,8 +52,25 @@ def user_runtime_root(environ: Mapping[str, str], uid: int) -> Path:
     """
     runtime = environ.get("XDG_RUNTIME_DIR", "")
     if runtime and Path(runtime).is_absolute():
+        # Used as given. Resolving it would follow a symlink planted in a
+        # directory the caller can write, which the registry then refuses to
+        # open; that refusal is the check, and this function must not bypass it.
         return Path(runtime) / "vibesys"
-    return _FALLBACK_PARENT / f"vibesys-{uid}"
+    return _fallback_runtime_parent() / f"vibesys-{uid}"
+
+
+def _fallback_runtime_parent() -> Path:
+    """The fallback parent, with the platform ``/tmp`` symlink resolved.
+
+    macOS ships ``/tmp`` as a symlink to ``/private/tmp``. The registry opens
+    the runtime root by walking from ``/`` without following links, so a root
+    chosen under the symlink cannot be opened. Only this fixed path is
+    resolved, and only when it is itself a symlink: a later component that an
+    attacker replaced stays a symlink and is still refused.
+    """
+    if _FALLBACK_PARENT.is_symlink():
+        return _FALLBACK_PARENT.resolve()
+    return _FALLBACK_PARENT
 
 
 def ensure_private_directory(path: Path, owner: int) -> Path:
