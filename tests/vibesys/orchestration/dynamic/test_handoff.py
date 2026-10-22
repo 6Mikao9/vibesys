@@ -25,6 +25,7 @@ from tests.vibesys.orchestration.dynamic._slots import (
     implement_and_judge,
     open_next_slot,
     planner_context,
+    verify_parents,
 )
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
 from tests.vibesys.search_faults import Step, play, steps
@@ -116,6 +117,7 @@ def test_each_planning_call_adds_one_file_and_the_next_prompt_names_it_but_never
         assert written.reasoning == f"{marker} why"
         assert [item.work_id for item in written.scheduled] == [identifier]
         assert written.handoff.doubts == (f"{marker} doubt {call}",)
+        verify_parents(host)  # from the second call on, the parent is the main the last call moved
         open_next_slot(host)
         implement_and_judge(host, identifier, f"c{call}")
         for asked in host.open(Measure):
@@ -140,6 +142,7 @@ def _write_request(asked: Asked) -> WriteHandoff:
 
 def _played(host: Host, identifier: str, candidate: str) -> None:
     """Play the scheduled workstream through, up to the next planner turn."""
+    verify_parents(host)  # a workstream that names no parent starts from the main, once verified
     open_next_slot(host)
     implement_and_judge(host, identifier, candidate)
     for asked in host.open(Measure):

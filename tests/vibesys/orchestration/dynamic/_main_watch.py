@@ -14,7 +14,7 @@ from tests.vibesys.orchestration.dynamic._host import CANDIDATE_THROUGHPUT, INPU
 from vibesys.orchestration.dynamic.search.api import MergeOutcome, WorkKind
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.search.api import RunSnapshot
+    from vibesys.orchestration.dynamic.search.api import MergeRecord, RunSnapshot
     from vs_core.api import RevisionRef
 
 
@@ -62,25 +62,30 @@ class MainWatch:
                 assert running.parent in {before, record.main}, (running, before, record.main)
 
     def _merges_kept_the_rule(self, record: RunSnapshot) -> None:
-        """Each merge named only mergeable candidates, and only a sound one moved main.
+        """Each merge named only candidates that beat main when it began, and only a sound one moved main.
 
-        The rule is restated from the host's own numbers, not read from the search: a candidate
-        is no merged main, was not merged before, and measures above main (anything does while
-        main and the input have no throughput); a merge that merged passed accuracy and measures
-        no lower than main before it.
+        The rule is restated from the host's own numbers, not read from the search. Merges are read
+        in the order they were folded, which is not the order they began: a candidate built on
+        main that beats it moves main at its settlement, as a merge of itself (its merge ID is its
+        hypothesis, its only source), while a merge workstream may still be running. A source is
+        no merged main, was not merged before, and measures above the main the merge began on
+        (anything does while main and the input have no throughput); a merge that merged passed
+        accuracy and measures no lower than main before it.
         """
-        merge_ids = {item.merge_id for item in record.merges} | {
+        merge_ids = {item.merge_id for item in record.merges if not _moved_by_itself(item)} | {
             item.plan.work_id for item in record.running if item.plan.kind is WorkKind.MERGE
         }
         main = self.input_throughput
+        began_on = {}  # the throughput of each main that moved, by its revision's id
         merged: set[tuple[str, str]] = set()
-        for item in sorted(record.merges, key=lambda merge_: merge_.sequence):
+        for item in record.merges:
+            start = began_on.get(item.base.revision_id.root, self.input_throughput)
             for source in item.candidates:
                 root = source.revision.revision_id.root
                 assert source.hypothesis_id not in merge_ids, item
                 assert (source.hypothesis_id, root) not in merged, item
                 found = self.throughputs.get(root, CANDIDATE_THROUGHPUT)
-                assert main is None or found > main, (item, main)
+                assert start is None or found > start, (item, start)
             if item.outcome is not MergeOutcome.MERGED:
                 continue
             assert item.accuracy_passed is True, item
@@ -88,4 +93,10 @@ class MainWatch:
             assert item.metrics, item
             assert main is None or item.metrics[0].value >= main, (item, main)
             main = item.metrics[0].value
+            began_on[item.revision.revision_id.root] = main
             merged |= {(s.hypothesis_id, s.revision.revision_id.root) for s in item.candidates}
+
+
+def _moved_by_itself(item: MergeRecord) -> bool:
+    """Whether a merge record is a candidate that moved main at its settlement, with no merge."""
+    return {source.hypothesis_id for source in item.candidates} == {item.merge_id}

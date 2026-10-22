@@ -46,11 +46,14 @@ from vs_core.api import (
     Finish,
     InvocationId,
     InvocationRef,
+    Measure,
+    Operation,
     RequestTurn,
     Retained,
     RevisionRef,
     SessionId,
     StartAttempt,
+    Withdraw,
 )
 from vs_core.api.search import ReplyError, ReplyErrorCode
 from vs_sim.api.testing import examples
@@ -260,31 +263,68 @@ def test_a_plan_that_continues_an_unknown_hypothesis_is_corrected_before_anythin
 # -- where a workstream starts -------------------------------------------------------------------
 
 
+def _start_all(host: Host) -> dict[str, RevisionRef]:
+    """Admit every workstream waiting for its workspace; the base each starts from, by hypothesis."""
+    bases: dict[str, RevisionRef] = {}
+    for asked in host.open(StartAttempt):
+        assert isinstance(asked.request, StartAttempt)
+        hypothesis = asked.request.attempt_id.root.split(":")[1]
+        bases[hypothesis] = asked.request.workspace.base
+        host.answer(asked)
+    return bases
+
+
+def _settle(host: Host) -> None:
+    """Answer the measurement, the reading of its evidence and the close, as the world would."""
+    for _ in range(20):
+        pending = [*host.open(Measure), *host.open(Operation), *host.open(Withdraw)]
+        if not pending:
+            return
+        host.answer(pending[0])
+
+
 @MODES
-def test_a_workstream_that_names_no_parent_starts_from_the_input_never_from_the_best_candidate(
+def test_a_workstream_that_names_no_parent_starts_from_main_never_from_the_best_candidate(
     *, restarting: bool
 ) -> None:
-    host = start(restarting=restarting, max_rounds=3, throughputs={"c1": 150.0, "c2": 200.0})
-    bases = []
-    for hypothesis, candidate, extra in (
-        ("h1", "c1", {}),
-        ("h2", "c2", {"parent_hypothesis_id": "h1"}),
-        ("h3", "c3", {}),
-    ):
-        plan(host, implement(hypothesis, **extra))
-        verify_parents(host)
-        (asked,) = host.open(StartAttempt)
-        assert isinstance(asked.request, StartAttempt)
-        bases.append(asked.request.workspace.base)
-        host.answer(asked)
-        implement_and_judge(host, hypothesis, candidate)
-        host.drain_until_turn(PLANNER_LABEL) if hypothesis != "h3" else host.drain()
+    host = start(
+        restarting=restarting,
+        max_rounds=3,
+        max_in_flight=2,
+        throughputs={"c1": 150.0, "c2": 200.0},
+    )
+    # h1 and h2 both start from the input. h1 settles first and moves main to c1; h2 beats c1 but
+    # was built on the input main has left, so it is the best candidate and is not main.
+    plan(host, implement("h1"), implement("h2"))
+    first = _start_all(host)
+    input_revision = first["h1"]
+    assert first["h2"] == input_revision
+    implement_and_judge(host, "h1", "c1")
+    _settle(host)
+    implement_and_judge(host, "h2", "c2")
+    _settle(host)
+    record = host.record
+    assert record is not None
+    assert record.main == RevisionRef.of_git_commit("c1")
 
-    input_revision, from_h1, again = bases
-    assert from_h1 != input_revision  # a named parent is built on
-    assert from_h1.git_commit == "c1"
-    # h2 is the best candidate by now (200 against 150 for h1), and h3 still starts from the input.
-    assert again == input_revision
+    host.drain_until_turn(PLANNER_LABEL)
+    plan(host, implement("h3", parent_hypothesis_id="h2"))
+    verify_parents(host)
+    (named,) = _start_all(host).values()
+    implement_and_judge(host, "h3", "c3")
+    _settle(host)
+
+    host.drain_until_turn(PLANNER_LABEL)
+    plan(host, implement("h4"))
+    verify_parents(host)
+    (unnamed,) = _start_all(host).values()
+    implement_and_judge(host, "h4", "c4")
+    host.drain()
+
+    assert named.git_commit == "c2"  # a named parent is built on
+    # h2 is the best candidate by now (200 against 150 for h1), and h4 still starts from main.
+    assert unnamed.git_commit == "c1"
+    assert unnamed != input_revision
 
 
 # -- text the agents wrote -----------------------------------------------------------------------

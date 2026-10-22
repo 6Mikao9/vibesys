@@ -23,6 +23,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, Discriminator, Field, Tag, model_validator
 
+from vibesys.candidates._task import declared_directions
 from vibesys.metrics import (
     AcceptedReading,
     EvidenceReading,
@@ -31,6 +32,7 @@ from vibesys.metrics import (
     accept_readings,
     mean_metrics,
     reading_of,
+    with_declared_directions,
 )
 from vs_core.api import MeasurementFailure
 from vs_core.api.search import (
@@ -449,9 +451,9 @@ async def decode_input(ctx: Flow, result: MeasurementResult) -> Baseline:
         case Failed() as failed:
             return Unmeasurable(failure=_ended(failed))
         case EvidenceReadingsBase() as outcome:
-            return input_from_readings(
-                refs, outcome.status, tuple(outcome.readings), blamed=result.failure
-            )
+            declared = declared_directions(ctx.task.terms)
+            readings = with_declared_directions(tuple(outcome.readings), declared)
+            return input_from_readings(refs, outcome.status, readings, blamed=result.failure)
         case None:
             return Unmeasurable(failure=InputFailure(kind=InputFailureKind.READINGS_UNDECODABLE))
 

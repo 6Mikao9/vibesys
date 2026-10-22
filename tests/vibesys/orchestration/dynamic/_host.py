@@ -609,7 +609,10 @@ class Host:
         )
         held = self.run.view.changes.get("measurements", ())
         assert isinstance(held, tuple)
-        self.run.view.changes["measurements"] = (*held, *refs, *samples)
+        # a measurement of the input again is a new record in a real ledger; here it states the same ones
+        known = {item.key for item in held}
+        fresh = tuple(item for item in (*refs, *samples) if item.key not in known)
+        self.run.view.changes["measurements"] = (*held, *fresh)
 
     def _benchmark_fails(self, stage: str, candidate: RevisionRef, *, is_input: bool) -> bool:
         """Whether the benchmark of a candidate the world was told fails it does."""

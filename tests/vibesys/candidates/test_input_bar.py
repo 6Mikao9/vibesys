@@ -14,14 +14,22 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.candidates.api import (
+    Baseline,
     InputReading,
     Measured,
+    declared_directions,
     input_metrics,
     samples_of,
     space_of,
     with_samples,
 )
-from vibesys.metrics import AcceptedReading, MetricComparison, MetricRow
+from vibesys.metrics import (
+    AcceptedReading,
+    Direction,
+    MetricComparison,
+    MetricRow,
+    with_declared_directions,
+)
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -49,6 +57,7 @@ TERMS = TaskTerms(
     ),
 )
 SPACE = space_of(TERMS)
+DIRECTIONS: tuple[Direction, ...] = ("max", "min")
 
 
 def rows(tpot: float, ttft: float) -> tuple[MetricRow, ...]:
@@ -78,7 +87,7 @@ def first_sample(tpot: float, ttft: float) -> Measured:
     )
 
 
-def compare(candidate: tuple[MetricRow, ...], baseline: Measured) -> MetricComparison:
+def compare(candidate: tuple[MetricRow, ...], baseline: Baseline) -> MetricComparison:
     """How a candidate relates to the input's bar."""
     return SPACE.compare_metrics(candidate, input_metrics(baseline))
 
@@ -139,3 +148,26 @@ def test_a_candidate_worse_than_the_mean_is_never_better(
             compare(loser, with_samples(first_sample(*pair), readings))
             is not MetricComparison.BETTER
         )
+
+
+@given(samples=SAMPLES, decoded=st.sampled_from(DIRECTIONS))
+def test_every_row_on_a_declared_axis_states_the_declared_direction_whatever_it_was_decoded_with(
+    samples: list[tuple[float, float]], decoded: Direction
+) -> None:
+    """The decoder states `max` for a non-headline row; TTFT was shown to agents as `better: max`."""
+    readings = tuple(
+        reading(i, *pair).model_copy(
+            update={
+                "metrics": (
+                    *rows(*pair),
+                    MetricRow(name="startup_s", value=1.0, direction=decoded, unit="s"),
+                )
+            }
+        )
+        for i, pair in enumerate(samples)
+    )
+    directed = with_declared_directions(readings, declared_directions(TERMS))
+    for item in directed:
+        by_name = {row.name: row.direction for row in item.metrics}
+        assert by_name["tpot_ms_avg"] == by_name["ttft_ms_avg"] == "min"
+        assert by_name["startup_s"] == decoded  # on no declared axis: left as decoded

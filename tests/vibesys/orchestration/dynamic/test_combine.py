@@ -33,7 +33,6 @@ from tests.vibesys.orchestration.dynamic._replies import (
 )
 from tests.vibesys.orchestration.dynamic._slots import (
     implement_and_judge,
-    open_next_slot,
     planner_context,
     turn_about,
     verify_parents,
@@ -85,13 +84,15 @@ MODES = across_restarts
 
 
 def _start(host: Host) -> None:
-    """Verify the parent when it is not the input, then admit the one workstream waiting."""
+    """Verify the parents when they are not the input, then admit every workstream waiting."""
     for _ in range(3):
         if host.open(StartAttempt):
             break
         verify_parents(host)
-    assert host.open(StartAttempt), host.run.timeline()
-    open_next_slot(host)
+    waiting = host.open(StartAttempt)
+    assert waiting, host.run.timeline()
+    for asked in waiting:
+        host.answer(asked)
 
 
 def _settle(host: Host) -> None:
@@ -101,6 +102,33 @@ def _settle(host: Host) -> None:
         if not pending:
             return
         host.answer(pending[0])
+
+
+def _parallel(host: Host, *runs: tuple[str, str, str]) -> PlannerPrompt:
+    """Plan ``runs`` (hypothesis, candidate, outcome) at once, all built on main now, and settle them in order.
+
+    Main moves at the first settlement whose candidate beats it, so a later run was built on a main
+    that has since left it: it needs a merge to reach main, and a run that does not beat the new
+    main is not mergeable at all. The planner turn a settlement opens stays open for the story's
+    next plan; the context of the first planning is what the call returns.
+    """
+    context = _plan(host, *(implement(name) for name, _, _ in runs))
+    _start(host)
+    for name, candidate, outcome in runs:
+        implement_and_judge(host, name, candidate, outcome=outcome)
+        _settle(host)
+    return context
+
+
+DECOY = ("h0", "c0", "supported")
+DECOY_THROUGHPUT = {"c0": INPUT_THROUGHPUT + 10}
+"""A candidate that beats the input a little: it moves main at its settlement, so every run that
+settles after it and was built on the input is left behind and reaches main only by a merge."""
+
+
+def _behind_main(host: Host, *runs: tuple[str, str, str]) -> PlannerPrompt:
+    """Play the decoy and then ``runs`` from the input: main is the decoy's, the runs wait to merge."""
+    return _parallel(host, DECOY, *runs)
 
 
 def _plan(host: Host, *entries: dict[str, object]) -> PlannerPrompt:
@@ -221,8 +249,9 @@ def test_a_combine_of_two_candidates_that_lost_alone_is_built_from_main_and_repo
     assert "beyond" not in _flat(shown).split("combined from `h1`")[1].split(".")[0]
     assert "combined from `h1`" in shown, shown
     assert "`h2`" in shown
-    # The composite beats main, so the existing merge path may bring it into main.
-    assert [item.hypothesis_id for item in after.mergeable] == ["k1"]
+    # The composite was built on main and beats it, so it moved main at settlement: no merge is left.
+    assert after.mergeable == ()
+    assert after.main_revision == RevisionRef.of_git_commit("c3")
 
 
 @MODES
@@ -322,35 +351,31 @@ def test_the_unapplied_reply_field_round_trips_and_rejects_unknown_keys(
             ImplementerResult.model_validate_json(implemented(unapplied=bad))
 
 
-# Main moves twice under a hypothesis that goes on: m1 merges h1 (main c3), m2 merges h3 (main c6).
-# Under read-only git, catching up applies main's change to the tree without recording main in the
-# git history, so only the run's record knows which main each candidate's tree holds.
-WALK = {"c2": 40.0, "c4": 40.0, "c5": 200.0, "c6": 200.0, "c7": 300.0, "c8": 40.0}
+# Main moves twice under a hypothesis that goes on: h1 settles first and moves main (c1), then h3
+# does (c5). Under read-only git, catching up applies main's change to the tree without recording
+# main in the git history, so only the run's record knows which main each candidate's tree holds.
+WALK = {"c2": 40.0, "c4": 40.0, "c5": 200.0, "c7": 300.0, "c8": 40.0}
 
 
 @MODES
 def test_a_part_that_caught_up_with_main_twice_is_combined_and_merged_with_its_own_change_only(
     *, restarting: bool
 ) -> None:
-    host = begin(config(max_rounds=12), restarting=restarting, throughputs=WALK)
-    first = _plan(host, implement("h1"))
+    host = begin(config(max_rounds=12, max_in_flight=2), restarting=restarting, throughputs=WALK)
+    # h2 is built on the input; h1 settles first and moves main to c1.
+    first = _parallel(host, ("h1", "c1", "supported"), ("h2", "c2", "inconclusive"))
     base = first.base_revision.revision_id.root
-    _implemented(host, "h1", "c1")
-    _plan(host, implement("h2"))
-    _implemented(host, "h2", "c2", "inconclusive")
-    _merged(host, "m1", "h1", "c3")
     _plan(host, implement("h2", continue_hypothesis=True))
     caught_up = _flat(
         render(PromptTemplate.IMPLEMENT, _implemented(host, "h2", "c4", "inconclusive"))
     )
-    assert f"git diff {base} c3" in caught_up
+    assert f"git diff {base} c1" in caught_up
     _plan(host, implement("h3"))
-    _implemented(host, "h3", "c5")
-    _merged(host, "m2", "h3", "c6")
+    _implemented(host, "h3", "c5")  # built on main c1 and beats it: main moves to c5
     _plan(host, implement("h2", continue_hypothesis=True))
     again = _flat(render(PromptTemplate.IMPLEMENT, _implemented(host, "h2", "c7", "inconclusive")))
-    # The second catch-up applies only m2's change: m1's is in the tree already.
-    assert "git diff c3 c6" in again, again
+    # The second catch-up applies only c5's change: c1's is in the tree already.
+    assert "git diff c1 c5" in again, again
     assert "merge-base" not in again
     _plan(host, implement("h4"))
     _implemented(host, "h4", "c8")
@@ -360,14 +385,14 @@ def test_a_part_that_caught_up_with_main_twice_is_combined_and_merged_with_its_o
     asked = turn_about(host, "implementer", "k1").context
     assert isinstance(asked, ImplementPrompt)
     told = _flat(render(PromptTemplate.IMPLEMENT, asked))
-    # Each part's own change: h2's tree holds main c6, and h4 started from it.
-    assert "git diff c6 c7" in told, told
-    assert "git diff c6 c8" in told, told
+    # Each part's own change: h2's tree holds main c5, and h4 started from it.
+    assert "git diff c5 c7" in told, told
+    assert "git diff c5 c8" in told, told
     implement_and_judge(host, "k1", "c9")
     _settle(host)
 
     merging = _flat(render(PromptTemplate.MERGE, _merged(host, "m3", "h2", "c10")))
-    assert "git diff c6 c7" in merging, merging
+    assert "git diff c5 c7" in merging, merging
     assert "merge-base" not in merging
 
 
@@ -510,17 +535,25 @@ def test_an_unapplied_entry_outside_a_combine_is_kept_and_the_candidate_measured
 # merge commit: diffing a merge commit against a tree that lacks F removes F cleanly. It starts
 # at the latest merged candidate the tree was built on; main holds that candidate, F and every
 # other change a merge brought in.
-FIXUP = {"c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 200.0, "c5": 250.0, "c6": 300.0, "c7": 300.0}
+FIXUP = {
+    **DECOY_THROUGHPUT,
+    "c1": 200.0,
+    "c2": 250.0,
+    "c3": 40.0,
+    "c4": 200.0,
+    "c5": 250.0,
+    "c6": 300.0,
+    "c7": 300.0,
+}
 
 
 @MODES
 def test_a_merger_fix_up_survives_the_merges_and_the_catch_up_of_children_of_what_it_merged(
     *, restarting: bool
 ) -> None:
-    host = begin(config(max_rounds=14), restarting=restarting, throughputs=FIXUP)
-    first = _plan(host, implement("h1"))
+    host = begin(config(max_rounds=15, max_in_flight=2), restarting=restarting, throughputs=FIXUP)
+    first = _behind_main(host, ("h1", "c1", "supported"))
     base = first.base_revision.revision_id.root
-    _implemented(host, "h1", "c1")
     on_c1 = {"parent_hypothesis_id": "h1", "parent_revision": "c1"}
     _plan(host, implement("h3", **on_c1))
     _implemented(host, "h3", "c2")
@@ -550,42 +583,46 @@ def test_a_merger_fix_up_survives_the_merges_and_the_catch_up_of_children_of_wha
     assert "`git diff c5 c6 | git apply --reject`" in final, final
 
 
-PARTLY = {"c1": 200.0, "c2": 210.0, "c3": 40.0, "c4": 260.0, "c5": 40.0}
+PARTLY = {"c0": 40.0, "c1": 200.0, "c2": 210.0, "c3": 40.0, "c4": 260.0, "c5": 40.0}
 
 
 @MODES
 def test_a_child_of_one_source_of_a_merge_catches_up_with_the_others_from_its_parent(
     *, restarting: bool
 ) -> None:
-    host = begin(config(max_rounds=12), restarting=restarting, throughputs=PARTLY)
-    first = _plan(host, implement("h1"))
-    base = first.base_revision.revision_id.root
+    host = begin(config(max_rounds=13), restarting=restarting, throughputs=PARTLY)
+    # Both sources are built on h0's candidate, which lost: main stays the input, so neither is
+    # built on a main and each reaches main only by a merge.
+    _plan(host, implement("h0"))
+    _implemented(host, "h0", "c0")
+    on_c0 = {"parent_hypothesis_id": "h0", "parent_revision": "c0"}
+    _plan(host, implement("h1", **on_c0))
     _implemented(host, "h1", "c1")
-    _plan(host, implement("h2"))
+    _plan(host, implement("h2", **on_c0))
     _implemented(host, "h2", "c2")
     _plan(host, implement("h3", parent_hypothesis_id="h1", parent_revision="c1"))
     _implemented(host, "h3", "c3", "inconclusive")
     _merged(host, "m1", ("h1", "h2"), "c4")
 
     # h3's tree holds c1 but not c2: its catch-up starts at c1 and so carries h2's change and
-    # whatever the merger added, never h1's again (from the input) and never nothing (from c4).
+    # whatever the merger added, never h1's again (from c0, where it was built) and never nothing
+    # (from c4).
     _plan(host, implement("h3", continue_hypothesis=True))
     asked = _implemented(host, "h3", "c5", "inconclusive")
     caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
     assert "`git diff c1 c4 | git apply --reject`" in caught_up, caught_up
-    assert f"git diff {base} " not in caught_up
+    assert "git diff c0 " not in caught_up
 
 
-CHAIN = {"c1": 200.0, "c2": 210.0, "c3": 40.0, "c4": 260.0, "c5": 40.0}
+CHAIN = {**DECOY_THROUGHPUT, "c1": 200.0, "c2": 210.0, "c3": 40.0, "c4": 260.0, "c5": 40.0}
 
 
 @MODES
 def test_a_child_of_the_later_of_two_merged_sources_on_one_line_starts_at_the_later(
     *, restarting: bool
 ) -> None:
-    host = begin(config(max_rounds=12), restarting=restarting, throughputs=CHAIN)
-    _plan(host, implement("h1"))
-    _implemented(host, "h1", "c1")
+    host = begin(config(max_rounds=13, max_in_flight=2), restarting=restarting, throughputs=CHAIN)
+    _behind_main(host, ("h1", "c1", "supported"))
     _plan(host, implement("h2", parent_hypothesis_id="h1", parent_revision="c1"))
     _implemented(host, "h2", "c2")
     _plan(host, implement("h3", parent_hypothesis_id="h2", parent_revision="c2"))
@@ -599,16 +636,16 @@ def test_a_child_of_the_later_of_two_merged_sources_on_one_line_starts_at_the_la
     assert "`git diff c2 c4 | git apply --reject`" in caught_up, caught_up
 
 
-LATE = {"c1": 300.0, "c2": 250.0, "c3": 40.0, "c4": 250.0, "c5": 300.0, "c6": 40.0}
+LATE = {**DECOY_THROUGHPUT, "c1": 300.0, "c2": 250.0, "c3": 40.0, "c4": 250.0, "c5": 300.0}
+LATE["c6"] = 40.0
 
 
 @MODES
 def test_merging_an_ancestor_after_its_descendant_does_not_move_a_childs_start_back(
     *, restarting: bool
 ) -> None:
-    host = begin(config(max_rounds=14), restarting=restarting, throughputs=LATE)
-    _plan(host, implement("h1"))
-    _implemented(host, "h1", "c1")
+    host = begin(config(max_rounds=15, max_in_flight=2), restarting=restarting, throughputs=LATE)
+    _behind_main(host, ("h1", "c1", "supported"))
     _plan(host, implement("h2", parent_hypothesis_id="h1", parent_revision="c1"))
     _implemented(host, "h2", "c2")
     _plan(host, implement("h3", parent_hypothesis_id="h2", parent_revision="c2"))
@@ -623,7 +660,19 @@ def test_merging_an_ancestor_after_its_descendant_does_not_move_a_childs_start_b
     assert "`git diff c2 c5 | git apply --reject`" in caught_up, caught_up
 
 
-ON_K1 = {"c1": 150.0, "c2": 120.0, "c3": 300.0, "c4": 400.0, "c5": 150.0, "c6": 400.0}
+# h1 is brought up to the decoy's main (c1b) before it is combined, so its change against main
+# starts where the composite's does. h2 and the composite do not beat main: a composite that did
+# would move main at settlement, being built on it, and h5 with it.
+ON_K1 = {
+    **DECOY_THROUGHPUT,
+    "c1": 150.0,
+    "c1b": 150.0,
+    "c2": 40.0,
+    "c3": 40.0,
+    "c4": 400.0,
+    "c5": 150.0,
+    "c6": 400.0,
+}
 
 
 LEFT_OUT = {"hypothesis_id": "h1", "part": "all of it", "why": "conflicts with h2"}
@@ -642,13 +691,13 @@ MISNAMED = {**LEFT_OUT, "hypothesis_id": "the h1 part"}
 def test_a_child_of_a_combine_whose_part_was_merged_starts_at_that_part(
     *, restarting: bool, reported: tuple[dict[str, str], ...]
 ) -> None:
-    host = begin(config(max_rounds=14), restarting=restarting, throughputs=ON_K1)
-    first = _plan(host, implement("h1"))
-    base = first.base_revision.revision_id.root
-    _implemented(host, "h1", "c1")
+    host = begin(config(max_rounds=15, max_in_flight=2), restarting=restarting, throughputs=ON_K1)
+    _behind_main(host, ("h1", "c1", "inconclusive"))
+    _plan(host, implement("h1", continue_hypothesis=True))  # h1 catches up with the decoy's main
+    _implemented(host, "h1", "c1b")
     _plan(host, implement("h2"))
     _implemented(host, "h2", "c2")
-    _plan(host, combine("k1", ("h1", "c1"), ("h2", "c2")))
+    _plan(host, combine("k1", ("h1", "c1b"), ("h2", "c2")))
     _start(host)
     _reply(host, "k1", "c3", unapplied=list(reported))
     _judged(host, "k1")
@@ -660,10 +709,10 @@ def test_a_child_of_a_combine_whose_part_was_merged_starts_at_that_part(
     merging = _flat(
         render(PromptTemplate.MERGE, _merged(host, "m2", "h5", "c6"), agent_git_writable=False)
     )
-    # The composite applied c1's change onto the input, so h5's tree holds c1, which main holds.
+    # The composite applied c1b's change onto main c0, so h5's tree holds c1b, which main holds.
     # A part the implementer left out is not in the tree: starting at it would revert it. An
     # entry naming no part may be a misnamed dropped part, so then no part counts as applied.
-    start = base if reported else "c1"
+    start = "c0" if reported else "c1b"
     assert f"`git diff {start} c4 | git apply --reject`" in merging, merging
 
 
@@ -684,21 +733,22 @@ def test_an_unapplied_entry_naming_no_part_is_shown_on_the_composite_row(
     assert "Not attributed to a part: `the scheduler part`: all of it (a typo)" in shown, shown
 
 
-UNMERGED = {"c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 260.0}
+UNMERGED = {**DECOY_THROUGHPUT, "c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 260.0}
 
 
 @MODES
 def test_a_merge_that_regressed_but_left_a_commit_does_not_move_a_childs_start(
     *, restarting: bool
 ) -> None:
-    host = begin(config(max_rounds=12), restarting=restarting, throughputs=UNMERGED)
-    first = _plan(host, implement("h1"))
+    host = begin(
+        config(max_rounds=13, max_in_flight=2), restarting=restarting, throughputs=UNMERGED
+    )
+    first = _behind_main(host, ("h1", "c1", "supported"))
     base = first.base_revision.revision_id.root
-    _implemented(host, "h1", "c1")
     _plan(host, implement("h2", parent_hypothesis_id="h1", parent_revision="c1"))
     _implemented(host, "h2", "c2")
-    # The merge of h1 leaves c3, which measures worse than main: main stays the input and does
-    # not hold c1, so h2's own change (against main) still starts at the input.
+    # The merge of h1 leaves c3, which measures worse than main: main stays the decoy's candidate
+    # and does not hold c1, so h2's own change (against main) still starts at the input.
     _merged(host, "m1", "h1", "c3")
 
     merging = _flat(
@@ -708,20 +758,31 @@ def test_a_merge_that_regressed_but_left_a_commit_does_not_move_a_childs_start(
     assert "git diff c1 " not in merging
 
 
-CONTINUED = {"c1": 300.0, "c2": 250.0, "c3": 40.0, "c4": 400.0, "c5": 300.0, "c6": 400.0}
+CONTINUED = {
+    **DECOY_THROUGHPUT,
+    "c1": 300.0,
+    "c1b": 300.0,
+    "c2": 40.0,
+    "c3": 40.0,
+    "c4": 400.0,
+    "c5": 300.0,
+    "c6": 400.0,
+}
 
 
 @MODES
 def test_a_combine_that_dropped_a_part_and_continued_does_not_count_it_once_that_part_merges(
     *, restarting: bool
 ) -> None:
-    host = begin(config(max_rounds=16), restarting=restarting, throughputs=CONTINUED)
-    first = _plan(host, implement("h1"))
-    base = first.base_revision.revision_id.root
-    _implemented(host, "h1", "c1")
+    host = begin(
+        config(max_rounds=17, max_in_flight=2), restarting=restarting, throughputs=CONTINUED
+    )
+    _behind_main(host, ("h1", "c1", "inconclusive"))
+    _plan(host, implement("h1", continue_hypothesis=True))  # h1 catches up with the decoy's main
+    _implemented(host, "h1", "c1b")
     _plan(host, implement("h2"))
     _implemented(host, "h2", "c2")
-    _plan(host, combine("k1", ("h1", "c1"), ("h2", "c2")))
+    _plan(host, combine("k1", ("h1", "c1b"), ("h2", "c2")))
     _start(host)
     _reply(host, "k1", "c3", unapplied=[LEFT_OUT], outcome="inconclusive")  # drops h1
     _judged(host, "k1")
@@ -735,6 +796,6 @@ def test_a_combine_that_dropped_a_part_and_continued_does_not_count_it_once_that
     merging = _flat(
         render(PromptTemplate.MERGE, _merged(host, "m2", "k1", "c6"), agent_git_writable=False)
     )
-    # k1 never took h1, which main now holds: starting at c1 would remove h1 from main.
-    assert f"`git diff {base} c4 | git apply --reject`" in merging, merging
-    assert "git diff c1 " not in merging
+    # k1 never took h1, which main now holds: starting at c1b would remove h1 from main.
+    assert "`git diff c0 c4 | git apply --reject`" in merging, merging
+    assert "git diff c1b " not in merging
