@@ -5,6 +5,9 @@
  * with a round trip and a throughput, in the virtual time of the clock that drives the test.
  */
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {FileDescriptorSetSchema} from '@bufbuild/protobuf/wkt';
+import {sha256} from '@noble/hashes/sha2.js';
+import {bytesToHex} from '@noble/hashes/utils.js';
 import {
   GetBlobsResponseSchema,
   HostService,
@@ -60,6 +63,12 @@ export interface SimDelivery {
   readonly at: number;
 }
 
+/** A stored keyframe as the gateway sends it: descriptors named by hash, sets held apart. */
+interface WireKeyframe {
+  readonly bytes: Uint8Array;
+  readonly sets: ReadonlyMap<string, Uint8Array>;
+}
+
 class Refused extends Error {
   constructor(
     message: string,
@@ -82,7 +91,7 @@ export class SimGateway implements RunTransport {
   readonly #published: StoreRecord[];
   readonly #waiting = new Set<() => void>();
   readonly #counts = new Map<string, number>();
-  readonly #keyframes = new Map<number, Uint8Array>();
+  readonly #keyframes = new Map<number, WireKeyframe>();
   #busyUntil = 0;
 
   constructor(
@@ -214,8 +223,9 @@ export class SimGateway implements RunTransport {
 
   private unaryReply(method: string, request: Uint8Array): Uint8Array {
     if (method === `${SERVICE}Skeleton`) {
-      if (!fromBinary(SkeletonRequestSchema, request).runId) throw new Error('run_id required');
-      const skeleton = this.skeleton();
+      const asked = fromBinary(SkeletonRequestSchema, request);
+      if (!asked.runId) throw new Error('run_id required');
+      const skeleton = this.skeleton(new Set(asked.knownDescriptorsSha256));
       this.skeletons.push(skeleton);
       return toBinary(SkeletonResponseSchema, skeleton);
     }
@@ -225,20 +235,24 @@ export class SimGateway implements RunTransport {
   }
 
   /** The latest checkpoint that fits the budget, then records until the budget is spent. */
-  private skeleton() {
+  private skeleton(known: ReadonlySet<string>) {
     const records = this.run.records;
     const budget = this.replyBytes - 32;
     let covered = 0;
     let keyframe: Uint8Array | undefined;
+    let sets: [string, Uint8Array][] = [];
     for (const candidate of [...(this.run.keyframes ?? [])].sort((a, b) => b - a)) {
-      const bytes = this.keyframe(candidate);
-      if (bytes.length <= budget) {
-        keyframe = bytes;
+      const wire = this.keyframe(candidate);
+      const unknown = [...wire.sets].filter(([hash]) => !known.has(hash));
+      const cost = wire.bytes.length + unknown.reduce((sum, [, data]) => sum + data.length + 80, 0);
+      if (cost <= budget) {
+        keyframe = wire.bytes;
+        sets = unknown;
         covered = candidate;
         break;
       }
     }
-    let size = keyframe?.length ?? 0;
+    let size = (keyframe?.length ?? 0) + sets.reduce((sum, [, data]) => sum + data.length + 80, 0);
     const included: Uint8Array[] = [];
     for (const record of records.slice(covered)) {
       const bytes = toBinary(RecordSchema, record);
@@ -250,6 +264,7 @@ export class SimGateway implements RunTransport {
     const committed = records.at(-1)?.seq ?? 0n;
     return create(SkeletonResponseSchema, {
       ...(keyframe ? {keyframe} : {}),
+      descriptorSets: sets.map(([hash, data]) => ({sha256: hash, data})),
       records: included,
       committedSeq: committed,
       nextSeq: last ? last.seq + 1n : (records[0]?.seq ?? 1n),
@@ -257,19 +272,27 @@ export class SimGateway implements RunTransport {
     });
   }
 
-  private keyframe(covered: number): Uint8Array {
-    const known = this.#keyframes.get(covered);
-    if (known) return known;
+  private keyframe(covered: number): WireKeyframe {
+    const cached = this.#keyframes.get(covered);
+    if (cached) return cached;
     const records = this.run.records;
-    const bytes = toBinary(
-      KeyframeSchema,
-      create(KeyframeSchema, {
-        ...foldSkeleton(seedSkeleton(), records.slice(0, covered)),
-        throughSeq: records[covered - 1]?.seq ?? 0n,
-      }),
-    );
-    this.#keyframes.set(covered, bytes);
-    return bytes;
+    const keyframe = create(KeyframeSchema, {
+      ...foldSkeleton(seedSkeleton(), records.slice(0, covered)),
+      throughSeq: records[covered - 1]?.seq ?? 0n,
+    });
+    const sets = new Map<string, Uint8Array>();
+    for (const version of keyframe.epochs) {
+      const descriptors = version.epoch?.descriptors;
+      if (!version.epoch || !descriptors) continue;
+      const data = toBinary(FileDescriptorSetSchema, descriptors);
+      const hash = bytesToHex(sha256(data));
+      sets.set(hash, data);
+      version.descriptorsSha256 = hash;
+      version.epoch.descriptors = undefined;
+    }
+    const wire = {bytes: toBinary(KeyframeSchema, keyframe), sets};
+    this.#keyframes.set(covered, wire);
+    return wire;
   }
 
   /** The log from the requested cursor in budget-sized messages, then whatever is published. */
