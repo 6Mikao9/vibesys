@@ -70,6 +70,7 @@ class WorkspaceEvaluationSpec:
     benchmark_command: str | None
     benchmark_contract: TrustedBenchmarkContract | None
     deployment_release_env_var: str | None
+    profile_command: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

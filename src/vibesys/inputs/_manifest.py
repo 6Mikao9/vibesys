@@ -31,6 +31,7 @@ from vs_project.api import (
     RunResourceRequest,
     check_comparisons_are_distinct,
 )
+from vs_runtime.api import ProfileField
 from vs_runtime.api.infrastructure import (
     EvalHostTenancy,
     EvaluatorPackageNotFoundError,
@@ -336,6 +337,12 @@ class AgentInput(BaseModel):
     ``inprocess`` is the default when neither says."""
 
 
+class ProfileInput(InputCommand):
+    """Diagnostic command and the measurement fields its protocol output guarantees."""
+
+    fields: tuple[ProfileField, ...] = ()
+
+
 class ProfileGuidedInput(BaseModel):
     """Framework-owned component-attribution settings for profile-guided search."""
 
@@ -452,7 +459,7 @@ class InputManifest(BaseModel):
     benchmark: BenchmarkCommand = Field(validation_alias=AliasChoices("benchmark", "measure"))
     metric: str | None = Field(default=None, min_length=1)
     """The headline metric the measure stage reports."""
-    profile: InputCommand | None = None
+    profile: ProfileInput | None = None
     resources: RunResourceRequest | None = None
     environment: EnvironmentInput | None = None
     workspace: WorkspaceInput | None = None
@@ -651,6 +658,8 @@ def _append_profile(lines: list[str], manifest: InputManifest) -> None:
         return
     command = manifest.profile
     lines.extend(["", "[profile]"])
+    if command.fields:
+        lines.append(f"fields = {_toml_array(command.fields)}")
     if command.command is not None:
         lines.append(f"command = {_toml_array(command.command)}")
     else:

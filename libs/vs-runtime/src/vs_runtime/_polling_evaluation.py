@@ -28,6 +28,7 @@ from vs_evaluation.api import (
     EvidenceResultIdentity,
     ExecutorObservation,
     ExecutorPoll,
+    ExecutorRejectedError,
     HostSampleRecord,
     HostSnapshotRecord,
     LifecyclePublisher,
@@ -52,6 +53,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
     from vs_runtime._measurement_progress import StageOutputOpener
+    from vs_runtime._profile_evaluation import CommandProfileCapture
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
     from vs_sim.api import Clock, HostProbe, OutputSink
@@ -87,6 +89,7 @@ class PollingEvaluationExecutor:
         stage_output: StageOutputOpener | None = None,
         control: RunControlChannel | None = None,
         host_probe: HostProbe | None = None,
+        profile_capture: CommandProfileCapture | None = None,
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
@@ -94,6 +97,7 @@ class PollingEvaluationExecutor:
         each stage's command writes its raw output to while it runs; ``None`` discards it.
         ``host_probe`` reads host contention around a benchmark; ``None`` records none.
         """
+        self._profile_capture = profile_capture
         self._control = control
         self._clock = clock
         self._stage_output = stage_output
@@ -115,16 +119,29 @@ class PollingEvaluationExecutor:
             cost_class=CostClass.UNKNOWN,
             observed_at=self._clock.now(),
             fresh_for_s=1.0,
+            supported_profile_fields=(
+                self._profile_capture.plan.profile_fields
+                if self._profile_capture is not None
+                else ()
+            ),
             supported_evidence_kinds=(
                 EvidenceKind.BUILD.value,
                 EvidenceKind.ACCURACY.value,
                 EvidenceKind.BENCHMARK.value,
+                *((EvidenceKind.PROFILE.value,) if self._profile_capture is not None else ()),
             ),
         )
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
         if handle_id in self._tasks or self._lifecycle.observation(handle_id) is not None:
             return
+        for step in request.stages:
+            stage = SemanticEvaluationStage.model_validate(step.payload)
+            if stage.kind is EvidenceKind.PROFILE:
+                if self._profile_capture is None:
+                    message = "the task declares no host profile capture"
+                    raise ExecutorRejectedError(message)
+                self._profile_capture.require(stage.required_profile_fields)
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
         self._tasks[handle_id] = asyncio.create_task(self._run(handle_id, request))
 
@@ -298,6 +315,8 @@ class PollingEvaluationExecutor:
         handle_id: str,
         output: OutputSink,
     ) -> _SemanticStageObservation:
+        if stage.kind is EvidenceKind.PROFILE:
+            return await self._profile(workspace, stage, handle_id, output)
         unmet: str | None = None
         host_snapshot: HostSnapshotRecord | None = None
         if stage.kind is EvidenceKind.BUILD:
@@ -352,8 +371,8 @@ class PollingEvaluationExecutor:
                 for name in headline_first(row, result.metric_name)
             )
         else:
-            message = "direct profile evaluation is not supported by the trusted runtime"
-            raise ValueError(message)
+            message = "the task declares no host profile capture"
+            raise ExecutorRejectedError(message)
         if summary is not None:
             summary = summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
         if operator_summary is not None:
@@ -389,6 +408,44 @@ class PollingEvaluationExecutor:
             evidence=evidence,
             completed=completed,
             operator_summary=operator_summary,
+        )
+
+    async def _profile(
+        self,
+        workspace: Workspace,
+        stage: SemanticEvaluationStage,
+        handle_id: str,
+        output: OutputSink,
+    ) -> _SemanticStageObservation:
+        if self._profile_capture is None:
+            message = "the task declares no host profile capture"
+            raise ExecutorRejectedError(message)
+        profile = await self._profile_capture.capture(workspace, output=output)
+        outcome = EvidenceOutcome.PASSED if profile.failure is None else EvidenceOutcome.FAILED
+        summary = profile.failure[-MAX_EVIDENCE_SUMMARY_CHARS:] if profile.failure else None
+        identity = EvidenceResultIdentity(
+            evaluation_id=handle_id,
+            outcome=outcome,
+            summary=summary,
+            metrics=profile.metrics,
+            partial=None,
+        )
+        return _SemanticStageObservation(
+            evidence=TrustedEvidence(
+                evidence_id=evidence_identity(stage, identity),
+                evaluation_id=handle_id,
+                stage_name=stage.kind.value,
+                kind=stage.kind,
+                fingerprints=stage.fingerprints,
+                trusted_inputs=stage.fingerprints.candidate,
+                outcome=outcome,
+                semantic_summary=summary,
+                metrics=profile.metrics,
+                failure_kind=profile.failure_kind,
+                accepted_round=0,
+            ),
+            completed=profile.completed,
+            operator_summary=summary,
         )
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:

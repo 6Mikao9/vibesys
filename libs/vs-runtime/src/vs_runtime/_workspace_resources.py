@@ -582,6 +582,7 @@ class RuntimeWorkspaceResource:
             benchmark_command=self._evaluation_plan.benchmark_command,
             benchmark_contract=self._evaluation_plan.benchmark_contract,
             deployment_release_env_var=view.deployment_release_env_var,
+            profile_command=view.paths.profile_command,
         )
 
     async def candidate_build(self, output: OutputSink) -> TrustedBuildResult:

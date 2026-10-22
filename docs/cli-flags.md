@@ -830,7 +830,7 @@ any other task-owned program. Package entry points decouple task manifests
 from the package's install location. `${PROJECT_ROOT}` in package arguments
 expands to the absolute candidate repository root.
 
-Serving bundles that enable trusted captures declare a separate diagnostic load:
+Serving bundles used by remote profiler captures declare a separate diagnostic load:
 
 ```toml
 [profile]
@@ -846,6 +846,22 @@ serving capture without the declaration fails with an error naming
 `profile.command`; VibeSys does not substitute the benchmark. The timeout bounds
 the load after service readiness, within the capture's overall deadline.
 Diagnostic captures do not change accuracy or benchmark acceptance.
+
+On a local host, `[profile]` instead names the complete capture command, including
+its service lifecycle. VibeSys runs it in a checkout of the requested revision
+through the evaluation executor and appends `--vs-output <path>`. The command
+writes evaluator protocol-v2 records there. Declare the measurement fields the
+command guarantees in `fields`, for example `fields = ["prefill_timing", "decode_timing"]`.
+Every declared field must appear as a numeric result metric; missing fields fail
+the capture. Additional per-request and startup metrics may be declared in the
+protocol's `hello` record. The planner is offered exactly the task's declared
+fields. A task command enables host profile work without selecting a profiler
+tool. Without a profile command, profile work remains unavailable.
+
+Host captures use the normal evaluation resource and store informational
+readings on the measured revision with purpose `profile`. Their metrics do not
+supply accuracy or promotion evidence. `timeout_seconds` bounds the whole host
+command, including service startup and cleanup.
 
 The optional `benchmark.result` block opts a single-metric benchmark into
 trusted framework scoring: VibeSys appends `json_argument`, reads the resulting

@@ -44,7 +44,12 @@ from vs_agent.api import (
     DurableSessionStore,
     ProviderRoutedExecutor,
 )
-from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
+from vs_runtime.api import (
+    CommandProfileCapture,
+    PollingEvaluationExecutor,
+    RetryingEvaluationExecutor,
+    TryHandles,
+)
 from vs_runtime.api.core import MeasurementDecisions
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
@@ -129,8 +134,8 @@ def _slurm_handle_root(namespace: StateNamespace) -> Path:
 
 
 _NO_PROFILE_CAPTURE_NOTE = (
-    "[profiler] framework profile capture is unavailable in this run (it needs a Slurm run "
-    "environment with remote profiling), so profile workstreams are not offered. A profiler "
+    "[profiler] framework profile capture is unavailable in this run environment, "
+    "so profile workstreams are not offered. A profiler "
     "agent can still profile with its own commands."
 )
 _CORE_CLEANUP_FAILURE = "core services cleanup failed"
@@ -445,6 +450,17 @@ class _ProductHostFactory:
                         stage_output=stage_output,
                         control=self.integration.control,
                         host_probe=PlatformHostProbe(),
+                        profile_capture=(
+                            CommandProfileCapture(
+                                agent_runtime.capture_commands,
+                                resources.evaluation_plan,
+                                lambda workspace: (
+                                    agent_runtime.evaluation.spec(workspace).profile_command
+                                ),
+                            )
+                            if resources.environment_resources.view.captures_profile
+                            else None
+                        ),
                     ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(

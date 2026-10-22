@@ -181,16 +181,16 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
         task=terms,
     )
     # The operator chooses how wide and how long to search; whether to profile follows the
-    # evaluation plan (a profile command and a chosen profiler), which only the host knows.
+    # evaluation plan (a profile command), which only the host knows.
     if evaluation.profile_capture_withheld:
         raise ConfigurationError(
             ConfigurationDiagnostic(
                 code="dynamic_profiling_unsupported",
                 stage="run_environment_validation",
                 message=(
-                    "profiling is on (a profile command and a profiler are chosen) but the "
+                    "a profile command is configured but the "
                     f"{context.environment.env_kind!r} run environment offers no profile capture; "
-                    "choose a profiler of 'none' or a run environment that can capture a profile"
+                    "choose a run environment that can capture a profile or remove the profile command"
                 ),
             )
         )

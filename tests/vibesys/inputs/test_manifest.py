@@ -465,3 +465,31 @@ def test_a_host_tenancy_override_round_trips_and_an_unknown_value_names_the_key(
         InputManifest.model_validate(_manifest({"environment": {"host_tenancy": "noisy"}}))
     with pytest.raises(ValidationError, match="not_a_tenancy"):
         InputManifest.model_validate(_manifest({"environment": {"not_a_tenancy": "shared"}}))
+
+
+@pytest.mark.parametrize("fields", [[], ["prefill_timing", "decode_timing"], ["hip_api_timing"]])
+def test_task_profile_fields_round_trip_without_inventing_capture_support(
+    fields: list[str],
+) -> None:
+    manifest = InputManifest.model_validate(
+        _manifest(
+            {
+                "profile": {"command": ["python", "profile.py"], "fields": fields},
+            }
+        )
+    )
+    round_tripped = InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest)))
+    assert round_tripped == manifest
+    assert round_tripped.profile is not None
+    assert list(round_tripped.profile.fields) == fields
+
+
+def test_task_profile_fields_reject_unknown_measurements() -> None:
+    with pytest.raises(ValidationError, match="fields"):
+        InputManifest.model_validate(
+            _manifest(
+                {
+                    "profile": {"command": ["python", "profile.py"], "fields": ["invented_phase"]},
+                }
+            )
+        )

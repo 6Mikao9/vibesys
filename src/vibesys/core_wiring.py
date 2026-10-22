@@ -111,7 +111,7 @@ def evaluation_inputs(run: ResolvedRun) -> EvaluationInputs:
     receipt = run.artifacts.write(plan.model_dump_json().encode())
     identity = semantic_evaluation_identity(plan, run.facts, run.environment)
     profiling = run.facts.profiler_id != "none"
-    wants_profile_work = profiling and plan.profile_command is not None
+    wants_profile_work = plan.profile_command is not None
     return EvaluationInputs(
         evaluator_digest=identity.evaluator.value,
         workload_digest=identity.workload.value,
