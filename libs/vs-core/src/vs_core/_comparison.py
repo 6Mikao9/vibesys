@@ -23,7 +23,10 @@ one for a ``min`` metric), ``worse`` when it is worse by more than that, and ``w
 otherwise. A comparison with no estimate of the noise says none of these: it is
 ``inconclusive``, so a large ratio over too few runs is never called noise.
 
-- A task that declares a floor (``relative_noise``) has stated its noise. The runs' spread is
+- A task that declares a floor for the metric has stated its noise: the metric's own objective
+  tolerance (``TaskObjective.noise``) or, for an objective with none, the task's
+  ``relative_noise`` (`ComparisonPolicy.floor_of`: the most specific declaration wins, as in
+  the product's ``MetricSpace``). The runs' spread is
   the pooled relative deviation, never taken below the floor (which is also all there is to go
   on while each side holds one sample)::
 
@@ -33,7 +36,7 @@ otherwise. A comparison with no estimate of the noise says none of these: it is
 
   and the critical number is ``VERDICT_NOISES`` (2, about 95% two-sided for a known noise),
   from one run a side.
-- A task that declares none (``relative_noise`` is 0) has not said its runs are exact: it has
+- A task that declares none for the metric (the floor is 0) has not said its runs are exact: it has
   said nothing, and the noise is only what the runs show. Each side's spread is its own, since
   a candidate's code can change how much its runs vary, and the candidate side grows with every
   run of it while the base stops at three. This is Welch's t test: with ``v_c`` and ``v_b``
@@ -241,19 +244,30 @@ class Measured:
 
 @dataclass(frozen=True, slots=True)
 class ComparisonPolicy:
-    """What the task fixes about comparing: its noise floor, base staleness and axes."""
+    """What the task fixes about comparing: its noise floors, base staleness and axes."""
 
     noise_floor: float = 0.0
-    """The declared relative variation of one run (``TaskTerms.relative_noise``)."""
+    """The declared relative variation of one run on a metric with no floor of its own
+    (``TaskTerms.relative_noise``)."""
+    metric_floors: tuple[tuple[str, float], ...] = ()
+    """The floor each objective declares for itself (``TaskObjective.noise``), by metric name."""
     base_max_age: float | None = None
     """Seconds after which a base sample is stale; None never lets one go stale."""
     directions: tuple[tuple[str, Direction], ...] = ()
     """The task's objectives by metric name, for a reading that states no direction."""
 
-    @property
-    def floor_declared(self) -> bool:
-        """Whether the task stated its noise; a floor of 0 states nothing (module docstring)."""
-        return self.noise_floor > 0
+    def floor_of(self, metric: str) -> float:
+        """The relative variation of one run the task declares for ``metric``.
+
+        The objective's own declared tolerance when it has one, else the task's
+        ``relative_noise``: the most specific declaration wins, as it does for the product's
+        ``MetricSpace``, so the two never read one task's noise two ways.
+        """
+        return dict(self.metric_floors).get(metric, self.noise_floor)
+
+    def declares_floor(self, metric: str) -> bool:
+        """Whether the task stated the noise of ``metric``; a floor of 0 states nothing (module docstring)."""
+        return self.floor_of(metric) > 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +294,11 @@ def terms_policy(task: TaskTerms | None) -> ComparisonPolicy:
         return ComparisonPolicy()
     return ComparisonPolicy(
         noise_floor=task.relative_noise,
+        metric_floors=tuple(
+            (item.name, item.noise.relative_noise)
+            for item in task.objectives
+            if item.noise is not None
+        ),
         base_max_age=task.base_staleness,
         directions=tuple((item.name, item.direction) for item in task.objectives),
     )
@@ -629,8 +648,9 @@ def compare(
         return None
     ratio = c / b
     m, n = len(mine), len(theirs)
-    if policy.floor_declared:
-        sigma = max(_pooled_spread(mine, c, theirs, b), policy.noise_floor)
+    floor = policy.floor_of(reading.metric)
+    if floor > 0:
+        sigma = max(_pooled_spread(mine, c, theirs, b), floor)
         noise = abs(ratio) * sigma * sqrt(1 / m + 1 / n)
         critical = VERDICT_NOISES
     else:
@@ -640,7 +660,7 @@ def compare(
     gain = ratio - 1 if direction == "max" else 1 - ratio
     verdict = (
         ComparisonVerdict.INCONCLUSIVE
-        if not _noise_known(m, n, noise, policy)
+        if not _noise_known(m, n, noise, policy, reading.metric)
         else ComparisonVerdict.BETTER
         if gain > critical * noise
         else ComparisonVerdict.WORSE
@@ -681,14 +701,14 @@ def _t_critical(degrees: float) -> float:
     return _T_975[min(whole - _T_FIRST_DEGREES, len(_T_975) - 1)]
 
 
-def _noise_known(m: int, n: int, noise: float, policy: ComparisonPolicy) -> bool:
-    """Whether a comparison of ``m`` and ``n`` runs with this ``noise`` has an estimate of it.
+def _noise_known(m: int, n: int, noise: float, policy: ComparisonPolicy, metric: str) -> bool:
+    """Whether a comparison of ``m`` and ``n`` runs of ``metric`` with this ``noise`` has an estimate of it.
 
     A declared floor is one. Without it, the runs must be ``MIN_SAMPLES_WITHOUT_FLOOR`` a side
     and show a spread above zero: zero spread from fewer runs, or from identical runs, is no
     measurement of the noise.
     """
-    return policy.floor_declared or (min(m, n) >= MIN_SAMPLES_WITHOUT_FLOOR and noise > 0)
+    return policy.declares_floor(metric) or (min(m, n) >= MIN_SAMPLES_WITHOUT_FLOOR and noise > 0)
 
 
 def _pooled_spread(mine: tuple[float, ...], c: float, theirs: tuple[float, ...], b: float) -> float:
@@ -1015,9 +1035,11 @@ def effect_resolution(comparison: Comparison, policy: ComparisonPolicy) -> float
     the comparison has no estimate of its noise (`_noise_known`), which says nothing of any bar.
     """
     m, n = comparison.candidate_samples, comparison.base_samples
-    if not _noise_known(m, n, comparison.noise, policy):
+    if not _noise_known(m, n, comparison.noise, policy, comparison.metric):
         return None
-    critical = VERDICT_NOISES if policy.floor_declared else _t_critical(min(m, n) - 1)
+    critical = (
+        VERDICT_NOISES if policy.declares_floor(comparison.metric) else _t_critical(min(m, n) - 1)
+    )
     return critical * comparison.noise
 
 
@@ -1062,19 +1084,19 @@ def verdict_unreachable(comparison: Comparison, policy: ComparisonPolicy) -> boo
     A declared floor is a noise estimate, so a comparison under one is never in this state.
     """
     return (
-        not policy.floor_declared
+        not policy.declares_floor(comparison.metric)
         and min(comparison.candidate_samples, comparison.base_samples) >= MIN_SAMPLES_WITHOUT_FLOOR
         and comparison.noise == 0
     )
 
 
-def _base_max_samples(policy: ComparisonPolicy) -> int:
+def _base_max_samples(policy: ComparisonPolicy, metric: str) -> int:
     """The most fresh samples a close call earns a base (module docstring).
 
     ``BASE_MAX_SAMPLES`` under a declared floor; without one ``MIN_SAMPLES_WITHOUT_FLOOR``, the
     fewest a side needs for a verdict.
     """
-    return BASE_MAX_SAMPLES if policy.floor_declared else MIN_SAMPLES_WITHOUT_FLOOR
+    return BASE_MAX_SAMPLES if policy.declares_floor(metric) else MIN_SAMPLES_WITHOUT_FLOOR
 
 
 def run_under_way(state: EvaluationState, receipt: SubmissionReceipt | None) -> bool:
@@ -1196,7 +1218,7 @@ def remeasures_base(
     return (
         close_call(comparison)
         and not verdict_unreachable(comparison, moment.policy)
-        and len(held) < _base_max_samples(moment.policy)
+        and len(held) < _base_max_samples(moment.policy, comparison.metric)
         and not _base_under_way(
             state, BaseRef(commit=comparison.base, measured_input=comparison.base_input), base
         )
@@ -1224,7 +1246,7 @@ def remeasures_candidate(
     """
     candidate = Measured(evaluation, comparison.candidate_input)
     return (
-        not moment.policy.floor_declared
+        not moment.policy.declares_floor(comparison.metric)
         and close_call(comparison)
         and comparison.candidate_samples < MIN_SAMPLES_WITHOUT_FLOOR
         and not base_in_flight(state, candidate, comparison.scope)
@@ -1260,12 +1282,16 @@ def official_needs_samples(
         held is not None
         and close_call(held)
         and not verdict_unreachable(held, moment.policy)
-        and not _candidate_runs_spoken_for(state, scope, measured, moment.policy)
+        and not _candidate_runs_spoken_for(state, scope, measured, moment.policy, held.metric)
     )
 
 
 def _candidate_runs_spoken_for(
-    state: EvaluationState, scope: Scope, measured: Measured, policy: ComparisonPolicy
+    state: EvaluationState,
+    scope: Scope,
+    measured: Measured,
+    policy: ComparisonPolicy,
+    metric: str,
 ) -> bool:
     """Whether the candidate's samples and its runs under way already make the sample cap.
 
@@ -1276,7 +1302,7 @@ def _candidate_runs_spoken_for(
     when the run under way lands. Both counts are the scope's own, as the comparison's are
     (`scope_samples`): another attempt's samples of the same input are not this candidate's.
     """
-    return not policy.floor_declared and (
+    return not policy.declares_floor(metric) and (
         len(scope_samples(state, scope, measured)) + runs_in_flight(state, measured, scope)
         >= MIN_SAMPLES_WITHOUT_FLOOR
     )
