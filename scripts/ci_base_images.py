@@ -1,16 +1,35 @@
-"""Resolve CI base images from one digest-pinned GHCR mirror inventory."""
+"""Resolve CI base images from one digest-pinned inventory with a GHCR mirror.
+
+Every image has two references to the same manifest digest: the private GHCR
+mirror and the upstream registry. A job probes the mirrors once and exports the
+reachable ones in ``VIBESYS_CI_BASE_IMAGES``; any other process (a developer
+build, a fork PR, a mirror outage) gets the upstream reference. The digest pins
+the content, so the choice never changes what is built.
+"""
 
 from __future__ import annotations
 
 import argparse
 import ast
+import json
+import os
 import re
+import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
+
+from scripts.ci_registry_image_cache import docker_command
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 PINS = Path(__file__).with_suffix(".toml")
 MIRROR_ROOT = "ghcr.io/uw-syfi/vibesys/ci-base"
+RESOLUTION_ENV = "VIBESYS_CI_BASE_IMAGES"
+_PROBE_SECONDS = 30
 
 
 @dataclass(frozen=True)
@@ -22,7 +41,7 @@ class ImagePin:
 
     @property
     def upstream(self) -> str:
-        """Return the immutable upstream reference used only by the mirror owner."""
+        """Return the immutable upstream reference: the mirror owner's source and the fallback."""
         repository = self.source.split(":", 1)[0]
         if "/" not in repository:
             repository = "library/" + repository
@@ -75,43 +94,105 @@ def image_pins(path: Path = PINS) -> tuple[ImagePin, ...]:
     return tuple(pins)
 
 
-def mirrored_image(source: str) -> str:
-    """Resolve a CI base by its upstream name; an unlisted image is an error."""
+class MirrorProbe(Protocol):
+    """Check that a mirror reference can be pulled with this process's credentials."""
+
+    def __call__(self, reference: str) -> None:
+        """Return when the manifest is readable; raise ``OSError`` or ``SubprocessError``."""
+        ...
+
+
+def docker_mirror_probe(reference: str) -> None:
+    """Read the mirror's manifest through the logged-in Docker client."""
+    docker_command(["docker", "manifest", "inspect", reference], timeout=_PROBE_SECONDS)
+
+
+def resolve_bases(pins: tuple[ImagePin, ...], probe: MirrorProbe) -> dict[str, str]:
+    """Map each source to its mirror when readable, else to the same digest upstream.
+
+    A mirror failure (not logged in, 401, 404, an outage, a missing Docker client)
+    warns and falls back, so no registry state can fail a build the upstream could serve.
+    """
+    resolved = {}
+    for pin in pins:
+        try:
+            probe(pin.mirror)
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(
+                f"::warning::CI base mirror {pin.mirror} is unavailable ({str(exc)[-300:]}); "
+                f"using {pin.upstream}, the same digest",
+                file=sys.stderr,
+            )
+            resolved[pin.source] = pin.upstream
+        else:
+            resolved[pin.source] = pin.mirror
+    return resolved
+
+
+def base_image(source: str, env: Mapping[str, str] | None = None) -> str:
+    """Return the reference to build from for an upstream name; an unlisted image is an error.
+
+    This is pure: it reads the job's exported resolution and otherwise answers with
+    the upstream digest, so importing a test module never touches a registry.
+    """
+    env = os.environ if env is None else env
     for pin in image_pins():
         if source == pin.source:
-            return pin.mirror
+            return _exported(env, pin)
     message = f"unmirrored CI image {source!r}; add its digest to {PINS.name}"
     raise ValueError(message)
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Print a mirror reference or the copy plan for the mirror workflow."""
+def _exported(env: Mapping[str, str], pin: ImagePin) -> str:
+    raw = env.get(RESOLUTION_ENV)
+    if not raw:
+        return pin.upstream
+    try:
+        exported = dict(json.loads(raw))
+    except (TypeError, ValueError) as exc:
+        message = f"{RESOLUTION_ENV} must be a JSON map of sources to references: {exc}"
+        raise ValueError(message) from exc
+    allowed = {p.source: (p.mirror, p.upstream) for p in image_pins()}
+    for source, reference in exported.items():
+        if reference not in allowed.get(source, ()):
+            message = f"{RESOLUTION_ENV} has an unpinned entry for {source!r}: {reference!r}"
+            raise ValueError(message)
+    return exported.get(pin.source, pin.upstream)
+
+
+def main(argv: list[str] | None = None, probe: MirrorProbe = docker_mirror_probe) -> None:
+    """Print a base reference, the job's mirror resolution, or the mirror workflow's copy plan."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", nargs="?")
+    parser.add_argument("--resolve", action="store_true", help="probe mirrors, print JSON")
     args = parser.parse_args(argv)
-    if args.source:
-        print(mirrored_image(args.source))
+    if args.resolve:
+        print(json.dumps(resolve_bases(image_pins(), probe), sort_keys=True))
+    elif args.source:
+        print(base_image(args.source))
     else:
         for pin in image_pins():
             print(pin.upstream, pin.publish_tag, pin.mirror)
 
 
 def ci_image_problems(root: Path, paths: list[str], pins: tuple[ImagePin, ...]) -> list[str]:
-    """Check CI's literal image inputs and Dockerfiles against the mirror inventory.
+    """Check CI's literal image inputs and Dockerfiles against the pin inventory.
 
-    Upstream names are permitted only as keys passed to ``mirrored_image`` or
-    the Feature matrix resolver. Example task Dockerfiles are user workloads,
-    not images built by CI. Dynamic FROM values come from the resolved pins or
-    from locally built task/Feature stages.
+    Upstream names are permitted only as keys passed to ``base_image`` or the
+    Feature matrix resolver. A literal reference must be a listed mirror or a
+    listed upstream digest; a Docker Hub tag, or a digest outside the inventory,
+    is a problem. Example task Dockerfiles are user workloads, not images built
+    by CI. Dynamic FROM values come from the resolved pins or from locally built
+    task/Feature stages.
     """
     problems = []
     sources = {pin.source for pin in pins}
-    mirrors = {pin.mirror for pin in pins}
+    approved = {pin.mirror for pin in pins} | {pin.upstream for pin in pins}
     for relative in paths:
         path = root / relative
         if path.is_file() and _ci_image_source(relative):
             text = path.read_text()
-            problems.extend(_literal_image_problems(relative, text, sources, mirrors))
+            problems.extend(_literal_image_problems(relative, text, sources, approved))
     return problems
 
 
@@ -133,17 +214,14 @@ def _ci_image_source(path: str) -> bool:
 
 
 def _literal_image_problems(
-    path: str, text: str, sources: set[str], mirrors: set[str]
+    path: str, text: str, sources: set[str], approved: set[str]
 ) -> list[str]:
     problems = []
     for number, line in enumerate(text.splitlines(), 1):
         stripped = line.strip()
         if stripped.startswith("#"):
             continue
-        if re.search(r"(?:docker[.]io|registry-1[.]docker[.]io|index[.]docker[.]io)/", stripped):
-            problems.append(
-                f"{path}:{number}: Docker Hub reference in CI; resolve a listed GHCR mirror"
-            )
+        problems.extend(_hub_problems(path, number, stripped, approved))
         # FROM stages, shell pulls, and workflow container/service image fields.
         match = re.search(
             r"(?:^FROM\s+(?:--platform=\S+\s+)?|docker\s+pull\s+|^\s*(?:image|container):\s+)([^\s]+)",
@@ -153,13 +231,13 @@ def _literal_image_problems(
         if match and not path.endswith(".py"):
             reference = match[1].strip("\"'")
             if (
-                "docker.io/" not in reference
-                and reference not in mirrors
+                "docker.io/" not in reference  # reported above
+                and reference not in approved
                 and reference != "scratch"
                 and not reference.startswith(("$", "{"))
             ):
                 problems.append(
-                    f"{path}:{number}: unmirrored CI image {reference}; resolve it from ci_base_images.toml"
+                    f"{path}:{number}: unlisted CI image {reference}; resolve it from ci_base_images.toml"
                 )
         if "Dockerfile" in Path(path).name and stripped.startswith("FROM "):
             continue
@@ -169,11 +247,25 @@ def _literal_image_problems(
         if stripped.startswith("base:") and stripped.split(maxsplit=1)[-1] not in sources:
             problems.append(f"{path}:{number}: base is absent from ci_base_images.toml")
     if path.endswith(".py"):
-        problems.extend(_python_image_problems(path, text, sources, mirrors))
+        problems.extend(_python_image_problems(path, text, sources, approved))
     return problems
 
 
-def _python_image_problems(path: str, text: str, sources: set[str], mirrors: set[str]) -> list[str]:
+def _hub_problems(path: str, number: int, line: str, approved: set[str]) -> list[str]:
+    hub_references = re.findall(
+        r"(?:docker[.]io|registry-1[.]docker[.]io|index[.]docker[.]io)/[^\s\"']+", line
+    )
+    return [
+        f"{path}:{number}: Docker Hub reference {hub} in CI; "
+        "use a digest listed in ci_base_images.toml"
+        for hub in hub_references
+        if hub not in approved
+    ]
+
+
+def _python_image_problems(
+    path: str, text: str, sources: set[str], approved: set[str]
+) -> list[str]:
     tree = ast.parse(text)
     resolved = set()
     problems = []
@@ -181,7 +273,7 @@ def _python_image_problems(path: str, text: str, sources: set[str], mirrors: set
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "mirrored_image"
+            and node.func.id == "base_image"
         ):
             for arg in node.args:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
@@ -198,14 +290,14 @@ def _python_image_problems(path: str, text: str, sources: set[str], mirrors: set
         ):
             continue
         value = node.value
-        if value in mirrors:
+        if value in approved:
             continue
         image = re.fullmatch(
             r"(?:docker[.]io/)?[a-z0-9][a-z0-9./_-]*(?::[a-zA-Z0-9_.-]+|@sha256:[0-9a-f]+)", value
         )
         if image:
             problems.append(
-                f"{path}:{node.lineno}: direct CI image {value}; use mirrored_image with a listed pin"
+                f"{path}:{node.lineno}: direct CI image {value}; use base_image with a listed pin"
             )
     return problems
 

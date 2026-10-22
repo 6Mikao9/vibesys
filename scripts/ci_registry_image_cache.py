@@ -110,11 +110,13 @@ def registry_cache(env: Mapping[str, str], run: RegistryCommands) -> bool:
     return hit
 
 
-def docker_command(argv: Sequence[str], *, input_text: str | None = None) -> str:
+def docker_command(
+    argv: Sequence[str], *, input_text: str | None = None, timeout: float = 180
+) -> str:
     """Run a registry operation with one bounded deadline and captured diagnostics."""
     # lint-waiver: LW-301001 [S603]; this runner receives fixed Docker subcommands and validated refs without a shell. Duplicating subprocess calls per operation would duplicate deadlines and diagnostics; a shell wrapper would obscure the tested failure boundary.
     result = subprocess.run(  # noqa: S603
-        argv, input=input_text, text=True, capture_output=True, timeout=180, check=False
+        argv, input=input_text, text=True, capture_output=True, timeout=timeout, check=False
     )
     if result.returncode:
         detail = (result.stderr or result.stdout)[-2000:]

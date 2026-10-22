@@ -615,6 +615,11 @@ jobs:
       # devcontainer CLI builds. GHCR shares snapshots across PR/merge-queue refs.
       # Exact keys include install inputs and base digests; the family/base alias
       # reuses unchanged layers after edits, with Docker validating each input.
+      # Log in with the job's token and pick, per base image, the GHCR mirror or the
+      # same digest upstream. A fork PR's read-only token or a mirror outage only warns.
+      - name: Select the CI base image mirrors
+        uses: ./.github/actions/ci-base-mirror
+
       - name: Resolve the image cache's base digests
         id: image-bases
         run: |
@@ -1022,6 +1027,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     timeout-minutes: 20
 
     steps:
@@ -1056,6 +1064,11 @@ jobs:
 
       - name: Set up repoctl
         uses: ./.github/actions/setup-repoctl
+
+      # Log in with the job's token and pick, per base image, the GHCR mirror or the
+      # same digest upstream. A fork PR's read-only token or a mirror outage only warns.
+      - name: Select the CI base image mirrors
+        uses: ./.github/actions/ci-base-mirror
 
       # Same Docker layer cache as `agent-image` (scripts/ci_docker_data_root.sh),
       # keyed on this tier's image inputs and the ISO week (floating base images).
@@ -1135,6 +1148,11 @@ jobs:
 
       # Same Docker layer cache as `agent-image` (scripts/ci_docker_data_root.sh),
       # keyed on install inputs and resolved base digests, including floating bases.
+      # Log in with the job's token and pick, per base image, the GHCR mirror or the
+      # same digest upstream. A fork PR's read-only token or a mirror outage only warns.
+      - name: Select the CI base image mirrors
+        uses: ./.github/actions/ci-base-mirror
+
       - name: Resolve the image cache's base digests
         id: image-bases
         run: |
@@ -1212,6 +1230,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Log in with the job's token and pick, per base image, the GHCR mirror or the
+      # same digest upstream. A fork PR's read-only token or a mirror outage only warns.
+      - name: Select the CI base image mirrors
+        uses: ./.github/actions/ci-base-mirror
+
       - name: Resolve the image cache's base digests
         id: image-bases
         env:
@@ -1248,6 +1271,14 @@ jobs:
             --build-arg "UBUNTU_MIRROR=${mirror}" \
             --file libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/UbuntuMirror.Dockerfile \
             libs/vs-sandbox/src/vs_sandbox/devcontainer-cli
+
+      # The devcontainer CLI container has no registry credentials, so the host
+      # pulls a mirrored base first and its builds find the image locally.
+      - name: Pull the Feature base image on the host
+        if: matrix.family != 'cuda-ubuntu'
+        env:
+          BASE_IMAGE: ${{ steps.image-bases.outputs.base }}
+        run: timeout --kill-after=5s 300s docker pull "$BASE_IMAGE"
 
       - name: Test every Feature on ${{ matrix.base }}
         env:

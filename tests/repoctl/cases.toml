@@ -345,7 +345,7 @@ pnpm_packages = []
 
 [[cases]]
 name = "shared image cache changes exercise every builder consumer"
-paths = ["scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", "scripts/ci_registry_image_cache.py", "scripts/ci_base_images.py", "scripts/ci_base_images.toml", ".github/actions/docker-image-cache/action.yml"]
+paths = ["scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", "scripts/ci_registry_image_cache.py", "scripts/ci_base_images.py", "scripts/ci_base_images.toml", "scripts/ci_base_mirror_setup.sh", ".github/actions/docker-image-cache/action.yml", ".github/actions/ci-base-mirror/action.yml"]
 jobs = ["agent_image", "python", "real_tiers"]
 [cases.collections]
 native_languages = []

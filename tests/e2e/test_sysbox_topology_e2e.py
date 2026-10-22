@@ -23,7 +23,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 import pytest
-from scripts.ci_base_images import mirrored_image
+from scripts.ci_base_images import base_image
 from tests.support import run_test_command
 
 from vs_agent.api.images import agent_image
@@ -44,8 +44,8 @@ from vs_sim.api import DISCARD
 pytestmark = pytest.mark.e2e
 
 _ENABLE_ENV = "VIBESYS_E2E_SYSBOX"
-_ALPINE = mirrored_image("alpine:latest")
-_BASE_IMAGE = mirrored_image("debian:bookworm")
+_ALPINE = base_image("alpine:latest")
+_BASE_IMAGE = base_image("debian:bookworm")
 _BUILD_TIMEOUT_S = 1800.0
 _EXEC_TIMEOUT_S = 300
 #: Compose names its project after the workspace directory.

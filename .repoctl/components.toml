@@ -236,8 +236,8 @@ files = [
   "scripts/run_minimal_container_tests.sh",
   "scripts/ci_docker_data_root.sh",
   "scripts/ci_image_cache.py",
-  "scripts/ci_registry_image_cache.sh", "scripts/ci_registry_image_cache.py", "scripts/ci_base_images.py", "scripts/ci_base_images.toml",
-  ".github/actions/docker-image-cache/action.yml",
+  "scripts/ci_registry_image_cache.sh", "scripts/ci_registry_image_cache.py", "scripts/ci_base_images.py", "scripts/ci_base_images.toml", "scripts/ci_base_mirror_setup.sh",
+  ".github/actions/docker-image-cache/action.yml", ".github/actions/ci-base-mirror/action.yml",
 ]
 
 [[components]]

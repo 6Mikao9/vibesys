@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from scripts.ci_base_images import mirrored_image
+from scripts.ci_base_images import base_image
 from tests.slurm_cluster.cluster import docker
 
 from vibesys.config import BUNDLED_RESOURCES, PROJECT_ROOT
@@ -114,12 +114,10 @@ class Base:
 
 #: Every container backend's base, with pinned CI mirrors for CPU and stand-ins.
 BASES = (
-    Base("cpu", ComputeBackend.CPU, image=mirrored_image("python:3.12-bookworm")),
+    Base("cpu", ComputeBackend.CPU, image=base_image("python:3.12-bookworm")),
     Base("cuda", ComputeBackend.CUDA),
     Base("rocm", ComputeBackend.ROCM),
-    Base(
-        "ubuntu-uid-1000", ComputeBackend.CPU, image=mirrored_image("ubuntu:24.04"), stand_in=True
-    ),
+    Base("ubuntu-uid-1000", ComputeBackend.CPU, image=base_image("ubuntu:24.04"), stand_in=True),
 )
 
 
