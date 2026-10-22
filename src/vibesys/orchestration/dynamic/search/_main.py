@@ -25,6 +25,7 @@ from vibesys.orchestration.dynamic.search._values import (
     MainMeasurement,
     MergeOutcome,
     MergeRecord,
+    MergeSource,
     ViolationCode,
 )
 from vs_core.api.search import EvidenceKind, RevisionRef, TaskTerms, Value
@@ -232,6 +233,61 @@ class MainLine:
             if latest:
                 start = latest[0]
         return start
+
+    def fast_forward(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord | None:
+        """Move main to a settled candidate built on it that its one measurement shows beats it.
+
+        This is the loop without a merge: the candidate is already main plus its own change and
+        was measured once, officially, so a second workstream and a second measurement would only
+        reproduce them. It qualifies when its parent is main now, it is winner-eligible and
+        retained, it passed the trusted accuracy and benchmark checks, and its benchmark beats
+        main's (`_beats`: beyond noise on the declared axes). It is folded as a merge of itself
+        (`MergeRecord`), so main's lineage and the planner's history need no second case; any other
+        candidate, built on an older main, still goes through a merge workstream. Everything it
+        reads is recorded with the settlement, so a replay decides the same.
+        """
+        start, settlement = done.start, done.settlement
+        accuracy = reading_of(done.evidence.readings, EvidenceKind.CORRECTNESS)
+        benchmark = reading_of(done.evidence.readings, EvidenceKind.BENCHMARK)
+        if (
+            start.parent.revision_id.root != self.revision.revision_id.root
+            or settlement is None
+            or not settlement.eligible
+            or settlement.retention != "candidate"
+            or settlement.candidate is None
+            or not checkable(terms)
+            or accuracy is None
+            or not accuracy.passed
+            or benchmark is None
+            or not benchmark.passed
+        ):
+            return None
+        main = self.reading()
+        space = candidates.space_of(terms)
+        if not _beats(benchmark.metrics, main, space):
+            return None
+        record = MergeRecord(
+            merge_id=start.plan.work_id,
+            sequence=start.sequence,
+            candidates=(
+                MergeSource(
+                    hypothesis_id=start.plan.work_id,
+                    revision=settlement.candidate,
+                    built_on=start.parent,
+                ),
+            ),
+            base=start.parent,
+            outcome=MergeOutcome.MERGED,
+            revision=settlement.candidate,
+            accuracy_passed=True,
+            benchmark_passed=True,
+            metrics=benchmark.metrics,
+            main_metrics=main.metrics if isinstance(main, Headline) else (),
+            main_benchmark_passed=self._benchmark_passed(),
+        )
+        self.merges.append(record)
+        self._advance(record, settlement.candidate, benchmark.host_snapshot)
+        return record
 
     def finished(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord:
         """Fold a finished merge workstream: move main when its commit is sound, record it.

@@ -1087,6 +1087,8 @@ class RunRecord:
             self.hypotheses[start.plan.work_id] = _hypotheses.with_round(current, done)
         if start.plan.kind is WorkKind.MERGE:
             self.main.finished(done, self.terms)
+        elif not profile:
+            self.main.fast_forward(done, self.terms)
         self._offer_as_parent(done)
         self._keep(done)
 
