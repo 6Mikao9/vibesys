@@ -152,14 +152,62 @@ class QueueStatusReader(Protocol):
         ...
 
 
+class EvaluationOccupancy:
+    """How many evaluation-resource gates hold a slot, and how many wait for one.
+
+    The local executor notes the gates it has admitted or queued. The search notes
+    candidates that wait for a slot and have not been submitted yet. Those two
+    sets do not overlap: a candidate leaves the search queue when its measurement
+    is submitted. The queue status tool reads the sum.
+    """
+
+    def __init__(self, threads: Threads) -> None:
+        """Keep the counts behind ``threads``' lock; the tool reads them off the asyncio thread."""
+        self._lock = threads.lock()
+        self._executor_running = 0
+        self._executor_waiting = 0
+        self._search_waiting = 0
+
+    def note_executor(self, running: int, waiting: int) -> None:
+        """Record the executor's admitted gates and the jobs queued for a slot."""
+        with self._lock:
+            self._executor_running = running
+            self._executor_waiting = waiting
+
+    def note_search(self, waiting: int) -> None:
+        """Record candidates the search has not submitted yet."""
+        with self._lock:
+            self._search_waiting = waiting
+
+    def counts(self) -> tuple[int, int]:
+        """Return ``(jobs_running, jobs_waiting)``."""
+        with self._lock:
+            return (
+                self._executor_running,
+                self._executor_waiting + self._search_waiting,
+            )
+
+
 class LocalQueueStatusReader:
-    """The run's own machine: no one else's work is ahead, and no queue lists the run's jobs."""
+    """The run's own machine: work waits only for this run's evaluation slots.
+
+    ``items`` stays ``None``: the local reader knows how many gates are running
+    and waiting, not a list of scheduler jobs. With no occupancy wired, nothing
+    is known to be waiting.
+    """
+
+    def __init__(self, occupancy: EvaluationOccupancy | None = None) -> None:
+        """Read ``occupancy`` when the host has one; otherwise report an empty queue."""
+        self._occupancy = occupancy
 
     def read(self) -> QueueStatus:
-        """A local run waits behind nothing but its own capacity."""
-        return QueueStatus(
-            queue=QueueKind.LOCAL, items=None, contention=QueueContention(jobs_waiting=0)
-        )
+        """A local run waits behind nothing but its own evaluation slots."""
+        if self._occupancy is None:
+            contention = QueueContention(jobs_waiting=0)
+        else:
+            running, waiting = self._occupancy.counts()
+            contention = QueueContention(jobs_running=running, jobs_waiting=waiting)
+        return QueueStatus(queue=QueueKind.LOCAL, items=None, contention=contention)
 
 
 class OpaqueQueueStatusReader:
@@ -206,6 +254,7 @@ __all__ = [
     "MAX_REASON_CHARS",
     "QUEUE_READING",
     "CachedQueueStatusReader",
+    "EvaluationOccupancy",
     "LocalQueueStatusReader",
     "OpaqueQueueStatusReader",
     "QueueContention",
