@@ -9,11 +9,15 @@ process and reports state through ``inspect``/``wait_for_change``.
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pydantic import JsonValue, ValidationError
+
 from vs_agent.api import AgentExecutionCancelledError
+from vs_core.api import EvaluationLease, EvaluationTiming
 from vs_evaluation.api import (
     MAX_EVIDENCE_SUMMARY_CHARS,
     AvailabilitySnapshot,
@@ -28,6 +32,7 @@ from vs_evaluation.api import (
     EvidenceResultIdentity,
     ExecutorObservation,
     ExecutorPoll,
+    ExecutorRejectedError,
     HostSampleRecord,
     HostSnapshotRecord,
     LifecyclePublisher,
@@ -61,7 +66,7 @@ if TYPE_CHECKING:
 _GATING_KINDS = frozenset({EvidenceKind.BUILD, EvidenceKind.ACCURACY})
 """Stages whose failed outcome skips the stages after them: nothing later can count."""
 
-_RESOURCE_KINDS = frozenset({EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK})
+_RESOURCE_KINDS = frozenset({EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK, EvidenceKind.PROFILE})
 """Trusted stages that use the evaluation resource and therefore take a slot."""
 
 
@@ -77,8 +82,9 @@ class PollingEvaluationExecutor:
 
     Each submitted request evaluates its candidate snapshot in a fresh candidate
     workspace through the trusted ``Evaluation`` effects, one stage at a time.
-    Accuracy and benchmark share ``slots`` leases: a gate stays queued, and its
-    command has not started, until a lease is free. Observations are process-local.
+    Resource gates share the admission pool: a gate stays queued until a lease
+    is free. A caller-chosen sequence retains that lease between jobs until its
+    final member or scope cancellation. Observations are process-local.
     """
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-241001 [PLR0913]; host_probe and admission are construction facts of this executor. A configure() after init can run once jobs exist and split admission from the executor that owns it, a carrier would only forward those resources, and making the probe required would force every test that does not sample the host to pass one.
@@ -110,6 +116,13 @@ class PollingEvaluationExecutor:
         self._admission = EvaluationAdmission() if admission is None else admission
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._lifecycle = LifecyclePublisher()
+        self._lease_keys: dict[str, str] = {}
+        self._retain: set[str] = set()
+        self._reserved: set[str] = set()
+        self._members: dict[str, str] = {}
+        self._closed: set[str] = set()
+        self._queued_at: dict[str, float] = {}
+        self._admitted_at: dict[str, float] = {}
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         del requirements
@@ -134,6 +147,8 @@ class PollingEvaluationExecutor:
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
         if handle_id in self._tasks or self._lifecycle.observation(handle_id) is not None:
             return
+        self._register_lease(handle_id, request)
+        self._queued_at[handle_id] = self._clock.now()
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
         self._tasks[handle_id] = asyncio.create_task(self._run(handle_id, request))
 
@@ -147,9 +162,15 @@ class PollingEvaluationExecutor:
         if observed is None:
             return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
         if is_finished(observed.state):
-            return ExecutorPoll(phase=PollPhase.ENDED, terminal=observed)
+            return ExecutorPoll(
+                phase=PollPhase.ENDED, terminal=observed, admission_timing=self._timing(handle_id)
+            )
         phase = PollPhase.QUEUED if observed.state is EvaluationState.QUEUED else PollPhase.RUNNING
-        return ExecutorPoll(phase=phase, current_stage=observed.current_stage)
+        return ExecutorPoll(
+            phase=phase,
+            current_stage=observed.current_stage,
+            admission_timing=self._timing(handle_id),
+        )
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         return self._lifecycle.observation(handle_id)
@@ -158,24 +179,42 @@ class PollingEvaluationExecutor:
         await self._lifecycle.wait_for_change(handle_id, timeout_s)
 
     async def cancel(self, handle_id: str) -> None:
-        task = self._tasks.get(handle_id)
-        if task is not None and not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        observed = self._lifecycle.observation(handle_id)
-        self._publish(
-            handle_id,
-            ExecutorObservation(
-                state=EvaluationState.CANCELED,
-                stage_results=observed.stage_results if observed is not None else (),
-            ),
-        )
+        # A completed member may still own its sequence's lease. Cancel its
+        # current member first, so releasing an earlier member cannot admit a
+        # competing gate while the current command is still running.
+        key = self._lease_keys.get(handle_id)
+        if key is not None:
+            self._closed.add(key)
+        member = self._members.get(key) if key is not None else None
+        handles = tuple(dict.fromkeys((handle_id, *((member,) if member is not None else ()))))
+        tasks = tuple(self._tasks[h] for h in handles if h in self._tasks)
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if key is not None:
+            await self._release_lease(key)
+        for handle in handles:
+            observed = self._lifecycle.observation(handle)
+            self._publish(
+                handle,
+                ExecutorObservation(
+                    state=EvaluationState.CANCELED,
+                    stage_results=observed.stage_results if observed is not None else (),
+                ),
+            )
 
     async def close(self) -> None:
         # Through cancel(), not task.cancel(): a task cancelled before its first step
         # never runs its own handler, so only cancel() ends it in a published state.
-        active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
-        await asyncio.gather(*(self.cancel(handle_id) for handle_id in active))
+        active = {
+            self._lease_keys[handle_id]: handle_id
+            for handle_id, task in self._tasks.items()
+            if not task.done() or self._lease_keys[handle_id] in self._reserved
+        }
+        # One cancellation per sequence: cancelling every completed member in
+        # parallel would repeatedly interrupt the current member's cleanup.
+        await asyncio.gather(*(self.cancel(handle_id) for handle_id in active.values()))
 
     async def _run(self, handle_id: str, request: EvaluationRequest) -> None:
         first = SemanticEvaluationStage.model_validate(request.stages[0].payload)
@@ -184,8 +223,10 @@ class PollingEvaluationExecutor:
         failure: str | None = None
         operator_failure: str | None = None
         holding = False
+        retain = handle_id in self._retain
         try:
             holding = await self._admit(handle_id, request)
+            self._admitted_at[handle_id] = self._clock.now()
             workspace = await self._workspaces.create_measured_candidate(first.snapshot)
             opened = False
             for step in request.stages:
@@ -260,6 +301,7 @@ class PollingEvaluationExecutor:
                 ),
             )
         except (asyncio.CancelledError, AgentExecutionCancelledError) as cancelled:
+            retain = False
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -286,21 +328,62 @@ class PollingEvaluationExecutor:
                 ),
             )
         finally:
-            if holding:
-                await self._admission.release(handle_id)
+            key = self._lease_keys[handle_id]
+            if holding and not retain:
+                await self._release_lease(key)
+            self._members.pop(key, None)
             if workspace is not None:
                 await workspace.discard()
+
+    def _timing(self, handle_id: str) -> JsonValue:
+        queued = self._queued_at.get(handle_id)
+        if queued is None:
+            return None
+        return EvaluationTiming(
+            queued_at=queued, admitted_at=self._admitted_at.get(handle_id)
+        ).model_dump(mode="json")
+
+    def _register_lease(self, handle_id: str, request: EvaluationRequest) -> None:
+        try:
+            lease = (
+                None
+                if request.admission is None
+                else EvaluationLease.model_validate(request.admission)
+            )
+        except ValidationError as error:
+            message = f"evaluation admission: {error}"
+            raise ExecutorRejectedError(message) from error
+        key = (
+            f"job:{handle_id}"
+            if lease is None
+            else "sequence:"
+            + json.dumps((request.owner_scope, request.owner_generation, lease.key))
+        )
+        if key in self._closed or key in self._members:
+            message = f"evaluation lease {key!r} is closed or already executing a member"
+            raise ExecutorRejectedError(message)
+        self._lease_keys[handle_id] = key
+        self._members[key] = handle_id
+        if lease is not None and lease.retain:
+            self._retain.add(handle_id)
+
+    async def _release_lease(self, key: str) -> None:
+        self._reserved.discard(key)
+        await self._admission.release(key)
 
     async def _admit(self, handle_id: str, request: EvaluationRequest) -> bool:
         # Admission covers the whole job. A build must not publish RUNNING
         # before a following GPU gate acquires its resource: core would then
         # charge that gate's queue wait against the measurement limit.
-        uses_resource = any(
+        uses_resource = request.admission is not None or any(
             SemanticEvaluationStage.model_validate(step.payload).kind in _RESOURCE_KINDS
             for step in request.stages
         )
         if uses_resource:
-            await self._admission.acquire(handle_id)
+            key = self._lease_keys[handle_id]
+            if key not in self._reserved:
+                await self._admission.acquire(key)
+                self._reserved.add(key)
         return uses_resource
 
     def _open_output(self, run: StageRun) -> AbstractContextManager[OutputSink]:

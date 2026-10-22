@@ -25,6 +25,7 @@ from vs_core.api import (
     EvaluationStageOutcome,
     EvaluationStageResult,
     EvaluationTerminalFacts,
+    EvaluationTiming,
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
@@ -199,6 +200,9 @@ def measurement_request(
         owner_generation=scope.generation,
         stages=tuple(steps),
         stop_on_failure=plan.policy == "ordered",
+        admission=(
+            None if plan.evaluation_lease is None else plan.evaluation_lease.model_dump(mode="json")
+        ),
     )
 
 
@@ -274,6 +278,11 @@ def job_view(  # noqa: PLR0913  # lint-waiver: LW-940004 [PLR0913]; the plan, id
             state=state,
             stage_id=stage,
             pending_reason=reason,
+            evaluation_timing=(
+                None
+                if poll.admission_timing is None
+                else EvaluationTiming.model_validate(poll.admission_timing)
+            ),
         )
 
     match poll.phase:

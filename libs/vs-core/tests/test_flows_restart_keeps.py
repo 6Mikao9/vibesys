@@ -387,13 +387,17 @@ class Measured(core.Value):
     status: str
 
 
-def measuring(revision: core.RevisionRef) -> SearchDef[Config]:
+def measuring(
+    revision: core.RevisionRef, *, lease: core.EvaluationLease | None = None
+) -> SearchDef[Config]:
     """A root that measures ``revision`` (asked at the current time) and publishes the result."""
 
     @fake_search("keeps", Config, ROLES)
     async def root(ctx: core.Flow, config: Config) -> None:
         ctx.checkpoint(config)
-        plan = measurement(revision, at=ctx.clock.now())
+        plan = measurement(revision, at=ctx.clock.now()).model_copy(
+            update={"evaluation_lease": lease}
+        )
         found = await ctx.evaluation.measure(plan, within=30.0)
         ctx.publish(Measured(status=type(found).__name__))
 
@@ -515,3 +519,35 @@ def test_a_root_snapshot_the_new_code_cannot_read_is_a_code_change_not_a_crash()
     run.swap(staged)
     with pytest.raises(core.FlowCodeChanged):
         run.reply(stale, Plan(n=7))
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("restarting", [False, True])
+def test_adding_admission_reattaches_a_measurement_saved_before_leases(*, restarting: bool) -> None:
+    run = FlowRun.start(measuring(REVISION), Config(), restarting=restarting)
+    (in_flight,) = [a for a in run.open if isinstance(a.request, core.Measure)]
+    updated = measuring(REVISION, lease=core.EvaluationLease(key="sequence", retain=True))
+    run.swap(code_changed(updated))
+    run.advance_to(5.0)
+    measures = [d for d in run.decisions if isinstance(d, core.Wait) and _measures(d)]
+    assert len(measures) == 1
+    run.answer(in_flight, _result(in_flight))
+    assert run.driver.published(run.state, Measured) == Measured(status="MeasurementResult")
+    assert run.state.dropped == ()
+    assert run.finished is not None
+
+
+def test_an_existing_sequence_lease_cannot_be_renamed_by_reattachment() -> None:
+    run = FlowRun.start(
+        measuring(REVISION, lease=core.EvaluationLease(key="old", retain=True)), Config()
+    )
+    (in_flight,) = [a for a in run.open if isinstance(a.request, core.Measure)]
+    updated = measuring(REVISION, lease=core.EvaluationLease(key="new", retain=True))
+    run.swap(code_changed(updated))
+    run.advance_to(5.0)
+    fresh = [a for a in run.open if isinstance(a.request, core.Measure) and a is not in_flight]
+    assert len(fresh) == 1
+    run.answer(in_flight, _result(in_flight))
+    assert [d.decision for d in run.state.dropped] == [in_flight.decision]
+    run.answer(fresh[0], _result(fresh[0]))
+    assert run.finished is not None

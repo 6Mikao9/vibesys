@@ -705,3 +705,18 @@ def test_a_measurement_takes_its_input_from_the_attempts_checkpoint_of_the_revis
     _, other = measure_in(after, scope, "third", "a1b2c3d")
     assert other.plan.measured_input == "sha256:other"
     assert other.reuses is None
+
+
+def test_a_sequence_member_reaches_its_lease_owner_instead_of_reusing_old_evidence() -> None:
+    """A reused final member would never return the sequence's held slot."""
+    state, agent = agent_run(
+        core.initial_state(), "c1", measured("local-validation", "0027142", None), "passed"
+    )
+    assert agent is not None
+    measurement = measured("official", "0027142", None).model_copy(
+        update={"evaluation_lease": core.EvaluationLease(key="sequence", retain=False)}
+    )
+    asked = official(state, measurement)
+    (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+    assert submission.reuses is None
+    assert submission.plan.evaluation_lease == measurement.evaluation_lease

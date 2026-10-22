@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from vs_core._generated.vibesys.core.v1.contracts_cv import EvaluationTiming
+
 from .common import ContractValidationError, Count, ResourceId, Seconds, Value
 
 
@@ -26,6 +28,10 @@ class JobProgress(Value):
     ran_s: Seconds | None = None
     pending_reason: str | None = None
     estimated_start_at: Seconds | None = None
+    evaluation_timing: EvaluationTiming | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """Exact admission from an in-process resource owner; absent for scheduler estimates."""
 
 
 class WaitEnd(StrEnum):

@@ -47,6 +47,7 @@ from vibesys.orchestration.dynamic.search._values import (
 )
 from vibesys.search_spans.api import GATE, GateAttrs
 from vs_core.api.search import (
+    EvaluationLease,
     EvidenceKind,
     EvidenceRef,
     Failed,
@@ -235,8 +236,16 @@ async def measurement_of(
     lists = _stage_lists(ctx, w, ws, revision, names)
     jobs: list[MeasuredJob] = []
     found: ComposedJobs | Failed
-    for stages in lists:
+    for index, stages in enumerate(lists):
         plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=stages)
+        if len(lists) > 1:
+            plan = plan.model_copy(
+                update={
+                    "evaluation_lease": EvaluationLease(
+                        key=f"{w.key}:{revision.revision_id.root}", retain=index < len(lists) - 1
+                    )
+                }
+            )
         one = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(stages))
         if isinstance(one, Failed):
             found = one

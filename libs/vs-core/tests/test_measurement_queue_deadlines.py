@@ -12,6 +12,7 @@ charged, so the limit counts from the job's start.
 
 from dataclasses import dataclass
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -35,7 +36,7 @@ class Measuring:
     submit: core.SubmitMeasurement
 
 
-def measuring(*, queued: bool) -> Measuring:
+def measuring(*, queued: bool, timing: core.EvaluationTiming | None = None) -> Measuring:
     """A strategy's ``Measure`` dispatched at time 0, its job's first fact at time 1.
 
     With ``queued`` that fact says the job waits in the scheduler's queue. The test
@@ -43,8 +44,14 @@ def measuring(*, queued: bool) -> Measuring:
     is set past the run deadline: only the submission's limit can end the measurement.
     """
     initial = core.initial_state()
-    limits = initial.run.limits.model_copy(update={"reconciliation_bound": 20 * LIMIT})
+    limits = initial.run.limits.model_copy(
+        update={"reconciliation_bound": 1_000_000.0 if timing is not None else 20 * LIMIT}
+    )
     initial = initial.model_copy(update={"run": initial.run.model_copy(update={"limits": limits})})
+    if timing is not None:
+        initial = initial.model_copy(
+            update={"run": initial.run.model_copy(update={"deadline_at": 1_000_000.0})}
+        )
     result = requested(initial)
     (submit,) = result.requests
     assert isinstance(submit, core.SubmitMeasurement)
@@ -59,6 +66,7 @@ def measuring(*, queued: bool) -> Measuring:
             observed_at=first.observed_at,
             state="pending",
             pending_reason="Resources",
+            evaluation_timing=timing,
         )
         if queued
         else None
@@ -215,3 +223,52 @@ def test_a_measurement_times_out_exactly_when_its_job_has_run_its_limit(
         assert timeouts <= 1
         assert cancels <= 1
         ended = ended or isinstance(fact, Ended)
+
+
+@pytest.mark.regression
+@example(wait_s=1000, run_s=20)
+@example(wait_s=10000, run_s=99)
+@given(
+    wait_s=st.integers(min_value=250, max_value=20000), run_s=st.integers(min_value=0, max_value=99)
+)
+def test_local_measurement_limit_starts_at_exact_admission(wait_s: int, run_s: int) -> None:
+    """A long local queue wait, even without intervening polls, cannot time out the candidate."""
+    measured = measuring(queued=True, timing=core.EvaluationTiming(queued_at=0.0))
+    state, submit = measured.state, measured.submit
+    waiting = core.step(state, core.ClockAdvanced(now_at=float(wait_s)))
+    assert _timed_out(waiting.events) == 0
+    assert _cancels(waiting.requests) == 0
+    assert _submission(waiting.state, submit).phase != core.RequestPhase.BLOCKED
+    seen = observation(submit, 2, resource_id=JOB, observed_at=float(wait_s))
+    started = core.step(
+        waiting.state,
+        core.JobObserved(
+            resource_id=JOB,
+            observation=seen,
+            progress=core.JobProgress(
+                observation_sequence=2,
+                observed_at=float(wait_s),
+                state="running",
+                evaluation_timing=core.EvaluationTiming(queued_at=0.0, admitted_at=float(wait_s)),
+            ),
+        ),
+    )
+    assert _timed_out(started.events) == 0
+    executing = core.step(started.state, core.ClockAdvanced(now_at=float(wait_s + run_s)))
+    assert _timed_out(executing.events) == 0
+    assert _cancels(executing.requests) == 0
+    overdue = core.step(executing.state, core.ClockAdvanced(now_at=float(wait_s) + LIMIT))
+    assert _timed_out(overdue.events) == 1
+    assert _cancels(overdue.requests) == 1
+
+
+def test_local_admission_hang_guard_reports_queue_budget_separately() -> None:
+    measured = measuring(queued=True, timing=core.EvaluationTiming(queued_at=0.0))
+    state, submit = measured.state, measured.submit
+    ended = core.step(state, core.ClockAdvanced(now_at=state.run.limits.queue_wait_budget))
+    assert _timed_out(ended.events) == 0
+    assert any(
+        isinstance(event, core.Failed) and event.reason is core.FailureReason.QUEUE_BUDGET_SPENT
+        for event in ended.events
+    )
+    assert _submission(ended.state, submit).phase is core.RequestPhase.BLOCKED

@@ -352,6 +352,8 @@ def _answered_from_held(
     The input's own run answers a repeat of its baseline; evidence of a profile capture that
     is still valid answers the capture asked for again.
     """
+    if plan.evaluation_lease is not None:
+        return None
     run = held_input_run(state, event.scope, identity)
     if run is not None:
         return AreaChange(state=state, events=(held_answer(state, run, event.decision_id),))

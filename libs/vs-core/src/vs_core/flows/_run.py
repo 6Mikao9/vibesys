@@ -864,7 +864,13 @@ def _overrides(control: ControlInput, taken: StopRequested) -> bool:
 def _same_plan(old: Measure, new: Measure) -> bool:
     """Whether two measurements measure the same thing (they may be asked at different times)."""
     when = {"submitted_at": 0.0}
-    return old.plan.model_copy(update=when) == new.plan.model_copy(update=when)
+    old_plan, new_plan = old.plan, new.plan
+    if old_plan.evaluation_lease is None:
+        # A run saved before sequence admission still owns its existing job.
+        # Reattach it; the next member acquires the new sequence's lease. An
+        # existing lease identity must match, or reattachment could orphan it.
+        new_plan = new_plan.model_copy(update={"evaluation_lease": None})
+    return old_plan.model_copy(update=when) == new_plan.model_copy(update=when)
 
 
 def _same_request(

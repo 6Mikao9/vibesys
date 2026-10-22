@@ -128,6 +128,19 @@ def job_bound(job: Job, stated: float, run: RunState, hosts: Sequence[HostEpoch]
     deadline ends with the run.
     """
     limits = run.limits
+    timing = None if job.progress is None else job.progress.evaluation_timing
+    if timing is not None:
+        # The in-process owner reports admission itself, rather than inferring it
+        # from sparse scheduler polls. Never let a stale pending fact turn queue
+        # wait into a candidate execution timeout. The separate hang guard is
+        # reported as QUEUE_BUDGET, not LIMIT.
+        bound = (
+            Bound(at=timing.queued_at + limits.queue_wait_budget, by=WaitEnd.QUEUE_BUDGET)
+            if timing.admitted_at is None
+            else Bound(at=stated + timing.admitted_at - timing.queued_at, by=WaitEnd.LIMIT)
+        )
+        ceiling = max(run.deadline_at, stated)
+        return bound if bound.at <= ceiling else Bound(at=ceiling, by=WaitEnd.RUN_END)
     bound = Bound(at=stated + job.queue_credit, by=WaitEnd.LIMIT)
     if pending(job) and job.observation is not None and bound.at > job.observation.observed_at:
         # The pending fact came before the limit passed, so the time since it is queue time,
@@ -205,6 +218,13 @@ def turn_bound(record: RequestRecord, run: RunState) -> Bound:
     return Bound(at=at, by=WaitEnd.LIMIT) if at <= ceiling.at else ceiling
 
 
+def _admission_stated(record: RequestRecord, job: Job, run: RunState) -> float:
+    timing = None if job.progress is None else job.progress.evaluation_timing
+    if timing is not None and record.limit_from_dispatch is not None:
+        return min(timing.queued_at + record.limit_from_dispatch, run.deadline_at)
+    return record.until.at
+
+
 def record_bound(
     record: RequestRecord,
     evaluation: EvaluationState,
@@ -217,7 +237,12 @@ def record_bound(
     ``until``, extended by the capacity hold of the turn it dispatches (``turn_bound``).
     """
     bounds = tuple(
-        job_bound(job, record.until.at, run, hosts)
+        job_bound(
+            job,
+            _admission_stated(record, job, run),
+            run,
+            hosts,
+        )
         for job in (*evaluation.jobs, *evaluation.registered_jobs)
         if source(job) == record.request_id and not job.terminal
     )

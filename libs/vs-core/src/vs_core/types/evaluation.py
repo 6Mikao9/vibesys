@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
+from vs_core._generated.vibesys.core.v1.contracts_cv import EvaluationLease
+
 from .common import (
     ArtifactRef,
     ContinuationId,
@@ -97,6 +99,13 @@ class MeasurementPlan(Value):
     submitted_at: Seconds
     queue_allowance: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
+    evaluation_lease: EvaluationLease | None = Field(default=None, exclude_if=unset)
+    """Hold one evaluation slot across a caller-chosen sequence of plans.
+
+    The final plan returns it. Scope closure cancels every member, so interrupted
+    sequences release through the same cleanup as their jobs. Scheduling metadata
+    does not change the scientific identity of any member.
+    """
     dedicated_measurement_resources: bool = Field(default=False, exclude_if=unset)
     """The executor gives this measurement its resources alone (``RunFacts``' capability).
 

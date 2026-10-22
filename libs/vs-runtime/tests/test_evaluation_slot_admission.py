@@ -8,11 +8,15 @@ reported queue depth is the number still waiting.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
+from vs_core.api import EvaluationLease
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationRequest,
@@ -23,17 +27,25 @@ from vs_evaluation.api import (
     ResourceRequirements,
     SemanticEvaluationStage,
 )
+from vs_evaluation.api.queue_status import EvaluationOccupancy, LocalQueueStatusReader
+from vs_project.api import Project
 from vs_runtime.api import (
     AccuracyEvaluation,
     AccuracyReceipt,
     BenchmarkEvaluation,
     BenchmarkFailureKind,
     BenchmarkObjective,
+    EvaluationAdmission,
     PollingEvaluationExecutor,
     Workspace,
 )
+from vs_runtime.api.core import MeasurementRequests, ReceiptStore
+from vs_runtime.api.slurm_evaluation_stack import submission
 from vs_runtime.api.testing import FakeEvaluation, FakeEvaluationGate, FakeWorkspace, FakeWorkspaces
-from vs_sim.api.testing import ManualClock, yield_until
+from vs_sim.api import DISCARD, yield_now
+from vs_sim.api.testing import ManualClock, SimThreads, yield_until
+
+from .test_evaluation_requests import close_request, context_for
 
 if TYPE_CHECKING:
     from vs_sim.api import OutputSink
@@ -48,11 +60,15 @@ _BUDGET_S = 10_000.0
 class _OneGpu(FakeEvaluation):
     """A GPU whose second concurrent accuracy or benchmark is the lock-wait timeout."""
 
-    def __init__(self) -> None:
+    def __init__(self, capacity: int = 1, *, interleave: bool = False) -> None:
         super().__init__()
         self.default_accuracy = AccuracyEvaluation(executed=True)
         self.default_benchmark = BenchmarkEvaluation(executed=True)
         self.overlaps = 0
+        self.peak = 0
+        self.started: list[tuple[str, str | None]] = []
+        self.capacity = capacity
+        self.interleave = interleave
         self._live = 0
 
     async def accuracy(
@@ -62,11 +78,15 @@ class _OneGpu(FakeEvaluation):
         reuse: AccuracyReceipt | None = None,
         output: OutputSink,
     ) -> AccuracyEvaluation:
-        if self._live:
+        if self._live >= self.capacity:
             self.overlaps += 1
             return _timed_out_accuracy()
         self._live += 1
+        self.peak = max(self.peak, self._live)
+        self.started.append(("accuracy", workspace.revision))
         try:
+            if self.interleave:
+                await yield_now()
             return await super().accuracy(workspace, reuse=reuse, output=output)
         finally:
             self._live -= 1
@@ -78,11 +98,15 @@ class _OneGpu(FakeEvaluation):
         objectives: tuple[BenchmarkObjective, ...] = (),
         output: OutputSink,
     ) -> BenchmarkEvaluation:
-        if self._live:
+        if self._live >= self.capacity:
             self.overlaps += 1
             return _timed_out_benchmark()
         self._live += 1
+        self.peak = max(self.peak, self._live)
+        self.started.append(("benchmark", workspace.revision))
         try:
+            if self.interleave:
+                await yield_now()
             return await super().benchmark(workspace, objectives=objectives, output=output)
         finally:
             self._live -= 1
@@ -186,3 +210,268 @@ async def _queued(executor: PollingEvaluationExecutor, handles: tuple[str, ...])
             running += 1
     assert queued == len(handles) - 1
     assert running == 1
+
+
+async def _finished(executor: PollingEvaluationExecutor, handle: str) -> None:
+    await yield_until(
+        lambda: executor.inspect(handle),
+        lambda seen: seen is not None and seen.state is EvaluationState.SUCCEEDED,
+        f"{handle} succeeds",
+    )
+
+
+def _member(snapshot: str, index: int, *, final: bool, benchmark_first: bool) -> EvaluationRequest:
+    request = _request(snapshot, f"official-{index}")
+    stage = request.stages[int(benchmark_first if index == 0 else not benchmark_first)]
+    return request.model_copy(
+        update={
+            "stages": (stage,),
+            "owner_scope": "official-attempt",
+            "admission": {"key": "official-sequence", "retain": not final},
+        }
+    )
+
+
+@example(waiters=8, benchmark_first=False)
+@example(waiters=8, benchmark_first=True)
+@given(waiters=st.integers(min_value=1, max_value=12), benchmark_first=st.booleans())
+async def test_official_sequence_holds_its_slot_between_jobs(
+    waiters: int, *, benchmark_first: bool
+) -> None:
+    """Queued local validations cannot slip between an official's separately chosen gates."""
+    evaluation = _OneGpu()
+    first_kind = "benchmark" if benchmark_first else "accuracy"
+    first = evaluation.gate(first_kind, 0)
+    occupancy = EvaluationOccupancy(SimThreads())
+    admission = EvaluationAdmission(on_counts=occupancy.note_executor)
+    reader = LocalQueueStatusReader(occupancy)
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
+    snapshot = await workspaces.root.snapshot("candidate")
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), admission=admission
+    )
+    try:
+        await executor.submit(
+            _member(snapshot, 0, final=False, benchmark_first=benchmark_first),
+            handle_id="official-0",
+        )
+        await yield_until(lambda: _entered(first), bool, "first official gate starts")
+        handles = tuple(f"agent-{i}" for i in range(waiters))
+        for handle in handles:
+            await executor.submit(_request(snapshot, handle), handle_id=handle)
+        await yield_until(admission.counts, lambda counts: counts == (1, waiters), "agents queue")
+        first.release()
+        await _finished(executor, "official-0")
+        assert await admission.counts() == (1, waiters)
+        assert reader.read().contention.jobs_running == 1
+        assert reader.read().contention.jobs_waiting == waiters
+        assert len(evaluation.accuracy_calls) + len(evaluation.benchmark_calls) == 1
+        second_kind = "accuracy" if benchmark_first else "benchmark"
+        second = evaluation.gate(second_kind, 0)
+        await executor.submit(
+            _member(snapshot, 1, final=True, benchmark_first=benchmark_first),
+            handle_id="official-1",
+        )
+        await yield_until(lambda: _entered(second), bool, "second official gate starts")
+        assert await admission.counts() == (1, waiters)
+        assert reader.read().contention.jobs_running == 1
+        assert reader.read().contention.jobs_waiting == waiters
+        assert len(evaluation.accuracy_calls) + len(evaluation.benchmark_calls) == 2
+        second.release()
+        for handle in ("official-1", *handles):
+            await _finished(executor, handle)
+        assert evaluation.overlaps == 0
+        assert await admission.counts() == (0, 0)
+    finally:
+        await executor.close()
+
+
+@pytest.mark.parametrize("exit_at", ["queued", "between", "running", "close"])
+async def test_an_interrupted_sequence_returns_the_shared_slot(exit_at: str) -> None:
+    """Scope cleanup can name any member, even a completed member of a live sequence."""
+    evaluation = _OneGpu()
+    first = evaluation.gate("accuracy", 0)
+    admission = EvaluationAdmission()
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
+    snapshot = await workspaces.root.snapshot("candidate")
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), admission=admission
+    )
+    try:
+        if exit_at == "queued":
+            await admission.acquire("profile")
+        await executor.submit(
+            _member(snapshot, 0, final=False, benchmark_first=False), handle_id="official-0"
+        )
+        if exit_at == "queued":
+            await yield_until(admission.counts, lambda counts: counts == (1, 1), "official queues")
+        else:
+            await yield_until(lambda: _entered(first), bool, "official starts")
+            first.release()
+            await _finished(executor, "official-0")
+        if exit_at == "running":
+            second = evaluation.gate("benchmark", 0)
+            await executor.submit(
+                _member(snapshot, 1, final=True, benchmark_first=False), handle_id="official-1"
+            )
+            await yield_until(lambda: _entered(second), bool, "second official starts")
+        if exit_at == "close":
+            await executor.close()
+        else:
+            await executor.cancel("official-0")
+        if exit_at == "queued":
+            assert await admission.counts() == (1, 0)
+            await admission.release("profile")
+        assert await admission.counts() == (0, 0)
+        first.release()
+        await executor.submit(_request(snapshot, "next-agent"), handle_id="next-agent")
+        await _finished(executor, "next-agent")
+        assert evaluation.overlaps == 0
+    finally:
+        await executor.close()
+
+
+@example(capacity=1, candidates=8, benchmark_first=False)
+@example(capacity=3, candidates=8, benchmark_first=True)
+@given(
+    capacity=st.integers(min_value=1, max_value=3),
+    candidates=st.integers(min_value=2, max_value=8),
+    benchmark_first=st.booleans(),
+)
+async def test_mixed_official_sequences_and_agent_gates_share_capacity(
+    capacity: int, candidates: int, *, benchmark_first: bool
+) -> None:
+    """Generated interleavings retain each official lease and obey the shared N-slot bound."""
+    evaluation = _OneGpu(capacity, interleave=True)
+    counts: list[tuple[int, int]] = []
+    admission = EvaluationAdmission(
+        capacity, on_counts=lambda running, waiting: counts.append((running, waiting))
+    )
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
+    snapshots = tuple([await workspaces.root.snapshot(f"candidate-{i}") for i in range(candidates)])
+    agents = tuple([await workspaces.root.snapshot(f"agent-{i}") for i in range(candidates)])
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), admission=admission
+    )
+
+    async def official(index: int) -> None:
+        for member in range(2):
+            handle = f"official-{index}-{member}"
+            job = _member(
+                snapshots[index], member, final=member == 1, benchmark_first=benchmark_first
+            )
+            job = job.model_copy(
+                update={
+                    "key": handle,
+                    "admission": {"key": f"sequence-{index}", "retain": member == 0},
+                }
+            )
+            await executor.submit(job, handle_id=handle)
+            await _finished(executor, handle)
+
+    async def agent(index: int) -> None:
+        handle = f"agent-{index}"
+        await executor.submit(_request(agents[index], handle), handle_id=handle)
+        await _finished(executor, handle)
+
+    tasks = tuple(
+        asyncio.create_task(work(index))
+        for index in range(candidates)
+        for work in (official, agent)
+    )
+    try:
+        await asyncio.gather(*tasks)
+        assert evaluation.overlaps == 0
+        assert evaluation.peak == capacity
+        assert all(running <= capacity for running, _waiting in counts)
+        assert await admission.counts() == (0, 0)
+        for snapshot in snapshots:
+            positions = [
+                i for i, (_kind, revision) in enumerate(evaluation.started) if revision == snapshot
+            ]
+            assert len(positions) == 2
+            kinds = tuple(evaluation.started[i][0] for i in positions)
+            assert kinds == (
+                ("benchmark", "accuracy") if benchmark_first else ("accuracy", "benchmark")
+            )
+            if capacity == 1:
+                assert positions[1] == positions[0] + 1
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await executor.close()
+
+
+async def test_scope_close_releases_a_completed_sequence_member(tmp_path: Path) -> None:
+    """The durable scope manifest cleans up a lease while its flow is between measure calls."""
+    evaluation = _OneGpu()
+    admission = EvaluationAdmission()
+    root = FakeWorkspace(path=Path("/workspace"))
+    commit = "a" * 40
+    root.add_retained_revision(commit)
+    workspaces = FakeWorkspaces(root, supports_parallel_candidates=True)
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), admission=admission
+    )
+    project = Project.open(tmp_path)
+    store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
+    requests = MeasurementRequests(executor, store)
+    submitted = submission("sequence-member", candidate=commit)
+    submitted = submitted.model_copy(
+        update={
+            "plan": submitted.plan.model_copy(
+                update={"evaluation_lease": EvaluationLease(key="sequence", retain=True)}
+            )
+        }
+    )
+    try:
+        result = await requests.execute(submitted, context_for(submitted))
+        resource = result.observation.observation.resource_id
+        assert resource is not None
+        await _finished(executor, resource.root)
+        assert await admission.counts() == (1, 0)
+        close = close_request()
+        closed = await requests.execute(close, context_for(close))
+        assert closed.observation.observation.released
+        assert await admission.counts() == (0, 0)
+    finally:
+        await executor.close()
+
+
+async def test_a_profile_job_shares_admission_and_releases_on_cancellation() -> None:
+    evaluation = _OneGpu()
+    held = evaluation.gate("benchmark", 0)
+    admission = EvaluationAdmission()
+    root = FakeWorkspace(path=Path("/workspace"))
+    workspaces = FakeWorkspaces(root, supports_parallel_candidates=True)
+    snapshot = await root.snapshot("candidate")
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), admission=admission
+    )
+
+    async def profile() -> None:
+        async with admission.lease("profile"):
+            await evaluation.benchmark(root, output=DISCARD)
+
+    capture = asyncio.create_task(profile())
+    try:
+        await yield_until(lambda: _entered(held), bool, "profile holds the GPU")
+        await executor.submit(_request(snapshot, "official"), handle_id="official")
+        await yield_until(admission.counts, lambda counts: counts == (1, 1), "official waits")
+        assert evaluation.accuracy_calls == []
+        capture.cancel()
+        await asyncio.gather(capture, return_exceptions=True)
+        await _finished(executor, "official")
+        assert evaluation.overlaps == 0
+        assert await admission.counts() == (0, 0)
+    finally:
+        capture.cancel()
+        await asyncio.gather(capture, return_exceptions=True)
+        await executor.close()

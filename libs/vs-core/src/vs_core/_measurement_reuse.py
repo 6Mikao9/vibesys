@@ -240,8 +240,13 @@ def reused_run(
     None for any other purpose, once the identity has a submission of its own, when the scope
     holds no conclusive run of this input, and when the samples held leave a close call.
     """
-    if identity.purpose != "official" or any(
-        budget.scope == scope and budget.identity == identity for budget in state.submission_budgets
+    if (
+        plan.evaluation_lease is not None
+        or identity.purpose != "official"
+        or any(
+            budget.scope == scope and budget.identity == identity
+            for budget in state.submission_budgets
+        )
     ):
         return None
     sources = tuple(

@@ -151,6 +151,8 @@ class EvaluationRequest(BaseModel):
     owner_scope: str | None = Field(default=None, min_length=1)
     owner_generation: int = Field(default=0, ge=0)
     stages: tuple[EvaluationStep, ...] = Field(min_length=1)
+    admission: JsonValue = Field(default=None, exclude_if=lambda value: value is None)
+    """Opaque executor admission metadata, interpreted and validated by its owner."""
     stop_on_failure: bool = True
     requirements: ResourceRequirements = Field(default_factory=ResourceRequirements)
 
@@ -295,6 +297,8 @@ class ExecutorPoll(BaseModel):
     estimated_start: str | None = None
     detail: str = ""
     terminal: ExecutorObservation | None = None
+    admission_timing: JsonValue = Field(default=None, exclude_if=lambda value: value is None)
+    """Opaque exact admission timestamps supplied by an in-process resource owner."""
 
     @model_validator(mode="after")
     def _terminal_exactly_when_ended(self) -> ExecutorPoll:
