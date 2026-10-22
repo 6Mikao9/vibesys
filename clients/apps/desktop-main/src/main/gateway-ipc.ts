@@ -13,7 +13,7 @@ import {
   SshLink,
 } from '@vibesys/connection';
 import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
-import {GATEWAY_CHANNEL, parseGatewayRequest} from '@vibesys/ipc';
+import {GATEWAY_CHANNEL, gatewayEnd, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
 import {configuredHostCall, HOST_CALL_METHOD} from '@vibesys/runs/intents';
 import {type SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import type {ScheduleTimeout} from '@vibesys/transport';
@@ -61,7 +61,7 @@ export function installGatewayIpc(
       abort.abort();
       event.sender.removeListener('destroyed', cancelled);
       event.sender.removeListener('did-start-navigation', navigated);
-      port.postMessage({end: true, ...(error === undefined ? {} : {error: String(error)})});
+      port.postMessage(gatewayEnd(error === undefined ? undefined : String(error)));
       port.close();
     };
     const cancelled = (): void => finish(new Error('gateway caller closed'));
@@ -82,7 +82,7 @@ export function installGatewayIpc(
       authorize(event, admits);
       const request = parseGatewayRequest(value);
       const receive = (bytes: Uint8Array): void => {
-        if (!done) port.postMessage({bytes});
+        if (!done) port.postMessage(gatewayReply(bytes));
       };
       if (request.kind === 'unary') {
         let bytes = request.bytes;

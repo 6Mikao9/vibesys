@@ -50,6 +50,7 @@ export {
   WatchResponseSchema,
 } from './generated/vibesys/api/v1/host_watch_generated_pb.js';
 export {CheckoutStatus} from './generated/vibesys/core/v1/vocabulary_pb.js';
+export * from './generated/vibesys/desktop/v1/gateway_pb.js';
 export * from './generated/vibesys/desktop/v1/settings_pb.js';
 export * from './generated/vibesys/host/v1/failure_pb.js';
 export * from './generated/vibesys/host/v1/operations_pb.js';
@@ -79,4 +80,4 @@ export {OperationFailed} from './operations.js';
 export {projectMessage} from './project.js';
 export {API_SCHEMA_HASH, HOST_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
 
-export {validatedFromBinary, validateHostPayload} from './validation.js';
+export {validatedExactFromBinary, validatedFromBinary, validateHostPayload} from './validation.js';

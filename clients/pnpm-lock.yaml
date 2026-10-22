@@ -872,6 +872,9 @@ importers:
 
   libs/ipc:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -881,6 +884,9 @@ importers:
       '@vibesys/logs':
         specifier: workspace:*
         version: link:../logs
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../proto
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../runs

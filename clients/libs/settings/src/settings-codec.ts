@@ -9,7 +9,7 @@ import {
   DesktopTheme,
   StartRunReasoning,
   StartRunResults,
-  validatedFromBinary,
+  validatedExactFromBinary,
 } from '@vibesys/proto';
 import type {RunStart} from '@vibesys/runs';
 import type {ThemeName} from '@vibesys/ui/tokens';
@@ -52,7 +52,7 @@ export function encodeSettings(value: SettingsFile): Uint8Array {
 }
 
 export function decodeSettings(bytes: Uint8Array): SettingsFile {
-  const message = validatedFromBinary(DesktopHostsSchema, bytes);
+  const message = validatedExactFromBinary(DesktopHostsSchema, bytes);
   return parseSettings({
     version: 2,
     hosts: Object.fromEntries(
@@ -83,7 +83,7 @@ export function encodePreferences(value: Preferences): Uint8Array {
 }
 
 export function decodePreferences(bytes: Uint8Array): Preferences {
-  const message = validatedFromBinary(DesktopPreferencesSchema, bytes);
+  const message = validatedExactFromBinary(DesktopPreferencesSchema, bytes);
   const appearance = message.appearance;
   if (appearance === undefined) throw new Error('appearance is required');
   return parsePreferences({
@@ -120,7 +120,7 @@ export function encodeRecent(value: ParsedRecent): Uint8Array {
 }
 
 export function decodeRecent(bytes: Uint8Array): ParsedRecent {
-  const message = validatedFromBinary(DesktopRecentSchema, bytes);
+  const message = validatedExactFromBinary(DesktopRecentSchema, bytes);
   const runs = message.runs.map(run => ({
     host: run.run?.host,
     runId: run.run?.runId,
@@ -219,10 +219,10 @@ function keyFor<T extends string>(values: Readonly<Record<T, number>>, value: nu
   return key;
 }
 
-function checked<D extends Parameters<typeof validatedFromBinary>[0]>(
+function checked<D extends Parameters<typeof validatedExactFromBinary>[0]>(
   schema: D,
   bytes: Uint8Array,
 ): Uint8Array {
-  validatedFromBinary(schema, bytes);
+  validatedExactFromBinary(schema, bytes);
   return bytes;
 }

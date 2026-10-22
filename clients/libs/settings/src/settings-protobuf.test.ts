@@ -137,6 +137,13 @@ describe('desktop settings protobuf migration', () => {
     }
   });
 
+  test('unknown protobuf fields are rejected for every retained settings format', () => {
+    for (const fixture of fixtures) {
+      const bytes = new Uint8Array([...Buffer.from(fixture.protobufHex, 'hex'), 0x98, 0x06, 1]);
+      expect(() => codecs[fixture.kind].read(bytes)).toThrow('#99');
+    }
+  });
+
   test('an import held at publication cannot overwrite an update queued after it', async () => {
     const filesystem = new FakeSettingsFilesystem({
       [paths.hosts]: JSON.stringify({version: 2, hosts: {local: {checkout: '/old'}}}),

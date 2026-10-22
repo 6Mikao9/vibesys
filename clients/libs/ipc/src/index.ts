@@ -19,11 +19,16 @@ export {
   WAKE_CHANNEL,
 } from './bridge.js';
 export {
+  decodeGatewayReply,
+  encodeGatewayRequest,
   GATEWAY_CHANNEL,
   type GatewayBridge,
   type GatewayCall,
-  type GatewayReply,
+  type GatewayPortBridge,
   type GatewayRequest,
+  gatewayBridge,
+  gatewayEnd,
+  gatewayReply,
   parseGatewayRequest,
 } from './gateway.js';
 export {openPortSocket, type PagePort} from './port-socket.js';

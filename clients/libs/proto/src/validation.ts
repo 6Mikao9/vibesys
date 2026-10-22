@@ -28,3 +28,26 @@ export function validateHostPayload(
   if (!descriptor) throw new Error(`unknown HostService method: ${method}`);
   validatedFromBinary(descriptor[direction], bytes);
 }
+
+/** Config and routing inputs are closed contracts; retained data readers use validatedFromBinary. */
+export function validatedExactFromBinary<D extends DescMessage>(
+  schema: D,
+  bytes: Uint8Array,
+): MessageShape<D> {
+  const message = validatedFromBinary(schema, bytes);
+  rejectUnknownFields(message, schema.typeName);
+  return message;
+}
+
+function rejectUnknownFields(value: unknown, path: string): void {
+  if (value === null || typeof value !== 'object' || value instanceof Uint8Array) return;
+  const record = value as Record<string, unknown>;
+  const unknown = record['$unknown'];
+  if (Array.isArray(unknown) && unknown.length > 0) {
+    const tag = (unknown[0] as {no: number}).no;
+    throw new Error(`${path}.#${tag}: unknown protobuf field`);
+  }
+  for (const [key, nested] of Object.entries(record)) {
+    if (key !== '$typeName' && key !== '$unknown') rejectUnknownFields(nested, `${path}.${key}`);
+  }
+}
