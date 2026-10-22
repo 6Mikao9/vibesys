@@ -32,6 +32,7 @@ from vs_evaluator_protocol.api import (
     Hello,
     Measurement,
     PartialMeasurement,
+    ProfileField,
     ProtocolError,
     check_objectives,
     parse_records,
@@ -238,6 +239,7 @@ class TrustedEvaluationPlan(BaseModel):
     accuracy_timeout_seconds: int | None = Field(default=None, gt=0)
     profile_command: str | None = Field(default=None, min_length=1)
     profile_timeout_seconds: int | None = Field(default=None, gt=0)
+    profile_fields: tuple[ProfileField, ...] = ()
     benchmark_command: str | None = Field(default=None, min_length=1)
     benchmark_timeout_seconds: int | None = Field(default=None, gt=0)
     framework_setup_timeout_seconds: int = Field(default=0, ge=0)

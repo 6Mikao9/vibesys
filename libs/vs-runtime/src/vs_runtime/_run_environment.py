@@ -147,6 +147,7 @@ from vs_sandbox.api.skypilot import (
     resolve_profile,
     stable_cluster_name,
 )
+from vs_sandbox.api.slurm import ProfileCaptureDescriptor
 from vs_sandbox.api.symlink_mounts import (
     symlink_lifecycle_hooks,
 )
@@ -201,6 +202,7 @@ class AgentPaths:
     accuracy_command: str | None = None
     benchmark_command: str | None = None
     profiler_support: str | None = None
+    profile_command: str | None = None
 
 
 class ParallelCandidateObstacle(StrEnum):
@@ -257,6 +259,8 @@ class RunEnvironmentView:
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
     agent_host_resources: tuple[HostResource, ...] = ()
+    # A command-backed capture offered by this environment, independent of a cluster.
+    local_profile_capture: ProfileCaptureDescriptor | None = None
     # Set when trusted evaluation runs as Slurm jobs; ``None`` otherwise.
     cluster_evaluation: ClusterEvaluationFacts | None = None
     # Whether the host that runs a trusted evaluation is shared or exclusive.
@@ -269,7 +273,9 @@ class RunEnvironmentView:
     @property
     def captures_profile(self) -> bool:
         """Whether the run can capture a profile: the one fact every profile offer reads."""
-        return self.cluster_evaluation is not None and self.cluster_evaluation.captures_profile
+        return self.local_profile_capture is not None or (
+            self.cluster_evaluation is not None and self.cluster_evaluation.captures_profile
+        )
 
     @property
     def dedicated_measurement_resources(self) -> bool:
@@ -286,6 +292,8 @@ class RunEnvironmentView:
     @property
     def supported_profile_fields(self) -> tuple[ProfileField, ...]:
         """The measurement fields this run's capture can supply; empty when it captures none."""
+        if self.local_profile_capture is not None:
+            return self.local_profile_capture.supported_fields
         if self.cluster_evaluation is None:
             return ()
         return self.cluster_evaluation.supported_profile_fields
@@ -356,6 +364,7 @@ class RunEnvironmentRequest:
     benchmark_output_argument: str | None = None
     profile_command: str | None = None
     profile_timeout_seconds: int | None = None
+    profile_fields: tuple[ProfileField, ...] = ()
     evaluator_requirements: TrustedEvaluatorRequirements = field(
         default_factory=TrustedEvaluatorRequirements
     )
@@ -741,9 +750,15 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                         accuracy_command=evaluation.accuracy_command,
                         benchmark_command=evaluation.benchmark_command,
                         profiler_support=request.profiler_support_path,
+                        profile_command=evaluation.profile_command,
                     ),
                     # The host sandbox binds a linked worktree's metadata read-only too.
                     workspace_git_writable=git_metadata_mounts(request.workspace).agent_writable,
+                    local_profile_capture=(
+                        ProfileCaptureDescriptor(supported_fields=request.profile_fields)
+                        if request.profile_command is not None
+                        else None
+                    ),
                     agent_host_resources=grants,
                     host_candidate_isolation=host_candidate_isolation,
                     evaluation_host_tenancy=declared_eval_host_tenancy(

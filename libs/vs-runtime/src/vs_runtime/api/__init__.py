@@ -38,6 +38,7 @@ if TYPE_CHECKING:
         ValidationRecipeArtifactPath,
     )
     from vs_runtime._polling_evaluation import PollingEvaluationExecutor
+    from vs_runtime._profile_evaluation import CommandProfileCapture
     from vs_runtime._retrying_evaluation import (
         ClosableEvaluationExecutor,
         EvaluationRetries,
@@ -130,6 +131,7 @@ _MODULES: dict[str, str] = {
             ),
         ),
         ("vs_runtime._evaluation_admission", ("EvaluationAdmission ")),
+        ("vs_runtime._profile_evaluation", ("CommandProfileCapture ")),
         ("vs_runtime._polling_evaluation", ("PollingEvaluationExecutor ")),
         (
             "vs_runtime._retrying_evaluation",
@@ -207,6 +209,7 @@ __all__ = [
     "CaptureCommands",
     "CaptureStopUnconfirmedError",
     "ClosableEvaluationExecutor",
+    "CommandProfileCapture",
     "CommandResult",
     "Commands",
     "Completed",

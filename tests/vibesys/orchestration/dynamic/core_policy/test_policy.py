@@ -9,12 +9,14 @@ options and generated evaluation plans and check what the plan says about each.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.vibesys.orchestration.dynamic._values import portfolio, profile_entry, run_record
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     COMMIT,
     EVALUATION_CAPACITY,
@@ -34,7 +36,13 @@ from vibesys.errors import ConfigurationError
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.dynamic.core_policy.api import requirements_for
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
-from vibesys.orchestration.dynamic.search.api import JUDGE, DynamicConfig, dynamic
+from vibesys.orchestration.dynamic.search.api import (
+    JUDGE,
+    DynamicConfig,
+    ViolationCode,
+    dynamic,
+    validate,
+)
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
 from vs_core.api import ArtifactId, ArtifactRef, AssessmentKind, RevisionRef
 from vs_runtime.api.core import CoreStartup, new_core_state
@@ -44,6 +52,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
 )
 from vs_sandbox.api.slurm import (
+    ProfileCaptureDescriptor,
     SlurmEvaluationPlan,
     load_slurm_operator_settings,
     trusted_profile_command,
@@ -230,7 +239,10 @@ def test_the_stage_limits_come_from_the_evaluation_plan_and_the_queue_from_the_r
         profile_timeout_seconds=profile,
     )
 
-    terms = plan_of(resolved(root, plan=plan), queue_allowance_seconds=queue).facts.task
+    environment = candidate_environment(local_profile_capture=ProfileCaptureDescriptor())
+    terms = plan_of(
+        resolved(root, plan=plan, environment=environment), queue_allowance_seconds=queue
+    ).facts.task
 
     assert terms is not None
     declared = {item.stage_id: item.execution_seconds for item in terms.stages}
@@ -322,7 +334,9 @@ def _slurm_view(
 
 def _environments(root: Path) -> dict[str, RunEnvironmentView]:
     return {
-        "host": candidate_environment(),
+        "host": candidate_environment(
+            env_kind="host", cli_sandboxed=False, host_candidate_isolation=True
+        ),
         "slurm-no-command": _slurm_view(root, service=False, profile_command=None),
         "slurm-command-only": _slurm_view(root, service=False),
         "slurm-service": _slurm_view(root, service=True),
@@ -337,12 +351,14 @@ def _environments(root: Path) -> dict[str, RunEnvironmentView]:
 def test_profile_work_follows_the_evaluation_plan_and_the_capture_the_run_offers(
     tmp_path: Path, environment: str, profiler_id: str, manifest_command: str | None
 ) -> None:
-    """Profiling is on exactly when a profiler is chosen and the plan has a profile command.
+    """Profiling is on exactly when the plan has a profile command.
 
     A run that wants profile work but cannot capture a profile is refused at launch with an
     error that names the option; it never plans a profile workstream nothing can satisfy.
     """
     view = _environments(tmp_path)[environment]
+    if environment == "host" and manifest_command is not None:
+        view = replace(view, local_profile_capture=ProfileCaptureDescriptor())
     plan = TrustedEvaluationPlan(
         accuracy_command="true",
         accuracy_timeout_seconds=11,
@@ -351,9 +367,9 @@ def test_profile_work_follows_the_evaluation_plan_and_the_capture_the_run_offers
     )
     run = resolved(tmp_path, profiler_id=profiler_id, plan=plan, environment=view)
 
-    wants_profile = profiler_id != "none" and manifest_command is not None
+    wants_profile = manifest_command is not None
     if wants_profile and not view.captures_profile:
-        with pytest.raises(ConfigurationError, match="profiling"):
+        with pytest.raises(ConfigurationError, match="profile capture"):
             plan_of(run)
         return
     made = plan_of(run)
@@ -493,3 +509,36 @@ def test_an_operator_cannot_set_profiling_at_launch() -> None:
     """Profiling follows the evaluation plan, so a launch that sets it is refused by name."""
     with pytest.raises(ValueError, match="profiling"):
         DynamicLaunch.model_validate_json('{"max_rounds": 2, "profiling": true}', strict=True)
+
+
+@pytest.mark.regression
+def test_a_task_profile_command_does_not_require_profiler_tools(tmp_path: Path) -> None:
+    run = resolved(
+        tmp_path,
+        profiler_id="none",
+        environment=_slurm_view(tmp_path, service=False),
+        plan=TrustedEvaluationPlan(profile_command="profile"),
+    )
+    assert _config(plan_of(run)).profiling
+
+
+@pytest.mark.regression
+def test_a_host_without_a_profile_command_still_rejects_profile_work(tmp_path: Path) -> None:
+    run = resolved(
+        tmp_path,
+        environment=candidate_environment(
+            env_kind="host",
+            cli_sandboxed=False,
+            host_candidate_isolation=True,
+        ),
+    )
+    record = run_record(_config(plan_of(run)))
+    result = validate(
+        portfolio(profile_entry("p1")),
+        record.world().ledger,
+        record.offered(),
+        capacity=1,
+        offer=None,
+    )
+    assert not result.valid
+    assert ViolationCode.PROFILE_NOT_OFFERED in {item.code for item in result.violations}

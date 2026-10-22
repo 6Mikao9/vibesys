@@ -648,6 +648,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profile_command=(
                     shlex.join(bundle.profile_command) if bundle.profile_command else None
                 ),
+                profile_fields=(bundle.manifest.profile.fields if bundle.manifest.profile else ()),
                 profile_timeout_seconds=(
                     bundle.manifest.profile.timeout_seconds if bundle.manifest.profile else None
                 ),

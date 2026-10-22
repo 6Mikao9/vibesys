@@ -200,6 +200,13 @@ The timeout bounds the load after readiness and cannot exceed the remaining
 capture deadline. Profiling provides diagnostic evidence; accuracy and benchmark
 acceptance still use their own unchanged gates.
 
+For a local host, the profile command owns startup, requests, and shutdown and
+writes evaluator protocol-v2 output to the appended `--vs-output` path. Its
+`fields` declaration lists the measurement fields it guarantees. The command
+runs against the requested revision through the evaluation executor; readings
+are informational and cannot promote that revision. See the
+[input contract](cli-flags.md) for details.
+
 A task may name workspace paths its evaluation never reads, such as the notes
 an agent keeps between turns:
 
