@@ -44,18 +44,21 @@ def test_a_declaration_or_a_last_bare_exclusive_dedicates_the_resources(
     """sbatch takes the last of ``--exclusive[=...]`` and ``--oversubscribe`` it reads."""
     sharing = [argument for argument in arguments if argument in _SHARING]
     exclusive = bool(sharing) and sharing[-1] == "--exclusive"
-    assert _config(arguments, declared=declared).dedicates_measurement_resources is (
-        bool(declared) or exclusive
-    )
+    config = _config(arguments, declared=declared)
+    assert config.dedicates_measurement_resources is (bool(declared) or exclusive)
+    assert config.exclusive_node is exclusive
 
 
 def test_the_declaration_alone_enables_it_on_a_shared_node() -> None:
     config = _config(["--gres=gpu:4", "-c", "64"], declared=True)
     assert config.dedicates_measurement_resources is True
+    assert config.exclusive_node is False
 
 
 def test_a_bare_exclusive_alone_enables_it() -> None:
-    assert _config(["--exclusive"]).dedicates_measurement_resources is True
+    config = _config(["--exclusive"])
+    assert config.dedicates_measurement_resources is True
+    assert config.exclusive_node is True
 
 
 def test_neither_leaves_it_false() -> None:

@@ -126,6 +126,7 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
     prepare_trusted_evaluator,
     require_built_task_image,
+    resolve_eval_host_tenancy,
     resolve_run_environment_spec,
     run_environment_deprecation,
     run_environment_record,
@@ -802,7 +803,10 @@ def _run_facts(
     return RunFacts(
         domain_id=bundle.domain.value,
         objective=objective,
-        environment_notes=agent_environment_notes(view),
+        environment_notes=agent_environment_notes(
+            view,
+            tenancy=resolve_eval_host_tenancy(view.evaluation_host_tenancy, bundle.host_tenancy),
+        ),
         agent_git_writable=view.agent_git_writable,
         profile_execution=ProfileExecution(view.profile_execution),
         objective_location=view.paths.objective,

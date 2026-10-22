@@ -1,0 +1,1 @@
+Commands run in a container. The evaluation host is shared, so measurements may include contention from other work; decide how to handle it.

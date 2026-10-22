@@ -28,6 +28,8 @@ from vs_evaluation.api import (
     EvidenceResultIdentity,
     ExecutorObservation,
     ExecutorPoll,
+    HostSampleRecord,
+    HostSnapshotRecord,
     LifecyclePublisher,
     PollPhase,
     ResourceRequirements,
@@ -44,7 +46,7 @@ from vs_runtime._evaluation_failure_text import render_evaluation_failure, rende
 from vs_runtime._evaluation_jobs import headline_first
 from vs_runtime._failure_classification import is_unsettled
 from vs_runtime._measurement_progress import StageRun
-from vs_sim.api import DISCARD
+from vs_sim.api import DISCARD, HostSample
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -52,7 +54,7 @@ if TYPE_CHECKING:
     from vs_runtime._measurement_progress import StageOutputOpener
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
-    from vs_sim.api import Clock, OutputSink
+    from vs_sim.api import Clock, HostProbe, OutputSink
 
 
 _GATING_KINDS = frozenset({EvidenceKind.BUILD, EvidenceKind.ACCURACY})
@@ -74,7 +76,9 @@ class PollingEvaluationExecutor:
     Observations are process-local: nothing survives a restart.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-241001 [PLR0913]; host_probe is one more injected role beside the evaluation, workspaces, clock, output and control.
+        # > A collaborator object would only rename these keywords and force every existing constructor call to change.
+        # > Making the probe required would force every test that does not care about the host to pass one.
         self,
         evaluation: Evaluation,
         workspaces: Workspaces,
@@ -82,15 +86,18 @@ class PollingEvaluationExecutor:
         clock: Clock,
         stage_output: StageOutputOpener | None = None,
         control: RunControlChannel | None = None,
+        host_probe: HostProbe | None = None,
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
         ``clock`` stamps availability observations. ``stage_output`` opens the stream
         each stage's command writes its raw output to while it runs; ``None`` discards it.
+        ``host_probe`` reads host contention around a benchmark; ``None`` records none.
         """
         self._control = control
         self._clock = clock
         self._stage_output = stage_output
+        self._host_probe = host_probe
         self._evaluation = evaluation
         self._workspaces = workspaces
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -292,6 +299,7 @@ class PollingEvaluationExecutor:
         output: OutputSink,
     ) -> _SemanticStageObservation:
         unmet: str | None = None
+        host_snapshot: HostSnapshotRecord | None = None
         if stage.kind is EvidenceKind.BUILD:
             built = await self._evaluation.build(workspace, output=output)
             completed = not is_unsettled(built.failure_kind)
@@ -315,7 +323,11 @@ class PollingEvaluationExecutor:
             partial = None
             kind = result.failure_kind
         elif stage.kind is EvidenceKind.BENCHMARK:
-            result = await self._evaluation.benchmark(workspace, output=output)
+            start = _sample_host(self._host_probe)
+            try:
+                result = await self._evaluation.benchmark(workspace, output=output)
+            finally:
+                host_snapshot = _host_snapshot(start, _sample_host(self._host_probe))
             completed = not is_unsettled(result.failure_kind)
             kind = result.failure_kind
             outcome = (
@@ -371,6 +383,7 @@ class PollingEvaluationExecutor:
             failure_kind=None if outcome is EvidenceOutcome.PASSED else kind,
             unmet_requirement=None if outcome is EvidenceOutcome.PASSED else unmet,
             accepted_round=0,
+            host_snapshot=host_snapshot,
         )
         return _SemanticStageObservation(
             evidence=evidence,
@@ -380,3 +393,39 @@ class PollingEvaluationExecutor:
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
         self._lifecycle.publish(handle_id, observation)
+
+
+def _sample_host(probe: HostProbe | None) -> HostSample | None:
+    """One host reading, or None when this run has no probe.
+
+    A probe that fails returns an all-unavailable sample. The measurement still counts.
+    """
+    if probe is None:
+        return None
+    try:
+        return probe.sample()
+    except Exception:  # noqa: BLE001  # lint-waiver: LW-241002 [BLE001]; a probe's failures are open and must not fail the measurement.
+        # > Catching only OSError misses a probe that raises ValueError or RuntimeError, and the benchmark would fail.
+        # > Letting the exception propagate treats an unread host as a failed candidate.
+        return HostSample()
+
+
+def _host_snapshot(start: HostSample | None, end: HostSample | None) -> HostSnapshotRecord | None:
+    """The start and end readings of one benchmark, or None when the run did not sample."""
+    if start is None:
+        return None
+    return HostSnapshotRecord(
+        start=_sample_record(start), end=_sample_record(HostSample() if end is None else end)
+    )
+
+
+def _sample_record(sample: HostSample) -> HostSampleRecord:
+    return HostSampleRecord(
+        load_1=sample.load_1,
+        load_5=sample.load_5,
+        load_15=sample.load_15,
+        cpu_count=sample.cpu_count,
+        memory_free_bytes=sample.memory_free_bytes,
+        memory_pressure=sample.memory_pressure,
+        gpu_processes=sample.gpu_processes,
+    )

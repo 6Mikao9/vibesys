@@ -130,6 +130,11 @@ def reading_mapping(ref: EvidenceRef, evidence: TrustedEvidence) -> Mapping[str,
         },
         "feedback": evidence.semantic_summary or "",
         "unmet_requirement": evidence.unmet_requirement,
+        **(
+            {}
+            if evidence.host_snapshot is None
+            else {"host_snapshot": evidence.host_snapshot.model_dump(mode="json")}
+        ),
     }
 
 

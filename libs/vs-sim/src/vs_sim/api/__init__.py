@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         WorkerReservationStateError,
         WorkerStartRefusedError,
     )
+    from vs_sim.host_probe import HostProbe, HostSample, PlatformHostProbe
     from vs_sim.loopback_http import HttpReply, LoopbackHttp, UrllibLoopbackHttp
     from vs_sim.network import Connection, DeadlineNetwork, Listener, Network, UnixNetwork
     from vs_sim.os_platform import Platform
@@ -136,6 +137,9 @@ _MODULES: dict[str, str] = {
     "Listener": "vs_sim.network",
     "Network": "vs_sim.network",
     "UnixNetwork": "vs_sim.network",
+    "HostProbe": "vs_sim.host_probe",
+    "HostSample": "vs_sim.host_probe",
+    "PlatformHostProbe": "vs_sim.host_probe",
     "CommandProbe": "vs_sim.probes",
     "ProbeResult": "vs_sim.probes",
     "ProcessesProbe": "vs_sim.probes",
@@ -244,6 +248,8 @@ __all__ = [
     "Event",
     "ForegroundChild",
     "ForegroundLauncher",
+    "HostProbe",
+    "HostSample",
     "HttpReply",
     "InheritedStdioLauncher",
     "LauncherLifelineError",
@@ -267,6 +273,7 @@ __all__ = [
     "PipedProcess",
     "PipedProcessLauncher",
     "Platform",
+    "PlatformHostProbe",
     "ProbeResult",
     "ProcessGroupUnreaped",
     "ProcessLauncher",

@@ -98,16 +98,39 @@ def test_docker_prompt_notes_snapshot(case_name: str, context: dict[str, object]
 
 
 _AGENT_NOTES_CASES = {
-    "git_writable": {"environment_notes": "Commands run in a container.", "git_writable": True},
-    "git_read_only": {"environment_notes": "Commands run in a container.", "git_writable": False},
-    "git_read_only_no_notes": {"environment_notes": "", "git_writable": False},
+    "git_writable": {
+        "environment_notes": "Commands run in a container.",
+        "git_writable": True,
+        "evaluation_host_shared": False,
+    },
+    "git_read_only": {
+        "environment_notes": "Commands run in a container.",
+        "git_writable": False,
+        "evaluation_host_shared": False,
+    },
+    "git_read_only_no_notes": {
+        "environment_notes": "",
+        "git_writable": False,
+        "evaluation_host_shared": False,
+    },
+    "shared_host": {
+        "environment_notes": "Commands run in a container.",
+        "git_writable": True,
+        "evaluation_host_shared": True,
+    },
 }
+
+_SHARED_HOST_SENTENCE = (
+    "The evaluation host is shared, so measurements may include contention from other work; "
+    "decide how to handle it."
+)
 
 
 @pytest.mark.parametrize(("case_name", "context"), _AGENT_NOTES_CASES.items())
 def test_agent_notes_snapshot(case_name: str, context: dict[str, object]) -> None:
     rendered = render_template("agent_notes.j2", template_dir=_ENVIRONMENTS_DIR, **context)
     _assert_matches_snapshot("agent", case_name, "agent_notes", rendered)
+    assert (_SHARED_HOST_SENTENCE in rendered) is bool(context["evaluation_host_shared"])
 
 
 def test_environment_templates_use_every_kwarg_their_call_site_passes() -> None:
@@ -131,7 +154,10 @@ def test_environment_templates_use_every_kwarg_their_call_site_passes() -> None:
             {"runtime_container_path": "/opt/vibesys-runtime/environment.md"},
         ),
         ("docker/prompt_notes.j2", {"history_root": Path("/opt/vibesys-history")}),
-        ("agent_notes.j2", {"environment_notes": "notes", "git_writable": False}),
+        (
+            "agent_notes.j2",
+            {"environment_notes": "notes", "git_writable": False, "evaluation_host_shared": False},
+        ),
     ]
     failures = []
     for name, kwargs in cases:
