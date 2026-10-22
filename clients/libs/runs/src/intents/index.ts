@@ -5,7 +5,10 @@ import {
   HostCallRequestSchema,
   HostCallResponseSchema,
   HostService,
+  IntentAction,
   type IntentState,
+  IntentStateSchema,
+  IntentStep,
   type PostIntentRequest,
   PostIntentRequestSchema,
   type PostIntentResponse,
@@ -164,14 +167,31 @@ export function intentTailRequest(runId: string): Uint8Array {
 }
 
 /** Writer position accompanies outcomes so earlier epochs remain history after a relaunch. */
-export type IntentOutcome = IntentState & {readonly epoch?: bigint; readonly sequence?: bigint};
+export type IntentOutcome = IntentState & {
+  readonly epoch?: bigint;
+  readonly sequence?: bigint;
+  readonly source?: 'epoch-started';
+};
 
 export function intentTailResponse(bytes: Uint8Array): readonly IntentOutcome[] {
   return fromBinary(TailResponseSchema, bytes).records.flatMap(bytes => {
     const record = fromBinary(RecordSchema, bytes);
-    return record.body.case === 'intent'
-      ? [{...record.body.value, epoch: BigInt(record.epoch), sequence: record.seq}]
-      : [];
+    const position = {epoch: BigInt(record.epoch), sequence: record.seq};
+    if (record.body.case === 'intent') return [{...record.body.value, ...position}];
+    // A committed successor epoch confirms a relaunch even without an IntentState row.
+    if (record.body.case === 'epochStarted' && record.epoch > 1)
+      return [
+        {
+          ...create(IntentStateSchema, {
+            controlId: String(record.epoch),
+            action: IntentAction.RESUME,
+            step: IntentStep.APPLIED,
+          }),
+          ...position,
+          source: 'epoch-started' as const,
+        },
+      ];
+    return [];
   });
 }
 
@@ -193,6 +213,7 @@ export {
   relaunchLabel,
   relaunchRequest,
   relaunchTarget,
+  sameRelaunchObservation,
 } from './relaunch.js';
 
 /** Writer lifecycle determines available live actions, independent of the reader or scrubber. */

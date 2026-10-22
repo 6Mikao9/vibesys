@@ -102,7 +102,7 @@ function LevelBody(props: {
  * a step opens and the breadcrumb appears.
  */
 const BREADCRUMB_ROW: readonly Crumb[] = [
-  {id: 'back', label: 'Run', press: () => undefined},
+  {id: 'back', label: 'Run'},
   {id: 'here', label: 'Here'},
 ];
 

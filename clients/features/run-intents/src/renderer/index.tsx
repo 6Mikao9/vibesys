@@ -62,6 +62,9 @@ export function useRunIntents(props: {
   ) => current.current?.send(request);
   if (!props.enabled || !snapshot || projectRoot === undefined)
     return {controls: null, busy, sendRequest};
+  const observedEpoch = props.relaunch?.epoch ?? 0n;
+  const confirmedEpoch = relaunch?.appliedEpoch ?? 0n;
+  const epoch = observedEpoch > confirmedEpoch ? observedEpoch : confirmedEpoch;
   const actions = runIntentActions(props.relaunch);
   const send = (action: RunIntentAction) => {
     if (!actions.includes(action)) return;
@@ -81,9 +84,9 @@ export function useRunIntents(props: {
     <IntentControls
       {...(relaunch ? {relaunch} : {})}
       actions={actions}
-      epoch={props.relaunch?.epoch ?? 0n}
+      epoch={epoch}
       busy={snapshot.matches({active: 'sending'})}
-      entries={intentRows(snapshot.context)}
+      entries={intentRows(snapshot.context, epoch)}
       error={snapshot.context.error}
       warning={snapshot.context.warning}
       guidanceOpen={guidanceOpen}

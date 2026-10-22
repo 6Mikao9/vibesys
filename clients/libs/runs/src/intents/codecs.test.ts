@@ -60,7 +60,7 @@ test('admission replies must match the request id', () => {
   expect(() => hostIntentResponse(new Uint8Array(), 'r-1')).toThrow();
 });
 
-test('only IntentState records are outcomes, with refusal reasons preserved', () => {
+test('intent and successor-epoch facts are history, with refusal reasons preserved', () => {
   const record = create(RecordSchema, {
     seq: 1n,
     body: {
@@ -78,11 +78,24 @@ test('only IntentState records are outcomes, with refusal reasons preserved', ()
     toBinary(
       TailResponseSchema,
       create(TailResponseSchema, {
-        records: [toBinary(RecordSchema, record), toBinary(RecordSchema, ignored)],
+        records: [
+          toBinary(RecordSchema, record),
+          toBinary(RecordSchema, ignored),
+          toBinary(
+            RecordSchema,
+            create(RecordSchema, {
+              seq: 3n,
+              epoch: 2,
+              body: {case: 'epochStarted', value: {epoch: 2}},
+            }),
+          ),
+        ],
       }),
     ),
   );
-  expect(result).toHaveLength(1);
+  expect(result).toHaveLength(2);
+  expect(result[1]?.source).toBe('epoch-started');
+  expect(result[1]?.action).toBe(IntentAction.RESUME);
   expect(result[0]?.reason).toBe('role ended');
 });
 

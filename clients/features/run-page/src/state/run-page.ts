@@ -479,6 +479,10 @@ export function runWallNow(state: RunPageState): number | null {
   return now === null ? null : now + (state.run.heard?.offset?.seconds ?? 0);
 }
 
+export function canResumeEnded(phase: RunPhase): boolean {
+  return phase.kind === 'ended' && phase.run.phase !== 'completed' && phase.end?.resumable === true;
+}
+
 /** The run's phase as the screen shows it. */
 export function runPhase(state: RunPageState): RunPhase {
   const core = state.run.core;
@@ -1051,7 +1055,7 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
       });
     case 'resume-ended': {
       const end = phase.kind === 'ended' ? phase.end : null;
-      return offered(phase.kind === 'ended' && end?.resumable === true, {
+      return offered(canResumeEnded(phase), {
         kind: 'resume-ended',
         fromRound: end?.resume_from_round ?? null,
       });

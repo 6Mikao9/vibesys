@@ -20,7 +20,7 @@ import {gatewayTransport} from './gateway-transport.js';
 interface GatewayRunProps {
   readonly seed: RunPageSeed;
   readonly bridge: GatewayBridge;
-  readonly settings: WelcomeBridge;
+  readonly settings: Pick<WelcomeBridge, 'onHostSettingsChanged' | 'runTransportV2'>;
   readonly schedule: ScheduleTimeout;
   readonly address: RunPageAddress;
   readonly legacy: (toggle: ReactNode) => ReactNode;
@@ -116,7 +116,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
 
 function runPorts(
   bridge: GatewayBridge,
-  settings: WelcomeBridge,
+  settings: GatewayRunProps['settings'],
   host: RunPageSeed['identity']['host'],
   schedule: ScheduleTimeout,
 ): GatewayRunPorts {

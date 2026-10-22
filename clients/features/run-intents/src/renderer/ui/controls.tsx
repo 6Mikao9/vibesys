@@ -76,9 +76,11 @@ export function IntentControls(props: {
       {props.relaunch &&
       !props.entries.some(
         entry =>
-          entry.action === IntentAction.RESUME && entry.epoch === props.relaunch?.appliedEpoch,
+          entry.action === IntentAction.RESUME &&
+          entry.status === 'applied' &&
+          entry.epoch === props.relaunch?.appliedEpoch,
       ) ? (
-        <RelaunchStatus {...props.relaunch} />
+        <RelaunchStatus {...props.relaunch} epoch={props.epoch} />
       ) : null}
       {props.warning ? (
         <Text tone="warn" title={props.warning}>
@@ -91,10 +93,13 @@ export function IntentControls(props: {
         </Text>
       ) : null}
       {props.entries.map(entry => (
-        <Row key={entry.id} gap="space-2" wrap>
+        <Row key={`${entry.source}:${entry.id}`} gap="space-2" wrap>
           <Text {...(entry.reason ? {title: entry.reason} : {})}>
             {ACTION_LABELS[entry.action]} · {STATUS_LABELS[entry.status]}
             {entry.epoch !== null && entry.epoch < props.epoch ? ' · Earlier epoch' : ''}
+            {entry.epoch === props.epoch && entry.status === 'applied' && !entry.current
+              ? ' · Earlier action'
+              : ''}
           </Text>
           {entry.status === 'uncertain' ? (
             <Button
@@ -106,7 +111,7 @@ export function IntentControls(props: {
         </Row>
       ))}
       <Dialog
-        open={props.guidanceOpen}
+        open={props.guidanceOpen && props.actions.includes('steer')}
         title="Guidance"
         dismiss={() => props.showGuidance(false)}
         actions={

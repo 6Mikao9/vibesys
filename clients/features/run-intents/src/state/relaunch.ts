@@ -8,6 +8,7 @@ import {
   type RelaunchResponse,
   RunLiveness,
   relaunchTarget,
+  sameRelaunchObservation,
 } from '@vibesys/runs/intents';
 import {assign, fromCallback, setup} from 'xstate';
 
@@ -34,6 +35,11 @@ export const relaunchMachine = setup({
       throw new Error('liveness was not provided');
     }),
   },
+  actions: {
+    livenessUnknown: assign({
+      liveness: ({context}) => ({epoch: context.liveness.epoch, value: RunLiveness.UNSPECIFIED}),
+    }),
+  },
   guards: {
     eligible: ({context}) => relaunchTarget(context.observation, context.liveness) !== null,
     nextEpoch: ({context}) =>
@@ -52,14 +58,26 @@ export const relaunchMachine = setup({
   invoke: {
     id: 'liveness',
     src: 'liveness',
-    onError: {actions: assign({liveness: {epoch: 0n, value: RunLiveness.UNSPECIFIED}})},
+    onError: {actions: 'livenessUnknown'},
   },
   on: {
     observe: {
-      guard: ({context, event}) => event.observation.epoch >= context.observation.epoch,
+      guard: ({context, event}) =>
+        event.observation.epoch >= context.observation.epoch &&
+        !sameRelaunchObservation(context.observation, event.observation),
       actions: assign(({event}) => ({observation: copyRelaunchObservation(event.observation)})),
     },
-    liveness: {actions: assign(({event}) => ({liveness: event.value}))},
+    liveness: {
+      guard: ({context, event}) =>
+        event.value.epoch >= context.liveness.epoch ||
+        (event.value.epoch === 0n && event.value.value === RunLiveness.UNSPECIFIED),
+      actions: assign(({context, event}) => ({
+        liveness:
+          event.value.epoch === 0n && event.value.value === RunLiveness.UNSPECIFIED
+            ? {epoch: context.liveness.epoch, value: RunLiveness.UNSPECIFIED}
+            : event.value,
+      })),
+    },
   },
   initial: 'ready',
   states: {

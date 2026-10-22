@@ -9,7 +9,7 @@ from hypothesis import strategies as st
 
 import vibesys.events as e
 import vs_proto.api as p
-from server.run_summary import RunSummaryFold
+from server.run_summary import RunSummaryFold, SummaryState
 from vibesys.records.api import MappingState, map_event
 
 
@@ -139,14 +139,17 @@ def journal(wall: int, specs: list[tuple[int, str]]) -> list[e.CoreEvent]:
     return [event.model_copy(update={"sequence": i}) for i, event in enumerate(observations, 1)]
 
 
-def project(events: list[e.CoreEvent]) -> tuple[dict[str, p.Span], list[p.Record], RunSummaryFold]:
+def project(
+    events: list[e.CoreEvent], *, omit_nulls: bool = False
+) -> tuple[dict[str, p.Span], list[p.Record], RunSummaryFold]:
     origin = events[0].timestamp.timestamp()
     state = MappingState("run-a", wall_span_clock=True, clock_epochs=((origin, 0),))
     records: list[p.Record] = []
     legacy = RunSummaryFold()
     for event in events:
-        assert legacy.consume(event.model_dump_json().encode())
-        result = map_event(state, event)
+        wire = usage_wire(event, omit_nulls=omit_nulls)
+        assert legacy.consume(wire)
+        result = map_event(state, e.CoreEvent.model_validate_json(wire))
         state = result.state
         records.extend(result.records)
     return {key: p.Span.from_binary(value) for key, value in state.spans}, records, legacy
@@ -253,44 +256,104 @@ def test_gate_enrichment_retains_command_and_runtime_label(command: str) -> None
     assert mapped.ended_at == 4
 
 
+def usage_wire(event: e.CoreEvent, *, omit_nulls: bool) -> bytes:
+    document = json.loads(event.model_dump_json())
+    if omit_nulls and isinstance(event.data, e.TurnUsageData):
+        document["data"] = {
+            key: value for key, value in document["data"].items() if value is not None
+        }
+    return json.dumps(document, separators=(",", ":")).encode()
+
+
+@pytest.fixture(scope="module")
+def usage_source() -> tuple[MappingState, SummaryState, e.CoreEvent, e.CoreEvent]:
+    events = journal(1700000000, [(1, "model-a"), (2, "model-b"), (3, "model-a")])
+    source = next(event for event in events if event.type == e.CoreEventType.TURN_USAGE_RECORDED)
+    finish = events[-1]
+    prefix = [event for event in events[:-1] if event.type != e.CoreEventType.TURN_USAGE_RECORDED]
+    state = MappingState("run-a", wall_span_clock=True, clock_epochs=((1700000000, 0),))
+    summary = RunSummaryFold()
+    for sequence, event in enumerate(prefix, 1):
+        wire = usage_wire(event.model_copy(update={"sequence": sequence}), omit_nulls=False)
+        assert summary.consume(wire)
+        state = map_event(state, e.CoreEvent.model_validate_json(wire)).state
+    return state, summary.state(), source, finish
+
+
+TOKEN_FIELDS = (
+    ("input", "input_tokens", "input"),
+    ("cache_read", "cache_read_input_tokens", "cache_read"),
+    ("cache_creation", "cache_creation_input_tokens", "cache_write"),
+    ("output", "output_tokens", "output"),
+    ("reasoning", "reasoning_output_tokens", "reasoning"),
+)
+
+
+def assert_usage_sources(state: MappingState, summary: RunSummaryFold) -> None:
+    spans = [p.Span.from_binary(value) for _, value in state.spans]
+    usage = [
+        p.AgentTurnAttrs.from_binary(span.label.attrs.value).usage
+        for span in spans
+        if span.label is not None
+        and span.label.kind == "agent_turn"
+        and span.label.attrs is not None
+    ]
+    for native, _, legacy in TOKEN_FIELDS:
+        reported = [
+            getattr(item, native) for item in usage if item is not None and item.has_field(native)
+        ]
+        assert (sum(reported) if reported else None) == getattr(summary.tokens, legacy)
+
+
 @pytest.mark.regression
 @given(
     increments=st.lists(
         st.tuples(
-            st.one_of(st.none(), st.integers(0, 1000000)),
-            st.one_of(st.none(), st.integers(0, 1000000)),
+            st.integers(0, 2),
+            st.dictionaries(
+                st.sampled_from([source for _, source, _ in TOKEN_FIELDS]),
+                st.one_of(st.none(), st.integers(0, 1000000)),
+                max_size=5,
+            ),
+            st.booleans(),
         ),
         min_size=1,
         max_size=8,
-    )
+    ),
+    omit_nulls=st.booleans(),
+    restart_at=st.integers(0, 8),
 )
-@example(increments=[(424250, 0), (857297, 0)])
-def test_repeated_turn_usage_has_one_total_in_summary_and_native_spans(
-    increments: list[tuple[int | None, int | None]],
+@example(
+    increments=[
+        (0, {"input_tokens": 424250, "output_tokens": 0}, True),
+        (0, {"input_tokens": 857297, "output_tokens": 0}, True),
+    ],
+    omit_nulls=False,
+    restart_at=1,
+)
+def test_list_and_page_token_totals_share_the_event_source(
+    usage_source: tuple[MappingState, SummaryState, e.CoreEvent, e.CoreEvent],
+    increments: list[tuple[int, dict[str, int | None], bool]],
+    *,
+    omit_nulls: bool,
+    restart_at: int,
 ) -> None:
-    events = journal(1700000000, [(1, "model-a")])
-    at = next(
-        i for i, event in enumerate(events) if event.type == e.CoreEventType.TURN_USAGE_RECORDED
-    )
-    source = events[at]
-    events[at : at + 1] = [
-        source.model_copy(
+    state, checkpoint, source, finish = usage_source
+    summary = RunSummaryFold.from_state(checkpoint)
+    for index, (turn, reading, named_span) in enumerate(increments):
+        if index == restart_at:
+            summary = RunSummaryFold.from_state(summary.state())
+        event = source.model_copy(
             update={
-                "data": e.TurnUsageData(
-                    span_id="op:turn-0", input_tokens=inputs, output_tokens=outputs
-                )
+                "sequence": checkpoint.through_sequence + index + 1,
+                "timestamp": finish.timestamp,
+                "execution_id": None if named_span else f"turn-{turn}",
+                "data": e.TurnUsageData.model_validate(
+                    {"span_id": f"op:turn-{turn}" if named_span else None, **reading}
+                ),
             }
         )
-        for inputs, outputs in increments
-    ]
-    events = [event.model_copy(update={"sequence": i}) for i, event in enumerate(events, 1)]
-    spans, _, legacy = project(events)
-    label = spans["op:turn-0"].label
-    assert label is not None
-    assert label.attrs is not None
-    usage = p.AgentTurnAttrs.from_binary(label.attrs.value).usage
-    assert usage is not None
-    assert (usage.input if usage.has_field("input") else None) == legacy.tokens.input
-    assert (usage.output if usage.has_field("output") else None) == legacy.tokens.output
-    assert usage.has_field("input") == (legacy.tokens.input is not None)
-    assert usage.has_field("output") == (legacy.tokens.output is not None)
+        wire = usage_wire(event, omit_nulls=omit_nulls)
+        assert summary.consume(wire)
+        state = map_event(state, e.CoreEvent.model_validate_json(wire)).state
+        assert_usage_sources(state, summary)

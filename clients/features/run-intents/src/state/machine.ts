@@ -4,10 +4,10 @@ import {
   copyIntent,
   IntentAction,
   IntentRefused,
-  IntentStep,
   intentAdmissionWarning,
 } from '@vibesys/runs/intents';
 import {assign, fromCallback, setup} from 'xstate';
+import {foldOutcomes, type OutcomeRow} from './history.js';
 
 export interface RunIntentsInput {
   readonly enabled: boolean;
@@ -19,15 +19,17 @@ export interface IntentEntry {
 }
 export interface IntentRow {
   readonly id: string;
+  readonly source: 'intent' | 'epoch-started';
   readonly action: IntentAction;
   readonly status: IntentEntry['status'];
   readonly reason: string | null;
   readonly epoch: bigint | null;
+  readonly current: boolean;
 }
 export interface RunIntentsContext {
   readonly enabled: boolean;
   readonly entries: readonly IntentEntry[];
-  readonly outcomes: readonly IntentRow[];
+  readonly outcomes: readonly OutcomeRow[];
   readonly current: PostIntentRequest | null;
   readonly error: string | null;
   readonly warning: string | null;
@@ -40,15 +42,16 @@ export type RunIntentsEvent =
 
 function outcomeEntries(
   entries: readonly IntentEntry[],
-  outcomes: readonly IntentOutcome[],
+  outcomes: readonly OutcomeRow[],
 ): readonly IntentEntry[] {
   return entries.map(entry => {
-    const outcome = outcomes.find(item => item.controlId === entry.request.requestId);
+    const outcome = outcomes.find(
+      item => item.source === 'intent' && item.id === entry.request.requestId,
+    );
     if (!outcome) return entry;
-    if (outcome.step !== IntentStep.APPLIED && outcome.step !== IntentStep.REFUSED) return entry;
     return {
       ...entry,
-      status: outcome.step === IntentStep.APPLIED ? 'applied' : 'refused',
+      status: outcome.status,
       reason: outcome.reason ?? null,
     };
   });
@@ -79,26 +82,11 @@ export const runIntentsMachine = setup({
     ),
     apply: assign(({context, event}) => {
       if (event.type !== 'outcomes') return {};
-      const entries = outcomeEntries(context.entries, event.outcomes);
+      const outcomes = foldOutcomes(context.outcomes, event.outcomes);
+      const entries = outcomeEntries(context.entries, outcomes);
       return {
         entries,
-        outcomes: event.outcomes
-          .filter(
-            outcome => outcome.step === IntentStep.APPLIED || outcome.step === IntentStep.REFUSED,
-          )
-          .reduce<readonly IntentRow[]>(
-            (rows, outcome) => [
-              ...rows.filter(row => row.id !== outcome.controlId),
-              {
-                id: outcome.controlId,
-                action: outcome.action,
-                status: outcome.step === IntentStep.APPLIED ? 'applied' : 'refused',
-                reason: outcome.reason ?? null,
-                epoch: outcome.epoch ?? null,
-              },
-            ],
-            context.outcomes,
-          ),
+        outcomes,
         error: entries.find(entry => entry.status === 'uncertain')?.reason ?? null,
         warning: entries.every(entry => entry.status === 'applied' || entry.status === 'refused')
           ? null
@@ -254,9 +242,10 @@ const INTENT_ACTIONS: Record<NonNullable<PostIntentRequest['intent']['case']>, I
 };
 
 /** History includes writer outcomes posted elsewhere, plus local requests still awaiting them. */
-export function intentRows(context: RunIntentsContext): readonly IntentRow[] {
+export function intentRows(context: RunIntentsContext, epoch: bigint): readonly IntentRow[] {
   const local = context.entries.map(entry => ({
     id: entry.request.requestId,
+    source: 'intent' as const,
     action: entry.request.intent.case
       ? INTENT_ACTIONS[entry.request.intent.case]
       : IntentAction.UNSPECIFIED,
@@ -264,11 +253,19 @@ export function intentRows(context: RunIntentsContext): readonly IntentRow[] {
     reason: entry.reason,
     epoch: entry.request.expectedEpoch,
   }));
-  return [
+  const rows = [
     ...context.outcomes.map(row => ({
       ...row,
       epoch: row.epoch ?? local.find(entry => entry.id === row.id)?.epoch ?? null,
     })),
-    ...local.filter(row => !context.outcomes.some(outcome => outcome.id === row.id)),
+    ...local.filter(
+      row =>
+        !context.outcomes.some(outcome => outcome.source === 'intent' && outcome.id === row.id),
+    ),
   ];
+  const latest = rows.filter(row => row.status === 'applied' && row.epoch === epoch).at(-1);
+  return rows.map(row => ({
+    ...row,
+    current: latest !== undefined && row.id === latest.id && row.source === latest.source,
+  }));
 }

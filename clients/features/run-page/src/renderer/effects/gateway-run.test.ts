@@ -15,6 +15,7 @@ import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
 import {FakeClock} from '@vibesys/transport/testing';
+import fc from 'fast-check';
 import type {SnapshotFrom} from 'xstate';
 import {
   gatewayRunMachine,
@@ -675,48 +676,63 @@ test('reply attachments load through the same verified content owner as objectiv
   ).toBe(true);
 });
 
-test('a quiet live log remains subscribed and an error belongs only to that stream', async () => {
+test('property: quiet logs and peer failures stay scoped to their stream for any idle interval', async () => {
   const fixture = storeRunFixture('live');
-  const transport = new FakeRunTransport({
-    ...fixture,
-    streams: {...fixture.streams, quiet: new Uint8Array()},
-  });
-  const clock = new FakeClock();
-  const actor = startGatewayRun(
-    {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-      watchSetting: () => () => {},
-      setting: async () => true,
-    },
-    clock.schedule,
-    {seed: SEED},
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({min: 30000, max: 3600000}),
+      fc.constantFrom('Not found', 'Unsupported by an older host', 'Connection closed'),
+      async (idle, error) => {
+        const transport = new FakeRunTransport({
+          ...fixture,
+          streams: {...fixture.streams, quiet: new Uint8Array()},
+        });
+        const clock = new FakeClock();
+        const actor = startGatewayRun(
+          {
+            reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+            watchSetting: () => () => {},
+            setting: async () => true,
+          },
+          clock.schedule,
+          {seed: SEED},
+        );
+        try {
+          await reached(
+            actor,
+            snapshot =>
+              snapshot.context.load?.complete === true &&
+              Object.keys(snapshot.context.text).length > 0,
+          );
+          transport.observe(
+            create(WatchRunsResponseSchema, {
+              runId: SEED.identity.runId,
+              liveness: RunLiveness.ALIVE,
+              head: {epoch: 1},
+            }),
+          );
+          actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
+          await transport.called(`${SERVICE}TailStream`);
+          clock.advanceBy(idle);
+          expect(actor.getSnapshot().context.error).toBeNull();
+          expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
+          expect(actor.getSnapshot().matches({active: {logs: 'following'}})).toBe(true);
+          transport.fail(`${SERVICE}TailStream`, new Error(error));
+          await reached(actor, snapshot => snapshot.context.ui.logProblem !== undefined);
+          expect(actor.getSnapshot().context.error).toBeNull();
+          transport.recover(`${SERVICE}TailStream`);
+          actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
+          expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
+          clock.advanceBy(idle);
+          expect(actor.getSnapshot().context.error).toBeNull();
+          actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
+          await reached(actor, snapshot => snapshot.context.ui.views['build-log'] !== undefined);
+          expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
+        } finally {
+          actor.stop();
+        }
+      },
+    ),
+    {numRuns: 16, seed: 253},
   );
-  try {
-    await reached(
-      actor,
-      snapshot =>
-        snapshot.context.load?.complete === true && Object.keys(snapshot.context.text).length > 0,
-    );
-    transport.observe(
-      create(WatchRunsResponseSchema, {
-        runId: SEED.identity.runId,
-        liveness: RunLiveness.ALIVE,
-        head: {epoch: 1},
-      }),
-    );
-    actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
-    await transport.called(`${SERVICE}TailStream`);
-    clock.advanceBy(60000);
-    expect(actor.getSnapshot().context.error).toBeNull();
-    expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
-    expect(actor.getSnapshot().matches({active: {logs: 'following'}})).toBe(true);
-    actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'missing'}});
-    await reached(actor, snapshot => snapshot.context.ui.logProblem !== undefined);
-    expect(actor.getSnapshot().context.error).toBeNull();
-    actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
-    await reached(actor, snapshot => snapshot.context.ui.views['build-log'] !== undefined);
-    expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
-  } finally {
-    actor.stop();
-  }
 });

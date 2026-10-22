@@ -1,11 +1,12 @@
 /** Relaunch uses HostCall; the epoch is confirmed by the host writer. */
-import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {clone, create, equals, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   HostCallRequestSchema,
   HostCallResponseSchema,
   HostService,
   type Lifecycle,
   LifecycleSchema,
+  Outcome,
   RelaunchRefusal,
   type RelaunchRequest,
   RelaunchRequestSchema,
@@ -87,6 +88,15 @@ export interface RelaunchObservation {
   readonly lifecycle?: Lifecycle;
 }
 
+export function sameRelaunchObservation(a: RelaunchObservation, b: RelaunchObservation): boolean {
+  return (
+    a.epoch === b.epoch &&
+    (a.lifecycle === undefined || b.lifecycle === undefined
+      ? a.lifecycle === b.lifecycle
+      : equals(LifecycleSchema, a.lifecycle, b.lifecycle))
+  );
+}
+
 /** Use the latest writer facts, never the scrubbed timeline position. */
 export function relaunchTarget(
   observation: RelaunchObservation,
@@ -98,7 +108,9 @@ export function relaunchTarget(
   const state = observation.lifecycle?.state;
   if (state?.case === 'parked') return {epoch: observation.epoch, state: 'parked'};
   if (state?.case === 'ended') {
-    return state.value.resumable ? {epoch: observation.epoch, state: 'ended'} : null;
+    return state.value.resumable && state.value.outcome !== Outcome.FINISHED
+      ? {epoch: observation.epoch, state: 'ended'}
+      : null;
   }
   return live === RunLiveness.INTERRUPTED ? {epoch: observation.epoch, state: 'interrupted'} : null;
 }
