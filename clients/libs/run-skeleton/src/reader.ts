@@ -9,7 +9,6 @@ import {
   TailStreamRequestSchema,
   TailStreamResponseSchema,
   WatchRunsRequestSchema,
-  type WatchRunsResponse,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
@@ -176,7 +175,7 @@ export function gatewayReader(
                   hint: response.removed
                     ? undefined
                     : {
-                        epoch: observedEpoch(response),
+                        epoch: response.head?.epoch ?? 0,
                         value: response.liveness,
                         head: response.head,
                       },
@@ -203,10 +202,4 @@ export function gatewayReader(
     log: (runId, streamId, signal, receive, fromOffset) =>
       log(transport, runId, streamId, signal, receive, fromOffset),
   };
-}
-
-function observedEpoch(response: WatchRunsResponse): number {
-  // Phase 1 heads omit the canonical epoch (proto3 decodes it as zero).
-  // Preserve their process epoch for fencing; liveness still comes from the gateway's lock probe.
-  return response.head?.epoch || response.head?.process?.epoch || 0;
 }

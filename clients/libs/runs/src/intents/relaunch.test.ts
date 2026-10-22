@@ -57,7 +57,7 @@ test('WatchRuns liveness belongs to its run and writer epoch; removal clears it'
   const response = create(WatchRunsResponseSchema, {
     runId: 'run-a',
     liveness: RunLiveness.INTERRUPTED,
-    head: {process: {epoch: 3}},
+    head: {epoch: 3, process: {epoch: 9}},
   });
   expect(livenessResponse(toBinary(WatchRunsResponseSchema, response), 'run-b')).toBeNull();
   expect(livenessResponse(toBinary(WatchRunsResponseSchema, response), 'run-a')).toEqual({
@@ -75,5 +75,16 @@ test('a newer host epoch fences an older parked snapshot', () => {
   const lifecycle = create(LifecycleSchema, {state: {case: 'parked', value: {}}});
   for (const value of [RunLiveness.ALIVE, RunLiveness.INTERRUPTED, RunLiveness.ENDED]) {
     expect(relaunchTarget({epoch: 1n, lifecycle}, {epoch: 2n, value})).toBeNull();
+  }
+});
+
+test('process metadata never supplies a missing canonical epoch', () => {
+  for (const epoch of [1, 7, 4294967295]) {
+    const response = create(WatchRunsResponseSchema, {
+      runId: 'run-a',
+      head: {process: {epoch}},
+      liveness: RunLiveness.INTERRUPTED,
+    });
+    expect(livenessResponse(toBinary(WatchRunsResponseSchema, response), 'run-a')?.epoch).toBe(0n);
   }
 });

@@ -80,7 +80,7 @@ for (const epoch of [1, 7, 4294967295])
             if (observed?.head) resolve(observed);
           });
         });
-        expect(hint.epoch).toBe(format === 'absent' ? 0 : epoch);
+        expect(hint.epoch).toBe(format === 'absent' || format === 'process' ? 0 : epoch);
         expect(hint.head).toEqual(head);
         for (const paused of [false, true]) {
           const skeleton = foldSkeleton(seedSkeleton(), [
@@ -104,7 +104,9 @@ for (const epoch of [1, 7, 4294967295])
             }),
           ]);
           expect(observeRun(skeleton, {...hint, value: RunLiveness.ALIVE}).interrupted).toBe(false);
-          expect(observeRun(skeleton, hint).interrupted).toBe(format !== 'absent');
+          expect(observeRun(skeleton, hint).interrupted).toBe(
+            format !== 'absent' && format !== 'process',
+          );
           expect(observeRun(skeleton, {...hint, epoch: epoch - 1}).interrupted).toBe(false);
           expect(observeRun(skeleton, {...hint, epoch: epoch + 1}).interrupted).toBe(false);
           expect(observeRun(skeleton).lifecycle?.state.case).toBe('running');

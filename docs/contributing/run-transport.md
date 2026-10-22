@@ -142,6 +142,15 @@ chart, and whether the run needs its user. The run writes it, computing the head
 metric points a client plots; no reader folds a journal for it.
 This deletes the second (Python) copy of the summary fold.
 
+The canonical epoch comes from committed `EpochStarted` records. Process metadata
+never supplies it. For retained phase-1 heads whose epoch cache is zero, `WatchRuns`
+decodes the published log prefix into its response without rewriting either file.
+An explicit zero committed sequence admits no records; an absent sequence retains
+the phase-1 complete-prefix rule. Without a log the epoch remains unknown. Native
+heads with a populated epoch cache avoid this scan. Python observation readers use
+`read_run_head`, which decodes missing caches through the same committed-prefix fold
+as `read_current_epoch`; clients consume the canonical response field directly. Lock probes still decide liveness independently.
+
 ## Intents and epochs
 
 **Operator controls** are Pause, Pause now, Resume and Guidance. A viewer posts a typed intent

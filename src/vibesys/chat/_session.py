@@ -70,12 +70,12 @@ def session_head(state: Keyframe, process: RunProcess | None) -> RunHead:
 
 
 def run_head(path: Path) -> tuple[int, bool]:
-    """Read the run's published lifecycle, with no write access to run storage."""
+    """Read canonical epoch and lifecycle through the shared observation reader."""
     head = read_run_head(path.with_name("run.log"))
-    if head.process is None or head.lifecycle is None or head.lifecycle.state is None:
-        message = "chat requires a native run.head with process and lifecycle"
+    if head.epoch < 1 or head.lifecycle is None or head.lifecycle.state is None:
+        message = "chat requires a published epoch with lifecycle"
         raise ValueError(message)
-    return head.process.epoch, head.lifecycle.state.field == "parked"
+    return head.epoch, head.lifecycle.state.field == "parked"
 
 
 class ChatSession:

@@ -532,7 +532,21 @@ class FileRunContent:
 
 
 def read_run_head(path: Path) -> RunHead:
-    """Read the validated writer observation beside ``path``, never recovery state."""
+    """Read a validated observation with its canonical epoch, never recovery state.
+
+    Native heads cache the committed epoch. Retained phase-1 heads omit it;
+    derive only that missing cache from the published prefix, never process
+    metadata. Original files stay unchanged. Without a log it remains unknown.
+    """
+    head = _read_raw_head(path)
+    log = path.with_name("run.log")
+    if head.epoch == 0 and log.exists():
+        with log.open("rb") as stream:
+            head.epoch = _read_epoch_prefix(RunLogReader(stream), head, log).number
+    return head
+
+
+def _read_raw_head(path: Path) -> RunHead:
     head = RunHead.from_binary(path.with_name("run.head").read_bytes())
     validate(head)
     return head
@@ -546,7 +560,7 @@ def read_current_epoch(path: Path) -> CurrentEpoch | None:
     retain their legacy complete-record rule.
     """
     head_path = path.parent / "run.head"
-    head = read_run_head(path) if head_path.exists() else None
+    head = _read_raw_head(path) if head_path.exists() else None
     if not path.exists():
         if head is not None:
             message = f"{path}: run.head exists without run.log"

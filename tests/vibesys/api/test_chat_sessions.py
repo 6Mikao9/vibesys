@@ -30,16 +30,19 @@ from vibesys.api.testing import FakeAuxiliaryAgents, FakeManagedAgent, FakeRunRe
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_proto.api import (
+    RUN_LOG_MAGIC,
     ChatMessageRequest,
     ChatSessionCreated,
     ChatSteerProposed,
     Ended,
+    EpochStarted,
     HostCallRequest,
     HostCallResponse,
     Lifecycle,
     Oneof,
     Outcome,
     Parked,
+    Record,
     RunFailure,
     RunFailureKind,
     RunHead,
@@ -51,7 +54,7 @@ from vs_proto.api import (
     Timestamp,
     validate,
 )
-from vs_runlog.api import RunLogReader, assert_run_unlocked
+from vs_runlog.api import RunLogReader, assert_run_unlocked, encode_frame
 from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScript, Sim, SimThreads
 
 if TYPE_CHECKING:
@@ -118,11 +121,29 @@ def publish(request: ChatMessageRequest, *, parked: bool = False, epoch: int = 1
             state=Oneof("parked", Parked()) if parked else Oneof("running", Running())
         ),
         process=RunProcess(pid=1, epoch=epoch, started_at=Timestamp(seconds=1)),
-        committed_seq=0,
+        committed_seq=2,
+        epoch=epoch,
     )
     validate(head)
     path = Project.run_log_path_for(request.project_root, request.run_id).parent
     path.mkdir(parents=True, exist_ok=True)
+    assert head.lifecycle is not None
+    (path / "run.log").write_bytes(
+        RUN_LOG_MAGIC
+        + encode_frame(
+            Record(
+                seq=1,
+                epoch=epoch,
+                at=Timestamp(seconds=1),
+                body=Oneof("epoch_started", EpochStarted(epoch=epoch)),
+            )
+        )
+        + encode_frame(
+            Record(
+                seq=2, epoch=epoch, at=Timestamp(seconds=1), body=Oneof("lifecycle", head.lifecycle)
+            )
+        )
+    )
     (path / "run.head").write_bytes(head.to_binary())
 
 
@@ -420,12 +441,36 @@ def test_invalid_inbox_routes_are_rejected_without_answering(chat: ChatMessageRe
     assert status.reason == "chat message routing does not match its inbox"
 
 
-def test_reading_an_incomplete_native_head_is_refused(chat: ChatMessageRequest) -> None:
-    path = Project.run_log_path_for(chat.project_root, chat.run_id).parent / "run.head"
+@pytest.mark.regression
+@pytest.mark.parametrize("head_epoch", [0, 7])
+@pytest.mark.parametrize("process_epoch", [None, 1, 8])
+@pytest.mark.parametrize("parked", [False, True])
+def test_chat_epoch_comes_from_the_committed_log(
+    chat: ChatMessageRequest, head_epoch: int, process_epoch: int | None, *, parked: bool
+) -> None:
+    publish(chat, epoch=7, parked=parked)
+    path = Project.run_head_path_for(chat.project_root, chat.run_id)
     head = RunHead.from_binary(path.read_bytes())
-    head.process = None
+    head.epoch = head_epoch
+    if process_epoch is None:
+        head.process = None
+    else:
+        assert head.process is not None
+        head.process.epoch = process_epoch
+    original = head.to_binary()
+    path.write_bytes(original)
+    assert run_head(path) == (7, parked)
+    assert path.read_bytes() == original
+
+
+@pytest.mark.regression
+def test_reading_an_unpublished_chat_epoch_is_refused(chat: ChatMessageRequest) -> None:
+    path = Project.run_head_path_for(chat.project_root, chat.run_id)
+    head = RunHead.from_binary(path.read_bytes())
+    head.committed_seq = 0
+    head.epoch = 0
     path.write_bytes(head.to_binary())
-    with pytest.raises(ValueError, match="process and lifecycle"):
+    with pytest.raises(ValueError, match="published epoch"):
         run_head(path)
 
 

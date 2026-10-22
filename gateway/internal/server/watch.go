@@ -78,7 +78,7 @@ rescan:
 				}
 				return rpcError(err)
 			}
-			head, err := readHead(dir)
+			head, err := readObservedHead(dir)
 			if err != nil {
 				return rpcError(err)
 			}
