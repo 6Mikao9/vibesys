@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_runtime.api import render_stage_failure
+from vs_runtime.api import BenchmarkObjective, render_stage_failure
 from vs_runtime.api.comparisons import ComparisonUnavailableError
 from vs_runtime.api.infrastructure import SemanticSlurmEvaluationExecutor
 from vs_sandbox.api.slurm import (
@@ -45,8 +45,10 @@ class SlurmSampleExecutors:
         sleeper: Sleeper,
         processes: Processes | None,
         cluster: Cluster | None,
+        objectives: tuple[BenchmarkObjective, ...] = (),
     ) -> None:
         """Bind the operator's settings and the plans every sample's job runs."""
+        self._objectives = objectives
         self._settings = settings
         self._evaluation = evaluation
         self._trusted = trusted
@@ -108,4 +110,5 @@ class SlurmSampleExecutors:
             sleeper=self._sleeper,
             processes=self._processes,
             cluster=self._cluster,
+            objectives=self._objectives,
         )

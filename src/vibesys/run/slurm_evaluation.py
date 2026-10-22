@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_runtime.api import render_stage_failure
+from vs_runtime.api import BenchmarkObjective, render_stage_failure
 from vs_runtime.api.infrastructure import SemanticSlurmEvaluationExecutor
 
 if TYPE_CHECKING:
@@ -41,6 +41,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
         stage_output: StageOutputOpener | None = None,
         root_proof: WorkspaceRootProof | None = None,
         control: RunControlChannel | None = None,
+        objectives: tuple[BenchmarkObjective, ...] = (),
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state."""
         super().__init__(
@@ -61,6 +62,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
             stage_output=stage_output,
             root_proof=root_proof,
             control=control,
+            objectives=objectives,
         )
 
 

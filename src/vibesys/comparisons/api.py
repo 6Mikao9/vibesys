@@ -19,6 +19,7 @@ from vibesys.comparisons._subjects import comparison_subjects
 from vibesys.domains.registry import resolve_domain
 from vibesys.run.evaluation import trusted_evaluation_plan
 from vs_project.api import comparison_directory, comparison_namespace, load_objectives
+from vs_runtime.api import BenchmarkObjective, MetricDirection
 from vs_runtime.api.comparisons import (
     ComparisonFailed,
     ComparisonMeasured,
@@ -200,6 +201,10 @@ async def measure_comparisons(  # noqa: PLR0913  # lint-waiver: LW-930097 [PLR09
         sleeper=host.sleeper,
         processes=host.processes,
         cluster=host.cluster,
+        objectives=tuple(
+            BenchmarkObjective(name=axis.name, direction=MetricDirection(axis.direction))
+            for axis in load_objectives(bundle.task_root).objective
+        ),
     )
     measurer = ComparisonMeasurer(
         _store(project), executors, clock=host.clock, sleeper=host.sleeper

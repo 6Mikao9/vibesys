@@ -41,6 +41,7 @@ from vs_evaluation.api import (
 )
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
+from vs_runtime._evaluation_jobs import headline_first
 from vs_runtime._failure_classification import is_unsettled
 from vs_runtime._measurement_progress import StageRun
 from vs_sim.api import DISCARD
@@ -324,10 +325,11 @@ class PollingEvaluationExecutor:
             operator_summary = result.operator_feedback
             partial = result.partial_measurement
             unmet = result.unmet_requirement
+            row = result.row or {}
             metrics = tuple(
                 EvidenceMetric(
                     name=name,
-                    value=value,
+                    value=row[name],
                     direction=(
                         result.metric_direction.value
                         if name == result.metric_name and result.metric_direction is not None
@@ -335,7 +337,7 @@ class PollingEvaluationExecutor:
                     ),
                     unit=result.metric_unit if name == result.metric_name else None,
                 )
-                for name, value in sorted((result.row or {}).items())
+                for name in headline_first(row, result.metric_name)
             )
         else:
             message = "direct profile evaluation is not supported by the trusted runtime"

@@ -95,6 +95,7 @@ def _write_project(
     accuracy_command: str = "true",
     benchmark_command: tuple[str, ...] = ("python", "benchmark.py"),
     protocol_row: dict[str, float] | None = None,
+    task: str = "default",
 ) -> None:
     root.mkdir(parents=True)
     (root / "queue.py").write_text("VALUE = 1\n")
@@ -142,6 +143,7 @@ def _write_project(
         f"[benchmark]\ncommand = {json.dumps(benchmark_command)}\n"
         f"{result_contract}",
         objective="Improve the queue.\n",
+        task=task,
     )
 
 
@@ -151,11 +153,18 @@ def _container_cli_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
 
 
-def _request(project_root: Path, *, agent_backend: str | None = None) -> RunRequest:
+def _request(
+    project_root: Path,
+    *,
+    agent_backend: str | None = None,
+    options: dict[str, object] | None = None,
+) -> RunRequest:
     return RunRequest(
         run_environment=fake_docker_environment(),
         project_root=project_root,
-        orchestration=OrchestrationDescriptor(id="evaluation", config_version=1, options={}),
+        orchestration=OrchestrationDescriptor(
+            id="evaluation", config_version=1, options={} if options is None else options
+        ),
         config=Config.model_validate({"model": {"name": "claude-sonnet-5"}}),
         input_bundle=load_task(project_root),
         objective="Improve the queue.",
@@ -184,6 +193,7 @@ def _run_project(
     body: Callable[[CoreHost], Awaitable[_Result]],
     *,
     agent_backend: str | None = None,
+    options: dict[str, object] | None = None,
 ) -> tuple[_Result, LocalRunIntegration]:
     integration = LocalRunIntegration(
         clock=ManualClock(),
@@ -195,7 +205,7 @@ def _run_project(
 
     async def exercise() -> _Result:
         async with open_core_host(
-            _request(project_root, agent_backend=agent_backend),
+            _request(project_root, agent_backend=agent_backend, options=options),
             integration,
             backend_factory=host_container_backend,
         ) as ctx:
@@ -241,6 +251,76 @@ def test_each_gate_writes_its_command_output_to_the_sink_it_was_given(tmp_path: 
         assert benchmark_output.stdout.startswith(b"warmup\n")
     finally:
         integration.close()
+
+
+# The row the Flint request-factory benchmark reported, and the axes of its task file,
+# headline first. The launch records those axes; the measurement asks for no others.
+_FLINT_ROW = {
+    "completed_requests": 2.0,
+    "decode_tokens_per_second": 18.0,
+    "scored_duration_s": 1.0,
+    "startup_duration_s": 40.0,
+    "timed_out_requests": 0.0,
+    "tpot_ms_avg": 53.53,
+    "ttft_ms_avg": 40596.54,
+}
+_FLINT_OBJECTIVES = (
+    '[[objective]]\nname = "tpot_ms_avg"\ndirection = "min"\n\n'
+    '[[objective]]\nname = "ttft_ms_avg"\ndirection = "min"\n\n'
+    '[[objective]]\nname = "completed_requests"\ndirection = "max"\n'
+)
+_FLINT_SPACE = {
+    "metric_space": {
+        "objectives": [
+            {"name": "tpot_ms_avg", "direction": "min"},
+            {"name": "ttft_ms_avg", "direction": "min"},
+            {"name": "completed_requests", "direction": "max"},
+        ],
+        "relative_noise": 0.0,
+    }
+}
+
+
+def _flint_headline(tmp_path: Path, *, options: dict[str, object] | None) -> BenchmarkEvaluation:
+    """Measure the Flint row the way the polling executor does: no objectives argument."""
+    project_root = tmp_path / "project"
+    _write_project(
+        project_root,
+        protocol_row=_FLINT_ROW,
+        task="flint-m3pro-quick",
+    )
+    (project_root / ".vibesys" / "tasks" / "flint-m3pro-quick" / "objectives.toml").write_text(
+        _FLINT_OBJECTIVES, encoding="utf-8"
+    )
+
+    async def body(ctx: CoreHost) -> BenchmarkEvaluation:
+        return await ctx.evaluation.benchmark(ctx.workspaces.root, output=DISCARD)
+
+    result, integration = _run_project(project_root, body, options=options)
+    try:
+        return result
+    finally:
+        integration.close()
+
+
+def test_a_recorded_metric_space_headlines_the_first_objective(tmp_path: Path) -> None:
+    result = _flint_headline(tmp_path, options=_FLINT_SPACE)
+
+    assert result.passed
+    assert result.metric_name == "tpot_ms_avg"
+    assert result.metric_value == 53.53
+    assert result.metric_direction is MetricDirection.MINIMIZE
+    assert result.row == _FLINT_ROW
+
+
+def test_a_named_task_objectives_file_headlines_when_the_launch_recorded_no_space(
+    tmp_path: Path,
+) -> None:
+    result = _flint_headline(tmp_path, options=None)
+
+    assert result.passed
+    assert result.metric_name == "tpot_ms_avg"
+    assert result.metric_value == 53.53
 
 
 def test_multiple_metrics_without_objectives_have_no_implicit_headline(tmp_path: Path) -> None:

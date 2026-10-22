@@ -16,6 +16,7 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
+from vibesys.inputs import load_objectives
 from vs_core.api import EvidenceKind
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api import (
@@ -253,6 +254,53 @@ async def _validate_local(
     )
 
 
+def run_benchmark_objectives(request: RunRequest) -> tuple[BenchmarkObjective, ...]:
+    """The axes this run ranks on, headline first.
+
+    A launch records them as ``metric_space`` on the orchestration options, including an
+    empty space (a scalar benchmark, or an explicit override). That record is authoritative.
+    A launch that records no space, such as the plain loop, uses the task directory's
+    ``objectives.toml``. The production benchmark caller passes no objectives of its own,
+    so this is what selects the headline of a multi-metric row.
+    """
+    options = request.orchestration.options
+    if "metric_space" in options:
+        return _objectives_of_space(options["metric_space"])
+    loaded = load_objectives(request.input_bundle.task_root)
+    return tuple(
+        BenchmarkObjective(name=axis.name, direction=MetricDirection(axis.direction))
+        for axis in loaded.objective
+    )
+
+
+def _objectives_of_space(raw: object) -> tuple[BenchmarkObjective, ...]:
+    if not isinstance(raw, dict):
+        message = "metric_space must be an object"
+        raise TypeError(message)
+    axes = raw.get("objectives", ())
+    if not isinstance(axes, list):
+        message = "metric_space.objectives must be a list"
+        raise TypeError(message)
+    selected: list[BenchmarkObjective] = []
+    for index, axis in enumerate(axes):
+        if not isinstance(axis, dict):
+            message = f"metric_space.objectives[{index}] must be an object"
+            raise TypeError(message)
+        name = axis.get("name")
+        direction = axis.get("direction")
+        if not isinstance(name, str) or not name:
+            message = f"metric_space.objectives[{index}].name must be a non-empty string"
+            raise ValueError(message)
+        if direction not in {"max", "min"}:
+            message = (
+                f"metric_space.objectives[{index}].direction must be 'max' or 'min', "
+                f"got {direction!r}"
+            )
+            raise ValueError(message)
+        selected.append(BenchmarkObjective(name=name, direction=MetricDirection(direction)))
+    return tuple(selected)
+
+
 class _EvaluationAdapter:
     """Apply VibeSys receipt, snapshot, metric, and event policy."""
 
@@ -266,6 +314,7 @@ class _EvaluationAdapter:
     ) -> None:
         self._run_id = run_id
         self._request = request
+        self._objectives = run_benchmark_objectives(request)
         self._runtime_evaluation = runtime.evaluation
         self._events = events
         self._log = log
@@ -386,8 +435,13 @@ class _EvaluationAdapter:
         objectives: tuple[BenchmarkObjective, ...] = (),
         output: OutputSink,
     ) -> BenchmarkEvaluation:
-        """Run the benchmark and apply policy-selected headline semantics."""
-        self._validate_objectives(objectives)
+        """Run the benchmark and apply policy-selected headline semantics.
+
+        An empty *objectives* uses the run's own axes. The in-process executor calls
+        this with none, and a multi-metric row has no headline without them.
+        """
+        selected = objectives or self._objectives
+        self._validate_objectives(selected)
         live = self._live_workspace(workspace)
         if self._request.agent_backend == "stub":
             return BenchmarkEvaluation(executed=False)
@@ -396,14 +450,14 @@ class _EvaluationAdapter:
         try:
             run = await self._runtime_evaluation.benchmark(
                 live,
-                required_metrics=frozenset(item.name for item in objectives),
+                required_metrics=frozenset(item.name for item in selected),
                 output=output,
             )
             result = run.result
             self._log_provisioning(result.provisioned_volumes, result.operator_failure)
             evaluation = self._interpret_benchmark(
                 result,
-                objectives,
+                selected,
                 run.contract,
             )
             self._publish_streams(
@@ -659,4 +713,9 @@ def create_evaluation(
     return _EvaluationAdapter(run_id, request, runtime, events, log)
 
 
-__all__ = ["CoreLocalValidationEvents", "create_evaluation", "trusted_evaluation_plan"]
+__all__ = [
+    "CoreLocalValidationEvents",
+    "create_evaluation",
+    "run_benchmark_objectives",
+    "trusted_evaluation_plan",
+]

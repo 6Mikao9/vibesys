@@ -12,7 +12,7 @@ import dataclasses
 import hashlib
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import ValidationError
 
@@ -60,6 +60,9 @@ from vs_evaluator_protocol.api import ProfileField
 from vs_runtime._evaluation_failure_text import render_stage_output_with_service_log
 from vs_runtime._failure_classification import observed_failure
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 STAGE_KINDS: dict[str, StageKind] = {
     "build": StageKind.BUILD,
@@ -371,6 +374,19 @@ def _core_kind(kind: StageKind) -> EvidenceKind:
     if kind is StageKind.PROFILE:
         return EvidenceKind.PROFILING
     return EvidenceKind.CORRECTNESS if kind is StageKind.ACCURACY else EvidenceKind.BENCHMARK
+
+
+def headline_first(names: Iterable[str], headline: str | None) -> tuple[str, ...]:
+    """*names* with *headline* first and the rest sorted.
+
+    A benchmark record's first metric is its headline (:func:`_reading`). Sorting every
+    name alphabetically would headline a different axis than the one the task declared.
+    """
+    ordered = sorted(names)
+    if headline is not None and headline in ordered:
+        ordered.remove(headline)
+        return (headline, *ordered)
+    return tuple(ordered)
 
 
 def _reading(item: TrustedEvidence) -> Reading | None:

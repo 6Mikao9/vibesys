@@ -45,6 +45,7 @@ from vs_evaluation.api import (
 )
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime._evaluation_failure_text import render_stage_output_with_service_log
+from vs_runtime._evaluation_jobs import headline_first
 from vs_runtime._failure_classification import RecordState, classify, is_unsettled, signal_of
 from vs_runtime._host_path_masking import mask_observation, private_paths
 from vs_runtime._measurement_progress import StageRun
@@ -53,7 +54,7 @@ from vs_runtime._trusted_evaluation import (
     build_trusted_benchmark_command,
     decode_trusted_benchmark_run,
 )
-from vs_runtime.contracts import BenchmarkFailureKind, RunCleanupError
+from vs_runtime.contracts import BenchmarkFailureKind, BenchmarkObjective, RunCleanupError
 from vs_sandbox.api.slurm import (
     PROFILE_OUTPUT_ROOT,
     SharedSlurmAdmission,
@@ -160,6 +161,7 @@ class SemanticSlurmEvaluationExecutor:
         stage_output: StageOutputOpener | None = None,
         root_proof: WorkspaceRootProof | None = None,
         control: RunControlChannel | None = None,
+        objectives: tuple[BenchmarkObjective, ...] = (),
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
@@ -193,6 +195,7 @@ class SemanticSlurmEvaluationExecutor:
         self._cluster = cluster
         self._processes = processes
         self._stage_output = stage_output
+        self._objectives = objectives
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
         # Set by ``close``: no submission makes a new candidate executor after it.
@@ -683,8 +686,9 @@ class SemanticSlurmEvaluationExecutor:
         record = RecordState.OUTCOME
         contract = self._trusted_plan.benchmark_contract
         if stage.kind is EvidenceKind.BENCHMARK and contract is not None:
+            required = frozenset(item.name for item in self._objectives)
             decoded = decode_trusted_benchmark_run(
-                raw.output, contract, frozenset(), exited_cleanly=passed
+                raw.output, contract, required, exited_cleanly=passed
             )
             partial = decoded.partial
             unmet = decoded.requirement
@@ -707,16 +711,18 @@ class SemanticSlurmEvaluationExecutor:
                     )
             passed = decoded.passed
             record = decoded.record
+            row = decoded.row or {}
+            headline = self._objectives[0].name if self._objectives else None
             metrics = tuple(
                 EvidenceMetric(
                     name=name,
-                    value=value,
+                    value=row[name],
                     direction=(
                         decoded.metrics[name].direction if name in decoded.metrics else None
                     ),
                     unit=decoded.metrics[name].unit if name in decoded.metrics else None,
                 )
-                for name, value in sorted((decoded.row or {}).items())
+                for name in headline_first(row, headline)
             )
         if stage.kind is EvidenceKind.PROFILE and passed:
             # The capture's printed summary is the profile's evidence; its end

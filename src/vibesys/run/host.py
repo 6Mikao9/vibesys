@@ -27,7 +27,11 @@ from vibesys.run.core_services import (
     build_core_services,
     turn_executor,
 )
-from vibesys.run.evaluation import CoreLocalValidationEvents, create_evaluation
+from vibesys.run.evaluation import (
+    CoreLocalValidationEvents,
+    create_evaluation,
+    run_benchmark_objectives,
+)
 from vibesys.run.evaluation_socket import prepare_queue_status_socket
 from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
@@ -640,6 +644,7 @@ class _ProductHostFactory:
             stage_output=stage_output,
             root_proof=cluster.root_proof,
             control=self.integration.control,
+            objectives=run_benchmark_objectives(self.request),
         )
 
     async def stop_new_work(self) -> None:
