@@ -196,26 +196,78 @@ def test_commits_with_one_measured_input_are_evaluated_on_byte_identical_trees(
                 assert tree == other_tree
 
 
-@pytest.mark.parametrize(
-    "declared",
-    [(), ("NOTES.md",), ("notes/",), ("NOTES.md", "notes/", "other.md")],
+_DECLARATIONS = st.sampled_from(
+    [
+        (),
+        ("NOTES.md",),
+        ("notes/",),
+        ("notes", "NOTES.md"),
+        ("NOTES.md", "notes/", "other.md"),
+        ("evidence/",),
+    ]
 )
-def test_another_unread_declaration_is_another_measured_input(
-    tmp_path: Path, declared: tuple[str, ...]
-) -> None:
-    """Even where it withholds nothing more, a changed declaration moves the digest.
+"""Declarations a task may state: some withhold paths the tree holds, some name none of them."""
 
-    The same commit read under two declarations is evaluated on two trees whenever the
-    declarations withhold different paths, so the declaration is part of the input; its
-    order and a directory's trailing slash are not.
+
+@pytest.mark.regression
+@settings(
+    max_examples=examples(pr=4, nightly=25),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    edits=st.lists(_EDITS, max_size=5),
+    declarations=st.tuples(_DECLARATIONS, _DECLARATIONS),
+)
+@example(edits=[], declarations=((), ("evidence/",)))
+def test_one_commit_read_under_two_declarations_has_one_measured_input_iff_one_evaluated_tree(
+    tmp_path: Path,
+    edits: list[tuple[str, str, int | str]],
+    declarations: tuple[tuple[str, ...], tuple[str, ...]],
+) -> None:
+    """The input is the content the evaluation receives, not the declaration that withheld it.
+
+    A task that adds ``unread = ["evidence/"]`` to a tree with no ``evidence/`` changes nothing
+    the evaluator reads, so it must not turn the measurements already taken of that commit into
+    another input's (run 142822: a base with three samples was left with one). Conversely, two
+    declarations that withhold different content give the evaluator different trees, and so
+    different inputs.
     """
+    case = tmp_path / f"case-{len(list(tmp_path.iterdir()))}"
+    root = case / "repo"
+    root.mkdir(parents=True)
+    (root / "main.py").write_text("VALUE = 0\n", encoding="utf-8")
+    (root / "NOTES.md").write_text("baseline notes\n", encoding="utf-8")
+    tracker = real_git_tracker(root, run_id="input-run", events=NullGitTrackerEvents())
+    tracker.init(existing=False)
+    for number, edit in enumerate(edits):
+        _apply(root, edit)
+        _git(root, "add", "-A", "-f", "--", ".", ":(exclude).vibesys/state")
+        _git(root, "commit", "-q", "--allow-empty", "-m", f"step {number}")
+    _git(root, "add", "-A", "-f", "--", ".", ":(exclude).vibesys/state")
+    _git(root, "commit", "-q", "--allow-empty", "-m", "final")
+    commit = _git(root, "rev-parse", "HEAD").strip()
+    seen: list[tuple[str, dict[str, tuple[str, str]]]] = []
+    for number, declared in enumerate(declarations):
+        worktree = case / f"evaluated-{number}"
+        _git(root, "worktree", "add", "-q", "--detach", str(worktree), commit)
+        real_git_tracker(
+            worktree, run_id="input-run", events=NullGitTrackerEvents()
+        ).withhold_unread(declared)
+        seen.append((tracker.measured_input(commit, declared), _tree(worktree)))
+    (first_digest, first_tree), (second_digest, second_tree) = seen
+    assert (first_digest == second_digest) == (first_tree == second_tree)
+
+
+def test_a_declaration_order_and_a_directory_slash_are_not_part_of_the_input(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "main.py").write_text("VALUE = 0\n", encoding="utf-8")
     tracker = real_git_tracker(tmp_path, run_id="input-run", events=NullGitTrackerEvents())
     tracker.init(existing=False)
     tracker.snapshot("step")
     commit = tracker.current_sha()
     assert commit is not None
-    assert tracker.measured_input(commit, declared) != tracker.measured_input(commit, _DECLARED)
     assert tracker.measured_input(commit, ("notes", "NOTES.md")) == tracker.measured_input(
         commit, _DECLARED
     )
