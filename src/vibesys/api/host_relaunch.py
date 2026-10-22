@@ -38,7 +38,7 @@ def relaunch_host(
     if not executable.is_file():
         return _refused(RelaunchRefusal.CHECKOUT_MISSING)
     project = Project.open(request.project_root)
-    project.state.load_run(request.run_id)
+    project.state.require_recorded_run(request.run_id)
     project.state.require_local_run(request.run_id)
     path = Project.run_log_path_for(project.root, request.run_id)
     if not path.exists():

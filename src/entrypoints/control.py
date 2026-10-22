@@ -161,7 +161,7 @@ def control_main(
         if arguments.action in ("pause", "pause-now"):
             payload["expected_epoch"] = recorded_epoch(project, arguments.run_id)
         request = CONTROL_REQUEST.validate_python(payload)
-        project.state.load_run(arguments.run_id)
+        project.state.require_recorded_run(arguments.run_id)
         project.state.require_local_run(arguments.run_id)
         inbox = project.state.control_inbox(arguments.run_id)
         inbox.post(
@@ -192,7 +192,7 @@ def _status(arguments: argparse.Namespace, *, cwd: Path, out: TextIO, err: TextI
     """Print what became of one request: ``pending``, ``applied`` or ``rejected: <why>``."""
     try:
         project = Project.open(arguments.project or cwd)
-        project.state.load_run(arguments.run_id)
+        project.state.require_recorded_run(arguments.run_id)
         project.state.require_local_run(arguments.run_id)
         status = project.state.control_inbox(arguments.run_id).status(
             arguments.request_id, ended=recorded_ending(project, arguments.run_id)

@@ -155,6 +155,37 @@ class GitTracker:
         )
         self._adopt_earlier_run_state()
 
+    def restore_run_checkout(self) -> None:
+        """Check out this run's branch when the worktree is clean and not already on it.
+
+        Further run state is committed to ``HEAD``. A checkout left on another commit
+        (a detached pin, another branch) does not hold the run's manifest. A dirty
+        worktree is left where it is; the error names the branch to check out.
+        Call this only after ``init`` of an existing run. ``init`` itself leaves the
+        operator checkout alone.
+        """
+        branch = self.project_branch
+        current = self._current_branch()
+        if current == branch:
+            return
+        if not self._branch_exists(branch):
+            message = f"VibeSys run branch does not exist: {branch}"
+            raise ValueError(message)
+        pending = self.baseline_changes()
+        if pending:
+            place = "a detached HEAD" if current is None else f"branch {current!r}"
+            listed = ", ".join(pending)
+            message = (
+                f"cannot resume VibeSys run {self.run_id!r} while the checkout is {place} "
+                f"with pending changes ({listed}); commit or stash them, then check out {branch!r}"
+            )
+            raise ValueError(message)
+        try:
+            self._git.switch_branch(branch)
+        except GitError as error:
+            message = f"cannot check out VibeSys run branch {branch!r}: {error}"
+            raise ValueError(message) from error
+
     def _adopt_earlier_run_state(self) -> None:
         """Count the untracked run state earlier processes left below ``.vibesys`` as theirs.
 

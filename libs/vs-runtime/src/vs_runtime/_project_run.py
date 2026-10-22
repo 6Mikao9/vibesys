@@ -449,13 +449,6 @@ def _assemble_project_run_resources(
         teardown_stack.enter_context(project_state.exclusive_run_host(request.run_id))
         if request.existing and effects.resume_recovery is not None:
             effects.resume_recovery()
-        if request.existing:
-            _reconcile_capture_intents(
-                project,
-                request.run_id,
-                project_state.local_namespace(request.run_id, "runtime"),
-                effects.capture_recovery,
-            )
         log_dir = project_state.log_directory(request.run_id)
         log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -477,9 +470,17 @@ def _assemble_project_run_resources(
             trusted_input_paths=request.trusted_input_paths,
         )
         git.init(existing=request.existing)
+        if request.existing:
+            git.restore_run_checkout()
 
     with boot_trace.span("project_state_resume"):
         if request.existing:
+            _reconcile_capture_intents(
+                project,
+                request.run_id,
+                project_state.local_namespace(request.run_id, "runtime"),
+                effects.capture_recovery,
+            )
             project_state.load_project()
             run_manifest = project_state.load_run(request.run_id)
             _validate_resume_identity(request, run_manifest, git)
