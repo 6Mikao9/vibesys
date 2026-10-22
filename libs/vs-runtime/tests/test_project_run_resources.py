@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -25,6 +26,8 @@ from vs_runtime.api.infrastructure import (
     ProjectRunMismatchError,
     ProjectRunMismatchKind,
     ProjectRunRequest,
+    ProjectRunResources,
+    ProjectRunWorkspaceLinkError,
     SDKRoots,
     open_project_run_resources,
 )
@@ -515,3 +518,101 @@ def test_resume_of_a_docker_run_logs_no_migration(tmp_path: Path) -> None:
         pass
 
     assert not any("[resume]" in event for event in events)
+
+
+def _host(root: Path, *, existing: bool) -> ProjectRunResources:
+    return open_project_run_resources(
+        _request(root, existing=existing),
+        effects=_effects([]),
+        resolve_resume=(
+            (lambda _recorded: OrchestrationResumeDecision(descriptor=None))
+            if existing
+            else _unexpected_resume
+        ),
+    )
+
+
+def _leave_candidate(root: Path, workspace_id: str, *, retain: bool) -> tuple[Path, str | None]:
+    """A host that stops while core holds the candidate: edits, maybe a retained commit."""
+    with _host(root, existing=False) as host:
+        revision = host.git.current_sha()
+        assert revision is not None
+        candidate = host.open_candidate(workspace_id, revision)
+        workspace = candidate.project_root
+        retained = None
+        if retain:
+            (workspace / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
+            candidate.git.snapshot("candidate work")
+            retained = candidate.git.current_sha()
+            assert retained is not None
+            candidate.retain(retained)
+        (workspace / "candidate.py").write_text("VALUE = 3\n", encoding="utf-8")
+        (workspace / "notes.md").write_text("in progress\n", encoding="utf-8")
+        candidate.detach()
+    return workspace, retained
+
+
+def _lose_registration(host: ProjectRunResources, workspace: Path, backup: Path) -> None:
+    """What a failed resume plus a rollback did: Git drops the worktree, a backup restores it."""
+    shutil.copytree(workspace, backup, symlinks=True)
+    host.git.remove_worktree(workspace)
+    shutil.move(backup, workspace)
+
+
+def _files(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != ".git"
+    }
+
+
+def test_resume_reattaches_a_candidate_restored_after_git_dropped_it(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    workspace, retained = _leave_candidate(root, "m-held", retain=True)
+    before = _files(workspace)
+    with _host(root, existing=True) as failed_resume:
+        _lose_registration(failed_resume, workspace, tmp_path / "backup")
+
+    with _host(root, existing=True) as resumed:
+        revision = resumed.git.current_sha()
+        assert revision is not None
+        candidate = resumed.reattach_candidate("m-held", revision)
+
+        assert candidate is not None
+        assert _files(workspace) == before
+        assert candidate.git.current_sha() == retained
+        assert sorted(candidate.git.pending_changes()) == ["candidate.py", "notes.md"]
+        candidate.detach()
+
+
+def test_resume_names_an_unlinked_candidate_without_a_retained_commit(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    workspace, _ = _leave_candidate(root, "m-fresh", retain=False)
+    before = _files(workspace)
+    with _host(root, existing=True) as failed_resume:
+        _lose_registration(failed_resume, workspace, tmp_path / "backup")
+
+    with pytest.raises(ProjectRunWorkspaceLinkError, match="m-fresh") as raised:
+        _host(root, existing=True)
+
+    assert raised.value.workspace_id == "m-fresh"
+    assert _files(workspace) == before
+
+
+def test_a_failed_reattach_keeps_the_candidate_on_disk(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    _write_project(root)
+    workspace, _ = _leave_candidate(root, "m-held", retain=True)
+    before = _files(workspace)
+    with _host(root, existing=True) as resumed:
+        revision = resumed.git.current_sha()
+        assert revision is not None
+        _lose_registration(resumed, workspace, tmp_path / "backup")
+
+        with pytest.raises(GitError):
+            resumed.reattach_candidate("m-held", revision)
+
+        assert _files(workspace) == before

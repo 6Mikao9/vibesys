@@ -6,13 +6,17 @@ import shutil
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from vs_project.api import GitCommandError
+from vs_project.api.testing import ContractProject
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_project.api.testing import ContractProject
+    from vs_project.api import GitRepository
 
 
 def test_clean_keeps_files_under_a_directory_that_replaced_a_tracked_file(
@@ -257,3 +261,98 @@ def test_the_location_of_a_directory_that_is_no_linked_worktree_is_a_command_err
         sandbox.repo.linked_worktree_location(plain)
     with pytest.raises(GitCommandError):
         sandbox.repo.linked_worktree_location(sandbox.root)
+
+
+def _lose_registration(repo: GitRepository, destination: Path, backup: Path) -> None:
+    """What a rollback does: Git drops the worktree, then a backup restores its directory."""
+    shutil.copytree(destination, backup, symlinks=True)
+    repo.remove_worktree(destination)
+    shutil.rmtree(destination, ignore_errors=True)
+    repo.prune_worktrees()
+    shutil.move(backup, destination)
+
+
+def _files(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != ".git"
+    }
+
+
+_NAMES = st.sampled_from(["a.txt", "b.txt", "dir/c.txt", "dir/deep/d.txt", "new.txt"])
+
+
+@settings(
+    max_examples=examples(pr=6, nightly=30),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    edits=st.dictionaries(_NAMES, st.one_of(st.none(), st.text(max_size=8)), max_size=5),
+    committed=st.booleans(),
+)
+def test_a_reattached_worktree_keeps_every_file_and_moves_head_to_the_commit(
+    sandbox: ContractProject,
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    edits: dict[str, str | None],
+    committed: bool,
+) -> None:
+    # One fresh project per example: the fixtures are shared across examples.
+    sandbox = ContractProject(root=tmp_path_factory.mktemp("project"), factory=sandbox.factory)
+    scratch = tmp_path_factory.mktemp("linked")
+    base = sandbox.start({"a.txt": "1\n", "dir/c.txt": "c\n"})
+    destination = scratch / "workspace"
+    repo = sandbox.repo
+    repo.add_worktree(destination, base)
+    head = base
+    if committed:
+        (destination / "a.txt").write_text("committed\n", encoding="utf-8")
+        linked = sandbox.factory(destination)
+        linked.pin(repo.linked_worktree_location(destination))
+        linked.stage_all(["."])
+        linked.commit("candidate work")
+        head = repo.worktree_head(destination)
+    for name, content in edits.items():
+        path = destination / name
+        if content is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+    before = _files(destination)
+    _lose_registration(repo, destination, scratch / "backup")
+    with pytest.raises(GitCommandError):
+        repo.linked_worktree_location(destination)
+
+    repo.reattach_worktree(destination, head)
+
+    assert _files(destination) == before
+    assert repo.worktree_head(destination) == head
+    linked = sandbox.factory(destination)
+    linked.pin(repo.linked_worktree_location(destination))
+    assert not linked.has_staged_changes()
+    linked.stage_all(["."])
+    linked.commit("after reattach", allow_empty=True)
+    assert repo.is_ancestor(head, repo.worktree_head(destination))
+
+
+def test_reattaching_refuses_a_registered_worktree_a_missing_commit_and_a_plain_path(
+    sandbox: ContractProject, tmp_path: Path
+) -> None:
+    base = sandbox.start({"a.txt": "1\n"})
+    destination = tmp_path / "linked"
+    repo = sandbox.repo
+    repo.add_worktree(destination, base)
+
+    with pytest.raises(GitCommandError):
+        repo.reattach_worktree(destination, base)
+    _lose_registration(repo, destination, tmp_path / "backup")
+    with pytest.raises(GitCommandError):
+        repo.reattach_worktree(destination, "1" * 40)
+    with pytest.raises(GitCommandError):
+        repo.reattach_worktree(tmp_path / "missing", base)
+
+    repo.reattach_worktree(destination, base)
+    assert repo.worktree_head(destination) == base

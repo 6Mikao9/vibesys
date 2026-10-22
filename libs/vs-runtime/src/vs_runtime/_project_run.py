@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol, TextIO
 from pydantic import BaseModel, ConfigDict, Field
 
 from vs_project.api import (
+    GitError,
     GitTracker,
     GitTrackerEvents,
     OrchestrationDescriptor,
@@ -131,6 +132,18 @@ class ProjectRunMismatchError(ProjectRunError):
         else:
             message = f"run {run_id!r} records task {recorded!r}, but task {actual!r} was selected"
         super().__init__(message)
+
+
+class ProjectRunWorkspaceLinkError(ProjectRunError):
+    """A candidate worktree on disk lost its Git registration and cannot get it back."""
+
+    def __init__(self, workspace_id: str, workspace: Path, reason: str) -> None:
+        self.workspace_id = workspace_id
+        self.workspace = workspace
+        super().__init__(
+            f"candidate workspace {workspace_id!r} at {workspace} is no linked worktree "
+            f"of the project repository and cannot be reattached: {reason}"
+        )
 
 
 class ProjectRunDirtyResumeError(ProjectRunError):
@@ -314,10 +327,9 @@ class ProjectRunResources:
             self.git.remove_worktree(workspace)
         teardown_stack = ReleaseStack()
         try:
-            teardown_stack.callback(self.git.remove_worktree, workspace)
             if not reattach:
+                teardown_stack.callback(self.git.remove_worktree, workspace)
                 self.git.add_worktree(workspace, revision)
-            if not reattach:
                 copy_support_directories(
                     self._request.project_root, workspace, self._request.candidate_support_dirs
                 )
@@ -340,6 +352,10 @@ class ProjectRunResources:
             )
             if self.git.trusted_input_baseline is not None:
                 git.configure_trusted_input_baseline(self.git.trusted_input_baseline)
+            if reattach:
+                # Only a reopened worktree is owned from here on: a reopen that fails
+                # keeps the stopped host's work on disk instead of deleting it.
+                teardown_stack.callback(self.git.remove_worktree, workspace)
             return _ProjectWorkspaceResources(
                 workspace_id=workspace_id,
                 project_root=workspace,
@@ -471,6 +487,7 @@ def _assemble_project_run_resources(
         )
         git.init(existing=request.existing)
         if request.existing:
+            _reattach_unlinked_candidates(project, request.run_id, git)
             git.restore_run_checkout()
 
     with boot_trace.span("project_state_resume"):
@@ -528,6 +545,34 @@ def _assemble_project_run_resources(
         provisional_ownership,
         root_edits_on_resume=tuple(git.pending_changes()) if request.existing else (),
     )
+
+
+def _reattach_unlinked_candidates(project: Project, run_id: str, git: GitTracker) -> None:
+    """Register again every candidate worktree of ``run_id`` that lost its Git registration.
+
+    A worktree directory restored after Git pruned its registration (a rollback from a
+    backup that lacks the repository's worktree records) holds a ``.git`` naming a
+    registration that is gone, which every later Git command refuses as a nested
+    repository. Its last retained commit becomes its ``HEAD`` again and its files stay.
+    Without a retained commit nothing records what it was built on, so the resume
+    stops naming it instead of guessing.
+    """
+    worktrees = project.state.candidate_worktrees_directory(run_id)
+    if not worktrees.is_dir():
+        return
+    for entry in sorted(worktrees.iterdir(), key=lambda path: path.name):
+        workspace = entry / "workspace"
+        if not (workspace / ".git").exists() or git.is_linked_worktree(workspace):
+            continue
+        commit = git.retained_candidate(entry.name)
+        if commit is None:
+            raise ProjectRunWorkspaceLinkError(
+                entry.name, workspace, "the run retained no commit for it"
+            )
+        try:
+            git.reattach_worktree(workspace, commit)
+        except GitError as error:
+            raise ProjectRunWorkspaceLinkError(entry.name, workspace, str(error)) from error
 
 
 def _load_capture_intents(namespace: StateNamespace) -> tuple[CaptureIntent, ...]:

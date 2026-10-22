@@ -1115,6 +1115,36 @@ class FakeGitRepository:
                 self._refuse(command, f"fatal: could not create the worktree: {error}")
             self._disk.register(checkout)
 
+    def reattach_worktree(self, destination: Path, commit: str) -> None:
+        with self._operation("reattach_worktree"):
+            command = ["worktree", "add", "--detach", "--no-checkout", str(destination), commit]
+            scope = self._scope(command)
+            target = self._commit_of(scope, commit)
+            if target is None:
+                self._refuse(command, f"fatal: invalid reference: {commit}")
+            resolved = destination.resolve()
+            pointer = resolved / ".git"
+            if not resolved.is_dir() or (pointer.is_dir() and not pointer.is_symlink()):
+                self._refuse(
+                    command, f"fatal: '{destination}' is not a directory a linked worktree can take"
+                )
+            if self._disk.exact(resolved) is not None:
+                self._refuse(command, f"fatal: '{destination}' is already a linked worktree")
+            for stale in self._disk.stale():
+                self._disk.unregister(stale)
+            name = self._admin_name(scope.repo, resolved)
+            checkout = Checkout(
+                path=resolved,
+                repo=scope.repo,
+                head=Head(None, target),
+                name=name,
+                index=dict(scope.repo.objects.snapshot_of(target)),
+            )
+            if pointer.is_symlink():
+                pointer.unlink()
+            pointer.write_text(f"gitdir: {scope.repo.git_dir / 'worktrees' / name}\n")
+            self._disk.register(checkout)
+
     @staticmethod
     def _admin_name(repo: Repository, path: Path) -> str:
         taken = {checkout.name for checkout in repo.checkouts}

@@ -573,6 +573,18 @@ class GitRepository(Protocol):
         """
         ...
 
+    def reattach_worktree(self, destination: Path, commit: str) -> None:
+        """Register the existing directory ``destination`` again as a linked worktree.
+
+        For a worktree whose registration was lost, e.g. its directory was restored
+        from a backup after Git pruned it: afterwards ``destination`` is a linked
+        worktree with a detached ``HEAD`` and an index at ``commit``, and every file
+        in it except ``.git`` is unchanged. Raises ``GitCommandError`` when
+        ``commit`` is no commit, ``destination`` is no directory, holds a ``.git``
+        directory, or is already a linked worktree of this repository (cli-only).
+        """
+        ...
+
     def remove_worktree(self, destination: Path) -> None:
         """Unregister the linked worktree at ``destination``, best effort (cli-only)."""
         ...

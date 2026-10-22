@@ -187,6 +187,7 @@ from vs_runtime._project_run import (
     ProjectRunMismatchKind,
     ProjectRunRequest,
     ProjectRunResources,
+    ProjectRunWorkspaceLinkError,
     open_project_run_resources,
 )
 from vs_runtime._quota_policy import (
@@ -644,6 +645,7 @@ __all__ = [
     "ProjectRunMismatchKind",
     "ProjectRunRequest",
     "ProjectRunResources",
+    "ProjectRunWorkspaceLinkError",
     "ProjectTreeCopy",
     "ProtocolBenchmarkContract",
     "ProviderFallback",

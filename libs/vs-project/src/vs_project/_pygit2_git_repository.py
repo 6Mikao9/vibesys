@@ -596,6 +596,9 @@ class Pygit2GitRepository:
     def add_worktree(self, destination: Path, commit: str) -> None:
         self._cli.add_worktree(destination, commit)
 
+    def reattach_worktree(self, destination: Path, commit: str) -> None:
+        self._cli.reattach_worktree(destination, commit)
+
     def remove_worktree(self, destination: Path) -> None:
         self._cli.remove_worktree(destination)
 

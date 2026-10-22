@@ -22,7 +22,7 @@ from vs_project._workspace_tree import (
     WorkspacePathError,
     open_workspace_tree,
 )
-from vs_project.api.git_repository import GitError, PatchStyle, StagingError
+from vs_project.api.git_repository import GitCommandError, GitError, PatchStyle, StagingError
 from vs_project.errors import ProjectStateError
 from vs_project.project import Project
 
@@ -216,6 +216,24 @@ class GitTracker:
         destination.parent.mkdir(parents=True, exist_ok=True)
         self._git.add_worktree(destination, commit)
 
+    def reattach_worktree(self, worktree_dir: Path, commit: str) -> None:
+        """Register *worktree_dir* again as a detached linked worktree at *commit*.
+
+        For a worktree whose registration was lost (pruned while its directory was
+        gone, then the directory came back): its files stay as they are, and its
+        ``HEAD`` and index move to *commit*. Raises ``GitCommandError`` when Git
+        cannot register it (see ``GitRepository.reattach_worktree``).
+        """
+        self._git.reattach_worktree(self._validate_local_worktree_path(worktree_dir), commit)
+
+    def is_linked_worktree(self, worktree_dir: Path) -> bool:
+        """Whether this repository has *worktree_dir* registered as a linked worktree."""
+        try:
+            self.linked_worktree_location(worktree_dir)
+        except GitCommandError:
+            return False
+        return True
+
     def linked_worktree_location(self, worktree_dir: Path) -> RepositoryLocation:
         """Where this repository registered the linked worktree ``worktree_dir``.
 
@@ -288,6 +306,13 @@ class GitTracker:
             raise ValueError(message)
         self._git.update_ref(ref, sha)
         return ref
+
+    def retained_candidate(self, candidate_id: str) -> str | None:
+        """The commit ``retain_candidate`` last kept for *candidate_id*, or ``None``."""
+        if not self._CANDIDATE_ID.fullmatch(candidate_id):
+            message = f"invalid candidate id: {candidate_id!r}"
+            raise ValueError(message)
+        return self._git.resolve_commit(f"refs/vibesys/{self.run_id}/candidates/{candidate_id}")
 
     def is_retained(self, commit: str) -> bool:
         """Whether this run keeps ``commit`` reachable, as opposed to merely present.
