@@ -483,6 +483,7 @@ EvidenceRequirements.required_evidence optional {"default":[],"items":{"$ref":"#
 Failed {"additionalProperties":false,"type":"object"}
 Failed.cause optional {"anyOf":[{"$ref":"#/$defs/RejectionCode"},{"type":"null"}],"default":null}
 Failed.decision optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
+Failed.detail optional {"default":"","type":"string"}
 Failed.digest optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Failed.errors optional {"default":[],"items":{"$ref":"#/$defs/ReplyError"},"type":"array"}
 Failed.kind optional {"const":"failed","default":"failed","type":"string"}
@@ -1387,7 +1388,7 @@ TurnEnded {"additionalProperties":false,"type":"object"}
 TurnEnded.decision required {"$ref":"#/$defs/DecisionId"}
 TurnEnded.kind optional {"const":"turn_ended","default":"turn_ended","type":"string"}
 TurnEnded.result required {"$ref":"#/$defs/TurnResult"}
-TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","provider_unavailable"],"type":"string"}
+TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","provider_unavailable","launch_failed"],"type":"string"}
 TurnResult {"additionalProperties":false,"type":"object"}
 TurnResult.detail optional {"default":"","maxLength":4000,"type":"string"}
 TurnResult.failure optional {"anyOf":[{"$ref":"#/$defs/TurnFailureKind"},{"type":"null"}],"default":null}

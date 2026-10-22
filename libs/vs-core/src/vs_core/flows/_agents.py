@@ -502,6 +502,7 @@ class _Ask:
             turn=turn,
             turn_failure=result.failure or TurnFailureKind.PROVIDER_FAILED,
             digest=_digest(result.detail),
+            detail=result.detail,
         )
 
     def _corrected(

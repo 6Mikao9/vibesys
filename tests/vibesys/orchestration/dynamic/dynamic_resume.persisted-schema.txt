@@ -289,6 +289,7 @@ PartialRow.value required {"$ref":"#/$defs/Finite"}
 PickPolicy {"enum":["newest","ranked"],"type":"string"}
 PlanMode {"enum":["explore","follow_plan"],"type":"string"}
 PlanProblem {"additionalProperties":false,"type":"object"}
+PlanProblem.detail optional {"default":"","type":"string"}
 PlanProblem.ended optional {"anyOf":[{"$ref":"#/$defs/FailureReason"},{"type":"null"}],"default":null}
 PlanProblem.errors optional {"default":[],"items":{"$ref":"#/$defs/ReplyError"},"type":"array"}
 PlanProblem.kind required {"$ref":"#/$defs/ProblemKind"}
@@ -436,7 +437,7 @@ Submission.key required {"type":"string"}
 Submission.kind required {"$ref":"#/$defs/WorkKind"}
 Submission.parent required {"$ref":"#/$defs/RevisionRef"}
 Submission.work_id required {"type":"string"}
-TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","provider_unavailable"],"type":"string"}
+TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","provider_unavailable","launch_failed"],"type":"string"}
 UnappliedPart {"additionalProperties":false,"type":"object"}
 UnappliedPart.hypothesis_id required {"minLength":1,"type":"string"}
 UnappliedPart.part required {"minLength":1,"type":"string"}

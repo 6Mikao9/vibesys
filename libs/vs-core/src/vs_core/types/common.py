@@ -235,6 +235,9 @@ class TurnFailureKind(StrEnum):
     """Core ended the turn while the run's capacity gate held it for its provider (an outage,
     a spent quota): no reply exists, and the turn's own work never failed. A strategy asks it
     again without counting it against the role's lost turns."""
+    LAUNCH_FAILED = "launch_failed"
+    """The agent process exited before a turn started. Asking again cannot succeed, and the
+    diagnostic begins with ``LAUNCH_FAILURE_PREFIX`` plus the CLI's own error text."""
 
 
 def unset(value: object) -> bool:

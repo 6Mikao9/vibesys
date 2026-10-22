@@ -11,6 +11,7 @@ from .types.common import (
     ObservationStatus,
 )
 from .types.sessions import (
+    LAUNCH_FAILURE_PREFIX,
     TURN_FAILURE_DETAIL_LIMIT,
     InputAcceptanceObserved,
     InputReservationReleased,
@@ -56,6 +57,10 @@ def turn_result(
         failure = TurnFailureKind.TRANSPORT_LOST
     elif observation.status == ObservationStatus.CANCELLED:
         failure = TurnFailureKind.CANCELLED
+    elif observation.status == ObservationStatus.FAILED and observation.diagnostic.startswith(
+        LAUNCH_FAILURE_PREFIX
+    ):
+        failure = TurnFailureKind.LAUNCH_FAILED
     else:
         failure = TurnFailureKind.PROVIDER_FAILED
     return TurnResult(

@@ -5,7 +5,7 @@ import json
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import example, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -479,6 +479,7 @@ _FAILURE_KINDS = {
 def test_a_failed_turn_result_carries_its_kind_and_the_bounded_executor_text(
     status: core.ObservationStatus, diagnostic: str
 ) -> None:
+    assume(not diagnostic.startswith(core.LAUNCH_FAILURE_PREFIX))
     spec = turn()
     dispatched = reload_step(
         waiting_turn_state(spec), core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
@@ -493,6 +494,26 @@ def test_a_failed_turn_result_carries_its_kind_and_the_bounded_executor_text(
     (event,) = (row for row in result.events if isinstance(row, core.TurnResult))
     assert event.failure is _FAILURE_KINDS[status]
     assert event.detail == diagnostic[: core.TURN_FAILURE_DETAIL_LIMIT]
+
+
+def test_an_agent_that_exits_before_its_turn_is_a_launch_failure() -> None:
+    """The executor's launch prefix is a closed failure, and the CLI text is kept."""
+    spec = turn()
+    dispatched = reload_step(
+        waiting_turn_state(spec), core.TurnInputsReserved(invocation=invocation(spec), input_ids=())
+    )
+    text = f"{core.LAUNCH_FAILURE_PREFIX}failed to initialize: Operation not permitted"
+    observation = turn_observation(
+        dispatched.requests[0], terminal=True, status=core.ObservationStatus.FAILED
+    ).model_copy(update={"diagnostic": text})
+
+    result = reload_step(
+        dispatched.state, core.TurnObserved(invocation=invocation(spec), observation=observation)
+    )
+
+    (event,) = (row for row in result.events if isinstance(row, core.TurnResult))
+    assert event.failure is core.TurnFailureKind.LAUNCH_FAILED
+    assert event.detail == text
 
 
 @given(diagnostic=st.text(max_size=64))

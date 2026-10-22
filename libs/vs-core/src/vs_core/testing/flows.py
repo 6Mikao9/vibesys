@@ -446,11 +446,16 @@ class FlowRun[C]:
             self._ended(asked, ObservationStatus.FAILED, failure=TurnFailureKind.TRANSPORT_LOST)
         )
 
-    def fail_turn(self, asked: Asked, failure: TurnFailureKind) -> None:
+    def fail_turn(self, asked: Asked, failure: TurnFailureKind, *, detail: str = "") -> None:
         """The provider failed the turn for good."""
         self._close(asked)
         self._timeline.append(f"{asked.decision.root}:turn-failed")
-        self.send(self._ended(asked, ObservationStatus.FAILED, failure=failure))
+        ended = self._ended(asked, ObservationStatus.FAILED, failure=failure)
+        if detail:
+            ended = ended.model_copy(
+                update={"result": ended.result.model_copy(update={"detail": detail})}
+            )
+        self.send(ended)
 
     def fail(self, asked: Asked, reason: FailureReason, **fields: object) -> None:
         """Deliver ``Failed(reason)`` for a wait; ``fields`` complete the reason's own fields."""

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
+import agentshim
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -26,7 +27,6 @@ from vs_agent.api import (
     AgentSessionKey,
     AgentSessionSpec,
     AgentSessionState,
-    AgentSpawnError,
     AgentTurnRequest,
     AgentTurnResult,
     AgentTurnTimeoutError,
@@ -35,6 +35,7 @@ from vs_agent.api import (
     DurableSessionStore,
     InvalidResponse,
     InvocationConflictError,
+    LaunchFailed,
     Pending,
     QuotaCondition,
     SessionConfigurationError,
@@ -294,7 +295,6 @@ class _ExitStatusError(Exception):
     "error",
     [
         LookupError("lost acknowledgement"),
-        AgentSpawnError("claude", "exit status 1"),
         AgentTurnTimeoutError(30),
         OSError("pipe"),
         _ExitStatusError("claude exited with status 1"),
@@ -321,6 +321,94 @@ def test_unexpected_boundary_failure_is_unknown_and_never_replayed(
     with pytest.raises(SessionResumeError, match=re.escape(str(error))):
         harness.reconstruct().resume(KEY, harness.message, "resume-2")
     assert harness.boundary.calls == 2
+
+
+def test_an_agent_that_exits_before_its_turn_is_a_launch_failure(harness: _Harness) -> None:
+    """A CLI that dies before a turn starts is terminal, and it is not sent again.
+
+    A resumed client turn reports that exit as a resume error. The first turn,
+    which is what a run's planner sends, is covered with the client below.
+    """
+    if harness.implementation == "client":
+        pytest.skip("a resumed client turn wraps the exit; the first-turn test covers it")
+    detail = "failed to initialize in-process app-server client: Operation not permitted"
+
+    def fail() -> None:
+        raise agentshim.CliExitError(("codex",), 1, stderr=detail, detail=detail)
+
+    harness.boundary.effect = fail
+    result = harness.sessions.resume(KEY, harness.message, "resume-1")
+    assert isinstance(result, LaunchFailed)
+    assert detail in result.detail
+    assert harness.reconstruct().resume(KEY, harness.message, "resume-1") == result
+    with pytest.raises(SessionResumeError, match="Operation not permitted"):
+        harness.reconstruct().resume(KEY, harness.message, "resume-2")
+    assert harness.boundary.calls == 2
+
+
+def test_a_first_client_turn_that_exits_is_a_launch_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The production path: the first turn's CLI exits before any turn event."""
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    namespace = _namespace(workspace)
+    detail = "failed to initialize in-process app-server client: Operation not permitted"
+    threads = SimThreads()
+    calls = 0
+
+    def execute(_request: object) -> FakeRun:
+        nonlocal calls
+        calls += 1
+        return FakeRun(stderr=[detail + "\n"], returncode=1)
+
+    client = AgentClient(
+        fake_agentshim_launcher(provider="codex", executor=FakeExecutor(execute), threads=threads),
+        provider="codex",
+        session_store=DurableSessionStore(
+            namespace.slot("sessions.json", AgentSessionState), threads=threads
+        ),
+        clock=ManualClock(),
+        threads=threads,
+    )
+    spec = AgentSessionSpec(
+        role="implementer",
+        provider="codex",
+        workspace=workspace,
+        policy=AgentExecutionPolicy(require_enforcement=False),
+    )
+    sessions = ClientAgentSessions(
+        client, namespace.slot("invocations.json", AgentInvocationState), threads=threads
+    )
+    turn = AgentTurnRequest(message="go", invocation_id="start-1")
+    try:
+        result = sessions.start(KEY, spec, turn)
+        assert isinstance(result, LaunchFailed)
+        assert detail in result.detail
+        assert sessions.start(KEY, spec, turn) == result
+        assert calls == 1
+        with pytest.raises(SessionResumeError, match="Operation not permitted"):
+            sessions.start(KEY, spec, AgentTurnRequest(message="go", invocation_id="start-2"))
+    finally:
+        client.close()
+
+
+def test_an_exit_after_a_turn_started_stays_unknown(harness: _Harness) -> None:
+    """A process that already started a turn may have accepted it, so it stays unknown."""
+
+    def fail() -> None:
+        raise agentshim.CliExitError(
+            ("codex",),
+            1,
+            stdout='{"type":"turn.started"}\n',
+            stderr="closed",
+            detail="closed",
+        )
+
+    harness.boundary.effect = fail
+    result = harness.sessions.resume(KEY, harness.message, "resume-1")
+    assert isinstance(result, Unknown)
 
 
 def test_cancellation_persists_unknown_before_propagating(harness: _Harness) -> None:

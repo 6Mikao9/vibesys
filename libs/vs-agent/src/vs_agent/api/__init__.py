@@ -153,9 +153,11 @@ from vs_agent.sessions import (
     Completed,
     InvalidResponse,
     InvocationOutcome,
+    LaunchFailed,
     Pending,
     Unknown,
     inspect_invocation_journal,
+    invocation_settled,
 )
 from vs_agent.shim_clock import STOP_POLL_S, ThreadsClock
 from vs_agent.sink import (
@@ -254,6 +256,7 @@ __all__ = [
     "InvocationConflictError",
     "InvocationOutcome",
     "JsonResultPayload",
+    "LaunchFailed",
     "LoginCommand",
     "LoginCredential",
     "LoginKind",
@@ -317,6 +320,7 @@ __all__ = [
     "describe_validation_error",
     "harnesses",
     "inspect_invocation_journal",
+    "invocation_settled",
     "launch_shell_environment",
     "materialize_skills",
     "model_display",

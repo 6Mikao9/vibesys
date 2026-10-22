@@ -5,16 +5,13 @@ from __future__ import annotations
 import os
 import stat
 from itertools import count
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import PrivateDirectoryError, ensure_private_directory, user_runtime_root
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _UID = os.getuid()
 _PERMISSION_BITS = st.integers(min_value=0o000, max_value=0o777)
@@ -29,7 +26,22 @@ def _fresh(tmp_path: Path) -> Path:
 def test_without_an_absolute_runtime_dir_the_root_is_a_fixed_per_user_path(
     environ: dict[str, str],
 ) -> None:
-    assert str(user_runtime_root(environ, 1001)) == "/tmp/vibesys-1001"  # noqa: S108  # lint-waiver: LW-178204 [S108]; the rule fixes this literal path.
+    root = user_runtime_root(environ, 1001)
+    # The fallback parent is /tmp, resolved when the platform ships it as a symlink.
+    assert root == Path("/tmp").resolve() / "vibesys-1001"  # noqa: S108  # lint-waiver: LW-178204 [S108]; the rule fixes this path, resolved only at the platform symlink.
+    assert not any(part.is_symlink() for part in root.parents)
+
+
+def test_a_supplied_runtime_dir_is_not_resolved(tmp_path: Path) -> None:
+    """A caller-supplied runtime dir is kept verbatim, symlink and all.
+
+    The registry refuses to follow a link. Resolving here would walk one an
+    attacker planted and hide that refusal.
+    """
+    link = tmp_path / "runtime"
+    link.symlink_to(tmp_path / "elsewhere")
+
+    assert user_runtime_root({"XDG_RUNTIME_DIR": str(link)}, 7) == link / "vibesys"
 
 
 @given(

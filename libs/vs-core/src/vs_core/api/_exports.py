@@ -1501,6 +1501,7 @@ def _load_types_session_inputs() -> dict[str, object]:
 
 def _load_types_sessions() -> dict[str, object]:
     from vs_core.types.sessions import (
+        LAUNCH_FAILURE_PREFIX,
         TURN_FAILURE_DETAIL_LIMIT,
         Access,
         AcquisitionStalled,
@@ -1604,6 +1605,7 @@ def _load_types_sessions() -> dict[str, object]:
         "SessionsState": SessionsState,
         "SnapshotAndRetainRun": SnapshotAndRetainRun,
         "SteerReceived": SteerReceived,
+        "LAUNCH_FAILURE_PREFIX": LAUNCH_FAILURE_PREFIX,
         "TURN_FAILURE_DETAIL_LIMIT": TURN_FAILURE_DETAIL_LIMIT,
         "TurnFailureKind": TurnFailureKind,
         "TurnInputsReserved": TurnInputsReserved,
