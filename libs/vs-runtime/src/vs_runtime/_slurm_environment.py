@@ -17,6 +17,7 @@ from vs_runtime._agent_gpu_commands import (
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
 from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_runtime_policy import RefusesDockerInDocker, reject_docker_in_docker
+from vs_runtime._eval_host_tenancy import declared_eval_host_tenancy
 from vs_runtime._host_command_bridge import (
     agent_paths,
     bridge_editor_extras,
@@ -622,6 +623,9 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 profiler_mcp_resources=profiler_mcp[1],
                 cluster_evaluation=ClusterEvaluationFacts(
                     self._settings, plans.plan, root_proof=root_proof
+                ),
+                evaluation_host_tenancy=declared_eval_host_tenancy(
+                    local_host=False, exclusive_node=config.exclusive_node
                 ),
             )
             with _starting_container(request, sandbox) as output:

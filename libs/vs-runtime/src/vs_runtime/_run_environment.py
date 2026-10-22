@@ -79,6 +79,7 @@ from vs_runtime._environment_startup import (
     WorkspaceRootProbeSink,
     startup_stage,
 )
+from vs_runtime._eval_host_tenancy import EvalHostTenancy, declared_eval_host_tenancy
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
 from vs_runtime._objective_document import (
@@ -256,6 +257,12 @@ class RunEnvironmentView:
     agent_host_resources: tuple[HostResource, ...] = ()
     # Set when trusted evaluation runs as Slurm jobs; ``None`` otherwise.
     cluster_evaluation: ClusterEvaluationFacts | None = None
+    # Whether the host that runs a trusted evaluation is shared or exclusive.
+    # The environment declares this when it opens. A local host is shared. An
+    # environment that guarantees an exclusive node is exclusive. Every other
+    # environment is shared, because it does not guarantee the node is alone.
+    # A task may override the value; the product resolves that override.
+    evaluation_host_tenancy: EvalHostTenancy = EvalHostTenancy.SHARED
 
     @property
     def captures_profile(self) -> bool:
@@ -731,6 +738,9 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                     # The host sandbox binds a linked worktree's metadata read-only too.
                     workspace_git_writable=git_metadata_mounts(request.workspace).agent_writable,
                     agent_host_resources=grants,
+                    evaluation_host_tenancy=declared_eval_host_tenancy(
+                        local_host=True, exclusive_node=False
+                    ),
                 ),
             )
         )

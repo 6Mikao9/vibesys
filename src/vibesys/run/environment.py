@@ -8,6 +8,7 @@ from vibesys.prompts import PROMPTS_DIR, render_template
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentFacts,
+    EvalHostTenancy,
     HostEnvironmentFacts,
     ModalEnvironmentFacts,
     RunEnvironment,
@@ -40,17 +41,23 @@ def _placeholder_missing_hidden_files(request: RunEnvironmentRequest) -> None:
         target.touch()
 
 
-def agent_environment_notes(view: RunEnvironmentView) -> str:
+def agent_environment_notes(
+    view: RunEnvironmentView, *, tenancy: EvalHostTenancy | None = None
+) -> str:
     """The run environment notes every agent prompt states, for the run's root session *view*.
 
     Prompts are rendered for the run, so the Git sentence follows where agents write
     (``RunEnvironmentView.agent_git_writable``), not the root session's own checkout.
+    ``tenancy`` is the task's resolved host tenancy; omitted, the environment's own
+    declaration is used. The shared-host sentence is in the template.
     """
+    resolved = view.evaluation_host_tenancy if tenancy is None else tenancy
     return render_template(
         "agent_notes.j2",
         template_dir=_TEMPLATE_DIR,
         environment_notes=view.prompt_notes,
         git_writable=view.agent_git_writable,
+        evaluation_host_shared=resolved is EvalHostTenancy.SHARED,
     )
 
 

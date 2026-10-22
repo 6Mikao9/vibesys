@@ -228,6 +228,20 @@ SlurmTransport = Annotated[
 ]
 
 
+def _last_sharing_is_bare_exclusive(arguments: tuple[str, ...]) -> bool:
+    """Whether the last sharing option sbatch would read is a bare ``--exclusive``.
+
+    ``--exclusive=user``, ``=mcs`` and ``=topo`` share the node, and so do
+    ``--oversubscribe``, ``--share`` and ``-s``. sbatch takes the last of these.
+    """
+    sharing = [
+        argument
+        for argument in arguments
+        if argument in {"--oversubscribe", "--share", "-s"} or argument.startswith("--exclusive")
+    ]
+    return bool(sharing) and sharing[-1] == "--exclusive"
+
+
 class SlurmConfig(BaseModel):
     """Cluster-neutral scheduler and transport settings.
 
@@ -286,13 +300,17 @@ class SlurmConfig(BaseModel):
         """
         if self.dedicated_measurement_resources:
             return True
-        sharing = [
-            argument
-            for argument in self.sbatch_arguments
-            if argument in {"--oversubscribe", "--share", "-s"}
-            or argument.startswith("--exclusive")
-        ]
-        return bool(sharing) and sharing[-1] == "--exclusive"
+        return _last_sharing_is_bare_exclusive(self.sbatch_arguments)
+
+    @property
+    def exclusive_node(self) -> bool:
+        """Whether the job is guaranteed the node alone.
+
+        True only when the last sharing option is a bare ``--exclusive``. A
+        declaration of dedicated GPUs or cores may still share the host, so it
+        does not make the node exclusive.
+        """
+        return _last_sharing_is_bare_exclusive(self.sbatch_arguments)
 
     @model_validator(mode="before")
     @classmethod

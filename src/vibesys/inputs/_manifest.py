@@ -32,6 +32,7 @@ from vs_project.api import (
     check_comparisons_are_distinct,
 )
 from vs_runtime.api.infrastructure import (
+    EvalHostTenancy,
     EvaluatorPackageNotFoundError,
     EvaluatorPackageRequirement,
     check_unread_paths,
@@ -392,6 +393,9 @@ class EnvironmentInput(BaseModel):
     #: Docker daemon of its own under Sysbox. Selecting that environment is
     #: automatic, like a task-owned Dockerfile.
     docker_in_docker: StrictBool = False
+    #: Whether the evaluation host is shared or exclusive. Omitted, the run
+    #: environment's own declaration stands. Unknown values are rejected.
+    host_tenancy: EvalHostTenancy | None = None
 
 
 class StageKind(StrEnum):
@@ -701,14 +705,21 @@ def _append_accuracy(lines: list[str], manifest: InputManifest) -> None:
 
 
 def _append_environment_and_resources(lines: list[str], manifest: InputManifest) -> None:
-    if manifest.environment is not None and manifest.environment.docker_in_docker:
-        lines.extend(["", "[environment]", "docker_in_docker = true"])
-    if manifest.environment is not None and manifest.environment.modal is not None:
+    environment = manifest.environment
+    if environment is not None and (
+        environment.docker_in_docker or environment.host_tenancy is not None
+    ):
+        lines.extend(["", "[environment]"])
+        if environment.docker_in_docker:
+            lines.append("docker_in_docker = true")
+        if environment.host_tenancy is not None:
+            lines.append(f"host_tenancy = {_toml_string(environment.host_tenancy.value)}")
+    if environment is not None and environment.modal is not None:
         lines.extend(
             [
                 "",
                 "[environment.modal]",
-                f"entrypoint = {_toml_string(manifest.environment.modal.entrypoint)}",
+                f"entrypoint = {_toml_string(environment.modal.entrypoint)}",
             ]
         )
 
@@ -930,6 +941,14 @@ class InputBundle(BaseModel):
         """Return whether the task declared that its candidate needs a Docker daemon."""
         environment = self.manifest.environment
         return environment is not None and environment.docker_in_docker
+
+    @property
+    def host_tenancy(self) -> EvalHostTenancy | None:
+        """The task's host-tenancy override, or None when the environment's default stands."""
+        environment = self.manifest.environment
+        if environment is None:
+            return None
+        return environment.host_tenancy
 
     @property
     def modal_entrypoint(self) -> str | None:

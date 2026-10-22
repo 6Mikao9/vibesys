@@ -24,6 +24,7 @@ from vibesys.inputs import (
     render_input_manifest,
 )
 from vs_project.api import AmbiguousTaskError, InvalidTaskDefinitionError
+from vs_runtime.api.infrastructure import EvalHostTenancy
 from vs_sim.api.testing import examples
 
 _COMMIT = "0123456789abcdef"
@@ -450,3 +451,17 @@ def test_profile_workload_is_a_strict_trusted_command_roundtrip(
         InputManifest.model_validate(
             {**manifest.model_dump(), "profile": {**profile, "untrusted_workload": "ignored"}}
         )
+
+
+@pytest.mark.parametrize("tenancy", ["shared", "exclusive"])
+def test_a_host_tenancy_override_round_trips_and_an_unknown_value_names_the_key(
+    tenancy: str,
+) -> None:
+    manifest = InputManifest.model_validate(_manifest({"environment": {"host_tenancy": tenancy}}))
+    assert manifest.environment is not None
+    assert manifest.environment.host_tenancy is EvalHostTenancy(tenancy)
+    assert InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest))) == manifest
+    with pytest.raises(ValidationError, match="host_tenancy"):
+        InputManifest.model_validate(_manifest({"environment": {"host_tenancy": "noisy"}}))
+    with pytest.raises(ValidationError, match="not_a_tenancy"):
+        InputManifest.model_validate(_manifest({"environment": {"not_a_tenancy": "shared"}}))

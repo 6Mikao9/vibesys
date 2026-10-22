@@ -64,6 +64,11 @@ from vs_runtime._environment_startup import (
     WorkspaceRootProbeSink,
 )
 from vs_runtime._environment_system import EnvironmentSystem
+from vs_runtime._eval_host_tenancy import (
+    EvalHostTenancy,
+    declared_eval_host_tenancy,
+    resolve_eval_host_tenancy,
+)
 from vs_runtime._evaluator_packages import (
     PACKAGE_ROOT_TOKEN,
     TOOL_TOKEN_PREFIX,
@@ -572,6 +577,7 @@ __all__ = [
     "EnvironmentStartupState",
     "EnvironmentSystem",
     "EnvironmentWaitCondition",
+    "EvalHostTenancy",
     "EvaluatorGoModule",
     "EvaluatorGoModuleError",
     "EvaluatorGoModuleLifecycleHooks",
@@ -753,6 +759,7 @@ __all__ = [
     "create_workspace_runtime",
     "decide_outage",
     "decide_quota",
+    "declared_eval_host_tenancy",
     "decode_trusted_benchmark_output",
     "decode_trusted_benchmark_run",
     "derived_environment_name",
@@ -802,6 +809,7 @@ __all__ = [
     "required_evaluator_go_module_cache_root",
     "required_evaluator_tools_root",
     "resolve_bundled_tree",
+    "resolve_eval_host_tenancy",
     "resolve_evaluator_package",
     "resolve_packaged_tree",
     "resolve_run_environment_spec",
