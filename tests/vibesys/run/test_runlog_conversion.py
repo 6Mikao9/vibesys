@@ -76,8 +76,10 @@ def test_conversion_cannot_replace_a_live_writers_destination(
     )
     original = source.read_bytes()
     destination = Project.run_log_path_for(project.root, "run-1")
-    with closing(RunLock(destination.parent / "run.lock")), pytest.raises(BlockingIOError):
-        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    with closing(RunLock(destination.parent / "run.lock")):
+        result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    assert result.status is ConversionStatus.SKIPPED
+    assert "live" in result.reason
     assert not destination.exists()
     assert source.read_bytes() == original
     assert not (destination.parent / "streams").exists()

@@ -29,6 +29,7 @@ message AcceptedOperation {
     TestClusterRequest test_cluster = 33;
     StartRunRequest start_run = 36;
     TerminateRunRequest terminate_run = 38;
+    ConvertSavedRunsRequest convert_saved_runs = 39;
     LoginRequest login = 40;
   }
 }
@@ -54,6 +55,7 @@ message OperationResult {
     TestClusterResponse test_cluster = 33;
     StartRunResponse start_run = 36;
     TerminateRunResponse terminate_run = 38;
+    ConvertSavedRunsResponse convert_saved_runs = 39;
     LoginResponse login = 40;
   }
 }

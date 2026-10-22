@@ -1945,7 +1945,7 @@ depends_on = ["vibesys.run"]
 
 [[interfaces]]
 from = ["vibesys.api.transport"]
-expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs"]
+expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs", "iter_conversions"]
 
 [[modules]]
 path = "vibesys.records"
@@ -2053,7 +2053,7 @@ expose = ["[A-Z].*"]
 
 [[modules]]
 path = "vibesys.api.host_operations"
-depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
+depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._convert", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
 
 [[interfaces]]
 from = ["vibesys.api.host_operations"]
@@ -2062,6 +2062,10 @@ expose = ["api", "api\\..*"]
 [[modules]]
 path = "vibesys.api.host_operations._candidate"
 depends_on = ["vs_proto", "vs_project"]
+
+[[modules]]
+path = "vibesys.api.host_operations._convert"
+depends_on = ["vibesys.api.transport", "vs_project", "vs_proto", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.api.host_operations._handlers"
