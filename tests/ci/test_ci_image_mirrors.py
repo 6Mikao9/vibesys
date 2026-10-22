@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -162,7 +161,7 @@ MIRROR_FAILURES = [
     OSError("HTTP 401: unauthorized"),
     OSError("HTTP 404: manifest unknown"),
     OSError("HTTP 500: internal error"),
-    subprocess.TimeoutExpired(["docker", "manifest", "inspect"], 30),
+    TimeoutError("probe deadline"),
     FileNotFoundError("docker"),
 ]
 

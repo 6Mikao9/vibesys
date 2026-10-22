@@ -26,10 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the manifest-preserving registry copier
-        timeout-minutes: 2
-        run: |
-          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update
-          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 install -y skopeo
+        uses: ./.github/actions/setup-runner-apt
+        with:
+          packages: skopeo
+
       - name: Mirror all pins without changing their digests
         env:
           GHCR_TOKEN: ${{ github.token }}
