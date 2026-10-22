@@ -128,6 +128,12 @@ def _measure(host: Host, revision: str) -> None:
         assert not last.retain
 
 
+LOST = 25.0
+"""A part measured before the combination: below the input, so it leaves main where it was."""
+LATE = 60.0
+"""A part measured after the combination: above the input (50), so the first to settle moves main."""
+
+
 def _coverage(context: PlannerPrompt | PlannerCorrection) -> dict[str, str]:
     return {row.hypothesis_id: row.facts.value for row in context.combinable}
 
@@ -136,9 +142,9 @@ def _coverage(context: PlannerPrompt | PlannerCorrection) -> dict[str, str]:
 @settings(max_examples=examples(pr=12, nightly=50))
 @example(states=("both", "none"), own="both", merge_facts="benchmark", throughput=100)
 @example(
-    states=("accuracy", "benchmark", "none"), own="accuracy", merge_facts="both", throughput=50
+    states=("accuracy", "benchmark", "none"), own="accuracy", merge_facts="both", throughput=60
 )
-@example(states=("none", "none"), own="both", merge_facts="both", throughput=50)
+@example(states=("none", "none"), own="both", merge_facts="both", throughput=60)
 @example(states=("both", "none"), own="both", merge_facts="both", throughput=25)
 @given(
     states=st.lists(st.sampled_from(tuple(_STAGES)), min_size=2, max_size=4)
@@ -146,7 +152,7 @@ def _coverage(context: PlannerPrompt | PlannerCorrection) -> dict[str, str]:
     .map(tuple),
     own=st.sampled_from(("accuracy", "benchmark", "both")),
     merge_facts=st.sampled_from(("accuracy", "benchmark", "both")),
-    throughput=st.sampled_from((25, 50, 100)),
+    throughput=st.sampled_from((25, int(LATE), 100)),
 )
 def test_combining_while_evaluation_is_busy_keeps_each_revisions_facts_local(
     states: tuple[str, ...], own: str, merge_facts: str, throughput: int
@@ -156,12 +162,18 @@ def test_combining_while_evaluation_is_busy_keeps_each_revisions_facts_local(
         DynamicConfig(max_rounds=len(states) + 4, max_in_flight=1),
         restarting=RestartPolicy(steps=frozenset({5, 20, 40, 70, 100})),
         view=FakeView(),
-        throughputs={"composite": 100.0, "merged": float(throughput)},
+        throughputs={
+            "composite": 100.0,
+            "merged": float(throughput),
+            **{f"part{i}": LATE if facts == "none" else LOST for i, facts in enumerate(states)},
+        },
     )
     initial_main = host.record.main if host.record is not None else None
     parts = [(f"h{i}", f"part{i}", facts) for i, facts in enumerate(states)]
     # Measured candidates finish first; the remaining candidates occupy/wait for the one slot.
-    for name, revision, facts in sorted(parts, key=lambda part: part[2] == "none"):
+    ordered = sorted(parts, key=lambda part: part[2] == "none")
+    unmeasured = [revision for _, revision, facts in ordered if facts == "none"]
+    for name, revision, facts in ordered:
         _plan(host, implement(name))
         _work(host, name, revision, facts)
         if facts != "none":
@@ -198,7 +210,9 @@ def test_combining_while_evaluation_is_busy_keeps_each_revisions_facts_local(
         _coverage(after)[name] == ("both" if facts == "none" else facts) for name, _, facts in parts
     )
     assert host.record is not None
-    assert host.record.main == initial_main
+    # The first unmeasured part to settle beats the input and, built on main, moves it; the
+    # composite settles after it, so it was built on a main it has left and is merged.
+    assert host.record.main == RevisionRef.of_git_commit(unmeasured[0])
 
     if own == "both":
         _plan(host, merge("m", "k"))
@@ -213,7 +227,7 @@ def test_combining_while_evaluation_is_busy_keeps_each_revisions_facts_local(
         _measure(host, "merged")
         assert host.record is not None
         assert (host.record.main == RevisionRef.of_git_commit("merged")) is (
-            merge_facts == "both" and throughput >= 50
+            merge_facts == "both" and throughput >= LATE
         )
 
     host.run.stop()

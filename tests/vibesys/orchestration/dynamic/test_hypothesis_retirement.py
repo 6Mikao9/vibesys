@@ -24,6 +24,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.orchestration.dynamic._slots import verify_parents
 from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
@@ -105,6 +106,7 @@ def test_every_retirement_the_planner_schema_allows_leaves_a_record_the_run_keep
     assert RunSnapshot.model_validate(record.model_dump(mode="python")) == record
     assert RunSnapshot.model_validate_json(record.model_dump_json()) == record
 
+    verify_parents(host)  # h2 starts from the main the first candidate moved
     (asked,) = host.open(StartAttempt)  # the plan that retired h1 still starts h2
     host.answer(asked)
     result = ImplementerResult.model_validate_json(implemented())

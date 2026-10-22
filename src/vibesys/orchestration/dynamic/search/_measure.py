@@ -11,13 +11,19 @@ from vibesys.candidates.api import (
     Baseline,
     InputFailure,
     again_after,
+    declared_directions,
     decode_input,
     failure,
     input_measurement,
     with_first_attempt,
     with_samples,
 )
-from vibesys.metrics import AcceptedReading, accept_readings, pooled_benchmarks
+from vibesys.metrics import (
+    AcceptedReading,
+    accept_readings,
+    pooled_benchmarks,
+    with_declared_directions,
+)
 from vibesys.orchestration.dynamic.search._composition import (
     ComposedJobs,
     MeasuredJob,
@@ -364,6 +370,8 @@ async def interpret(ctx: Flow, ws: Workspace, proof: Proof) -> tuple[AcceptedRea
     if not isinstance(outcome, EvidenceReadings):
         raise WorkEndedError(Failure(kind=FailureKind.EVIDENCE_UNDECODABLE), proof=proof)
     readings = accept_readings(outcome.readings, proof.refs)
+    if not isinstance(readings, str):
+        readings = with_declared_directions(readings, declared_directions(ctx.task.terms))
     if isinstance(readings, str):
         raise WorkEndedError(Failure(kind=FailureKind.EVIDENCE_REFUSED), proof=proof)
     if outcome.status != "succeeded" or not readings:

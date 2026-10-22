@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from vibesys.candidates._settlement import Gates
-from vibesys.metrics import MetricSpace, Objective
+from vibesys.metrics import Direction, MetricSpace, Objective
 from vs_core.api.search import (
     ArtifactRef,
     EvidenceKind,
@@ -40,6 +40,11 @@ def space_of(terms: TaskTerms) -> MetricSpace:
         ),
         relative_noise=terms.relative_noise,
     )
+
+
+def declared_directions(terms: TaskTerms) -> dict[str, Direction]:
+    """Which way is better on each axis the task declares: the one authority on direction."""
+    return {item.name: item.direction for item in terms.objectives}
 
 
 PROFILE = "profile"

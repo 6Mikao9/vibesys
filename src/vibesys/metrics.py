@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AcceptedReading",
+    "Direction",
     "EvidenceReading",
     "FrameworkBenchmarkOutcome",
     "HostContention",
@@ -61,6 +62,7 @@ __all__ = [
     "mean_metrics",
     "pooled_benchmarks",
     "reading_of",
+    "with_declared_directions",
 ]
 
 
@@ -517,6 +519,31 @@ def pooled_benchmarks[R: EvidenceReading](readings: tuple[R, ...]) -> tuple[R, .
     pooled = samples[-1].model_copy(update={"metrics": mean_metrics([s.metrics for s in samples])})
     kept = tuple(item for item in readings if item not in samples)
     return (*kept, pooled)
+
+
+def with_declared_directions[R: EvidenceReading](
+    readings: tuple[R, ...], declared: Mapping[str, Direction]
+) -> tuple[R, ...]:
+    """``readings`` whose rows state the direction the task declared for their axis.
+
+    The evaluator reports a direction for its headline only, and the evidence decoder fills in
+    ``max`` for every other row, so an axis the task minimises (TTFT) was shown to agents as
+    ``better: max``. The declared objective is the one authority on which way is better; a
+    row on no declared axis keeps what it was decoded with.
+    """
+    return tuple(
+        item.model_copy(
+            update={
+                "metrics": tuple(
+                    row.model_copy(update={"direction": declared[row.name]})
+                    if row.name in declared
+                    else row
+                    for row in item.metrics
+                )
+            }
+        )
+        for item in readings
+    )
 
 
 def accept_readings(
