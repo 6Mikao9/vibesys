@@ -393,13 +393,30 @@ def _admitted(
         return AreaChange(state=state)
     run = reused_run(state, event.scope, plan, identity.value)
     reuses = None if run is None else run.submission_id
+    if event.reuse_only and run is None:
+        return AreaChange(
+            state=state,
+            events=(
+                MeasurementResult(scope=event.scope, evidence=(), status=ObservationStatus.PENDING),
+            ),
+        )
     base = base_of(context, event.scope, plan) if event.compared else None
     origin_of = Origin(event.scope, origin.value.decision_id, reuses=reuses, base=base)
     change = _admit(state, context, origin_of, plan, identity.value)
+    return _based(change, context, origin_of, plan)
+
+
+def _based(
+    change: AreaChange[EvaluationState],
+    context: EvaluationContext,
+    origin: Origin,
+    plan: MeasurementPlan,
+) -> AreaChange[EvaluationState]:
+    """``change`` with the base run its submission compares against, when it submitted one."""
     outbound = next((r for r in change.requests if isinstance(r.request, SubmitMeasurement)), None)
     if outbound is None or outbound.request.request_id is None:
         return change
-    return with_base(change, context, origin_of, plan, outbound.request.request_id)
+    return with_base(change, context, origin, plan, outbound.request.request_id)
 
 
 def _admit(

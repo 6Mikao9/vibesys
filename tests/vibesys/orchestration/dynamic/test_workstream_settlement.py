@@ -74,7 +74,9 @@ def measured(host: Host) -> list[RevisionRef]:
     plans = [
         item.request.plan
         for item in host.run.decisions
-        if isinstance(item, Wait) and isinstance(item.request, Measure)
+        if isinstance(item, Wait)
+        and isinstance(item.request, Measure)
+        and not item.request.reuse_only
     ]
     return [
         plan.candidate

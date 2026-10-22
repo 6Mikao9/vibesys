@@ -132,6 +132,10 @@ class Measure(DecisionBase):
     the candidate's when no fresh sample of it is held. A measurement nobody compares costs no
     base run.
     """
+    reuse_only: bool = Field(default=False, exclude_if=unset)
+    """Answer only from what core holds: admit no run when reuse (`vs_core._measurement_reuse`)
+    cannot answer, and finish with a result whose status is ``pending`` and which holds no
+    evidence. A strategy asks this before it reserves anything for a fresh run."""
 
 
 class ProposeWinner(DecisionBase):

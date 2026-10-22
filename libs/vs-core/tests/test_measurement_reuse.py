@@ -720,3 +720,50 @@ def test_a_sequence_member_reaches_its_lease_owner_instead_of_reusing_old_eviden
     (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
     assert submission.reuses is None
     assert submission.plan.evaluation_lease == measurement.evaluation_lease
+
+
+def reuse_only(state: core.CoreState, measurement: core.MeasurementPlan) -> core.Transition:
+    """The strategy's question before it reserves a slot: answer from the held runs, or nothing."""
+    decision = core.Measure(
+        decision_id=core.DecisionId(root="held"),
+        scope=scope_of(state),
+        plan=measurement,
+        reuse_only=True,
+    )
+    return transition(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=100.0)),
+            expected_revision=state.revision,
+        ),
+    )
+
+
+@given(variant=st.sampled_from(("same", *_UNLIKE)), outcome=st.sampled_from(_CONCLUSIVE))
+def test_a_reuse_only_measurement_admits_exactly_what_an_official_one_would_reuse(
+    variant: Variant, outcome: Outcome
+) -> None:
+    """Held: the reusing submission, as `Measure` makes it. Not held: nothing is admitted at all.
+
+    A notes-only commit (another revision, the same measured input) is held. A run unlike the
+    official one is not, and the question leaves no submission, charge or budget behind, so the
+    fresh measurement that follows is the first of its identity.
+    """
+    state, agent = agent_run(
+        core.initial_state(), "c1", measured("local-validation", "a", "sha256:a", variant), outcome
+    )
+    assert agent is not None
+    official_plan = measured("official", "notes-only", "sha256:a")
+    before = len(submissions(state))
+    asked = reuse_only(state, official_plan)
+    if variant == "same":
+        (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+        assert submission.reuses == agent.request_id
+        return
+    fresh = official(asked.state, official_plan)
+    (second,) = [r for r in fresh.requests if isinstance(r, core.SubmitMeasurement)]
+    assert len(submissions(asked.state)) == before
+    (pending,) = results(asked)
+    assert pending.status is core.ObservationStatus.PENDING
+    assert not pending.evidence
+    assert second.reuses is None

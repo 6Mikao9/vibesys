@@ -66,6 +66,7 @@ def _candidate_measurements(host: Host) -> int:
     return sum(
         isinstance(item, Wait)
         and isinstance(item.request, Measure)
+        and not item.request.reuse_only
         and item.request.plan.purpose != "baseline"
         for item in host.run.decisions
     )
@@ -136,7 +137,9 @@ def test_the_planner_is_asked_before_a_slow_input_measurement_lands(*, restartin
     measured = {
         item.request.plan.candidate
         for item in host.run.decisions
-        if isinstance(item, Wait) and isinstance(item.request, Measure)
+        if isinstance(item, Wait)
+        and isinstance(item.request, Measure)
+        and not item.request.reuse_only
     }
     assert {RevisionRef.of_git_commit("c1"), RevisionRef.of_git_commit("c2")} <= measured
     assert isinstance(host.run.finished, Finish)

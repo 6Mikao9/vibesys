@@ -54,6 +54,9 @@ from vs_core.api import (
     InterpretEvidenceBase,
     InvocationId,
     InvocationRef,
+    Measure,
+    MeasurementFinished,
+    MeasurementResult,
     ObservationStatus,
     Operation,
     OperationFinished,
@@ -70,6 +73,7 @@ from vs_core.api import (
     ResumeReady,
     ResumeRefusal,
     ResumeRefused,
+    RevisionRef,
     Scope,
     Settlement,
     SettlementId,
@@ -290,6 +294,12 @@ class FlowRun[C]:
         self.state: FlowState
         self.decisions: list[Decision] = []
         """Every decision the search issued, in order."""
+        self.held: set[str] = set()
+        """The revisions (their ids) whose official measurement core answers from runs it holds.
+
+        A ``reuse_only`` measurement of any other is answered "not held" at once, as core does;
+        one of these stays open, for the host to answer as the run it reuses.
+        """
         self._open: list[Asked] = []
         self._sleeps: list[Seconds] = []
         self._prompts: dict[ArtifactId, tuple[str, Value]] = {}
@@ -642,6 +652,13 @@ class FlowRun[C]:
                     self._queue.append(
                         OperationFinished(decision=operation.decision_id, result=result)
                     )
+                case Wait(request=Measure(reuse_only=True) as probe) if self._not_held(probe):
+                    nothing = MeasurementResult(
+                        scope=probe.scope, evidence=(), status=ObservationStatus.PENDING
+                    )
+                    self._queue.append(
+                        MeasurementFinished(decision=probe.decision_id, result=nothing)
+                    )
                 case Wait(request=ProposeWinner() as proposal) if self.adopting:
                     self._open.append(Asked(proposal.decision_id, proposal, None))
                     self._queue.append(self._adopted(proposal))
@@ -654,6 +671,10 @@ class FlowRun[C]:
                 case Finish():
                     self.finished = decision
                     self._open.append(Asked(decision.decision_id, decision, None))
+
+    def _not_held(self, probe: Measure) -> bool:
+        candidate = probe.plan.candidate
+        return not isinstance(candidate, RevisionRef) or candidate.revision_id.root not in self.held
 
     def _prompt(self, request: Work) -> tuple[str | None, Value | None]:
         if isinstance(request, RequestTurn) and request.turn.prompts:

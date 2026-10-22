@@ -172,7 +172,9 @@ def _decisions[T](host: Host, kind: type[T]) -> list[T]:
     return [
         item.request
         for item in host.run.decisions
-        if isinstance(item, Wait) and isinstance(item.request, kind)
+        if isinstance(item, Wait)
+        and isinstance(item.request, kind)
+        and not getattr(item.request, "reuse_only", False)  # core's own question, not a measurement
     ]
 
 
@@ -250,7 +252,10 @@ def _check_kept_work(host: Host, seen: Seen) -> None:
 
 
 def _input_in_flight(host: Host) -> bool:
-    return any(isinstance(item.request, Measure) for item in host.input_waits())
+    return any(
+        isinstance(item.request, Measure) and not item.request.reuse_only
+        for item in host.input_waits()
+    )
 
 
 def _input_decoding(host: Host) -> bool:
@@ -267,7 +272,9 @@ def _reviewing(host: Host) -> bool:
 
 def _candidate_measuring(host: Host) -> bool:
     return any(
-        isinstance(item.request, Measure) and item.request.plan.purpose != "baseline"
+        isinstance(item.request, Measure)
+        and not item.request.reuse_only
+        and item.request.plan.purpose != "baseline"
         for item in host.run.open
     )
 

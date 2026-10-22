@@ -107,6 +107,7 @@ def _measure(host: Host, revision: str) -> None:
             a
             for a in host.open(Measure)
             if isinstance(a.request, Measure)
+            and not a.request.reuse_only
             and a.request.plan.candidate == RevisionRef.of_git_commit(revision)
         ]
         if not pending:
