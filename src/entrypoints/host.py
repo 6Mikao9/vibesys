@@ -19,6 +19,7 @@ from vibesys.api.host_operations.api import (
     StartRefusedError,
     execute_inspect_candidate,
     serve_cluster,
+    serve_convert_saved_runs,
     serve_login,
     serve_project,
     serve_start,
@@ -62,8 +63,10 @@ class LoginLibrary(Protocol):
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from typing import BinaryIO
 
+    from vibesys.api.transport import RunConversion
     from vs_sim.api import SignalRelay, SleepingClock, Threads
 
 
@@ -163,15 +166,7 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        owned = threads
-        destination.write(
-            terminate_host(
-                source.read((1 << 20) + 1),
-                platform=runtime,
-            )
-            if _MUTATION_COMMANDS[arguments[0]] == "terminate_run"
-            else _serve_mutation(arguments[0], source.read((1 << 20) + 1), owned)
-        )
+        destination.write(_mutate(arguments[0], source.read((1 << 20) + 1), runtime))
         return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -242,6 +237,16 @@ def watch_login(
         serve_login(payload, cli="login", start=start, write=write, wait=wait)
 
 
+def _mutate(cli: str, payload: bytes, platform: Platform) -> bytes:
+    """Route one mutation command; termination and conversion keep no admission receipt."""
+    slot = _MUTATION_COMMANDS[cli]
+    if slot == "terminate_run":
+        return terminate_host(payload, platform=platform)
+    if slot == "convert_saved_runs":
+        return _serve_conversion(payload, platform)
+    return _serve_mutation(cli, payload, platform.threads)
+
+
 def _serve_mutation(cli: str, payload: bytes, threads: Threads) -> bytes:
     """Dispatch one mutation command. Cluster and project changes are not starts."""
     slot = _MUTATION_COMMANDS[cli]
@@ -250,6 +255,18 @@ def _serve_mutation(cli: str, payload: bytes, threads: Threads) -> bytes:
     if slot in {"put_cluster", "remove_cluster", "test_cluster"}:
         return _serve_cluster(payload, threads)
     return _serve_project(payload, threads)
+
+
+def _serve_conversion(payload: bytes, platform: Platform) -> bytes:
+    """Convert stopped runs; the conversion engine loads only for this command."""
+    transport = import_module("vibesys.api.transport")
+
+    def conversions(project: Project) -> Iterator[RunConversion]:
+        return transport.iter_conversions(project, clock=platform.clock, threads=platform.threads)
+
+    return serve_convert_saved_runs(
+        payload, conversions=conversions, clock=platform.clock, home=Path.home()
+    )
 
 
 def _serve_project(payload: bytes, threads: Threads) -> bytes:

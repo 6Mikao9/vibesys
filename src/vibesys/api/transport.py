@@ -6,6 +6,14 @@ from vibesys.run.runlog_conversion import (
     RunConversion,
     convert_run,
     convert_runs,
+    iter_conversions,
 )
 
-__all__ = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs"]
+__all__ = [
+    "ConversionResult",
+    "ConversionStatus",
+    "RunConversion",
+    "convert_run",
+    "convert_runs",
+    "iter_conversions",
+]

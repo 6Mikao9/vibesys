@@ -16,6 +16,7 @@ from vs_proto.api import Keyframe, RunHead, validate
 from vs_runlog.api import (
     FileRunContent,
     FileRunLogWriter,
+    RunLock,
     RunLogReader,
     RunLogStopReason,
     install_run_log,
@@ -131,7 +132,28 @@ def convert_run(
     return result
 
 
+def _writer_is_live(directory: Path) -> bool:
+    """Probe the writer lock without creating it; every live writer holds run.lock."""
+    path = directory / "run.lock"
+    if not path.exists():
+        return False
+    try:
+        RunLock(path).close()
+    except BlockingIOError:
+        return True
+    return False
+
+
 def _convert_directory(
+    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+) -> ConversionResult:
+    """Convert a stopped run; a run whose writer holds ``run.lock`` is left untouched."""
+    if _writer_is_live(directory):
+        return ConversionResult(ConversionStatus.SKIPPED, "run is live: a writer holds run.lock")
+    return _convert_stopped(directory, run_id, clock=clock, threads=threads)
+
+
+def _convert_stopped(
     directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
 ) -> ConversionResult:
     """Atomically convert a quiescent run with trace events, preserving the JSONL source.
@@ -185,6 +207,8 @@ class RunConversion:
 
     run: str
     result: ConversionResult
+    # The row that already attempted this host index entry's target, if any.
+    alias_of: str | None = None
 
 
 def _attempt(
@@ -213,22 +237,25 @@ def _indexed_target(entry: Path) -> Path | ConversionResult:
         return target
 
 
-def convert_runs(
+def iter_conversions(
     project: Project, *, clock: SleepingClock, threads: Threads
-) -> tuple[RunConversion, ...]:
-    """Convert stopped project runs and every host index entry, once per target.
+) -> Iterator[RunConversion]:
+    """Convert stopped project runs and every host index entry, once per target, lazily.
 
-    Originals are never deleted, including after the seven-day retention window.
-    A failed run does not prevent later runs from being attempted. Index entries
-    without a supported journal are explicitly reported, including dangling links.
+    Each run is attempted only when the caller asks for the next outcome, so a
+    caller with a deadline stops between runs. A run already converted reports
+    ``EXISTS``. Originals are never deleted, including after the seven-day
+    retention window. A failed run does not prevent later runs from being
+    attempted. Index entries without a supported journal are explicitly
+    reported, including dangling links. A run whose writer holds ``run.lock``
+    is skipped and left untouched.
     """
     entries = [(entry, _indexed_target(entry)) for entry in project.indexed_run_directories()]
-    results = []
-    seen: set[Path] = set()
+    seen: dict[Path, str] = {}
     ids = set(project.logged_run_ids_for(project.root)) | set(project.state.checkout_run_ids())
     for run_id in sorted(ids):
         directory = project.log_directory_for(project.root, run_id)
-        seen.add(directory.resolve())
+        seen[directory.resolve()] = run_id
         try:
             result = convert_run(project, run_id, clock=clock, threads=threads)
         except (OSError, ValueError, TypeError, ProjectError) as exc:
@@ -241,20 +268,31 @@ def convert_runs(
                 ConversionStatus.SKIPPED,
                 "unsupported: no trace journal; store.json core state requires phase 3 state.pb",
             )
-        if result.status is ConversionStatus.EXISTS:
-            result = ConversionResult(ConversionStatus.SKIPPED, result.reason)
-        results.append(RunConversion(run_id, result))
+        yield RunConversion(run_id, result)
     for entry, target in entries:
         if isinstance(target, ConversionResult):
-            result = target
+            yield RunConversion(str(entry), target)
         elif target in seen:
-            result = ConversionResult(
-                ConversionStatus.SKIPPED, "already processed this index target"
+            yield RunConversion(
+                str(entry),
+                ConversionResult(ConversionStatus.SKIPPED, "already processed this index target"),
+                alias_of=seen[target],
             )
         else:
             result = _attempt(target, entry.name, clock=clock, threads=threads)
-            seen.add(target)
-        if result.status is ConversionStatus.EXISTS:
-            result = ConversionResult(ConversionStatus.SKIPPED, result.reason)
-        results.append(RunConversion(str(entry), result))
-    return tuple(results)
+            seen[target] = str(entry)
+            yield RunConversion(str(entry), result)
+
+
+def convert_runs(
+    project: Project, *, clock: SleepingClock, threads: Threads
+) -> tuple[RunConversion, ...]:
+    """Convert every run :func:`iter_conversions` finds; an existing conversion is skipped."""
+    return tuple(
+        RunConversion(
+            row.run, ConversionResult(ConversionStatus.SKIPPED, row.result.reason), row.alias_of
+        )
+        if row.result.status is ConversionStatus.EXISTS
+        else row
+        for row in iter_conversions(project, clock=clock, threads=threads)
+    )

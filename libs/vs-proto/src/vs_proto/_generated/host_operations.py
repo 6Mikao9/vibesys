@@ -381,6 +381,30 @@ def accept_terminate_run(
     return TerminateRun.accept(request)
 
 
+ConvertSavedRuns = Operation(
+    "ConvertSavedRuns",
+    39,
+    39,
+    39,
+    120000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.ConvertSavedRunsRequest,
+    pb.ConvertSavedRunsResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_convert_saved_runs(
+    request: pb.ConvertSavedRunsRequest,
+) -> AcceptedRequest[pb.ConvertSavedRunsRequest]:
+    return ConvertSavedRuns.accept(request)
+
+
 Login = Operation(
     "Login",
     40,
@@ -430,6 +454,7 @@ OPERATIONS: tuple[Operation, ...] = (
     TestCluster,
     StartRun,
     TerminateRun,
+    ConvertSavedRuns,
     Login,
 )
 
@@ -501,6 +526,7 @@ class MutationHandlers:
     test_cluster: Callable[[pb.TestClusterRequest], pb.TestClusterResponse]
     start_run: Callable[[pb.StartRunRequest], pb.StartRunResponse]
     terminate_run: Callable[[pb.TerminateRunRequest], pb.TerminateRunResponse]
+    convert_saved_runs: Callable[[pb.ConvertSavedRunsRequest], pb.ConvertSavedRunsResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -531,6 +557,10 @@ class MutationHandlers:
             case 38:
                 return TerminateRun.validate_response(
                     request, self.terminate_run(TerminateRun.request_value(request))
+                )
+            case 39:
+                return ConvertSavedRuns.validate_response(
+                    request, self.convert_saved_runs(ConvertSavedRuns.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -656,6 +686,7 @@ MUTATIONS: dict[str, Operation] = {
     "test_cluster": TestCluster,
     "start_run": StartRun,
     "terminate_run": TerminateRun,
+    "convert_saved_runs": ConvertSavedRuns,
 }
 MUTATION_CALLS: tuple[HostCall, ...] = (
     HostCall("create_example", "create-example", 34, 34, 120000, 5000),
@@ -665,6 +696,7 @@ MUTATION_CALLS: tuple[HostCall, ...] = (
     HostCall("test_cluster", "test-cluster", 33, 33, 65000, 5000),
     HostCall("start_run", "start-run", 36, 36, 60000, 5000),
     HostCall("terminate_run", "terminate-run", 38, 38, 10000, 5000),
+    HostCall("convert_saved_runs", "convert-saved-runs", 39, 39, 120000, 5000),
 )
 WATCHES: dict[str, Operation] = {"login": Login}
 WATCH_CALLS: tuple[HostCall, ...] = (HostCall("login", "login", 40, 40, 600000, 5000),)
