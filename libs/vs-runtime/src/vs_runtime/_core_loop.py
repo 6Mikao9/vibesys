@@ -57,7 +57,7 @@ from vs_core.api import (
     validate_startup,
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence, Unknown
-from vs_runtime._core_preflight import resolve_core_resume
+from vs_runtime._core_preflight import resolve_core_resume, validate_resume_receipts
 from vs_runtime._core_record import (
     Publication,
     PublicationAcknowledgement,
@@ -452,6 +452,9 @@ class CoreRuntime[S: StrategyState]:
 
     def _decode(self, stored: StoredEnvelope) -> RuntimeRecord[S]:
         record = self._record_model.decode(stored, self._registry)
+        validate_resume_receipts(
+            record.envelope.core.run.receipts, source_schema=str(stored.schema_version)
+        )
         self._check_identity(record.envelope)
         return record.model_copy(update={"envelope": record.envelope})
 

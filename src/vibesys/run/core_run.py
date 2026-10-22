@@ -164,7 +164,15 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing)
-    await start_core_awaiting_lease(loop, config)
+    try:
+        await start_core_awaiting_lease(loop, config)
+    except CoreResumeError as error:
+        diagnostic = error.diagnostic
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code=diagnostic.code, stage=diagnostic.stage, message=diagnostic.message
+            )
+        ) from error
     bridge = services.agent_evaluation
     run_error: BaseException | None = None
     try:
