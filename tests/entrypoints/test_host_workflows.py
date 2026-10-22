@@ -195,3 +195,124 @@ def test_candidate_inspection_is_a_registered_binary_read(host_root: Path, sim: 
     assert response.result.value.request_id == "candidate-a"
     assert response.result.value.selection_revision == 3
     assert response.result.value.state == pb.CandidateState.NOT_FOUND
+
+
+@pytest.mark.regression
+def test_native_cluster_probe_uses_the_injected_processes_and_replays_once(
+    host_root: Path, sim: Sim
+) -> None:
+    del host_root
+    threads = sim.threads()
+    processes = FakeProcesses(
+        lambda _: ProcessScript(returncode=255, stderr=b"probe refused"),
+        pass_time=threads.sleep,
+    )
+    platform = sim.platform(threads, processes=processes, signaller=FakeProcessSignaller(set()))
+    request = MutateRequest(
+        checkout="/src/checkout",
+        method=Oneof(
+            "test_cluster",
+            pb.TestClusterRequest(
+                request_id="cluster-probe-a",
+                cluster=pb.SlurmClusterSettings(
+                    name="lab",
+                    workspace="/work",
+                    reach=pb.SlurmClusterSettingsReach(
+                        value=Oneof("ssh_reach", pb.SshReach(kind="ssh", host="host-a"))
+                    ),
+                ),
+            ),
+        ),
+    )
+    validate(request)
+    replies = []
+    for _ in range(2):
+        output = BytesIO()
+        assert (
+            main(
+                ["test-cluster"],
+                stdin=BytesIO(request.to_binary()),
+                stdout=output,
+                platform=platform,
+            )
+            == 0
+        )
+        replies.append(output.getvalue())
+    assert replies[0] == replies[1]
+    response = MutateResponse.from_binary(replies[0])
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "test_cluster"
+    result = response.result.value.result
+    assert result is not None
+    assert result.field == "failed"
+    assert result.value.stage is pb.ClusterTestStage.REACH
+    assert result.value.detail == "probe refused"
+    assert len(processes.ran) == 1
+    assert processes.ran[0].argv[0] == "ssh"
+
+
+def test_native_cluster_put_and_remove_persist_without_the_helper(
+    host_root: Path, sim: Sim
+) -> None:
+    del host_root
+    threads = sim.threads()
+    processes = FakeProcesses(
+        lambda spec: ProcessScript(
+            stdout=b"cpu|1|(null)\n" if any("sinfo" in arg for arg in spec.argv) else b""
+        ),
+        pass_time=threads.sleep,
+    )
+    platform = sim.platform(threads, processes=processes, signaller=FakeProcessSignaller(set()))
+    put = MutateRequest(
+        checkout="/src/checkout",
+        method=Oneof(
+            "put_cluster",
+            pb.PutClusterRequest(
+                request_id="cluster-put-a",
+                cluster=pb.SlurmClusterSettings(
+                    name="lab",
+                    workspace="/work",
+                    reach=pb.SlurmClusterSettingsReach(
+                        value=Oneof("ssh_reach", pb.SshReach(kind="ssh", host="host-a"))
+                    ),
+                ),
+            ),
+        ),
+    )
+    output = BytesIO()
+    assert (
+        main(["put-cluster"], stdin=BytesIO(put.to_binary()), stdout=output, platform=platform) == 0
+    )
+    response = MutateResponse.from_binary(output.getvalue())
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "put_cluster"
+    settings = response.result.value.settings
+    assert settings is not None
+    assert len(settings.clusters) == 1
+    saved = settings.clusters[0].cluster
+    assert saved is not None
+    assert saved.name == "lab"
+    assert len(processes.ran) == 3
+    remove = MutateRequest(
+        checkout="/src/checkout",
+        method=Oneof(
+            "remove_cluster", pb.RemoveClusterRequest(request_id="cluster-remove-a", name="lab")
+        ),
+    )
+    output = BytesIO()
+    assert (
+        main(
+            ["remove-cluster"], stdin=BytesIO(remove.to_binary()), stdout=output, platform=platform
+        )
+        == 0
+    )
+    response = MutateResponse.from_binary(output.getvalue())
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "remove_cluster"
+    settings = response.result.value.settings
+    assert settings is not None
+    assert list(settings.clusters) == []
+    assert len(processes.ran) == 3

@@ -1518,7 +1518,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/server/event_index.py": (EdgeKind.STORE, "the event index"),
     "src/server/span_index.py": (EdgeKind.STORE, "the journal's span index"),
     "src/server/events.py": (EdgeKind.STORE, "the run's wire event log"),
-    "src/server/host_helper_compute.py": (
+    "src/server/host_compute_runtime.py": (
         EdgeKind.STORE,
         "the machine's compute settings file and the Modal and Slurm files it reads",
     ),

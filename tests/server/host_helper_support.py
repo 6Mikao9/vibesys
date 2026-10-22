@@ -41,9 +41,9 @@ from server.host_api import (
     RunStatus,
     parse_helper_message,
 )
+from server.host_compute_runtime import MachineCompute
 from server.host_harness import HarnessDisplay
 from server.host_helper import serve_channel
-from server.host_helper_compute import MachineCompute
 from server.host_helper_logs import (
     HelperLogs,
     StoredBytes,

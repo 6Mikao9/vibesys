@@ -11,19 +11,21 @@ answers for the machine it runs on.
 
 Light: Pydantic, the standard library and ``server.host_envelope`` and
 ``server.host_machine_facts``. ``server.host_api`` imports the messages into the helper's
-request and reply unions.
+request and reply unions. Registry mutations use the generated protobuf boundary on demand.
 
 Public surface: ``ComputeError``, ``ClusterName``, ``SameMachine``, ``SlurmTarget``, ``ModalTarget``,
 ``MeasurementTarget``, ``SshReach``, ``LoginNodeReach``, ``ClusterReach``, ``ClusterHardware``,
 ``SlurmClusterSettings``, ``ClusterSource``, ``ListedCluster``, ``ModalTokenSource``,
 ``ModalStatus``, ``ComputeSettings``, ``ClusterTestStage``, ``ClusterTestPassed``,
-``ClusterTestFailed``, ``ClusterTestResult``, and the four requests and replies.
+``ClusterTestFailed``, ``ClusterTestResult``, ``ClusterCompute``,
+``apply_registered_cluster`` and the four requests and replies.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from importlib import import_module
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, overload
 
 from pydantic import (
     BaseModel,
@@ -37,6 +39,12 @@ from pydantic import (
 
 from server.host_envelope import HelperErrorCode, HelperReplyBase, HelperRequestBase
 from server.host_machine_facts import Accelerator
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+    from vs_proto.api import host_payloads as pb
+
 
 ClusterName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")]
 """A Slurm cluster's name on its machine: a safe name of at most 63 characters, as ``vs_slurm``'s."""
@@ -318,3 +326,116 @@ __all__ = [
     "SlurmTarget",
     "SshReach",
 ]
+
+
+def _wire() -> ModuleType:
+    """Load the protobuf boundary only for a registry operation, never hello."""
+    return import_module("vs_proto.api")
+
+
+class ClusterCompute(Protocol):
+    """The cluster changes one registered mutation asks of a host."""
+
+    def add(self, cluster: SlurmClusterSettings) -> ComputeSettings:
+        """Save ``cluster`` and return the machine's settings."""
+        ...
+
+    def remove(self, name: str) -> ComputeSettings:
+        """Forget the cluster ``name`` and return the machine's settings."""
+        ...
+
+    def test(self, cluster: SlurmClusterSettings) -> ClusterTestResult:
+        """How far ``cluster`` can be used from this machine."""
+        ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["remove_cluster"],
+    request: pb.RemoveClusterRequest,
+    compute: ClusterCompute,
+) -> pb.RemoveClusterResponse: ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["put_cluster"],
+    request: pb.PutClusterRequest,
+    compute: ClusterCompute,
+) -> pb.PutClusterResponse: ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["test_cluster"],
+    request: pb.TestClusterRequest,
+    compute: ClusterCompute,
+) -> pb.TestClusterResponse: ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: str,
+    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
+    compute: ClusterCompute,
+) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse: ...
+
+
+def apply_registered_cluster(
+    slot: str,
+    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
+    compute: ClusterCompute,
+) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse:
+    """Change or test one cluster and return that slot's registry response.
+
+    ``ComputeError`` and ``ValueError`` stay with the caller, which stores a refusal.
+    """
+    wire = _wire()
+    payloads = wire.host_payloads
+    if slot == "remove_cluster" and isinstance(request, payloads.RemoveClusterRequest):
+        settings = compute.remove(request.name)
+        return payloads.RemoveClusterResponse(
+            request_id=request.request_id, settings=_registry_settings(settings)
+        )
+    if slot == "put_cluster" and isinstance(request, payloads.PutClusterRequest):
+        saved = compute.add(_registry_cluster(request.cluster))
+        return payloads.PutClusterResponse(
+            request_id=request.request_id, settings=_registry_settings(saved)
+        )
+    if slot == "test_cluster" and isinstance(request, payloads.TestClusterRequest):
+        found = compute.test(_registry_cluster(request.cluster))
+        return payloads.TestClusterResponse(
+            request_id=request.request_id, result=_registry_test(found)
+        )
+    message = f"cluster slot {slot} does not match its request"
+    raise ValueError(message)
+
+
+def _registry_cluster(cluster: pb.SlurmClusterSettings | None) -> SlurmClusterSettings:
+    if cluster is None:
+        message = "cluster is required"
+        raise ValueError(message)
+    return SlurmClusterSettings.model_validate(_wire().to_mapping(cluster))
+
+
+def _registry_settings(settings: ComputeSettings) -> pb.ComputeSettings:
+    wire = _wire()
+    return wire.from_mapping(wire.host_payloads.ComputeSettings, settings.model_dump(mode="json"))
+
+
+def _registry_test(result: ClusterTestResult) -> object:
+    wire = _wire()
+    payloads = wire.host_payloads
+    if isinstance(result, ClusterTestPassed):
+        hardware = wire.from_mapping(
+            payloads.ClusterHardware, result.hardware.model_dump(mode="json")
+        )
+        passed = payloads.ClusterTestPassed(hardware=hardware, partitions=list(result.partitions))
+        return wire.Oneof("passed", passed)
+    stages = {
+        ClusterTestStage.REACH: payloads.ClusterTestStage.REACH,
+        ClusterTestStage.SCHEDULER: payloads.ClusterTestStage.SCHEDULER,
+        ClusterTestStage.WORKSPACE: payloads.ClusterTestStage.WORKSPACE,
+    }
+    failed = payloads.ClusterTestFailed(stage=stages[result.stage], detail=result.detail)
+    return wire.Oneof("failed", failed)

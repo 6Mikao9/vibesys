@@ -33,9 +33,9 @@ from server.host_agent_logins import (
     LoginUnavailableReason,
 )
 from server.host_api import HarnessOption
+from server.host_compute_runtime import MachineCompute, OsConfigFiles
 from server.host_harness import HarnessDisplay, Maker, ModelGeneration
 from server.host_helper import serve_channel
-from server.host_helper_compute import MachineCompute
 from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import (
@@ -44,7 +44,6 @@ from server.host_helper_os import (
     HeldLogin,
     LoginBounds,
     LoginStarter,
-    OsConfigFiles,
     OsDirectories,
     ProjectStopIntents,
     StoreLogReader,

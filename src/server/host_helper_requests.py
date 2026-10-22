@@ -11,11 +11,10 @@ decisions it needs (:func:`negotiate`, :func:`select_completions`,
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
-Public surface: ``answer``, ``apply_registered_cluster``,
-``RegisteredClusterHost``, ``apply_registered_project``, ``RegisteredProjectHost``,
+Public surface: ``answer``, ``apply_registered_project``, ``RegisteredProjectHost``,
 ``launch_registered_run``, ``registry_start_request``,
 ``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
-``HelperHost``; the interfaces ``Projects``, ``Directories``, ``ClusterCompute``,
+``HelperHost``; the interfaces ``Projects``, ``Directories``,
 ``ProjectMutationExamples``, ``ProjectMutationDirectories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
 ``ScannedEntry``, ``Scan``, ``PathHints``);
@@ -107,13 +106,10 @@ from server.host_api import (
     RunSummary,
 )
 from server.host_compute import (
-    ClusterTestResult,
     ComputeError,
-    ComputeSettings,
     MeasurementTarget,
     ModalTarget,
     SameMachine,
-    SlurmClusterSettings,
     SlurmTarget,
 )
 from server.host_examples import ProjectLookupError
@@ -170,6 +166,7 @@ if TYPE_CHECKING:
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import HarnessChoice, RunDigestUnreadable
     from server.host_compute import MeasurementTarget
+    from server.host_compute_runtime import MachineCompute
     from server.host_examples import (
         CreatedProject,
         ExampleDestination,
@@ -177,7 +174,6 @@ if TYPE_CHECKING:
         TaskGoal,
         TaskList,
     )
-    from server.host_helper_compute import MachineCompute
     from server.host_helper_readers import Readers
     from server.host_operation_reads import HostReadSource
     from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
@@ -1494,125 +1490,6 @@ def launch_registered_run(
 ) -> RunStartReply | HelperError:
     """Launch one already-admitted start through the helper's launcher."""
     return _start(request, host)
-
-
-class ClusterCompute(Protocol):
-    """The cluster changes one registered mutation asks of a host."""
-
-    def add(self, cluster: SlurmClusterSettings) -> ComputeSettings:
-        """Save ``cluster`` and return the machine's settings."""
-        ...
-
-    def remove(self, name: str) -> ComputeSettings:
-        """Forget the cluster ``name`` and return the machine's settings."""
-        ...
-
-    def test(self, cluster: SlurmClusterSettings) -> ClusterTestResult:
-        """How far ``cluster`` can be used from this machine."""
-        ...
-
-
-class RegisteredClusterHost(Protocol):
-    """A host whose compute surface can put, remove, or test one cluster."""
-
-    @property
-    def compute(self) -> ClusterCompute:
-        """The machine's clusters."""
-        ...
-
-
-@overload
-def apply_registered_cluster(
-    slot: Literal["remove_cluster"],
-    request: pb.RemoveClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.RemoveClusterResponse: ...
-
-
-@overload
-def apply_registered_cluster(
-    slot: Literal["put_cluster"],
-    request: pb.PutClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.PutClusterResponse: ...
-
-
-@overload
-def apply_registered_cluster(
-    slot: Literal["test_cluster"],
-    request: pb.TestClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.TestClusterResponse: ...
-
-
-@overload
-def apply_registered_cluster(
-    slot: str,
-    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse: ...
-
-
-def apply_registered_cluster(
-    slot: str,
-    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
-    host: RegisteredClusterHost,
-) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse:
-    """Change or test one cluster and return that slot's registry response.
-
-    ``ComputeError`` and ``ValueError`` stay with the caller, which stores a refusal.
-    """
-    wire = _wire()
-    payloads = wire.host_payloads
-    if slot == "remove_cluster" and isinstance(request, payloads.RemoveClusterRequest):
-        settings = host.compute.remove(request.name)
-        return payloads.RemoveClusterResponse(
-            request_id=request.request_id, settings=_registry_settings(settings)
-        )
-    if slot == "put_cluster" and isinstance(request, payloads.PutClusterRequest):
-        saved = host.compute.add(_registry_cluster(request.cluster))
-        return payloads.PutClusterResponse(
-            request_id=request.request_id, settings=_registry_settings(saved)
-        )
-    if slot == "test_cluster" and isinstance(request, payloads.TestClusterRequest):
-        found = host.compute.test(_registry_cluster(request.cluster))
-        return payloads.TestClusterResponse(
-            request_id=request.request_id, result=_registry_test(found)
-        )
-    message = f"cluster slot {slot} does not match its request"
-    raise ValueError(message)
-
-
-def _registry_cluster(cluster: pb.SlurmClusterSettings | None) -> SlurmClusterSettings:
-    if cluster is None:
-        message = "cluster is required"
-        raise ValueError(message)
-    model = import_module("server.host_compute").SlurmClusterSettings
-    return model.model_validate(_wire().to_mapping(cluster))
-
-
-def _registry_settings(settings: ComputeSettings) -> pb.ComputeSettings:
-    wire = _wire()
-    return wire.from_mapping(wire.host_payloads.ComputeSettings, settings.model_dump(mode="json"))
-
-
-def _registry_test(result: ClusterTestResult) -> object:
-    models = import_module("server.host_compute")
-    wire = _wire()
-    payloads = wire.host_payloads
-    if isinstance(result, models.ClusterTestPassed):
-        hardware = wire.from_mapping(
-            payloads.ClusterHardware, result.hardware.model_dump(mode="json")
-        )
-        passed = payloads.ClusterTestPassed(hardware=hardware, partitions=list(result.partitions))
-        return wire.Oneof("passed", passed)
-    stages = {
-        models.ClusterTestStage.REACH: payloads.ClusterTestStage.REACH,
-        models.ClusterTestStage.SCHEDULER: payloads.ClusterTestStage.SCHEDULER,
-        models.ClusterTestStage.WORKSPACE: payloads.ClusterTestStage.WORKSPACE,
-    }
-    failed = payloads.ClusterTestFailed(stage=stages[result.stage], detail=result.detail)
-    return wire.Oneof("failed", failed)
 
 
 class ProjectMutationExamples(Protocol):

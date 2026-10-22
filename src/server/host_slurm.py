@@ -3,7 +3,7 @@
 ``slurm_config_of`` is the one place a ``SlurmClusterSettings`` becomes the ``SlurmConfig`` a run
 loads, so a cluster saved by the helper is one a run can use; ``operator_document`` is that
 configuration as the ``[slurm]`` table of the operator file, and ``operator_cluster`` reads such a
-table back as settings. Kept apart from ``server.host_helper_compute`` so the helper loads
+table back as settings. Kept apart from ``server.host_compute_runtime`` so the helper loads
 ``vs_slurm`` only for a compute request, not for ``hello``.
 
 Public surface: ``slurm_config_of``, ``operator_document``, ``operator_cluster``.

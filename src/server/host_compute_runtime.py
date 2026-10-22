@@ -1,11 +1,11 @@
-"""The host helper's compute settings: a machine's Slurm clusters, its Modal token, connection tests.
+"""The host's compute settings: a machine's Slurm clusters, its Modal token, connection tests.
 
 ``MachineCompute`` is the one place that reads and writes what a machine offers as places to
-measure. Its Slurm clusters live in one TOML file the helper edits (``compute.toml`` in the
+measure. Its Slurm clusters live in one TOML file the host edits (``compute.toml`` in the
 user's VibeSys configuration directory). The operator file a terminal run reads
 (``slurm.toml``, one cluster) is listed beside them and only read, so a machine that already
 runs Slurm through ``--slurm-config`` shows that cluster without a second copy. A cluster of
-the helper's file is rendered, when a run needs it, into the same ``[slurm]`` operator format
+the host's file is rendered, when a run needs it, into the same ``[slurm]`` operator format
 (one file per cluster beside ``compute.toml``), so a run measures through the existing
 ``--run-environment slurm --slurm-config PATH`` wiring and no second path. The rendered file
 is derived from ``compute.toml`` on every use and never edited by hand.
@@ -14,24 +14,25 @@ Files go through ``ConfigFiles`` and commands (``ssh``, ``sinfo``) through ``vs_
 ``CommandProbe``, so tests drive it with in-memory files and a ``ScriptedProbe``. A Modal
 token is only ever tested for, never read into a reply. Light like the helper
 (``tests/architecture/test_light_entrypoints.py``): the standard library, Pydantic,
-``vs_slurm`` (through ``server.host_helper_slurm``, loaded on first use) and light ``server``
+``vs_slurm`` (through ``server.host_slurm``, loaded on first use) and light ``server``
 modules.
 
-Public surface: ``MachineCompute``, ``ConfigFiles``, ``COMPUTE_FILE``,
+Public surface: ``MachineCompute``, ``ConfigFiles``, ``OsConfigFiles``, ``COMPUTE_FILE``,
 ``SLURM_FILE``, ``parse_sinfo``, ``accelerator_of_gpu_model``, ``render_toml``, ``remote_command``.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import posixpath
 import re
 import tomllib
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
-from server.host_api import HelperErrorCode
 from server.host_compute import (
     ClusterHardware,
     ClusterName,
@@ -48,6 +49,7 @@ from server.host_compute import (
     SlurmClusterSettings,
     SshReach,
 )
+from server.host_envelope import HelperErrorCode
 from server.host_machine_facts import Accelerator
 
 if TYPE_CHECKING:
@@ -59,7 +61,7 @@ if TYPE_CHECKING:
 CONFIG_DIRECTORY: Final = ".config/vibesys"
 """Where VibeSys keeps a user's machine-wide configuration, under the home directory."""
 COMPUTE_FILE: Final = "compute.toml"
-"""The file this helper edits: the Slurm clusters set up on the machine."""
+"""The file this host edits: the Slurm clusters set up on the machine."""
 SLURM_FILE: Final = "slurm.toml"
 """The operator file a terminal run reads by default; listed, never written."""
 _RENDERED_DIRECTORY: Final = "compute"
@@ -235,9 +237,9 @@ def _slurm() -> ModuleType:
     # > `vs_slurm` is about thirty modules the helper's start-up budget
     # > (`tests/e2e/test_host_helper.py`) has no room for, and only a compute request needs it;
     # > a copy of its validation here would be a second source of truth for what a cluster is.
-    from server import host_helper_slurm  # noqa: PLC0415
+    from server import host_slurm  # noqa: PLC0415
 
-    return host_helper_slurm
+    return host_slurm
 
 
 class _ComputeFile(BaseModel):
@@ -286,7 +288,7 @@ class MachineCompute:
         )
 
     def settings(self) -> ComputeSettings:
-        """The clusters set up here, the helper's file first, and Modal's token status."""
+        """The clusters set up here, the host's file first, and Modal's token status."""
         listed = [
             ListedCluster(cluster=cluster, source=ClusterSource.VIBESYS)
             for cluster in self._stored_clusters().values()
@@ -325,7 +327,7 @@ class MachineCompute:
     def slurm_config_path(self, name: str) -> str | None:
         """The operator file a run measures on cluster ``name`` through, or ``None`` if none is set up.
 
-        A cluster of the helper's file is rendered to its own operator file first, so the file
+        A cluster of the host's file is rendered to its own operator file first, so the file
         always says what ``compute.toml`` does.
         """
         stored = self._stored_clusters().get(name)
@@ -408,7 +410,7 @@ class MachineCompute:
         return self.settings()
 
     def remove(self, name: str) -> ComputeSettings:
-        """Forget the cluster ``name`` of the helper's file and its rendered operator file.
+        """Forget the cluster ``name`` of the host's file and its rendered operator file.
 
         Raises ``ComputeError``: ``unknown_cluster``, or ``cluster_read_only`` for the cluster
         of the operator file, which only the operator edits.
@@ -514,3 +516,25 @@ __all__ = [
     "remote_command",
     "render_toml",
 ]
+
+
+class OsConfigFiles:
+    """The machine's configuration files on this filesystem (``ConfigFiles``)."""
+
+    def read(self, path: str) -> str | None:
+        """The file's text, or ``None`` when it does not exist."""
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+
+    def write(self, path: str, text: str) -> None:
+        """Replace the file whole: write a sibling, then rename it over the file."""
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        try:
+            staged.write_text(text, encoding="utf-8")
+            staged.replace(target)
+        finally:
+            staged.unlink(missing_ok=True)

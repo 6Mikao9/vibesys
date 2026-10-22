@@ -15,6 +15,10 @@ ROOT = Path(__file__).resolve().parents[2]
     [
         ("ProjectLookupError", "server/host_examples.py", "server/host_helper_requests.py"),
         ("ComputeError", "server/host_compute.py", "server/host_helper_compute.py"),
+        ("MachineCompute", "server/host_compute_runtime.py", "server/host_helper_compute.py"),
+        ("ConfigFiles", "server/host_compute_runtime.py", "server/host_helper_compute.py"),
+        ("OsConfigFiles", "server/host_compute_runtime.py", "server/host_helper_os.py"),
+        ("ClusterCompute", "server/host_compute.py", "server/host_helper_requests.py"),
         ("HostReadSource", "server/host_operation_reads.py", "server/host_helper_requests.py"),
     ],
 )
@@ -29,8 +33,7 @@ def test_shared_host_behavior_has_a_native_owner(name: str, owner: str, retired_
     )
 
 
-def test_native_read_adapter_does_not_depend_on_the_helper() -> None:
-    tree = ast.parse((ROOT / "src/server/host_operation_reads.py").read_text())
+def _helper_dependencies(tree: ast.AST) -> set[str]:
     imported: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -46,8 +49,27 @@ def test_native_read_adapter_does_not_depend_on_the_helper() -> None:
             and isinstance(node.args[0].value, str)
         ):
             imported.add(node.args[0].value)
-    assert not {
+    return {
         module
         for module in imported
         if module.startswith(("server.host_helper", "entrypoints.host_helper"))
     }
+
+
+def test_native_read_adapter_does_not_depend_on_the_helper() -> None:
+    tree = ast.parse((ROOT / "src/server/host_operation_reads.py").read_text())
+    assert not _helper_dependencies(tree)
+
+
+def test_native_cluster_dispatch_does_not_depend_on_the_helper() -> None:
+    tree = ast.parse((ROOT / "src/entrypoints/host.py").read_text())
+    dispatch = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_serve_cluster"
+    )
+    assert not _helper_dependencies(dispatch)
+    for path in ("src/server/host_compute_runtime.py", "src/server/host_slurm.py"):
+        assert not _helper_dependencies(ast.parse((ROOT / path).read_text()))
+    for path in ("src/server/host_helper_compute.py", "src/server/host_helper_slurm.py"):
+        assert not (ROOT / path).exists(), f"retired helper owner returned: {path}"

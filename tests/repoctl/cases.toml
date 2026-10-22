@@ -414,3 +414,12 @@ jobs = ["clients"]
 native_languages = []
 native_targets = []
 pnpm_packages = { dependents_of = "pnpm:@vibesys/app-desktop-shell" }
+
+[[cases]]
+name = "native compute runtime selects its Python consumers"
+paths = ["src/server/host_compute_runtime.py", "src/server/host_slurm.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

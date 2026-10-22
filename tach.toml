@@ -89,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_operation_reads", "vibesys.comparisons"]
+depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_operation_reads", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -234,7 +234,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -269,12 +269,12 @@ depends_on = ["server.host_api", "server.host_compute", "server.host_machine_fac
 [[modules]]
 # A machine's compute settings: Slurm clusters in one file, the Modal token, connection tests.
 # Files and commands come through seams; Pydantic, the standard library and vs_slurm otherwise.
-path = "server.host_helper_compute"
-depends_on = ["server.host_api", "server.host_compute", "server.host_helper_slurm", "server.host_machine_facts", "vs_sim.api"]
+path = "server.host_compute_runtime"
+depends_on = ["server.host_compute", "server.host_envelope", "server.host_slurm", "server.host_machine_facts", "vs_sim.api"]
 
 [[modules]]
 # What vs_slurm says about a cluster of the compute settings; loaded only by a compute request.
-path = "server.host_helper_slurm"
+path = "server.host_slurm"
 depends_on = ["server.host_compute", "vs_slurm"]
 
 [[modules]]
@@ -285,7 +285,7 @@ depends_on = ["server.host_envelope"]
 [[modules]]
 # Where results are measured and a machine's compute settings, as helper messages. Pydantic only.
 path = "server.host_compute"
-depends_on = ["server.host_envelope", "server.host_machine_facts"]
+depends_on = ["server.host_envelope", "server.host_machine_facts", "vs_proto"]
 
 [[modules]]
 # The host helper's MachineProbe on a real host: hardware, Docker, harness CLIs, checkouts.
@@ -2127,3 +2127,11 @@ depends_on = ["server.host_agent_logins", "server.host_api", "server.host_comput
 [[interfaces]]
 from = ["server.host_operation_reads"]
 expose = ["HostReadFacts", "HostReadSource", "ReadRefusedError", "read_failure_category", "answer_registered_read"]
+
+[[interfaces]]
+from = ["server.host_compute_runtime"]
+expose = ["MachineCompute", "ConfigFiles", "OsConfigFiles", "CONFIG_DIRECTORY", "COMPUTE_FILE", "SLURM_FILE", "parse_sinfo", "accelerator_of_gpu_model", "render_toml", "remote_command"]
+
+[[interfaces]]
+from = ["server.host_slurm"]
+expose = ["slurm_config_of", "operator_document", "operator_cluster"]

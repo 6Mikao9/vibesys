@@ -64,7 +64,7 @@ class LoginLibrary(Protocol):
 if TYPE_CHECKING:
     from typing import BinaryIO
 
-    from vs_sim.api import SignalRelay, SleepingClock, Threads
+    from vs_sim.api import Processes, SignalRelay, SleepingClock, Threads
 
 
 def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tuple[int, str, str]:
@@ -171,7 +171,7 @@ def main(
                 platform=runtime,
             )
             if _MUTATION_COMMANDS[arguments[0]] == "terminate_run"
-            else _serve_mutation(arguments[0], source.read((1 << 20) + 1), owned)
+            else _serve_mutation(arguments[0], source.read((1 << 20) + 1), owned, runtime.processes)
         )
         return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
@@ -245,13 +245,13 @@ def watch_login(
         serve_login(payload, cli="login", start=start, write=write, wait=wait)
 
 
-def _serve_mutation(cli: str, payload: bytes, threads: Threads) -> bytes:
+def _serve_mutation(cli: str, payload: bytes, threads: Threads, processes: Processes) -> bytes:
     """Dispatch one mutation command. Cluster and project changes are not starts."""
     slot = _MUTATION_COMMANDS[cli]
     if slot == "start_run":
         return _serve_start(payload, threads)
     if slot in {"put_cluster", "remove_cluster", "test_cluster"}:
-        return _serve_cluster(payload, threads)
+        return _serve_cluster(payload, processes)
     return _serve_project(payload, threads)
 
 
@@ -278,11 +278,15 @@ def _serve_project(payload: bytes, threads: Threads) -> bytes:
     )
 
 
-def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
+def _serve_cluster(payload: bytes, processes: Processes) -> bytes:
     """Admit one cluster change, then apply it. Replay does not apply it again."""
-    requests = import_module("server.host_helper_requests")
-    refused = import_module("server.host_compute").ComputeError
-    host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
+    models = import_module("server.host_compute")
+    refused = models.ComputeError
+    adapters = import_module("server.host_compute_runtime")
+    probe = import_module("vs_sim.api").ProcessesProbe(processes)
+    compute = adapters.MachineCompute(
+        adapters.OsConfigFiles(), probe, home=str(Path.home()), environ=os.environ
+    )
 
     def apply(slot: str, request: object) -> object:
         if not isinstance(
@@ -291,7 +295,7 @@ def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
             message = "cluster request is not a cluster mutation"
             raise ClusterRefusedError(message)
         try:
-            return requests.apply_registered_cluster(slot, request, host)
+            return models.apply_registered_cluster(slot, request, compute)
         except (refused, TypeError, ValueError) as exc:
             raise ClusterRefusedError(str(exc)) from exc
 
