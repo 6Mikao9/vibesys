@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
+from scripts.ci_base_images import mirrored_image
 from tests.slurm_cluster.cluster import SlurmCluster, build_image, docker, wait_until
 
 from vibesys.run.environment import open_run_environment
@@ -321,7 +322,7 @@ def make_request(
             ComputeBackend.CPU,
             log_dir,
             log=lambda _: None,
-            image="python:3.12-slim",
+            image=mirrored_image("python:3.12-slim"),
             docker=SubprocessDockerCli(
                 processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
             ),

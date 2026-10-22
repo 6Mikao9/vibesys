@@ -1,6 +1,6 @@
 # A one-node-per-container Slurm cluster for the slurm_cluster test tier.
 # Slurm comes from the distribution packages, so a build is an apt install.
-FROM ubuntu:24.04
+FROM ghcr.io/uw-syfi/vibesys/ci-base@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
 
 ARG USER_NAME
 ARG USER_UID

@@ -67,7 +67,7 @@ def test_only_cuda_feature_builds_use_the_runner_mirror() -> None:
     assert steps.index(prepare) < steps.index(test)
     assert test["env"]["FEATURE_BASE"] == (
         "${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || "
-        "format('{0}@{1}', matrix.base, steps.image-bases.outputs.base) }}"
+        "steps.image-bases.outputs.base }}"
     )
     assert 'test_features.sh "$FEATURE_BASE"' in test["run"]
     cache = next(step for step in steps if step.get("id") == "docker-cache")

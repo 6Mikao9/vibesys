@@ -1,0 +1,36 @@
+name: Mirror CI base images
+
+on:
+  push:
+    paths:
+      - 'scripts/ci_base_images.toml'
+      - 'scripts/ci_base_images.py'
+      - 'scripts/ci_mirror_base_images.sh'
+      - '.github/workflows/ci-base-images.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ci-base-image-mirrors
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the manifest-preserving registry copier
+        timeout-minutes: 2
+        run: |
+          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update
+          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 install -y skopeo
+      - name: Mirror all pins without changing their digests
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: ./scripts/ci_mirror_base_images.sh

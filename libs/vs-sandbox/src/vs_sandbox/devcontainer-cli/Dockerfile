@@ -3,7 +3,7 @@
 # through a mounted /var/run/docker.sock, which a hardened host may forbid, so a
 # run never uses it (runs build images with plain `docker build`). See
 # docs/contributing/devcontainer-features.md.
-FROM node:24.21.0-bookworm-slim
+FROM ghcr.io/uw-syfi/vibesys/ci-base@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 ARG DEVCONTAINERS_CLI_VERSION=0.89.0
 ARG DOCKER_CLI_VERSION=27.5.1
 ARG BUILDX_VERSION=0.30.1

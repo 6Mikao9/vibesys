@@ -19,6 +19,7 @@ import hashlib
 import json
 import re
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,7 +37,7 @@ from vs_sandbox.feature_dockerfile import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
 _DIAGNOSTIC_LIMIT = 1000
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
@@ -245,7 +246,7 @@ def build_feature_image(
     ) as tmp:
         context = Path(tmp).resolve()
         for destination, source in plan.copied_folders.items():
-            shutil.copytree(source, context / destination)
+            shutil.copytree(source, context / destination, symlinks=True)
         for relative, text in plan.generated_files.items():
             (context / relative).write_text(text, encoding="utf-8")
         dockerfile = context / "Dockerfile"
@@ -308,12 +309,8 @@ def _input_digest(base_identity: str, plan: BuildPlan, context: Path) -> str:
     for part in (base_identity, plan.dockerfile, *sorted(plan.generated_files.items())):
         digest.update(repr(part).encode())
         digest.update(b"\0")
-    for destination in sorted(plan.copied_folders):
-        for path in sorted(p for p in (context / destination).rglob("*") if p.is_file()):
-            digest.update(str(path.relative_to(context)).encode())
-            digest.update(b"\0")
-            digest.update(path.read_bytes())
-            digest.update(b"\0")
+    paths = (path.relative_to(context).as_posix() for path in context.rglob("*"))
+    digest.update(image_context_digest(context, paths).encode())
     return digest.hexdigest()[:32]
 
 
@@ -346,3 +343,30 @@ class _Docker:
             message = f"{what} failed (exit {result.returncode}): {detail[-_DIAGNOSTIC_LIMIT:]}"
             raise FeatureImageBuildError(message)
         return result
+
+
+def image_context_digest(context: Path, relative_paths: Iterable[str]) -> str:
+    """Hash sorted paths, entry types, permissions, file bytes and link targets.
+
+    Callers select the entries Docker can read, including directories and links,
+    after applying their context's ignore policy. Modification times and ownership
+    are excluded: Docker COPY does not use modification times for cache identity,
+    and the builders assign container ownership themselves.
+    """
+    digest = hashlib.sha256()
+    for relative in sorted(relative_paths):
+        path = context / relative
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode):
+            payload = str(path.readlink()).encode()
+        elif stat.S_ISREG(mode):
+            payload = path.read_bytes()
+        elif stat.S_ISDIR(mode):
+            payload = b""
+        else:
+            message = f"unsupported image input: {path}"
+            raise ValueError(message)
+        for part in (relative.encode(), str(mode).encode(), payload):
+            digest.update(len(part).to_bytes(8, "big"))
+            digest.update(part)
+    return digest.hexdigest()
