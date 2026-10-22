@@ -897,6 +897,24 @@ export class Hosts {
       throw new Error('run transport v2 is on and the run watch is missing');
     }
     runs.start(hostFromKey(key));
+    await this.#convertRecentProjects(key, stopped);
+  }
+
+  /**
+   * Convert the stopped pre-transport runs of every project the app has met on `key`, one project
+   * at a time, so the host's run index (and so WatchRuns) lists them.
+   */
+  async #convertRecentProjects(key: HostKey, stopped: () => boolean): Promise<void> {
+    if (this.#deps.runConversion === undefined) return;
+    const projects = new Set(
+      (await this.#deps.settings.recent()).runs
+        .filter(run => run.host === key)
+        .map(run => run.project),
+    );
+    for (const project of projects) {
+      if (stopped()) return;
+      await this.#convertRuns(hostFromKey(key), project);
+    }
   }
 
   #install(key: HostKey, checkout: string, lease: ConnectionLease): void {

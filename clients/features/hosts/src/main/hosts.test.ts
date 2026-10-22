@@ -2835,3 +2835,56 @@ test('a v2 run list converts each project once, before listing, and retries a fa
     'This Mac: run conversion needs a newer checkout',
   ]);
 });
+
+test('a v2 host converts each project the app has met on it once, when it is shown', async () => {
+  const settings = new SettingsStore({
+    settingsPath: '/settings/hosts.json',
+    recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
+    filesystem: new FakeSettingsFilesystem(),
+    log: () => {},
+  });
+  await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/src'}));
+  for (const [host, project, runId] of [
+    ['ssh:alpha', '/srv/a', 'run-1'],
+    ['ssh:alpha', '/srv/b', 'run-2'],
+    ['ssh:alpha', '/srv/a', 'run-3'],
+    ['ssh:beta', '/srv/c', 'run-4'],
+  ] as const) {
+    await settings.updateRecent(current =>
+      remember(current, {host, project, task: null, runId, instanceId: null, attachedAt: 1}),
+    );
+  }
+  const converted = Promise.withResolvers<void>();
+  const asked: string[] = [];
+  await using manager = new ConnectionManager({
+    linkFor: () => new FakeLink(),
+    appVersion: 'test',
+    scheduleTimeout: new FakeClock().scheduleTimeout,
+    config: CONFIG,
+    log: () => {},
+  });
+  const hosts = new Hosts({
+    manager,
+    settings,
+    localCheckout: '/bundled',
+    sshConfigPath: '/missing',
+    transportV2: async () => true,
+    runs: {start: () => {}, cancel: () => {}},
+    savedRuns: {list: async () => []},
+    runConversion: {
+      convert: async (host, project) => {
+        asked.push(`${hostKey(host)} ${project}`);
+        if (asked.length === 2) converted.resolve();
+        return {kind: 'converted', runs: [], alreadyConverted: 0, unreported: 0};
+      },
+    },
+    log: () => {},
+    push: () => {},
+    retire: () => {},
+  });
+  await hosts.recent([ALPHA]);
+  await converted.promise;
+  await hosts.projectRuns(ALPHA, '/srv/a');
+  expect(asked.sort()).toEqual(['ssh:alpha /srv/a', 'ssh:alpha /srv/b']);
+});
