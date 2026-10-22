@@ -58,6 +58,14 @@ export {
   registryTransport,
   requireCheckout,
 } from './shell/registry-reads.js';
+export {
+  type ConvertedRun,
+  type RegistryRunConversion,
+  type RegistryRunConversionPorts,
+  RUN_CONVERSION_CALLS,
+  type RunConversionOutcome,
+  registryRunConversion,
+} from './shell/registry-run-conversion.js';
 export {type RegistrySavedRuns, registrySavedRuns} from './shell/registry-saved-runs.js';
 export {
   type CompletedPaths,

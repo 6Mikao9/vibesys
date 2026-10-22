@@ -18,6 +18,7 @@ import {
   registryClusters,
   registryProjects,
   registryReads,
+  registryRunConversion,
   registrySavedRuns,
   registrySetup,
   registryStart,
@@ -327,6 +328,9 @@ function listedHosts(parts: {
 }): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
   const {manager, settings, gateway, history, notifier, welcome, broadcast, endLogin, runs} = parts;
   const {transportV2, setup} = hostTransport(settings, gateway);
+  const checkout = async (id: HostId): Promise<string | null> =>
+    (await settings.hosts()).settings.hosts[hostKey(id)]?.checkout ??
+    (id.kind === 'local' ? REPOSITORY_ROOT : null);
   return {
     setup,
     hosts: new Hosts({
@@ -339,10 +343,12 @@ function listedHosts(parts: {
       ...(endLogin === undefined ? {} : {endLogin}),
       runs,
       savedRuns: registrySavedRuns({
-        checkout: async id =>
-          (await settings.hosts()).settings.hosts[hostKey(id)]?.checkout ??
-          (id.kind === 'local' ? REPOSITORY_ROOT : null),
+        checkout,
         unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+      }),
+      runConversion: registryRunConversion({
+        checkout,
+        mutate: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),
       }),
       log,
       push: listing => {

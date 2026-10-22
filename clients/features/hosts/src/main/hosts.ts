@@ -11,6 +11,7 @@ import {
   HelperRequestError,
   type HostConnection,
   type LogsLease,
+  type RegistryRunConversion,
   type RegistrySavedRuns,
   type RegistrySetup,
   type RunWatch,
@@ -103,6 +104,8 @@ export interface HostsDeps {
   /** WatchRuns while this host is shown. Cancel reaps the stream. */
   readonly runs?: Pick<RunWatch, 'start' | 'cancel'>;
   readonly savedRuns?: RegistrySavedRuns;
+  /** Converts a project's stopped pre-transport runs once per session before the v2 run list. */
+  readonly runConversion?: RegistryRunConversion;
 }
 
 /** How many times a summary is read again when its pages disagree on where the run stood. */
@@ -241,6 +244,8 @@ export class Hosts {
   #configured = new Set<HostKey>();
   /** The one replacement currently allowed to install for each host. */
   readonly #watchIntents = new Map<HostKey, WatchIntent>();
+  /** One run conversion per host and project in this session; a failed one is tried again. */
+  readonly #conversions = new Map<string, Promise<void>>();
   /** Advances before desired-set changes, fencing reads against the desired-host union. */
   #generation = 0;
 
@@ -642,6 +647,7 @@ export class Hosts {
   async projectRuns(id: HostId, project: string): Promise<readonly ListedRun[]> {
     if (await this.#transportV2(id)) {
       if (!this.#deps.savedRuns) throw new Error('saved-run registry is missing');
+      await this.#convertRuns(id, project);
       return this.#deps.savedRuns.list(id, project, new AbortController().signal);
     }
     await using lease = await this.connection(id);
@@ -651,6 +657,37 @@ export class Hosts {
     } catch (error) {
       throw plain(error, 'Could not list the runs of the project');
     }
+  }
+
+  /** Convert `project`'s stopped pre-transport runs on `id` once, so the listing includes them. */
+  #convertRuns(id: HostId, project: string): Promise<void> {
+    const conversion = this.#deps.runConversion;
+    if (conversion === undefined) return Promise.resolve();
+    const key = `${hostKey(id)}\n${project}`;
+    const known = this.#conversions.get(key);
+    if (known !== undefined) return known;
+    const label = hostLabel(id);
+    const converting = conversion.convert(id, project, new AbortController().signal).then(
+      outcome => {
+        if (outcome.kind === 'needs-update') {
+          this.#deps.log(`${label}: run conversion needs a newer checkout`);
+          return;
+        }
+        const count = (status: string) => outcome.runs.filter(run => run.status === status).length;
+        this.#deps.log(
+          `${label}: runs converted ${count('converted')}, skipped ${count('skipped')}, ` +
+            `failed ${count('failed')}, already converted ${outcome.alreadyConverted}`,
+        );
+        for (const run of outcome.runs.filter(item => item.status === 'failed'))
+          this.#deps.log(`${label}: run ${run.runId} did not convert: ${run.reason}`);
+      },
+      (error: unknown) => {
+        this.#conversions.delete(key);
+        this.#deps.log(`${label}: run conversion failed: ${(error as Error).message}`);
+      },
+    );
+    this.#conversions.set(key, converting);
+    return converting;
   }
 
   /** The vetted provider and model pairs runs on `id` may start with; `unsupported` on an older helper. */

@@ -256,7 +256,9 @@ function completionSubject(
       project: string,
       signal: AbortSignal,
     ) => Promise<readonly import('@vibesys/hosts').ListedRun[]>;
+    convert?: import('@vibesys/connection').RegistryRunConversion['convert'];
   },
+  log: (message: string) => void = () => {},
 ): {
   readonly hosts: Hosts;
   readonly manager: ConnectionManager;
@@ -283,7 +285,8 @@ function completionSubject(
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
       ...(native ? {transportV2: async () => native.enabled, savedRuns: {list: native.list}} : {}),
-      log: () => {},
+      ...(native?.convert ? {runConversion: {convert: native.convert}} : {}),
+      log,
       push: () => {},
       retire: () => {},
     }),
@@ -2774,3 +2777,61 @@ for (const enabled of [false, true]) {
     if (enabled) expect(rows[0]?.runId).toBe('native-run');
   });
 }
+
+test('a v2 run list converts each project once, before listing, and retries a failed conversion', async () => {
+  const link = new FakeLink();
+  const events: string[] = [];
+  const logs: string[] = [];
+  const outcomes: (() => Promise<import('@vibesys/connection').RunConversionOutcome>)[] = [
+    async () => {
+      throw new Error('gateway closed');
+    },
+    async () => ({
+      kind: 'converted',
+      runs: [
+        {runId: 'old', status: 'converted', reason: ''},
+        {runId: 'live', status: 'skipped', reason: 'run is live'},
+        {runId: 'torn', status: 'failed', reason: 'journal is torn'},
+      ],
+      alreadyConverted: 2,
+      unreported: 0,
+    }),
+    async () => ({kind: 'needs-update'}),
+  ];
+  const subject = completionSubject(
+    link,
+    {
+      enabled: true,
+      list: async (_host, project) => {
+        events.push(`list ${project}`);
+        return [];
+      },
+      convert: async (_host, project) => {
+        events.push(`convert ${project}`);
+        const next = outcomes.shift();
+        if (next === undefined) throw new Error('converted too often');
+        return next();
+      },
+    },
+    message => logs.push(message),
+  );
+  await using _manager = subject.manager;
+  for (const project of ['/srv/a', '/srv/a', '/srv/a', '/srv/b', '/srv/b'])
+    await subject.hosts.projectRuns(LOCAL, project);
+  expect(events).toEqual([
+    'convert /srv/a',
+    'list /srv/a',
+    'convert /srv/a',
+    'list /srv/a',
+    'list /srv/a',
+    'convert /srv/b',
+    'list /srv/b',
+    'list /srv/b',
+  ]);
+  expect(logs.filter(line => line.includes('conver'))).toEqual([
+    'This Mac: run conversion failed: gateway closed',
+    'This Mac: runs converted 1, skipped 1, failed 1, already converted 2',
+    'This Mac: run torn did not convert: journal is torn',
+    'This Mac: run conversion needs a newer checkout',
+  ]);
+});
