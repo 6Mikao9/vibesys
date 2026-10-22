@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from io import BytesIO
+from io import BufferedWriter, BytesIO, RawIOBase
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from entrypoints.host import watch_login
 from entrypoints.host_helper import AgentLibraryLogins
@@ -13,12 +15,13 @@ from server.host_helper_os import LoginBounds, LoginStarter
 from vs_agent.api import LoginCommand, LoginState, ProviderLogin
 from vs_proto.api import FailureCategory, Oneof, WatchRequest, WatchResponse, validate
 from vs_proto.api import host_payloads as pb
-from vs_sim.api import Signals
+from vs_sim.api import Connection, Signals
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     FakePipedProcessLauncher,
     FakeSignalRelay,
     ScriptedPipedProcess,
+    SimNetwork,
     SimThreads,
 )
 
@@ -134,3 +137,86 @@ def test_a_refused_or_unknown_provider_is_framed_and_releases_the_watch(provider
         assert response.result.value.category == FailureCategory.INVALID_INPUT
     assert not relay.active
     assert launcher.started == []
+
+
+class _PipeWriter(RawIOBase):
+    """Real Python buffering over the simulator's byte pipe, with no OS handles."""
+
+    def __init__(self, connection: Connection) -> None:
+        super().__init__()
+        self._connection = connection
+
+    def writable(self) -> bool:
+        return True
+
+    def write(self, buffer: Buffer, /) -> int:
+        data = bytes(buffer)
+        self._connection.send(data, timeout=HANG_GUARD_S)
+        return len(data)
+
+
+def _read_pipe(connection: Connection, length: int) -> bytes:
+    data = bytearray()
+    while len(data) < length:
+        chunk = connection.recv(length - len(data), timeout=HANG_GUARD_S)
+        assert chunk, "login output pipe closed inside its frame"
+        data.extend(chunk)
+    return bytes(data)
+
+
+@pytest.mark.parametrize("ending", ["completion", "cancel"])
+@given(buffer_size=st.integers(min_value=1, max_value=65536))
+@example(buffer_size=8192)
+def test_regression_login_instructions_leave_a_buffered_pipe_before_completion(
+    buffer_size: int, ending: str
+) -> None:
+    threads = SimThreads()
+    network = SimNetwork(threads)
+    process = ScriptedPipedProcess(threads, merge_stderr=True)
+    process.write(stdout="Open https://login.example/device\nCode ABCD-EFGH1\n")
+    launcher = FakePipedProcessLauncher(lambda _start: process)
+    relay = FakeSignalRelay()
+
+    def run() -> None:
+        listener = network.listen("login-output")
+        sender = network.connect("login-output", timeout=HANG_GUARD_S)
+        receiver = listener.accept(timeout=HANG_GUARD_S)
+        output = BufferedWriter(_PipeWriter(sender), buffer_size=buffer_size)
+        watch = threads.spawn(
+            lambda: watch_login(_request(), output, _library(threads, launcher), threads, relay),
+            name="buffered-login-watch",
+        )
+        try:
+            size = int.from_bytes(_read_pipe(receiver, 4), "big")
+            assert 0 < size < 1 << 20
+            response = WatchResponse.from_binary(_read_pipe(receiver, size))
+            validate(response)
+            assert response.result is not None
+            assert response.result.field == "login"
+            body = response.result.value.body
+            assert body is not None
+            assert body.field == "started"
+            assert body.value.instruction == (
+                "Open https://login.example/device and enter the code ABCD-EFGH1"
+            )
+            assert watch.is_alive(), "instructions must be visible while login is still held"
+            if ending == "completion":
+                process.exit(0)
+            else:
+                assert relay.deliver(Signals.SIGTERM)
+            watch.join(HANG_GUARD_S)
+            assert not watch.is_alive()
+            if ending == "cancel":
+                assert process.signals == ["terminate"]
+        finally:
+            if watch.is_alive():
+                process.exit(0)
+            watch.join(HANG_GUARD_S)
+            output.close()
+            sender.close()
+            receiver.close()
+            listener.close()
+        assert not watch.is_alive()
+        assert not relay.active
+
+    threads.run(run)

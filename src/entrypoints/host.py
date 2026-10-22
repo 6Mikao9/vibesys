@@ -237,6 +237,8 @@ def watch_login(
 
     def write(chunk: bytes) -> None:
         destination.write(chunk)
+        # A watch stays alive after its first frame; a pipe cannot wait for process exit.
+        destination.flush()
 
     with signals.relay([Signals.SIGTERM], lambda _number: stop.set()):
         serve_login(payload, cli="login", start=start, write=write, wait=wait)
