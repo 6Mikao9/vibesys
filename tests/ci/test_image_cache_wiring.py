@@ -123,6 +123,7 @@ class FakeRegistry:
     def __call__(self, argv: Sequence[str], *, input_text: str | None = None) -> str:
         del input_text
         self.calls.append(tuple(argv))
+        assert argv[1] in {"login", "pull", "create", "cp", "rm", "build", "push", "tag"}
         if argv[1] == self.fail:
             if argv[1] == "cp":
                 Path(argv[-1]).write_bytes(b"partial archive")

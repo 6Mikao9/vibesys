@@ -28,6 +28,6 @@ done < <(python3 -m scripts.ci_base_images)
 # GitHub exposes package visibility only in its settings UI. Fail with a concrete
 # bootstrap instruction instead of letting a fork PR discover a private mirror.
 if ! timeout --kill-after=5s 60s skopeo inspect --no-creds --raw "docker://${last_mirror}" >/dev/null; then
-    echo '::error::Make the CI base mirror package public at https://github.com/orgs/uw-syfi/packages/container/vibesys%2Fci-base/settings, then run this workflow again.'
+    echo '::error::Make the vibesys/ci-base package public at https://github.com/orgs/uw-syfi/packages?repo_name=vibesys, then run this workflow again.'
     exit 1
 fi

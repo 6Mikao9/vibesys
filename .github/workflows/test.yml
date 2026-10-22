@@ -1241,7 +1241,6 @@ jobs:
         env:
           BASE_IMAGE: ${{ steps.image-bases.outputs.base }}
         run: |
-          if docker image inspect vibesys-feature-base:ci >/dev/null 2>&1; then exit 0; fi
           mirror=$(python3 scripts/ci_ubuntu_mirror.py)
           echo "Feature apt mirror: ${mirror}"
           docker build --tag vibesys-feature-base:ci \
