@@ -33,6 +33,7 @@ from tests.vibesys.orchestration.dynamic._host import (
     Host,
     begin,
     config,
+    core_view,
 )
 from tests.vibesys.orchestration.dynamic._main_watch import MainWatch
 from tests.vibesys.orchestration.dynamic._values import (
@@ -105,7 +106,7 @@ CHANGED = code_changed(dynamic)
 
 
 def _begin(cfg: DynamicConfig, policy: RestartPolicy | None = None) -> Host:
-    run = start_flow(dynamic, cfg, facts=FACTS, restarting=policy or False)
+    run = start_flow(dynamic, cfg, facts=FACTS, restarting=policy or False, view=core_view(cfg))
     return Host(run, cfg)
 
 

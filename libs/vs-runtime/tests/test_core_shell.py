@@ -524,6 +524,54 @@ def test_only_operator_resume_renews_the_original_duration(
         shell.release_lease(now_at=started)
 
 
+_BUDGET = ("max_attempts", "max_turns", "max_parallel", "max_refunds", "max_adoption_rounds")
+
+
+@pytest.mark.regression
+@example(first=48, then=60, resume=True)
+@example(first=48, then=60, resume=False)
+@example(first=60, then=48, resume=True)
+@given(first=st.integers(1, 500), then=st.integers(1, 500), resume=st.booleans())
+def test_an_operator_resume_raises_the_runs_budget_to_the_new_plan_and_never_lowers_it(
+    first: int, then: int, *, resume: bool
+) -> None:
+    """A resume with a larger ``--max-rounds`` plans a larger budget, and core admits by it.
+
+    Before, a resume kept the limits the run started with, so every start past the old budget
+    was refused (`BUDGET`) however the operator resumed it. A crash recovery keeps the record's.
+    """
+    store = FakeStateStore()
+    initial = declared(counter)
+
+    def planned(count: int) -> CoreState:
+        limits = initial.run.limits.model_copy(update=dict.fromkeys(_BUDGET, count))
+        return initial.model_copy(update={"run": initial.run.model_copy(update={"limits": limits})})
+
+    for now_at, plan in ((0.0, planned(first)), (100.0, planned(then))):
+        shell = CoreRuntime(
+            store,
+            counter.driver(CounterConfig()),
+            plan,
+            config=CounterConfig(),
+            bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+        )
+        shell.start("host", now_at=now_at, lease_duration=1, resume=resume)
+        shell.release_lease(now_at=now_at)
+    limits = CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        initial,
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
+    limits.start("host", now_at=200.0, lease_duration=1, resume=resume)
+    stored = limits.record.envelope.core.run.limits
+    expected = max(first, then) if resume else first
+    assert {name: getattr(stored, name) for name in _BUDGET} == dict.fromkeys(_BUDGET, expected)
+    # core's own wait bounds are the run's, whatever a later plan says
+    assert stored.cleanup_bound == initial.run.limits.cleanup_bound
+
+
 @pytest.mark.regression
 @example(epochs=[1, 5, 8])
 @given(epochs=st.lists(st.integers(1, 100), min_size=1, max_size=5, unique=True).map(sorted))

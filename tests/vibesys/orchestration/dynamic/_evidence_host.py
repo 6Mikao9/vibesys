@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Unpack
 
-from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, World
+from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, World, core_view
 from tests.vibesys.orchestration.dynamic._replies import implemented, plan_reply, reviewed
 from tests.vibesys.vibesys_flows import start_flow
 
@@ -82,7 +82,7 @@ def begin_with_evidence(
     Like `begin`, the host answers the input's measurement first, so a story starts from a
     measured input with the first planner turn open.
     """
-    run = start_flow(dynamic, cfg, facts=facts, restarting=restarting)
+    run = start_flow(dynamic, cfg, facts=facts, restarting=restarting, view=core_view(cfg))
     host = EvidenceHost(run, cfg, **world)
     host.measure_input()
     return host

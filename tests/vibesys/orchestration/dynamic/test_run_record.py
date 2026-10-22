@@ -22,12 +22,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
 from tests.vibesys.orchestration.dynamic._values import (
     config,
     evidence_of,
+    finished_profile,
     revision,
     run_record,
     settlement_of,
@@ -545,14 +546,37 @@ def test_a_search_ends_without_a_winner_only_when_no_candidate_stands_and_the_in
 def test_the_record_checkpoints_every_field_it_holds() -> None:
     """A field added to the record or its queue is resumed after a code change, or is the run's.
 
-    What the run fixes (config, input revision, task terms; the queue's slots and policy) is
-    given again on resume, and main is compared with the record's own input measurement; verdicts not yet handed over are handed again (`decided_verdicts`).
+    What the run fixes (config, input revision, task terms; the queue's slots and policy) and
+    core's admission limit are given again on resume, and main is compared with the record's own input measurement; verdicts not yet handed over are handed again (`decided_verdicts`).
     """
     record = run_record()
     gate = {f"gate_{item.name}" for item in dataclasses.fields(type(record.gate))}
-    held = {item.name for item in dataclasses.fields(RunRecord)} - {"config", "base", "terms"}
+    held = {item.name for item in dataclasses.fields(RunRecord)} - {
+        "config",
+        "base",
+        "terms",
+        "admissions",
+    }
     assert (held - {"gate"}) | gate == set(RecordState.model_fields)
     queue = {item.name for item in dataclasses.fields(EvaluationQueue)}
     assert queue - {"slots", "policy", "_verdicts"} == set(QueueState.model_fields)
     main = {item.name for item in dataclasses.fields(MainLine)}
     assert main - {"baseline"} == set(MainState.model_fields)
+
+
+@pytest.mark.regression
+@example(rounds=24, raised=6)
+@given(rounds=st.integers(1, 30), raised=st.integers(0, 30))
+def test_a_resumed_record_schedules_up_to_cores_admission_limit_not_its_checkpointed_config(
+    rounds: int, raised: int
+) -> None:
+    """The root reads its budget from core (`RunRecord.admissions`); the checkpoint's config,
+    which a resume restores unchanged, never caps a budget the operator raised on resume."""
+    cfg = config(max_rounds=rounds, max_in_flight=1)
+    done = [finished_profile(f"p{n}", n) for n in range(1, cfg.start_budget + 1)]
+    spent = run_record(cfg, finished_work=done)
+    resumed = RunRecord.resumed(cfg, spent.base, spent.terms, spent.state())
+    resumed.admissions = cfg.start_budget + raised
+    assert resumed.capacity() == min(1, raised)
+    assert resumed.over(planning=False, measuring=False, stopping=False) == (raised == 0)
+    assert resumed.world().remaining == raised

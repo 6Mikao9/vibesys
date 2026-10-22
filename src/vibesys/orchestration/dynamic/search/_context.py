@@ -91,9 +91,9 @@ _HISTORY_SUMMARY_CHARS = 600
 _PROFILE_EVIDENCE_IDS = 8
 
 
-def remaining(config: DynamicConfig, *, started: int, refunded: int) -> int:
-    """Workstreams the run may still schedule; a refund returns its slot to the budget."""
-    return max(config.start_budget - started + refunded, 0)
+def remaining(budget: int, *, started: int, refunded: int) -> int:
+    """Workstreams the run may still schedule of ``budget``; a refund returns its slot."""
+    return max(budget - started + refunded, 0)
 
 
 def free_slots(config: DynamicConfig, *, active: int, left: int) -> int:
@@ -423,6 +423,8 @@ class PlanWorld:
     main_measurement: MainMeasurement | None = None
     merges: tuple[MergeRecord, ...] = ()
     """Every finished merge, oldest first."""
+    budget: int | None = None
+    """Workstreams the run may start in all (`RunRecord.budget`); None, the config's own."""
     merge_options: MergeOptions = field(default_factory=MergeOptions)
     """Which candidates a merge may name now; its rows are the prompt's mergeable list."""
     space: MetricSpace | None = None
@@ -453,7 +455,8 @@ class PlanWorld:
     @property
     def remaining(self) -> int:
         """Workstreams the run may still schedule."""
-        return remaining(self.config, started=self.active + self.done, refunded=self.refunded)
+        budget = self.config.start_budget if self.budget is None else self.budget
+        return remaining(budget, started=self.active + self.done, refunded=self.refunded)
 
     @property
     def capacity(self) -> int:

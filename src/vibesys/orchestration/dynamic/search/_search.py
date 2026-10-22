@@ -93,12 +93,15 @@ from vs_core.api.search import (
 )
 async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner | Uncompared | None:
     """Measure the input while planning, run workstreams in the free slots, name the best."""
-    base, terms = ctx.facts.baseline, ctx.task.terms
+    task = ctx.task
+    base, terms = ctx.facts.baseline, task.terms
     if isinstance(given, DynamicResume):
         run = RunRecord.resumed(given.config, base, terms, given.record)
         run.held_over()
     else:
         run = RunRecord(given, base, None, terms)
+    # core holds the run's budget; a resume with a larger one raises it, the checkpoint does not
+    run.admissions = task.limits.max_attempts
     ctx.fall_back_to_input(run.leading()[1])
     # typed, so the match on what they yield below is checked exhaustive
     # unbounded: the record bounds the workstreams started (`RunRecord.room`) and the agents at

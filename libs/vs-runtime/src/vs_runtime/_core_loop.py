@@ -76,7 +76,7 @@ from vs_runtime._evaluation_jobs import awaits_submissions
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
-    from vs_core.api import OpenWait, Request
+    from vs_core.api import Limits, OpenWait, Request
     from vs_project.api import Project
     from vs_runtime._core_requests import ExecutionOutcome
     from vs_runtime._mid_turn_steering import TurnSteering
@@ -521,6 +521,9 @@ class CoreRuntime[S: StrategyState]:
             if self._record is None
             else self.record.envelope.core
         )
+        if self._record is not None and resume:
+            limits = _raised_budget(core.run.limits, self._initial.run.limits)
+            core = core.model_copy(update={"run": core.run.model_copy(update={"limits": limits})})
         duration = core.run.duration_seconds or self._initial.run.duration_seconds
         if duration is not None and (self._record is None or resume):
             core = core.model_copy(
@@ -1554,6 +1557,26 @@ def _search_generators() -> Iterator[None]:
         yield
     finally:
         sys.set_asyncgen_hooks(*previous)
+
+
+_BUDGET_FIELDS = ("max_attempts", "max_turns", "max_parallel", "max_refunds", "max_adoption_rounds")
+
+
+def _raised_budget(stored: Limits, planned: Limits) -> Limits:
+    """The budget of a run the operator resumes: each of its counts raised to the plan's, never lowered.
+
+    A resume re-plans the run from its recorded options and the operator's flags, so a larger
+    ``--max-rounds`` plans a larger budget. Core's limits are written once, when the run starts;
+    without this a resume would keep the old ones and refuse every start past them. A smaller
+    plan (a lower flag is refused before here, but a code change may shrink a derived count)
+    never takes back what the run was granted. Core's own wait bounds are left as stored.
+    """
+    raised = {
+        name: getattr(planned, name)
+        for name in _BUDGET_FIELDS
+        if getattr(planned, name) > getattr(stored, name)
+    }
+    return stored.model_copy(update=raised) if raised else stored
 
 
 def _started_at(core: CoreState, now_at: float) -> CoreState:

@@ -297,6 +297,10 @@ class RunRecord:
     it (`at_work`): its attempt may still queue for core's admission. Once its workspace opened
     (`Opened`) it waits for a slot like a resumed turn (wait 0, `resumes`), so new work queued
     for admission never holds the slot a parked turn needs to resume and close its attempt."""
+    admissions: int | None = None
+    """Workstreams the run may start: core's admission limit (``ctx.task.limits.max_attempts``),
+    which a resume with a larger budget raises; None, the config's own ``start_budget``. Read from
+    core, not kept in the record, so a checkpointed config never caps a raised budget."""
     planned_by: dict[str, str] = field(default_factory=dict)
     """The agent whose reply planned each plan, by work id: the planner, or the outliner for a
     step it outlined; it starts the plan's workstreams (`WorkstreamStart.started_by`)."""
@@ -459,6 +463,11 @@ class RunRecord:
     # -- what the run has left -----------------------------------------------------------------
 
     @property
+    def budget(self) -> int:
+        """Workstreams the run may start in all: core's admission limit, else the config's."""
+        return self.config.start_budget if self.admissions is None else self.admissions
+
+    @property
     def started(self) -> int:
         """Workstreams ever scheduled: the finished ones and the ones still running."""
         return len(self.finished_work) + len(self.running)
@@ -492,7 +501,7 @@ class RunRecord:
 
     def capacity(self) -> int:
         """Free slots the next plan may fill, bounded by the remaining budget."""
-        left = remaining(self.config, started=self.started, refunded=self.refunded)
+        left = remaining(self.budget, started=self.started, refunded=self.refunded)
         return free_slots(self.config, active=len(self.working), left=left)
 
     def may_plan(self, *, stopping: bool) -> bool:
@@ -508,7 +517,7 @@ class RunRecord:
         """Whether nothing is in flight and nothing more will be scheduled."""
         if self.running or planning or measuring or self.accepted:
             return False
-        left = remaining(self.config, started=self.started, refunded=self.refunded)
+        left = remaining(self.budget, started=self.started, refunded=self.refunded)
         return stopping or self.gate.failed or left == 0
 
     # -- planning ------------------------------------------------------------------------------
@@ -652,6 +661,7 @@ class RunRecord:
         offered = self.offered()
         return PlanWorld(
             config=self.config,
+            budget=self.budget,
             base=self.base,
             baseline=self.baseline,
             hypotheses=tuple(self.hypotheses.values()),

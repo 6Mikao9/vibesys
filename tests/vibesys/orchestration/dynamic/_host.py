@@ -77,13 +77,14 @@ from vs_core.api import (
     Withdraw,
 )
 from vs_core.api.search import TaskStage, TaskTerms
+from vs_core.api.testing import FakeView
 from vs_core.testing.builders import initial_state
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from vs_core.api import OperationRequest, Scope
-    from vs_core.api.testing import Asked, FakeView, FlowRun, RestartPolicy
+    from vs_core.api.testing import Asked, FlowRun, RestartPolicy
 
 TERMS = TaskTerms(
     recipe=ArtifactRef(artifact_id=ArtifactId(root="recipe"), digest="recipe"),
@@ -162,11 +163,30 @@ def begin(
     answers the input's measurement before anything else, so a story starts from a measured input
     with the first planner turn open; a story about the overlap passes False.
     """
-    run = start_flow(dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting)
+    run = start_flow(
+        dynamic,
+        cfg,
+        facts=FACTS,
+        restarting=restarting,
+        view=core_view(cfg, view),
+        adopting=adopting,
+    )
     host = Host(run, cfg, **world)
     if input_first:
         host.measure_input()
     return host
+
+
+def core_view(cfg: DynamicConfig, view: FakeView | None = None) -> FakeView:
+    """``view`` (default: an ordinary one) with the admission limit core holds for ``cfg``.
+
+    A run's core starts with ``max_attempts`` equal to the config's ``start_budget``, and the
+    search reads its budget from there; a view that sets its own ``limits`` keeps them.
+    """
+    view = FakeView() if view is None else view
+    limits = view.current().limits.model_copy(update={"max_attempts": cfg.start_budget})
+    view.changes.setdefault("limits", limits)
+    return view
 
 
 class World(TypedDict, total=False):

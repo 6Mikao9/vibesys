@@ -24,6 +24,7 @@ from tests.vibesys.orchestration.dynamic._host import (
     Host,
     begin,
     config,
+    core_view,
 )
 from tests.vibesys.orchestration.dynamic._replies import implement, implemented, plan_reply
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
@@ -240,7 +241,9 @@ def test_a_planning_call_in_flight_when_the_input_fails_is_planned_again(
 def test_an_input_with_nothing_to_measure_is_never_shown_as_pending(*, restarting: bool) -> None:
     cfg = config()
     facts = FACTS.model_copy(update={"task": UNMEASURED_TERMS})
-    host = Host(start_flow(dynamic, cfg, facts=facts, restarting=restarting), cfg)
+    host = Host(
+        start_flow(dynamic, cfg, facts=facts, restarting=restarting, view=core_view(cfg)), cfg
+    )
 
     assert not host.input_waits()
     first = host.run.expect_turn(role=PLANNER_LABEL).context

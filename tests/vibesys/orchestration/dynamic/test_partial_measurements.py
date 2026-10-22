@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, config
+from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, config, core_view
 from tests.vibesys.orchestration.dynamic._replies import implement, implemented, plan_reply
 from tests.vibesys.orchestration.dynamic._slots import (
     implement_and_judge,
@@ -91,7 +91,7 @@ def start(
 ) -> WarmupHost:
     """Run the input's measurement up to the first planner turn."""
     cfg = config(max_rounds=3, max_in_flight=1)
-    run = FlowRun.start(dynamic, cfg, facts=FACTS, restarting=restarting)
+    run = FlowRun.start(dynamic, cfg, facts=FACTS, restarting=restarting, view=core_view(cfg))
     host = WarmupHost(run, cfg, reached_rounds, baseline)
     host.measure_input()
     host.drain_until_turn(PLANNER_LABEL)
