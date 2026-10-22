@@ -26,6 +26,15 @@ def test_no_refusal_tells_the_agent_to_commit(reason: ToolRefusal) -> None:
     assert _COMMIT_ADVICE.search(text) is None
 
 
+def test_an_unknown_step_names_the_field() -> None:
+    text = render_tool_refusal(
+        ToolRefusal.UNKNOWN_STEPS, detail="steps: 'profile' is not a gate this run measures"
+    )
+
+    assert "steps:" in text
+    assert "profile" in text
+
+
 def test_a_candidate_without_a_revision_is_pointed_at_the_working_tree_snapshot() -> None:
     text = render_tool_refusal(ToolRefusal.INVALID_PLAN)
 

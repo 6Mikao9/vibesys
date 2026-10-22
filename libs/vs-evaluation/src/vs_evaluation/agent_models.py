@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -50,6 +51,27 @@ EvidenceKinds = Annotated[
 ]
 
 
+class TrustedEvalStep(StrEnum):
+    """A trusted gate an implementer may ask to run on its revision."""
+
+    ACCURACY = "accuracy"
+    BENCHMARK = "benchmark"
+
+
+def _unique_steps(steps: tuple[TrustedEvalStep, ...]) -> tuple[TrustedEvalStep, ...]:
+    if len(steps) != len(set(steps)):
+        message = "duplicate step"
+        raise ValueError(message)
+    return steps
+
+
+TrustedEvalSteps = Annotated[
+    tuple[TrustedEvalStep, ...],
+    AfterValidator(_unique_steps),
+    Field(json_schema_extra={"uniqueItems": True}),
+]
+
+
 class EvidenceKindsArgs(AgentToolArgs):
     """Arguments naming the semantic evidence kinds a tool applies to."""
 
@@ -80,6 +102,14 @@ class SubmitArgs(EvidenceKindsArgs):
     """Submission intent, including explicit justification for an extra profile."""
 
     additional_capture_reason: AdditionalProfileCaptureReason | None = None
+    steps: TrustedEvalSteps = Field(
+        default=(),
+        description=(
+            "Gates to run on this revision, first to run first. Empty runs every gate "
+            "this run measures, accuracy before benchmark. A gate already recorded for "
+            "this revision is not run again."
+        ),
+    )
 
 
 class SubmitCall(SubmitArgs):

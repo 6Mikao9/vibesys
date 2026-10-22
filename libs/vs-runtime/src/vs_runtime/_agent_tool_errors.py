@@ -38,6 +38,7 @@ class ToolRefusal(StrEnum):
     BUSY = "busy"
     RUN_FAILING = "run_failing"
     MALFORMED = "malformed"
+    UNKNOWN_STEPS = "unknown_steps"
     UNKNOWN_CALLER = "unknown_caller"
     NESTED_REPOSITORY = "nested_repository"
     REFUSED = "refused"
@@ -46,14 +47,18 @@ class ToolRefusal(StrEnum):
 class ToolRefusedError(ValueError):
     """A tool call the run refused, carrying its rendered text for the agent."""
 
-    def __init__(self, reason: ToolRefusal, handles: Sequence[str] = ()) -> None:
-        """Render the agent-facing text for ``reason`` and the unknown ``handles``."""
+    def __init__(
+        self, reason: ToolRefusal, handles: Sequence[str] = (), *, detail: str = ""
+    ) -> None:
+        """Render the agent-facing text for ``reason``, the unknown ``handles`` and ``detail``."""
         self.reason = reason
-        super().__init__(render_tool_refusal(reason, handles))
+        super().__init__(render_tool_refusal(reason, handles, detail))
 
 
-def render_tool_refusal(reason: ToolRefusal, handles: Sequence[str] = ()) -> RenderedPrompt:
+def render_tool_refusal(
+    reason: ToolRefusal, handles: Sequence[str] = (), detail: str = ""
+) -> RenderedPrompt:
     """The text an agent reads for a refused call."""
     return _RENDERER.render_template(
-        "agent_tool_error.j2", reason=reason.value, handles=list(handles)
+        "agent_tool_error.j2", reason=reason.value, handles=list(handles), detail=detail
     )

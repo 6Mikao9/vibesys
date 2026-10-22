@@ -23,8 +23,9 @@ accuracy or speed: fail the candidate on such a claim only when a listed result 
 it. When none is listed and your verdict depends on one, {% if agent_evaluation %}measure
 the workspace once with `submit_evaluation` and wait for the result before you decide,
 instead of judging the claim from the code. If you cannot, {% endif %}do not fail the
-candidate for the missing measurement: the framework measures every candidate that passes
-review. Otherwise do not run local checks, benchmarks, or other commands that take more
+candidate for the missing measurement: the framework repeats the trusted steps the
+implementer submitted for that revision, or every gate (accuracy first) when none were
+submitted. Otherwise do not run local checks, benchmarks, or other commands that take more
 than a few seconds.
 Passing trusted evaluation is not enough: reject a candidate that violates any rule or
 constraint the objective states. Return only the schema-valid JSON with the

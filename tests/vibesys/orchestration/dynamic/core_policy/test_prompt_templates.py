@@ -264,6 +264,25 @@ def test_the_implementer_keeps_working_while_its_evaluation_is_queued(
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
+@given(data=st.data(), offered=st.booleans())
+def test_the_implementer_chooses_which_trusted_gates_run(
+    data: st.DataObject, *, offered: bool
+) -> None:
+    context = data.draw(CONTEXTS[PromptTemplate.IMPLEMENT])
+
+    text = " ".join(render(PromptTemplate.IMPLEMENT, context, agent_evaluation=offered).split())
+
+    guidance = (
+        "The evaluator is scarce",
+        "Leave steps empty to run both, accuracy first",
+        "A result already recorded for this revision is reused",
+        "both a passing accuracy result and a benchmark no worse than main",
+        "request the remaining step or move on",
+    )
+    assert all(line in text for line in guidance) is offered
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
 @given(data=st.data(), summary=tokens("blk"), step=st.just("") | tokens("nxt"))
 def test_a_retried_implementer_is_shown_its_own_blocker_and_narrowed_step(
     data: st.DataObject, summary: str, step: str

@@ -90,10 +90,12 @@ from vs_core.api import (
     EvidenceId,
     EvidenceKey,
     EvidenceKind,
+    EvidenceRef,
     InvocationId,
     InvocationRef,
     MeasurementPlan,
     MeasurementRecipe,
+    ObservationStatus,
     PreparedSubmissionReceipt,
     ResourceId,
     RevisionRef,
@@ -324,7 +326,12 @@ def _ignore_diagnostic(line: str) -> None:
 
 @dataclass(frozen=True)
 class AgentEvaluationPolicy:
-    """What the host fixes about an agent's measurement; the agent supplies none of it."""
+    """What the host fixes about an agent's measurement.
+
+    The agent may choose which of this policy's gates run, and in what order
+    (``stages_to_run``). The host fixes the recipe, the digests, the budgets and which
+    gates exist.
+    """
 
     evaluator_digest: str
     workload_digest: str
@@ -380,11 +387,44 @@ class AgentEvaluationPolicy:
             dedicated_measurement_resources=self.dedicated_measurement_resources,
         )
 
+    def stages_to_run(
+        self, steps: tuple[str, ...], *, recorded: frozenset[str] = frozenset()
+    ) -> tuple[str, ...]:
+        """The stage ids a submit call runs, in order.
+
+        Empty ``steps`` is every stage this policy measures, in recipe order, and ignores
+        ``recorded``: that is today's plan. A named step must be a gate this policy measures
+        (not ``build``). Recorded gates are dropped. ``build`` stays first when any gate
+        remains and the recipe has it, because later gates load what it built. An empty
+        result means every requested gate is already recorded.
+        """
+        known = tuple(name for name, _seconds in self.stages)
+        if not steps:
+            return known
+        gates = {name for name in known if name != "build"}
+        unknown = next((step for step in steps if step not in gates), None)
+        if unknown is not None:
+            message = f"steps: {unknown!r} is not a gate this run measures"
+            raise ValueError(message)
+        pending = tuple(step for step in steps if step not in recorded)
+        if not pending:
+            return ()
+        if "build" in known:
+            return ("build", *pending)
+        return pending
+
     def plan(
-        self, candidate: RevisionRef, *, measured_input: str, now_at: float
+        self,
+        candidate: RevisionRef,
+        *,
+        measured_input: str,
+        now_at: float,
+        stages: tuple[str, ...] | None = None,
     ) -> MeasurementPlan:
-        """The ordered plan over the declared stages for this candidate, submitted now."""
-        planned = self.measurement.plan(candidate, purpose=self.purpose, now_at=now_at)
+        """The ordered plan over ``stages`` (default: every stage) for this candidate."""
+        planned = self.measurement.plan(
+            candidate, purpose=self.purpose, now_at=now_at, stages=stages
+        )
         return planned.model_copy(update={"measured_input": measured_input})
 
 
@@ -499,6 +539,54 @@ def _policy_digest(policy: AgentEvaluationPolicy) -> str:
     return hashlib.sha256(
         f"{policy.purpose}\n{policy.measurement.model_dump_json()}".encode()
     ).hexdigest()
+
+
+def _owed_digest(policy: AgentEvaluationPolicy, steps: tuple[str, ...]) -> str:
+    """The owed key for one request.
+
+    Empty ``steps`` keeps the policy digest, so a retry of today's call still matches an
+    entry written before steps existed. A named request hashes the step list in, so a
+    different request is not answered with the first handle.
+    """
+    digest = _policy_digest(policy)
+    if not steps:
+        return digest
+    named = "\n".join(steps)
+    return hashlib.sha256(f"{digest}\n{named}".encode()).hexdigest()
+
+
+_GATE_OF_KIND = {
+    EvidenceKind.CORRECTNESS: "accuracy",
+    EvidenceKind.BENCHMARK: "benchmark",
+}
+_CONCLUSIVE = frozenset({ObservationStatus.SUCCEEDED, ObservationStatus.FAILED})
+
+
+def _recorded_gates(
+    evidence: tuple[EvidenceRef, ...],
+    *,
+    scope: Scope,
+    revision: str,
+    policy: AgentEvaluationPolicy,
+) -> frozenset[str]:
+    """Gates already conclusive for this exact revision under this policy."""
+    found: set[str] = set()
+    for item in evidence:
+        gate = _GATE_OF_KIND.get(item.kind)
+        if (
+            gate is None
+            or item.scope != scope
+            or item.candidate.revision_id.root != revision
+            or item.provenance != "trusted"
+            or item.status not in _CONCLUSIVE
+            or item.purpose != policy.purpose
+            or item.evaluator_digest != policy.evaluator_digest
+            or item.workload_digest != policy.workload_digest
+            or item.environment_digest != policy.environment_digest
+        ):
+            continue
+        found.add(gate)
+    return frozenset(found)
 
 
 class AgentEvaluationBridge:
@@ -797,9 +885,16 @@ class AgentEvaluationBridge:
         try:
             call = decode_json(frame, _CALLS, source="evaluation tool call", max_bytes=_FRAME_LIMIT)
             if isinstance(call, Unreadable):
+                if call.key_path == "steps" or call.key_path.startswith("steps."):
+                    return (
+                        self._failure(ToolRefusal.UNKNOWN_STEPS, detail=call.details()),
+                        acknowledge,
+                    )
                 return self._failure(ToolRefusal.MALFORMED), acknowledge
             if isinstance(call, SubmitCall):
-                result, acknowledge = await self._submit(self._scope_of(call.token))
+                result, acknowledge = await self._submit(
+                    self._scope_of(call.token), tuple(step.value for step in call.steps)
+                )
             elif isinstance(call, WaitCall):
                 result = self._validate_wait(self._scope_of(call.token), call.handles)
             else:
@@ -829,20 +924,23 @@ class AgentEvaluationBridge:
         return tuple(lines)
 
     @staticmethod
-    def _failure(reason: ToolRefusal, error: ToolRefusedError | None = None) -> bytes:
-        text = str(error) if error is not None else render_tool_refusal(reason)
+    def _failure(
+        reason: ToolRefusal, error: ToolRefusedError | None = None, *, detail: str = ""
+    ) -> bytes:
+        text = str(error) if error is not None else render_tool_refusal(reason, detail=detail)
         return SocketFailure(error=text).model_dump_json().encode()
 
     # submit
 
     async def _submit(
-        self, scope: Scope
+        self, scope: Scope, steps: tuple[str, ...] = ()
     ) -> tuple[SubmittedReply | RunStoppingReply, Callable[[], None]]:
         """Admit the caller's candidate, or hand back the handle of its evaluation.
 
-        Core decides whether the call is a new submission or a repeat of one the scope
-        already holds (see ``AgentCall.repeat``); the reply carries the handle either way.
-        The second value acknowledges the handle once its reply reached the agent.
+        ``steps`` names the gates to run, in order. Empty runs every gate the policy
+        measures. Core decides whether the call is a new submission or a repeat of one the
+        scope already holds (see ``AgentCall.repeat``); the reply carries the handle either
+        way. The second value acknowledges the handle once its reply reached the agent.
         """
         shell, clock = self._bound()
         if self._executing(scope) is None:
@@ -857,7 +955,28 @@ class AgentEvaluationBridge:
             revision = await self._revision(workspace, scoped)
             measured_input = await workspace.measured_input(revision)
             policy = self._pinned(shell)
-            key = OwedKey(scope=scope, revision=revision, policy=_policy_digest(policy))
+            requested = steps
+            recorded = (
+                _recorded_gates(
+                    shell.admitted_core.evaluation.evidence,
+                    scope=scope,
+                    revision=revision,
+                    policy=policy,
+                )
+                if requested
+                else frozenset()
+            )
+            try:
+                stages = policy.stages_to_run(requested, recorded=recorded)
+            except ValueError as error:
+                raise ToolRefusedError(ToolRefusal.UNKNOWN_STEPS, detail=str(error)) from error
+            if requested and not stages:
+                replayed = self._replay(shell, scope, revision, requested)
+                if replayed is not None:
+                    return replayed, _nothing
+                stages = policy.stages_to_run(requested)
+            plan_stages = None if not requested else stages
+            key = OwedKey(scope=scope, revision=revision, policy=_owed_digest(policy, requested))
             owed = self._owed.find(key)
             charged = None if owed is None else self._charge_of(shell, owed)
             if owed is not None and charged is not None:
@@ -872,9 +991,12 @@ class AgentEvaluationBridge:
                 event = AgentMeasurementRequested(
                     scope=scope,
                     plan=policy.plan(
-                        revision_ref(revision), measured_input=measured_input, now_at=now
+                        revision_ref(revision),
+                        measured_input=measured_input,
+                        now_at=now,
+                        stages=plan_stages,
                     ),
-                    within=Within(limit=policy.measurement.budget()),
+                    within=Within(limit=policy.measurement.budget(plan_stages)),
                     call_id=owed.call_id,
                 )
                 transition = self._admit(shell, event, now)
@@ -887,6 +1009,49 @@ class AgentEvaluationBridge:
                 self._owed.clear(key, owed.call_id)
                 raise
             return self._answer(shell, scoped, call), self._acknowledger(owed)
+
+    def _replay(
+        self,
+        shell: AdmissionShell,
+        scope: Scope,
+        revision: str,
+        gates: tuple[str, ...],
+    ) -> SubmittedReply | None:
+        """The recorded result of ``gates`` on ``revision``, or None when the ledger lacks one."""
+        latest: dict[str, EvidenceRef] = {}
+        for item in shell.admitted_core.evaluation.evidence:
+            gate = _GATE_OF_KIND.get(item.kind)
+            if (
+                gate not in gates
+                or item.scope != scope
+                or item.candidate.revision_id.root != revision
+                or item.provenance != "trusted"
+                or item.status not in _CONCLUSIVE
+            ):
+                continue
+            held = latest.get(gate)
+            if held is None or item.observation_sequence >= held.observation_sequence:
+                latest[gate] = item
+        if any(gate not in latest for gate in gates):
+            return None
+        chosen = tuple(latest[gate] for gate in gates)
+        try:
+            stages = tuple(
+                EvaluationStageOutcome.of(self._recorded(item.source_request, item.evidence_id))
+                for item in chosen
+            )
+        except ContractError:
+            return None
+        request_id = chosen[-1].source_request
+        failed = any(item.status is ObservationStatus.FAILED for item in chosen)
+        outcome = _outcome(shell.admitted_core, request_id) or ("failed" if failed else "succeeded")
+        return SubmittedReply(
+            handle_id=handle_for(request_id),
+            repeat=True,
+            outcome=outcome,
+            evidence=tuple(item.evidence_id.root for item in chosen),
+            stages=stages,
+        )
 
     def _answer(self, shell: AdmissionShell, scoped: _Scoped, call: AgentCall) -> SubmittedReply:
         """The reply for a call core answered with a submission, which the turn may now wait on."""
