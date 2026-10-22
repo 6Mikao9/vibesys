@@ -1,4 +1,4 @@
-"""Host-side maintenance commands, dispatched before starting a run engine."""
+"""Host commands with contract-only startup; dispatched commands load their I/O adapters."""
 
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from server.host_compute import ComputeError
-from server.host_examples import ProjectLookupError
 from vibesys.api.host import host_call, terminate_host
 from vibesys.api.host_operations.api import (
     ClusterRefusedError,
@@ -260,6 +258,7 @@ def _serve_mutation(cli: str, payload: bytes, threads: Threads) -> bytes:
 def _serve_project(payload: bytes, threads: Threads) -> bytes:
     """Admit one project change, then apply it. Replay does not apply it again."""
     requests = import_module("server.host_helper_requests")
+    refused = import_module("server.host_examples").ProjectLookupError
     host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
 
     def apply(slot: str, request: object) -> object:
@@ -268,7 +267,7 @@ def _serve_project(payload: bytes, threads: Threads) -> bytes:
             raise ProjectRefusedError(message)
         try:
             return requests.apply_registered_project(slot, request, host)
-        except (ProjectLookupError, TypeError, ValueError) as exc:
+        except (refused, TypeError, ValueError) as exc:
             raise ProjectRefusedError(str(exc)) from exc
 
     return serve_project(
@@ -282,6 +281,7 @@ def _serve_project(payload: bytes, threads: Threads) -> bytes:
 def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
     """Admit one cluster change, then apply it. Replay does not apply it again."""
     requests = import_module("server.host_helper_requests")
+    refused = import_module("server.host_compute").ComputeError
     host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
 
     def apply(slot: str, request: object) -> object:
@@ -292,7 +292,7 @@ def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
             raise ClusterRefusedError(message)
         try:
             return requests.apply_registered_cluster(slot, request, host)
-        except (ComputeError, TypeError, ValueError) as exc:
+        except (refused, TypeError, ValueError) as exc:
             raise ClusterRefusedError(str(exc)) from exc
 
     return serve_cluster(
@@ -306,6 +306,7 @@ def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
 def _serve_start(payload: bytes, threads: Threads) -> bytes:
     """Admit the start, then launch through the helper. Replay does not launch."""
     requests = import_module("server.host_helper_requests")
+    refused = import_module("server.host_examples").ProjectLookupError
     models = import_module("server.host_api")
 
     def launch(request: pb.StartRunRequest) -> tuple[str, str]:
@@ -316,7 +317,7 @@ def _serve_start(payload: bytes, threads: Threads) -> bytes:
         host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
         try:
             reply = requests.launch_registered_run(body, host)
-        except ProjectLookupError as exc:
+        except refused as exc:
             raise StartRefusedError(str(exc)) from exc
         if isinstance(reply, models.HelperError):
             raise StartRefusedError(reply.message)

@@ -227,6 +227,14 @@ def test_light_entrypoint_imports_only_light_modules(entrypoint: str) -> None:
     assert violations(entrypoint) == []
 
 
+@pytest.mark.regression
+def test_native_host_admission_does_not_load_server_adapters() -> None:
+    closure = import_closure("entrypoints.host")
+    assert not {
+        name: chain for name, chain in closure.items() if name.partition(".")[0] == "server"
+    }
+
+
 # --- the guard's own behavior ----------------------------------------------------
 
 
