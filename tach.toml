@@ -1367,7 +1367,7 @@ expose = ["BackendPromptRenderer", "CORE_PROTOCOL_DIR", "ComparisonRule", "Compu
 from = ["vibesys.prompts"]
 
 [[interfaces]]
-expose = ["AcceptedReading", "EvidenceReading", "FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricRow", "MetricSpace", "Objective", "PartialRow", "accept_readings", "judged_evidence", "reading_of"]
+expose = ["AcceptedReading", "Direction", "EvidenceReading", "FrameworkBenchmarkOutcome", "Measurement", "MetricComparison", "MetricRow", "MetricSpace", "Objective", "PartialRow", "accept_readings", "judged_evidence", "mean_metrics", "pooled_benchmarks", "reading_of", "with_declared_directions"]
 from = ["vibesys.metrics"]
 
 [[interfaces]]
