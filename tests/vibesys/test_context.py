@@ -31,6 +31,7 @@ from vibesys.inputs import (
 from vibesys.orchestration.agent_options import (
     AgentOrchestrationOptions,
 )
+from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vibesys.orchestration.profilers import (
     PROFILERS_COMMON_STAGED_NAME,
     ProfilerKind,
@@ -83,7 +84,8 @@ class _CreateContextOptions(TypedDict, total=False):
     evaluator_package_root: Path | None
     exp_name: str
     existing: bool
-    configuration: AgentOrchestrationOptions | None
+    orchestration_id: str
+    configuration: BaseModel | None
     config: Config | None
     profiler_kind: ProfilerKind
     workspace_sources: tuple[WorkspaceSource, ...]
@@ -193,7 +195,7 @@ def _create_context(
     bundle = bundle.model_copy(update=updates)
     exp_name = options.get("exp_name", "queue")
     descriptor = OrchestrationDescriptor(
-        id="multi-agent",
+        id=options.get("orchestration_id", "multi-agent"),
         config_version=1,
         options=(options.get("configuration") or _options()).model_dump(mode="json"),
     )
@@ -859,6 +861,44 @@ def test_agent_v5_run_resumes_only_with_the_options_it_started_with(tmp_path: Pa
         pass
 
     assert _git(project, "branch", "--show-current") == f"vibesys-runs/{run_id}"
+
+
+@pytest.mark.regression
+def test_dynamic_run_resumes_with_a_larger_max_rounds_and_only_that(tmp_path: Path) -> None:
+    """Regression: ``--resume --max-rounds 42`` over 24 recorded failed at argument resolution."""
+    project = tmp_path / "queue"
+    evaluator = _write_project(project)
+
+    def dynamic(**changes: int) -> DynamicLaunch:
+        return DynamicLaunch.model_validate({"interface": "inprocess", "max_rounds": 2, **changes})
+
+    def resume(configuration: DynamicLaunch, run_id: str) -> AbstractContextManager[_PreparedRun]:
+        return _create_context(
+            project,
+            evaluator=evaluator,
+            orchestration_id="dynamic",
+            configuration=configuration,
+            exp_name=run_id,
+            existing=True,
+        )
+
+    with _create_context(
+        project, evaluator=evaluator, orchestration_id="dynamic", configuration=dynamic()
+    ) as first:
+        run_id = first.project_resources.state.run_id
+
+    with pytest.raises(
+        ConfigurationError, match=r"cannot lower 'max_rounds'.*recorded 2, requested 1"
+    ):
+        resume(dynamic(max_rounds=1), run_id)
+    with pytest.raises(ConfigurationError, match="cannot change its descriptor"):
+        resume(dynamic(max_rounds=3, max_in_flight=3), run_id)
+
+    with resume(dynamic(max_rounds=3), run_id):
+        pass
+    stored = Project.open(project).state.load_run(run_id)
+    assert isinstance(stored, OrchestrationRunManifest)
+    assert stored.orchestration.options["max_rounds"] == 3
 
 
 @pytest.mark.parametrize(

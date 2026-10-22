@@ -58,6 +58,7 @@ from vs_runtime.api import (
     CorePlan,
     CorePolicy,
     OrchestrationPlugin,
+    OrchestrationResumeDecision,
 )
 from vs_runtime.api.core import (
     AgentEvaluationPolicy,
@@ -73,6 +74,7 @@ if TYPE_CHECKING:
 
     from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
+    from vs_project.api import OrchestrationDescriptor
     from vs_runtime.api import CoreRunContext
 
 _PLUGIN_ID = dynamic.name
@@ -259,6 +261,57 @@ def _project_max_rounds(options: BaseModel) -> int:
     return DynamicLaunch.model_validate(options).max_rounds
 
 
+_BUDGET_OPTION = "max_rounds"
+
+
+def dynamic_resume_policy(
+    recorded: OrchestrationDescriptor, requested: OrchestrationDescriptor
+) -> OrchestrationResumeDecision:
+    """Accept a resume whose only change is a larger ``--max-rounds``; every other option is exact.
+
+    ``max_rounds`` only sets how many workstreams the run may still admit: the resumed run's
+    admission limit is ``budget(config).attempts`` of the requested options (the runtime raises
+    core's stored limits to it, never lowers them), so the descriptor recorded is the one that
+    plans the budget. A lower value is refused, naming the option and both values. Nothing else
+    qualifies: ``max_in_flight``, the backlog and the other options shape work already in
+    flight or already decided, and the run's clients read them from the recorded descriptor.
+    """
+    if recorded == requested:
+        return OrchestrationResumeDecision(descriptor=None)
+    old, new = recorded.options.get(_BUDGET_OPTION), requested.options.get(_BUDGET_OPTION)
+    others_equal = {k: v for k, v in recorded.options.items() if k != _BUDGET_OPTION} == {
+        k: v for k, v in requested.options.items() if k != _BUDGET_OPTION
+    }
+    if (
+        recorded.id != requested.id
+        or recorded.config_version != requested.config_version
+        or not others_equal
+        or not (isinstance(old, int) and isinstance(new, int))
+    ):
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=(
+                    f"resuming orchestration {recorded.id!r} cannot change its descriptor "
+                    f"except to raise {_BUDGET_OPTION!r}"
+                ),
+            )
+        )
+    if new < old:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="project_resume_configuration_mismatch",
+                stage="resume_resolution",
+                message=(
+                    f"resuming orchestration {recorded.id!r} cannot lower {_BUDGET_OPTION!r} "
+                    f"(recorded {old}, requested {new})"
+                ),
+            )
+        )
+    return OrchestrationResumeDecision(descriptor=requested)
+
+
 def dynamic_core_registration() -> OrchestrationRegistration:
     """The dynamic search registered as a core run the built-in `DYNAMIC` registration."""
     plugin = OrchestrationPlugin(
@@ -270,6 +323,7 @@ def dynamic_core_registration() -> OrchestrationRegistration:
     return OrchestrationRegistration(
         plugin=plugin,
         projector=dynamic_projector(),
+        resume_policy=dynamic_resume_policy,
         project_max_rounds=_project_max_rounds,
         iteration_support=IterationSupport.PROJECTED,
     )
