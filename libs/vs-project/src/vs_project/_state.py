@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from uuid import UUID
 
+    from vs_project._retained import RetainedFile
     from vs_project._state_io import AtomicWriteEffects
 
 _logger = logging.getLogger(__name__)
@@ -1072,6 +1073,19 @@ class ProjectState:
         return _snapshot_directory(
             project_root=self.project_root, root=self._contained_run_dir(run_id)
         )
+
+    def retained_run_files(
+        self, run_id: str, *, local_namespace: str | None = None
+    ) -> tuple[RetainedFile, ...]:
+        """List originals with their sizes, without requiring today's manifest schema."""
+        # lint-waiver: LW-337002 [PLC0415]; hello never reads retained files.
+        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > hides this dependency from tach and adds indirection to its only caller.
+        from vs_project._retained import list_retained  # noqa: PLC0415
+
+        if local_namespace is None:
+            return list_retained(self._contained_run_dir(run_id))
+        return list_retained(self._local_state_dir(run_id, local_namespace))
 
     def git_integration(self, run_id: str) -> ProjectGitIntegration:
         """Return opaque Git integration capabilities for one run."""

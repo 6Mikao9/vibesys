@@ -225,6 +225,17 @@ class Project:
         """Return the authoritative core-event journal for one run."""
         return cls.log_directory_for(project_root, run_id) / "core-events.jsonl"
 
+    def retained_event_journal(self, run_id: str, *, max_bytes: int) -> bytes | None:
+        """Read the original bounded JSONL journal for a semantic restart, without writing."""
+        # lint-waiver: LW-337003 [PLC0415]; hello never reads a retained journal.
+        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > hides this dependency from tach and adds indirection to its only caller.
+        from vs_project._retained import read_retained_bytes  # noqa: PLC0415
+
+        return read_retained_bytes(
+            self.event_journal_path_for(self.root, run_id), max_bytes=max_bytes
+        )
+
     @classmethod
     def publish_run_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Atomically publish a host discovery link to this run's log directory."""
