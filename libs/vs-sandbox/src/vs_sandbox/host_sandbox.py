@@ -593,6 +593,15 @@ def _sbpl_string(value: str) -> str:
 _SHALLOW_PATH = 2
 """A path this short is ``/`` or one directory such as ``/tmp``, never a Codex state root."""
 
+#: Operator-owned names in the parent of a granted file leaf. The profile is
+#: rebuilt every turn, so denying every other child that exists then write-locks
+#: the files the CLI created on the previous turn (its state database, logs,
+#: installation id, and skill tree) and the next resume dies with
+#: ``Operation not permitted``. These two stay denied: ``config.toml`` is
+#: operator policy, not an authentication file, and ``worktrees`` holds sibling
+#: Codex checkouts.
+_PROTECTED_LEAF_PARENT_ENTRIES: frozenset[str] = frozenset({"config.toml", "worktrees"})
+
 
 @dataclass(frozen=True)
 class SeatbeltSandbox(WorkspaceSandbox):
@@ -673,9 +682,11 @@ class SeatbeltSandbox(WorkspaceSandbox):
         # Bubblewrap makes the parent of a file leaf an empty writable directory.
         # Seatbelt sees the real parent, so a CLI that creates files beside the
         # leaf (Codex writes its state database next to auth.json) needs that
-        # parent writable. Pre-existing children that were not granted stay
-        # write-denied below, so a sibling checkout is not modified. The home
-        # directory itself is never added.
+        # parent writable. Only the named operator-owned entries stay
+        # write-denied below. Denying every child present at generation time
+        # would lock the files the CLI created on the previous turn, because
+        # the profile is rebuilt for each turn. The home directory itself is
+        # never added.
         parent_writes, sibling_denies = self._leaf_parent_writes()
         write_roots += [str(path) for path in parent_writes]
         write_roots += [str(path) for path in self._symlink_write_targets()]
@@ -727,16 +738,20 @@ class SeatbeltSandbox(WorkspaceSandbox):
         return "\n".join(lines) + "\n"
 
     def _leaf_parent_writes(self) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
-        """Parents a file leaf needs writable, and the siblings that stay write-denied.
+        """Parents a file leaf needs writable, and the operator entries that stay denied.
 
         A grant of a file (``auth.json``) or of a directory beside that file
         (``sessions``) does not make their parent writable. Codex creates its
         state database, sockets and skill tree in that parent at startup, and
         fails with ``Operation not permitted`` when it cannot. The parent is
-        allowed, then every child that already exists and was not granted is
-        denied, so ``worktrees`` and ``config.toml`` cannot be modified. A
-        parent that is the home directory, or not deeper than it, is skipped:
-        the profile never grants the whole home.
+        allowed. A child whose name is in ``_PROTECTED_LEAF_PARENT_ENTRIES``
+        and that was not granted is denied, so ``config.toml`` and
+        ``worktrees`` cannot be modified. Any other child stays writable,
+        including one the CLI created after an earlier profile: the profile is
+        generated again on the next turn, and denying every ungranted child
+        that exists then makes resume fail. A parent that is the home
+        directory, or not deeper than it, is skipped: the profile never grants
+        the whole home.
         """
         granted = {path.resolve() for path in self.write_paths}
         granted.add(self.workspace.resolve())
@@ -772,6 +787,8 @@ class SeatbeltSandbox(WorkspaceSandbox):
             if not parent.is_dir():
                 continue
             for child in sorted(parent.iterdir()):
+                if child.name not in _PROTECTED_LEAF_PARENT_ENTRIES:
+                    continue
                 if child.resolve() in granted:
                     continue
                 denies.append(child)
