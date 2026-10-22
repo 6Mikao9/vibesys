@@ -387,3 +387,12 @@ jobs = ["python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "protobuf gateway browser fixture selects its client consumers"
+paths = ["clients/apps/desktop-shell/e2e/gateway-preload.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/app-desktop-shell" }

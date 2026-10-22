@@ -29,7 +29,7 @@ for (const width of [1000, 1440, 1920])
   test(`session chat replay and explicit steer at ${width}px`, async ({page}) => {
     await page.setViewportSize({width, height: 900});
     const {fixture, requests} = await prepareSession(page);
-    await page.addInitScript(installGateway, fixture);
+    await installGateway(page, fixture);
     await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
     await page.getByRole('switch', {name: 'Run transport v2'}).check();
     await page.getByRole('button', {name: 'Chat', exact: true}).click();
@@ -127,7 +127,7 @@ for (const state of ['parked', 'stopped'] as const)
     test(`${state} run retains chat history at ${width}px`, async ({page}) => {
       await page.setViewportSize({width, height: 900});
       const {fixture, requests} = await prepareSession(page, state);
-      await page.addInitScript(installGateway, fixture);
+      await installGateway(page, fixture);
       await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
       await page.getByRole('switch', {name: 'Run transport v2'}).check();
       await page.getByRole('button', {name: 'Chat', exact: true}).click();

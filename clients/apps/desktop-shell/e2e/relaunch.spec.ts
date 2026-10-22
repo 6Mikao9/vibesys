@@ -69,8 +69,8 @@ async function openRelaunch(page: Page, state: RunState, result = 'epoch') {
       answer = resolve;
     });
   });
-  await page.addInitScript(
-    installGateway,
+  await installGateway(
+    page,
     wire(fixture, state === 'interrupted' ? RunLiveness.INTERRUPTED : RunLiveness.ENDED),
   );
   await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});

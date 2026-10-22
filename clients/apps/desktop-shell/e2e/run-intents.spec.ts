@@ -61,7 +61,7 @@ async function openIntents(page: Page, amendment = false) {
     const replay = intentReplay('pending', envelope.method.value.requestId);
     return [...toBinary(HostCallResponseSchema, replay.admission)];
   });
-  await page.addInitScript(installGateway, wire(fixture));
+  await installGateway(page, wire(fixture));
   await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
   const toggle = page.getByRole('switch', {name: 'Run transport v2'});
   await expect(toggle).not.toBeChecked();

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
-import {DesktopHostsSchema, validatedExactFromBinary, validatedFromBinary} from '../dist/index.js';
+import {DesktopHostsSchema, validatedExactFromBinary, validatedFromBinary} from '@vibesys/proto';
 
 test('closed config inputs reject unknown fields at root and nested paths; retained readers preserve them', () => {
   for (const nested of [false, true]) {
@@ -26,7 +26,7 @@ test('closed config inputs reject unknown fields at root and nested paths; retai
 
 test('gateway fixture bytes have the same schema validation as Python', async () => {
   const {readFile} = await import('node:fs/promises');
-  const {DesktopGatewayRequestSchema, DesktopGatewayReplySchema} = await import('../dist/index.js');
+  const {DesktopGatewayRequestSchema, DesktopGatewayReplySchema} = await import('@vibesys/proto');
   const cases = JSON.parse(
     await readFile(
       new URL('../../../../proto/testdata/desktop/gateway.json', import.meta.url),

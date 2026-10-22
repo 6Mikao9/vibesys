@@ -15,7 +15,7 @@ for (const kind of ['short', 'live', 'blobs'] as const)
     test(`store Run screen ${kind} at ${width}px`, async ({page}) => {
       await page.setViewportSize({width, height: 900});
       const fixture = storeRunFixture(kind);
-      await page.addInitScript(installGateway, wire(fixture));
+      await installGateway(page, wire(fixture));
       await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
       const toggle = page.getByRole('switch', {name: 'Run transport v2'});
       await expect(toggle).not.toBeChecked();
@@ -88,7 +88,7 @@ test('the host switch survives missing legacy history and usage retains its mode
   page,
 }) => {
   await page.setViewportSize({width: 1440, height: 900});
-  await page.addInitScript(installGateway, wire(storeRunFixture('short')));
+  await installGateway(page, wire(storeRunFixture('short')));
   await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'}, {summary: 'gone'});
   await expect(page.getByText('Could not load this run', {exact: true})).toBeVisible();
   const toggle = page.getByRole('switch', {name: 'Run transport v2'});
