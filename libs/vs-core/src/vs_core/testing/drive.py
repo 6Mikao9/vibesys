@@ -221,6 +221,11 @@ class Faults:
     inspections from what the executors did (see ``_Executed``): a crash number that falls inside
     a recovery is a crash during recovery. A request that was executed but whose result was not
     delivered died before sealing it when ``unsealed`` says so, else its result is sealed.
+
+    ``dies_in_turn`` selects turns (a dispatch or a resume) during which the host dies, the first
+    time each is sent. The provider process ends with the host that owns it, so the turn's session
+    journal records it interrupted (its call returned without a result) and nothing is sealed: an
+    inspection of the request or of the turn finds it begun and its outcome unknown.
     """
 
     unknown_first: Callable[[Request], bool] = lambda _request: False
@@ -232,6 +237,7 @@ class Faults:
     unsealed: Callable[[Request], bool] = lambda _request: False
     reobserve_after: frozenset[int] = frozenset()
     replay_after: frozenset[int] = frozenset()
+    dies_in_turn: Callable[[Request], bool] = lambda _request: False
 
 
 class _CrashError(Exception):
@@ -254,6 +260,8 @@ class _Executed:
     events: list[CoreEvent]
     sealed: bool = True
     delivered: bool = False
+    interrupted: bool = False
+    """The host died while this turn ran: its journal says it ended with no result."""
 
 
 @dataclass
@@ -548,6 +556,12 @@ class _Driver[S: StrategyState]:
                 held.sealed = True
             held.delivered = False
             return list(held.events)
+        if isinstance(request, DispatchTurn | ResumeSessionTurn) and self.faults.dies_in_turn(
+            request
+        ):
+            self.trace.effects.append(key)
+            self.ledger[key] = _Executed(request, [Unknown()], [], sealed=False, interrupted=True)
+            raise _CrashError
         self.in_turn += 1
         for event in self.during_turn(request, self.trace.core):
             self.consume(event)
@@ -591,6 +605,13 @@ class _Driver[S: StrategyState]:
             message = "a turn inspection names the request that dispatched the turn"
             raise ValueError(message)
         held = self.ledger.get(target.root)
+        if turn and held is not None and held.interrupted:
+            # The journal records the turn interrupted: the turn ended, and with no reply.
+            sequence = self.calls.get(self.key_of(request), 0)
+            self.calls[self.key_of(request)] = sequence + 1
+            query = self.observation(request, Succeeded(), sequence)
+            found = TargetObservation(observation=self.unproven(request, target, terminal=False))
+            return [query.model_copy(update={"target": found})]
         if turn and held is not None and not held.sealed:
             held.events = self.build_events(held.request, held.answers)
             held.sealed = True

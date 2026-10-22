@@ -22,6 +22,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import Phase, event, example, given, note, settings
 from hypothesis import strategies as st
 
@@ -32,6 +33,8 @@ from vs_sim.api.testing import examples
 from .toy_agent_search import ROLES, Config, ToyHost, run_toy, summary
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_core.api.testing import Trace
 
 
@@ -179,3 +182,57 @@ def test_a_run_that_crashes_and_recovers_ends_as_the_crash_free_run_did(
     # The executors did the crash-free run's work, and no request's effect happened twice.
     assert max(Counter(crashed.effects).values(), default=1) == 1
     assert work_of(crashed) == work_of(reference)
+
+
+def _dies_in(turns: frozenset[int]) -> Callable[[core.Request], bool]:
+    """The host dies while the n-th turn it sends runs, for each n in *turns* (from 0)."""
+    sent = 0
+
+    def dies(request: core.Request) -> bool:
+        del request  # turns are counted in the order they are sent
+        nonlocal sent
+        sent += 1
+        return sent - 1 in turns
+
+    return dies
+
+
+# Each death costs one recovery; a turn lost to it is asked again under the role's lost-turn rule.
+@pytest.mark.regression
+@settings(
+    max_examples=examples(pr=4, nightly=16),
+    deadline=None,
+    derandomize=True,
+    database=None,
+    phases=(Phase.explicit, Phase.generate),
+)
+@given(
+    world=WORLDS,
+    turns=st.sets(st.integers(0, 4), min_size=1, max_size=2).map(frozenset),
+    crashes=st.sets(st.integers(1, 120), max_size=1),
+)
+# The live run that halted: a waiting implementer's resume turn ran when its host died.
+@example(world=PINNED, turns=frozenset({1}), crashes=set())
+@example(world=PINNED, turns=frozenset({0}), crashes=set())
+def test_a_host_that_dies_mid_turn_never_blocks_the_resumed_run(
+    world: World, turns: frozenset[int], crashes: set[int]
+) -> None:
+    """A turn whose host died is lost, not unknown: recovery settles it and the run goes on.
+
+    The turn's journal says it ended with no reply, and the cancellation of the lost turn
+    releases it. Before, that release closed the turn's dispatch by another path than the
+    check's own inspection, so its recovery check kept a stale "pending", was then settled by
+    kind as an effect nothing can redo, and the resumed run ended "recovery blocked: outcome
+    unknown" naming the turn.
+    """
+    faults = Faults(crash_after=frozenset(crashes), dies_in_turn=_dies_in(turns))
+    crashed = world.run(faults)
+    died = [r for r in crashed.requests if isinstance(r, core.CancelTurn)]
+    event(f"crashes: {crashed.crashes}, lost-turn cancels: {min(len(died), 3)}")
+    assert crashed.core.records.recovery.phase is not core.RecoveryPhase.BLOCKED, [
+        check.target.root
+        for check in crashed.core.records.recovery.checks
+        if check.resolution == "blocked"
+    ]
+    assert crashed.finished, "the recovered run never ended"
+    assert crashed.core.run.status is core.RunStatus.TERMINAL
