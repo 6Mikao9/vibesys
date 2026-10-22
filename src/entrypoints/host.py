@@ -146,15 +146,7 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        owned = threads
-        host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), owned)
-        library = import_module("entrypoints.host_helper").AgentLibraryLogins
-        if not isinstance(host.logins, library):
-            message = "host logins cannot be held open"
-            raise TypeError(message)
-        watch_login(
-            source.read((1 << 20) + 1), destination, host.logins, owned, WakeupFdSignalRelay(owned)
-        )
+        _serve_login(source.read((1 << 20) + 1), destination, threads)
         return 0
     if arguments and arguments[0] in _MUTATION_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -196,6 +188,13 @@ def main(
     sys.stdout.write(output)
     sys.stderr.write(error)
     return code
+
+
+def _serve_login(payload: bytes, destination: BinaryIO, threads: Threads) -> None:
+    """Wire the native login watch without constructing unrelated helper resources."""
+    launcher = import_module("vs_sim.api").SubprocessPipedProcessLauncher()
+    logins = import_module("server.host_agent_logins").host_logins(launcher, threads)
+    watch_login(payload, destination, logins, threads, WakeupFdSignalRelay(threads))
 
 
 def watch_login(

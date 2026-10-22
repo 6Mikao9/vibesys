@@ -19,6 +19,10 @@ ROOT = Path(__file__).resolve().parents[2]
         ("ConfigFiles", "server/host_compute_runtime.py", "server/host_helper_compute.py"),
         ("OsConfigFiles", "server/host_compute_runtime.py", "server/host_helper_os.py"),
         ("ClusterCompute", "server/host_compute.py", "server/host_helper_requests.py"),
+        ("AgentLibraryLogins", "server/host_agent_logins.py", "entrypoints/host_helper.py"),
+        ("LoginStarter", "server/host_agent_logins.py", "server/host_helper_os.py"),
+        ("HeldLogin", "server/host_agent_logins.py", "server/host_helper_os.py"),
+        ("LoginBounds", "server/host_agent_logins.py", "server/host_helper_os.py"),
         ("HostReadSource", "server/host_operation_reads.py", "server/host_helper_requests.py"),
     ],
 )
@@ -73,3 +77,27 @@ def test_native_cluster_dispatch_does_not_depend_on_the_helper() -> None:
         assert not _helper_dependencies(ast.parse((ROOT / path).read_text()))
     for path in ("src/server/host_helper_compute.py", "src/server/host_helper_slurm.py"):
         assert not (ROOT / path).exists(), f"retired helper owner returned: {path}"
+
+
+def test_native_login_dispatch_does_not_depend_on_the_helper() -> None:
+    tree = ast.parse((ROOT / "src/entrypoints/host.py").read_text())
+    dispatch = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_serve_login"
+    )
+    watch_branch = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.BoolOp)
+        and any(
+            isinstance(part, ast.Name) and part.id == "_WATCH_COMMANDS"
+            for part in ast.walk(node.test)
+        )
+    )
+    assert not _helper_dependencies(dispatch)
+    assert not _helper_dependencies(watch_branch)
+    assert not _helper_dependencies(
+        ast.parse((ROOT / "src/server/host_agent_logins.py").read_text())
+    )

@@ -13,8 +13,14 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from server.host_agent_logins import LoginStarted, LoginUnavailable, LoginUnavailableReason
-from server.host_helper_os import LoginBounds, LoginStarter, login_instruction
+from server.host_agent_logins import (
+    LoginBounds,
+    LoginStarted,
+    LoginStarter,
+    LoginUnavailable,
+    LoginUnavailableReason,
+    login_instruction,
+)
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     FakePipedProcessLauncher,

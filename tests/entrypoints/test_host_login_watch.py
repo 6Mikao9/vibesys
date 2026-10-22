@@ -10,8 +10,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from entrypoints.host import watch_login
-from entrypoints.host_helper import AgentLibraryLogins
-from server.host_helper_os import LoginBounds, LoginStarter
+from server.host_agent_logins import AgentLibraryLogins, LoginBounds, LoginStarter
 from vs_agent.api import LoginCommand, LoginState, ProviderLogin
 from vs_proto.api import FailureCategory, Oneof, WatchRequest, WatchResponse, validate
 from vs_proto.api import host_payloads as pb

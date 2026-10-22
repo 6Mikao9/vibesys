@@ -24,13 +24,9 @@ from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_agent_logins import (
-    AccountLogin,
-    AgentLogin,
-    ApiKeyLogin,
-    LoginStarted,
-    LoginState,
-    LoginUnavailable,
-    LoginUnavailableReason,
+    harness_binaries,
+    host_logins,
+    launch_environment,
 )
 from server.host_api import HarnessOption
 from server.host_compute_runtime import MachineCompute, OsConfigFiles
@@ -41,9 +37,6 @@ from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
-    HeldLogin,
-    LoginBounds,
-    LoginStarter,
     OsDirectories,
     ProjectStopIntents,
     StoreLogReader,
@@ -79,11 +72,11 @@ from vs_sim.api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Mapping
 
     from server.host_examples import CreatedProject, ExampleDestination, ExampleList
     from server.host_helper_requests import ExampleProjects
-    from vs_agent.api import LoginCommand, ModelDisplay, ProviderLogin
+    from vs_agent.api import ModelDisplay
     from vs_sim.api import Threads
 
 _STDIN_FD = 0
@@ -140,153 +133,6 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
             )
         )
     return tuple(options)
-
-
-@cache
-def harness_binaries() -> tuple[tuple[str, str], ...]:
-    """Each vetted provider, in offer order, with its CLI's program name; loaded on first use."""
-    # lint-waiver: LW-271504 [PLC0415]; the helper answers hello without loading the agent library.
-    # > The same deferral as `vetted_harnesses`: `vs_agent.api` owns the vetted list and the
-    # > provider profiles that name each CLI, and importing it at module level would make every
-    # > channel pay half a second before `hello`; a copied list would be a second source of truth.
-    from vs_agent.api import harnesses, provider_binary  # noqa: PLC0415
-
-    providers = dict.fromkeys(harness.provider for harness in harnesses())
-    return tuple((provider, provider_binary(provider)) for provider in providers)
-
-
-def launch_environment() -> Mapping[str, str]:
-    """The environment a run finds provider CLIs in; loaded on first use."""
-    # lint-waiver: LW-271506 [PLC0415]; the helper answers hello without loading the agent library.
-    # > The same deferral as `harness_binaries`: `vs_agent.api` owns how a run finds a provider
-    # > CLI (the interactive login shell's environment), and the helper may itself have been
-    # > started by a non-login shell whose `PATH` lacks it; a copy of that lookup here would
-    # > drift from the run's.
-    from vs_agent.api import launch_shell_environment  # noqa: PLC0415
-
-    return launch_shell_environment()
-
-
-def provider_login_here(provider: str) -> ProviderLogin:
-    """``provider``'s CLI probed in the environment a run finds it in, with this user's home."""
-    # lint-waiver: LW-271508 [PLC0415]; the helper answers hello without loading the agent library.
-    # > The same deferral as `vetted_harnesses`: `vs_agent.api` owns the provider facts and
-    # > importing it at module level would make every channel pay half a second before `hello`.
-    from vs_agent.api import provider_login  # noqa: PLC0415
-
-    return provider_login(provider, env=launch_environment(), home=Path.home())
-
-
-def provider_login_command_here(provider: str) -> LoginCommand | None:
-    """The command that signs ``provider``'s CLI in, or ``None`` when its CLI has none."""
-    # lint-waiver: LW-271509 [PLC0415]; the helper answers hello without loading the agent library.
-    # > The same deferral as `provider_login_here`: `vs_agent.api` owns the provider facts and
-    # > importing it at module level would make every channel pay half a second before `hello`.
-    from vs_agent.api import provider_login_command  # noqa: PLC0415
-
-    return provider_login_command(provider)
-
-
-class AgentLibraryLogins:
-    """Each vetted harness's login, read through the agent library (agentshim's facts).
-
-    ``login_of`` probes one provider's CLI; the agent library is loaded when it first runs, not
-    for ``hello``.
-    """
-
-    def __init__(
-        self,
-        login_of: Callable[[str], ProviderLogin],
-        command_of: Callable[[str], LoginCommand | None],
-        starter: LoginStarter,
-    ) -> None:
-        """Bind how a CLI is probed, which command signs it in, and how that command is run.
-
-        ``provider_login_here`` and ``provider_login_command_here`` on a real host.
-        """
-        self._login_of = login_of
-        self._command_of = command_of
-        self._starter = starter
-
-    def providers(self) -> tuple[str, ...]:
-        """The providers the vetted harnesses come from, in offer order."""
-        return tuple(provider for provider, _binary in harness_binaries())
-
-    def list(self) -> tuple[AgentLogin, ...]:
-        """Each provider's CLI probed for whether it is installed and signed in, and how."""
-        return tuple(self._login(provider) for provider in self.providers())
-
-    def start(self, provider: str) -> LoginStarted | LoginUnavailable:
-        """Run the harness's own login command, or say why it cannot be run from here.
-
-        A harness that is not installed is reported as that first. A command that prompts the
-        person is not run: it is named, for a terminal.
-        """
-        if not self._login_of(provider).installed:
-            return LoginUnavailable(reason=LoginUnavailableReason.NOT_INSTALLED)
-        command = self._command_of(provider)
-        if command is None:
-            return LoginUnavailable(reason=LoginUnavailableReason.NO_LOGIN_COMMAND)
-        if command.needs_terminal:
-            return LoginUnavailable(
-                reason=LoginUnavailableReason.NEEDS_TERMINAL, command=command.line
-            )
-        return self._starter.start(command.argv)
-
-    def hold(self, provider: str) -> HeldLogin:
-        """Start ``provider``'s login and keep its process group until cancel or completion.
-
-        The same refusals as ``start``. A provider this host does not offer raises ``ValueError``.
-        """
-        if provider not in self.providers():
-            message = f"this host offers no harness for provider {provider!r}"
-            raise ValueError(message)
-        if not self._login_of(provider).installed:
-            return self._starter.refuse(
-                LoginUnavailable(reason=LoginUnavailableReason.NOT_INSTALLED)
-            )
-        command = self._command_of(provider)
-        if command is None:
-            return self._starter.refuse(
-                LoginUnavailable(reason=LoginUnavailableReason.NO_LOGIN_COMMAND)
-            )
-        if command.needs_terminal:
-            return self._starter.refuse(
-                LoginUnavailable(reason=LoginUnavailableReason.NEEDS_TERMINAL, command=command.line)
-            )
-        return self._starter.hold(command.argv)
-
-    def _login(self, provider: str) -> AgentLogin:
-        # lint-waiver: LW-271507 [PLC0415]; the helper answers hello without loading the agent library.
-        # > The same deferral as `vetted_harnesses`: `vs_agent.api` owns the provider facts and
-        # > importing it at module level would make every channel pay half a second before `hello`.
-        from vs_agent import api as agents  # noqa: PLC0415
-
-        found = self._login_of(provider)
-        command = self._command_of(provider)
-        credential = found.credential
-        how: AccountLogin | ApiKeyLogin | None = None
-        if credential is not None:
-            how = (
-                ApiKeyLogin(variable=credential.variable, file=credential.file)
-                if credential.kind is agents.LoginKind.API_KEY
-                else AccountLogin()
-            )
-        state = {
-            agents.LoginState.SIGNED_IN: LoginState.SIGNED_IN,
-            agents.LoginState.SIGNED_OUT: LoginState.SIGNED_OUT,
-            agents.LoginState.UNKNOWN: LoginState.UNKNOWN,
-        }[found.state]
-        return AgentLogin(
-            provider=provider,
-            provider_name=agents.provider_display_name(provider),
-            installed=found.installed,
-            state=state,
-            how=how,
-            api_key_variables=found.api_key_variables,
-            detail=found.detail,
-            can_start_login=found.installed and command is not None and not command.needs_terminal,
-        )
 
 
 @cache
@@ -371,13 +217,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
             harness_binaries=harness_binaries,
             launch_environment=launch_environment,
         ),
-        logins=AgentLibraryLogins(
-            provider_login_here,
-            provider_login_command_here,
-            LoginStarter(
-                SubprocessPipedProcessLauncher(), threads, launch_environment, LoginBounds()
-            ),
-        ),
+        logins=host_logins(SubprocessPipedProcessLauncher(), threads),
         compute=MachineCompute(
             OsConfigFiles(), SubprocessProbe(), home=str(Path.home()), environ=environ
         ),
