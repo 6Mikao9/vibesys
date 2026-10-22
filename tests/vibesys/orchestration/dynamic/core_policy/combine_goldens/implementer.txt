@@ -1,0 +1,85 @@
+Own hypothesis `combined` in this isolated candidate workspace.
+
+Objective (authoritative, including operator constraints):
+Raise queue throughput.
+
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash. The target's interpreter is determined by its declared launch command and can
+differ from the editor's.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+## Performance bounds
+
+A bound is an estimate of a fixed limit, never a prediction of the current code.
+Name the scored metric and the unit of work. Name the resource each unit must
+consume: bytes moved, operations, round trips, or a serialized dependency.
+Divide that work by the hardware rate. State the result as a range, and state
+each assumption with the kind of evidence behind it.
+
+Keep two limits separate. The hardware limit is what this computation can reach
+on this hardware for the fixed workload, independent of the current design. The
+design ceiling is what the current design can reach. It may sit far below the
+hardware limit, and that gap is a reason to change the design, not a reason to
+lower the hardware limit.
+
+Write the bounds before any measurement exists. Revise them when understanding
+improves: a measured hardware rate against the spec sheet, the real shape of the
+workload, a byte count taken from the code, a measurement that beats the bound
+(then the bound is wrong), or a plateau far below the bound (check the bound,
+then the code). Never derive a bound from a candidate's own speed. A revision
+needs independent evidence: a microbenchmark, a byte count from the code, or a
+profile. Hardware rates come from the platform notes for this run's backend.
+
+Report every measurement as a fraction of its bound. Rank proposed work by the
+time that could still be recovered between the measurement and the bound.
+
+If an earlier handoff records no performance bounds, the next plan must supply
+them.
+Claim: The parts help together.
+Task: Apply the two changes.
+Pass criteria: Preserve accuracy and improve throughput.
+Parent revision: `input`
+
+Evidence references:
+none
+
+
+This workstream combines implemented candidates into one new candidate. Your workspace is a
+checkout of main at `input`. Apply each part's own change (the diff from
+the revision the part was built on to the part), in this order:
+1. hypothesis `h0` at `c0`: `git diff input c0 | git apply --3way`
+2. hypothesis `h1` at `c1`: `git diff input c1 | git apply --3way`
+A hunk that does not apply cleanly is left with conflict markers in its file: resolve them. Combine the parts as the task says, without
+redesigning any of them.
+Parts may be unmeasured; their facts do not transfer to this revision, which needs its own accuracy pass and benchmark no worse than main before it can become main.
+Then run the project's fast tests, fix what the combination broke, and submit the composite.
+In `unapplied`, list every part, or piece of one, that you could not apply, and why.
+
+Start from the first measurable step: the smallest change to the claim that you can finish
+and submit in this turn, so the framework measures something real. Submit that step
+as your nomination before you attempt
+the rest of the task. If you cannot finish a step, do not end the turn on partial work:
+state the concrete blocker (the exact file, function, check or error that stops you) and,
+in `next_step`, the narrower step that would get past it.
+
+Inspect referenced artifacts only as needed. Keep evidence in files and return compact
+references with their applicable revision. Implement and run the cheapest checks that
+cover the changed behavior. The framework runs trusted evaluation on the candidate you
+nominate; do not duplicate it.
+
+Local checks catch crashes before the slow trusted evaluation; they do not tune the
+candidate. Once the candidate builds and one local check passes, stop checking and
+nominate it:
+the trusted result arrives sooner than another round of local polish would end. Never
+rerun a local check on files that already passed it. When a check output is long, write
+it to a file and read the file, instead of rerunning the check to see another part of it.
+After a failure, change the code before you run the check again.
+
+Return only schema-valid JSON with one `reply` object. In that object, set
+`summary`, `outcome` (use `nominated` only when the candidate is ready for independent
+review and framework gates), `evidence` and, when the outcome is
+`implementation_failed`, `next_step`.

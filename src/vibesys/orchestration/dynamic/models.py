@@ -268,29 +268,37 @@ MAX_COMBINE_PARENTS = MAX_MERGE_CANDIDATES
 
 
 class CombineParent(BaseModel):
-    """One part of a combine: an exact offered revision of a buildable candidate."""
+    """One part of a combine: an exact revision of an implemented candidate, measured or not."""
 
     model_config = ConfigDict(extra="forbid")
 
-    hypothesis_id: AgentId = Field(description="The ID of a hypothesis listed as buildable.")
+    hypothesis_id: AgentId = Field(
+        description="The ID of a hypothesis that has an implemented candidate revision."
+    )
     revision: str = Field(
-        min_length=1, description="An exact revision of that hypothesis the buildable list offers."
+        min_length=1,
+        description=(
+            "An exact revision of that hypothesis from the implemented list, measured or not."
+        ),
     )
 
 
 class CombinePlan(BaseModel):
-    """Build one new candidate from several buildable candidates, starting from main.
+    """Build one new candidate from several implemented candidates, starting from main.
 
     The implementer applies each part's own change on a checkout of main, in the order given,
-    runs the project's fast tests and submits the result. The composite is a candidate of a new
-    hypothesis, judged and measured like any other; it does not move main. A part may have lost
-    or tied alone: a combine tests whether the parts work together.
+    runs the project's fast tests and submits the result. The composite is a new revision whose
+    facts start empty and are earned only by measuring that revision; it does not move main.
+    A part may be unmeasured, or have lost or tied alone: a combine tests whether the parts
+    work together.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     kind: Literal[WorkstreamKind.COMBINE] = Field(
-        description="Use combine to build one new candidate out of several buildable candidates."
+        description=(
+            "Use combine to build one new candidate out of implemented candidates, measured or not."
+        )
     )
     hypothesis_id: AgentId = Field(
         description="A new hypothesis ID for the composite, unused by any hypothesis, profile or merge."
@@ -303,8 +311,8 @@ class CombinePlan(BaseModel):
         min_length=2,
         max_length=MAX_COMBINE_PARENTS,
         description=(
-            "The parts, each an exact offered (hypothesis, revision) pair of a different "
-            "hypothesis, in the order to apply them."
+            "The parts, each an exact (hypothesis, revision) pair of a different implemented "
+            "candidate, measured or not, in the order to apply them."
         ),
     )
     instructions: str = Field(
@@ -655,7 +663,15 @@ class PortfolioPlan(BaseModel):
     reasoning: str = Field(min_length=1, description="Why this portfolio of workstreams.")
     workstreams: Annotated[
         tuple[PlannerWorkstream, ...],
-        DecidedFrom("capacity", "remaining", "buildable", "mergeable", "history", "baseline"),
+        DecidedFrom(
+            "capacity",
+            "remaining",
+            "buildable",
+            "combinable",
+            "mergeable",
+            "history",
+            "baseline",
+        ),
     ] = Field(
         min_length=1,
         max_length=32,

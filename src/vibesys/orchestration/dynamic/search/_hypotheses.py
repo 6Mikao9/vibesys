@@ -35,7 +35,7 @@ def scheduled(
 
 
 def cancelled(plan: WorkPlan, sequence: int, parts: tuple[CombineSource, ...]) -> HypothesisRecord:
-    """A combine that never started: fewer than two of its parts were still buildable.
+    """A combine that never started: fewer than two of its parts were still implemented.
 
     It is abandoned so it is not continued; its row shows the parts that were left.
     """

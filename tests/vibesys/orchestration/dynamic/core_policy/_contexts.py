@@ -181,6 +181,18 @@ def _history(draw: st.DrawFn) -> list[dict[str, object]]:
 
 
 @st.composite
+def _combinable(draw: st.DrawFn) -> list[dict[str, object]]:
+    return [
+        {
+            "hypothesis_id": f"comb{index}",
+            "revision": draw(REVISIONS),
+            "facts": draw(st.sampled_from(("none", "accuracy", "benchmark", "both"))),
+        }
+        for index in range(draw(st.integers(0, 3)))
+    ]
+
+
+@st.composite
 def _buildable(draw: st.DrawFn) -> list[dict[str, object]]:
     return [
         {
@@ -257,6 +269,7 @@ def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, obje
         "base_accuracy_passed": draw(st.none() | st.booleans()),
         "offer_snapshot": draw(tokens("snap")),
         "buildable": draw(_buildable()),
+        "combinable": draw(_combinable()),
         "history": draw(_history()),
         "older_ids": tuple(draw(st.lists(tokens("old"), max_size=2, unique=True))),
         "baseline": draw(METRICS),

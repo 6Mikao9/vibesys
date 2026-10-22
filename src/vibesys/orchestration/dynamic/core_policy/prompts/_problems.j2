@@ -27,8 +27,12 @@ hypothesis {{ quoted(item.subject) }} was blocked; continue it only with a task 
 an exact candidate revision requires {{ reply.parent_hypothesis_id }}; usable options: {{ alternatives(item.usable) }}
 {%- elif item.code.value == 'continuation-has-parent' -%}
 a continued hypothesis builds on its own candidate; use null
+{%- elif item.code.value == 'revision-not-offered' and 'parents' in item.path -%}
+{{ quoted(item.revision) }} is not an implemented revision of {{ quoted(item.subject) }}; usable revisions: {{ alternatives(item.usable) }}
 {%- elif item.code.value == 'revision-not-offered' -%}
 {{ quoted(item.revision) }} is not an offered revision of {{ quoted(item.subject) }}; usable options: {{ alternatives(item.usable) }}
+{%- elif item.code.value == 'parent-not-buildable' and 'parents' in item.path -%}
+{{ quoted(item.subject) }} has no implemented candidate; name a hypothesis from the implemented list
 {%- elif item.code.value == 'parent-not-buildable' -%}
 {{ quoted(item.subject) }} is not a buildable candidate; name one listed under buildable candidates (for a merge, its latest verified candidate), or use null for the main revision
 {%- elif item.code.value == 'profile-not-offered' -%}

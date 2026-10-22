@@ -27,6 +27,7 @@ from vibesys.orchestration.dynamic.search._values import (
     Expectation,
     HandoffNote,
     HypothesisRecord,
+    ImplementedRevision,
     PlanViolation,
     ViolationCode,
     WorkKind,
@@ -99,6 +100,8 @@ class PlanLedger:
     merge_ids: frozenset[str] = frozenset()
     merging: bool = False
     merge_options: MergeOptions = field(default_factory=MergeOptions)
+    implemented: tuple[ImplementedRevision, ...] = ()
+    """Candidate revisions a combine may name, measured or not. Facts on each are its own."""
 
     def hypothesis(self, identifier: str) -> HypothesisRecord | None:
         """The record of a hypothesis ID, if one exists."""
@@ -285,12 +288,47 @@ def _merge_violation(
     return None
 
 
+def _combine_revisions(
+    offered: tuple[ParentOption, ...], implemented: tuple[ImplementedRevision, ...]
+) -> dict[str, set[str]]:
+    """Revisions a combine may name, by hypothesis: implemented candidates and offered parents."""
+    found: dict[str, set[str]] = {}
+    for item in implemented:
+        found.setdefault(item.hypothesis_id, set()).add(item.revision.revision_id.root)
+    for item in offered:
+        found.setdefault(item.snapshot.hypothesis_id, set()).add(
+            item.snapshot.revision.revision_id.root
+        )
+    return found
+
+
+def _combine_alternatives(
+    offered: tuple[ParentOption, ...], implemented: tuple[ImplementedRevision, ...]
+) -> tuple[Alternative, ...]:
+    """The revisions a correction may quote, implemented candidates first."""
+    listed = {
+        (item.hypothesis_id, item.revision.revision_id.root): Alternative(
+            hypothesis_id=item.hypothesis_id, revision=item.revision.revision_id.root
+        )
+        for item in implemented
+    }
+    for item in offered:
+        key = (item.snapshot.hypothesis_id, item.snapshot.revision.revision_id.root)
+        listed.setdefault(
+            key,
+            Alternative(hypothesis_id=key[0], revision=key[1]),
+        )
+    return tuple(listed[key] for key in sorted(listed))
+
+
 def _combine_violation(
     position: int, plan: CombinePlan, ledger: PlanLedger, offered: tuple[ParentOption, ...]
 ) -> PlanViolation | None:
-    """A combine needs a new hypothesis ID and distinct parts, each an offered exact revision.
+    """A combine needs a new hypothesis ID and distinct parts, each an implemented revision.
 
-    There is no bar against main: parts that lost or tied alone are what a combine is for.
+    A part may be unmeasured. There is no bar against main: parts that lost or tied alone, or
+    that have not been measured yet, are what a combine is for. Facts of a part do not become
+    facts of the combination.
     """
     path: tuple[str | int, ...] = ("workstreams", position)
     identifier = plan.hypothesis_id
@@ -305,6 +343,8 @@ def _combine_violation(
         return PlanViolation(
             path=(*path, "hypothesis_id"), code=ViolationCode.HYPOTHESIS_ID_USED, subject=identifier
         )
+    known = _combine_revisions(offered, ledger.implemented)
+    usable = _combine_alternatives(offered, ledger.implemented)
     seen: set[str] = set()
     for index, part in enumerate(plan.parents):
         field = (*path, "parents", index)
@@ -315,20 +355,20 @@ def _combine_violation(
                 subject=part.hypothesis_id,
             )
         seen.add(part.hypothesis_id)
-        mine = tuple(item for item in offered if item.snapshot.hypothesis_id == part.hypothesis_id)
-        if not mine:
+        revisions = known.get(part.hypothesis_id)
+        if not revisions:
             return PlanViolation(
                 path=(*field, "hypothesis_id"),
                 code=ViolationCode.PARENT_NOT_BUILDABLE,
                 subject=part.hypothesis_id,
             )
-        if not any(item.snapshot.revision.revision_id.root == part.revision for item in mine):
+        if part.revision not in revisions:
             return PlanViolation(
                 path=(*field, "revision"),
                 code=ViolationCode.REVISION_NOT_OFFERED,
                 subject=part.hypothesis_id,
                 revision=part.revision,
-                usable=_alternatives(offered),
+                usable=usable,
             )
     return None
 

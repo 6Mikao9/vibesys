@@ -87,6 +87,42 @@ class Step(Value):
     depends_on: tuple[StepId, ...] = ()
 
 
+class FactCoverage(StrEnum):
+    """Which trusted facts one revision has recorded on itself. Closed.
+
+    ``accuracy`` is a passing accuracy reading on that revision. ``benchmark`` is a benchmark
+    reading on that revision. Neither is copied from a parent or a part.
+    """
+
+    NONE = "none"
+    ACCURACY = "accuracy"
+    BENCHMARK = "benchmark"
+    BOTH = "both"
+
+
+def fact_coverage(*, accuracy: bool, benchmark: bool) -> FactCoverage:
+    """The coverage of an accuracy pass and a benchmark reading, both on one revision."""
+    if accuracy and benchmark:
+        return FactCoverage.BOTH
+    if accuracy:
+        return FactCoverage.ACCURACY
+    if benchmark:
+        return FactCoverage.BENCHMARK
+    return FactCoverage.NONE
+
+
+class ImplementedRevision(Value):
+    """A candidate revision an implementer produced, and the facts on that revision only.
+
+    A combine may name it whether or not it has been measured. Its ``facts`` are none until
+    this revision's own measurement records them.
+    """
+
+    hypothesis_id: str
+    revision: RevisionRef
+    facts: FactCoverage
+
+
 class CombinePick(Value):
     """One part a combine names: a hypothesis and the exact revision of it, as validated."""
 
@@ -95,7 +131,7 @@ class CombinePick(Value):
 
 
 COMBINE_MIN_PARTS = 2
-"""A combine needs this many parts: with fewer still buildable when it is to start, it never starts."""
+"""A combine needs this many parts: with fewer still implemented when it is to start, it never starts."""
 
 
 class CombineSource(Value):

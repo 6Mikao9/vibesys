@@ -273,7 +273,9 @@ def test_a_part_withdrawn_before_the_combine_starts_is_named_to_the_implementer(
     asked = implement_prompt(start, (), baseline=run.baseline)
     assert [pick.hypothesis_id for pick in asked.combine_missing] == ["b"]
     told = _flat(render(PromptTemplate.IMPLEMENT, asked))
-    assert "hypothesis `b` at `b-r1` is no longer buildable: leave it out" in told, told
+    assert "hypothesis `b` at `b-r1` is no longer an implemented candidate: leave it out" in told, (
+        told
+    )
 
 
 def test_a_combine_left_with_one_part_never_starts_and_the_planner_hears_why() -> None:
@@ -292,7 +294,7 @@ def test_a_combine_left_with_one_part_never_starts_and_the_planner_hears_why() -
     assert [part.hypothesis_id for part in composite.parts] == ["a"]
     shown = _flat(render(PromptTemplate.PORTFOLIO, asked))
     assert "This combine never started" in shown, shown
-    assert "only `a` at `a-r1` of its parts was still buildable, and a combine needs two" in shown
+    assert "only `a` at `a-r1` of its parts was still implemented, and a combine needs two" in shown
 
 
 _TEXT = st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), min_size=1, max_size=40)

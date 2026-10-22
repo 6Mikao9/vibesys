@@ -22,6 +22,7 @@ from vibesys.orchestration.dynamic.search._values import (
     CombineSource,
     DropReason,
     Failure,
+    ImplementedRevision,
     MainMeasurement,
     MergeRecord,
     MergeSource,
@@ -106,7 +107,7 @@ class CompositeRow(Value):
     relative_noise: float = 0.0
     """The task's declared relative noise the comparison allowed; 0 is a strict comparison."""
     cancelled: bool = False
-    """The combine never started: fewer than two of its parts were still buildable."""
+    """The combine never started: fewer than two of its parts were still implemented."""
     unapplied: tuple[UnappliedPart, ...] = ()
     """What the implementer said it could not apply."""
     unattributed: tuple[UnappliedPart, ...] = ()
@@ -242,6 +243,8 @@ class _Planning(RolePromptContext):
     merges: tuple[MergeRecord, ...] = ()
     """Every finished merge, oldest first."""
     buildable: tuple[BuildableRow, ...] = ()
+    combinable: tuple[ImplementedRevision, ...] = ()
+    """Implemented candidate revisions a combine may name, each with the facts on that revision."""
     history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
@@ -326,7 +329,7 @@ class ImplementPrompt(RolePromptContext):
     combine: tuple[CombineSource, ...] = ()
     """For a combine: the parts to apply onto ``parent_revision`` (main), in order."""
     combine_missing: tuple[CombinePick, ...] = ()
-    """For a combine: the parts the planner named that are no longer buildable, left out."""
+    """For a combine: the parts the planner named that are no longer implemented, left out."""
     watch_for: str = ""
     """For a combine: what the planner said to check or be careful of."""
 
