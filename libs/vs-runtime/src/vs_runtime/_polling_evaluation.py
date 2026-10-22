@@ -68,7 +68,7 @@ _RESOURCE_KINDS = frozenset({EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK})
 class _EvaluationAdmission:
     """Fair leases for the evaluation resource, one per admitted gate.
 
-    A job holds one lease across its consecutive accuracy and benchmark stages, so
+    A job holds one lease across all its stages when any stage uses the resource, so
     the next job's command starts only when a slot is free. Time spent queued is
     not time the command has been running. ``on_counts`` is told ``(running,
     waiting)`` after every change and must not call back into the admission.
@@ -248,11 +248,11 @@ class PollingEvaluationExecutor:
         operator_failure: str | None = None
         holding = False
         try:
+            holding = await self._admit(handle_id, request)
             workspace = await self._workspaces.create_measured_candidate(first.snapshot)
             opened = False
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
-                holding = await self._hold(handle_id, stage.kind, holding=holding)
                 if not opened:
                     # The drain learns the job is executing once a stage is admitted,
                     # not while it is still waiting for a slot.
@@ -354,15 +354,17 @@ class PollingEvaluationExecutor:
             if workspace is not None:
                 await workspace.discard()
 
-    async def _hold(self, handle_id: str, kind: EvidenceKind, *, holding: bool) -> bool:
-        """Take one lease for a resource stage, or return it when the job leaves them."""
-        if kind in _RESOURCE_KINDS:
-            if not holding:
-                await self._admission.acquire(handle_id)
-            return True
-        if holding:
-            await self._admission.release(handle_id)
-        return False
+    async def _admit(self, handle_id: str, request: EvaluationRequest) -> bool:
+        # Admission covers the whole job. A build must not publish RUNNING
+        # before a following GPU gate acquires its resource: core would then
+        # charge that gate's queue wait against the measurement limit.
+        uses_resource = any(
+            SemanticEvaluationStage.model_validate(step.payload).kind in _RESOURCE_KINDS
+            for step in request.stages
+        )
+        if uses_resource:
+            await self._admission.acquire(handle_id)
+        return uses_resource
 
     def _open_output(self, run: StageRun) -> AbstractContextManager[OutputSink]:
         if self._stage_output is None:

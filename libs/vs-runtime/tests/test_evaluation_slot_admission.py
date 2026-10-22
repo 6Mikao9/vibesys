@@ -38,7 +38,7 @@ from vs_sim.api.testing import ManualClock, yield_until
 if TYPE_CHECKING:
     from vs_sim.api import OutputSink
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.regression]
+pytestmark = pytest.mark.regression
 
 _CANDIDATES = 8
 _BUDGET_S = 10_000.0
@@ -88,7 +88,7 @@ class _OneGpu(FakeEvaluation):
             self._live -= 1
 
 
-def _request(snapshot: str, key: str) -> EvaluationRequest:
+def _request(snapshot: str, key: str, *, build: bool = False) -> EvaluationRequest:
     digest = ContentDigest.sha256(key.encode())
     fingerprints = EvidenceFingerprints(
         candidate=digest, evaluator=digest, workload=digest, environment=digest
@@ -102,12 +102,17 @@ def _request(snapshot: str, key: str) -> EvaluationRequest:
                     snapshot=snapshot, kind=kind, fingerprints=fingerprints
                 ).model_dump(mode="json"),
             )
-            for kind in (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+            for kind in (
+                *((EvidenceKind.BUILD,) if build else ()),
+                EvidenceKind.ACCURACY,
+                EvidenceKind.BENCHMARK,
+            )
         ),
     )
 
 
-async def test_one_slot_queues_gpu_gates_without_spending_their_budget() -> None:
+@pytest.mark.parametrize("build", [False, True])
+async def test_one_slot_queues_gpu_gates_without_spending_their_budget(*, build: bool) -> None:
     """Eight candidates and one slot: one benchmark runs, seven wait, none times out."""
     evaluation = _OneGpu()
     held = evaluation.gate("benchmark", 0)
@@ -119,7 +124,7 @@ async def test_one_slot_queues_gpu_gates_without_spending_their_budget() -> None
     executor = PollingEvaluationExecutor(evaluation, workspaces, clock=clock)
     handles = tuple(f"candidate-{index}" for index in range(_CANDIDATES))
     for handle in handles:
-        await executor.submit(_request(snapshot, handle), handle_id=handle)
+        await executor.submit(_request(snapshot, handle, build=build), handle_id=handle)
 
     await yield_until(lambda: _entered(held), lambda entered: entered, "the admitted benchmark")
     clock.advance(_BUDGET_S)
