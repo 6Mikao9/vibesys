@@ -1,0 +1,37 @@
+{
+  "preflight": "passed",
+  "accepted_receipts": 162,
+  "receipt_payloads_and_digests_preserved": true,
+  "receipt_files_byte_identical": true,
+  "core_evaluation_preserved": true,
+  "history_preserved": true,
+  "queue_preserved": true,
+  "queue_preserved_after_code_restart": true,
+  "candidate": "0bf2a8a6a1b3faf3c595494a3b082abb453447b0",
+  "axis_verdicts": {
+    "tpot_ms_avg": "within_noise",
+    "ttft_ms_avg": "better",
+    "completed_requests": "within_noise"
+  },
+  "aggregate_verdict": "better",
+  "build_on_available": true,
+  "combine_available": true,
+  "mergeable": true,
+  "effective_tolerances": {
+    "tpot_ms_avg": 0.05,
+    "ttft_ms_avg": 0.07721914927154185,
+    "completed_requests": 0.05
+  },
+  "replay_emitted_decisions": 2,
+  "resume_factory_preflight": "passed",
+  "policy_revisions": {
+    "tpot_ms_avg": 2,
+    "ttft_ms_avg": 2,
+    "completed_requests": 2
+  },
+  "baseline_observation_counts": {
+    "tpot_ms_avg": 2,
+    "ttft_ms_avg": 2,
+    "completed_requests": 1
+  }
+}

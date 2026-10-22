@@ -32,7 +32,12 @@ def gates_of(terms: TaskTerms) -> Gates:
 def space_of(terms: TaskTerms) -> MetricSpace:
     """The axes and the tolerance candidates are compared within."""
     return MetricSpace(
-        objectives=tuple(Objective(item.name, item.direction) for item in terms.objectives),
+        objectives=tuple(
+            Objective(
+                item.name, item.direction, None if item.noise is None else item.noise.relative_noise
+            )
+            for item in terms.objectives
+        ),
         relative_noise=terms.relative_noise,
     )
 

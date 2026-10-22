@@ -256,7 +256,10 @@ candidates, adoption chooses the earliest member of the non-dominated frontier.
 These checks use the input or main's metric row under the task's declared
 `relative_noise`, not the statistical comparison's verdict. An absent `[pareto]`
 table means zero tolerance for promotion; a prose estimate of noise does not
-configure it.
+configure it. A run can also record versioned per-objective tolerances with
+calibration observations and provenance. Repeated baseline receipts supply the
+observed relative spread when available; a declared floor remains the minimum.
+These explicit policy migrations preserve original measurements and receipts.
 
 An agent's evaluation is compared with its base, the revision its workspace
 started from. The base is measured once per (measured input, gates, host) and

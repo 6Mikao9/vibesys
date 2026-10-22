@@ -102,6 +102,9 @@ class Objective:
 
     name: str
     direction: Literal["max", "min"]
+    relative_noise: Annotated[FiniteFloat | None, Field(ge=0.0, lt=1.0)] = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     def signed(self, value: float) -> float:
         """Return *value* flipped to "higher is better" semantics.
@@ -219,7 +222,13 @@ class MetricSpace(BaseModel):
             if direction == "max"
             else baseline.value - candidate.value
         )
-        tolerance = abs(baseline.value) * self.relative_noise
+        axis = self.axis(baseline.metric)
+        fraction = (
+            axis.relative_noise
+            if axis is not None and axis.relative_noise is not None
+            else self.relative_noise
+        )
+        tolerance = abs(baseline.value) * fraction
         if improvement > tolerance:
             return MetricComparison.BETTER
         if improvement < -tolerance:

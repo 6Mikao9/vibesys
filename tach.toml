@@ -2095,3 +2095,12 @@ depends_on = ["server.host_api", "vs_proto"]
 [[interfaces]]
 from = ["server.host_operation_types_generated"]
 expose = ["is_registry_read", "RegistryReadRequest", "UnmigratedHelperRequest"]
+
+[[modules]]
+path = "vibesys.dynamic_migration"
+layer = "loops"
+depends_on = ["vibesys.metrics", "vibesys.orchestration.dynamic.search", "vs_core", "vs_runtime"]
+
+[[interfaces]]
+from = ["vibesys.dynamic_migration"]
+expose = ["migrate_objective_policy", "recorded_objective_readings"]

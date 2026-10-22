@@ -138,7 +138,11 @@ from vs_runtime._evidence_ledger import (
     EvidenceRecorder,
     ReceiptEvidenceLedger,
 )
-from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
+from vs_runtime._evidence_operations import (
+    InterpretEvidenceOwner,
+    RetainRevisionOwner,
+    reading_mapping,
+)
 from vs_runtime._export_patch_operation import ExportPatchOwner
 from vs_runtime._issue_board_operations import BoardTexts, IssueBoardOwner
 from vs_runtime._measurement_progress import (
@@ -464,6 +468,7 @@ __all__ = [
     "operation_roles",
     "owner_key",
     "production_owners",
+    "reading_mapping",
     "receipt_executor_kinds",
     "reject_legacy_resume",
     "reply_variable",

@@ -356,6 +356,7 @@ type TaskObjective struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Direction     TaskObjectiveDirection `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.core.v1.TaskObjectiveDirection" json:"direction,omitempty"`
+	Noise         *ObjectiveNoise        `protobuf:"bytes,3,opt,name=noise,proto3" json:"noise,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -404,6 +405,144 @@ func (x *TaskObjective) GetDirection() TaskObjectiveDirection {
 	return TaskObjectiveDirection_TASK_OBJECTIVE_DIRECTION_UNSPECIFIED
 }
 
+func (x *TaskObjective) GetNoise() *ObjectiveNoise {
+	if x != nil {
+		return x.Noise
+	}
+	return nil
+}
+
+// Versioned, revisable run declaration for one objective's promotion tolerance.
+// Original measurements and accepted decision receipts remain immutable.
+type ObjectiveNoise struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	SchemaVersion  int32                  `protobuf:"varint,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	Revision       string                 `protobuf:"bytes,2,opt,name=revision,proto3" json:"revision,omitempty"`
+	Floor          float64                `protobuf:"fixed64,3,opt,name=floor,proto3" json:"floor,omitempty"`
+	RelativeNoise  float64                `protobuf:"fixed64,4,opt,name=relative_noise,json=relativeNoise,proto3" json:"relative_noise,omitempty"`
+	Provenance     string                 `protobuf:"bytes,5,opt,name=provenance,proto3" json:"provenance,omitempty"`
+	BaselineValues []*NoiseSample         `protobuf:"bytes,6,rep,name=baseline_values,json=baselineValues,proto3" json:"baseline_values,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ObjectiveNoise) Reset() {
+	*x = ObjectiveNoise{}
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ObjectiveNoise) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ObjectiveNoise) ProtoMessage() {}
+
+func (x *ObjectiveNoise) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ObjectiveNoise.ProtoReflect.Descriptor instead.
+func (*ObjectiveNoise) Descriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ObjectiveNoise) GetSchemaVersion() int32 {
+	if x != nil {
+		return x.SchemaVersion
+	}
+	return 0
+}
+
+func (x *ObjectiveNoise) GetRevision() string {
+	if x != nil {
+		return x.Revision
+	}
+	return ""
+}
+
+func (x *ObjectiveNoise) GetFloor() float64 {
+	if x != nil {
+		return x.Floor
+	}
+	return 0
+}
+
+func (x *ObjectiveNoise) GetRelativeNoise() float64 {
+	if x != nil {
+		return x.RelativeNoise
+	}
+	return 0
+}
+
+func (x *ObjectiveNoise) GetProvenance() string {
+	if x != nil {
+		return x.Provenance
+	}
+	return ""
+}
+
+func (x *ObjectiveNoise) GetBaselineValues() []*NoiseSample {
+	if x != nil {
+		return x.BaselineValues
+	}
+	return nil
+}
+
+// One calibration observation in the declared units of its objective.
+type NoiseSample struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Value         float64                `protobuf:"fixed64,1,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NoiseSample) Reset() {
+	*x = NoiseSample{}
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NoiseSample) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NoiseSample) ProtoMessage() {}
+
+func (x *NoiseSample) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NoiseSample.ProtoReflect.Descriptor instead.
+func (*NoiseSample) Descriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *NoiseSample) GetValue() float64 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
 // A run's headline reading of the benchmark stage, as the trusted record states it.
 type Reading struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -418,7 +557,7 @@ type Reading struct {
 
 func (x *Reading) Reset() {
 	*x = Reading{}
-	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[4]
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -430,7 +569,7 @@ func (x *Reading) String() string {
 func (*Reading) ProtoMessage() {}
 
 func (x *Reading) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[4]
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -443,7 +582,7 @@ func (x *Reading) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reading.ProtoReflect.Descriptor instead.
 func (*Reading) Descriptor() ([]byte, []int) {
-	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Reading) GetMetric() string {
@@ -495,7 +634,7 @@ type BaseRef struct {
 
 func (x *BaseRef) Reset() {
 	*x = BaseRef{}
-	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[5]
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -507,7 +646,7 @@ func (x *BaseRef) String() string {
 func (*BaseRef) ProtoMessage() {}
 
 func (x *BaseRef) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[5]
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -520,7 +659,7 @@ func (x *BaseRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BaseRef.ProtoReflect.Descriptor instead.
 func (*BaseRef) Descriptor() ([]byte, []int) {
-	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *BaseRef) GetCommit() *RevisionRef {
@@ -561,7 +700,7 @@ type Sample struct {
 
 func (x *Sample) Reset() {
 	*x = Sample{}
-	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[6]
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -573,7 +712,7 @@ func (x *Sample) String() string {
 func (*Sample) ProtoMessage() {}
 
 func (x *Sample) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[6]
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -586,7 +725,7 @@ func (x *Sample) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Sample.ProtoReflect.Descriptor instead.
 func (*Sample) Descriptor() ([]byte, []int) {
-	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Sample) GetRun() *RequestId {
@@ -695,7 +834,7 @@ type Comparison struct {
 
 func (x *Comparison) Reset() {
 	*x = Comparison{}
-	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[7]
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -707,7 +846,7 @@ func (x *Comparison) String() string {
 func (*Comparison) ProtoMessage() {}
 
 func (x *Comparison) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[7]
+	mi := &file_vibesys_core_v1_leaves_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -720,7 +859,7 @@ func (x *Comparison) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Comparison.ProtoReflect.Descriptor instead.
 func (*Comparison) Descriptor() ([]byte, []int) {
-	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_core_v1_leaves_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Comparison) GetScope() *Scope {
@@ -845,10 +984,24 @@ const file_vibesys_core_v1_leaves_proto_rawDesc = "" +
 	"\x06digest\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06digest:-\xc2\xf3\x18)\x1a'vs_core._revision_ref.RevisionReference\"n\n" +
 	"\tTaskStage\x12\"\n" +
 	"\bstage_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\astageId\x12=\n" +
-	"\x11execution_seconds\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x10executionSeconds\"\x85\x01\n" +
+	"\x11execution_seconds\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x10executionSeconds\"\xc4\x01\n" +
 	"\rTaskObjective\x12\x1b\n" +
 	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12W\n" +
-	"\tdirection\x18\x02 \x01(\x0e2'.vibesys.core.v1.TaskObjectiveDirectionB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\tdirection\"\xfe\x01\n" +
+	"\tdirection\x18\x02 \x01(\x0e2'.vibesys.core.v1.TaskObjectiveDirectionB\x10\xbaH\a\x82\x01\x04\x10\x01 \x00\xca\xf3\x18\x02\b\x01R\tdirection\x12=\n" +
+	"\x05noise\x18\x03 \x01(\v2\x1f.vibesys.core.v1.ObjectiveNoiseB\x06\xca\xf3\x18\x020\x01R\x05noise\"\x9d\x04\n" +
+	"\x0eObjectiveNoise\x125\n" +
+	"\x0eschema_version\x18\x01 \x01(\x05B\x0e\xbaH\x04\x1a\x02(\x01\xca\xf3\x18\x03*\x011R\rschemaVersion\x129\n" +
+	"\brevision\x18\x02 \x01(\tB\x1d\xbaH\x11r\x0f2\r^[1-9][0-9]*$\xca\xf3\x18\x05\x10\x01*\x011R\brevision\x12/\n" +
+	"\x05floor\x18\x03 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\x05floor\x12@\n" +
+	"\x0erelative_noise\x18\x04 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\rrelativeNoise\x12'\n" +
+	"\n" +
+	"provenance\x18\x05 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
+	"provenance\x12E\n" +
+	"\x0fbaseline_values\x18\x06 \x03(\v2\x1c.vibesys.core.v1.NoiseSampleR\x0ebaselineValues:\xb5\x01\xbaH\xb1\x01\x1aV\n" +
+	"\x0epolicy_version\x12*unsupported objective noise schema version\x1a\x18this.schema_version == 1\x1aW\n" +
+	"\vnoise_floor\x12%relative_noise must be at least floor\x1a!this.relative_noise >= this.floor\"2\n" +
+	"\vNoiseSample\x12#\n" +
+	"\x05value\x18\x01 \x01(\x01B\r\xbaH\x04\x12\x02@\x01\xca\xf3\x18\x02\b\x01R\x05value\"\xfe\x01\n" +
 	"\aReading\x12\x1f\n" +
 	"\x06metric\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06metric\x12+\n" +
 	"\x05value\x18\x02 \x01(\x01B\x15\xbaH\x04\x12\x02@\x01\xca\xf3\x18\n" +
@@ -936,7 +1089,7 @@ func file_vibesys_core_v1_leaves_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_core_v1_leaves_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_core_v1_leaves_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_vibesys_core_v1_leaves_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_vibesys_core_v1_leaves_proto_goTypes = []any{
 	(Direction)(0),              // 0: vibesys.core.v1.Direction
 	(ChargeClass)(0),            // 1: vibesys.core.v1.ChargeClass
@@ -945,38 +1098,42 @@ var file_vibesys_core_v1_leaves_proto_goTypes = []any{
 	(*RevisionRef)(nil),         // 4: vibesys.core.v1.RevisionRef
 	(*TaskStage)(nil),           // 5: vibesys.core.v1.TaskStage
 	(*TaskObjective)(nil),       // 6: vibesys.core.v1.TaskObjective
-	(*Reading)(nil),             // 7: vibesys.core.v1.Reading
-	(*BaseRef)(nil),             // 8: vibesys.core.v1.BaseRef
-	(*Sample)(nil),              // 9: vibesys.core.v1.Sample
-	(*Comparison)(nil),          // 10: vibesys.core.v1.Comparison
-	(*RequestId)(nil),           // 11: vibesys.core.v1.RequestId
-	(*EvidenceId)(nil),          // 12: vibesys.core.v1.EvidenceId
-	(*RevisionId)(nil),          // 13: vibesys.core.v1.RevisionId
-	(*Scope)(nil),               // 14: vibesys.core.v1.Scope
-	(ComparisonVerdict)(0),      // 15: vibesys.core.v1.ComparisonVerdict
+	(*ObjectiveNoise)(nil),      // 7: vibesys.core.v1.ObjectiveNoise
+	(*NoiseSample)(nil),         // 8: vibesys.core.v1.NoiseSample
+	(*Reading)(nil),             // 9: vibesys.core.v1.Reading
+	(*BaseRef)(nil),             // 10: vibesys.core.v1.BaseRef
+	(*Sample)(nil),              // 11: vibesys.core.v1.Sample
+	(*Comparison)(nil),          // 12: vibesys.core.v1.Comparison
+	(*RequestId)(nil),           // 13: vibesys.core.v1.RequestId
+	(*EvidenceId)(nil),          // 14: vibesys.core.v1.EvidenceId
+	(*RevisionId)(nil),          // 15: vibesys.core.v1.RevisionId
+	(*Scope)(nil),               // 16: vibesys.core.v1.Scope
+	(ComparisonVerdict)(0),      // 17: vibesys.core.v1.ComparisonVerdict
 }
 var file_vibesys_core_v1_leaves_proto_depIdxs = []int32{
-	11, // 0: vibesys.core.v1.EvidenceKey.source_request:type_name -> vibesys.core.v1.RequestId
-	12, // 1: vibesys.core.v1.EvidenceKey.evidence_id:type_name -> vibesys.core.v1.EvidenceId
-	13, // 2: vibesys.core.v1.RevisionRef.revision_id:type_name -> vibesys.core.v1.RevisionId
+	13, // 0: vibesys.core.v1.EvidenceKey.source_request:type_name -> vibesys.core.v1.RequestId
+	14, // 1: vibesys.core.v1.EvidenceKey.evidence_id:type_name -> vibesys.core.v1.EvidenceId
+	15, // 2: vibesys.core.v1.RevisionRef.revision_id:type_name -> vibesys.core.v1.RevisionId
 	2,  // 3: vibesys.core.v1.TaskObjective.direction:type_name -> vibesys.core.v1.TaskObjectiveDirection
-	0,  // 4: vibesys.core.v1.Reading.direction:type_name -> vibesys.core.v1.Direction
-	4,  // 5: vibesys.core.v1.BaseRef.commit:type_name -> vibesys.core.v1.RevisionRef
-	11, // 6: vibesys.core.v1.Sample.run:type_name -> vibesys.core.v1.RequestId
-	14, // 7: vibesys.core.v1.Sample.scope:type_name -> vibesys.core.v1.Scope
-	4,  // 8: vibesys.core.v1.Sample.commit:type_name -> vibesys.core.v1.RevisionRef
-	7,  // 9: vibesys.core.v1.Sample.reading:type_name -> vibesys.core.v1.Reading
-	8,  // 10: vibesys.core.v1.Sample.base:type_name -> vibesys.core.v1.BaseRef
-	14, // 11: vibesys.core.v1.Comparison.scope:type_name -> vibesys.core.v1.Scope
-	0,  // 12: vibesys.core.v1.Comparison.direction:type_name -> vibesys.core.v1.Direction
-	4,  // 13: vibesys.core.v1.Comparison.candidate:type_name -> vibesys.core.v1.RevisionRef
-	4,  // 14: vibesys.core.v1.Comparison.base:type_name -> vibesys.core.v1.RevisionRef
-	15, // 15: vibesys.core.v1.Comparison.verdict:type_name -> vibesys.core.v1.ComparisonVerdict
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	7,  // 4: vibesys.core.v1.TaskObjective.noise:type_name -> vibesys.core.v1.ObjectiveNoise
+	8,  // 5: vibesys.core.v1.ObjectiveNoise.baseline_values:type_name -> vibesys.core.v1.NoiseSample
+	0,  // 6: vibesys.core.v1.Reading.direction:type_name -> vibesys.core.v1.Direction
+	4,  // 7: vibesys.core.v1.BaseRef.commit:type_name -> vibesys.core.v1.RevisionRef
+	13, // 8: vibesys.core.v1.Sample.run:type_name -> vibesys.core.v1.RequestId
+	16, // 9: vibesys.core.v1.Sample.scope:type_name -> vibesys.core.v1.Scope
+	4,  // 10: vibesys.core.v1.Sample.commit:type_name -> vibesys.core.v1.RevisionRef
+	9,  // 11: vibesys.core.v1.Sample.reading:type_name -> vibesys.core.v1.Reading
+	10, // 12: vibesys.core.v1.Sample.base:type_name -> vibesys.core.v1.BaseRef
+	16, // 13: vibesys.core.v1.Comparison.scope:type_name -> vibesys.core.v1.Scope
+	0,  // 14: vibesys.core.v1.Comparison.direction:type_name -> vibesys.core.v1.Direction
+	4,  // 15: vibesys.core.v1.Comparison.candidate:type_name -> vibesys.core.v1.RevisionRef
+	4,  // 16: vibesys.core.v1.Comparison.base:type_name -> vibesys.core.v1.RevisionRef
+	17, // 17: vibesys.core.v1.Comparison.verdict:type_name -> vibesys.core.v1.ComparisonVerdict
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_core_v1_leaves_proto_init() }
@@ -987,15 +1144,15 @@ func file_vibesys_core_v1_leaves_proto_init() {
 	file_vibesys_core_v1_value_options_proto_init()
 	file_vibesys_core_v1_common_proto_init()
 	file_vibesys_core_v1_vocabulary_proto_init()
-	file_vibesys_core_v1_leaves_proto_msgTypes[4].OneofWrappers = []any{}
-	file_vibesys_core_v1_leaves_proto_msgTypes[7].OneofWrappers = []any{}
+	file_vibesys_core_v1_leaves_proto_msgTypes[6].OneofWrappers = []any{}
+	file_vibesys_core_v1_leaves_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_core_v1_leaves_proto_rawDesc), len(file_vibesys_core_v1_leaves_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

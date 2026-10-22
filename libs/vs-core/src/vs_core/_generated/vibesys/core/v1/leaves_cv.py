@@ -92,9 +92,65 @@ class TaskStage(CoreValue):
 class TaskObjective(CoreValue):
     "One axis the task compares candidates on, and which way is better."
 
-    model_fields: ClassVar[tuple[str, ...]] = ("name", "direction")
+    model_fields: ClassVar[tuple[str, ...]] = ("name", "direction", "noise")
     name: Annotated[str, Field(min_length=1)]
     direction: TaskObjectiveDirection
+    noise: Annotated[ObjectiveNoise | None, Field(exclude_if=omit_unset)] = None
+
+    __hash__ = CoreValue.cached_hash
+
+
+@final
+@dataclass(
+    frozen=True,
+    slots=True,
+    kw_only=True,
+    config=ConfigDict(extra="forbid", strict=True, validate_default=True),
+)
+class ObjectiveNoise(CoreValue):
+    "Versioned, revisable run declaration for one objective's promotion tolerance.\nOriginal measurements and accepted decision receipts remain immutable."
+
+    model_fields: ClassVar[tuple[str, ...]] = (
+        "schema_version",
+        "revision",
+        "floor",
+        "relative_noise",
+        "provenance",
+        "baseline_values",
+    )
+    schema_version: Annotated[
+        int,
+        Field(ge=1),
+        AfterValidator(partial(bounded_integer, minimum=-2147483648, maximum=2147483647)),
+    ] = 1
+    revision: Annotated[int, Field(ge=1)] = 1
+    floor: Annotated[float, Field(ge=0.0, lt=1.0, allow_inf_nan=False)]
+    relative_noise: Annotated[float, Field(ge=0.0, lt=1.0, allow_inf_nan=False)]
+    provenance: Annotated[str, Field(min_length=1)]
+    baseline_values: tuple[NoiseSample, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Enforce the proto message rules at construction as well as decode."""
+        if not (self.schema_version == 1):
+            raise ValueError("unsupported objective noise schema version")
+        if not (self.relative_noise >= self.floor):
+            raise ValueError("relative_noise must be at least floor")
+
+    __hash__ = CoreValue.cached_hash
+
+
+@final
+@dataclass(
+    frozen=True,
+    slots=True,
+    kw_only=True,
+    config=ConfigDict(extra="forbid", strict=True, validate_default=True),
+)
+class NoiseSample(CoreValue):
+    "One calibration observation in the declared units of its objective."
+
+    model_fields: ClassVar[tuple[str, ...]] = ("value",)
+    value: Annotated[float, Field(allow_inf_nan=False)]
 
     __hash__ = CoreValue.cached_hash
 
@@ -230,6 +286,8 @@ resolve_value(EvidenceKey)
 resolve_value(RevisionRef)
 resolve_value(TaskStage)
 resolve_value(TaskObjective)
+resolve_value(ObjectiveNoise)
+resolve_value(NoiseSample)
 resolve_value(Reading)
 resolve_value(BaseRef)
 resolve_value(Sample)

@@ -64,6 +64,25 @@ message TaskStage {
 message TaskObjective {
   string name = 1 [(buf.validate.field).string = {min_len: 1}];
   TaskObjectiveDirection direction = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  ObjectiveNoise noise = 3 [(core_field).omit_unset = true];
+}
+
+// Versioned, revisable run declaration for one objective's promotion tolerance.
+// Original measurements and accepted decision receipts remain immutable.
+message ObjectiveNoise {
+  option (buf.validate.message).cel = {id: "policy_version", message: "unsupported objective noise schema version", expression: "this.schema_version == 1"};
+  option (buf.validate.message).cel = {id: "noise_floor", message: "relative_noise must be at least floor", expression: "this.relative_noise >= this.floor"};
+  int32 schema_version = 1 [(buf.validate.field).int32.gte = 1, (core_field).default_json = "1"];
+  string revision = 2 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field) = {integer: true, default_json: "1"}];
+  double floor = 3 [(buf.validate.field).double = {gte: 0, lt: 1, finite: true}];
+  double relative_noise = 4 [(buf.validate.field).double = {gte: 0, lt: 1, finite: true}];
+  string provenance = 5 [(buf.validate.field).string.min_len = 1];
+  repeated NoiseSample baseline_values = 6;
+}
+
+// One calibration observation in the declared units of its objective.
+message NoiseSample {
+  double value = 1 [(buf.validate.field).double.finite = true, (core_field).explicit = true];
 }
 
 // A run's headline reading of the benchmark stage, as the trusted record states it.

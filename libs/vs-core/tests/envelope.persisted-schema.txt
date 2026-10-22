@@ -780,7 +780,16 @@ MessageDelivered.kind optional {"const":"message_delivered","default":"message_d
 MessageDropped {"additionalProperties":false,"type":"object"}
 MessageDropped.drop required {"$ref":"#/$defs/InputDropped"}
 MessageDropped.kind optional {"const":"message_dropped","default":"message_dropped","type":"string"}
+NoiseSample {"additionalProperties":false,"type":"object"}
+NoiseSample.value required {"type":"number"}
 NullValue {"type":"null"}
+ObjectiveNoise {"additionalProperties":false,"type":"object"}
+ObjectiveNoise.baseline_values optional {"default":[],"items":{"$ref":"#/$defs/NoiseSample"},"type":"array"}
+ObjectiveNoise.floor required {"exclusiveMaximum":1.0,"minimum":0.0,"type":"number"}
+ObjectiveNoise.provenance required {"minLength":1,"type":"string"}
+ObjectiveNoise.relative_noise required {"exclusiveMaximum":1.0,"minimum":0.0,"type":"number"}
+ObjectiveNoise.revision optional {"default":1,"minimum":1,"type":"integer"}
+ObjectiveNoise.schema_version optional {"default":1,"minimum":1,"type":"integer"}
 Observation {"additionalProperties":false,"type":"object"}
 Observation.accepted optional {"default":false,"type":"boolean"}
 Observation.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -1379,6 +1388,7 @@ SubmitMeasurement.scope required {"$ref":"#/$defs/Scope"}
 TaskObjective {"additionalProperties":false,"type":"object"}
 TaskObjective.direction required {"enum":["max","min"],"type":"string"}
 TaskObjective.name required {"minLength":1,"type":"string"}
+TaskObjective.noise optional {"anyOf":[{"$ref":"#/$defs/ObjectiveNoise"},{"type":"null"}],"default":null}
 TaskStage {"additionalProperties":false,"type":"object"}
 TaskStage.execution_seconds required {"minimum":0.0,"type":"number"}
 TaskStage.stage_id required {"minLength":1,"type":"string"}

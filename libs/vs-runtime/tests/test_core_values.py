@@ -38,6 +38,17 @@ def _sample(cls: type[core.CoreValue], root: str, count: int) -> core.CoreValue:
     )
     values: dict[type[core.CoreValue], Callable[[], core.CoreValue]] = {
         core.TimestampValue: lambda: core.TimestampValue(seconds=-count, nanos=count),
+        shared_values.NoiseSample: lambda: shared_values.NoiseSample(value=float(count)),
+        shared_values.ObjectiveNoise: lambda: shared_values.ObjectiveNoise(
+            floor=0.05,
+            relative_noise=0.05 + count / 1000,
+            provenance=root,
+            baseline_values=(shared_values.NoiseSample(value=float(count)),),
+        ),
+        core.EvaluationLease: lambda: core.EvaluationLease(key=root, retain=bool(count % 2)),
+        core.EvaluationTiming: lambda: core.EvaluationTiming(
+            queued_at=float(count), admitted_at=float(count + 1)
+        ),
         core.SchemaRef: lambda: core.SchemaRef(name=root, version=count + 1),
         core.ArtifactRef: lambda: artifact,
         core.Scope: lambda: scope,
@@ -326,3 +337,11 @@ def test_immutable_acceptance_proof_stays_bound_to_its_original_evidence(
 @pytest.mark.parametrize("name", ["LifecycleClass", "ObservationStatus"])
 def test_shared_enum_dependencies_keep_the_existing_public_identity(name: str) -> None:
     assert getattr(core, name) is getattr(shared_values, name)
+
+
+@pytest.mark.parametrize("version", [0, 2])
+def test_objective_noise_rejects_unknown_policy_versions(version: int) -> None:
+    with pytest.raises(ValueError, match=r"schema_version|schema version"):
+        shared_values.ObjectiveNoise(
+            schema_version=version, floor=0.05, relative_noise=0.05, provenance="calibration"
+        )

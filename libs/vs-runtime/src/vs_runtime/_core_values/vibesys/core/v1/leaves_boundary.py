@@ -99,11 +99,49 @@ def decode_TaskStage(m: pb.TaskStage) -> values.TaskStage:
 
 
 def encode_TaskObjective(v: values.TaskObjective) -> pb.TaskObjective:
-    return pb.TaskObjective(name=v.name, direction=encode_TaskObjectiveDirection(v.direction))
+    return pb.TaskObjective(
+        name=v.name,
+        direction=encode_TaskObjectiveDirection(v.direction),
+        noise=None if v.noise is None else encode_ObjectiveNoise(v.noise),
+    )
 
 
 def decode_TaskObjective(m: pb.TaskObjective) -> values.TaskObjective:
-    return values.TaskObjective(name=m.name, direction=decode_TaskObjectiveDirection(m.direction))
+    return values.TaskObjective(
+        name=m.name,
+        direction=decode_TaskObjectiveDirection(m.direction),
+        noise=None if m.noise is None else decode_ObjectiveNoise(m.noise),
+    )
+
+
+def encode_ObjectiveNoise(v: values.ObjectiveNoise) -> pb.ObjectiveNoise:
+    return pb.ObjectiveNoise(
+        schema_version=v.schema_version,
+        revision=str(v.revision),
+        floor=v.floor,
+        relative_noise=v.relative_noise,
+        provenance=v.provenance,
+        baseline_values=[encode_NoiseSample(x) for x in v.baseline_values],
+    )
+
+
+def decode_ObjectiveNoise(m: pb.ObjectiveNoise) -> values.ObjectiveNoise:
+    return values.ObjectiveNoise(
+        schema_version=m.schema_version,
+        revision=int(m.revision),
+        floor=m.floor,
+        relative_noise=m.relative_noise,
+        provenance=m.provenance,
+        baseline_values=tuple(decode_NoiseSample(x) for x in m.baseline_values),
+    )
+
+
+def encode_NoiseSample(v: values.NoiseSample) -> pb.NoiseSample:
+    return pb.NoiseSample(value=v.value)
+
+
+def decode_NoiseSample(m: pb.NoiseSample) -> values.NoiseSample:
+    return values.NoiseSample(value=m.value)
 
 
 def encode_Reading(v: values.Reading) -> pb.Reading:
@@ -213,6 +251,8 @@ ENCODERS: dict[type, Callable[..., Message]] = {
     values.RevisionRef: encode_RevisionRef,
     values.TaskStage: encode_TaskStage,
     values.TaskObjective: encode_TaskObjective,
+    values.ObjectiveNoise: encode_ObjectiveNoise,
+    values.NoiseSample: encode_NoiseSample,
     values.Reading: encode_Reading,
     values.BaseRef: encode_BaseRef,
     values.Sample: encode_Sample,
@@ -223,6 +263,8 @@ DECODERS: dict[type, Callable[..., object]] = {
     pb.RevisionRef: decode_RevisionRef,
     pb.TaskStage: decode_TaskStage,
     pb.TaskObjective: decode_TaskObjective,
+    pb.ObjectiveNoise: decode_ObjectiveNoise,
+    pb.NoiseSample: decode_NoiseSample,
     pb.Reading: decode_Reading,
     pb.BaseRef: decode_BaseRef,
     pb.Sample: decode_Sample,

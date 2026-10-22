@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/core/v1/leaves.proto.
  */
 export const file_vibesys_core_v1_leaves: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NvcmUvdjEvbGVhdmVzLnByb3RvEg92aWJlc3lzLmNvcmUudjEixgEKC0V2aWRlbmNlS2V5EjUKBGtpbmQYASABKAlCJ7pIEHIOCgxldmlkZW5jZV9rZXnK8xgQKg4iZXZpZGVuY2Vfa2V5IhJACg5zb3VyY2VfcmVxdWVzdBgCIAEoCzIaLnZpYmVzeXMuY29yZS52MS5SZXF1ZXN0SWRCDLpIA8gBAcrzGAIIARI+CgtldmlkZW5jZV9pZBgDIAEoCzIbLnZpYmVzeXMuY29yZS52MS5FdmlkZW5jZUlkQgy6SAPIAQHK8xgCCAEilQEKC1JldmlzaW9uUmVmEj4KC3JldmlzaW9uX2lkGAEgASgLMhsudmliZXN5cy5jb3JlLnYxLlJldmlzaW9uSWRCDLpIA8gBAcrzGAIIARIXCgZkaWdlc3QYAiABKAlCB7pIBHICEAE6LcLzGCkaJ3ZzX2NvcmUuX3JldmlzaW9uX3JlZi5SZXZpc2lvblJlZmVyZW5jZSJTCglUYXNrU3RhZ2USGQoIc3RhZ2VfaWQYASABKAlCB7pIBHICEAESKwoRZXhlY3V0aW9uX3NlY29uZHMYAiABKAFCELpIDRILQAEpAAAAAAAAAAAidAoNVGFza09iamVjdGl2ZRIVCgRuYW1lGAEgASgJQge6SARyAhABEkwKCWRpcmVjdGlvbhgCIAEoDjInLnZpYmVzeXMuY29yZS52MS5UYXNrT2JqZWN0aXZlRGlyZWN0aW9uQhC6SAeCAQQQASAAyvMYAggBItEBCgdSZWFkaW5nEhcKBm1ldHJpYxgBIAEoCUIHukgEcgIQARIkCgV2YWx1ZRgCIAEoAUIVukgEEgJAAcrzGAoIAToGRmluaXRlEjcKCWRpcmVjdGlvbhgDIAEoDjIaLnZpYmVzeXMuY29yZS52MS5EaXJlY3Rpb25CCLpIBYIBAhABEhEKBHVuaXQYBCABKAlIAIgBARIyCgtyZXBldGl0aW9ucxgFIAEoCUIdukgRcg8yDV5bMS05XVswLTldKiTK8xgFEAEqATFCBwoFX3VuaXQiZgoHQmFzZVJlZhI6CgZjb21taXQYASABKAsyHC52aWJlc3lzLmNvcmUudjEuUmV2aXNpb25SZWZCDLpIA8gBAcrzGAIIARIfCg5tZWFzdXJlZF9pbnB1dBgCIAEoCUIHukgEcgIQASLPAwoGU2FtcGxlEjUKA3J1bhgBIAEoCzIaLnZpYmVzeXMuY29yZS52MS5SZXF1ZXN0SWRCDLpIA8gBAcrzGAIIARIzCgVzY29wZRgCIAEoCzIWLnZpYmVzeXMuY29yZS52MS5TY29wZUIMukgDyAEByvMYAggBEjoKBmNvbW1pdBgDIAEoCzIcLnZpYmVzeXMuY29yZS52MS5SZXZpc2lvblJlZkIMukgDyAEByvMYAggBEh8KDm1lYXN1cmVkX2lucHV0GAQgASgJQge6SARyAhABEhsKCmV2YWx1YXRpb24YBSABKAlCB7pIBHICEAESFQoFZ2F0ZXMYBiADKAlCBsrzGAIIARIVCgRob3N0GAcgASgJQge6SARyAhABEiMKE2RlZGljYXRlZF9yZXNvdXJjZXMYCCABKAhCBsrzGAIIARI3CgdyZWFkaW5nGAkgASgLMhgudmliZXN5cy5jb3JlLnYxLlJlYWRpbmdCDLpIA8gBAcrzGAIIARIrCgtvYnNlcnZlZF9hdBgKIAEoAUIWukgNEgtAASkAAAAAAAAAAMrzGAIIARImCgRiYXNlGAsgASgLMhgudmliZXN5cy5jb3JlLnYxLkJhc2VSZWYitQUKCkNvbXBhcmlzb24SMwoFc2NvcGUYASABKAsyFi52aWJlc3lzLmNvcmUudjEuU2NvcGVCDLpIA8gBAcrzGAIIARIXCgZtZXRyaWMYAiABKAlCB7pIBHICEAESEQoEdW5pdBgDIAEoCUgAiAEBEj8KCWRpcmVjdGlvbhgEIAEoDjIaLnZpYmVzeXMuY29yZS52MS5EaXJlY3Rpb25CELpIB4IBBBABIADK8xgCCAESPQoJY2FuZGlkYXRlGAUgASgLMhwudmliZXN5cy5jb3JlLnYxLlJldmlzaW9uUmVmQgy6SAPIAQHK8xgCCAESIAoPY2FuZGlkYXRlX2lucHV0GAYgASgJQge6SARyAhABEjgKBGJhc2UYByABKAsyHC52aWJlc3lzLmNvcmUudjEuUmV2aXNpb25SZWZCDLpIA8gBAcrzGAIIARIbCgpiYXNlX2lucHV0GAggASgJQge6SARyAhABEiYKD2NhbmRpZGF0ZV92YWx1ZRgJIAEoAUINukgEEgJAAcrzGAIIARIhCgpiYXNlX3ZhbHVlGAogASgBQg26SAQSAkAByvMYAggBEhwKBXJhdGlvGAsgASgBQg26SAQSAkAByvMYAggBEh8KBW5vaXNlGAwgASgBQhC6SA0SC0ABKQAAAAAAAAAAEkUKB3ZlcmRpY3QYDSABKA4yIi52aWJlc3lzLmNvcmUudjEuQ29tcGFyaXNvblZlcmRpY3RCELpIB4IBBBABIADK8xgCCAESOwoRY2FuZGlkYXRlX3NhbXBsZXMYDiABKAlCILpIFXITMhFeKDB8WzEtOV1bMC05XSopJMrzGAQIARABEjYKDGJhc2Vfc2FtcGxlcxgPIAEoCUIgukgVchMyEV4oMHxbMS05XVswLTldKikkyvMYBAgBEAFCBwoFX3VuaXQqbAoJRGlyZWN0aW9uEhkKFURJUkVDVElPTl9VTlNQRUNJRklFRBAAEhwKDURJUkVDVElPTl9NQVgQARoJ2vMYBQoDbWF4EhwKDURJUkVDVElPTl9NSU4QAhoJ2vMYBQoDbWluGgjS8xgECAEQASrRAQoLQ2hhcmdlQ2xhc3MSHAoYQ0hBUkdFX0NMQVNTX1VOU1BFQ0lGSUVEEAASIQoRQ0hBUkdFX0NMQVNTX0ZSRUUQARoK2vMYBgoEZnJlZRIhChFDSEFSR0VfQ0xBU1NfUEFJRBACGgra8xgGCgRwYWlkEi0KF0NIQVJHRV9DTEFTU19DT1JSRUNUSU9OEAMaENrzGAwKCmNvcnJlY3Rpb24SJQoTQ0hBUkdFX0NMQVNTX1JFU1VNRRAEGgza8xgICgZyZXN1bWUaCNLzGAQIARABKqYBChZUYXNrT2JqZWN0aXZlRGlyZWN0aW9uEigKJFRBU0tfT0JKRUNUSVZFX0RJUkVDVElPTl9VTlNQRUNJRklFRBAAEisKHFRBU0tfT0JKRUNUSVZFX0RJUkVDVElPTl9NQVgQARoJ2vMYBQoDbWF4EisKHFRBU0tfT0JKRUNUSVZFX0RJUkVDVElPTl9NSU4QAhoJ2vMYBQoDbWluGgjS8xgECAEQAUI/Wj1naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2NvcmUvdjE7Y29yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_core_v1_value_options, file_vibesys_core_v1_common, file_vibesys_core_v1_vocabulary]);
+  fileDesc("Chx2aWJlc3lzL2NvcmUvdjEvbGVhdmVzLnByb3RvEg92aWJlc3lzLmNvcmUudjEixgEKC0V2aWRlbmNlS2V5EjUKBGtpbmQYASABKAlCJ7pIEHIOCgxldmlkZW5jZV9rZXnK8xgQKg4iZXZpZGVuY2Vfa2V5IhJACg5zb3VyY2VfcmVxdWVzdBgCIAEoCzIaLnZpYmVzeXMuY29yZS52MS5SZXF1ZXN0SWRCDLpIA8gBAcrzGAIIARI+CgtldmlkZW5jZV9pZBgDIAEoCzIbLnZpYmVzeXMuY29yZS52MS5FdmlkZW5jZUlkQgy6SAPIAQHK8xgCCAEilQEKC1JldmlzaW9uUmVmEj4KC3JldmlzaW9uX2lkGAEgASgLMhsudmliZXN5cy5jb3JlLnYxLlJldmlzaW9uSWRCDLpIA8gBAcrzGAIIARIXCgZkaWdlc3QYAiABKAlCB7pIBHICEAE6LcLzGCkaJ3ZzX2NvcmUuX3JldmlzaW9uX3JlZi5SZXZpc2lvblJlZmVyZW5jZSJTCglUYXNrU3RhZ2USGQoIc3RhZ2VfaWQYASABKAlCB7pIBHICEAESKwoRZXhlY3V0aW9uX3NlY29uZHMYAiABKAFCELpIDRILQAEpAAAAAAAAAAAirAEKDVRhc2tPYmplY3RpdmUSFQoEbmFtZRgBIAEoCUIHukgEcgIQARJMCglkaXJlY3Rpb24YAiABKA4yJy52aWJlc3lzLmNvcmUudjEuVGFza09iamVjdGl2ZURpcmVjdGlvbkIQukgHggEEEAEgAMrzGAIIARI2CgVub2lzZRgDIAEoCzIfLnZpYmVzeXMuY29yZS52MS5PYmplY3RpdmVOb2lzZUIGyvMYAjABItIDCg5PYmplY3RpdmVOb2lzZRImCg5zY2hlbWFfdmVyc2lvbhgBIAEoBUIOukgEGgIoAcrzGAMqATESLwoIcmV2aXNpb24YAiABKAlCHbpIEXIPMg1eWzEtOV1bMC05XSokyvMYBRABKgExEigKBWZsb29yGAMgASgBQhm6SBYSFEABEQAAAAAAAPA/KQAAAAAAAAAAEjEKDnJlbGF0aXZlX25vaXNlGAQgASgBQhm6SBYSFEABEQAAAAAAAPA/KQAAAAAAAAAAEhsKCnByb3ZlbmFuY2UYBSABKAlCB7pIBHICEAESNQoPYmFzZWxpbmVfdmFsdWVzGAYgAygLMhwudmliZXN5cy5jb3JlLnYxLk5vaXNlU2FtcGxlOrUBukixARpWCg5wb2xpY3lfdmVyc2lvbhIqdW5zdXBwb3J0ZWQgb2JqZWN0aXZlIG5vaXNlIHNjaGVtYSB2ZXJzaW9uGhh0aGlzLnNjaGVtYV92ZXJzaW9uID09IDEaVwoLbm9pc2VfZmxvb3ISJXJlbGF0aXZlX25vaXNlIG11c3QgYmUgYXQgbGVhc3QgZmxvb3IaIXRoaXMucmVsYXRpdmVfbm9pc2UgPj0gdGhpcy5mbG9vciIrCgtOb2lzZVNhbXBsZRIcCgV2YWx1ZRgBIAEoAUINukgEEgJAAcrzGAIIASLRAQoHUmVhZGluZxIXCgZtZXRyaWMYASABKAlCB7pIBHICEAESJAoFdmFsdWUYAiABKAFCFbpIBBICQAHK8xgKCAE6BkZpbml0ZRI3CglkaXJlY3Rpb24YAyABKA4yGi52aWJlc3lzLmNvcmUudjEuRGlyZWN0aW9uQgi6SAWCAQIQARIRCgR1bml0GAQgASgJSACIAQESMgoLcmVwZXRpdGlvbnMYBSABKAlCHbpIEXIPMg1eWzEtOV1bMC05XSokyvMYBRABKgExQgcKBV91bml0ImYKB0Jhc2VSZWYSOgoGY29tbWl0GAEgASgLMhwudmliZXN5cy5jb3JlLnYxLlJldmlzaW9uUmVmQgy6SAPIAQHK8xgCCAESHwoObWVhc3VyZWRfaW5wdXQYAiABKAlCB7pIBHICEAEizwMKBlNhbXBsZRI1CgNydW4YASABKAsyGi52aWJlc3lzLmNvcmUudjEuUmVxdWVzdElkQgy6SAPIAQHK8xgCCAESMwoFc2NvcGUYAiABKAsyFi52aWJlc3lzLmNvcmUudjEuU2NvcGVCDLpIA8gBAcrzGAIIARI6CgZjb21taXQYAyABKAsyHC52aWJlc3lzLmNvcmUudjEuUmV2aXNpb25SZWZCDLpIA8gBAcrzGAIIARIfCg5tZWFzdXJlZF9pbnB1dBgEIAEoCUIHukgEcgIQARIbCgpldmFsdWF0aW9uGAUgASgJQge6SARyAhABEhUKBWdhdGVzGAYgAygJQgbK8xgCCAESFQoEaG9zdBgHIAEoCUIHukgEcgIQARIjChNkZWRpY2F0ZWRfcmVzb3VyY2VzGAggASgIQgbK8xgCCAESNwoHcmVhZGluZxgJIAEoCzIYLnZpYmVzeXMuY29yZS52MS5SZWFkaW5nQgy6SAPIAQHK8xgCCAESKwoLb2JzZXJ2ZWRfYXQYCiABKAFCFrpIDRILQAEpAAAAAAAAAADK8xgCCAESJgoEYmFzZRgLIAEoCzIYLnZpYmVzeXMuY29yZS52MS5CYXNlUmVmIrUFCgpDb21wYXJpc29uEjMKBXNjb3BlGAEgASgLMhYudmliZXN5cy5jb3JlLnYxLlNjb3BlQgy6SAPIAQHK8xgCCAESFwoGbWV0cmljGAIgASgJQge6SARyAhABEhEKBHVuaXQYAyABKAlIAIgBARI/CglkaXJlY3Rpb24YBCABKA4yGi52aWJlc3lzLmNvcmUudjEuRGlyZWN0aW9uQhC6SAeCAQQQASAAyvMYAggBEj0KCWNhbmRpZGF0ZRgFIAEoCzIcLnZpYmVzeXMuY29yZS52MS5SZXZpc2lvblJlZkIMukgDyAEByvMYAggBEiAKD2NhbmRpZGF0ZV9pbnB1dBgGIAEoCUIHukgEcgIQARI4CgRiYXNlGAcgASgLMhwudmliZXN5cy5jb3JlLnYxLlJldmlzaW9uUmVmQgy6SAPIAQHK8xgCCAESGwoKYmFzZV9pbnB1dBgIIAEoCUIHukgEcgIQARImCg9jYW5kaWRhdGVfdmFsdWUYCSABKAFCDbpIBBICQAHK8xgCCAESIQoKYmFzZV92YWx1ZRgKIAEoAUINukgEEgJAAcrzGAIIARIcCgVyYXRpbxgLIAEoAUINukgEEgJAAcrzGAIIARIfCgVub2lzZRgMIAEoAUIQukgNEgtAASkAAAAAAAAAABJFCgd2ZXJkaWN0GA0gASgOMiIudmliZXN5cy5jb3JlLnYxLkNvbXBhcmlzb25WZXJkaWN0QhC6SAeCAQQQASAAyvMYAggBEjsKEWNhbmRpZGF0ZV9zYW1wbGVzGA4gASgJQiC6SBVyEzIRXigwfFsxLTldWzAtOV0qKSTK8xgECAEQARI2CgxiYXNlX3NhbXBsZXMYDyABKAlCILpIFXITMhFeKDB8WzEtOV1bMC05XSopJMrzGAQIARABQgcKBV91bml0KmwKCURpcmVjdGlvbhIZChVESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIcCg1ESVJFQ1RJT05fTUFYEAEaCdrzGAUKA21heBIcCg1ESVJFQ1RJT05fTUlOEAIaCdrzGAUKA21pbhoI0vMYBAgBEAEq0QEKC0NoYXJnZUNsYXNzEhwKGENIQVJHRV9DTEFTU19VTlNQRUNJRklFRBAAEiEKEUNIQVJHRV9DTEFTU19GUkVFEAEaCtrzGAYKBGZyZWUSIQoRQ0hBUkdFX0NMQVNTX1BBSUQQAhoK2vMYBgoEcGFpZBItChdDSEFSR0VfQ0xBU1NfQ09SUkVDVElPThADGhDa8xgMCgpjb3JyZWN0aW9uEiUKE0NIQVJHRV9DTEFTU19SRVNVTUUQBBoM2vMYCAoGcmVzdW1lGgjS8xgECAEQASqmAQoWVGFza09iamVjdGl2ZURpcmVjdGlvbhIoCiRUQVNLX09CSkVDVElWRV9ESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIrChxUQVNLX09CSkVDVElWRV9ESVJFQ1RJT05fTUFYEAEaCdrzGAUKA21heBIrChxUQVNLX09CSkVDVElWRV9ESVJFQ1RJT05fTUlOEAIaCdrzGAUKA21pbhoI0vMYBAgBEAFCP1o9Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9jb3JlL3YxO2NvcmV2MWIGcHJvdG8z", [file_buf_validate_validate, file_vibesys_core_v1_value_options, file_vibesys_core_v1_common, file_vibesys_core_v1_vocabulary]);
 
 /**
  * Full identity of one evidence record: the request that produced it plus its ID.
@@ -119,6 +119,11 @@ export type TaskObjective = Message<"vibesys.core.v1.TaskObjective"> & {
    * @generated from field: vibesys.core.v1.TaskObjectiveDirection direction = 2;
    */
   direction: TaskObjectiveDirection;
+
+  /**
+   * @generated from field: vibesys.core.v1.ObjectiveNoise noise = 3;
+   */
+  noise?: ObjectiveNoise | undefined;
 };
 
 /**
@@ -127,6 +132,70 @@ export type TaskObjective = Message<"vibesys.core.v1.TaskObjective"> & {
  */
 export const TaskObjectiveSchema: GenMessage<TaskObjective> = /*@__PURE__*/
   messageDesc(file_vibesys_core_v1_leaves, 3);
+
+/**
+ * Versioned, revisable run declaration for one objective's promotion tolerance.
+ * Original measurements and accepted decision receipts remain immutable.
+ *
+ * @generated from message vibesys.core.v1.ObjectiveNoise
+ */
+export type ObjectiveNoise = Message<"vibesys.core.v1.ObjectiveNoise"> & {
+  /**
+   * @generated from field: int32 schema_version = 1;
+   */
+  schemaVersion: number;
+
+  /**
+   * @generated from field: string revision = 2;
+   */
+  revision: string;
+
+  /**
+   * @generated from field: double floor = 3;
+   */
+  floor: number;
+
+  /**
+   * @generated from field: double relative_noise = 4;
+   */
+  relativeNoise: number;
+
+  /**
+   * @generated from field: string provenance = 5;
+   */
+  provenance: string;
+
+  /**
+   * @generated from field: repeated vibesys.core.v1.NoiseSample baseline_values = 6;
+   */
+  baselineValues: NoiseSample[];
+};
+
+/**
+ * Describes the message vibesys.core.v1.ObjectiveNoise.
+ * Use `create(ObjectiveNoiseSchema)` to create a new message.
+ */
+export const ObjectiveNoiseSchema: GenMessage<ObjectiveNoise> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_leaves, 4);
+
+/**
+ * One calibration observation in the declared units of its objective.
+ *
+ * @generated from message vibesys.core.v1.NoiseSample
+ */
+export type NoiseSample = Message<"vibesys.core.v1.NoiseSample"> & {
+  /**
+   * @generated from field: double value = 1;
+   */
+  value: number;
+};
+
+/**
+ * Describes the message vibesys.core.v1.NoiseSample.
+ * Use `create(NoiseSampleSchema)` to create a new message.
+ */
+export const NoiseSampleSchema: GenMessage<NoiseSample> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_leaves, 5);
 
 /**
  * A run's headline reading of the benchmark stage, as the trusted record states it.
@@ -165,7 +234,7 @@ export type Reading = Message<"vibesys.core.v1.Reading"> & {
  * Use `create(ReadingSchema)` to create a new message.
  */
 export const ReadingSchema: GenMessage<Reading> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_leaves, 4);
+  messageDesc(file_vibesys_core_v1_leaves, 6);
 
 /**
  * The revision a candidate is compared with, and what the evaluation reads there.
@@ -192,7 +261,7 @@ export type BaseRef = Message<"vibesys.core.v1.BaseRef"> & {
  * Use `create(BaseRefSchema)` to create a new message.
  */
 export const BaseRefSchema: GenMessage<BaseRef> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_leaves, 5);
+  messageDesc(file_vibesys_core_v1_leaves, 7);
 
 /**
  * One framework run of one measured input: the unit of measurement, always traceable.
@@ -265,7 +334,7 @@ export type Sample = Message<"vibesys.core.v1.Sample"> & {
  * Use `create(SampleSchema)` to create a new message.
  */
 export const SampleSchema: GenMessage<Sample> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_leaves, 6);
+  messageDesc(file_vibesys_core_v1_leaves, 8);
 
 /**
  * A candidate's samples compared with its base's: the ratio, its noise and the verdict.
@@ -359,7 +428,7 @@ export type Comparison = Message<"vibesys.core.v1.Comparison"> & {
  * Use `create(ComparisonSchema)` to create a new message.
  */
 export const ComparisonSchema: GenMessage<Comparison> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_leaves, 7);
+  messageDesc(file_vibesys_core_v1_leaves, 9);
 
 /**
  * @generated from enum vibesys.core.v1.Direction
