@@ -1,5 +1,12 @@
 import {expect, test} from 'bun:test';
-import {Backend, CheckId, CheckState, ReasoningEffort, RunResults} from '@vibesys/proto';
+import {
+  AgentLoginState,
+  Backend,
+  CheckId,
+  CheckState,
+  ReasoningEffort,
+  RunResults,
+} from '@vibesys/proto';
 import {type RegistryRunInputs, registryRunCatalog} from '../index.js';
 import {FakeReadCatalog} from '../testing/index.js';
 
@@ -151,4 +158,43 @@ test('catalog cancellation, missing checkout and peer failure never turn into em
   peer.failure = new Error('denied');
   await expect(reads.harnesses(HOST, new AbortController().signal)).rejects.toThrow('denied');
   expect(peer.requests).toEqual([]);
+});
+
+test('login status preserves provider, credential-source and missing-CLI facts', async () => {
+  const peer = new FakeReadCatalog();
+  peer.loginFacts = [
+    {
+      provider: 'agent-a',
+      providerName: 'Agent A',
+      installed: true,
+      state: AgentLoginState.SIGNED_IN,
+      how: {value: {case: 'account', value: {kind: 'account'}}},
+      apiKeyVariables: ['AGENT_API_KEY'],
+      detail: 'Signed in',
+      canStartLogin: true,
+    },
+    {
+      provider: 'agent-b',
+      providerName: 'Agent B',
+      installed: true,
+      state: AgentLoginState.SIGNED_IN,
+      how: {value: {case: 'apiKey', value: {kind: 'api_key', variable: 'AGENT_API_KEY'}}},
+    },
+    {provider: 'agent-c', providerName: 'Agent C', state: AgentLoginState.UNKNOWN},
+  ];
+  expect(await registryRunCatalog(peer).logins(HOST, new AbortController().signal)).toMatchObject([
+    {
+      provider: 'agent-a',
+      provider_name: 'Agent A',
+      installed: true,
+      state: 'signed_in',
+      how: {kind: 'account'},
+      api_key_variables: ['AGENT_API_KEY'],
+      detail: 'Signed in',
+      can_start_login: true,
+    },
+    {provider: 'agent-b', state: 'signed_in', how: {kind: 'api_key', variable: 'AGENT_API_KEY'}},
+    {provider: 'agent-c', installed: false, state: 'unknown', how: null},
+  ]);
+  expect(peer.requests[0]?.method.case).toBe('listAgentLogins');
 });

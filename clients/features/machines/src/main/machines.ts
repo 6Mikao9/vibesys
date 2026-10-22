@@ -12,6 +12,7 @@ import {
   HelperRequestError,
   type InspectedCandidate,
   type RegistryClusters,
+  type RegistryRunCatalog,
   type RegistrySetup,
   type RunWatch,
 } from '@vibesys/connection';
@@ -63,6 +64,8 @@ export interface MachinesMainDeps {
   readonly transportV2?: (id: HostId) => Promise<boolean>;
   /** Required when `transportV2` is true. Missing it throws; it does not fall back. */
   readonly registry?: RegistryCatalog;
+  /** Login status reads over the gateway when transport v2 is enabled. */
+  readonly catalog?: Pick<RegistryRunCatalog, 'logins'>;
   /** Setup reads. Required when `transportV2` is true for inspect. */
   readonly setup?: RegistrySetup;
   /** Cluster changes. Required when `transportV2` is true for put, remove, and test. */
@@ -283,6 +286,16 @@ export class MachinesMain {
 
   /** Each vetted harness's login on `id`, or that its helper predates login state. */
   async agentLogins(id: HostId): Promise<Offered<readonly AgentLogin[]>> {
+    if (await this.#v2(id)) {
+      const catalog = this.#deps.catalog;
+      if (catalog === undefined)
+        throw new Error('run transport v2 is on and the login catalog is missing');
+      try {
+        return {kind: 'offered', value: await catalog.logins(id, new AbortController().signal)};
+      } catch (error) {
+        throw explained(error, 'read the agent logins', id);
+      }
+    }
     return this.#offered(id, 'read the agent logins', async connection => {
       const reply = await connection.request({type: 'agent_logins.list'});
       return reply.logins;

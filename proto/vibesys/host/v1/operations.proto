@@ -1716,3 +1716,90 @@ enum TerminateRunOutcome {
   TERMINATE_RUN_OUTCOME_OBSERVATION_UNKNOWN = 5;
   TERMINATE_RUN_OUTCOME_PROCESS_ABSENT = 6;
 }
+
+// Login status facts are read independently of the long-lived login watch.
+enum AgentLoginState {
+  AGENT_LOGIN_STATE_UNSPECIFIED = 0;
+  AGENT_LOGIN_STATE_SIGNED_IN = 1 [(vibesys.host.v1.adapter_spelling) = "signed_in"];
+  AGENT_LOGIN_STATE_SIGNED_OUT = 2 [(vibesys.host.v1.adapter_spelling) = "signed_out"];
+  AGENT_LOGIN_STATE_UNKNOWN = 3 [(vibesys.host.v1.adapter_spelling) = "unknown"];
+}
+message LoginAccount {
+  string kind = 1 [(buf.validate.field).string.const = "account"];
+}
+message LoginApiKey {
+  option (buf.validate.message).cel = {
+    id: "login.one_key_source"
+    message: "an API key names a variable or a file, not both"
+    expression: "!has(this.variable) || !has(this.file)"
+  };
+  string kind = 1 [(buf.validate.field).string.const = "api_key"];
+  optional string variable = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  optional string file = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+}
+message AgentLoginHow {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    LoginAccount account = 1;
+    LoginApiKey api_key = 2;
+  }
+}
+message AgentLogin {
+  option (buf.validate.message).cel = {
+    id: "login.installed_state"
+    message: "a missing harness has unknown login state"
+    expression: "this.installed || this.state == 3"
+  };
+  option (buf.validate.message).cel = {
+    id: "login.how_state"
+    message: "how is named only for a signed-in harness"
+    expression: "!has(this.how) || this.state == 1"
+  };
+  string provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string provider_name = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  bool installed = 3;
+  AgentLoginState state = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  AgentLoginHow how = 5;
+  repeated string api_key_variables = 6 [(buf.validate.field).repeated = {
+    max_items: 10000
+    items: {
+      string: {
+        min_len: 1
+        max_len: 128
+      }
+    }
+  }];
+  string detail = 7 [(buf.validate.field).string = {
+    max_len: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+  bool can_start_login = 8;
+}
+message ListAgentLoginsRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+}
+message ListAgentLoginsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  repeated AgentLogin logins = 2 [(buf.validate.field).repeated.max_items = 10000];
+}

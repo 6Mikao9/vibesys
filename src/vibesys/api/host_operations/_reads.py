@@ -19,6 +19,10 @@ class ReadSource(Protocol):
         """The canonical project's task catalog."""
         ...
 
+    def logins(self) -> list[pb.AgentLogin]:
+        """Each vetted harness's current login facts, never its secrets."""
+        ...
+
     def harnesses(self) -> list[pb.HarnessOption]:
         """Vetted harnesses in display order, installed providers first."""
         ...

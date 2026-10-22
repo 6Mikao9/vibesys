@@ -42,6 +42,7 @@ const (
 	HostOperationsService_ChatMessage_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ChatMessage"
 	HostOperationsService_ListSavedRuns_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListSavedRuns"
 	HostOperationsService_TerminateRun_FullMethodName       = "/vibesys.api.v1.HostOperationsService/TerminateRun"
+	HostOperationsService_ListAgentLogins_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListAgentLogins"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -84,6 +85,7 @@ type HostOperationsServiceClient interface {
 	// Native discovery does not migrate the helper's runs.list summary contract.
 	ListSavedRuns(ctx context.Context, in *v1.ListSavedRunsRequest, opts ...grpc.CallOption) (*v1.ListSavedRunsResponse, error)
 	TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error)
+	ListAgentLogins(ctx context.Context, in *v1.ListAgentLoginsRequest, opts ...grpc.CallOption) (*v1.ListAgentLoginsResponse, error)
 }
 
 type hostOperationsServiceClient struct {
@@ -323,6 +325,16 @@ func (c *hostOperationsServiceClient) TerminateRun(ctx context.Context, in *v1.T
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) ListAgentLogins(ctx context.Context, in *v1.ListAgentLoginsRequest, opts ...grpc.CallOption) (*v1.ListAgentLoginsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.ListAgentLoginsResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_ListAgentLogins_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostOperationsServiceServer is the server API for HostOperationsService service.
 // All implementations must embed UnimplementedHostOperationsServiceServer
 // for forward compatibility.
@@ -363,6 +375,7 @@ type HostOperationsServiceServer interface {
 	// Native discovery does not migrate the helper's runs.list summary contract.
 	ListSavedRuns(context.Context, *v1.ListSavedRunsRequest) (*v1.ListSavedRunsResponse, error)
 	TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error)
+	ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error)
 	mustEmbedUnimplementedHostOperationsServiceServer()
 }
 
@@ -438,6 +451,9 @@ func (UnimplementedHostOperationsServiceServer) ListSavedRuns(context.Context, *
 }
 func (UnimplementedHostOperationsServiceServer) TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TerminateRun not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAgentLogins not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) mustEmbedUnimplementedHostOperationsServiceServer() {}
 func (UnimplementedHostOperationsServiceServer) testEmbeddedByValue()                               {}
@@ -849,6 +865,24 @@ func _HostOperationsService_TerminateRun_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_ListAgentLogins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.ListAgentLoginsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).ListAgentLogins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_ListAgentLogins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).ListAgentLogins(ctx, req.(*v1.ListAgentLoginsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostOperationsService_ServiceDesc is the grpc.ServiceDesc for HostOperationsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -939,6 +973,10 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TerminateRun",
 			Handler:    _HostOperationsService_TerminateRun_Handler,
+		},
+		{
+			MethodName: "ListAgentLogins",
+			Handler:    _HostOperationsService_ListAgentLogins_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

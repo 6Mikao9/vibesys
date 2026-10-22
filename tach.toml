@@ -2114,7 +2114,7 @@ expose = ["pause_now", "serve_terminate", "terminate_run"]
 
 [[modules]]
 path = "server.host_operation_reads"
-depends_on = ["server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations"]
+depends_on = ["server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations"]
 
 [[interfaces]]
 from = ["server.host_operation_reads"]

@@ -413,6 +413,7 @@ const deadlineInputs = {
   getTaskGoal: {project: '/project', task: 'bench'},
   describeMachine: {},
   listCompute: {},
+  listAgentLogins: {},
   preflightRun: {project: '/project'},
   inspectCandidate: {path: '/candidate', selectionRevision: 1n},
   completePaths: {prefix: '/manual/'},

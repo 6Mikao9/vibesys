@@ -1,6 +1,7 @@
 /** New-run catalogs and preflight over the registry, without opening a helper channel. */
 import type {MessageInitShape} from '@bufbuild/protobuf';
 import type {
+  AgentLogin,
   Backend,
   Check,
   ExampleList,
@@ -10,16 +11,19 @@ import type {
 import type {HostId} from '@vibesys/hosts';
 import {
   acceptGetTaskGoal,
+  acceptListAgentLogins,
   acceptListExamples,
   acceptListHarnesses,
   acceptListTasks,
   acceptPreflightRun,
   callGetTaskGoal,
+  callListAgentLogins,
   callListExamples,
   callListHarnesses,
   callListTasks,
   callPreflightRun,
   GetTaskGoalResponseSchema,
+  ListAgentLoginsResponseSchema,
   ListExamplesResponseSchema,
   ListHarnessesResponseSchema,
   type PreflightRunRequestSchema,
@@ -32,6 +36,7 @@ import {type RegistryReadPorts, registryTransport, requireCheckout} from './regi
 import type {RegistryRunInputs} from './registry-start.js';
 
 export interface RegistryRunCatalog {
+  logins(host: HostId, signal: AbortSignal): Promise<AgentLogin[]>;
   tasks(host: HostId, project: string, signal: AbortSignal): Promise<string[]>;
   harnesses(host: HostId, signal: AbortSignal): Promise<HarnessesListReply['harnesses']>;
   examples(host: HostId, signal: AbortSignal): Promise<ExampleList>;
@@ -55,6 +60,15 @@ export function registryRunCatalog(ports: RegistryReadPorts): RegistryRunCatalog
     return registryTransport(checkout, (bytes, owned) => ports.unary(host, bytes, owned));
   }
   return {
+    async logins(host, signal) {
+      const reply = await callListAgentLogins(
+        await transport(host, signal),
+        acceptListAgentLogins({requestId: 'catalog'}),
+        signal,
+      );
+      return (projectMessage(ListAgentLoginsResponseSchema, reply) as {logins: AgentLogin[]})
+        .logins;
+    },
     async tasks(host, project, signal) {
       const reply = await callListTasks(
         await transport(host, signal),

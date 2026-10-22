@@ -425,6 +425,10 @@ function machinesOver(
       checkout: id => hosts.checkout(id),
       unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
     }),
+    catalog: registryRunCatalog({
+      checkout: id => hosts.checkout(id),
+      unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+    }),
     clusters: registryClusters({
       checkout: id => hosts.checkout(id),
       unary: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),

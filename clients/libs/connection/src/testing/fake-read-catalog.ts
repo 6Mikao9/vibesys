@@ -3,6 +3,7 @@ import {create, type MessageInitShape, toBinary} from '@bufbuild/protobuf';
 import type {HostId} from '@vibesys/hosts';
 import {
   Accelerator,
+  type AgentLoginSchema,
   type ExampleListSchema,
   type HarnessOptionSchema,
   MachineDescriptionSchema,
@@ -21,6 +22,7 @@ export class FakeReadCatalog implements RegistryReadPorts {
   readonly requests: ReadRequest[] = [];
   readonly projects = new Map<string, string[]>();
   readonly goals = new Map<string, MessageInitShape<typeof TaskGoalSchema>>();
+  loginFacts: MessageInitShape<typeof AgentLoginSchema>[] = [];
   harnessOptions: MessageInitShape<typeof HarnessOptionSchema>[] = [];
   exampleList: MessageInitShape<typeof ExampleListSchema> = {version: 1n, examples: []};
   machine = create(MachineDescriptionSchema, {
@@ -62,6 +64,13 @@ export class FakeReadCatalog implements RegistryReadPorts {
           },
         });
       }
+      case 'listAgentLogins':
+        return this.reply({
+          result: {
+            case: 'listAgentLogins',
+            value: {requestId: method.value.requestId, logins: this.loginFacts},
+          },
+        });
       case 'listHarnesses':
         return this.reply({
           result: {

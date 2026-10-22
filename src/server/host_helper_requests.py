@@ -47,8 +47,6 @@ from server.host_api import (
     RUN_ENVIRONMENT_FLAG,
     SLURM_CONFIG_FLAG,
     UNVETTED_MODEL_FLAG,
-    AgentLoginsListReply,
-    AgentLoginsListRequest,
     AgentLoginsStartReply,
     AgentLoginsStartRequest,
     Checkout,
@@ -946,7 +944,6 @@ def _answer(
             | ComputeTestClusterRequest()
             | ComputeAddClusterRequest()
             | ComputeRemoveClusterRequest()
-            | AgentLoginsListRequest()
             | AgentLoginsStartRequest()
         ):
             reply = _machine_reply(request, host)
@@ -1000,12 +997,10 @@ def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
 
 
 def _logins_reply(
-    request: AgentLoginsListRequest | AgentLoginsStartRequest, logins: AgentLogins
-) -> AgentLoginsListReply | AgentLoginsStartReply | HelperError:
+    request: AgentLoginsStartRequest, logins: AgentLogins
+) -> AgentLoginsStartReply | HelperError:
     """Answer one read of the harnesses' logins, or a request to start one."""
     request_id = request.request_id
-    if isinstance(request, AgentLoginsListRequest):
-        return AgentLoginsListReply(request_id=request_id, logins=logins.list())
     if request.provider not in logins.providers():
         message = f"this host offers no harness for provider {request.provider!r}"
         return _error(request_id, HelperErrorCode.UNKNOWN_PROVIDER, message)
@@ -1053,13 +1048,12 @@ def _machine_reply(
     | ComputeTestClusterRequest
     | ComputeAddClusterRequest
     | ComputeRemoveClusterRequest
-    | AgentLoginsListRequest
     | AgentLoginsStartRequest,
     host: HelperHost,
 ) -> HelperReply | HelperError:
     """Answer what this machine offers, what a path on it holds, or make a project on it."""
     match request:
-        case AgentLoginsListRequest() | AgentLoginsStartRequest():
+        case AgentLoginsStartRequest():
             return _logins_reply(request, host.logins)
         case (
             ComputeTestClusterRequest() | ComputeAddClusterRequest() | ComputeRemoveClusterRequest()

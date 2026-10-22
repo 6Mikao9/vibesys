@@ -27,6 +27,11 @@ class _Reads:
             request_id=request.request_id, tasks=self._source.tasks(request.project)
         )
 
+    def list_agent_logins(self, request: pb.ListAgentLoginsRequest) -> pb.ListAgentLoginsResponse:
+        return pb.ListAgentLoginsResponse(
+            request_id=request.request_id, logins=self._source.logins()
+        )
+
     def list_harnesses(self, request: pb.ListHarnessesRequest) -> pb.ListHarnessesResponse:
         installed = self._source.installed_harnesses()
         listed = sorted(
@@ -110,6 +115,7 @@ def handlers(source: ReadSource) -> host_operations.Handlers:
         list_tasks=reads.list_tasks,
         list_saved_runs=reads.list_saved_runs,
         list_harnesses=reads.list_harnesses,
+        list_agent_logins=reads.list_agent_logins,
         list_examples=reads.list_examples,
         get_task_goal=reads.get_task_goal,
         describe_machine=reads.describe_machine,

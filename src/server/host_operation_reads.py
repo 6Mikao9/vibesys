@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from types import ModuleType
 
+    from server.host_agent_logins import AgentLogin
     from server.host_api import HarnessOption, RunPreflightReply
     from server.host_compute import ComputeSettings
     from server.host_examples import ExampleDestination, ExampleList, TaskGoal, TaskList
@@ -57,6 +58,10 @@ class _ReadMachine(Protocol):
     def harness_clis(self) -> tuple[str, ...]: ...
 
 
+class _ReadLogins(Protocol):
+    def list(self) -> tuple[AgentLogin, ...]: ...
+
+
 class HostReadFacts(Protocol):
     """Fresh catalogs and probes, independent of transport and run ownership."""
 
@@ -83,6 +88,11 @@ class HostReadFacts(Protocol):
     @property
     def machine(self) -> _ReadMachine:
         """Installed provider probes."""
+        ...
+
+    @property
+    def logins(self) -> _ReadLogins:
+        """Provider-owned login facts."""
         ...
 
     def harnesses(self) -> tuple[HarnessOption, ...]:
@@ -134,6 +144,13 @@ class HostReadSource:
             _wire().host_payloads.TaskList,
             self._host.projects.tasks(self._path(project)).model_dump(mode="json"),
         )
+
+    def logins(self) -> list[pb.AgentLogin]:
+        """Project the provider's observed login state without reading secrets."""
+        return [
+            _wire().from_mapping(_wire().host_payloads.AgentLogin, login.model_dump(mode="json"))
+            for login in self._host.logins.list()
+        ]
 
     def harnesses(self) -> list[pb.HarnessOption]:
         """Project vetted harness facts; ordering belongs to the product handler."""

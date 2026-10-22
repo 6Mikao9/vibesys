@@ -30,6 +30,8 @@ func DispatchHostRead(request *apiv1.ReadRequest) (HostCall, bool) {
 		return HostCall{CLI: "inspect-destination", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	case request.GetListSavedRuns() != nil:
 		return HostCall{CLI: "list-saved-runs", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 1}, true
+	case request.GetListAgentLogins() != nil:
+		return HostCall{CLI: "list-agent-logins", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	default:
 		return HostCall{}, false
 	}
@@ -70,6 +72,9 @@ func HostReadResponseValid(request *apiv1.ReadRequest, response *apiv1.ReadRespo
 	case request.GetListSavedRuns() != nil:
 		got := response.GetListSavedRuns()
 		return got != nil && got.GetRequestId() == request.GetListSavedRuns().GetRequestId()
+	case request.GetListAgentLogins() != nil:
+		got := response.GetListAgentLogins()
+		return got != nil && got.GetRequestId() == request.GetListAgentLogins().GetRequestId()
 	default:
 		return false
 	}
