@@ -27,15 +27,10 @@ EVALUATOR = REPO_ROOT / "resources/evaluators/queue"
 BUILD_TIMEOUT_S = 600
 CHECK_TIMEOUT_S = 300
 
-# Compile and run every recipe in the existing native evaluator job; ordinary shards
-# deliberately exclude native_build so cold Rust/Go builds cannot dominate one shard.
-pytestmark = [
-    pytest.mark.native_build,
-    pytest.mark.skipif(
-        shutil.which("cargo") is None or shutil.which("go") is None,
-        reason="the queue example needs the Rust and Go toolchains",
-    ),
-]
+pytestmark = pytest.mark.skipif(
+    shutil.which("cargo") is None or shutil.which("go") is None,
+    reason="the queue example needs the Rust and Go toolchains",
+)
 
 
 def _build(workspace: Path) -> subprocess.CompletedProcess[str]:

@@ -248,7 +248,6 @@ commands = [
     "tests/examples/test_queue_evaluator.py",
     "tests/e2e/test_bundled_go_evaluator_offline.py",
     "tests/e2e/test_kvstore_default_gate_e2e.py",
-    "tests/e2e/test_scripted_queue_recipes_e2e.py",
   ],
 ]
 
