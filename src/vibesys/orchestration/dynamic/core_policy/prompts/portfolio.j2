@@ -10,6 +10,7 @@ workstream counts once, whether it starts a hypothesis or continues one.
 
 {% include 'run_context.j2' %}
 {{ domain_section(domain_sections, 'orchestrator') }}
+{% include 'performance_bounds.j2' %}
 Assign work only where it can succeed: never assign edits to read-only inputs, and
 never plan work that needs target hardware outside trusted evaluation.
 
@@ -288,7 +289,8 @@ Older hypothesis IDs (omitted above; reuse one only to continue it): {{ older_id
 ## Handoff notes of earlier planners
 Each planning call starts a new planner with no memory of the calls before it. Every call
 that scheduled a plan left a handoff file: its reasoning, the workstreams it scheduled, what it
-expected of each, what it meant to do next on each outcome, and its open doubts.
+expected of each, what it meant to do next on each outcome, its performance bounds, and its
+open doubts.
 {% if handoff_paths %}
 The files, newest first, as paths in your workspace. They are not shown here: read the ones
 you need yourself, at least the newest, before you plan.
@@ -302,7 +304,12 @@ None exists yet: this is the first plan of the run.
 Leave the same for the planner after you in {{ reply.handoff }}: in {{ reply.expectations }}, one entry
 per workstream of your reply with its {{ reply.work_id }}, what you expect it to show
 ({{ reply.expected }}), and what you would plan next if it does ({{ reply.if_it_succeeds }}) and if it does not
-({{ reply.if_it_fails }}); in {{ reply.doubts }}, what you are unsure of and how a later plan could check it.
+({{ reply.if_it_fails }}); in {{ reply.bounds }}, one or more limits, at least one hardware limit
+({{ reply.bound_kind }}), each with {{ reply.metric }}, {{ reply.low }}, {{ reply.high }}, {{ reply.unit }},
+and {{ reply.assumptions }} ({{ reply.statement }}, {{ reply.evidence_kind }}); set {{ reply.measured }}
+when a trusted value exists, and {{ reply.revisions }} ({{ reply.previous_low }}, {{ reply.previous_high }},
+{{ reply.reason }}) when you replace a range; in {{ reply.doubts }}, what you are unsure of and how a
+later plan could check it. If those files have no performance bounds, this turn must supply them.
 
 Answer with the structured response, filling its top-level fields directly:
 {{ reply.reasoning }} (why this portfolio), {{ reply.workstreams }} (one entry per new workstream),

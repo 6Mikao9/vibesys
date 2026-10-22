@@ -39,3 +39,9 @@ controlled end-to-end comparison. Do not add overlapping CPU/CUDA durations,
 call hardware peak automatically attainable, or use the reference engine as the
 hardware ceiling. Verify that any throughput-only gain remains a legitimate
 Pareto tradeoff and that terminal parity uses one joint operating point.
+
+For a claimed gain, compare the trusted measurement with the recorded bounds.
+A revision that shrinks the gap needs evidence other than the candidate's own
+speed: a microbenchmark, a byte count, or a profile. Reject a claim that treats
+the current-architecture ceiling as the hardware limit, or the candidate's
+speed as the bound.

@@ -313,6 +313,7 @@ _PLANNER = PlannerPrompt.model_validate(
             },
         ),
         "baseline": (MetricRow(name="baseline-metric-b3", value=1.0, direction="max"),),
+        "handoff_paths": ("handoff-path-f7",),
         "evaluations": {
             "pick": "ranked",
             "slots": 2,
@@ -423,6 +424,7 @@ def cases() -> dict[str, Case]:
                 "mergeable": "mergeable-hyp-d5",
                 "history": "history-hyp-a2",
                 "baseline": "baseline-metric-b3",
+                "handoff_paths": "handoff-path-f7",
                 "evaluations": "waiting-work-e6",
             },
         ),

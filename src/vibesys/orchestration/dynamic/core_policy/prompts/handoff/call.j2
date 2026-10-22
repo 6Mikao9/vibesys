@@ -53,6 +53,22 @@ none recorded
 Expectations left out, because these workstreams were not scheduled: {% for work_id in handoff.dropped %}`{{ work_id }}`{% if not loop.last %}, {% endif %}{% endfor %}.
 
 {% endif %}
+## Performance bounds
+{% for item in handoff.bounds %}
+- {{ item.metric }} ({{ item.bound_kind.value }}): {{ item.low }} to {{ item.high }} {{ item.unit }}
+{% for assumption in item.assumptions %}
+  - {{ assumption.statement }} ({{ assumption.evidence_kind.value }})
+{% endfor %}
+{% if item.measured %}
+  Measured: {{ item.measured.value }} {{ item.measured.unit }}
+{% endif %}
+{% for revision in item.revisions %}
+  Revised from {{ revision.previous_low }} to {{ revision.previous_high }}: {{ revision.reason }}
+{% endfor %}
+{% else %}
+none recorded; the next planner must supply them
+{% endfor %}
+
 ## Open doubts
 {% for doubt in handoff.doubts %}
 - {{ doubt }}

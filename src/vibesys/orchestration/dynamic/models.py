@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast, override
@@ -12,7 +13,9 @@ from pydantic import (
     Discriminator,
     Field,
     Tag,
+    ValidationInfo,
     field_validator,
+    model_validator,
 )
 from pydantic.json_schema import GenerateJsonSchema
 
@@ -400,6 +403,198 @@ class PlannerHypothesisUpdate(HypothesisStrategyUpdate):
     )
 
 
+class BoundKind(StrEnum):
+    """Which limit a performance bound estimates."""
+
+    HARDWARE_LIMIT = "hardware_limit"
+    """The limit of this computation on this hardware, for the fixed workload."""
+    DESIGN_CEILING = "design_ceiling"
+    """What the current design can reach. It may sit far below the hardware limit."""
+
+
+class BoundEvidence(StrEnum):
+    """What kind of evidence an assumption of a bound rests on."""
+
+    SPEC_SHEET = "spec_sheet"
+    MICROBENCHMARK = "microbenchmark"
+    BYTE_COUNT = "byte_count"
+    PROFILE = "profile"
+    WORKLOAD_SHAPE = "workload_shape"
+    STATED_ASSUMPTION = "stated_assumption"
+
+
+_INDEPENDENT_BOUND_EVIDENCE = frozenset(
+    {
+        BoundEvidence.MICROBENCHMARK,
+        BoundEvidence.BYTE_COUNT,
+        BoundEvidence.PROFILE,
+        BoundEvidence.WORKLOAD_SHAPE,
+    }
+)
+"""Evidence that can justify changing a bound. A candidate's own speed is not one of them."""
+
+
+def _nonblank(value: str, field: str) -> str:
+    if not value.strip():
+        message = f"{field} must not be blank"
+        raise ValueError(message)
+    return value
+
+
+def _widen_int(value: object) -> object:
+    """A strict value model rejects ``1`` for a float field. ``bool`` stays a bool."""
+    if type(value) is int:
+        return float(value)
+    return value
+
+
+def _ordered_range(low: float, high: float, low_name: str, high_name: str) -> None:
+    if not math.isfinite(low) or not math.isfinite(high) or low < 0 or low > high:
+        message = f"{low_name} must be finite and >= 0, and {low_name} <= {high_name}"
+        raise ValueError(message)
+
+
+class BoundAssumption(Value):
+    """One assumption a bound's range rests on, and the kind of evidence for it."""
+
+    statement: str = Field(min_length=1, description="What the range assumes.")
+    evidence_kind: BoundEvidence = Field(
+        description=(
+            "The kind of evidence for this assumption. A revision of the range needs "
+            "microbenchmark, byte_count, profile, or workload_shape somewhere in the entry."
+        )
+    )
+
+    @field_validator("statement")
+    @classmethod
+    def _statement_not_blank(cls, value: str) -> str:
+        return _nonblank(value, "statement")
+
+
+class BoundRevision(Value):
+    """An earlier range this bound replaced, and why it changed."""
+
+    previous_low: float = Field(description="The low end of the range this revision replaced.")
+    previous_high: float = Field(description="The high end of the range this revision replaced.")
+    reason: str = Field(min_length=1, description="Why the range changed.")
+
+    @field_validator("previous_low", "previous_high", mode="before")
+    @classmethod
+    def _widen_endpoints(cls, value: object) -> object:
+        return _widen_int(value)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        return _nonblank(value, "reason")
+
+    @model_validator(mode="after")
+    def _range_is_ordered(self) -> BoundRevision:
+        _ordered_range(
+            self.previous_low,
+            self.previous_high,
+            "revisions.previous_low",
+            "revisions.previous_high",
+        )
+        return self
+
+
+class BoundMeasurement(Value):
+    """The current measured value of a bound's metric, when one exists."""
+
+    value: float = Field(description="The measured value. It is not itself the bound.")
+    unit: str = Field(min_length=1, description="The unit of value.")
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def _widen_measured(cls, value: object) -> object:
+        return _widen_int(value)
+
+    @model_validator(mode="after")
+    def _measured_is_finite(self) -> BoundMeasurement:
+        if not math.isfinite(self.value):
+            message = "measured.value must be finite"
+            raise ValueError(message)
+        return self
+
+    @field_validator("unit")
+    @classmethod
+    def _unit_not_blank(cls, value: str) -> str:
+        return _nonblank(value, "unit")
+
+
+class PerformanceBound(Value):
+    """An estimate of a fixed limit on one scored metric, as a range with its assumptions.
+
+    A bound is not a prediction of the current code, and it is never derived from a
+    candidate's own speed. ``revisions`` records each earlier range this estimate replaced.
+    """
+
+    metric: str = Field(min_length=1, description="The scored metric this bound limits.")
+    bound_kind: BoundKind = Field(description="hardware_limit or design_ceiling.")
+    low: float = Field(description="Low end of the range, in unit.")
+    high: float = Field(description="High end of the range, in unit.")
+    unit: str = Field(min_length=1, description="Unit of low, high, and revisions.")
+    assumptions: tuple[BoundAssumption, ...] = Field(
+        min_length=1,
+        max_length=16,
+        description="What the range assumes, each with its evidence kind.",
+    )
+    measured: BoundMeasurement | None = Field(
+        default=None,
+        description="The current measured value of metric, when a measurement exists.",
+    )
+    revisions: tuple[BoundRevision, ...] = Field(
+        default=(),
+        max_length=16,
+        description="Earlier ranges this estimate replaced, oldest first, and why.",
+    )
+
+    @field_validator("low", "high", mode="before")
+    @classmethod
+    def _widen_ends(cls, value: object) -> object:
+        return _widen_int(value)
+
+    @field_validator("metric", "unit")
+    @classmethod
+    def _text_not_blank(cls, value: str, info: ValidationInfo) -> str:
+        return _nonblank(value, str(info.field_name))
+
+    @model_validator(mode="after")
+    def _range_and_revisions(self) -> PerformanceBound:
+        _ordered_range(self.low, self.high, "bounds.low", "bounds.high")
+        if self.revisions and not any(
+            item.evidence_kind in _INDEPENDENT_BOUND_EVIDENCE for item in self.assumptions
+        ):
+            message = (
+                "bounds.assumptions: a revision needs independent evidence "
+                "(microbenchmark, byte_count, profile, or workload_shape)"
+            )
+            raise ValueError(message)
+        return self
+
+
+def hardware_limit_bound(
+    *,
+    metric: str = "throughput",
+    low: float = 1.0,
+    high: float = 2.0,
+    unit: str = "unit/s",
+    statement: str = "each unit of work moves a fixed number of bytes",
+) -> PerformanceBound:
+    """One hardware-limit bound the planner schema accepts."""
+    return PerformanceBound(
+        metric=metric,
+        bound_kind=BoundKind.HARDWARE_LIMIT,
+        low=low,
+        high=high,
+        unit=unit,
+        assumptions=(
+            BoundAssumption(statement=statement, evidence_kind=BoundEvidence.STATED_ASSUMPTION),
+        ),
+    )
+
+
 class WorkstreamExpectation(BaseModel):
     """What the planner expects of one workstream it scheduled, and what it would do next."""
 
@@ -434,6 +629,22 @@ class PlannerHandoff(BaseModel):
         max_length=16,
         description="What you are unsure of and would check next; empty when there is nothing.",
     )
+    bounds: tuple[PerformanceBound, ...] = Field(
+        min_length=1,
+        max_length=16,
+        description=(
+            "Performance bounds for the scored metrics. A bound is a first-principles limit, "
+            "not a prediction. At least one entry is a hardware_limit. Required on every turn, "
+            "including the first and any turn whose earlier handoff files omit bounds."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _includes_a_hardware_limit(self) -> PlannerHandoff:
+        if not any(item.bound_kind is BoundKind.HARDWARE_LIMIT for item in self.bounds):
+            message = "bounds: at least one entry must have bound_kind hardware_limit"
+            raise ValueError(message)
+        return self
 
 
 class PortfolioPlan(BaseModel):
@@ -461,10 +672,14 @@ class PortfolioPlan(BaseModel):
             description="Parks and abandonments of completed hypotheses; empty when there are none.",
         )
     )
-    handoff: PlannerHandoff = Field(
+    handoff: Annotated[
+        PlannerHandoff,
+        DecidedFrom("baseline", "history", "handoff_paths"),
+    ] = Field(
         description=(
             "Your note to the next planner, who starts without your memory: what you expect "
-            "of each workstream, what you would do next on each outcome, and your open doubts."
+            "of each workstream, what you would do next on each outcome, your performance "
+            "bounds, and your open doubts."
         )
     )
     evaluation_order: Annotated[tuple[str, ...], DecidedFrom("evaluations")] = Field(
@@ -777,6 +992,11 @@ class ReviewResult(BaseModel):
 __all__ = [
     "MAX_COMBINE_PARENTS",
     "MAX_PROFILE_QUESTION_CHARS",
+    "BoundAssumption",
+    "BoundEvidence",
+    "BoundKind",
+    "BoundMeasurement",
+    "BoundRevision",
     "CombineParent",
     "CombinePlan",
     "EvidenceAttributionError",
@@ -786,6 +1006,7 @@ __all__ = [
     "MergeOutcomeKind",
     "MergePlan",
     "MergeResult",
+    "PerformanceBound",
     "PlanOutline",
     "PlannedWorkstream",
     "PlannerHandoff",
@@ -804,6 +1025,7 @@ __all__ = [
     "WorkstreamExpectation",
     "WorkstreamKind",
     "WorkstreamPlan",
+    "hardware_limit_bound",
     "planned_id",
     "planner_reply_type",
     "planner_response_type",

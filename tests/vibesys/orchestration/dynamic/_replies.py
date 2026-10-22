@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.dynamic.models import hardware_limit_bound
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -19,7 +21,7 @@ def plan_reply(
 
     ``updates`` are the reply's hypothesis updates (`abandon`), left out of the reply when empty.
     """
-    note = (
+    note = dict(
         handoff
         if handoff is not None
         else {
@@ -27,6 +29,7 @@ def plan_reply(
             "doubts": ["doubt"],
         }
     )
+    note.setdefault("bounds", [hardware_limit_bound().model_dump(mode="json")])
     reply: dict[str, object] = {"reasoning": reasoning, "workstreams": list(entries)}
     if updates:
         reply["hypothesis_updates"] = list(updates)

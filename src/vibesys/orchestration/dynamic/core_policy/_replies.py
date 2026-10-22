@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan
+from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, hardware_limit_bound
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -68,6 +68,13 @@ def planner_reply_example() -> str:
                     for ordinal in ordinals
                 ],
                 "doubts": ["What is still unclear and how to check it."],
+                "bounds": [
+                    hardware_limit_bound(
+                        metric="the scored metric",
+                        unit="the metric's unit",
+                        statement="What the range assumes, and why the ends differ.",
+                    )
+                ],
             },
         }
     )

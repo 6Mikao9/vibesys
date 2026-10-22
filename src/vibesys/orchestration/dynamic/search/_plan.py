@@ -544,5 +544,10 @@ def _handoff_note(
                     subject=item.work_id,
                 )
             )
-    note = HandoffNote(expectations=tuple(kept), doubts=plan.handoff.doubts, dropped=tuple(dropped))
+    note = HandoffNote(
+        expectations=tuple(kept),
+        doubts=plan.handoff.doubts,
+        dropped=tuple(dropped),
+        bounds=plan.handoff.bounds,
+    )
     return note, tuple(unknown)

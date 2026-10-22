@@ -54,6 +54,7 @@ from vibesys.api import (
 )
 from vibesys.candidates import api as candidates
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
+from vibesys.orchestration.dynamic.models import hardware_limit_bound
 from vibesys.orchestration.dynamic.search.api import (
     FinishedWork,
     HypothesisRecord,
@@ -421,6 +422,7 @@ def portfolio(
                 for item in workstreams
             ],
             "doubts": [],
+            "bounds": [hardware_limit_bound().model_dump(mode="json")],
         },
     }
 

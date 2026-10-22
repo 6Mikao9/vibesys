@@ -32,6 +32,7 @@ from vibesys.orchestration.dynamic.models import (
     ImplementerResult,
     ReviewResult,
     StrategyReason,
+    hardware_limit_bound,
 )
 from vibesys.orchestration.dynamic.search.api import RunSnapshot
 from vs_core.api import Finish, Retained, RevisionRef, StartAttempt
@@ -53,7 +54,11 @@ def retiring_plan(disposition: str, reason_kind: str) -> str:
                     "reason": "no further progress",
                 }
             ],
-            "handoff": {"expectations": [], "doubts": []},
+            "handoff": {
+                "expectations": [],
+                "doubts": [],
+                "bounds": [hardware_limit_bound().model_dump(mode="json")],
+            },
         }
     )
 

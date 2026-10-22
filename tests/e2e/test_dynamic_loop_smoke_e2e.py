@@ -63,6 +63,7 @@ from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.events import CoreEventType, MeasurementComparedData
 from vibesys.orchestration.dynamic import PLUGIN
+from vibesys.orchestration.dynamic.models import hardware_limit_bound
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import (
     FakeProvider,
@@ -498,6 +499,7 @@ _PLAN = {
             }
         ],
         "doubts": [],
+        "bounds": [hardware_limit_bound().model_dump(mode="json")],
     },
 }
 _IMPLEMENTED = {
