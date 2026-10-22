@@ -495,6 +495,12 @@ class LoopInput:
         )
         (task / "benchmark.py").write_text(_BENCHMARK, encoding="utf-8")
         (task / "accuracy.py").write_text(_ACCURACY, encoding="utf-8")
+        # The benchmark reports one protocol metric. A protocol-2 task names that metric
+        # in objectives.toml; preflight refuses the launch until it does.
+        (task / "objectives.toml").write_text(
+            '[[objective]]\nname = "throughput"\ndirection = "max"\n',
+            encoding="utf-8",
+        )
         connector = FakeConnector(base / "cluster")
         cluster = connector.state
         remote = base / "remote"

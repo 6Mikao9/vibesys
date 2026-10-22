@@ -162,13 +162,64 @@ def _resolve_metric_space(args: argparse.Namespace) -> MetricSpace:
     The tolerance always comes from the task file: it describes the workload's
     measurement variation, which a command-line axis list does not change.
     """
-    space = _load_metric_space_toml(args.input_bundle.task_root)
+    bundle = args.input_bundle
+    try:
+        space = _load_metric_space_toml(bundle.task_root)
+    except ValueError as exc:
+        _configuration_error(
+            f"task {bundle.task_name!r}: {exc}",
+            code="invalid_objectives",
+            stage="input_loading",
+        )
     if getattr(args, "objective", None):
         return MetricSpace(
             objectives=tuple(args.objective),
             relative_noise=space.relative_noise,
         )
     return space
+
+
+def _require_protocol_objectives(
+    args: argparse.Namespace, descriptor: OrchestrationDescriptor
+) -> None:
+    """Refuse a protocol-2 benchmark whose run has no objective axes.
+
+    That benchmark reports several metrics. With no axes the measurement still runs,
+    then fails because no headline is defined. Name the task and its objectives file
+    before any of that work starts.
+    """
+    bundle = args.input_bundle
+    if bundle.benchmark_result_protocol is None:
+        return
+    path = bundle.task_root / "objectives.toml"
+    if "metric_space" in descriptor.options:
+        raw = descriptor.options["metric_space"]
+        if not isinstance(raw, dict) or not isinstance(raw.get("objectives", []), list):
+            _configuration_error(
+                f"task {bundle.task_name!r}: {path.name} did not resolve to an objective list",
+                code="invalid_objectives",
+                stage="input_loading",
+            )
+        axes = raw.get("objectives", [])
+    else:
+        try:
+            axes = load_objectives(bundle.task_root).objective
+        except ValueError as exc:
+            _configuration_error(
+                f"task {bundle.task_name!r}: {exc}",
+                code="invalid_objectives",
+                stage="input_loading",
+            )
+    if axes:
+        return
+    state = "declares no objectives" if path.is_file() else "is missing"
+    _configuration_error(
+        f"task {bundle.task_name!r}: {path.name} {state}. A benchmark with "
+        "result_protocol = 2 reports several metrics and has no headline until that "
+        "file names them with [[objective]] name and direction.",
+        code="missing_objectives",
+        stage="input_loading",
+    )
 
 
 def _validate_openevolve_options(args: argparse.Namespace) -> None:
@@ -387,6 +438,7 @@ def validated_run_request(
             descriptor = _evolve_policy_descriptor(args, bundle)
             objective = bundle.objective
         _validate_options(descriptor)
+        _require_protocol_objectives(args, descriptor)
         request = RunRequest(
             project_root=bundle.root,
             orchestration=descriptor,
