@@ -98,3 +98,29 @@ export function observeRun(skeleton: Skeleton, hint?: RunLivenessHint) {
 export function isFinalLoad(load: SkeletonLoad | undefined): boolean {
   return load?.complete === true && observeRun(load.skeleton).final;
 }
+
+/** Where a load stands; a pure function of the facts the gateway has told the reader. */
+export type LoadProgress =
+  | {readonly phase: 'skeleton'}
+  | {readonly phase: 'history'; readonly through: bigint; readonly committed: bigint}
+  | {readonly phase: 'complete'};
+
+export function loadProgress(load: SkeletonLoad | undefined): LoadProgress {
+  if (load === undefined) return {phase: 'skeleton'};
+  if (load.complete) return {phase: 'complete'};
+  return {phase: 'history', through: load.skeleton.throughSeq ?? 0n, committed: load.committedSeq};
+}
+
+/** The share of the committed history applied, from 0 to 1. */
+export function progressFraction(progress: LoadProgress): number {
+  switch (progress.phase) {
+    case 'skeleton':
+      return 0;
+    case 'complete':
+      return 1;
+    case 'history':
+      return progress.committed <= 0n
+        ? 1
+        : Math.min(1, Number((progress.through * 1000n) / progress.committed) / 1000);
+  }
+}

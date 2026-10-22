@@ -13,7 +13,7 @@ export interface GatewayBridge {
     method: string,
     bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
-    ended: (error?: string) => void,
+    ended: (error?: string, status?: number) => void,
   ): {cancel(): void};
 }
 export interface GatewayRequest {
@@ -24,7 +24,7 @@ export interface GatewayRequest {
 }
 export type GatewayReply =
   | {readonly bytes: Uint8Array}
-  | {readonly end: true; readonly error?: string};
+  | {readonly end: true; readonly error?: string; readonly status?: number};
 
 export function parseGatewayRequest(value: unknown): GatewayRequest {
   if (value === null || typeof value !== 'object')
