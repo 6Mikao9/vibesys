@@ -70,6 +70,7 @@ ChildManifest.members optional {"default":[],"items":{"$ref":"#/$defs/ResourceId
 Closing {"additionalProperties":false,"type":"object"}
 Closing.cause optional {"anyOf":[{"$ref":"#/$defs/Failure"},{"type":"null"}],"default":null}
 Closing.evidence optional {"$ref":"#/$defs/Evidence","default":{"proof":null,"readings":[]}}
+Closing.input optional {"anyOf":[{"$ref":"#/$defs/Baseline"},{"type":"null"}],"default":null}
 Closing.merge optional {"anyOf":[{"$ref":"#/$defs/MergeReport"},{"type":"null"}],"default":null}
 Closing.result optional {"anyOf":[{"$ref":"#/$defs/Result"},{"type":"null"}],"default":null}
 Closing.unreachable optional {"anyOf":[{"$ref":"#/$defs/Unreachable"},{"type":"null"}],"default":null}
@@ -178,6 +179,7 @@ InputReading.accuracy_passed optional {"anyOf":[{"type":"boolean"},{"type":"null
 InputReading.benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
 InputReading.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
 InputReading.partial optional {"anyOf":[{"$ref":"#/$defs/PartialRow"},{"type":"null"}],"default":null}
+InputReading.samples optional {"default":1,"minimum":1,"type":"integer"}
 InvocationId {"additionalProperties":false,"type":"object"}
 InvocationId.kind optional {"const":"invocation","default":"invocation","type":"string"}
 InvocationId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}

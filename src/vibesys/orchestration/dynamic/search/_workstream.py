@@ -12,7 +12,7 @@ resumes in the same workspace from there (`resumed`).
 from dataclasses import dataclass
 
 from vibesys.candidates.api import Baseline
-from vibesys.orchestration.dynamic.search._measure import the_input
+from vibesys.orchestration.dynamic.search._measure import the_bar, the_input
 from vibesys.orchestration.dynamic.search._outcomes import (
     RESTARTED,
     Closing,
@@ -112,7 +112,8 @@ async def close_with(
     else:
         closing = await do_work(ctx, w, ws, work, at)
     if closing.scored(w.plan):
-        await the_input(ctx, w, work)  # a candidate is scored against it
+        work.baseline = await the_bar(ctx, ws, await the_input(ctx, w, work))
+        closing = closing.model_copy(update={"input": work.baseline})
     settled = keep(ctx, w, ws, closing, work.baseline)
     label_outcome(ctx, w, closing, settled, work)
     mark(ctx, w, work, ResumeStage.SETTLING, result=closing.result, closing=closing)

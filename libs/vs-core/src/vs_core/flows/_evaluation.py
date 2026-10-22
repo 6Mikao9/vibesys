@@ -19,7 +19,14 @@ from vs_core._strategy_operations import (
     EvidenceReadingsBase,
     LocalValidationReport,
 )
-from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value
+from vs_core.types.common import (
+    THIS_RUN,
+    DecisionId,
+    EvidenceKind,
+    ObservationStatus,
+    RevisionRef,
+    Value,
+)
 from vs_core.types.evaluation import EvidenceRef, MeasurementPlan, MeasurementResult
 from vs_core.types.measurement import Comparison, ComparisonSettled, StatedComparison
 from vs_core.types.search import MeasuredPlan, MeasurementFinished, OperationFinished
@@ -29,6 +36,7 @@ from vs_core.types.until import Failed, Within
 from ._sources import First
 
 if TYPE_CHECKING:
+    from vs_core._measurement_recipe import MeasurementRecipe
     from vs_core.types.common import AttemptRef, Scope, Seconds
     from vs_core.types.search import RunView
 
@@ -286,6 +294,20 @@ class Evaluation:
             lambda view: _taken(view.measurements, workspace.ref, revision), _REFS
         )
 
+    def recorded(
+        self, revision: RevisionRef, *, purpose: str, kind: EvidenceKind, recipe: MeasurementRecipe
+    ) -> tuple[EvidenceRef, ...]:
+        """Every conclusive trusted record of ``kind`` the ledger holds of ``revision`` for ``purpose``.
+
+        Whichever scope took it (the strategy's own measurement, or a run core made on its
+        behalf) and whichever request, as long as it was taken under ``recipe``'s evaluator,
+        workload and environment, so the samples are of one measurement. Oldest first. The
+        read is journaled with the flow, so a replay sees the records the decision saw.
+        """
+        return self._kit.read(
+            lambda view: _recorded(view.measurements, revision, purpose, kind, recipe), _REFS
+        )
+
     def last_evaluated(self, workspace: Workspace) -> RevisionRef | None:
         """The revision of the workspace's newest conclusive trusted evaluation, if any.
 
@@ -296,6 +318,28 @@ class Evaluation:
         return self._kit.read(
             lambda view: _last_evaluated(view.measurements, workspace.ref), _REVISION
         )
+
+
+def _recorded(
+    measurements: tuple[EvidenceRef, ...],
+    revision: RevisionRef,
+    purpose: str,
+    kind: EvidenceKind,
+    recipe: MeasurementRecipe,
+) -> tuple[EvidenceRef, ...]:
+    held = (
+        item
+        for item in measurements
+        if item.provenance == "trusted"
+        and item.status == ObservationStatus.SUCCEEDED
+        and item.candidate == revision
+        and item.purpose == purpose
+        and item.kind is kind
+        and item.evaluator_digest == recipe.evaluator_digest
+        and item.workload_digest == recipe.workload_digest
+        and item.environment_digest == recipe.environment_digest
+    )
+    return tuple(sorted(held, key=lambda item: item.observation_sequence))
 
 
 def _attempt_evaluations(

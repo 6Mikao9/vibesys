@@ -206,6 +206,9 @@ class World(TypedDict, total=False):
     """The input's measurement ends as ``baseline`` once only: measured again, it is measured."""
     handoff_writes_open: bool
     """Leave each handoff write open for the story to answer; else the owner writes it at once."""
+    input_samples: list[float]
+    """The throughputs of further trusted baseline benchmarks the ledger holds of the input once
+    it is measured, as core's own runs of the base leave them (the input's own is 50)."""
     merging: bool
     """The planner merges the mergeable candidates whenever no merge runs."""
     merger_answers: list[int]
@@ -255,6 +258,7 @@ class Host:
     input_recovers: bool = False
     input_measurements: int = 0
     """How many times the host measured the input."""
+    input_samples: list[float] = field(default_factory=list)
     handoff_writes_open: bool = False
     merging: bool = False
     merger_answers: list[int] = field(default_factory=list)
@@ -570,6 +574,8 @@ class Host:
                 for index, stage in enumerate(plan.stages)
             )
         )
+        if is_input:
+            self._record(refs, candidate, request.scope)
         failed = not refs
         result = MeasurementResult(
             scope=request.scope,
@@ -578,6 +584,32 @@ class Host:
             failure=self.input_blame if is_input and self.baseline != "measured" else None,
         )
         self.run.answer(asked, MeasurementFinished(decision=asked.decision, result=result))
+
+    def _record(
+        self, refs: tuple[EvidenceRef, ...], input_revision: RevisionRef, scope: Scope
+    ) -> None:
+        """Keep the input's records in the ledger the run's view states, with the further samples."""
+        samples = tuple(
+            EvidenceRef(
+                evidence_id=EvidenceId(root=f"benchmark:baseline:sample-{index}"),
+                kind=EvidenceKind.BENCHMARK,
+                purpose="baseline",
+                scope=scope,
+                source_request=RequestId(root=f"base-run-{index}"),
+                candidate=input_revision,
+                observation_sequence=index + 1,
+                evaluator_digest=refs[0].evaluator_digest,
+                workload_digest=refs[0].workload_digest,
+                environment_digest=refs[0].environment_digest,
+                provenance="trusted",
+                status=ObservationStatus.SUCCEEDED,
+            )
+            for index, _ in enumerate(self.input_samples)
+            if refs
+        )
+        held = self.run.view.changes.get("measurements", ())
+        assert isinstance(held, tuple)
+        self.run.view.changes["measurements"] = (*held, *refs, *samples)
 
     def _benchmark_fails(self, stage: str, candidate: RevisionRef, *, is_input: bool) -> bool:
         """Whether the benchmark of a candidate the world was told fails it does."""
@@ -618,8 +650,11 @@ class Host:
         metrics = ()
         passed = ref.status is ObservationStatus.SUCCEEDED
         if ref.kind is EvidenceKind.BENCHMARK and passed:
+            sample = ref.evidence_id.root.removeprefix("benchmark:baseline:sample-")
             value = (
-                INPUT_THROUGHPUT
+                self.input_samples[int(sample)]
+                if sample != ref.evidence_id.root
+                else INPUT_THROUGHPUT
                 if ref.purpose == "baseline"
                 else self.throughputs.get(ref.candidate.revision_id.root, CANDIDATE_THROUGHPUT)
             )

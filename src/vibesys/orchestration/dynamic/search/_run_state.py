@@ -559,6 +559,18 @@ class RunRecord:
             self.accepted = []
         self.main.baseline = baseline
 
+    def refined(self, baseline: candidates.Baseline | None) -> None:
+        """Fold the input as a settlement saw it, when its bar rests on more samples than ours.
+
+        Settlements fold in the order they finished, and the samples of the input only grow, so
+        the bar main is compared with is the best evidence any settlement so far was decided on.
+        """
+        if baseline is not None and candidates.samples_of(baseline) > candidates.samples_of(
+            self.baseline
+        ):
+            self.baseline = baseline
+            self.main.baseline = baseline
+
     def _merge_ids(self) -> frozenset[str]:
         """The IDs merges were scheduled under, finished or running."""
         work = (*self.finished_work, *self.running.values())
@@ -1041,6 +1053,7 @@ class RunRecord:
     def finished(self, done: WorkstreamDone) -> None:
         """Keep what a finished workstream leaves behind: its record, round and parent."""
         start = done.start
+        self.refined(done.input)
         del self.running[start.key]
         self.submitted.pop(start.key, None)
         self.waits.pop(start.key, None)
