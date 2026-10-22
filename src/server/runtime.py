@@ -487,16 +487,16 @@ class ServerRuntime:
             )
         transport.wait_until_delivered(watermark, DETACHED_DRAIN_TIMEOUT_SECONDS)
 
-    def interrupt(self) -> bool:
-        """Stop the run on Ctrl-C, cancelling its work in flight; False when no run is installed.
+    def interrupt(self, signal: Signals = Signals.SIGINT) -> bool:
+        """Stop the run for a process signal; False when no run is installed.
 
         The stop goes through the run's control, the one authority for its stop, as an
-        operator's cancelling stop does; a repeated Ctrl-C changes nothing. The server
+        operator's cancelling stop does; a repeated signal changes nothing. The server
         then leaves once the run has stopped, without waiting for its clients to go.
         """
         if not self.controls.stop(StopMode.CANCEL):
             return False
-        self.shutdown(Signals.SIGINT)
+        self.shutdown(signal)
         return True
 
     def shutdown(self, signal: Signals | None = None) -> None:

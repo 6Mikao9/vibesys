@@ -141,8 +141,11 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
 
 def _inactive_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:
     run = state.run
+    # A stop during the drain finishes it. The epoch is parked, not failed, and
+    # the same stop again is the same finish. Refusing it left the only way out
+    # a signal that cancelled the process.
     if (
-        control.action in ("steer", "withdraw")
+        control.action in ("steer", "withdraw", "stop")
         and run.status in (RunStatus.DRAINING, RunStatus.PARKED)
     ) or (run.status == RunStatus.DRAINING and control.action == "pause_now"):
         return None

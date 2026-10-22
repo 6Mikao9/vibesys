@@ -10,6 +10,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from vs_agent.api import AgentExecutionCancelledError
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -608,6 +609,9 @@ class _ParkedTurns:
         return kinds.count(RunControlTransitionKind.RESUMED)
 
 
+@pytest.mark.regression
+@example(waiters=[_Waiter(kind="capacity", seconds=100.0, cancelled=True)], cancel_at=2.0, seed=0)
+@example(waiters=[_Waiter(kind="timed", seconds=100.0, cancelled=False)], cancel_at=99.0, seed=0)
 @given(
     waiters=_WAITERS,
     cancel_at=st.floats(min_value=2.0, max_value=99.0),
@@ -619,12 +623,10 @@ def test_a_turns_cancel_ends_only_its_own_wait(
     """Cancelling any subset of the parked turns leaves the run, and every other turn, as it was.
 
     Timed turns arm the run's timed resume at 0 s; capacity turns wait under the operator's
-    request from 1 s. Cancelled turns end at once and change nothing: the run stays paused,
-    the others stay parked under the same request, and the run resumes itself, once, at the
-    earliest deadline still in force (every timed one, and each surviving capacity wait). The
-    timed resume belongs to the channel, so it fires even when every turn that armed it left.
-    Before, a cancelled wait counted as elapsed and resumed the run, and the first capacity
-    turn to leave dropped the operator's request for all of them.
+    request from 1 s. Cancelled turns end at once. Surviving waiters and timers keep the run
+    paused until the earliest deadline still in force. When the last capacity waiter leaves
+    and no timer owns the quota pause, leave_capacity ends the orphaned pause immediately.
+    A timed resume belongs to the channel, so it fires even when the turn that armed it left.
     """
     run = _ParkedTurns(waiters, seed)
     threads, control = run.threads, run.control
@@ -642,7 +644,8 @@ def test_a_turns_cancel_ends_only_its_own_wait(
             assert control.resume_when_capacity_returns()
         threads.sleep(cancel_at - 1.0)
         run.cancel()
-        threads.sleep(1.0)
+        # Observe before the earliest deadline, even at the latest cancellation.
+        threads.sleep(0.5)
         after_cancel = (control.pause_requested(), run.survivors_parked())
         # The run loop's control poll, after the earliest deadline still in force.
         threads.sleep(max(run.base + (resume_at or 0.0) + 1.0 - threads.now(), 0.0))
@@ -653,11 +656,11 @@ def test_a_turns_cancel_ends_only_its_own_wait(
 
     paused_after_cancel, survivors_parked, paused_at_end = threads.run(main)
 
-    assert paused_after_cancel
+    assert paused_after_cancel is (resume_at is not None)
     assert survivors_parked
     assert len(set(run.requests.values())) <= 1
-    assert paused_at_end is (resume_at is None)
-    assert run.resumed() == (0 if resume_at is None else 1)
+    assert not paused_at_end
+    assert run.resumed() == 1
     for index, waiter in enumerate(waiters):
         wake, at = run.outcomes.get(index, (None, None))
         if waiter.cancelled:
@@ -866,3 +869,23 @@ def test_a_stop_core_recorded_stays_in_force_across_a_runtime_restart(
         if polled:
             assert _never_weaker(stop_mode(core.run), process.channel.stop_mode())
     assert stop_mode(core.run) == process.channel.stop_mode()
+
+
+@pytest.mark.regression
+@example(starts=2)
+@given(starts=st.integers(min_value=1, max_value=8))
+def test_park_keeps_admitted_evaluations_authorized_through_executor_retries(starts: int) -> None:
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    control.land_park(("admitted",))
+    started: list[str] = []
+    for _ in range(starts):
+        control.start_execution(lambda: started.append("admitted"), evaluation_id="admitted")
+        control.settle_drain_job("admitted")
+        assert control.drain_ready
+    assert len(started) == starts
+    with pytest.raises(AgentExecutionCancelledError):
+        control.start_execution(lambda: started.append("new"), evaluation_id="new")
+    control.land_park(immediate=True)
+    with pytest.raises(AgentExecutionCancelledError):
+        control.start_execution(lambda: started.append("admitted"), evaluation_id="admitted")
+    assert len(started) == starts

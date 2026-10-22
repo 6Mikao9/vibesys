@@ -14,12 +14,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import FAKE_REGISTRY, FakeView
 
 from .flow_support import Config, Plan, answer_of, ask, start
-from .test_flows import Begin, answer, ended, stop_aware, waits
+from .test_flows import Begin, answer, ended, stop_aware, waits, worker
 from .test_flows_codec import ask_twice
 
 if TYPE_CHECKING:
@@ -178,3 +180,39 @@ def test_a_run_saved_stopped_by_the_previous_version_resumes_and_lifts() -> None
         envelope.strategy, core.StopLifted(control=lifted.control), FakeView().current()
     )
     assert flows.live.stop is None
+
+
+@pytest.mark.regression
+@example(count=17, restarting=True)
+@given(count=st.integers(min_value=1, max_value=24), restarting=st.booleans())
+def test_new_epoch_replays_every_live_wait_instead_of_restarting_from_old_checkpoints(
+    count: int, *, restarting: bool
+) -> None:
+    async def pending(ctx: core.Flow, config: Config) -> core.NoWinner:
+        ctx.checkpoint(config)
+        async with ctx.group() as tasks:
+            for index in range(count):
+                tasks.start(str(index), worker, str(index))
+            answers: list[int] = []
+            async for value in tasks:
+                assert isinstance(value, int)
+                answers.append(value)
+        return core.NoWinner(reason=str(sum(answers)))
+
+    run = start(pending, restarting=restarting)
+    admitted = tuple(run.open)
+    before = tuple(run.decisions)
+    run.send(
+        core.StopLifted(
+            control=core.ControlInput(
+                control_id=core.ControlId(root="epoch:2"), action="resume", when="now"
+            ),
+            new_epoch=True,
+        )
+    )
+    assert tuple(run.decisions) == before
+    for index, asked in enumerate(admitted):
+        run.reply(asked, Plan(n=index))
+    assert ended(run).reason == f"no-winner: {sum(range(count))}"
+    assert not run.state.dropped
+    assert not run.state.restart_settled

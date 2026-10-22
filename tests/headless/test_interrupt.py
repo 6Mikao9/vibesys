@@ -247,9 +247,9 @@ async def test_every_shutdown_signal_ends_the_run_cancelling_its_work_never_drai
 ) -> None:
     """SIGINT and SIGTERM end a run the same way: its work in flight is cancelled, not drained.
 
-    Ctrl-C asks for a stop in ``StopMode.CANCEL``; SIGTERM and SIGHUP cancel the run's
-    task. Either way the run's core cancels its evaluations and the teardown closes the
-    executors, which cancel every job (``test_slurm_shutdown_leaves_no_job``).
+    Every handled signal asks for ``StopMode.CANCEL``. The run commits its stopped
+    result before process exit; no signal turns normal operator termination into a
+    failed run by cancelling the driver task.
     """
     signals = FakeSignalSource()
     session = _EndingSession(signals, delivered)
@@ -266,7 +266,8 @@ async def test_every_shutdown_signal_ends_the_run_cancelling_its_work_never_drai
         assert exited.value.code == 128 + delivered[0]
 
     assert all(mode is StopMode.CANCEL for mode in session.stops)
-    assert session.stops or session.cancelled
+    assert session.stops
+    assert not session.cancelled
     assert not any(signals.handles(number) for number in _SHUTDOWN)
 
 

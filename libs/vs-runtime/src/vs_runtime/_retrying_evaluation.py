@@ -25,6 +25,7 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvidenceOutcome,
+    ExecutorObservation,
     ExecutorPoll,
     ExecutorRejectedError,
     PollingEvaluationExecutor,
@@ -40,7 +41,6 @@ if TYPE_CHECKING:
     from vs_evaluation.api import (
         AvailabilitySnapshot,
         EvaluationStateNamespace,
-        ExecutorObservation,
         ResourceRequirements,
     )
     from vs_runtime._measurement_progress import StageOutputOpener, StageRun
@@ -147,6 +147,7 @@ class _Tries(BaseModel):
 
     request: EvaluationRequest
     attempt: int = Field(default=1, ge=1)
+    cancelled: bool = Field(default=False, strict=True)
 
 
 class RetryingEvaluationExecutor:
@@ -187,7 +188,8 @@ class RetryingEvaluationExecutor:
             # request as it is now asked for, so the tries to come carry the purpose.
             tries = tries.model_copy(update={"request": request})
             self._namespace.save(self._path(handle_id), tries)
-        await self._submit_try(handle_id, tries)
+        if not tries.cancelled:
+            await self._submit_try(handle_id, tries)
 
     async def poll(self, handle_id: str) -> ExecutorPoll:
         """Inspect the current try; start the next one instead of reporting a retryable failure."""
@@ -196,8 +198,12 @@ class RetryingEvaluationExecutor:
             return await self._inner.poll(handle_id)
         current = attempt_handle(handle_id, tries.attempt)
         polled = await self._inner.poll(current)
-        if polled.phase is PollPhase.UNSUBMITTED and tries.attempt > 1:
-            # The next try was recorded and the host stopped before starting it.
+        if tries.cancelled:
+            return await self._finish_cancel(current, polled)
+        if polled.phase is PollPhase.UNSUBMITTED:
+            # Every try is durable intent, including the first. A process-local
+            # executor loses its tasks on restart; UNSUBMITTED proves it holds
+            # none, so replay the same identity and plan without charging a retry.
             await self._submit_try(handle_id, tries)
             return ExecutorPoll(phase=PollPhase.QUEUED, attempt=polled.attempt)
         if polled.terminal is None:
@@ -224,11 +230,30 @@ class RetryingEvaluationExecutor:
 
     async def cancel(self, handle_id: str) -> None:
         """Cancel the current try; a cancelled try is never retried."""
+        tries = self._load(handle_id)
+        if tries is not None and not tries.cancelled:
+            # Cancellation is durable intent too: a lost executor must not
+            # resurrect work that the operator explicitly cancelled.
+            self._namespace.save(
+                self._path(handle_id), tries.model_copy(update={"cancelled": True})
+            )
         await self._inner.cancel(self._current(handle_id))
 
     async def close(self) -> None:
         """Close the inner executor."""
         await self._inner.close()
+
+    async def _finish_cancel(self, current: str, polled: ExecutorPoll) -> ExecutorPoll:
+        """Recover cancellation committed before the previous host contacted its executor."""
+        if polled.phase not in (PollPhase.ENDED, PollPhase.UNSUBMITTED):
+            await self._inner.cancel(current)
+            polled = await self._inner.poll(current)
+        if polled.phase is PollPhase.UNSUBMITTED:
+            return ExecutorPoll(
+                phase=PollPhase.ENDED,
+                terminal=ExecutorObservation(state=EvaluationState.CANCELED),
+            )
+        return polled
 
     async def _submit_try(self, handle_id: str, tries: _Tries) -> None:
         self._tries.record(handle_id, tries.attempt)

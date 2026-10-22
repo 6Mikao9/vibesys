@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -315,3 +315,51 @@ def test_a_measurement_refused_because_the_run_environment_is_unavailable_is_nev
     assert inner.submitted == ["h"]
     assert terminal.run_environment_unavailable is True
     assert not MeasurementFailure.RUN_ENVIRONMENT_UNAVAILABLE.retryable
+
+
+@pytest.mark.regression
+@example(count=17)
+@given(count=st.integers(min_value=1, max_value=24))
+def test_restart_reloads_every_durable_first_try_when_the_executor_lost_its_tasks(
+    count: int,
+) -> None:
+    namespace = InMemoryEvaluationNamespace()
+    retries = EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=1)
+    first = RetryingEvaluationExecutor(ScriptedExecutor((Outcome.SUCCEEDED,)), retries, namespace)
+    recovered_inner = ScriptedExecutor((Outcome.SUCCEEDED,))
+    recovered = RetryingEvaluationExecutor(recovered_inner, retries, namespace)
+
+    async def story() -> None:
+        for index in range(count):
+            await first.submit(_request(str(index)), handle_id=f"h-{index}")
+        for index in range(count):
+            handle = f"h-{index}"
+            await recovered.poll(handle)
+            result = await recovered.poll(handle)
+            assert result.terminal == _terminal(Outcome.SUCCEEDED)
+        assert set(recovered_inner.submitted) == {f"h-{index}" for index in range(count)}
+
+    run_virtual(VirtualClock(), story())
+
+
+@pytest.mark.regression
+@example(count=17)
+@given(count=st.integers(min_value=1, max_value=24))
+def test_recovery_respects_durable_cancellation_instead_of_resurrecting_it(count: int) -> None:
+    namespace = InMemoryEvaluationNamespace()
+    retries = EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=1)
+    first = RetryingEvaluationExecutor(ScriptedExecutor((Outcome.SUCCEEDED,)), retries, namespace)
+    inner = ScriptedExecutor((Outcome.SUCCEEDED,))
+    recovered = RetryingEvaluationExecutor(inner, retries, namespace)
+
+    async def story() -> None:
+        for index in range(count):
+            handle = f"h-{index}"
+            await first.submit(_request(str(index)), handle_id=handle)
+            await first.cancel(handle)
+        for index in range(count):
+            result = await recovered.poll(f"h-{index}")
+            assert result.terminal == ExecutorObservation(state=EvaluationState.CANCELED)
+        assert inner.submitted == []
+
+    run_virtual(VirtualClock(), story())

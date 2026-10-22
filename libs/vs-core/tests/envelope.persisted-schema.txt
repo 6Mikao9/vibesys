@@ -427,6 +427,9 @@ EvaluationHistoryAvailability {"enum":["complete","unavailable"],"type":"string"
 EvaluationHistoryCursor {"additionalProperties":false,"type":"object"}
 EvaluationHistoryCursor.ordinal optional {"$ref":"#/$defs/Count","default":0}
 EvaluationHistoryCursor.submission_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
+EvaluationLease {"additionalProperties":false,"type":"object"}
+EvaluationLease.key required {"minLength":1,"type":"string"}
+EvaluationLease.retain optional {"default":false,"type":"boolean"}
 EvaluationRequest {"discriminator":{"mapping":{"cancel_owned_job":"#/$defs/CancelOwnedJob","collect_evidence":"#/$defs/CollectEvidence","inspect_owned_job":"#/$defs/InspectOwnedJob","observe_owned_job":"#/$defs/ObserveOwnedJob","submit_measurement":"#/$defs/SubmitMeasurement"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/SubmitMeasurement"},{"$ref":"#/$defs/ObserveOwnedJob"},{"$ref":"#/$defs/InspectOwnedJob"},{"$ref":"#/$defs/CancelOwnedJob"},{"$ref":"#/$defs/CollectEvidence"}]}
 EvaluationStageOutcome {"enum":["passed","failed","unknown"],"type":"string"}
 EvaluationStageResult {"additionalProperties":false,"type":"object"}
@@ -449,6 +452,9 @@ EvaluationTerminalFacts.accuracy_passed optional {"default":false,"type":"boolea
 EvaluationTerminalFacts.failed_benchmark optional {"anyOf":[{"$ref":"#/$defs/BenchmarkFailure"},{"type":"null"}],"default":null}
 EvaluationTerminalFacts.stages optional {"default":[],"items":{"$ref":"#/$defs/EvaluationStageResult"},"type":"array"}
 EvaluationTerminalFacts.traceback_signature optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
+EvaluationTiming {"additionalProperties":false,"type":"object"}
+EvaluationTiming.admitted_at optional {"anyOf":[{"minimum":0.0,"type":"number"},{"type":"null"}],"default":null}
+EvaluationTiming.queued_at required {"minimum":0.0,"type":"number"}
 EventCursor {"additionalProperties":false,"type":"object"}
 EventCursor.sequence required {"$ref":"#/$defs/Count"}
 EventId {"additionalProperties":false,"type":"object"}
@@ -663,6 +669,7 @@ ItemInputTarget.item_id required {"$ref":"#/$defs/ItemId"}
 ItemInputTarget.kind optional {"const":"item","default":"item","type":"string"}
 JobProgress {"additionalProperties":false,"type":"object"}
 JobProgress.estimated_start_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
+JobProgress.evaluation_timing optional {"anyOf":[{"$ref":"#/$defs/EvaluationTiming"},{"type":"null"}],"default":null}
 JobProgress.observation_sequence required {"$ref":"#/$defs/Count"}
 JobProgress.observed_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 JobProgress.pending_reason optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
@@ -737,6 +744,7 @@ MeasurementPlan.accuracy_stage optional {"anyOf":[{"minLength":1,"type":"string"
 MeasurementPlan.candidate required {"anyOf":[{"$ref":"#/$defs/RevisionRef"},{"$ref":"#/$defs/SnapshotResultRef"}]}
 MeasurementPlan.dedicated_measurement_resources optional {"default":false,"type":"boolean"}
 MeasurementPlan.environment_digest required {"type":"string"}
+MeasurementPlan.evaluation_lease optional {"anyOf":[{"$ref":"#/$defs/EvaluationLease"},{"type":"null"}],"default":null}
 MeasurementPlan.evaluator_digest required {"type":"string"}
 MeasurementPlan.measured_input optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
 MeasurementPlan.policy required {"enum":["ordered","parallel"],"type":"string"}

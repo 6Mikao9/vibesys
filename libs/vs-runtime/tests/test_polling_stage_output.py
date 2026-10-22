@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from vs_evaluation.api import (
     MAX_EVIDENCE_SUMMARY_CHARS,
@@ -23,15 +25,19 @@ from vs_evaluation.api import (
     EvidenceFingerprints,
     EvidenceKind,
     ExecutorObservation,
+    PollPhase,
     SemanticEvaluationStage,
     TrustedEvidence,
 )
+from vs_evaluation.api.testing import InMemoryEvaluationNamespace
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api import (
     AccuracyEvaluation,
     BenchmarkEvaluation,
     BenchmarkFailureKind,
+    EvaluationRetries,
     PollingEvaluationExecutor,
+    RetryingEvaluationExecutor,
 )
 from vs_runtime.api.core import StageRun
 from vs_runtime.api.infrastructure import create_run_control_channel
@@ -281,3 +287,58 @@ async def test_pause_drain_lets_every_stage_of_an_executing_job_finish() -> None
     assert (await ended).state is EvaluationState.SUCCEEDED
     assert len(evaluation.accuracy_calls) == len(evaluation.benchmark_calls) == 1
     await executor.close()
+
+
+@pytest.mark.regression
+@example(count=17)
+@given(count=st.integers(min_value=1, max_value=5))
+async def test_fresh_process_executor_recovers_all_submitted_measurements(count: int) -> None:
+    namespace = InMemoryEvaluationNamespace()
+    retries = EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=1)
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
+    before = FakeEvaluation()
+    gates = [before.gate("accuracy", index) for index in range(count)]
+    first = RetryingEvaluationExecutor(
+        PollingEvaluationExecutor(before, workspaces, clock=ManualClock()), retries, namespace
+    )
+    snapshot = await workspaces.root.snapshot("candidate")
+    try:
+        for index in range(count):
+            await first.submit(_request(snapshot), handle_id=f"pending-{index}")
+
+        async def entered() -> bool:
+            return gates[0].entered.is_set()
+
+        await yield_until(entered, bool, "the first admitted evaluation entering its gate")
+        # A shared admission slot may hold the rest in its queue. All logical
+        # submissions must survive, whether queued or already executing.
+        for index in range(count):
+            assert (await first.poll(f"pending-{index}")).phase in (
+                PollPhase.QUEUED,
+                PollPhase.RUNNING,
+            )
+        assert 1 <= len(before.accuracy_calls) <= count
+    finally:
+        await first.close()
+    after = FakeEvaluation()
+    resumed = RetryingEvaluationExecutor(
+        PollingEvaluationExecutor(after, workspaces, clock=ManualClock()), retries, namespace
+    )
+    try:
+        for index in range(count):
+            handle = f"pending-{index}"
+            admitted = await resumed.poll(handle)
+            assert admitted.phase is PollPhase.QUEUED
+            result = await yield_until(
+                lambda handle=handle: resumed.poll(handle),
+                lambda seen: seen.phase is PollPhase.ENDED,
+                "the recovered measurement",
+                turns=1000,
+            )
+            assert result.terminal is not None
+            assert result.terminal.state is EvaluationState.SUCCEEDED
+        assert len(after.accuracy_calls) == count
+    finally:
+        await resumed.close()

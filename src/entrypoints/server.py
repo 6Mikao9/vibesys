@@ -111,8 +111,8 @@ def _termination_signal(
     """Forward the launcher's signals into the server's run and cleanup boundary.
 
     A Ctrl-C (SIGINT) stops the run through its control, cancelling its work in flight,
-    as headless does; with no run to stop, it ends the server like SIGTERM. SIGTERM and
-    SIGHUP end the server now, through its cleanup boundary. The relay owns SIGINT too,
+    as headless does. SIGTERM and SIGHUP use the same durable stop path when a run
+    is installed; without one, a signal ends the server through its cleanup boundary. The relay owns SIGINT too,
     so ``asyncio.run`` installs no handler that would cancel the run's driver on the
     first SIGINT and raise inside its teardown on the next.
 
@@ -135,7 +135,7 @@ def _termination_signal(
 
         def on_signal(signum: int) -> None:
             number = Signals(signum)
-            if number is Signals.SIGINT and runtime.interrupt():
+            if runtime.interrupt(number):
                 return
             runtime.shutdown(number)
             interrupt.request()

@@ -50,6 +50,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
     ChannelRunControl,
+    PauseNowRequest,
     PauseRequest,
     RuntimeRunControlChannel,
 )
@@ -106,7 +107,7 @@ async def _assert_parked_writer_recovery(host: CoreRunHost, config: RunLoopConfi
     host.shell.release_lease(now_at=host.clock.now())
 
 
-async def test_pause_drain_cancels_the_queued_job_exits_and_relaunch_reruns_it(
+async def test_pause_now_cancels_the_queued_job_exits_and_relaunch_reruns_it(
     tmp_path: Path,
 ) -> None:
     clock = _Operator(clock_from(1.0))
@@ -121,7 +122,7 @@ async def test_pause_drain_cancels_the_queued_job_exits_and_relaunch_reruns_it(
 
         def request_park() -> None:
             if world.cluster.submissions:
-                operator.submit(PauseRequest(control_id="park"))
+                operator.submit(PauseNowRequest(control_id="park"))
                 clock.act = lambda: None
 
         clock.act = request_park
@@ -390,5 +391,42 @@ async def test_pause_treats_an_executing_evaluation_by_its_mode(
         assert observed.phase is PollPhase.ENDED
         assert observed.terminal is not None
         assert observed.terminal.state is EvaluationState.SUCCEEDED
+        assert not world.cluster.cancelled
+        process.shell.release_lease(now_at=clock.now())
+
+
+async def test_pause_drains_an_admitted_queued_evaluation_without_cancelling_it(
+    tmp_path: Path,
+) -> None:
+    clock = _Operator(clock_from(1.0))
+    threads = loop_threads()
+    channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads)
+    control = ChannelRunControl(channel, threads)
+    posted = False
+    with open_skeleton_world(tmp_path, SkeletonStrategy.baseline_only()) as world:
+        world.control = channel
+        world.cluster.states = (SlurmJobStatus.PENDING,)
+        process = world.runtime()
+
+        def progress() -> bool:
+            nonlocal posted
+            assert not world.cluster.cancelled
+            if world.cluster.submissions and not posted:
+                control.submit(PauseRequest(control_id="pause-queued"))
+                posted = True
+                return True
+            if process.shell.record.envelope.core.run.status is RunStatus.DRAINING:
+                world.cluster.finish_jobs()
+            return False
+
+        clock.act = progress
+        host = CoreRunHost(
+            process.shell, process.delivery, clock, RunControlBridge(channel, Steers())
+        )
+        config = RunLoopConfig(host_id="host-a", lease_duration=300, max_concurrent=4)
+        start_core(host, config)
+        outcome = await drive_core(host, config)
+        assert outcome.status is RunStatus.PARKED
+        assert all(job.terminal for job in process.shell.record.envelope.core.evaluation.jobs)
         assert not world.cluster.cancelled
         process.shell.release_lease(now_at=clock.now())
