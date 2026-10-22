@@ -720,6 +720,7 @@ Measure.compared optional {"default":false,"type":"boolean"}
 Measure.decision_id required {"$ref":"#/$defs/DecisionId"}
 Measure.kind optional {"const":"measure","default":"measure","type":"string"}
 Measure.plan required {"$ref":"#/$defs/MeasurementPlan"}
+Measure.reuse_only optional {"default":false,"type":"boolean"}
 Measure.scope required {"$ref":"#/$defs/Scope"}
 MeasurementFailure {"enum":["workload","infrastructure","ambiguous","unknown","run_environment_unavailable"],"type":"string"}
 MeasurementFinished {"additionalProperties":false,"type":"object"}

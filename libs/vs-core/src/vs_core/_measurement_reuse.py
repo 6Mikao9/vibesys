@@ -35,6 +35,10 @@ is stored, so every reader that ranks candidates reads that one number, and re-r
 a lucky sample gains nothing. (Merge and adoption decisions do not read it yet: they compare
 with the input's baseline run, #3136.)
 
+A strategy that must reserve something for a fresh run (a queue slot) asks first with
+``Measure.reuse_only``: core then admits the measurement only when this rule answers it, and
+otherwise answers a pending result without a run, a budget charge or a submission.
+
 The decision is a pure function of core state, taken when the Measure is admitted and recorded
 in the submission request (`SubmitMeasurement.reuses`), so a resume replays it. Only the first
 submission of an identity can reuse; a retry measures afresh. Records the runtime reports for
@@ -185,6 +189,7 @@ def unanswered_measures(run: RunState) -> tuple[MeasurementRequested, ...]:
             scope=receipt.decision.scope,
             plan=receipt.decision.plan,
             compared=receipt.decision.compared,
+            reuse_only=receipt.decision.reuse_only,
         )
         for receipt in run.receipts
         if isinstance(receipt.decision, Measure)

@@ -69,7 +69,9 @@ def _issued[R](host: Host, kind: type[R]) -> list[R]:
     return [
         item.request
         for item in host.run.decisions
-        if isinstance(item, Wait) and isinstance(item.request, kind)
+        if isinstance(item, Wait)
+        and isinstance(item.request, kind)
+        and not getattr(item.request, "reuse_only", False)  # core's own question, not a measurement
     ]
 
 
@@ -169,6 +171,35 @@ def test_by_default_the_planner_fills_agent_slots_while_candidates_wait_for_a_me
         for item in host.open(RequestTurn, label="implementer")
         if _line_of(item.decision.root).endswith(".next")
     ]
+
+
+@MODES
+def test_a_candidate_core_answers_from_held_runs_takes_no_slot_and_waits_for_none(
+    *, restarting: bool
+) -> None:
+    """Regression: a candidate the agent already measured waited hours for a slot it never used.
+
+    The one evaluation slot is the GPU's queue. A measurement that core answers from runs it
+    holds starts no job, so it is answered while another candidate holds the slot; a fresh one
+    still waits its turn behind it.
+    """
+    host = begin(config(max_rounds=3, **QUEUED), restarting=restarting)
+    host.run.held = {"c2"}  # the agent's own run of h2's input is held
+    _plan(host, implement("h1"))
+    _work(host, "000001.h1", "c1")
+    _plan(host, implement("h2"))
+    _work(host, "000002.h2", "c2")
+
+    # h1 holds the only slot, and h2 is answered without one.
+    assert _measuring(host) == ["000001.h1", "000002.h2"]
+    _end_measurement(host, "000002.h2")
+    _plan(host, implement("h3"))
+    _work(host, "000003.h3", "c3")
+
+    # h3 is a fresh run: it waits behind h1 for the slot.
+    assert _measuring(host) == ["000001.h1"]
+    _end_measurement(host, "000001.h1")
+    assert _measuring(host) == ["000003.h3"]
 
 
 @MODES

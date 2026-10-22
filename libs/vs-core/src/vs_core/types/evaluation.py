@@ -751,6 +751,8 @@ class MeasurementRequested(Value):
     plan: MeasurementPlan
     compared: bool = Field(default=False, exclude_if=unset)
     """The strategy reads the candidate's comparison with its base (``Measure.compared``)."""
+    reuse_only: bool = Field(default=False, exclude_if=unset)
+    """The strategy takes only an answer core holds (``Measure.reuse_only``)."""
 
 
 class AgentMeasurementRequested(Value):

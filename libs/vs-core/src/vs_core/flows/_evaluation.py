@@ -70,6 +70,24 @@ def _within(within: Seconds | Within) -> Within:
     return within if isinstance(within, Within) else Within(limit=within)
 
 
+def _decision(
+    plan: MeasurementPlan,
+    workspace: Workspace | None,
+    *,
+    compared: bool = False,
+    reuse_only: bool = False,
+) -> Measure:
+    # its own decision root, so asking first leaves the ids of the measurements themselves as
+    # they were: a flow that restarts mid-measurement finds the decision it recorded
+    return Measure(
+        decision_id=DecisionId(root="held" if reuse_only else "measure"),
+        scope=THIS_RUN if workspace is None else workspace.scope,
+        plan=plan,
+        compared=compared,
+        reuse_only=reuse_only,
+    )
+
+
 class Evaluation:
     """The evaluation aspect of ``ctx``."""
 
@@ -90,8 +108,25 @@ class Evaluation:
         ``label`` labels the measurement's span. The candidate is not compared with its base:
         `measure_compared` is for a search that reads the comparison.
         """
-        found = await self._measure(plan, workspace, within, label, compared=False)
+        found = await self._measure(_decision(plan, workspace), within, label)
         return found if isinstance(found, Failed) else found.result
+
+    async def held(
+        self,
+        plan: MeasurementPlan,
+        *,
+        workspace: Workspace | None = None,
+        within: Seconds | Within,
+    ) -> MeasurementResult | None | Failed:
+        """The answer to ``plan`` from the runs core holds, or None when only a new run would.
+
+        Nothing is admitted on None, so a caller can reserve what a new run needs and then
+        `measure`. On an answer, `measure` is not asked again.
+        """
+        found = await self._measure(_decision(plan, workspace, reuse_only=True), within, None)
+        if isinstance(found, Failed):
+            return found
+        return None if found.result.status == ObservationStatus.PENDING else found.result
 
     async def measure_compared(
         self,
@@ -115,7 +150,7 @@ class Evaluation:
         result's records are handed back as the ledger states them then, and the ledger keeps
         that figure: the round's headline and the record cannot part.
         """
-        found = await self._measure(plan, workspace, within, label, compared=True)
+        found = await self._measure(_decision(plan, workspace, compared=True), within, label)
         if isinstance(found, Failed) or found.comparison is None:
             return found
         settled = await self._settled(found.comparison, _within(within).limit * SETTLE_RUNS)
@@ -124,18 +159,8 @@ class Evaluation:
         return Compared(result=result, comparison=settled)
 
     async def _measure(
-        self,
-        plan: MeasurementPlan,
-        workspace: Workspace | None,
-        within: Seconds | Within,
-        label: Label | None,
-        *,
-        compared: bool,
+        self, request: Measure, within: Seconds | Within, label: Label | None
     ) -> Compared | Failed:
-        scope = THIS_RUN if workspace is None else workspace.scope
-        request = Measure(
-            decision_id=DecisionId(root="measure"), scope=scope, plan=plan, compared=compared
-        )
         match await self._kit.wait(request, _within(within), label):
             case MeasurementFinished(result=result, comparison=comparison):
                 return Compared(result=result, comparison=comparison)

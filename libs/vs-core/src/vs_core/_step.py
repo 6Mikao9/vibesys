@@ -1110,6 +1110,7 @@ def _decision_signal(state: CoreState, decision: Command) -> tuple[Signal, ...]:
                     scope=decision.scope,
                     plan=decision.plan,
                     compared=decision.compared,
+                    reuse_only=decision.reuse_only,
                 ),
             )
         case ProposeWinner():

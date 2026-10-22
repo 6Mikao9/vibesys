@@ -5,6 +5,8 @@ evaluation queue and waits until a slot is bound to it (`a_slot`), so its agents
 work meanwhile. Which waiting candidate a free slot measures is the queue's choice (`_queue`).
 """
 
+from collections.abc import Callable
+from functools import partial
 from typing import Literal
 
 from vibesys.candidates.api import (
@@ -59,6 +61,7 @@ from vs_core.api.search import (
     EvidenceRef,
     Failed,
     Flow,
+    MeasurementPlan,
     MeasurementPurpose,
     MeasurementRecipe,
     MeasurementResult,
@@ -228,15 +231,12 @@ async def measurement_of(
 ) -> ComposedJobs:
     """Measure ``revision`` with the trusted evaluations; what the evidence says is `evidence_of`.
 
-    The measurement is dispatched only once a slot is bound to it and the input's measurement
-    has landed (`the_input`): the workstream waits for both parked, so its agent slot may go to
-    new work meanwhile. A stop while it waits ends it unmeasured (`FailureKind.NOT_MEASURED`),
-    so its reviewed code is kept as work in progress, as a superseded candidate's is.
-
-    The measurement is dispatched only once a slot is bound to it and the input's measurement
-    has landed (`the_input`): the workstream waits for both parked, so its agent slot may go to
-    new work meanwhile. A stop while it waits ends it unmeasured (`FailureKind.NOT_MEASURED`),
-    so its reviewed code is kept as work in progress, as a superseded candidate's is.
+    Core is asked first: a measurement it answers from the runs it holds takes no slot and no
+    wait (`ctx.evaluation.held`). Only a fresh run is dispatched, once a slot is bound to it and
+    the input's measurement has landed (`the_input`): the workstream waits for both parked, so
+    its agent slot may go to new work meanwhile. A stop while it waits ends it unmeasured
+    (`FailureKind.NOT_MEASURED`), so its reviewed code is kept as work in progress, as a
+    superseded candidate's is.
 
     The backend measures again after an infrastructure failure, so a result that reaches here
     is the candidate's own; a measurement that ended without one is a failure of the workstream.
@@ -249,35 +249,36 @@ async def measurement_of(
     recipe = MeasurementRecipe.of(ctx.facts)
     if w.plan.kind is WorkKind.PROFILE and w.plan.required_fields:
         recipe = recipe.requiring(PROFILE_STAGE, w.plan.required_fields)
-    try:
-        await a_slot(ctx, w, work, revision)
-        await the_input(ctx, w, work)  # until a backend binds a slot at its job's start (#2662)
-    except Stopped:
-        # a reviewed candidate the stop kept from its measurement is kept, as a dropped one is
-        stopped = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.STOPPED)
-        raise WorkEndedError(stopped) from None
     lists = _stage_lists(ctx, w, ws, revision, names)
-    jobs: list[MeasuredJob] = []
-    found: ComposedJobs | Failed
-    for index, stages in enumerate(lists):
-        plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=stages)
-        if len(lists) > 1:
-            plan = plan.model_copy(
-                update={
-                    "evaluation_lease": EvaluationLease(
-                        key=f"{w.key}:{revision.revision_id.root}", retain=index < len(lists) - 1
-                    )
-                }
-            )
-        one = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(stages))
-        if isinstance(one, Failed):
-            found = one
-            break
-        jobs.append(MeasuredJob(plan=plan, result=one))
-    else:
-        found = compose_jobs(
-            tuple(jobs), recipe_digest=recipe.recipe.digest, accuracy_stage=recipe.accuracy_stage
-        )
+    plan_of = partial(recipe.plan, revision, purpose=purpose)
+    found = await _held(ctx, ws, recipe, plan_of, lists)
+    if found is None:
+        try:
+            await a_slot(ctx, w, work, revision)
+            await the_input(ctx, w, work)  # until a backend binds a slot at its job's start (#2662)
+        except Stopped:
+            # a reviewed candidate the stop kept from its measurement is kept, as a dropped one is
+            stopped = Failure(kind=FailureKind.NOT_MEASURED, dropped=DropReason.STOPPED)
+            raise WorkEndedError(stopped) from None
+        jobs: list[MeasuredJob] = []
+        for index, stages in enumerate(lists):
+            plan = plan_of(now_at=ctx.clock.now(), stages=stages)
+            if len(lists) > 1:
+                plan = plan.model_copy(
+                    update={
+                        "evaluation_lease": EvaluationLease(
+                            key=f"{w.key}:{revision.revision_id.root}",
+                            retain=index < len(lists) - 1,
+                        )
+                    }
+                )
+            one = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(stages))
+            if isinstance(one, Failed):
+                found = one
+                break
+            jobs.append(MeasuredJob(plan=plan, result=one))
+        else:
+            found = _composed(recipe, tuple(jobs))
     shown = tuple(dict.fromkeys(stage for stages in lists for stage in stages))
     gate = ctx.operation_span
     if gate is not None:
@@ -289,6 +290,29 @@ async def measurement_of(
         ctx.channel(REPORTS).send(Released(key=w.key))
         raise ended_by(found, None)
     return found
+
+
+async def _held(
+    ctx: Flow,
+    ws: Workspace,
+    recipe: MeasurementRecipe,
+    plan_of: Callable[..., MeasurementPlan],
+    lists: tuple[tuple[str, ...], ...],
+) -> ComposedJobs | Failed | None:
+    """What core answers from the runs it holds, or None when only a fresh run would answer."""
+    if len(lists) != 1:  # several lists hold an evaluation lease, which no held run answers
+        return None
+    plan = plan_of(now_at=ctx.clock.now(), stages=lists[0])
+    answer = await ctx.evaluation.held(plan, workspace=ws, within=recipe.budget(lists[0]))
+    if not isinstance(answer, MeasurementResult):
+        return answer
+    return _composed(recipe, (MeasuredJob(plan=plan, result=answer),))
+
+
+def _composed(recipe: MeasurementRecipe, jobs: tuple[MeasuredJob, ...]) -> ComposedJobs:
+    return compose_jobs(
+        jobs, recipe_digest=recipe.recipe.digest, accuracy_stage=recipe.accuracy_stage
+    )
 
 
 def _stage_lists(

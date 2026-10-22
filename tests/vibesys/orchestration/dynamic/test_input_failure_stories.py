@@ -79,6 +79,7 @@ def _input_measurements(host: EvidenceHost) -> int:
     return sum(
         isinstance(item, Wait)
         and isinstance(item.request, Measure)
+        and not item.request.reuse_only
         and item.request.plan.purpose == "baseline"
         for item in host.run.decisions
     )
@@ -194,6 +195,7 @@ def _candidate_measurements(host: EvidenceHost) -> list[str]:
         for item in host.run.decisions
         if isinstance(item, Wait)
         and isinstance(item.request, Measure)
+        and not item.request.reuse_only
         and item.request.plan.purpose == "official"
         and isinstance(item.request.plan.candidate, RevisionRef)
     ]
