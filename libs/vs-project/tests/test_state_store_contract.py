@@ -199,6 +199,75 @@ def test_fence_renewal_expiry_and_takeover(make_store: StoreFactory, tmp_path: P
     assert store.commit(None, _envelope(0), second, now=19) == Committed(record=_envelope(0))
 
 
+@pytest.mark.regression
+@given(delay=st.integers(min_value=0, max_value=3600))
+@example(delay=84)
+def test_expired_unchanged_lease_can_be_renewed(make_store: StoreFactory, delay: int) -> None:
+    """A heartbeat delayed by synchronous storage work recovers before any further dispatch."""
+    with TemporaryDirectory() as directory:
+        store = make_store(Path(directory), ())
+        first = store.acquire("host-a", now=0, duration=60)
+        assert first is not None
+        envelope = _envelope(0)
+        assert store.commit(None, envelope, first, now=1) == Committed(record=envelope)
+        now = 60 + delay
+        assert not store.verify(first, now=now)
+        assert store.commit(0, _envelope(1), first, now=now) == Conflict(
+            reason=ConflictReason.FENCE, revision=0
+        )
+
+        renewed = store.renew(first, now=now, duration=60)
+
+        assert renewed is not None
+        assert renewed.epoch == first.epoch
+        assert renewed.expires_at == now + 60
+        assert store.load() == envelope
+        assert store.verify(first, now=now)
+        assert store.acquire("host-b", now=now, duration=60) is None
+        assert store.commit(0, _envelope(1), renewed, now=now) == Committed(record=_envelope(1))
+
+
+@given(delay=st.integers(min_value=0, max_value=3600), same_host=st.booleans())
+@example(delay=84, same_host=True)
+def test_late_renewal_never_reclaims_a_successor_epoch(
+    make_store: StoreFactory, delay: int, *, same_host: bool
+) -> None:
+    with TemporaryDirectory() as directory:
+        store = make_store(Path(directory), ())
+        first = store.acquire("host-a", now=0, duration=60)
+        assert first is not None
+        now = 60 + delay
+        successor = store.acquire("host-a" if same_host else "host-b", now=now, duration=60)
+        assert successor is not None
+
+        assert store.renew(first, now=now, duration=60) is None
+        assert not store.verify(first, now=now)
+        assert store.verify(successor, now=now)
+
+
+@given(released_at=st.integers(min_value=5, max_value=19), delay=st.integers(0, 3600))
+@example(released_at=10, delay=84)
+def test_release_revokes_every_token_before_late_renewal(
+    make_store: StoreFactory, released_at: int, delay: int
+) -> None:
+    """Release is permanent even for an older token whose expiry equals the release time."""
+    with TemporaryDirectory() as directory:
+        store = make_store(Path(directory), ())
+        first = store.acquire("host-a", now=0, duration=10)
+        assert first is not None
+        renewed = store.renew(first, now=5, duration=15)
+        assert renewed is not None
+        assert store.release(renewed, now=released_at)
+        now = released_at + delay
+
+        for token in (first, renewed):
+            assert store.renew(token, now=now, duration=60) is None
+            assert not store.verify(token, now=now)
+        successor = store.acquire("host-a", now=now, duration=60)
+        assert successor is not None
+        assert successor.epoch > renewed.epoch
+
+
 def test_fenced_mutation_finishes_before_takeover_and_rejects_the_old_owner(
     make_store: StoreFactory, tmp_path: Path
 ) -> None:
@@ -333,7 +402,6 @@ def test_same_host_reacquires_only_after_expiry_with_a_new_epoch(
     first = store.acquire("host-a", now=0, duration=10)
     assert first is not None
     assert store.acquire("host-a", now=1, duration=10) is None
-    assert store.renew(first, now=10, duration=10) is None
     second = store.acquire("host-a", now=10, duration=10)
     assert second is not None
     assert second.epoch > first.epoch

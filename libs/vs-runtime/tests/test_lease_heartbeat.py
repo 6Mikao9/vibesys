@@ -9,9 +9,11 @@ real time.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from hypothesis import given, settings
+import pytest
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import (
@@ -135,15 +137,18 @@ class _SlowStateStore(FakeStateStore):
     runs meanwhile. Moving the virtual clock inside the call, with no await, is exactly that.
     """
 
-    def __init__(self, cost: float) -> None:
+    def __init__(self, cost: float, *, stall_at: int | None = None) -> None:
         super().__init__()
         self.cost = cost
+        self.stall_at = stall_at
+        self.commits = 0
         self.clock: VirtualClock | None = None
 
     def commit(
         self, expected_revision: int | None, envelope: StoredEnvelope, fence: StoreFence, now: float
     ) -> CommitOutcome:
-        if self.clock is not None:
+        self.commits += 1
+        if self.clock is not None and (self.stall_at is None or self.commits == self.stall_at):
             self.clock.at += self.cost
         return super().commit(expected_revision, envelope, fence, now)
 
@@ -175,6 +180,44 @@ def test_slow_commits_in_one_settle_do_not_starve_the_lease(cost: float) -> None
 
     assert run.halted is None
     assert run.core.run.status == RunStatus.TERMINAL
+
+
+@pytest.mark.regression
+@given(cost=st.floats(min_value=60.0, max_value=180.0), stall_at=st.integers(1, 10))
+@example(cost=84.0, stall_at=5)
+def test_a_commit_stall_past_expiry_recovers_without_a_takeover(cost: float, stall_at: int) -> None:
+    """A synchronous commit can outlast the lease while preventing the heartbeat from running.
+
+    Renewing the unchanged epoch restores authority before further work. No request is
+    replayed, no new run epoch is needed, and the production loop reaches its terminal state.
+    """
+    harness = Harness(
+        registry=OperationRegistry(()),
+        facts=FACTS,
+        limits=sample_limits(
+            max_attempts=2, max_turns=2, max_parallel=1, request_retries=sample_retries(2)
+        ),
+        envelope_type=RunEnvelope[FlowState],
+    )
+    opened: list[EnsureWorkspace] = []
+
+    def answer(request: object, core: object) -> Succeeded:
+        if isinstance(request, EnsureWorkspace):
+            opened.append(request)
+        return _answer(request, core)
+
+    store = _SlowStateStore(cost, stall_at=stall_at)
+    host = scripted_host(Launch(one_step, OneStepConfig()), answer, harness, {}, store=store)
+    host.config = replace(host.config, lease_duration=60.0)
+    store.clock = host.clock
+
+    run = host.run()
+
+    assert run.halted is None
+    assert run.core.run.status == RunStatus.TERMINAL
+    assert len(run.core.records.hosts) == 1
+    assert store.commits >= stall_at
+    assert len(opened) == 1
 
 
 class FanOutConfig(Value):

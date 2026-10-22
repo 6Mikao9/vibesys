@@ -146,14 +146,19 @@ class _Expected(BaseModel):
     revision: int | None = Field(ge=0)
 
 
-def _valid_fence(lease: LeaseDocument, fence: StoreFence, now: float) -> bool:
+def _matching_epoch(lease: LeaseDocument, fence: StoreFence, now: float) -> bool:
     current = lease.fence
     return (
         current is not None
         and current.host_id == fence.host_id
         and current.epoch == fence.epoch
-        and lease.observed_at <= now < current.expires_at
+        and lease.observed_at <= now
     )
+
+
+def _valid_fence(lease: LeaseDocument, fence: StoreFence, now: float) -> bool:
+    current = lease.fence
+    return current is not None and _matching_epoch(lease, fence, now) and now < current.expires_at
 
 
 def _later(stored: LeaseDocument, moved: LeaseDocument | None) -> LeaseDocument:
@@ -290,12 +295,17 @@ class StoreOperations(ABC):
             return fence
 
     def renew(self, fence: StoreFence, now: float, duration: float) -> StoreFence | None:
-        """Extend matching ownership, preserving the authoritative lease."""
+        """Extend an unchanged epoch, including after a delayed heartbeat.
+
+        Expiry permits takeover, but does not itself transfer ownership. Under the
+        transaction, either this renewal wins or a takeover/release revokes its epoch.
+        Dispatch and commits still require an unexpired, confirmed lease.
+        """
         timing = _Time(now=now, duration=duration)
         with self._operation():
             lease = self._lease()
             current = lease.document.fence
-            if current is None or not _valid_fence(lease.document, fence, timing.now):
+            if current is None or not _matching_epoch(lease.document, fence, timing.now):
                 return None
             renewed = StoreFence(
                 host_id=current.host_id,
@@ -306,15 +316,16 @@ class StoreOperations(ABC):
             return renewed
 
     def release(self, fence: StoreFence, now: float) -> bool:
-        """End matching ownership at ``now`` so the next host can acquire at once."""
+        """Revoke matching ownership so no retained token can renew it later."""
         timing = _Time(now=now)
         with self._operation():
             lease = self._lease()
             current = lease.document.fence
             if current is None or not _valid_fence(lease.document, fence, timing.now):
                 return False
+            # Expiry permits renewal, so explicit release must revoke the epoch itself.
             released = StoreFence(
-                host_id=current.host_id, epoch=current.epoch, expires_at=timing.now
+                host_id=current.host_id, epoch=current.epoch + 1, expires_at=timing.now
             )
             self._write_lease(lease, LeaseDocument(fence=released, observed_at=timing.now))
             return True

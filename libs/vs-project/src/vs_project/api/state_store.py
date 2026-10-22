@@ -175,14 +175,21 @@ class StateStore(Protocol):
         ...
 
     def renew(self, fence: StoreFence, now: float, duration: float) -> StoreFence | None:
-        """Extend a live matching epoch without shrinking its expiry."""
+        """Extend a matching epoch without shrinking its expiry, even after expiry.
+
+        A delayed heartbeat can restore an expired lease only if neither takeover
+        nor release revoked that epoch. The comparison and extension are atomic;
+        time before the persisted watermark is rejected. Expiry alone authorizes
+        no work: callers must confirm renewal before dispatching or committing.
+        """
         ...
 
     def release(self, fence: StoreFence, now: float) -> bool:
         """End a live matching lease at ``now``; False when this fence no longer holds it.
 
-        The epoch is kept, so the next acquire still gets a higher one and this host's
-        token stays invalid.
+        Release advances the epoch to revoke every retained token, including ones
+        from before a renewal. The next acquire advances it again; epochs need not
+        be consecutive.
         """
         ...
 
