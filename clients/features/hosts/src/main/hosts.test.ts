@@ -4,7 +4,15 @@ import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
 import {FAKE_MODEL_CATALOGUE, FakeLink, record} from '@vibesys/connection/testing';
 import {RUN_EVENT_TYPES_BY_KINDS, type RunSummary} from '@vibesys/contracts/host-helper';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
-import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
+import {
+  decodeRetainedSettings,
+  encodeSettings,
+  remember,
+  SettingsStore,
+  settingsBinaryPath,
+  settingsFor,
+  withHostSettings,
+} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Hosts, type SshConfigFilesystem} from './index.js';
@@ -143,6 +151,12 @@ class DeferredReadFilesystem extends FakeSettingsFilesystem {
 
   constructor(files: Readonly<Record<string, string>>, heldRead = 1) {
     super(files);
+    for (const [path, text] of Object.entries(files)) {
+      this.setBytes(
+        settingsBinaryPath(path),
+        encodeSettings(decodeRetainedSettings(JSON.parse(text))),
+      );
+    }
     this.#heldRead = heldRead;
     let received = (): void => {};
     let release = (): void => {};
@@ -156,13 +170,13 @@ class DeferredReadFilesystem extends FakeSettingsFilesystem {
     this.#release = release;
   }
 
-  override async readText(path: string): Promise<string> {
+  override async readBytes(path: string): Promise<Uint8Array> {
     this.#reads += 1;
     if (this.#reads === this.#heldRead) {
       this.#received();
       await this.#released;
     }
-    return super.readText(path);
+    return super.readBytes(path);
   }
 
   release(): void {
@@ -174,15 +188,15 @@ class DeferredReadFilesystem extends FakeSettingsFilesystem {
 class CapturedReadFilesystem extends FakeSettingsFilesystem {
   #gate: CapturedReadGate | null = null;
 
-  override async readText(path: string): Promise<string> {
-    const text = await super.readText(path);
+  override async readBytes(path: string): Promise<Uint8Array> {
+    const bytes = await super.readBytes(path);
     const gate = this.#gate;
     if (gate !== null) {
       this.#gate = null;
       gate.captured();
       await gate.released;
     }
-    return text;
+    return bytes;
   }
 
   deferNextRead(): {readonly captured: Promise<void>; readonly release: () => void} {
@@ -1469,7 +1483,7 @@ describe('Hosts checkout changes', () => {
     await hosts.recent([ALPHA]);
     expect(manager.existing('ssh:alpha')).not.toBeNull();
     const persistence = new Error('directory sync failed');
-    filesystem.failNextDirectorySync('/settings/hosts.json', persistence);
+    filesystem.failNextDirectorySync(settingsBinaryPath('/settings/hosts.json'), persistence);
 
     await expect(hosts.remove(ALPHA)).rejects.toBe(persistence);
 
@@ -1509,7 +1523,7 @@ describe('Hosts checkout changes', () => {
     await hosts.recent([ALPHA]);
     await manager[Symbol.asyncDispose]();
     const persistence = new Error('replace failed');
-    filesystem.failNextReplace('/settings/hosts.json', persistence);
+    filesystem.failNextReplace(settingsBinaryPath('/settings/hosts.json'), persistence);
 
     await expect(hosts.remove(ALPHA)).rejects.toBe(persistence);
 
