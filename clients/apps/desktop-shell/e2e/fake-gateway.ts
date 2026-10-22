@@ -124,7 +124,9 @@ export function installGateway(input: WireFixture): void {
             postIntent(host: string, bytes: number[]): Promise<number[]>;
           };
           return {
-            result: peer.postIntent(host, [...request]).then(bytes => new Uint8Array(bytes)),
+            result: peer
+              .postIntent(host, [...request])
+              .then(bytes => ({bytes: new Uint8Array(bytes)})),
             cancel: () => undefined,
           };
         }
@@ -135,7 +137,7 @@ export function installGateway(input: WireFixture): void {
               ? input.blobs[[...request].join(',')]
               : undefined;
         if (!bytes) throw new Error('Unknown unary');
-        return {result: Promise.resolve(new Uint8Array(bytes)), cancel: () => undefined};
+        return {result: Promise.resolve({bytes: new Uint8Array(bytes)}), cancel: () => undefined};
       },
       stream: (
         _host: string,

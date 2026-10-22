@@ -198,7 +198,7 @@ if (process.type === 'renderer') {
   electron.contextBridge.exposeInMainWorld('vibesysGateway', {
     unary: (host, method, bytes) => {
       let cancel = (): void => {};
-      const result = new Promise<Uint8Array>((resolve, reject) => {
+      const result = new Promise<import('@vibesys/ipc').GatewayUnaryReply>(resolve => {
         let response: Uint8Array | undefined;
         cancel = openGateway(
           'unary',
@@ -208,10 +208,11 @@ if (process.type === 'renderer') {
           value => {
             response = value;
           },
-          error => {
-            if (error !== undefined) reject(new Error(error));
-            else if (response === undefined) reject(new Error('missing unary response'));
-            else resolve(response);
+          (error, code) => {
+            // A rejection would lose `code` on the context bridge, so a failure resolves as data.
+            if (error !== undefined) resolve(code === undefined ? {error} : {error, code});
+            else if (response === undefined) resolve({error: 'missing unary response'});
+            else resolve({bytes: response});
           },
         );
       });
@@ -220,7 +221,7 @@ if (process.type === 'renderer') {
     stream: (host, method, bytes, receive, ended) => ({
       cancel: openGateway('stream', host, method, bytes, receive, ended),
     }),
-  } satisfies import('@vibesys/ipc').GatewayBridge);
+  } satisfies import('@vibesys/ipc').GatewayPreloadBridge);
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
 }
 

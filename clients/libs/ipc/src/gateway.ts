@@ -18,6 +18,18 @@ export interface GatewayBridge {
     ended: (error?: string, code?: number) => void,
   ): {cancel(): void};
 }
+/**
+ * A unary reply as it crosses the context bridge. The bridge keeps only an Error's message, so a
+ * failure travels as data and `gatewayBridge` turns it back into a typed error in the renderer.
+ */
+export type GatewayUnaryReply =
+  | {readonly bytes: Uint8Array}
+  | {readonly error: string; readonly code?: number};
+/** What the preload exposes; the renderer reads it only through `gatewayBridge`. */
+export interface GatewayPreloadBridge {
+  unary(host: HostKey, method: string, bytes: Uint8Array): GatewayCall<GatewayUnaryReply>;
+  stream: GatewayBridge['stream'];
+}
 export interface GatewayRequest {
   readonly kind: 'unary' | 'stream';
   readonly host: HostKey;
@@ -55,4 +67,22 @@ export function gatewayFailure(error: string, code?: number): Error {
 /** The host answered that it holds no such run or stream. */
 export function isNotFoundCode(code: number | undefined): boolean {
   return code === GrpcCode.NOT_FOUND;
+}
+
+/** The renderer's bridge over the preload's: a failed unary call rejects with `gatewayFailure`. */
+export function gatewayBridge(preload: GatewayPreloadBridge): GatewayBridge {
+  return {
+    unary(host, method, bytes) {
+      const call = preload.unary(host, method, bytes);
+      return {
+        result: call.result.then(reply => {
+          if ('bytes' in reply) return reply.bytes;
+          throw gatewayFailure(reply.error, reply.code);
+        }),
+        cancel: () => call.cancel(),
+      };
+    },
+    stream: (host, method, bytes, receive, ended) =>
+      preload.stream(host, method, bytes, receive, ended),
+  };
 }
