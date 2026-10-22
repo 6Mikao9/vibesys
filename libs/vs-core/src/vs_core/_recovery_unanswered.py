@@ -18,6 +18,10 @@ by what the request is, and the verdict is one of four.
   left a resource nobody proved released. Recovery blocks on that record, and the run ends
   blocked naming it.
 
+Recovery first reads the target's own facts: one that another request settled is resolved by
+them, as a turn its host died in is once the cancellation of the lost turn released it. Only a
+target its facts leave unresolved gets a verdict here.
+
 The policy is a pure function of the facts below, so it does not branch on a backend and
 recovery applies it in one place.
 """

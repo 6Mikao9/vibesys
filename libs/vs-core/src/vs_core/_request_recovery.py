@@ -753,6 +753,14 @@ def _settle_unanswered(
         # The target itself answers nothing: its host is dead, and it is not dispatched yet.
         if subjects or any(request != check.target for request in requests):
             continue
+        # A fact can reach the target by a path other than its inspections: the release of a
+        # lost turn closes the turn's dispatch (``_end_released_dispatch``), and ``_observe``
+        # re-resolves only the checks an inspection names. Settling by kind is for a target its
+        # facts cannot resolve, so its facts are read first, as ``_recheck`` reads them.
+        current = _aggregate_resolution(record, context, state)
+        if current != "pending":
+            checks[index] = check.model_copy(update={"resolution": current, "wait": None})
+            continue
         verdict = settlement(
             record,
             inspection=_inspection_of(state, check),
