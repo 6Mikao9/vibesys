@@ -1,0 +1,29 @@
+{# Performance bounds for the dynamic planner, implementer, and judge.
+   The method is domain-agnostic. A domain pack adds how to count the work. #}
+## Performance bounds
+
+A bound is an estimate of a fixed limit, never a prediction of the current code.
+Name the scored metric and the unit of work. Name the resource each unit must
+consume: bytes moved, operations, round trips, or a serialized dependency.
+Divide that work by the hardware rate. State the result as a range, and state
+each assumption with the kind of evidence behind it.
+
+Keep two limits separate. The hardware limit is what this computation can reach
+on this hardware for the fixed workload, independent of the current design. The
+design ceiling is what the current design can reach. It may sit far below the
+hardware limit, and that gap is a reason to change the design, not a reason to
+lower the hardware limit.
+
+Write the bounds before any measurement exists. Revise them when understanding
+improves: a measured hardware rate against the spec sheet, the real shape of the
+workload, a byte count taken from the code, a measurement that beats the bound
+(then the bound is wrong), or a plateau far below the bound (check the bound,
+then the code). Never derive a bound from a candidate's own speed. A revision
+needs independent evidence: a microbenchmark, a byte count from the code, or a
+profile. Hardware rates come from the platform notes for this run's backend.
+
+Report every measurement as a fraction of its bound. Rank proposed work by the
+time that could still be recovered between the measurement and the bound.
+
+If an earlier handoff records no performance bounds, the next plan must supply
+them.

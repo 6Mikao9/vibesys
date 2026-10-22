@@ -8,6 +8,7 @@ accepted fits the record, and the accepted entries alone always make a valid pla
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -38,6 +39,7 @@ from vibesys.orchestration.dynamic.models import (
     PortfolioPlan,
     ProfileField,
     ProfileOffer,
+    hardware_limit_bound,
 )
 from vibesys.orchestration.dynamic.search.api import (
     HypothesisRecord,
@@ -594,9 +596,13 @@ def combine_cases(draw: st.DrawFn) -> CombineCase:
 
 
 def _parsed(reply: dict[str, object]) -> PortfolioPlan | list[tuple[str | int, ...]]:
-    """The reply as the planning call parses it, or the paths of what the schema rejected."""
+    """The reply as the planning call parses it, or the paths of what the schema rejected.
+
+    The call reads JSON (``model_validate_json``). Nested bound values are strict, so a
+    Python dict is not the same parse.
+    """
     try:
-        return PortfolioPlan.model_validate(reply)
+        return PortfolioPlan.model_validate_json(json.dumps(reply))
     except ValidationError as error:
         return [tuple(item["loc"]) for item in error.errors()]
 
@@ -625,7 +631,11 @@ def test_a_combine_is_scheduled_exactly_when_its_parts_are_distinct_offered_exac
     reply: dict[str, object] = {
         "reasoning": "combine",
         "workstreams": [case.entry],
-        "handoff": {"expectations": [], "doubts": []},
+        "handoff": {
+            "expectations": [],
+            "doubts": [],
+            "bounds": [hardware_limit_bound().model_dump(mode="json")],
+        },
     }
     plan = _parsed(reply)
     if not isinstance(plan, PortfolioPlan):

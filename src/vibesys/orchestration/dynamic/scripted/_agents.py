@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vibesys.orchestration.dynamic.models import hardware_limit_bound
 from vibesys.orchestration.dynamic.scripted._choice import index, unit
 from vibesys.orchestration.dynamic.scripted._recipes import EditKind, Recipe, applied_slugs
 from vibesys.orchestration.dynamic.scripted._scenario import (
@@ -110,6 +111,7 @@ def plan(seed: int, workload: Workload | None, prompt: str) -> Turn:
                 for item in workstreams
             ],
             "doubts": [],
+            "bounds": [hardware_limit_bound().model_dump(mode="json")],
         },
     }
     narration = (

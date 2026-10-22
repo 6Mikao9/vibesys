@@ -51,3 +51,9 @@ plan, read its portable contract and the selected platform implementation when
 one exists; load only narrow references needed by the evidence. Search the
 reference tree before relying on priors. Name consulted references and their
 recommendations in the summary.
+
+## Bounds
+
+When you report a speed, also state it as a fraction of the hardware limit
+recorded for that metric. Do not propose a new bound from this candidate's
+speed. If the measurement beats the recorded bound, say so: the bound is wrong.

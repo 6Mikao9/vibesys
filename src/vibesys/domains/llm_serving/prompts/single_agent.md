@@ -23,6 +23,11 @@ share. Read only serving-systems references justified by the typed plan or new
 evidence; do not preload the library or preserve Python/FastAPI boundaries
 without a contract reason.
 
+State a hardware limit for each scored metric before the first measurement, from
+the platform hardware notes, and report each measurement as a fraction of that
+limit. Do not treat this candidate's speed as the bound. A measurement that
+beats the bound means the bound is wrong.
+
 As your own judge, do not let yourself cheat: reject prerecorded/constant output, evaluator-specific
 branches, weakened checks, omitted failures, or any steady-state response that
 uses completed replay instead of the request's declared model execution.

@@ -26,6 +26,7 @@ from vibesys.orchestration.dynamic.models import (
     StrategyReason,
     WorkstreamExpectation,
     WorkstreamPlan,
+    hardware_limit_bound,
 )
 from vibesys.orchestration.dynamic.search.api import (
     Candidate,
@@ -287,6 +288,7 @@ def portfolio(
                 for item in expected
             ),
             doubts=(),
+            bounds=(hardware_limit_bound(),),
         ),
         evaluation_order=order,
     )

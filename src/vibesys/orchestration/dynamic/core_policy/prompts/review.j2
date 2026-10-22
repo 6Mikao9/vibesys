@@ -5,6 +5,7 @@ Review hypothesis `{{ hypothesis_id }}` without editing its candidate.
 
 {% include 'run_context.j2' %}
 {{ domain_section(domain_sections, 'judge') }}
+{% include 'performance_bounds.j2' %}
 Claim: {{ hypothesis }}
 Pass criteria: {{ pass_criteria }}
 Candidate revision: `{{ rev(candidate) }}`

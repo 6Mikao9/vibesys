@@ -13,7 +13,7 @@ from pydantic import Field, model_validator
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
-from vibesys.orchestration.dynamic.models import StrategyReason, UnappliedPart
+from vibesys.orchestration.dynamic.models import PerformanceBound, StrategyReason, UnappliedPart
 from vs_core.api.search import (
     AttemptId,
     CheckpointDecline,
@@ -166,6 +166,9 @@ class HandoffNote(Value):
     expectations: tuple[Expectation, ...] = ()
     doubts: tuple[str, ...] = ()
     dropped: tuple[str, ...] = ()
+    bounds: tuple[PerformanceBound, ...] = ()
+    """The reply's performance bounds. Empty when the note was written before bounds existed:
+    the next planner turn must supply them, and a new reply that omits them is rejected."""
 
 
 # -- why work ended -----------------------------------------------------------------------------

@@ -6,6 +6,7 @@ Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
 
 {% include 'run_context.j2' %}
 {{ domain_section(domain_sections, 'implementer') }}
+{% include 'performance_bounds.j2' %}
 Claim: {{ hypothesis }}
 Task: {{ task }}
 Pass criteria: {{ pass_criteria }}

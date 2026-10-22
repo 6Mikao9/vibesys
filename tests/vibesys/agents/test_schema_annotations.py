@@ -13,6 +13,7 @@ from vibesys.orchestration.dynamic.models import (
     ImplementPortfolioPlan,
     PlannerHandoff,
     PortfolioPlan,
+    hardware_limit_bound,
 )
 from vibesys.orchestration.multi.models import PreRoundDecision
 from vs_agent.api import AgentClient
@@ -65,7 +66,7 @@ def _annotations(
                     "pass_criteria": "Tests pass.",
                 }
             ],
-            handoff=PlannerHandoff(expectations=(), doubts=()),
+            handoff=PlannerHandoff(expectations=(), doubts=(), bounds=(hardware_limit_bound(),)),
         ),
         ImplementPortfolioPlan(
             reasoning="Test batching.",
@@ -78,7 +79,7 @@ def _annotations(
                     "pass_criteria": "Tests pass.",
                 }
             ],
-            handoff=PlannerHandoff(expectations=(), doubts=()),
+            handoff=PlannerHandoff(expectations=(), doubts=(), bounds=(hardware_limit_bound(),)),
         ),
     ],
     ids=lambda response: type(response).__name__,

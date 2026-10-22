@@ -6,6 +6,8 @@ import asyncio
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from vs_core.api import AdoptionPublication, CheckoutStatus, CheckoutUpdate
+from vs_project.api import GitError, PublicationError, PublishedRevision
 from vs_project.api.workspace_tree import EntryKind
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
@@ -20,7 +22,7 @@ from vs_runtime._trusted_evaluation import (
 from vs_runtime._workspace_files import entry_kind, file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
-from vs_runtime.contracts import CaptureStopUnconfirmedError
+from vs_runtime.contracts import CaptureStopUnconfirmedError, RuntimeContractError
 from vs_sandbox.api import (
     CaptureExecutionIdentity,
     CommandStopUnconfirmedError,
@@ -335,7 +337,33 @@ class RuntimeWorkspaceResource:
     def trusted_input_baseline(self) -> str | None:
         return self._project.git.trusted_input_baseline
 
+    def publish(self, revision: str, message: str) -> AdoptionPublication:
+        try:
+            published = self._root_project.git.publish_revision(
+                revision,
+                message,
+                preserve_paths=self._memory_paths,
+            )
+        except (GitError, PublicationError, ValueError) as error:
+            raise RuntimeContractError(str(error)) from error
+        return AdoptionPublication(
+            revision=published.revision,
+            commit=published.commit,
+            branch=published.branch,
+        )
+
+    def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        outcome = self._root_project.git.update_checkout(
+            PublishedRevision(
+                revision=publication.revision,
+                commit=publication.commit,
+                branch=publication.branch,
+            )
+        )
+        return CheckoutUpdate(status=CheckoutStatus(outcome.value))
+
     def snapshot(self, label: str) -> str:
+        self._require_root_write()
         self._project.git.snapshot(label)
         revision = self._project.git.current_sha()
         if revision is None:
@@ -355,6 +383,7 @@ class RuntimeWorkspaceResource:
         preserve_memory: bool = True,
         exact_keeping: tuple[str, ...] | None = None,
     ) -> bool:
+        self._require_root_write(restoring=True)
         if preserve_memory:
             preserve_paths = tuple(dict.fromkeys((*preserve_paths, *self._memory_paths)))
         restored = self._project.git.checkout_tree(
@@ -367,6 +396,13 @@ class RuntimeWorkspaceResource:
         if restored and self._id is not None:
             self._revision = revision
         return restored
+
+    def _require_root_write(self, *, restoring: bool = False) -> None:
+        if self._id is None and (
+            self._root_project.root_edits_on_resume or (restoring and self._root_project.resuming)
+        ):
+            message = "project content retained; resumed root work requires project-edit protection"
+            raise RuntimeContractError(message)
 
     def try_restore(self, revision: str, *, clean: bool) -> bool:
         restored = self.restore(revision, clean=clean)
