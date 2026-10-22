@@ -423,3 +423,21 @@ jobs = ["python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "scripted recipe build tests select the native evaluator job"
+paths = ["tests/e2e/test_scripted_queue_recipes_e2e.py"]
+jobs = ["python", "examples"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "scripted recipe edits select the native evaluator job"
+paths = ["src/vibesys/orchestration/dynamic/scripted/_recipes.py"]
+jobs = ["python", "examples"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
