@@ -2,14 +2,16 @@
  * How a run opens over a narrow link, as properties of generated runs. The real reader, loader and
  * page machine run against a gateway Fake with a round trip and a throughput in virtual time.
  *
- * Input space: native runs of 1 to 40 ideas, finished or live; writer checkpoints that are absent,
- * stale, current, or too big for the reply; reply budgets from 160 KiB to the gateway's 1 MiB;
+ * Input space: native runs of 1 to 160 ideas, finished or live; writer checkpoints that are absent,
+ * stale, current, or too big for the reply; reply budgets from 112 KiB to the gateway's 1 MiB;
  * a run with no run.log (NotFound); links from 20 ms and 700 B/ms to 200 ms and 2800 B/ms; a Tail
  * cut mid-way (clean end or error); a link that is down or refuses every call.
  */
 import {expect, test} from 'bun:test';
-import {fromBinary} from '@bufbuild/protobuf';
-import {TailRequestSchema} from '@vibesys/proto';
+import {readFileSync} from 'node:fs';
+import {gunzipSync} from 'node:zlib';
+import {fromBinary, toBinary} from '@bufbuild/protobuf';
+import {RecordSchema, TailRequestSchema} from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {MAX_ATTEMPTS, RECORD_WINDOW, RETRY_CAP_MS} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
@@ -34,7 +36,7 @@ const SEED = {
 };
 const SERVICE = '/vibesys.api.v1.HostService/';
 const MINUTE = 60_000;
-const CASES = 40;
+const CASES = 20;
 
 interface Case {
   readonly run: SimRun;
@@ -42,9 +44,19 @@ interface Case {
   readonly ideas: number;
 }
 
+const generated = new Map<number, Case>();
+
 function generate(seed: number): Case {
+  const cached = generated.get(seed);
+  if (cached) return cached;
+  const made = build(seed);
+  generated.set(seed, made);
+  return made;
+}
+
+function build(seed: number): Case {
   const random = new Seeded(seed);
-  const ideas = 1 + random.int(40);
+  const ideas = 1 + random.int(160);
   const records = storeRunFixture(random.pick(['short', 'live'] as const), ideas, seed).records;
   const keyframes = random.pick([
     [],
@@ -55,7 +67,7 @@ function generate(seed: number): Case {
   const run: SimRun = {
     records,
     keyframes,
-    replyBytes: random.pick([160 * 1024, 256 * 1024, GATEWAY_REPLY_BYTES]),
+    replyBytes: random.pick([112 * 1024, 160 * 1024, 256 * 1024, GATEWAY_REPLY_BYTES]),
   };
   const link = {rttMs: 20 + random.int(180), bytesPerMs: 700 * (1 + random.int(4))};
   return {run, link, ideas};
@@ -204,13 +216,52 @@ test('a Tail cut mid-way resumes from its cursor and loses nothing', async () =>
         ? {kind: 'cut', afterMessages: 0, clean}
         : undefined,
     );
-    const last = run.records.at(-1)?.seq ?? 0n;
-    await until(clock, () => actor.getSnapshot().context.load?.skeleton.throughSeq === last);
-    const context = actor.getSnapshot().context;
-    expect(context.load?.skeleton.throughSeq).toBe(last);
-    const complete = gateway.callsTo('Skeleton').length;
-    expect(complete).toBe(1);
+    await until(clock, () => false, MINUTE);
+    const {load} = actor.getSnapshot().context;
+    expect(load?.skeleton.throughSeq).toBe(run.records.at(-1)?.seq);
+    expect(load?.complete).toBe(true);
+    // A cut costs a second Tail from the cursor, never a second Skeleton or a re-read.
+    expect(gateway.callsTo('Skeleton')).toHaveLength(1);
     expect(gateway.callsTo('Tail').length).toBeLessThanOrEqual(2);
+    expect(gateway.skeletons).toHaveLength(1);
+    const tailBytes = gateway.deliveries
+      .filter(item => item.method === `${SERVICE}Tail`)
+      .reduce((sum, item) => sum + item.bytes, 0);
+    // At most the window and everything after the Skeleton's cursor, once, plus message framing.
+    const from = (gateway.skeletons[0]?.nextSeq ?? 0n) - RECORD_WINDOW;
+    const wanted = run.records.filter(record => record.seq >= from);
+    const allowed = wanted.reduce(
+      (sum, record) => sum + toBinary(RecordSchema, record).length + 16,
+      64,
+    );
+    expect(tailBytes).toBeLessThanOrEqual(allowed);
     actor.stop();
   }
+});
+
+test('a converted run (the retained conversion corpus) paints from its first reply and reads on', async () => {
+  const root = new URL('../../../../../../proto/testdata/conversion/', import.meta.url);
+  const values: string[] = JSON.parse(
+    gunzipSync(readFileSync(new URL('records.base64.json.gz', root))).toString(),
+  );
+  const records = values.map(value =>
+    fromBinary(RecordSchema, Uint8Array.from(Buffer.from(value, 'base64'))),
+  );
+  const link = {rttMs: 100, bytesPerMs: 1400};
+  const {clock, gateway, actor} = open(
+    {records, keyframes: [], replyBytes: GATEWAY_REPLY_BYTES},
+    link,
+  );
+  const at = await until(clock, () => painted(actor));
+  const first = gateway.deliveries.find(item => item.method === `${SERVICE}Skeleton`);
+  if (at === undefined || first === undefined) throw new Error('no paint');
+  expect(at).toBeLessThanOrEqual(link.rttMs + first.bytes / link.bytesPerMs + 1);
+  expect(gateway.bytesBy(at)).toBeLessThanOrEqual(gateway.replyBytes + 256);
+  await until(clock, () => actor.getSnapshot().context.load?.complete === true);
+  expect(gateway.callsTo('Tail').length).toBeLessThanOrEqual(1);
+  for (const tail of gateway.callsTo('Tail'))
+    expect(fromBinary(TailRequestSchema, tail.request).fromSeq).toBeGreaterThanOrEqual(
+      gateway.skeletons[0]?.nextSeq ?? 0n,
+    );
+  actor.stop();
 });

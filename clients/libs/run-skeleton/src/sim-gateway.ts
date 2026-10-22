@@ -82,6 +82,7 @@ export class SimGateway implements RunTransport {
   readonly #published: StoreRecord[];
   readonly #waiting = new Set<() => void>();
   readonly #counts = new Map<string, number>();
+  readonly #keyframes = new Map<number, Uint8Array>();
   #busyUntil = 0;
 
   constructor(
@@ -230,13 +231,7 @@ export class SimGateway implements RunTransport {
     let covered = 0;
     let keyframe: Uint8Array | undefined;
     for (const candidate of [...(this.run.keyframes ?? [])].sort((a, b) => b - a)) {
-      const bytes = toBinary(
-        KeyframeSchema,
-        create(KeyframeSchema, {
-          ...foldSkeleton(seedSkeleton(), records.slice(0, candidate)),
-          throughSeq: records[candidate - 1]?.seq ?? 0n,
-        }),
-      );
+      const bytes = this.keyframe(candidate);
       if (bytes.length <= budget) {
         keyframe = bytes;
         covered = candidate;
@@ -260,6 +255,21 @@ export class SimGateway implements RunTransport {
       nextSeq: last ? last.seq + 1n : (records[0]?.seq ?? 1n),
       complete: covered + included.length === records.length,
     });
+  }
+
+  private keyframe(covered: number): Uint8Array {
+    const known = this.#keyframes.get(covered);
+    if (known) return known;
+    const records = this.run.records;
+    const bytes = toBinary(
+      KeyframeSchema,
+      create(KeyframeSchema, {
+        ...foldSkeleton(seedSkeleton(), records.slice(0, covered)),
+        throughSeq: records[covered - 1]?.seq ?? 0n,
+      }),
+    );
+    this.#keyframes.set(covered, bytes);
+    return bytes;
   }
 
   /** The log from the requested cursor in budget-sized messages, then whatever is published. */
