@@ -28,6 +28,7 @@ from vibesys.orchestration.dynamic.search._values import Blocker
 from vs_core.api.search import (
     Assessment,
     AttemptRef,
+    EvidenceRef,
     Flow,
     MeasurementResult,
     Value,
@@ -69,6 +70,8 @@ class WorkstreamResume(Value):
     """The merger's commit, once a merge made one (`Work.merged`)."""
     result: Result | None = None
     measurement: MeasurementResult | None = None
+    unverified: tuple[EvidenceRef, ...] = ()
+    """Benchmark evidence of the measurement that is shown and not used to decide."""
     closing: Closing | None = None
     baseline: Baseline | None = None
     input_wait_since: float | None = None
@@ -100,6 +103,7 @@ def mark(  # noqa: PLR0913  # lint-waiver: LW-271016 [PLR0913]; each keyword is 
     blockers: tuple[Blocker, ...] = (),
     result: Result | None = None,
     measurement: MeasurementResult | None = None,
+    unverified: tuple[EvidenceRef, ...] = (),
     closing: Closing | None = None,
 ) -> None:
     """Checkpoint what the workstream established at ``stage`` in its open workspace.
@@ -121,6 +125,7 @@ def mark(  # noqa: PLR0913  # lint-waiver: LW-271016 [PLR0913]; each keyword is 
             merged=work.merged,
             result=result,
             measurement=measurement,
+            unverified=unverified,
             closing=closing,
             baseline=work.baseline,
             input_wait_since=work.input_wait_since,

@@ -16,6 +16,7 @@ $root.overdue_reported optional {"default":false,"type":"boolean"}
 $root.result optional {"anyOf":[{"$ref":"#/$defs/Result"},{"type":"null"}],"default":null}
 $root.stage required {"$ref":"#/$defs/ResumeStage"}
 $root.start required {"$ref":"#/$defs/WorkstreamStart"}
+$root.unverified optional {"default":[],"items":{"$ref":"#/$defs/EvidenceRef"},"type":"array"}
 $root.version optional {"const":1,"default":1,"type":"integer"}
 $root.workspace required {"$ref":"#/$defs/AttemptRef"}
 AcceptedReading {"additionalProperties":false,"type":"object"}
@@ -104,6 +105,7 @@ EventId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 Evidence {"additionalProperties":false,"type":"object"}
 Evidence.proof optional {"anyOf":[{"$ref":"#/$defs/Proof"},{"type":"null"}],"default":null}
 Evidence.readings optional {"default":[],"items":{"$ref":"#/$defs/AcceptedReading"},"type":"array"}
+Evidence.shown optional {"default":[],"items":{"$ref":"#/$defs/AcceptedReading"},"type":"array"}
 EvidenceAcceptanceReceipt {"additionalProperties":false,"type":"object"}
 EvidenceAcceptanceReceipt.observation required {"$ref":"#/$defs/Observation"}
 EvidenceId {"additionalProperties":false,"type":"object"}
