@@ -13,9 +13,11 @@ import argparse
 import ast
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,16 +97,83 @@ def image_pins(path: Path = PINS) -> tuple[ImagePin, ...]:
 
 
 class MirrorProbe(Protocol):
-    """Check that a mirror reference can be pulled with this process's credentials."""
+    """Check that a mirror reference can be pulled the way the job's consumers pull it."""
 
-    def __call__(self, reference: str) -> None:
-        """Return when the manifest is readable; raise ``OSError`` or ``SubprocessError``."""
+    def __call__(self, reference: str, /) -> None:
+        """Return when the image is readable; raise ``OSError`` or ``SubprocessError``."""
         ...
 
 
+class DockerRun(Protocol):
+    """Run one bounded Docker command in a given environment; failure raises ``OSError``."""
+
+    def __call__(self, argv: list[str], *, timeout: float, env: Mapping[str, str]) -> str:
+        """Return stdout on success."""
+        ...
+
+
+CONFIG_ENV = "DOCKER_CONFIG"
+_PLATFORM_ARCHITECTURES = {
+    "x86_64": "amd64",
+    "amd64": "amd64",
+    "aarch64": "arm64",
+    "arm64": "arm64",
+}
+
+
+def consumer_environment(env: Mapping[str, str], private_home: str) -> dict[str, str]:
+    """Return the environment of a consumer whose ``HOME`` is private, as the test suite's is.
+
+    Registry credentials reach such a consumer only through ``DOCKER_CONFIG``; without
+    it the consumer pulls anonymously and a private mirror answers 401.
+    """
+    if not env.get(CONFIG_ENV):
+        message = (
+            f"{CONFIG_ENV} is not set, so a consumer with a private HOME has no registry "
+            "credentials"
+        )
+        raise OSError(message)
+    return {**env, "HOME": private_home}
+
+
+def probe_mirror(reference: str, run: DockerRun, env: Mapping[str, str], machine: str) -> None:
+    """Read the index and this host's platform child, with the consumers' credentials.
+
+    A pin is a multi-platform index. Reading only the index passes while a child was
+    never copied, and the pull of that child fails; so the child is read too.
+    """
+    raw = run(["docker", "manifest", "inspect", reference], timeout=_PROBE_SECONDS, env=env)
+    try:
+        children = json.loads(raw).get("manifests")
+    except (ValueError, AttributeError) as exc:
+        message = f"{reference} has an unreadable manifest: {exc}"
+        raise OSError(message) from exc
+    if children is None:
+        return
+    architecture = _PLATFORM_ARCHITECTURES.get(machine, machine)
+    repository = reference.split("@", 1)[0]
+    matching = [
+        child["digest"]
+        for child in children
+        if child.get("platform", {}).get("os") == "linux"
+        and child["platform"].get("architecture") == architecture
+    ]
+    if not matching:
+        message = f"{reference} has no linux/{architecture} child"
+        raise OSError(message)
+    for digest in matching:
+        run(
+            ["docker", "manifest", "inspect", f"{repository}@{digest}"],
+            timeout=_PROBE_SECONDS,
+            env=env,
+        )
+
+
 def docker_mirror_probe(reference: str) -> None:
-    """Read the mirror's manifest through the logged-in Docker client."""
-    docker_command(["docker", "manifest", "inspect", reference], timeout=_PROBE_SECONDS)
+    """Probe through the Docker client with a private HOME and only ``DOCKER_CONFIG`` credentials."""
+    with tempfile.TemporaryDirectory(prefix="ci-base-probe-") as home:
+        env = consumer_environment(os.environ, home)
+        probe_mirror(reference, docker_command, env, platform.machine())
 
 
 def resolve_bases(pins: tuple[ImagePin, ...], probe: MirrorProbe) -> dict[str, str]:

@@ -12,17 +12,20 @@ import yaml
 from hypothesis import example, given
 from hypothesis import strategies as st
 from scripts.ci_base_images import (
+    CONFIG_ENV,
     RESOLUTION_ENV,
     ImagePin,
     base_image,
     ci_image_problems,
+    consumer_environment,
     image_pins,
     main,
+    probe_mirror,
     resolve_bases,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -286,5 +289,166 @@ def test_the_mirror_action_logs_in_with_the_job_token_and_never_fails_the_job() 
     assert "--password-stdin" in script
     assert "python3 -m scripts.ci_base_images --resolve" in script
     assert script.count("::warning::") == 2
+    # Tests run with a private HOME, so the credential directory travels in DOCKER_CONFIG.
+    pin = script.index('export DOCKER_CONFIG="${DOCKER_CONFIG:-${HOME:?}/.docker}"')
+    assert pin < script.index("docker login ghcr.io")
+    assert 'echo "DOCKER_CONFIG=${DOCKER_CONFIG}" >> "${GITHUB_ENV:?}"' in script
     assert script.rstrip().endswith("exit 0")
     assert "set -e" not in script.replace("set -uo", "")
+
+
+PRIVATE_HOME = "/private/home"
+RUNNER_HOME = "/home/runner"
+CREDENTIALS = f"{RUNNER_HOME}/.docker"
+
+
+class FakeDockerRegistry:
+    """A private registry that answers a Docker client by where its credentials are.
+
+    The client reads credentials from ``DOCKER_CONFIG``, else ``$HOME/.docker``, as
+    Docker does. Only a client that finds the logged-in directory is authorized.
+    """
+
+    def __init__(self, platforms: Mapping[str, list[str]]) -> None:
+        self.platforms = platforms
+        self.reads: list[str] = []
+
+    def authorized(self, env: Mapping[str, str]) -> bool:
+        return env.get(CONFIG_ENV, f"{env['HOME']}/.docker") == CREDENTIALS
+
+    def __call__(self, argv: list[str], *, timeout: float, env: Mapping[str, str]) -> str:
+        assert argv[:3] == ["docker", "manifest", "inspect"]
+        assert timeout > 0
+        reference = argv[3]
+        self.reads.append(reference)
+        if not self.authorized(env):
+            message = "manifest failed (exit 1): 401 Unauthorized: anonymous token"
+            raise OSError(message)
+        repository, digest = reference.split("@")
+        if digest in self.platforms:
+            children = [
+                {"digest": f"sha256:{arch:0<64}", "platform": {"os": "linux", "architecture": arch}}
+                for arch in self.platforms[digest]
+            ]
+            return json.dumps({"manifests": children})
+        if repository.endswith("ci-base") and any(
+            digest == f"sha256:{arch:0<64}" for arches in self.platforms.values() for arch in arches
+        ):
+            return json.dumps({"config": {}})
+        message = f"manifest failed (exit 1): {reference}: manifest unknown"
+        raise OSError(message)
+
+    def consumer_pulls(self, env: Mapping[str, str]) -> bool:
+        """Whether a Docker client with ``env`` reads the mirror, as the test suite's does."""
+        return self.authorized(env)
+
+
+def _probe_with(
+    registry: FakeDockerRegistry, env: Mapping[str, str], machine: str = "x86_64"
+) -> Callable[[str], None]:
+    def probe(reference: str) -> None:
+        probe_mirror(reference, registry, consumer_environment(env, PRIVATE_HOME), machine)
+
+    return probe
+
+
+@pytest.mark.regression
+def test_a_probe_cannot_pass_with_credentials_a_private_home_consumer_would_not_find(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The probe ran with the runner's HOME and passed; pytest's private HOME pulled anonymously."""
+    pins = image_pins()
+    registry = FakeDockerRegistry({pin.digest: ["amd64"] for pin in pins})
+    job_env = {"HOME": RUNNER_HOME}  # logged in under ~/.docker, DOCKER_CONFIG not exported
+    assert registry.consumer_pulls(job_env)
+    assert not registry.consumer_pulls({**job_env, "HOME": PRIVATE_HOME})
+    resolved = resolve_bases(pins, _probe_with(registry, job_env))
+    assert resolved == {pin.source: pin.upstream for pin in pins}
+    assert registry.reads == []
+    assert capsys.readouterr().err.count("::warning::") == len(pins)
+
+
+def test_a_pinned_credential_directory_reaches_a_consumer_with_a_private_home() -> None:
+    pins = image_pins()
+    registry = FakeDockerRegistry({pin.digest: ["amd64"] for pin in pins})
+    job_env = {"HOME": RUNNER_HOME, CONFIG_ENV: CREDENTIALS}
+    assert registry.consumer_pulls({**job_env, "HOME": PRIVATE_HOME})
+    assert resolve_bases(pins, _probe_with(registry, job_env)) == {
+        pin.source: pin.mirror for pin in pins
+    }
+
+
+@given(
+    machine=st.sampled_from(["x86_64", "aarch64", "arm64", "amd64"]),
+    copied=st.lists(st.sampled_from(["amd64", "arm64"]), unique=True),
+)
+def test_a_mirror_whose_platform_child_was_never_copied_falls_back(
+    machine: str, copied: list[str]
+) -> None:
+    pin = image_pins()[0]
+    registry = FakeDockerRegistry({pin.digest: copied})
+    env = {"HOME": RUNNER_HOME, CONFIG_ENV: CREDENTIALS}
+    wanted = {"x86_64": "amd64", "amd64": "amd64"}.get(machine, "arm64")
+    resolved = resolve_bases((pin,), _probe_with(registry, env, machine))
+    assert resolved == {pin.source: pin.mirror if wanted in copied else pin.upstream}
+    if wanted in copied:
+        assert len(registry.reads) == 2  # the index, then the child a pull would fetch
+
+
+def test_a_child_manifest_the_registry_lost_falls_back() -> None:
+    pin = image_pins()[0]
+
+    class LostChild(FakeDockerRegistry):
+        def __call__(self, argv: list[str], *, timeout: float, env: Mapping[str, str]) -> str:
+            if "@sha256:" + "amd64".ljust(64, "0") in argv[3]:
+                message = "manifest failed (exit 1): manifest unknown"
+                raise OSError(message)
+            return super().__call__(argv, timeout=timeout, env=env)
+
+    registry = LostChild({pin.digest: ["amd64"]})
+    env = {"HOME": RUNNER_HOME, CONFIG_ENV: CREDENTIALS}
+    assert resolve_bases((pin,), _probe_with(registry, env)) == {pin.source: pin.upstream}
+
+
+class ScriptedDocker:
+    """A Docker client that answers every read with one body and records the references."""
+
+    def __init__(self, body: str) -> None:
+        self.body = body
+        self.reads: list[str] = []
+
+    def __call__(self, argv: list[str], *, timeout: float, env: Mapping[str, str]) -> str:
+        assert timeout > 0
+        assert env[CONFIG_ENV] == CREDENTIALS
+        self.reads.append(argv[3])
+        return self.body
+
+
+@pytest.mark.parametrize("body", ["not json", "[]", '"text"'])
+def test_an_unreadable_index_falls_back_instead_of_failing_the_job(body: str) -> None:
+    pin = image_pins()[0]
+    docker = ScriptedDocker(body)
+    resolved = resolve_bases(
+        (pin,), lambda ref: probe_mirror(ref, docker, {CONFIG_ENV: CREDENTIALS}, "x86_64")
+    )
+    assert resolved == {pin.source: pin.upstream}
+
+
+def test_a_single_platform_manifest_needs_no_child_read() -> None:
+    pin = image_pins()[0]
+    docker = ScriptedDocker(json.dumps({"config": {}}))
+    probe_mirror(pin.mirror, docker, {CONFIG_ENV: CREDENTIALS}, "x86_64")
+    assert docker.reads == [pin.mirror]
+
+
+@given(env=st.dictionaries(st.sampled_from(["PATH", "DOCKER_HOST", "HOME"]), st.text(max_size=8)))
+def test_a_consumer_environment_always_has_a_private_home_and_the_config_directory(
+    env: dict[str, str],
+) -> None:
+    if not env.get(CONFIG_ENV):
+        with pytest.raises(OSError, match=CONFIG_ENV):
+            consumer_environment(env, PRIVATE_HOME)
+        return
+    consumer = consumer_environment(env, PRIVATE_HOME)
+    assert consumer["HOME"] == PRIVATE_HOME
+    assert consumer[CONFIG_ENV] == env[CONFIG_ENV]
