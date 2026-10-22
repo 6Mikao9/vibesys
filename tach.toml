@@ -2052,6 +2052,29 @@ from = ["vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 expose = ["[A-Z].*"]
 
 [[modules]]
+path = "vibesys.fact_import"
+layer = "loops"
+depends_on = ["vibesys", "vs_agent", "vs_core", "vs_project", "vs_proto", "vs_decode.api", "vs_runtime", "vs_evaluation.api", "vs_evaluator_protocol", "vibesys.hypothesis", "vibesys.metrics"]
+
+[[interfaces]]
+from = ["vibesys.fact_import"]
+expose = ["api", "api\\..*"]
+
+# The only fact_import code that reads a Project; the importer itself is pure.
+[[modules]]
+path = "vibesys.fact_import.reader"
+layer = "loops"
+depends_on = ["vibesys.fact_import", "vs_core", "vs_project", "vs_proto"]
+
+[[interfaces]]
+from = ["vibesys.fact_import.reader"]
+expose = ["RetainedReadLimits", "read_run_facts"]
+
+[[modules]]
+path = "vibesys.api.importing"
+depends_on = ["vibesys.fact_import", "vibesys.fact_import.reader"]
+
+[[modules]]
 path = "vibesys.api.host_operations"
 depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
 

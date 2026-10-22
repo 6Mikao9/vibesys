@@ -67,6 +67,7 @@ from vs_proto._generated.vibesys.core.v1 import common_pb as core_common
 from vs_proto._generated.vibesys.core.v1 import contracts_pb as core_contracts
 from vs_proto._generated.vibesys.core.v1 import control_pb as core_control
 from vs_proto._generated.vibesys.core.v1 import failures_pb as core_failures
+from vs_proto._generated.vibesys.core.v1 import imported_facts_pb as imported_facts
 from vs_proto._generated.vibesys.core.v1 import iterations_pb as core_iterations
 from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
 from vs_proto._generated.vibesys.core.v1 import replay_agent_pb as replay_agent
@@ -416,6 +417,7 @@ __all__ = [
     "host_operation_descriptors",
     "host_operations",
     "host_payloads",
+    "imported_facts",
     "operation_options",
     "replay",
     "replay_agent",
