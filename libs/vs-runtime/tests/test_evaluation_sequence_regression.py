@@ -1,8 +1,8 @@
-"""A measurement retains one resource slot between separately requested executor jobs.
+"""Waiting validations progress between separately requested official jobs.
 
-This scenario uses the executor API present at 094c5ad2b. Admission metadata is
-copied onto the request so the base runs the same work and fails on its observable
-queue counts, rather than on a missing constructor argument or new API export.
+An official measurement retains an uncontended slot, but must yield that idle
+reservation to validations already waiting. No successor submission is needed
+for those validations to finish.
 """
 
 from pathlib import Path
@@ -45,7 +45,7 @@ def request(snapshot: str, key: str, kind: EvidenceKind) -> EvaluationRequest:
 
 
 @pytest.mark.regression
-async def test_agents_stay_queued_between_an_official_measurements_jobs() -> None:
+async def test_agents_finish_between_an_official_measurements_jobs() -> None:
     evaluation = FakeEvaluation(
         default_accuracy=AccuracyEvaluation(executed=True),
         default_benchmark=BenchmarkEvaluation(executed=True),
@@ -80,10 +80,16 @@ async def test_agents_stay_queued_between_an_official_measurements_jobs() -> Non
             lambda seen: seen is not None and seen.state is EvaluationState.SUCCEEDED,
             "official accuracy ends",
         )
+        for agent in agents:
+            await yield_until(
+                lambda agent=agent: executor.inspect(agent),
+                lambda seen: seen is not None and seen.state is EvaluationState.SUCCEEDED,
+                f"{agent} finishes before the official successor is submitted",
+            )
         between = await executor.availability(ResourceRequirements())
-        assert between.in_flight == 1
-        assert between.queue_depth == len(agents)
-        assert len(evaluation.accuracy_calls) == 1
+        assert between.in_flight == 0
+        assert between.queue_depth == 0
+        assert len(evaluation.accuracy_calls) == len(agents) + 1
         final = request(snapshot, "official-benchmark", EvidenceKind.BENCHMARK).model_copy(
             update={"admission": {"key": "official", "retain": False}}
         )
