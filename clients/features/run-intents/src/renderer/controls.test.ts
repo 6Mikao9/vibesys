@@ -426,16 +426,16 @@ test('an interrupted WatchRuns hint enables relaunch only for the current run an
   try {
     const watch = bridge.streams[0];
     expect(watch?.method).toBe('/vibesys.api.v1.HostService/WatchRuns');
-    const hint = (runId: string, epoch: number) =>
+    const hint = (runId: string, epoch: number, processEpoch = 9) =>
       toBinary(
         WatchRunsResponseSchema,
         create(WatchRunsResponseSchema, {
           runId,
           liveness: RunLiveness.INTERRUPTED,
-          head: {process: {epoch}},
+          head: {epoch, process: {epoch: processEpoch}},
         }),
       );
-    for (const bytes of [hint('other', 2), hint('run-1', 1)]) {
+    for (const bytes of [hint('other', 2), hint('run-1', 1), hint('run-1', 0, 2)]) {
       watch?.receive(bytes);
       actor.send({type: 'relaunch'});
       expect(bridge.calls).toHaveLength(0);
