@@ -2,6 +2,7 @@
 import type {HostId} from '@vibesys/hosts';
 import {
   acceptConvertSavedRuns,
+  type ConvertSavedRunsResponse,
   callConvertSavedRuns,
   decodeHostMutate,
   encodeHostMutate,
@@ -9,6 +10,7 @@ import {
   OperationFailed,
   type OperationSignal,
   operationPolicies,
+  type RunConversion,
   RunConversionStatus,
 } from '@vibesys/proto';
 import {newRequestId} from '@vibesys/request-identity';
@@ -56,44 +58,61 @@ const STATUSES: ReadonlyMap<RunConversionStatus, ConvertedRun['status']> = new M
 export function registryRunConversion(ports: RegistryRunConversionPorts): RegistryRunConversion {
   return {
     async convert(host, project, signal) {
-      const checkout = requireCheckout(await ports.checkout(host), null);
-      const transport = {
-        async invoke(id: number, payload: Uint8Array, _totalMs: number, owned: OperationSignal) {
-          if (!(owned instanceof AbortSignal)) throw new Error('operation cancelled');
-          const policy = Object.values(operationPolicies).find(item => item.id === id);
-          if (policy === undefined) throw new Error('unknown mutation');
-          return decodeHostMutate(
-            policy.name,
-            await ports.mutate(host, encodeHostMutate(checkout, policy.name, payload), owned),
-          );
-        },
-      };
+      const transport = mutateTransport(
+        ports,
+        host,
+        requireCheckout(await ports.checkout(host), null),
+      );
       const runs: ConvertedRun[] = [];
-      let alreadyConverted = 0;
       let unreported = 0;
       for (let call = 0; call < RUN_CONVERSION_CALLS; call++) {
-        let response: Awaited<ReturnType<typeof callConvertSavedRuns>>;
-        try {
-          response = await callConvertSavedRuns(
-            transport,
-            acceptConvertSavedRuns({requestId: newRequestId(), project}),
-            signal,
-          );
-        } catch (error) {
-          if (error instanceof OperationFailed && error.category === FailureCategory.UNSUPPORTED)
-            return {kind: 'needs-update'};
-          throw error;
-        }
-        for (const run of response.runs) {
-          const status = STATUSES.get(run.status);
-          if (status === undefined) throw new Error(`run ${run.runId} has no conversion status`);
-          runs.push({runId: run.runId, status, reason: run.reason});
-        }
-        alreadyConverted = response.alreadyConverted;
+        const response = await convertOnce(transport, project, signal);
+        if (response === 'needs-update') return {kind: 'needs-update'};
+        runs.push(...response.runs.map(convertedRun));
         unreported += response.unreported;
-        if (response.complete) return {kind: 'converted', runs, alreadyConverted, unreported};
+        if (response.complete)
+          return {kind: 'converted', runs, alreadyConverted: response.alreadyConverted, unreported};
       }
       throw new Error(`run conversion did not finish in ${RUN_CONVERSION_CALLS} calls`);
     },
   };
+}
+
+function mutateTransport(ports: RegistryRunConversionPorts, host: HostId, checkout: string) {
+  return {
+    async invoke(id: number, payload: Uint8Array, _totalMs: number, owned: OperationSignal) {
+      if (!(owned instanceof AbortSignal)) throw new Error('operation cancelled');
+      const policy = Object.values(operationPolicies).find(item => item.id === id);
+      if (policy === undefined) throw new Error('unknown mutation');
+      return decodeHostMutate(
+        policy.name,
+        await ports.mutate(host, encodeHostMutate(checkout, policy.name, payload), owned),
+      );
+    },
+  };
+}
+
+/** One ConvertSavedRuns call; an UNSUPPORTED failure means the host's checkout predates it. */
+async function convertOnce(
+  transport: ReturnType<typeof mutateTransport>,
+  project: string,
+  signal: AbortSignal,
+): Promise<ConvertSavedRunsResponse | 'needs-update'> {
+  try {
+    return await callConvertSavedRuns(
+      transport,
+      acceptConvertSavedRuns({requestId: newRequestId(), project}),
+      signal,
+    );
+  } catch (error) {
+    if (error instanceof OperationFailed && error.category === FailureCategory.UNSUPPORTED)
+      return 'needs-update';
+    throw error;
+  }
+}
+
+function convertedRun(run: RunConversion): ConvertedRun {
+  const status = STATUSES.get(run.status);
+  if (status === undefined) throw new Error(`run ${run.runId} has no conversion status`);
+  return {runId: run.runId, status, reason: run.reason};
 }
