@@ -60,7 +60,7 @@ func (h *host) Mutate(ctx context.Context, request *apiv1.MutateRequest) (*apiv1
 		if err != nil {
 			message += ": " + err.Error()
 		}
-		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, message+"\n"+result.Stderr), nil
+		return mutateFailure(exitFailureCategory(result, err), message+"\n"+result.Stderr), nil
 	}
 	response := &apiv1.MutateResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {

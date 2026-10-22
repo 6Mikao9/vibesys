@@ -56,7 +56,7 @@ func (h *host) Read(ctx context.Context, request *apiv1.ReadRequest) (*apiv1.Rea
 		if err != nil {
 			message += ": " + err.Error()
 		}
-		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, message+"\n"+result.Stderr), nil
+		return readFailure(exitFailureCategory(result, err), message+"\n"+result.Stderr), nil
 	}
 	response := &apiv1.ReadResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {
