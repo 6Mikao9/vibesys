@@ -22,7 +22,12 @@ one Git gives:
 * index changes while the index has unmerged entries;
 * ``update_ref`` on a symbolic ref (Git writes through to its target);
 * ``is_valid_branch_name`` for ``@{-N}`` (expands from the checkout reflog) and
-  ``has_ref_containing`` with a wildcard or empty prefix.
+  ``has_ref_containing`` with a wildcard or empty prefix;
+* a repository whose common git dir lists shallow commits (``.git/shallow``,
+  including a linked worktree, whose own git dir does not contain that file):
+  libgit2 follows the grafted parents and asks for objects the clone does not
+  have. ``root_commit``, ``is_ancestor``, ``recent_subjects`` and
+  ``has_ref_containing`` go to the CLI, which stops at that boundary.
 
 Every call opens the repository again, so nothing is cached and writes by other
 processes (the agent's own ``git``) are visible at once. Writes use libgit2's
@@ -258,6 +263,11 @@ class Pygit2GitRepository:
     def is_ancestor(self, ancestor: Revision, descendant: Revision) -> bool:
         try:
             repository = self._open()
+        except _LIBGIT2_ERRORS:
+            return False
+        if _shallow_boundary(repository):
+            return self._cli.is_ancestor(ancestor, descendant)
+        try:
             older = self._commit(repository, ancestor)
             newer = self._commit(repository, descendant)
             if older is None or newer is None:
@@ -269,6 +279,11 @@ class Pygit2GitRepository:
     def root_commit(self, revision: Revision) -> str | None:
         try:
             repository = self._open()
+        except _LIBGIT2_ERRORS as error:
+            self._fail(f"rev-list --max-parents=0 {revision}", error)
+        if _shallow_boundary(repository):
+            return self._cli.root_commit(revision)
+        try:
             start = self._commit(repository, revision)
             if start is None:
                 _refuse(f"bad revision '{revision}'")
@@ -291,6 +306,11 @@ class Pygit2GitRepository:
             return self._cli.recent_subjects(limit)
         try:
             repository = self._open()
+        except _LIBGIT2_ERRORS as error:
+            self._fail("log", error)
+        if _shallow_boundary(repository):
+            return self._cli.recent_subjects(limit)
+        try:
             if repository.head_is_unborn:
                 _refuse("your current branch does not have any commits yet")
             subjects: list[CommitSubject] = []
@@ -327,6 +347,11 @@ class Pygit2GitRepository:
             return self._cli.has_ref_containing(commit, prefix)
         try:
             repository = self._open()
+        except _LIBGIT2_ERRORS:
+            return False
+        if _shallow_boundary(repository):
+            return self._cli.has_ref_containing(commit, prefix)
+        try:
             wanted = self._commit(repository, commit)
             if wanted is None:
                 return False
@@ -655,3 +680,17 @@ def _common_dir(git_dir: Path) -> Path:
     except FileNotFoundError:
         return git_dir
     return (git_dir / pointer).resolve()
+
+
+def _shallow_boundary(repository: pygit2.Repository) -> frozenset[str]:
+    """Commit ids at which this clone's history stops, or empty when it is complete.
+
+    The list lives in the common git dir. A linked worktree's own git dir does not
+    contain it, and libgit2 then reports the repository as not shallow and walks
+    the grafted parents whose objects were never fetched.
+    """
+    try:
+        text = (_common_dir(Path(repository.path)) / "shallow").read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    return frozenset(line.strip() for line in text.splitlines() if line.strip())

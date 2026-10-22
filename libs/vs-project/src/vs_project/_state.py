@@ -47,6 +47,7 @@ from vs_project._manifests import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
+from vs_project._run_branches import run_branch
 from vs_project._state_io import (
     STATE_DOCUMENT_MAX_BYTES,
     _atomic_write_model,
@@ -1206,10 +1207,37 @@ class ProjectState:
 
         This is the checkout's copy, which the run whose branch is checked out reads
         and writes. ``RunHistory`` reads every run, whichever branch is checked out.
+        A missing file names ``vibesys-runs/<run id>``, the branch that holds it.
         """
         path = self._run_manifest_path(run_id)
+        if not path.is_file():
+            raise self._missing_recorded_manifest(run_id, path)
         _require_run_schema(_read_json_object(path), source=path)
         return _load_model(path, OrchestrationRunManifest)
+
+    def require_recorded_run(self, run_id: str) -> None:
+        """Accept a run whose manifest is in this checkout, or whose machine-local state is.
+
+        The committed manifest lives on ``vibesys-runs/<run id>``. A checkout that
+        moved off that branch still has the machine-local state the run started
+        with. A run with neither is missing; the error names the branch to check out.
+        This does not read or write the git tree.
+        """
+        path = self._run_manifest_path(run_id)
+        if path.is_file():
+            self.load_run(run_id)
+            return
+        if self._contained_local_run_dir(run_id).is_dir():
+            return
+        raise self._missing_recorded_manifest(run_id, path)
+
+    def _missing_recorded_manifest(self, run_id: str, path: Path) -> ProjectStateError:
+        branch = run_branch(run_id)
+        return ProjectStateError(
+            f"VibeSys metadata file does not exist: {path}. "
+            f"Run state is committed on branch {branch}; "
+            "check out that branch when the worktree is clean."
+        )
 
     def record_home_branch(self, run_id: str, branch: str) -> None:
         """Atomically note the branch a run returns the checkout to, in machine-local state.
@@ -1463,7 +1491,7 @@ class ProjectState:
 
     def session_inbox(self, run_id: str, session_id: str) -> FileControlInbox:
         """Open an ordered, idempotent inbox beside one session's log."""
-        self.load_run(run_id)
+        self.require_recorded_run(run_id)
         identity = validate_request_id(session_id)
         relative = f"logs/sessions/{identity}"
         return FileControlInbox(
@@ -1538,7 +1566,7 @@ class ProjectState:
 
     def local_namespace(self, run_id: str, namespace: str) -> StateNamespace:
         """Return the typed filesystem boundary for machine-local subsystem state."""
-        self.load_run(run_id)
+        self.require_recorded_run(run_id)
         return StateNamespace(
             project_root=self.project_root,
             root=self._local_state_dir(run_id, namespace),

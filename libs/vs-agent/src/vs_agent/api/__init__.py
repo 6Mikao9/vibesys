@@ -83,13 +83,16 @@ from vs_agent.host_resource_declarations import (
 )
 from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
+    ALLOWED_MODELS_SETTING,
     CLAUDE_CLI_MIN_FOR_GENERATION,
     CLI_VERSIONS,
     DEFAULT_CLI_PROVIDER,
     NODE_VERSION,
     SHIPPED_PROVIDERS,
     Harness,
+    ModelNotAllowedError,
     UnvettedHarnessError,
+    check_allowed_model,
     check_harness,
     cli_mcp_config_files,
     cli_skill_dirs,
@@ -187,6 +190,7 @@ if TYPE_CHECKING:
     from vs_sim.api import Clock, Threads
 
 __all__ = [
+    "ALLOWED_MODELS_SETTING",
     "BASE_ENV_ALLOWLIST",
     "CHECK_TIMEOUT_S",
     "CLAUDE_CLI_MIN_FOR_GENERATION",
@@ -264,6 +268,7 @@ __all__ = [
     "MCPServerSpec",
     "ModelDisplay",
     "ModelGenerationFacts",
+    "ModelNotAllowedError",
     "NullAgentEventSink",
     "NullSessionStore",
     "OrphanReapError",
@@ -308,6 +313,7 @@ __all__ = [
     "auth_env_vars",
     "auth_paths",
     "build_agent_client",
+    "check_allowed_model",
     "check_harness",
     "check_tool_servers",
     "cli_mcp_config_files",

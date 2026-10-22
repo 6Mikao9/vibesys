@@ -106,7 +106,7 @@ def _failure(code: str, message: str, *, exit_code: int = 2) -> bytes:
 def _post_intent(request: PostIntentRequest) -> PostIntentResponse:
     control = CONTROL_REQUEST.validate_python(_control_payload(request))
     project = Project.open(request.project_root)
-    project.state.load_run(request.run_id)
+    project.state.require_recorded_run(request.run_id)
     project.state.require_local_run(request.run_id)
     inbox = project.state.control_inbox(request.run_id)
     inbox.post(
@@ -170,7 +170,7 @@ def _chat_message(
             )
         )
     project = Project.open(request.project_root)
-    project.state.load_run(request.run_id)
+    project.state.require_recorded_run(request.run_id)
     project.state.require_local_run(request.run_id)
     import_module("vibesys.api.chat").run_head(
         Project.run_log_path_for(request.project_root, request.run_id).parent / "run.head"
