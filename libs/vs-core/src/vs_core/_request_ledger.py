@@ -510,7 +510,10 @@ def _refine(
         return AreaChange(state=state)
     proven = previous.model_copy(
         update={
-            "event_id": observation.event_id,
+            # The disposition is core's synthetic end, even after an executor proves
+            # release. Keeping its provenance lets repeated inspections at this same
+            # executor sequence be judged by _answered_after_close, too.
+            "event_id": previous.event_id if _ended_at_close(previous) else observation.event_id,
             "sequence": observation.sequence,
             "observed_at": observation.observed_at,
             "released": previous.released or released,

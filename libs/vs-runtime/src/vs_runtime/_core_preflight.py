@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 
 from vs_core.api import (
+    Accepted,
     ContractError,
     OperationRegistry,
     SearchDriver,
     StrategyState,
     validate_startup,
 )
+from vs_core.api.proofs import Mismatch, Proven, accepted_receipt_for
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import (
     Project,
@@ -25,6 +27,7 @@ from vs_project.api import (
 from vs_runtime._core_record import RuntimeRecord
 
 if TYPE_CHECKING:
+    from vs_core.api import DecisionReceipt
     from vs_project.api import StateNamespace
 
 
@@ -167,14 +170,13 @@ def resolve_core_resume[S: StrategyState](
     selected = project.state.resolve_run(run_id)
     _reject_legacy_state(project, selected.run_id)
     store_namespace = project.state.state_store_namespace(selected.run_id)
-    # StateStore.load synchronizes an existing record under its lock. Probe
-    # absence through Project first so rejecting journal-only legacy runs does
-    # not materialize a new core-store lock or directory.
+    # Observe without the writer's lock or durability repair: preflight must
+    # neither materialize a lock nor change the record it is judging.
     if store_namespace.read_bytes("store.json") is None:
         stored = None
     else:
         try:
-            stored = project.state_store(selected.run_id).load()
+            stored = project.state_store(selected.run_id).observe()
         except StateDocumentDamagedError as error:
             path = _path(store_namespace, "store.json")
             raise CoreResumeError(
@@ -217,4 +219,44 @@ def resolve_core_resume[S: StrategyState](
                 message=f"invalid core resume: {path} (runtime schema {schema}): {error}",
             )
         ) from error
+    validate_resume_receipts(
+        record.envelope.core.run.receipts,
+        path=_path(store_namespace, "store.json"),
+        source_schema=str(stored.schema_version),
+    )
     return ResolvedCoreResume(selected.run_id, project.state_store(selected.run_id), record)
+
+
+def validate_resume_receipts(
+    receipts: tuple[DecisionReceipt, ...],
+    *,
+    source_schema: str,
+    path: str = "core.run.receipts",
+) -> None:
+    """Decoding must preserve accepted command identity, including nested defaults.
+
+    A schema-compatible added default can still change a command's digest. Recovery
+    cannot safely infer a replacement digest or redo a completed effect. Refuse before
+    acquiring a writer lease, with the decision and failed proof named.
+    """
+    for receipt in receipts:
+        if not isinstance(receipt.feedback, Accepted):
+            continue
+        proof = accepted_receipt_for(receipts, receipt.decision_id, None)
+        if isinstance(proof, Proven):
+            continue
+        failed = proof.field.value if isinstance(proof, Mismatch) else proof.reason.value
+        error = ContractError(
+            ("core", "run", "receipts", receipt.decision_id.root, failed),
+            "accepted decision integrity failed after decoding; resume with the VibeSys "
+            "version that wrote this decision or provide an explicit persisted-state "
+            "migration; do not replace saved digests or replay completed effects",
+        )
+        raise CoreResumeError(
+            ResumeDiagnostic(
+                code="core_resume_invalid",
+                path=path,
+                source_schema=source_schema,
+                message=f"invalid core resume: {path} (runtime schema {source_schema}): {error}",
+            )
+        ) from error
