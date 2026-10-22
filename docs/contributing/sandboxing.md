@@ -151,8 +151,9 @@ handoff then lists the new ones.
 
 Reads are not uniformly hidden. Bubblewrap and Landlock deny all reads outside
 the project and declared resources. Seatbelt allows broad reads and denies the
-project's ancestor trees and all writes outside the project; use the default Docker run environment on
-macOS when full read confinement matters.
+project's ancestor trees, except metadata of the ancestor directories themselves
+needed by shell path resolution, and all writes outside the project; use the
+default Docker run environment on macOS when full read confinement matters.
 
 ## Host candidate isolation and evaluation admission
 
