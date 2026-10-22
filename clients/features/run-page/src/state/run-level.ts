@@ -200,8 +200,6 @@ function trendOf(
   const to = Math.max(from + 1, last.at, model.latest ?? 0);
   const start = input === null ? [] : [{x: from, y: input}];
   const steps = [...start, ...fold.best.map(step => ({x: step.at, y: step.value}))];
-  // One step is a value, not a trend: it would draw as a stray dot.
-  if (steps.length < 2) return null;
   return {
     label: `${name}: best so far over the run`,
     steps,

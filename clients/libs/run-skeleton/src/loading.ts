@@ -17,9 +17,17 @@ export interface RunLivenessHint {
   readonly head?: RunHead | undefined;
 }
 
+/** Records before a keyframe's boundary that the first Tail also delivers, for the run's record log. */
+export const RECORD_WINDOW = 256n;
+
 export interface SkeletonLoad {
   readonly skeleton: Skeleton;
   readonly nextSeq: bigint;
+  /**
+   * Where the first Tail starts: a keyframe hides the records it summarises, so the Tail reaches
+   * back a window to show the latest of them. Those records only feed the record log.
+   */
+  readonly windowFrom: bigint | undefined;
   readonly committedSeq: bigint;
   readonly complete: boolean;
 }
@@ -47,6 +55,12 @@ export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
   return {
     skeleton,
     nextSeq: response.nextSeq,
+    windowFrom:
+      response.keyframe === undefined
+        ? undefined
+        : response.nextSeq > RECORD_WINDOW
+          ? response.nextSeq - RECORD_WINDOW
+          : 0n,
     committedSeq: response.committedSeq,
     complete: response.complete,
   };
@@ -63,6 +77,7 @@ export function ingestTail(state: SkeletonLoad, response: TailResponse): Skeleto
     throw new Error('tail.through_seq: does not match delivered prefix');
   return {
     ...state,
+    windowFrom: undefined,
     skeleton,
     nextSeq: skeleton.throughSeq === undefined ? state.nextSeq : skeleton.throughSeq + 1n,
     complete:

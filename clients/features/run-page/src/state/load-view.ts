@@ -1,6 +1,6 @@
 /** What the load shows: a pure reading of the reader's facts, in status words and numbers. */
-import type {LoadRefusal, SkeletonLoadFailure} from '@vibesys/run-skeleton';
-import {progressFraction} from '@vibesys/run-skeleton';
+import type {LoadRefusal, SkeletonLoad, SkeletonLoadFailure} from '@vibesys/run-skeleton';
+import {progressFraction, type Skeleton} from '@vibesys/run-skeleton';
 import type {GatewayRunContext} from './gateway-machine.js';
 
 export type LoadView =
@@ -56,4 +56,9 @@ export function loadView(
         detail: `${progress.through} of ${progress.committed}`,
       };
   }
+}
+
+/** The screen paints from the first Skeleton that holds an epoch; the rest of the history follows. */
+export function paintedSkeleton(load: SkeletonLoad | undefined): Skeleton | undefined {
+  return load !== undefined && load.skeleton.epochs.length > 0 ? load.skeleton : undefined;
 }

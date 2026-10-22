@@ -10,7 +10,9 @@ export interface SkeletonLoaderInput {
 }
 export interface TailInput {
   readonly runId: string;
+  /** Where the request starts; records before `cursor` feed the record log and nothing else. */
   readonly fromSeq: bigint;
+  readonly cursor: bigint;
   readonly receive: (event: LoaderEvent) => void;
 }
 export type LoaderEvent =
@@ -108,7 +110,8 @@ export const skeletonLoaderMachine = setup({
           if (!context.load) throw new Error('Tail requires loaded Skeleton');
           return {
             runId: context.runId,
-            fromSeq: context.load.nextSeq,
+            fromSeq: context.load.windowFrom ?? context.load.nextSeq,
+            cursor: context.load.nextSeq,
             receive: event => self.send(event),
           };
         },

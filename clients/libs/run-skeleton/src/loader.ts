@@ -2,9 +2,11 @@ import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
   HostService,
+  RecordSchema,
   SkeletonRequestSchema,
   SkeletonResponseSchema,
   TailRequestSchema,
+  type TailResponse,
   TailResponseSchema,
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
@@ -53,10 +55,23 @@ export function skeletonLoaderMachineFor(
           if (signal.aborted) return;
           const response = fromBinary(TailResponseSchema, bytes);
           records(response.records);
-          input.receive({type: 'tail', response});
+          const fresh = unseen(response, input.cursor);
+          if (fresh) input.receive({type: 'tail', response: fresh});
         }
       }),
     },
+  });
+}
+
+/** The part of a Tail message at or after the cursor, if any; the rest only feeds the record log. */
+function unseen(response: TailResponse, cursor: bigint): TailResponse | undefined {
+  const records = response.records;
+  const start = records.findIndex(bytes => fromBinary(RecordSchema, bytes).seq >= cursor);
+  if (start < 0) return undefined;
+  if (start === 0) return response;
+  return create(TailResponseSchema, {
+    records: records.slice(start),
+    throughSeq: response.throughSeq,
   });
 }
 

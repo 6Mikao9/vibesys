@@ -5,6 +5,7 @@ import {
   gatewayRunMachine,
   loadView,
   logStreamToFollow,
+  paintedSkeleton,
   projectSkeleton,
   type RunPageSeed,
   skeletonScreenState,
@@ -40,8 +41,7 @@ export function useGatewayRun(options: {
   }, [ports, schedule, host, runId]);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
   const {load, ui, text, hint, replies} = snapshot.context;
-  // The keyframe is enough to paint; the rest of the history follows into the same fold.
-  const skeleton = load?.skeleton.epochs.length ? load.skeleton : undefined;
+  const skeleton = paintedSkeleton(load);
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
   const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
   const objective = text[epoch?.run?.objective?.sha256 ?? ''] ?? '';

@@ -24,6 +24,7 @@ export {
   loadProgress,
   observeRun,
   progressFraction,
+  RECORD_WINDOW,
   type RunLivenessHint,
   type SkeletonLoad,
 } from './loading.js';
