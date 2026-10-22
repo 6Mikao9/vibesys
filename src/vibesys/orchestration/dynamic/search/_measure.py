@@ -15,8 +15,9 @@ from vibesys.candidates.api import (
     failure,
     input_measurement,
     with_first_attempt,
+    with_samples,
 )
-from vibesys.metrics import AcceptedReading, accept_readings
+from vibesys.metrics import AcceptedReading, accept_readings, pooled_benchmarks
 from vibesys.orchestration.dynamic.search._composition import (
     ComposedJobs,
     MeasuredJob,
@@ -174,6 +175,24 @@ async def while_input_pending[T](ctx: Flow, w: WorkstreamStart, work: Work, sour
             return value
 
 
+async def the_bar(ctx: Flow, ws: Workspace, baseline: Baseline) -> Baseline:
+    """``baseline`` with the bar every trusted benchmark of the input recorded so far states.
+
+    The input is measured once before any agent works, and core takes more runs of it while
+    candidates are compared. A single draw is one point of the input's noise, so a candidate is
+    compared with the mean of all of them (`with_samples`), read from the ledger at the moment
+    of the decision. The read and the decoding are journaled with the flow, so replaying the
+    decision gives the same bar; a settlement already asked for is not decided again.
+    """
+    recipe = MeasurementRecipe.of(ctx.facts)
+    refs = ctx.evaluation.recorded(
+        ctx.facts.baseline, purpose="baseline", kind=EvidenceKind.BENCHMARK, recipe=recipe
+    )
+    if not refs:
+        return baseline
+    return with_samples(baseline, await interpret(ctx, ws, Proof(refs=refs)))
+
+
 async def a_slot(ctx: Flow, w: WorkstreamStart, work: Work, revision: RevisionRef) -> None:
     """Submit ``revision`` for its trusted measurement and wait until a slot is bound to it.
 
@@ -310,7 +329,7 @@ async def evidence_of(
     readings = await interpret(ctx, ws, Proof(refs=shown))
     decisive_keys = {item.key for item in decisive}
     return Evidence(
-        readings=tuple(item for item in readings if item.key in decisive_keys),
+        readings=pooled_benchmarks(tuple(item for item in readings if item.key in decisive_keys)),
         proof=None if not decisive else Proof(refs=decisive),
         shown=readings,
     )

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass as standard_dataclass
 from enum import StrEnum
+from statistics import fmean
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
@@ -57,6 +58,8 @@ __all__ = [
     "PartialRow",
     "accept_readings",
     "judged_evidence",
+    "mean_metrics",
+    "pooled_benchmarks",
     "reading_of",
 ]
 
@@ -479,6 +482,41 @@ def reading_of[R: EvidenceReading](readings: tuple[R, ...], kind: EvidenceKind) 
     """The latest decoded reading of one evidence kind, or None when absent."""
     matching = [item for item in readings if item.kind is kind]
     return matching[-1] if matching else None
+
+
+_SAMPLES_TO_POOL = 2
+
+
+def mean_metrics(rows: Sequence[tuple[MetricRow, ...]]) -> tuple[MetricRow, ...]:
+    """The mean of each metric over the rows that report it, in the order first reported.
+
+    Direction and unit are those of the first row that reports the metric. A metric reported by
+    one row is that row's.
+    """
+    values: dict[str, list[float]] = {}
+    first: dict[str, MetricRow] = {}
+    for row in rows:
+        for metric in row:
+            first.setdefault(metric.name, metric)
+            values.setdefault(metric.name, []).append(metric.value)
+    return tuple(
+        first[name].model_copy(update={"value": fmean(found)}) for name, found in values.items()
+    )
+
+
+def pooled_benchmarks[R: EvidenceReading](readings: tuple[R, ...]) -> tuple[R, ...]:
+    """``readings`` with their passed benchmarks pooled into the latest one, stating their mean.
+
+    Several trusted benchmark records of one revision are samples of one measurement; whoever
+    compares the revision reads their mean (`mean_metrics`), never the sample that came last.
+    One benchmark, or none that passed, leaves ``readings`` as they are.
+    """
+    samples = [item for item in readings if item.kind is EvidenceKind.BENCHMARK and item.passed]
+    if len(samples) < _SAMPLES_TO_POOL:
+        return readings
+    pooled = samples[-1].model_copy(update={"metrics": mean_metrics([s.metrics for s in samples])})
+    kept = tuple(item for item in readings if item not in samples)
+    return (*kept, pooled)
 
 
 def accept_readings(

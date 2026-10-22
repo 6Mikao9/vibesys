@@ -21,13 +21,15 @@ plain functions, property-tested on their own.
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, Discriminator, Tag, model_validator
+from pydantic import AfterValidator, Discriminator, Field, Tag, model_validator
 
 from vibesys.metrics import (
+    AcceptedReading,
     EvidenceReading,
     MetricRow,
     PartialRow,
     accept_readings,
+    mean_metrics,
     reading_of,
 )
 from vs_core.api import MeasurementFailure
@@ -153,6 +155,10 @@ class InputReading(Value):
     accuracy_passed: bool | None = None
     benchmark_passed: bool | None = None
     metrics: tuple[MetricRow, ...] = ()
+    """The bar: the mean of ``samples`` trusted benchmark readings of the input per axis."""
+    samples: int = Field(default=1, ge=1)
+    """How many trusted benchmark readings of the input ``metrics`` is the mean of
+    (`with_samples`); a record written before this was kept holds one."""
     partial: PartialRow | None = None
 
 
@@ -299,6 +305,38 @@ def input_metrics(baseline: Baseline | None) -> tuple[MetricRow, ...]:
             return seen.metrics
         case _:
             return ()
+
+
+def with_samples(baseline: Baseline, readings: tuple[AcceptedReading, ...]) -> Baseline:
+    """``baseline`` whose bar is the mean of every trusted benchmark reading of the input.
+
+    One measurement of the input is one draw from its noise, and the first one is no better than
+    those taken later under the same recipe, so the bar a candidate must beat is their mean per
+    axis. The readings are the ledger's own records of the input at the decision, so the same
+    records give the same bar on replay. Only a baseline that has a bar (`input_metrics`) is
+    refined, and readings that did not pass its benchmark are not samples. With none, or no
+    more samples than the baseline already states, it is returned as it is.
+    """
+    taken = tuple(
+        item.metrics
+        for item in readings
+        if item.kind is EvidenceKind.BENCHMARK and item.passed and item.metrics
+    )
+    seen = reading(baseline)
+    if not taken or seen is None or not input_metrics(baseline) or len(taken) <= seen.samples:
+        return baseline
+    refined = seen.model_copy(update={"metrics": mean_metrics(taken), "samples": len(taken)})
+    match baseline:
+        case Measured() | Unmeasurable():
+            return baseline.model_copy(update={"reading": refined})
+        case NotConfigured():
+            return baseline
+
+
+def samples_of(baseline: Baseline | None) -> int:
+    """How many trusted benchmark readings of the input its bar is the mean of; 0 with no bar."""
+    seen = None if baseline is None else reading(baseline)
+    return 0 if seen is None or not input_metrics(baseline) else seen.samples
 
 
 def uncompared(baseline: Baseline | None) -> bool:

@@ -26,9 +26,11 @@ from vibesys.candidates._input import (
     input_value,
     measure_input,
     reading,
+    samples_of,
     trusted,
     uncompared,
     with_first_attempt,
+    with_samples,
 )
 from vibesys.candidates._review import ReviewEvaluation, review_evaluations
 from vibesys.candidates._run import EligibleRound, Winner, choose_winner, ending_reason
@@ -97,6 +99,7 @@ __all__ = [
     "reading",
     "review_evaluations",
     "run_deadline_at",
+    "samples_of",
     "settle_for",
     "space_of",
     "terms_of",
@@ -105,5 +108,6 @@ __all__ = [
     "turned_down",
     "uncompared",
     "with_first_attempt",
+    "with_samples",
     "workspace_mode_for",
 ]

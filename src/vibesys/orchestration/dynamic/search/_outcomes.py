@@ -226,6 +226,9 @@ class Closing(Value):
     unreachable: Unreachable | None = None
     merge: MergeReport | None = None
     """What a merge workstream's merger answered."""
+    input: Baseline | None = None
+    """The input as its settlement was decided against: its bar is the mean of every trusted
+    reading of it the ledger held then (`_measure.the_bar`). None for a closing not scored."""
 
     @property
     def readings(self) -> tuple[AcceptedReading, ...]:
@@ -349,6 +352,9 @@ class WorkstreamDone:
     evidence: Evidence = field(default_factory=Evidence)
     unreachable: Unreachable | None = None
     merge: MergeReport | None = None
+    input: Baseline | None = None
+    """The input the settlement was decided against (`Closing.input`); the record keeps the
+    one that states the most samples, so main is compared with the same bar."""
 
     @classmethod
     def stopped(cls, start: WorkstreamStart) -> "WorkstreamDone":
@@ -400,6 +406,7 @@ class WorkstreamDone:
             evidence=closing.evidence,
             unreachable=closing.unreachable,
             merge=closing.merge,
+            input=closing.input,
         )
 
 
