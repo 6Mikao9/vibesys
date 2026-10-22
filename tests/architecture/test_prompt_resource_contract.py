@@ -290,6 +290,7 @@ def representative_context() -> dict[str, object]:
     # True renders the optional evaluation section of the core-policy prompts.
     context["agent_evaluation"] = True
     context["git_writable"] = True
+    context["evaluation_host_shared"] = True
     for name in [
         "baseline_pending",
         "framework_benchmark_enabled",
