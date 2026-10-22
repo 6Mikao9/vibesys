@@ -26,7 +26,6 @@ export interface HostSettings {
    * The app starts the host helper from it (`uv run --project <checkout>`).
    */
   readonly checkout: string;
-  readonly runTransportV2?: boolean;
 }
 
 export interface SettingsFile {
@@ -39,16 +38,8 @@ export const EMPTY_SETTINGS: SettingsFile = {version: 2, hosts: {}};
 /** Validate one host's settings, rejecting unknown keys. */
 function parseHostSettings(value: unknown, path: string): HostSettings {
   const record = object(value, path);
-  onlyKeys(record, ['checkout', 'runTransportV2'], path);
-  if (record['runTransportV2'] !== undefined && typeof record['runTransportV2'] !== 'boolean') {
-    throw new SettingsError(`${path}.runTransportV2 must be a boolean`);
-  }
-  return {
-    checkout: validHostPath(record['checkout'], `${path}.checkout`),
-    ...(record['runTransportV2'] === undefined
-      ? {}
-      : {runTransportV2: record['runTransportV2'] as boolean}),
-  };
+  onlyKeys(record, ['checkout'], path);
+  return {checkout: validHostPath(record['checkout'], `${path}.checkout`)};
 }
 
 /**
@@ -81,6 +72,22 @@ export function parseSettings(value: unknown): SettingsFile {
     parsed[hostKey(id)] = parseHostSettings(settings, `hosts.json: hosts.${key}`);
   }
   return {version: 2, hosts: parsed};
+}
+
+/** Read-only JSON import: drop the retired selection, rejecting every other unknown key. */
+export function decodeRetainedSettings(value: unknown): SettingsFile {
+  const record = object(value, 'hosts.json');
+  if (record['version'] !== 2) return parseSettings(value);
+  const hosts = object(record['hosts'], 'hosts.json: hosts');
+  return parseSettings({
+    ...record,
+    hosts: Object.fromEntries(
+      Object.entries(hosts).map(([key, value]) => {
+        const {runTransportV2: _discarded, ...current} = object(value, `hosts.json: hosts.${key}`);
+        return [key, current];
+      }),
+    ),
+  });
 }
 
 export function settingsFor(file: SettingsFile, id: HostId): HostSettings | null {

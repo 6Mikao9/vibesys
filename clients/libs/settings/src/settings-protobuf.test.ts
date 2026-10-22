@@ -20,6 +20,7 @@ interface Fixture {
   readonly source: unknown;
   readonly protobufHex: string;
   readonly expected: unknown;
+  readonly retainedProtobufHex?: string;
 }
 const fixtures = JSON.parse(
   readFileSync(
@@ -190,22 +191,25 @@ describe('desktop settings protobuf migration', () => {
     }
   });
 
-  test('protobuf codecs preserve supported host destinations and independent switch values', () => {
+  test('protobuf codecs preserve supported host destinations', () => {
     for (const alias of ['host-a', 'user@host-a:22', '::1', '_host', '.host']) {
       for (const checkout of ['~', '/', '~/project', '/project/é']) {
-        for (const enabled of [undefined, false, true]) {
-          const value = {
-            version: 2 as const,
-            hosts: {
-              [`ssh:${alias}`]: {
-                checkout,
-                ...(enabled === undefined ? {} : {runTransportV2: enabled}),
-              },
-            },
-          };
-          expect(decodeSettings(encodeSettings(value))).toEqual(value);
-        }
+        const value = {version: 2 as const, hosts: {[`ssh:${alias}`]: {checkout}}};
+        expect(decodeSettings(encodeSettings(value))).toEqual(value);
       }
     }
+  });
+
+  test('published historical host preferences load cleanly and disappear from the next write', async () => {
+    const fixture = fixtures.find(value => value.retainedProtobufHex !== undefined);
+    if (!fixture?.retainedProtobufHex) throw new Error('retained profile fixture is required');
+    const bytes = Uint8Array.from(Buffer.from(fixture.retainedProtobufHex, 'hex'));
+    const filesystem = new FakeSettingsFilesystem();
+    filesystem.setBytes(binaryPaths.hosts, bytes);
+    const settings = store(filesystem);
+    const loaded = await settings.hosts();
+    expect(loaded.problem).toBeNull();
+    expect<unknown>(loaded.settings).toEqual(fixture.expected);
+    expect(Buffer.from(encodeSettings(loaded.settings)).toString('hex')).toBe(fixture.protobufHex);
   });
 });

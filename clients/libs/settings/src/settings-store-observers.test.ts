@@ -129,19 +129,19 @@ test('host settings notify every window only after a committed atomic write', as
     filesystem,
     log: () => {},
   });
-  const first: boolean[] = [];
-  const second: boolean[] = [];
+  const first: string[] = [];
+  const second: string[] = [];
   const stopFirst = settings.onHostsChanged(file => {
     expect(written(filesystem, '/settings/hosts.json')).toEqual(file);
-    first.push(file.hosts['local']?.runTransportV2 ?? false);
+    first.push(file.hosts['local']?.checkout ?? '');
   });
   const stopSecond = settings.onHostsChanged(file =>
-    second.push(file.hosts['local']?.runTransportV2 ?? false),
+    second.push(file.hosts['local']?.checkout ?? ''),
   );
-  for (const enabled of [true, false, true]) {
+  for (const checkout of ['/src/a', '/src/b', '/src/c']) {
     const next = {
       version: 2 as const,
-      hosts: {local: {checkout: '/src/vibesys', runTransportV2: enabled}},
+      hosts: {local: {checkout}},
     };
     expect(
       await settings.updateHosts(
@@ -154,7 +154,7 @@ test('host settings notify every window only after a committed atomic write', as
   stopFirst();
   stopSecond();
   await settings.updateHosts(() => ({version: 2, hosts: {}}));
-  expect(first).toEqual([true, false, true]);
+  expect(first).toEqual(['/src/a', '/src/b', '/src/c']);
   expect(second).toEqual(first);
 });
 

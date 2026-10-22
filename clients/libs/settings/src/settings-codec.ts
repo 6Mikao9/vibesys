@@ -7,6 +7,7 @@ import {
   DesktopPreferencesSchema,
   DesktopRecentSchema,
   DesktopTheme,
+  RetainedDesktopHostsSchema,
   StartRunReasoning,
   StartRunResults,
   validatedExactFromBinary,
@@ -52,7 +53,7 @@ export function encodeSettings(value: SettingsFile): Uint8Array {
 }
 
 export function decodeSettings(bytes: Uint8Array): SettingsFile {
-  const message = validatedExactFromBinary(DesktopHostsSchema, bytes);
+  const message = validatedExactFromBinary(RetainedDesktopHostsSchema, bytes);
   return parseSettings({
     version: 2,
     hosts: Object.fromEntries(
@@ -60,7 +61,6 @@ export function decodeSettings(bytes: Uint8Array): SettingsFile {
         key,
         {
           checkout: host.checkout,
-          ...(host.runTransportV2 === undefined ? {} : {runTransportV2: host.runTransportV2}),
         },
       ]),
     ),

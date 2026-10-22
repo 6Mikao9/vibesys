@@ -31,7 +31,7 @@
         }
       }
     },
-    "protobufHex": "080112130a056c6f63616c120a0a082f70726f6a656374121c0a0a7373683a686f73742d61120e0a0a7e2f636865636b6f75741000121b0a127373683a7573657240686f73742d613a323212050a017e1001",
+    "protobufHex": "080112130a056c6f63616c120a0a082f70726f6a656374121a0a0a7373683a686f73742d61120c0a0a7e2f636865636b6f757412190a127373683a7573657240686f73742d613a323212030a017e",
     "expected": {
       "version": 2,
       "hosts": {
@@ -39,15 +39,14 @@
           "checkout": "/project"
         },
         "ssh:host-a": {
-          "checkout": "~/checkout",
-          "runTransportV2": false
+          "checkout": "~/checkout"
         },
         "ssh:user@host-a:22": {
-          "checkout": "~",
-          "runTransportV2": true
+          "checkout": "~"
         }
       }
-    }
+    },
+    "retainedProtobufHex": "080112130a056c6f63616c120a0a082f70726f6a656374121c0a0a7373683a686f73742d61120e0a0a7e2f636865636b6f75741000121b0a127373683a7573657240686f73742d613a323212050a017e1001"
   },
   {
     "id": "preferences-v1",

@@ -14,13 +14,34 @@ message DesktopHostSettings {
     max_len: 1024
     pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
   }];
-  // Removed together with transport selection after the migration gates pass.
-  optional bool run_transport_v2 = 2;
+  reserved 2;
+  reserved "run_transport_v2";
 }
 
 message DesktopHosts {
   uint32 version = 1 [(buf.validate.field).uint32.const = 1];
   map<string, DesktopHostSettings> hosts = 2 [(buf.validate.field).map = {
+    max_pairs: 10000
+    keys: {
+      string: {pattern: "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"}
+    }
+  }];
+}
+
+// Read-only decoder for the settings written before the single-transport cutover.
+message RetainedDesktopHostSettings {
+  string checkout = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1024
+    pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
+  }];
+  // Read-only historical field; projections discard it and writers never emit it.
+  optional bool discarded_selection = 2;
+}
+
+message RetainedDesktopHosts {
+  uint32 version = 1 [(buf.validate.field).uint32.const = 1];
+  map<string, RetainedDesktopHostSettings> hosts = 2 [(buf.validate.field).map = {
     max_pairs: 10000
     keys: {
       string: {pattern: "^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$"}

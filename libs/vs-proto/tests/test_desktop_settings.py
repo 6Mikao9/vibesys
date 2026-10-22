@@ -22,6 +22,19 @@ def test_retained_settings_fixtures_have_the_same_validated_cross_language_encod
         encoded = bytes.fromhex(fixture["protobufHex"])
         message = models[fixture["kind"]].from_binary(encoded)
         validate(message)
+        if "retainedProtobufHex" in fixture:
+            retained = desktop_settings.RetainedDesktopHosts.from_binary(
+                bytes.fromhex(fixture["retainedProtobufHex"])
+            )
+            validate(retained)
+            current = desktop_settings.DesktopHosts(
+                version=retained.version,
+                hosts={
+                    key: desktop_settings.DesktopHostSettings(checkout=value.checkout)
+                    for key, value in retained.hosts.items()
+                },
+            )
+            assert current == message
         assert models[fixture["kind"]].from_binary(message.to_binary()) == message, fixture["id"]
 
 

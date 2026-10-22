@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/desktop/v1/settings.proto.
  */
 export const file_vibesys_desktop_v1_settings: GenFile = /*@__PURE__*/
-  fileDesc("CiF2aWJlc3lzL2Rlc2t0b3AvdjEvc2V0dGluZ3MucHJvdG8SEnZpYmVzeXMuZGVza3RvcC52MSKAAQoTRGVza3RvcEhvc3RTZXR0aW5ncxI1CghjaGVja291dBgBIAEoCUIjukggch4QARiACDIXXih+JHwvfH4vKVteXHgwMFxyXG5dKiQSHQoQcnVuX3RyYW5zcG9ydF92MhgCIAEoCEgAiAEBQhMKEV9ydW5fdHJhbnNwb3J0X3YyIoACCgxEZXNrdG9wSG9zdHMSGAoHdmVyc2lvbhgBIAEoDUIHukgEKgIIARJ/CgVob3N0cxgCIAMoCzIrLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wSG9zdHMuSG9zdHNFbnRyeUJDukhAmgE9EJBOIjhyNjI0Xihsb2NhbHxzc2g6W0EtWmEtejAtOV8uQDpdW0EtWmEtejAtOV8uQDotXXswLDI1NH0pJBpVCgpIb3N0c0VudHJ5EgsKA2tleRgBIAEoCRI2CgV2YWx1ZRgCIAEoCzInLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wSG9zdFNldHRpbmdzOgI4ASLVAQoRRGVza3RvcEFwcGVhcmFuY2USQwoEbW9kZRgBIAEoDjIpLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wQXBwZWFyYW5jZU1vZGVCCrpIB4IBBBABIAASPQoFbGlnaHQYAiABKA4yIC52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFRoZW1lQgy6SAmCAQYYARgCGAMSPAoEZGFyaxgDIAEoDjIgLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wVGhlbWVCDLpICYIBBhgEGAUYBiKPAQoNRGVza3RvcFJ1blJlZhJJCgRob3N0GAEgASgJQju6SDhyNjI0Xihsb2NhbHxzc2g6W0EtWmEtejAtOV8uQDpdW0EtWmEtejAtOV8uQDotXXswLDI1NH0pJBIzCgZydW5faWQYAiABKAlCI7pIIHIeMhxeW2EtejAtOV1bYS16MC05Ll8tXXswLDEyN30kIvgBChJEZXNrdG9wUHJlZmVyZW5jZXMSGAoHdmVyc2lvbhgBIAEoDUIHukgEKgIIARJBCgphcHBlYXJhbmNlGAIgASgLMiUudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BBcHBlYXJhbmNlQga6SAPIAQESKgoVbm90aWZpY2F0aW9uc19lbmFibGVkGAMgASgIQga6SAPIAQFIAIgBARI/CghhcmNoaXZlZBgEIAMoCzIhLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wUnVuUmVmQgq6SAeSAQQQoI0GQhgKFl9ub3RpZmljYXRpb25zX2VuYWJsZWQipwIKD0Rlc2t0b3BSdW5TdGFydBIxCgdoYXJuZXNzGAEgASgLMiAudmliZXN5cy5ob3N0LnYxLlN0YXJ0UnVuSGFybmVzcxI5CgdvcHRpb25zGAIgASgLMiAudmliZXN5cy5ob3N0LnYxLlN0YXJ0UnVuT3B0aW9uc0IGukgDyAEBEjgKBmFnZW50cxgDIAMoCzIeLnZpYmVzeXMuaG9zdC52MS5TdGFydFJ1bkFnZW50Qgi6SAWSAQIQIBI8CgptZWFzdXJlX29uGAQgASgLMiAudmliZXN5cy5ob3N0LnYxLlN0YXJ0UnVuTWVhc3VyZUIGukgDyAEBEi4KBGFyZ3MYBSADKAlCILpIHZIBGhCAAiIVchMogCAyDl5bXlxyXG5ceDAwXSokIt0CChBEZXNrdG9wUmVjZW50UnVuEjYKA3J1bhgBIAEoCzIhLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wUnVuUmVmQga6SAPIAQESNAoHcHJvamVjdBgCIAEoCUIjukggch4QARiACDIXXih+JHwvfH4vKVteXHgwMFxyXG5dKiQSNgoEdGFzaxgDIAEoCUIjukggch4yHF5bYS16MC05XVthLXowLTkuXy1dezAsMTI3fSRIAIgBARIvCgtpbnN0YW5jZV9pZBgEIAEoCUIVukgSchAyDl5bMC05YS1mXXsxMn0kSAGIAQESJQoLYXR0YWNoZWRfYXQYBSABKAFCELpIDRILQAEpAAAAAAAAAAASMgoFc3RhcnQYBiABKAsyIy52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFJ1blN0YXJ0QgcKBV90YXNrQg4KDF9pbnN0YW5jZV9pZCJPChpEZXNrdG9wUmV0YWluZWRSZWNlbnRFbnRyeRINCgVhZnRlchgBIAEoDRIiCg1vcmlnaW5hbF9qc29uGAIgASgMQgu6SAh6BhABGICAQCK3AQoNRGVza3RvcFJlY2VudBIYCgd2ZXJzaW9uGAEgASgNQge6SAQqAggBEj4KBHJ1bnMYAiADKAsyJC52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFJlY2VudFJ1bkIKukgHkgEEEKCNBhJMCghyZXRhaW5lZBgDIAMoCzIuLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wUmV0YWluZWRSZWNlbnRFbnRyeUIKukgHkgEEEKCNBiqpAQoVRGVza3RvcEFwcGVhcmFuY2VNb2RlEicKI0RFU0tUT1BfQVBQRUFSQU5DRV9NT0RFX1VOU1BFQ0lGSUVEEAASIgoeREVTS1RPUF9BUFBFQVJBTkNFX01PREVfU1lTVEVNEAESIQodREVTS1RPUF9BUFBFQVJBTkNFX01PREVfTElHSFQQAhIgChxERVNLVE9QX0FQUEVBUkFOQ0VfTU9ERV9EQVJLEAMqxQEKDERlc2t0b3BUaGVtZRIdChlERVNLVE9QX1RIRU1FX1VOU1BFQ0lGSUVEEAASFwoTREVTS1RPUF9USEVNRV9QQVBFUhABEhYKEkRFU0tUT1BfVEhFTUVfTUlTVBACEhYKEkRFU0tUT1BfVEhFTUVfU0FORBADEhUKEURFU0tUT1BfVEhFTUVfSU5LEAQSGgoWREVTS1RPUF9USEVNRV9NSUROSUdIVBAFEhoKFkRFU0tUT1BfVEhFTUVfVEVSTUlOQUwQBkJFWkNnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2Rlc2t0b3AvdjE7ZGVza3RvcHYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_host_v1_operations]);
+  fileDesc("CiF2aWJlc3lzL2Rlc2t0b3AvdjEvc2V0dGluZ3MucHJvdG8SEnZpYmVzeXMuZGVza3RvcC52MSJkChNEZXNrdG9wSG9zdFNldHRpbmdzEjUKCGNoZWNrb3V0GAEgASgJQiO6SCByHhABGIAIMhdeKH4kfC98fi8pW15ceDAwXHJcbl0qJEoECAIQA1IQcnVuX3RyYW5zcG9ydF92MiKAAgoMRGVza3RvcEhvc3RzEhgKB3ZlcnNpb24YASABKA1CB7pIBCoCCAESfwoFaG9zdHMYAiADKAsyKy52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcEhvc3RzLkhvc3RzRW50cnlCQ7pIQJoBPRCQTiI4cjYyNF4obG9jYWx8c3NoOltBLVphLXowLTlfLkA6XVtBLVphLXowLTlfLkA6LV17MCwyNTR9KSQaVQoKSG9zdHNFbnRyeRILCgNrZXkYASABKAkSNgoFdmFsdWUYAiABKAsyJy52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcEhvc3RTZXR0aW5nczoCOAEijgEKG1JldGFpbmVkRGVza3RvcEhvc3RTZXR0aW5ncxI1CghjaGVja291dBgBIAEoCUIjukggch4QARiACDIXXih+JHwvfH4vKVteXHgwMFxyXG5dKiQSIAoTZGlzY2FyZGVkX3NlbGVjdGlvbhgCIAEoCEgAiAEBQhYKFF9kaXNjYXJkZWRfc2VsZWN0aW9uIpkCChRSZXRhaW5lZERlc2t0b3BIb3N0cxIYCgd2ZXJzaW9uGAEgASgNQge6SAQqAggBEocBCgVob3N0cxgCIAMoCzIzLnZpYmVzeXMuZGVza3RvcC52MS5SZXRhaW5lZERlc2t0b3BIb3N0cy5Ib3N0c0VudHJ5QkO6SECaAT0QkE4iOHI2MjReKGxvY2FsfHNzaDpbQS1aYS16MC05Xy5AOl1bQS1aYS16MC05Xy5AOi1dezAsMjU0fSkkGl0KCkhvc3RzRW50cnkSCwoDa2V5GAEgASgJEj4KBXZhbHVlGAIgASgLMi8udmliZXN5cy5kZXNrdG9wLnYxLlJldGFpbmVkRGVza3RvcEhvc3RTZXR0aW5nczoCOAEi1QEKEURlc2t0b3BBcHBlYXJhbmNlEkMKBG1vZGUYASABKA4yKS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcEFwcGVhcmFuY2VNb2RlQgq6SAeCAQQQASAAEj0KBWxpZ2h0GAIgASgOMiAudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BUaGVtZUIMukgJggEGGAEYAhgDEjwKBGRhcmsYAyABKA4yIC52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFRoZW1lQgy6SAmCAQYYBBgFGAYijwEKDURlc2t0b3BSdW5SZWYSSQoEaG9zdBgBIAEoCUI7ukg4cjYyNF4obG9jYWx8c3NoOltBLVphLXowLTlfLkA6XVtBLVphLXowLTlfLkA6LV17MCwyNTR9KSQSMwoGcnVuX2lkGAIgASgJQiO6SCByHjIcXlthLXowLTldW2EtejAtOS5fLV17MCwxMjd9JCL4AQoSRGVza3RvcFByZWZlcmVuY2VzEhgKB3ZlcnNpb24YASABKA1CB7pIBCoCCAESQQoKYXBwZWFyYW5jZRgCIAEoCzIlLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wQXBwZWFyYW5jZUIGukgDyAEBEioKFW5vdGlmaWNhdGlvbnNfZW5hYmxlZBgDIAEoCEIGukgDyAEBSACIAQESPwoIYXJjaGl2ZWQYBCADKAsyIS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFJ1blJlZkIKukgHkgEEEKCNBkIYChZfbm90aWZpY2F0aW9uc19lbmFibGVkIqcCCg9EZXNrdG9wUnVuU3RhcnQSMQoHaGFybmVzcxgBIAEoCzIgLnZpYmVzeXMuaG9zdC52MS5TdGFydFJ1bkhhcm5lc3MSOQoHb3B0aW9ucxgCIAEoCzIgLnZpYmVzeXMuaG9zdC52MS5TdGFydFJ1bk9wdGlvbnNCBrpIA8gBARI4CgZhZ2VudHMYAyADKAsyHi52aWJlc3lzLmhvc3QudjEuU3RhcnRSdW5BZ2VudEIIukgFkgECECASPAoKbWVhc3VyZV9vbhgEIAEoCzIgLnZpYmVzeXMuaG9zdC52MS5TdGFydFJ1bk1lYXN1cmVCBrpIA8gBARIuCgRhcmdzGAUgAygJQiC6SB2SARoQgAIiFXITKIAgMg5eW15cclxuXHgwMF0qJCLdAgoQRGVza3RvcFJlY2VudFJ1bhI2CgNydW4YASABKAsyIS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFJ1blJlZkIGukgDyAEBEjQKB3Byb2plY3QYAiABKAlCI7pIIHIeEAEYgAgyF14ofiR8L3x+LylbXlx4MDBcclxuXSokEjYKBHRhc2sYAyABKAlCI7pIIHIeMhxeW2EtejAtOV1bYS16MC05Ll8tXXswLDEyN30kSACIAQESLwoLaW5zdGFuY2VfaWQYBCABKAlCFbpIEnIQMg5eWzAtOWEtZl17MTJ9JEgBiAEBEiUKC2F0dGFjaGVkX2F0GAUgASgBQhC6SA0SC0ABKQAAAAAAAAAAEjIKBXN0YXJ0GAYgASgLMiMudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BSdW5TdGFydEIHCgVfdGFza0IOCgxfaW5zdGFuY2VfaWQiTwoaRGVza3RvcFJldGFpbmVkUmVjZW50RW50cnkSDQoFYWZ0ZXIYASABKA0SIgoNb3JpZ2luYWxfanNvbhgCIAEoDEILukgIegYQARiAgEAitwEKDURlc2t0b3BSZWNlbnQSGAoHdmVyc2lvbhgBIAEoDUIHukgEKgIIARI+CgRydW5zGAIgAygLMiQudmliZXN5cy5kZXNrdG9wLnYxLkRlc2t0b3BSZWNlbnRSdW5CCrpIB5IBBBCgjQYSTAoIcmV0YWluZWQYAyADKAsyLi52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcFJldGFpbmVkUmVjZW50RW50cnlCCrpIB5IBBBCgjQYqqQEKFURlc2t0b3BBcHBlYXJhbmNlTW9kZRInCiNERVNLVE9QX0FQUEVBUkFOQ0VfTU9ERV9VTlNQRUNJRklFRBAAEiIKHkRFU0tUT1BfQVBQRUFSQU5DRV9NT0RFX1NZU1RFTRABEiEKHURFU0tUT1BfQVBQRUFSQU5DRV9NT0RFX0xJR0hUEAISIAocREVTS1RPUF9BUFBFQVJBTkNFX01PREVfREFSSxADKsUBCgxEZXNrdG9wVGhlbWUSHQoZREVTS1RPUF9USEVNRV9VTlNQRUNJRklFRBAAEhcKE0RFU0tUT1BfVEhFTUVfUEFQRVIQARIWChJERVNLVE9QX1RIRU1FX01JU1QQAhIWChJERVNLVE9QX1RIRU1FX1NBTkQQAxIVChFERVNLVE9QX1RIRU1FX0lOSxAEEhoKFkRFU0tUT1BfVEhFTUVfTUlETklHSFQQBRIaChZERVNLVE9QX1RIRU1FX1RFUk1JTkFMEAZCRVpDZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9kZXNrdG9wL3YxO2Rlc2t0b3B2MWIGcHJvdG8z", [file_buf_validate_validate, file_vibesys_host_v1_operations]);
 
 /**
  * Desktop-owned data. The original JSON files are read-only import sources.
@@ -25,13 +25,6 @@ export type DesktopHostSettings = Message<"vibesys.desktop.v1.DesktopHostSetting
    * @generated from field: string checkout = 1;
    */
   checkout: string;
-
-  /**
-   * Removed together with transport selection after the migration gates pass.
-   *
-   * @generated from field: optional bool run_transport_v2 = 2;
-   */
-  runTransportV2?: boolean | undefined;
 };
 
 /**
@@ -64,6 +57,54 @@ export const DesktopHostsSchema: GenMessage<DesktopHosts> = /*@__PURE__*/
   messageDesc(file_vibesys_desktop_v1_settings, 1);
 
 /**
+ * Read-only decoder for the settings written before the single-transport cutover.
+ *
+ * @generated from message vibesys.desktop.v1.RetainedDesktopHostSettings
+ */
+export type RetainedDesktopHostSettings = Message<"vibesys.desktop.v1.RetainedDesktopHostSettings"> & {
+  /**
+   * @generated from field: string checkout = 1;
+   */
+  checkout: string;
+
+  /**
+   * Read-only historical field; projections discard it and writers never emit it.
+   *
+   * @generated from field: optional bool discarded_selection = 2;
+   */
+  discardedSelection?: boolean | undefined;
+};
+
+/**
+ * Describes the message vibesys.desktop.v1.RetainedDesktopHostSettings.
+ * Use `create(RetainedDesktopHostSettingsSchema)` to create a new message.
+ */
+export const RetainedDesktopHostSettingsSchema: GenMessage<RetainedDesktopHostSettings> = /*@__PURE__*/
+  messageDesc(file_vibesys_desktop_v1_settings, 2);
+
+/**
+ * @generated from message vibesys.desktop.v1.RetainedDesktopHosts
+ */
+export type RetainedDesktopHosts = Message<"vibesys.desktop.v1.RetainedDesktopHosts"> & {
+  /**
+   * @generated from field: uint32 version = 1;
+   */
+  version: number;
+
+  /**
+   * @generated from field: map<string, vibesys.desktop.v1.RetainedDesktopHostSettings> hosts = 2;
+   */
+  hosts: { [key: string]: RetainedDesktopHostSettings };
+};
+
+/**
+ * Describes the message vibesys.desktop.v1.RetainedDesktopHosts.
+ * Use `create(RetainedDesktopHostsSchema)` to create a new message.
+ */
+export const RetainedDesktopHostsSchema: GenMessage<RetainedDesktopHosts> = /*@__PURE__*/
+  messageDesc(file_vibesys_desktop_v1_settings, 3);
+
+/**
  * @generated from message vibesys.desktop.v1.DesktopAppearance
  */
 export type DesktopAppearance = Message<"vibesys.desktop.v1.DesktopAppearance"> & {
@@ -88,7 +129,7 @@ export type DesktopAppearance = Message<"vibesys.desktop.v1.DesktopAppearance"> 
  * Use `create(DesktopAppearanceSchema)` to create a new message.
  */
 export const DesktopAppearanceSchema: GenMessage<DesktopAppearance> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_settings, 2);
+  messageDesc(file_vibesys_desktop_v1_settings, 4);
 
 /**
  * @generated from message vibesys.desktop.v1.DesktopRunRef
@@ -110,7 +151,7 @@ export type DesktopRunRef = Message<"vibesys.desktop.v1.DesktopRunRef"> & {
  * Use `create(DesktopRunRefSchema)` to create a new message.
  */
 export const DesktopRunRefSchema: GenMessage<DesktopRunRef> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_settings, 3);
+  messageDesc(file_vibesys_desktop_v1_settings, 5);
 
 /**
  * @generated from message vibesys.desktop.v1.DesktopPreferences
@@ -142,7 +183,7 @@ export type DesktopPreferences = Message<"vibesys.desktop.v1.DesktopPreferences"
  * Use `create(DesktopPreferencesSchema)` to create a new message.
  */
 export const DesktopPreferencesSchema: GenMessage<DesktopPreferences> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_settings, 4);
+  messageDesc(file_vibesys_desktop_v1_settings, 6);
 
 /**
  * @generated from message vibesys.desktop.v1.DesktopRunStart
@@ -179,7 +220,7 @@ export type DesktopRunStart = Message<"vibesys.desktop.v1.DesktopRunStart"> & {
  * Use `create(DesktopRunStartSchema)` to create a new message.
  */
 export const DesktopRunStartSchema: GenMessage<DesktopRunStart> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_settings, 5);
+  messageDesc(file_vibesys_desktop_v1_settings, 7);
 
 /**
  * @generated from message vibesys.desktop.v1.DesktopRecentRun
@@ -221,7 +262,7 @@ export type DesktopRecentRun = Message<"vibesys.desktop.v1.DesktopRecentRun"> & 
  * Use `create(DesktopRecentRunSchema)` to create a new message.
  */
 export const DesktopRecentRunSchema: GenMessage<DesktopRecentRun> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_settings, 6);
+  messageDesc(file_vibesys_desktop_v1_settings, 8);
 
 /**
  * Unreadable historical entries are retained as evidence, never interpreted as
@@ -246,7 +287,7 @@ export type DesktopRetainedRecentEntry = Message<"vibesys.desktop.v1.DesktopReta
  * Use `create(DesktopRetainedRecentEntrySchema)` to create a new message.
  */
 export const DesktopRetainedRecentEntrySchema: GenMessage<DesktopRetainedRecentEntry> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_settings, 7);
+  messageDesc(file_vibesys_desktop_v1_settings, 9);
 
 /**
  * @generated from message vibesys.desktop.v1.DesktopRecent
@@ -273,7 +314,7 @@ export type DesktopRecent = Message<"vibesys.desktop.v1.DesktopRecent"> & {
  * Use `create(DesktopRecentSchema)` to create a new message.
  */
 export const DesktopRecentSchema: GenMessage<DesktopRecent> = /*@__PURE__*/
-  messageDesc(file_vibesys_desktop_v1_settings, 8);
+  messageDesc(file_vibesys_desktop_v1_settings, 10);
 
 /**
  * @generated from enum vibesys.desktop.v1.DesktopAppearanceMode

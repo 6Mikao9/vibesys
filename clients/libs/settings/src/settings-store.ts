@@ -30,7 +30,7 @@ import {randomUUID} from 'node:crypto';
 import {open, readFile, rename, unlink} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import type {SkippedRecent} from '@vibesys/runs';
-import {EMPTY_SETTINGS, parseSettings, type SettingsFile} from './host-settings.js';
+import {decodeRetainedSettings, EMPTY_SETTINGS, type SettingsFile} from './host-settings.js';
 import {DEFAULT_PREFERENCES, type Preferences, parsePreferences} from './preferences.js';
 import {
   EMPTY_RECENT,
@@ -141,7 +141,7 @@ export class SettingsStore {
       {
         decode: decodeSettings,
         encode: encodeSettings,
-        legacy: value => parseSettings(value),
+        legacy: value => decodeRetainedSettings(value),
       },
       importQueue,
     );
