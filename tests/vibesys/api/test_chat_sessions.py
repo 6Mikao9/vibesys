@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from tests.support.task_project import write_task
 
@@ -34,6 +36,7 @@ from vs_proto.api import (
     ChatMessageRequest,
     ChatSessionCreated,
     ChatSteerProposed,
+    CreateChatSessionRequest,
     Ended,
     EpochStarted,
     HostCallRequest,
@@ -59,7 +62,6 @@ from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScrip
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 def chat_call(
@@ -84,7 +86,10 @@ def chat_call(
 @pytest.fixture
 def chat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ChatMessageRequest:
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
-    root = tmp_path / "project"
+    return chat_project(tmp_path / "project")
+
+
+def chat_project(root: Path) -> ChatMessageRequest:
     root.mkdir()
     project = Project.open(root)
     project.state.create_project("chat", now=datetime(2026, 1, 1, tzinfo=UTC))
@@ -618,3 +623,102 @@ def test_every_ending_uses_the_same_chat_admission_and_retained_history(
         assert path.read_bytes() == original
     assert len(starts) == 2
     assert len(events(chat)) == 5
+
+
+@pytest.mark.regression
+@example(
+    actions=[
+        (0, "create"),
+        (0, "send"),
+        (1, "create"),
+        (0, "open"),
+        (0, "retry"),
+        (0, "conflict"),
+        (0, "lose-head"),
+        (0, "retry"),
+    ]
+)
+@given(
+    actions=st.lists(
+        st.tuples(
+            st.integers(0, 4),
+            st.sampled_from(["create", "send", "open", "retry", "conflict", "lose-head"]),
+        ),
+        min_size=1,
+        max_size=30,
+    )
+)
+def test_generated_thread_sequences_keep_creation_and_question_identity(
+    actions: list[tuple[int, str]],
+) -> None:
+    """Create/open/send/restart/retry through public codecs, without an agent process."""
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as environment:
+        root = Path(temporary)
+        environment.setenv("VIBESYS_STATE_HOME", str(root / "state"))
+        chat = chat_project(root / "project")
+        created: set[int] = set()
+        for index, action in actions:
+            provider, model = ("claude", "opus") if index % 2 == 0 else ("codex", "gpt-5")
+            request = CreateChatSessionRequest(
+                project_root=chat.project_root,
+                run_id=chat.run_id,
+                session_id=f"thread-{index}",
+                provider=provider,
+                model=model,
+            )
+            if action == "lose-head" and index in created:
+                (
+                    Project.chat_session_directory_for(
+                        chat.project_root, chat.run_id, request.session_id
+                    )
+                    / "run.head"
+                ).unlink(missing_ok=True)
+            if index not in created or action in {"create", "retry", "conflict", "lose-head"}:
+                if index in created and action == "conflict":
+                    request.model = "different"
+                payload = HostCallRequest(
+                    checkout="/checkout", method=Oneof("create_chat_session", request)
+                ).to_binary()
+                response = HostCallResponse.from_binary(chat_call(payload))
+                assert response.result is not None
+                if index in created and action == "conflict":
+                    assert response.result.field == "configuration_failed"
+                else:
+                    assert response.result.field == "create_chat_session"
+                    assert response.result.value.session_id == request.session_id
+                    created.add(index)
+            message = ChatMessageRequest.from_binary(chat.to_binary())
+            message.session_id = request.session_id
+            if action == "send":
+                response = HostCallResponse.from_binary(
+                    chat_call(
+                        HostCallRequest(
+                            checkout="/checkout", method=Oneof("chat_message", message)
+                        ).to_binary(),
+                        start_chat=lambda _: None,
+                    )
+                )
+                assert response.result is not None
+                assert response.result.field == "chat_message"
+                assert (
+                    len(
+                        Project.open(chat.project_root)
+                        .state.session_inbox(chat.run_id, request.session_id)
+                        .pending()
+                    )
+                    == 1
+                )
+            if action == "open":
+                threads = SimThreads()
+                session = ChatSession(message, ChatRuntime(threads.clock, threads))
+                try:
+                    saved = session.configuration(
+                        ChatSessionCreated(id=request.session_id, provider="other", model="other")
+                    )
+                    assert (saved.provider, saved.model) == (provider, model)
+                finally:
+                    session.close()
+            records = events(message)
+            assert len(records) == 1
+            assert records[0].field == "created"
+            assert (records[0].value.provider, records[0].value.model) == (provider, model)

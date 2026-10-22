@@ -3,9 +3,15 @@ syntax = "proto3";
 package vibesys.desktop.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/descriptor.proto";
 import "vibesys/host/v1/operations.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1";
+
+// An import-only alias from a retained JSON format. It is never a writer key.
+extend google.protobuf.FieldOptions {
+  string retained_json_key = 50120;
+}
 
 // Desktop-owned data. The original JSON files are read-only import sources.
 message DesktopHostSettings {
@@ -36,7 +42,7 @@ message RetainedDesktopHostSettings {
     pattern: "^(~$|/|~/)[^\\x00\\r\\n]*$"
   }];
   // Read-only historical field; projections discard it and writers never emit it.
-  optional bool discarded_selection = 2;
+  optional bool discarded_selection = 2 [(retained_json_key) = "runTransportV2"];
 }
 
 message RetainedDesktopHosts {

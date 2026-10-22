@@ -438,4 +438,21 @@ service HostOperationsService {
       }
     };
   }
+  rpc CreateChatSession(CreateChatSessionRequest) returns (CreateChatSessionResponse) {
+    option (vibesys.host.v1.operation) = {
+      operation_id: 39
+      request_tag: 6
+      response_tag: 6
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_ADMISSION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 3
+        response_path: 1
+      }
+    };
+  }
 }

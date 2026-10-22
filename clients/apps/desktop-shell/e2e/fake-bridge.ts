@@ -28,7 +28,6 @@ export type CoreMethods =
   | 'preferences'
   | 'setAppearance'
   | 'setNotifications'
-  | 'runTransportV2'
   | 'onHostSettingsChanged'
   | 'archive'
   | 'runDigests'
@@ -191,7 +190,6 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
     seed.listings.map(listing => [(listing as {host: string}).host, listing]),
   );
   let recent = seed.recent;
-  const transportSettings = new Map<string, boolean>();
   const push = (event: string, value: unknown): void => {
     sequence += 1;
     for (const listener of listeners[event] ?? []) listener({sequence, value});
@@ -229,13 +227,6 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
         store({...preferences, appearance}),
       setNotifications: (enabled: boolean) => store({...preferences, notifications: {enabled}}),
       onHostSettingsChanged: on('hostSettings'),
-      runTransportV2: (host: string, enabled?: boolean) => {
-        if (enabled !== undefined) {
-          transportSettings.set(host, enabled);
-          push('hostSettings', null);
-        }
-        return ok(transportSettings.get(host) ?? false);
-      },
       archive: (run: {host: string; runId: string}, archived: boolean) => {
         const others = preferences.archived.filter(
           each => each.host !== run.host || each.runId !== run.runId,

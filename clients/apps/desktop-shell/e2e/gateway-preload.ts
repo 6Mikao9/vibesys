@@ -9,12 +9,16 @@ import {
   parseGatewayRequest,
 } from '@vibesys/ipc';
 import {
+  HostCallRequestSchema,
   RecordSchema,
   SkeletonResponseSchema,
+  TailRequestSchema,
   TailResponseSchema,
+  TailStreamRequestSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {foldSkeleton, observeRun, seedSkeleton} from '@vibesys/run-skeleton';
+import {ChatPeer} from './chat-peer.js';
 import type {WireFixture} from './fake-gateway.js';
 
 export function installGateway(input: WireFixture): void {
@@ -23,16 +27,30 @@ export function installGateway(input: WireFixture): void {
   const ended = new Set<(error?: string) => void>();
   const history = [input.tail];
   const observations = fixtureObservations(input);
-  const chats = new Set<(bytes: Uint8Array) => void>();
+  const chat = new ChatPeer(input.chat);
   const watchers = new Set<(bytes: Uint8Array) => void>();
   let active = 0;
   const bridge: GatewayBridge = {
     unary: (host: string, method: string, request: Uint8Array) => {
       calls.push(method);
+      const local = chat.unary(method, request);
+      if (local) return {result: Promise.resolve(local), cancel: () => undefined};
       if (method === input.methods.hostCall) {
         const peer = window as unknown as {
           postIntent(host: string, bytes: number[]): Promise<number[]>;
         };
+        const operation = fromBinary(HostCallRequestSchema, request).method;
+        if (!peer.postIntent && operation.case === 'chatMessage')
+          return {
+            result: Promise.resolve(
+              chat.message(
+                operation.value.sessionId,
+                operation.value.requestId,
+                operation.value.text,
+              ),
+            ),
+            cancel: () => undefined,
+          };
         return {
           result: peer.postIntent(host, [...request]).then(bytes => new Uint8Array(bytes)),
           cancel: () => undefined,
@@ -58,12 +76,11 @@ export function installGateway(input: WireFixture): void {
       calls.push(method);
       active += 1;
       let closed = false;
+      let cancelChat: () => void = () => undefined;
       if (method === input.methods.tail) {
-        if (
-          [..._bytes].slice(-input.chatRequest.length).join(',') === input.chatRequest.join(',')
-        ) {
-          chats.add(receive);
-          receive(new Uint8Array(input.chat));
+        const tail = fromBinary(TailRequestSchema, _bytes);
+        if (tail.sessionId !== '') {
+          cancelChat = chat.watch(tail.sessionId, tail.fromSeq, receive);
         } else {
           streams.add(receive);
           for (const bytes of history) receive(new Uint8Array(bytes));
@@ -71,7 +88,12 @@ export function installGateway(input: WireFixture): void {
       } else if (method === input.methods.watchRuns) {
         watchers.add(receive);
         receive(observations.decode(new Uint8Array(input.watchRuns)));
-      } else if (method === input.methods.log) receive(new Uint8Array(input.log));
+      } else if (method === input.methods.log)
+        receive(
+          new Uint8Array(
+            input.streams?.[fromBinary(TailStreamRequestSchema, _bytes).streamId] ?? input.log,
+          ),
+        );
       else throw new Error('Unknown stream');
       return {
         cancel: () => {
@@ -80,7 +102,7 @@ export function installGateway(input: WireFixture): void {
             active -= 1;
             streams.delete(receive);
             ended.delete(finish);
-            chats.delete(receive);
+            cancelChat();
             watchers.delete(receive);
           }
         },
@@ -92,8 +114,10 @@ export function installGateway(input: WireFixture): void {
     vibesysGateway: preloadOver(bridge),
     fakeGateway: {
       appendChat: (bytes: number[]) => {
-        for (const receive of chats) receive(new Uint8Array(bytes));
+        chat.append(bytes);
       },
+      sendChatFrame: (bytes: number[]) => chat.publish(bytes),
+      seedChat: (id: string, bytes: number[]) => chat.append(bytes, id),
       disconnect: () => {
         for (const finish of [...ended]) finish('SSH connection closed');
       },

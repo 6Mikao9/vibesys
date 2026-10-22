@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -101,3 +102,21 @@ def test_native_login_dispatch_does_not_depend_on_the_helper() -> None:
     assert not _helper_dependencies(
         ast.parse((ROOT / "src/server/host_agent_logins.py").read_text())
     )
+
+
+def test_transport_selection_cannot_return_to_clients() -> None:
+    """The retained protobuf descriptor owns the old JSON key; clients have no switch."""
+    selection = re.compile(r"transportv2|runtransportv2|transport_v2", re.IGNORECASE)
+    violations = []
+    for area in ("apps", "features", "libs"):
+        for path in (ROOT / "clients" / area).rglob("*"):
+            if not path.is_file() or path.suffix not in {".ts", ".tsx", ".cts", ".mjs", ".md"}:
+                continue
+            if set(path.parts) & {"node_modules", "dist", ".turbo"}:
+                continue
+            violations.extend(
+                f"{path.relative_to(ROOT)}: {line.strip()}"
+                for line in path.read_text().splitlines()
+                if selection.search(line)
+            )
+    assert not violations, "\n".join(violations)

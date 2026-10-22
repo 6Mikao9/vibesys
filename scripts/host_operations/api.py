@@ -38,7 +38,6 @@ _BOUNDED_READ = 2
 _STREAM = 2
 _CHECKOUT = 1
 _FAILURE_RESPONSE_TAG = 2
-_HOST_CALL_REQUESTS = frozenset({"PostIntentRequest", "RelaunchRequest", "ChatMessageRequest"})
 
 
 class GenerationError(ValueError):
@@ -54,6 +53,7 @@ class Operation:
     response: str
     policy: object
     correlations: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...]
+    host_call: bool
 
     @property
     def slot(self) -> str:
@@ -65,8 +65,8 @@ class Operation:
         return self.policy.effect == _READ
 
     def is_host_call(self) -> bool:
-        """The three HostCall methods keep their API messages and envelope."""
-        return self.request in _HOST_CALL_REQUESTS
+        """The HostCall methods keep their API messages and envelope."""
+        return self.host_call
 
     def is_admission(self) -> bool:
         """Durable admission, whether it rides HostCall or a neutral envelope."""
@@ -154,6 +154,12 @@ def compile_registry(
         pool.FindMessageTypeByName("google.protobuf.MethodOptions")
     )
     service = pool.FindServiceByName("vibesys.api.v1.HostOperationsService")
+    host_call_requests = {
+        field.message_type.full_name
+        for field in pool.FindMessageTypeByName("vibesys.api.v1.HostCallRequest")
+        .oneofs_by_name["method"]
+        .fields
+    }
     operations = []
     seen: dict[str, set[int]] = {
         key: set() for key in ("operation_id", "request_tag", "response_tag")
@@ -183,6 +189,7 @@ def compile_registry(
                 method.output_type.name,
                 policy,
                 tuple(correlations),
+                method.input_type.full_name in host_call_requests,
             )
         )
     expected = {op.slot for op in operations if op.is_read() and op.policy.executor == _CHECKOUT}

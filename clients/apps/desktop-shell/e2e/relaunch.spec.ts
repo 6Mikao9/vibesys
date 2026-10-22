@@ -74,7 +74,6 @@ async function openRelaunch(page: Page, state: RunState, result = 'epoch') {
     wire(fixture, state === 'interrupted' ? RunLiveness.INTERRUPTED : RunLiveness.ENDED),
   );
   await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
-  await page.getByRole('switch', {name: 'Run transport v2'}).check();
   await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeEnabled();
   return {
     fixture,

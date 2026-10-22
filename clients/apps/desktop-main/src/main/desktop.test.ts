@@ -1,5 +1,4 @@
 import {describe, expect, test} from 'bun:test';
-import {hostKey} from '@vibesys/hosts';
 import {
   WELCOME_CHANNELS,
   WELCOME_EVENTS,
@@ -258,13 +257,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
       events.push(`main:push:${channel}`);
     },
   };
-  const gatewaySettings = new Map<string, boolean>();
   const desktop = new Desktop({
-    gatewaySetting: async (host, enabled) => {
-      const key = hostKey(host);
-      if (enabled !== undefined) gatewaySettings.set(key, enabled);
-      return gatewaySettings.get(key) ?? false;
-    },
     window,
     welcome: new WelcomeFeed(),
     hosts,

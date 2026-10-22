@@ -32,6 +32,7 @@ export const hostCallBudgets = Object.freeze({
   postIntent: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   relaunch: Object.freeze({capMs: 30000, graceMs: 5000, totalMs: 35000} as const),
   chatMessage: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
+  createChatSession: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
 } as const);
 export function acceptListTasks(input: MessageInitShape<typeof pb.ListTasksRequestSchema>): Accepted<"ListTasks"> {
   return accept(operationPolicies.ListTasks, pb.ListTasksRequestSchema, input);

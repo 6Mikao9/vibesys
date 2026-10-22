@@ -43,6 +43,7 @@ const (
 	HostOperationsService_ListSavedRuns_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListSavedRuns"
 	HostOperationsService_TerminateRun_FullMethodName       = "/vibesys.api.v1.HostOperationsService/TerminateRun"
 	HostOperationsService_ListAgentLogins_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListAgentLogins"
+	HostOperationsService_CreateChatSession_FullMethodName  = "/vibesys.api.v1.HostOperationsService/CreateChatSession"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -86,6 +87,7 @@ type HostOperationsServiceClient interface {
 	ListSavedRuns(ctx context.Context, in *v1.ListSavedRunsRequest, opts ...grpc.CallOption) (*v1.ListSavedRunsResponse, error)
 	TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error)
 	ListAgentLogins(ctx context.Context, in *v1.ListAgentLoginsRequest, opts ...grpc.CallOption) (*v1.ListAgentLoginsResponse, error)
+	CreateChatSession(ctx context.Context, in *CreateChatSessionRequest, opts ...grpc.CallOption) (*CreateChatSessionResponse, error)
 }
 
 type hostOperationsServiceClient struct {
@@ -335,6 +337,16 @@ func (c *hostOperationsServiceClient) ListAgentLogins(ctx context.Context, in *v
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) CreateChatSession(ctx context.Context, in *CreateChatSessionRequest, opts ...grpc.CallOption) (*CreateChatSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateChatSessionResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_CreateChatSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostOperationsServiceServer is the server API for HostOperationsService service.
 // All implementations must embed UnimplementedHostOperationsServiceServer
 // for forward compatibility.
@@ -376,6 +388,7 @@ type HostOperationsServiceServer interface {
 	ListSavedRuns(context.Context, *v1.ListSavedRunsRequest) (*v1.ListSavedRunsResponse, error)
 	TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error)
 	ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error)
+	CreateChatSession(context.Context, *CreateChatSessionRequest) (*CreateChatSessionResponse, error)
 	mustEmbedUnimplementedHostOperationsServiceServer()
 }
 
@@ -454,6 +467,9 @@ func (UnimplementedHostOperationsServiceServer) TerminateRun(context.Context, *v
 }
 func (UnimplementedHostOperationsServiceServer) ListAgentLogins(context.Context, *v1.ListAgentLoginsRequest) (*v1.ListAgentLoginsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAgentLogins not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) CreateChatSession(context.Context, *CreateChatSessionRequest) (*CreateChatSessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateChatSession not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) mustEmbedUnimplementedHostOperationsServiceServer() {}
 func (UnimplementedHostOperationsServiceServer) testEmbeddedByValue()                               {}
@@ -883,6 +899,24 @@ func _HostOperationsService_ListAgentLogins_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_CreateChatSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateChatSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).CreateChatSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_CreateChatSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).CreateChatSession(ctx, req.(*CreateChatSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostOperationsService_ServiceDesc is the grpc.ServiceDesc for HostOperationsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -977,6 +1011,10 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAgentLogins",
 			Handler:    _HostOperationsService_ListAgentLogins_Handler,
+		},
+		{
+			MethodName: "CreateChatSession",
+			Handler:    _HostOperationsService_CreateChatSession_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

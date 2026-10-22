@@ -23,6 +23,7 @@ export interface WireFixture {
   tail: number[];
   blobs: Record<string, number[]>;
   log: number[];
+  streams?: Record<string, number[]>;
   chatRequest: number[];
   chat: number[];
   watchRuns: number[];
@@ -44,6 +45,7 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
           liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
           head: {
             strategy: 'fixture',
+            epoch,
             lifecycle,
             process: {pid: 1, epoch, startedAt: {seconds: 1700000000n}},
           },
@@ -98,6 +100,17 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
       ...toBinary(TailRequestSchema, create(TailRequestSchema, {sessionId: 'default'})),
     ],
     chat: [],
+    streams: Object.fromEntries(
+      Object.entries(fixture.streams).map(([id, data]) => [
+        id,
+        [
+          ...toBinary(
+            TailStreamResponseSchema,
+            create(TailStreamResponseSchema, {data, nextOffset: BigInt(data.length)}),
+          ),
+        ],
+      ]),
+    ),
     log: [
       ...toBinary(
         TailStreamResponseSchema,
@@ -113,7 +126,7 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
 let preload: string | undefined;
 
 /** Bundle the real generated codecs into the page so the Fake cannot drift from the preload ABI. */
-export async function installGateway(page: Page, input: WireFixture): Promise<void> {
+export function gatewayScript(input: WireFixture): string {
   preload ??= buildSync({
     entryPoints: [fileURLToPath(new URL('./gateway-preload.ts', import.meta.url))],
     bundle: true,
@@ -125,7 +138,8 @@ export async function installGateway(page: Page, input: WireFixture): Promise<vo
     target: 'es2022',
   }).outputFiles[0]?.text;
   if (preload === undefined) throw new Error('gateway fixture bundle is missing');
-  await page.addInitScript({
-    content: `${preload}\nfixtureGateway.installGateway(${JSON.stringify(input)});`,
-  });
+  return `${preload}\nfixtureGateway.installGateway(${JSON.stringify(input)});`;
+}
+export async function installGateway(page: Page, input: WireFixture): Promise<void> {
+  await page.addInitScript({content: gatewayScript(input)});
 }

@@ -14,7 +14,7 @@ import {
   hostChatResponse,
 } from '@vibesys/runs/chat';
 import {createActor, fromCallback, fromPromise} from 'xstate';
-import {type ChatEvent, runSessionsMachine} from '../../state/index.js';
+import {type ChatEvent, type ChatHistory, runSessionsMachine} from '../../state/index.js';
 
 export interface SessionPorts {
   readonly bridge: GatewayBridge;
@@ -22,6 +22,7 @@ export interface SessionPorts {
   readonly runId: string;
   readonly sessionId: string;
   readonly enabled: boolean;
+  readonly history?: ChatHistory;
   readonly schedule: ScheduleTimeout;
 }
 export function sessionsActor(input: SessionPorts) {
@@ -80,6 +81,9 @@ export function sessionsActor(input: SessionPorts) {
         }),
       },
     }),
-    {input: {enabled: input.enabled}, clock: clockFrom(input.schedule)},
+    {
+      input: {enabled: input.enabled, ...(input.history ? {history: input.history} : {})},
+      clock: clockFrom(input.schedule),
+    },
   );
 }

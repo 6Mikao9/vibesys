@@ -48,7 +48,7 @@ function reached(
   });
 }
 
-test('model: every setting, content and log operation belongs to its active state', () => {
+test('model: every content and log operation belongs to its active state', () => {
   const fixture = storeRunFixture();
   const skeleton = foldSkeleton(seedSkeleton(), fixture.records);
   checkMachine({
@@ -56,8 +56,6 @@ test('model: every setting, content and log operation belongs to its active stat
     input: {seed: SEED},
     event: (random, live) =>
       random.pick([
-        {type: 'setting-changed'},
-        {type: 'toggle', enabled: random.pick([true, false])},
         {
           type: 'loaded',
           load: {
@@ -71,11 +69,7 @@ test('model: every setting, content and log operation belongs to its active stat
         {type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}},
         ...live.operations.flatMap(id => [
           live.error(id, new Error('Fault')),
-          ...(id.endsWith('setting')
-            ? [live.done(id, true), live.done(id, false)]
-            : id === 'content'
-              ? [live.done(id, {hash: 'hash', text: 'Content'})]
-              : []),
+          ...(id === 'content' ? [live.done(id, {hash: 'hash', text: 'Content'})] : []),
         ]),
         ...live.delays.map(id => live.fire(id)),
       ]),
@@ -87,14 +81,8 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   const transport = new FakeRunTransport({...fixture, initialCount: 3});
   const cache = new FakeSkeletonCache();
   const clock = new FakeClock();
-  let enabled = true;
   const ports = {
     reader: gatewayReader(transport, cache, clock.schedule),
-    watchSetting: () => () => {},
-    setting: async (value: boolean | undefined) => {
-      enabled = value ?? enabled;
-      return enabled;
-    },
   };
   const actor = startGatewayRun(ports, clock.schedule, {seed: SEED});
   await reached(
@@ -122,8 +110,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await reached(actor, snapshot => snapshot.context.ui.views['build-log']?.lines.length === 1);
   expect(transport.activeStreams).toBe(4);
-  actor.send({type: 'toggle', enabled: false});
-  await reached(actor, snapshot => snapshot.matches('off'));
+  actor.stop();
   await Promise.resolve();
   expect(
     transport.calls.every(
@@ -132,7 +119,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
     ),
   ).toBe(true);
   actor.stop();
-  const reopened = startGatewayRun({...ports, setting: async () => true}, clock.schedule, {
+  const reopened = startGatewayRun({...ports}, clock.schedule, {
     seed: SEED,
   });
   await reached(reopened, snapshot => Object.keys(snapshot.context.text).length === 2);
@@ -140,22 +127,17 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   reopened.stop();
 });
 
-test('off is inert, live records append while scrubbed and switching streams cancels the prior follower', async () => {
+test('live records append while scrubbed and switching streams cancels the prior follower', async () => {
   const fixture = storeRunFixture('live');
   const transport = new FakeRunTransport(fixture);
   const clock = new FakeClock();
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-      watchSetting: () => () => {},
-      setting: async value => value ?? false,
     },
     clock.schedule,
     {seed: SEED},
   );
-  await reached(actor, snapshot => snapshot.matches('off'));
-  expect(transport.calls).toHaveLength(0);
-  actor.send({type: 'toggle', enabled: true});
   await reached(actor, snapshot => snapshot.context.load?.complete === true);
   actor.send({type: 'ui', action: {type: 'view', view: {at: 3}}});
   const seq = (fixture.records.at(-1)?.seq ?? 0n) + 1n;
@@ -181,8 +163,6 @@ test('native record history owns its cursor and retries without losing startup o
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-      watchSetting: () => () => {},
-      setting: async () => true,
     },
     clock.schedule,
     {seed: SEED},
@@ -245,8 +225,6 @@ test('failed unary and corrupt content surface errors without using the legacy p
     const actor = startGatewayRun(
       {
         reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-        watchSetting: () => () => {},
-        setting: async () => true,
       },
       new FakeClock().schedule,
       {seed: SEED},
@@ -259,39 +237,14 @@ test('failed unary and corrupt content surface errors without using the legacy p
   }
 });
 
-test('setting, content and first-log deadlines use the injected clock', async () => {
+test('content and first-log deadlines use the injected clock', async () => {
   const fixture = storeRunFixture();
   const clock = new FakeClock();
   const transport = new FakeRunTransport(fixture);
   const reader = gatewayReader(transport, new FakeSkeletonCache(), clock.schedule);
-  let finishSetting: (enabled: boolean) => void = () => {
-    throw new Error('setting not started');
-  };
-  const checking = startGatewayRun(
-    {
-      reader,
-      watchSetting: () => () => {},
-      setting: () =>
-        new Promise(resolve => {
-          finishSetting = resolve;
-        }),
-    },
-    clock.schedule,
-    {seed: SEED},
-  );
-  clock.advanceBy(15000);
-  expect(checking.getSnapshot().matches('failed')).toBe(true);
-  finishSetting(true);
-  await Promise.resolve();
-  expect(transport.calls).toHaveLength(0);
-  checking.stop();
   transport.held.add(`${SERVICE}GetBlobs`);
   transport.held.add(`${SERVICE}TailStream`);
-  const actor = startGatewayRun(
-    {reader, watchSetting: () => () => {}, setting: async () => true},
-    clock.schedule,
-    {seed: SEED},
-  );
+  const actor = startGatewayRun({reader}, clock.schedule, {seed: SEED});
   await reached(actor, snapshot => snapshot.matches({active: {content: 'reading'}}));
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await transport.called(`${SERVICE}GetBlobs`);
@@ -313,8 +266,6 @@ test('each objective hash is attempted once even when content fails', async () =
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-      watchSetting: () => () => {},
-      setting: async () => true,
     },
     clock.schedule,
     {seed: SEED},
@@ -328,113 +279,6 @@ test('each objective hash is attempted once even when content fails', async () =
   expect(transport.calls.filter(call => call.method.endsWith('GetBlobs'))).toHaveLength(2);
   expect(actor.getSnapshot().context.error).toBe('Content unavailable');
   actor.stop();
-});
-
-/** The shared host store: subscriptions observe committed writes in all windows. */
-class HostSetting {
-  enabled = true;
-  readonly listeners = new Set<() => void>();
-  readonly watch = (listener: () => void): (() => void) => {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  };
-  readonly setting = async (value: boolean | undefined): Promise<boolean> => {
-    if (value !== undefined) {
-      this.enabled = value;
-      for (const listener of [...this.listeners]) listener();
-    }
-    return this.enabled;
-  };
-}
-
-test('all windows follow the shared host switch and cancel their readers together', async () => {
-  const settings = new HostSetting();
-  const clock = new FakeClock();
-  const transports = [
-    new FakeRunTransport(storeRunFixture()),
-    new FakeRunTransport(storeRunFixture()),
-  ];
-  const windows = transports.map(transport =>
-    startGatewayRun(
-      {
-        reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-        setting: settings.setting,
-        watchSetting: settings.watch,
-      },
-      clock.schedule,
-      {seed: SEED},
-    ),
-  );
-  try {
-    for (const window of windows)
-      await reached(window, snapshot => snapshot.context.load?.complete === true);
-    for (let step = 0; step < 8; step += 1) {
-      const enabled = step % 2 === 1;
-      windows[step % windows.length]?.send({type: 'toggle', enabled});
-      for (const window of windows) {
-        await reached(window, snapshot =>
-          enabled
-            ? snapshot.context.load?.complete === true && snapshot.matches('active')
-            : snapshot.matches('off'),
-        );
-        expect(window.getSnapshot().context.enabled).toBe(enabled);
-      }
-      if (!enabled)
-        expect(
-          transports.every(transport =>
-            transport.calls
-              .filter(call => call.method.endsWith('/Tail'))
-              .every(call => call.signal.aborted),
-          ),
-        ).toBe(true);
-    }
-  } finally {
-    for (const window of windows) window.stop();
-  }
-  expect(settings.listeners.size).toBe(0);
-  expect(
-    transports.every(transport =>
-      transport.calls
-        .filter(call => call.method.endsWith('/Tail'))
-        .every(call => call.signal.aborted),
-    ),
-  ).toBe(true);
-});
-
-test('a changed host setting fences a stale initial read', async () => {
-  const settings = new HostSetting();
-  const clock = new FakeClock();
-  let finishRead: (enabled: boolean) => void = () => {
-    throw new Error('read not started');
-  };
-  let first = true;
-  const transport = new FakeRunTransport(storeRunFixture());
-  const actor = startGatewayRun(
-    {
-      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-      watchSetting: settings.watch,
-      setting: value => {
-        if (!first) return settings.setting(value);
-        first = false;
-        return new Promise(resolve => {
-          finishRead = resolve;
-        });
-      },
-    },
-    clock.schedule,
-    {seed: SEED},
-  );
-  try {
-    await settings.setting(false);
-    await reached(actor, snapshot => snapshot.matches('off'));
-    finishRead(true);
-    await Promise.resolve();
-    expect(actor.getSnapshot().context.enabled).toBe(false);
-    expect(actor.getSnapshot().matches('off')).toBe(true);
-    expect(transport.calls).toHaveLength(0);
-  } finally {
-    actor.stop();
-  }
 });
 
 test.each([
@@ -463,12 +307,9 @@ test.each([
     ],
   });
   const clock = new FakeClock();
-  const settings = new HostSetting();
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-      setting: settings.setting,
-      watchSetting: settings.watch,
     },
     clock.schedule,
     {seed: SEED},
@@ -527,12 +368,9 @@ test.each([
     const fixture = storeRunFixture(kind);
     const transport = new FakeRunTransport(fixture);
     const clock = new FakeClock();
-    const settings = new HostSetting();
     const actor = startGatewayRun(
       {
         reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-        setting: settings.setting,
-        watchSetting: settings.watch,
       },
       clock.schedule,
       {seed: SEED},
@@ -571,12 +409,9 @@ test.each([
   const clock = new FakeClock();
   const transport = new FakeRunTransport(fixture);
   if (failure === 'deadline') transport.held.add(`${SERVICE}WatchRuns`);
-  const settings = new HostSetting();
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-      setting: settings.setting,
-      watchSetting: settings.watch,
     },
     clock.schedule,
     {seed: SEED},
@@ -647,8 +482,6 @@ test('reply attachments load through the same verified content owner as objectiv
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
-      watchSetting: () => () => {},
-      setting: async () => true,
     },
     clock.schedule,
     {seed: SEED},

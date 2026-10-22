@@ -3,16 +3,12 @@ import type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/
 import {copyIntent, IntentRefused, IntentStep, intentAdmissionWarning} from '@vibesys/runs/intents';
 import {assign, fromCallback, setup} from 'xstate';
 
-export interface RunIntentsInput {
-  readonly enabled: boolean;
-}
 export interface IntentEntry {
   readonly request: PostIntentRequest;
   readonly status: 'sending' | 'pending' | 'applied' | 'refused' | 'uncertain';
   readonly reason: string | null;
 }
 export interface RunIntentsContext {
-  readonly enabled: boolean;
   readonly entries: readonly IntentEntry[];
   readonly current: PostIntentRequest | null;
   readonly error: string | null;
@@ -44,7 +40,6 @@ export const runIntentsMachine = setup({
   types: {
     context: {} as RunIntentsContext,
     events: {} as RunIntentsEvent,
-    input: {} as RunIntentsInput,
   },
   actors: {
     post: unprovided<PostIntentResponse, PostIntentRequest>('post'),
@@ -78,19 +73,14 @@ export const runIntentsMachine = setup({
   delays: {deadline: 35_000},
 }).createMachine({
   id: 'runIntents',
-  context: ({input}) => ({
-    enabled: input.enabled,
+  context: () => ({
     entries: [],
     current: null,
     error: null,
     warning: null,
   }),
-  initial: 'routing',
+  initial: 'active',
   states: {
-    routing: {
-      always: [{guard: ({context}) => context.enabled, target: 'active'}, {target: 'disabled'}],
-    },
-    disabled: {},
     active: {
       invoke: {
         id: 'watch',

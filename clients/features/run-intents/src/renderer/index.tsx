@@ -15,13 +15,12 @@ import {intentsActor} from './effects/controls.js';
 import {useRelaunch} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
 
-/** Mount with a key of host/runId. enabled is the host's runTransportV2 setting. */
+/** Mount with a key of host/runId. */
 export function useRunIntents(props: {
   readonly bridge: GatewayBridge;
   readonly host: HostKey;
   readonly projectRoot: RecordedProjectRoot | undefined;
   readonly runId: string;
-  readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
   readonly relaunch?: RelaunchObservation;
 }) {
@@ -34,7 +33,6 @@ export function useRunIntents(props: {
       bridge: props.bridge,
       host: props.host,
       runId: props.runId,
-      enabled: props.enabled,
       schedule: props.schedule,
     });
     current.current = actor;
@@ -45,22 +43,21 @@ export function useRunIntents(props: {
       subscription.unsubscribe();
       actor.stop();
     };
-  }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
+  }, [props.bridge, props.host, props.runId, props.schedule]);
   const projectRoot = props.projectRoot;
   const relaunch = useRelaunch({
     bridge: props.bridge,
     host: props.host,
     projectRoot: projectRoot ?? '',
     runId: props.runId,
-    observation: props.enabled && projectRoot !== undefined ? props.relaunch : undefined,
+    observation: projectRoot !== undefined ? props.relaunch : undefined,
     schedule: props.schedule,
   });
   const busy = snapshot?.matches({active: 'sending'}) ?? false;
   const sendRequest = (
     request: Parameters<NonNullable<typeof current.current>['send']>[0] & {type: 'send'},
   ) => current.current?.send(request);
-  if (!props.enabled || !snapshot || projectRoot === undefined)
-    return {controls: null, busy, sendRequest};
+  if (!snapshot || projectRoot === undefined) return {controls: null, busy, sendRequest};
   const send = (action: RunIntentAction) => {
     const request = runIntent(
       {

@@ -60,7 +60,6 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
-          enabled
           relaunch={{epoch: 1n}}
           schedule={clock.schedule}
         />,

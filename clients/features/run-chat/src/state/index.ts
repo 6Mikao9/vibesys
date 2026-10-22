@@ -24,6 +24,7 @@ export {
   effectiveHarness,
   type PanelContext,
   type PanelEvent,
+  type PanelMachineEvent,
   panelInitial,
   panelMachine,
   type UserSteer,

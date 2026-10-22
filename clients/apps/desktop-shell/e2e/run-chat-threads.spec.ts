@@ -1,6 +1,7 @@
 import {expect, type Page, test} from '@playwright/test';
 import type {RunEvent} from '@vibesys/contracts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {emitChat} from './chat-events.js';
 import {settled} from './checks/settle.js';
 import {openFixture, playLive} from './fixture-world.js';
 
@@ -13,10 +14,6 @@ import {openFixture, playLive} from './fixture-world.js';
 const FIXTURE = 'queue-rs-live';
 const LONG =
   'A very long thread title that goes on and on and on for quite a while, past any panel';
-
-interface FixtureWindow extends Window {
-  fakeHost: {emit(events: readonly unknown[]): void};
-}
 
 function chatEvent(sequence: number, type: string, thread: string, data: object, extra = {}) {
   return {
@@ -73,10 +70,7 @@ async function open(page: Page, width: number, events: readonly RunEvent[]): Pro
   await openFixture(page, fixture);
   await playLive(page, fixture);
   await settled(page);
-  await page.evaluate(
-    batch => (window as unknown as FixtureWindow).fakeHost.emit(batch),
-    events as readonly unknown[],
-  );
+  await emitChat(page, events);
   await page.getByRole('button', {name: 'Chat', exact: true}).click();
   await expect(panel(page)).toBeVisible();
   await settled(page);

@@ -36,7 +36,6 @@ const schedule = (callback, delay) => {
   return () => clearTimeout(timer);
 };
 const calls = new GatewayCalls(
-  async host => host === 'local',
   () => ({
     dial: async () => {
       const duplex =

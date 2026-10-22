@@ -20,14 +20,13 @@ import {FakeClock} from '@vibesys/transport/testing';
 import {waitFor} from 'xstate';
 import {intentsActor, relaunchActor} from './index.js';
 
-function fixture(enabled = true) {
+function fixture() {
   const bridge = new FakeGatewayBridge();
   const clock = new FakeClock();
   const actor = intentsActor({
     bridge,
     host: 'local' as HostKey,
     runId: 'run-1',
-    enabled,
     schedule: clock.schedule,
   });
   actor.start();
@@ -89,14 +88,6 @@ test('a successful unary HostCall means pending until Tail says applied or refus
     expect(bridge.calls.every(call => call.cancelled)).toBe(true);
     expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
   }
-});
-
-test('switch off makes no transport call', () => {
-  const {actor, bridge} = fixture(false);
-  actor.send({type: 'send', request});
-  expect(bridge.calls).toHaveLength(0);
-  expect(bridge.streams).toHaveLength(0);
-  actor.stop();
 });
 
 test('timeout cancels the unary and a late reply cannot settle its retry', async () => {

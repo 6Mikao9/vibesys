@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
-import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
-import {FAKE_MODEL_CATALOGUE, FakeLink, record} from '@vibesys/connection/testing';
+import {type ConnectionLease, ConnectionManager, registrySetup} from '@vibesys/connection';
+import {FakeLink, FakeReadCatalog, record} from '@vibesys/connection/testing';
 import {RUN_EVENT_TYPES_BY_KINDS, type RunSummary} from '@vibesys/contracts/host-helper';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {
@@ -248,7 +248,7 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
     preferencesPath: '/unused/preferences.json',
     log: () => {},
   });
-  return new Hosts({
+  return hostsInWorld({
     manager,
     settings,
     localCheckout: '/vibesys',
@@ -264,7 +264,6 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
 function completionSubject(
   link: FakeLink,
   native?: {
-    enabled: boolean;
     list: (
       host: HostId,
       project: string,
@@ -291,17 +290,40 @@ function completionSubject(
   });
   return {
     manager,
-    hosts: new Hosts({
+    hosts: hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
-      ...(native ? {transportV2: async () => native.enabled, savedRuns: {list: native.list}} : {}),
+      ...(native ? {savedRuns: {list: native.list}} : {}),
       log: () => {},
       push: () => {},
       retire: () => {},
     }),
   };
+}
+
+/** Native setup facts shared by checkout-race scenarios; helper leases remain separate. */
+function hostsInWorld(
+  deps: ConstructorParameters<typeof Hosts>[0],
+  peer = new FakeReadCatalog(),
+): Hosts {
+  for (const path of [
+    '/new',
+    '/newer',
+    '/cancelled',
+    '/new-beta',
+    '/first',
+    '/second',
+    '/checkouts/alpha-new',
+  ]) {
+    peer.candidates.set(path, {root: '/src/vibesys', version: '0.1.1', compatible: true});
+  }
+  return new Hosts({
+    setup: registrySetup(peer),
+    runs: {start: () => {}, cancel: () => {}},
+    ...deps,
+  });
 }
 
 describe('Hosts.aliases', () => {
@@ -336,42 +358,6 @@ describe('Hosts.aliases', () => {
 });
 
 describe('Hosts.complete', () => {
-  test('returns a typed unsupported outcome without sending paths.complete', async () => {
-    const link = new FakeLink();
-    link.helper.features.delete('paths_complete');
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    await expect(subject.hosts.complete(LOCAL, '/manual/')).resolves.toEqual({
-      kind: 'unsupported',
-    });
-    expect(link.helper.requests.filter(request => request.type === 'paths.complete')).toEqual([]);
-  });
-
-  test('returns a typed listing when paths_complete was negotiated', async () => {
-    const link = new FakeLink();
-    link.helper.host.directories.set('/manual', ['project']);
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    await expect(subject.hosts.complete(LOCAL, '/manual/')).resolves.toEqual({
-      kind: 'listed',
-      directory: '/manual',
-      entries: [
-        {
-          name: 'project',
-          path: '/manual/project',
-          checkout: false,
-          project: false,
-        },
-      ],
-      truncated: false,
-    });
-    expect(link.helper.requests.filter(request => request.type === 'paths.complete')).toHaveLength(
-      1,
-    );
-  });
-
   test('uses the registry when transport v2 is on and does not open the helper', async () => {
     const manager = new ConnectionManager({
       linkFor: () => {
@@ -381,7 +367,7 @@ describe('Hosts.complete', () => {
       scheduleTimeout: new FakeClock().scheduleTimeout,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings: new SettingsStore({
         settingsPath: '/settings/hosts.json',
@@ -395,7 +381,6 @@ describe('Hosts.complete', () => {
       log: () => {},
       push: () => {},
       retire: () => {},
-      transportV2: async () => true,
       setup: {
         inspectCandidate: async () => {
           throw new Error('unused');
@@ -439,11 +424,10 @@ describe('Hosts.complete', () => {
       log: () => {},
       push: () => {},
       retire: () => {},
-      transportV2: async () => true,
     });
     await using _manager = manager;
     await expect(hosts.complete(LOCAL, '/manual/')).rejects.toThrow(
-      'run transport v2 is on and the registry setup is missing',
+      'the registry setup is missing',
     );
   });
 });
@@ -472,7 +456,7 @@ describe('Hosts.setCheckout transport v2', () => {
     return {
       settings,
       manager,
-      hosts: new Hosts({
+      hosts: hostsInWorld({
         manager,
         settings,
         localCheckout: '/bundled',
@@ -480,7 +464,6 @@ describe('Hosts.setCheckout transport v2', () => {
         log: () => {},
         push: () => {},
         retire: () => {},
-        transportV2: async () => true,
         setup,
       }),
     };
@@ -544,111 +527,6 @@ describe('Hosts.setCheckout transport v2', () => {
     release();
     await expect(pending).rejects.toThrow('the checkout change was cancelled');
     expect((await settings.hosts()).settings.hosts['local']).toBeUndefined();
-  });
-});
-
-describe('Hosts.harnesses', () => {
-  test('returns a typed unsupported outcome without sending harnesses.list', async () => {
-    const link = new FakeLink();
-    link.helper.features.delete('harnesses');
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({kind: 'unsupported'});
-    expect(link.helper.requests.filter(request => request.type === 'harnesses.list')).toEqual([]);
-  });
-
-  test("returns the host's vetted pairs, each provider's default marked", async () => {
-    const link = new FakeLink();
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({
-      kind: 'listed',
-      harnesses: link.helper.host.harnesses.map(({provider, model, default: isDefault}) => ({
-        provider,
-        model,
-        default: isDefault,
-      })),
-    });
-  });
-});
-
-describe('Hosts.harnesses display', () => {
-  test('carries how each pair reads, a pair the model is unnamed for with only the provider name, and none for a pair without it', async () => {
-    const link = new FakeLink();
-    link.helper.host.harnesses.splice(
-      0,
-      link.helper.host.harnesses.length,
-      {
-        provider: 'claude',
-        model: 'claude-opus-5-5',
-        default: true,
-        display: {
-          provider_name: 'Claude Code',
-          model_name: 'Opus 5.5',
-          family: 'Claude',
-          tier: 3,
-          tier_name: 'Opus',
-        },
-      },
-      {provider: 'codex', model: 'gpt-a', default: true},
-      {
-        provider: 'codex',
-        model: 'gpt-x',
-        default: false,
-        display: {provider_name: 'Codex'},
-      },
-    );
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({
-      kind: 'listed',
-      harnesses: [
-        {
-          provider: 'claude',
-          model: 'claude-opus-5-5',
-          default: true,
-          display: {
-            providerName: 'Claude Code',
-            modelName: 'Opus 5.5',
-            family: 'Claude',
-            tier: 3,
-            tierName: 'Opus',
-          },
-        },
-        {provider: 'codex', model: 'gpt-a', default: true},
-        {provider: 'codex', model: 'gpt-x', default: false, display: {providerName: 'Codex'}},
-      ],
-    });
-  });
-});
-
-describe('Hosts.harnesses makers and generations', () => {
-  test("carry each pair's maker and generation, asked only of a helper that has them", async () => {
-    const link = new FakeLink();
-    link.helper.host.harnesses.splice(
-      0,
-      link.helper.host.harnesses.length,
-      ...FAKE_MODEL_CATALOGUE,
-    );
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-    const listed = async () => {
-      const listing = await subject.hosts.harnesses(LOCAL);
-      return listing.kind === 'listed' ? listing.harnesses : [];
-    };
-
-    const sol = (await listed()).find(offer => 'generation' in (offer.display ?? {}));
-    expect(sol?.display).toMatchObject({maker: 'openai', generation: {id: 'gpt-6', order: 1}});
-    link.helper.features.delete('harness_generations');
-    for (const offer of await listed()) {
-      expect(offer.display ?? {}).not.toHaveProperty('maker');
-      expect(offer.display ?? {}).not.toHaveProperty('generation');
-    }
-    const asked = link.helper.requests.filter(request => request.type === 'harnesses.list');
-    expect(asked.map(request => 'with_generations' in request)).toEqual([true, false]);
   });
 });
 
@@ -1008,7 +886,6 @@ describe('Hosts.readSummary', () => {
     });
     expect(link.helper.requests.filter(request => request.type === 'runs.summary')).toEqual([]);
     // The machine is still usable for what that helper serves.
-    await expect(hosts.projectRuns(LOCAL, '/srv/project')).resolves.toBeDefined();
   });
 
   test('says the run is gone when the host holds no record of it', async () => {
@@ -1302,67 +1179,6 @@ describe('Hosts.usageWindow', () => {
   });
 });
 
-describe('Hosts.projectRuns', () => {
-  const run = (id: string, task: string | null, created: string): RunSummary => ({
-    run_id: id,
-    task,
-    display_name: `name-of-${id}`,
-    created_at: created,
-    phase: null,
-    instance_id: null,
-  });
-
-  test('lists every run of the project, newest first, with no digest read', async () => {
-    const link = new FakeLink();
-    link.helper.host.projects.set('/srv/project', ['mpmc']);
-    link.helper.host.runHistory.set('/srv/project', [
-      run('run-1', 'mpmc', '2026-10-17T03:00:00Z'),
-      run('run-3', null, '2026-10-17T05:00:00Z'),
-      run('run-2', 'mpmc', '2026-10-17T04:00:00Z'),
-    ]);
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    const runs = await subject.hosts.projectRuns(LOCAL, '/srv/project');
-
-    expect(runs).toEqual([
-      {
-        runId: 'run-3',
-        name: 'name-of-run-3',
-        task: null,
-        createdAt: Date.parse('2026-10-17T05:00:00Z'),
-      },
-      {
-        runId: 'run-2',
-        name: 'name-of-run-2',
-        task: 'mpmc',
-        createdAt: Date.parse('2026-10-17T04:00:00Z'),
-      },
-      {
-        runId: 'run-1',
-        name: 'name-of-run-1',
-        task: 'mpmc',
-        createdAt: Date.parse('2026-10-17T03:00:00Z'),
-      },
-    ]);
-    expect(link.helper.requests.filter(request => request.type === 'runs.list')).toEqual([
-      expect.not.objectContaining({digest_runs: expect.anything()}),
-    ]);
-  });
-
-  test('names the project when the host cannot list its runs', async () => {
-    const subject = completionSubject(new FakeLink());
-    await using _manager = subject.manager;
-
-    const failure = await subject.hosts.projectRuns(LOCAL, '/srv/missing').then(
-      () => null,
-      (error: Error) => error,
-    );
-    expect(failure?.message).toStartWith('Could not list the runs of the project');
-    expect(failure?.message).not.toContain('/srv/missing');
-  });
-});
-
 describe('Hosts checkout changes', () => {
   test('removing a host fences an older checkout validation before acknowledging removal', async () => {
     const settings = new SettingsStore({
@@ -1374,7 +1190,8 @@ describe('Hosts checkout changes', () => {
     });
     await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
     const link = new FakeLink();
-    const held = link.deferEstablish();
+    const peer = new FakeReadCatalog();
+    const held = peer.deferInspection('/new');
     await using manager = new ConnectionManager({
       linkFor: () => link,
       appVersion: 'test',
@@ -1382,15 +1199,18 @@ describe('Hosts checkout changes', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
+    const hosts = hostsInWorld(
+      {
+        manager,
+        settings,
+        localCheckout: '/bundled',
+        sshConfigPath: '/missing',
+        log: () => {},
+        push: () => {},
+        retire: () => {},
+      },
+      peer,
+    );
     const change = {owner: '10:100', sequence: 1};
     const changing = hosts.setCheckout(ALPHA, '/new', change);
     await held.received;
@@ -1425,7 +1245,7 @@ describe('Hosts checkout changes', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1466,7 +1286,7 @@ describe('Hosts checkout changes', () => {
       log: () => {},
     });
     const retired: string[] = [];
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1509,7 +1329,7 @@ describe('Hosts checkout changes', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1552,7 +1372,7 @@ describe('Hosts checkout changes', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1578,7 +1398,7 @@ describe('Hosts checkout changes', () => {
 
     expect(settingsFor((await settings.hosts()).settings, LOCAL)?.checkout).toBe('/newer');
     // `/cancelled` opened only its disposable candidate; it never replaced the watched connection.
-    expect(link.helper.checkouts).toEqual(['/existing', '/cancelled', '/newer', '/newer']);
+    expect(link.helper.checkouts).toEqual(['/existing', '/newer']);
     expect(manager.existing('local')?.checkoutRoot).toBe('/src/vibesys');
   });
 
@@ -1603,7 +1423,7 @@ describe('Hosts checkout changes', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1624,7 +1444,7 @@ describe('Hosts checkout changes', () => {
 
     await expect(changing).resolves.toBe('/src/vibesys');
     expect(settingsFor((await settings.hosts()).settings, LOCAL)?.checkout).toBe('/new');
-    expect(link.helper.checkouts).toEqual(['/existing', '/new', '/new']);
+    expect(link.helper.checkouts).toEqual(['/existing', '/new']);
     expect(manager.existing('local')?.checkoutRoot).toBe('/src/vibesys');
   });
 });
@@ -1648,7 +1468,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1695,7 +1515,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1713,7 +1533,7 @@ describe('Hosts desired set', () => {
     await older;
 
     expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
-    expect(link.helper.checkouts).toEqual(['/new', '/new']);
+    expect(link.helper.checkouts).toEqual(['/new']);
   });
 
   test.each([
@@ -1737,7 +1557,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1784,7 +1604,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1838,7 +1658,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1881,7 +1701,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1901,7 +1721,7 @@ describe('Hosts desired set', () => {
 
     expect(settingsFor((await settings.hosts()).settings, ALPHA)?.checkout).toBe('/new');
     expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
-    expect(link.helper.checkouts).toEqual(['/old', '/new', '/new']);
+    expect(link.helper.checkouts).toEqual(['/old', '/new']);
   });
 
   test('a newer committed checkout supersedes an older delayed refresh for the same host', async () => {
@@ -1922,7 +1742,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -1965,7 +1785,7 @@ describe('Hosts desired set', () => {
       log: () => {},
     });
     const retired: string[] = [];
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2006,7 +1826,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2044,7 +1864,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2091,7 +1911,7 @@ describe('Hosts desired set', () => {
       observed = resolve;
     });
     const retired: string[] = [];
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2141,7 +1961,7 @@ describe('Hosts desired set', () => {
     });
     const pushed: HostListing[] = [];
     const retired: string[] = [];
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2189,7 +2009,7 @@ describe('Hosts desired set', () => {
       log: () => {},
     });
     const pushed: HostListing[] = [];
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2235,7 +2055,7 @@ describe('Hosts desired set', () => {
         config: CONFIG,
         log: () => {},
       });
-      const hosts = new Hosts({
+      const hosts = hostsInWorld({
         manager,
         settings,
         localCheckout: '/bundled',
@@ -2299,7 +2119,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2352,7 +2172,7 @@ describe('Hosts desired set', () => {
       log: () => {},
     });
     const pushed: HostListing[] = [];
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2407,7 +2227,7 @@ describe('Hosts desired set', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2452,7 +2272,7 @@ describe('Hosts desired set', () => {
     // every acquisition in the pass below rejects the same way a real shutdown race would.
     await manager[Symbol.asyncDispose]();
     const logged: string[] = [];
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2504,7 +2324,7 @@ describe('Hosts inspection changes', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2554,7 +2374,7 @@ describe('Hosts inspection changes', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2607,7 +2427,7 @@ describe('Hosts inspection changes', () => {
       config: CONFIG,
       log: () => {},
     });
-    const hosts = new Hosts({
+    const hosts = hostsInWorld({
       manager,
       settings,
       localCheckout: '/bundled',
@@ -2748,7 +2568,7 @@ describe('Hosts inspection changes', () => {
 });
 
 function inspectorHosts(manager: ConnectionManager): Hosts {
-  return new Hosts({
+  return hostsInWorld({
     manager,
     settings: new SettingsStore({
       settingsPath: '/settings/hosts.json',
@@ -2765,26 +2585,20 @@ function inspectorHosts(manager: ConnectionManager): Hosts {
   });
 }
 
-for (const enabled of [false, true]) {
-  test(`saved-run discovery selects only the chosen transport (${enabled})`, async () => {
-    const link = new FakeLink();
-    link.helper.host.projects.set('/srv/project', ['mpmc']);
-    let calls = 0;
-    const subject = completionSubject(link, {
-      enabled,
-      list: async (_host, project, signal) => {
-        expect(project).toBe('/srv/project');
-        expect(signal.aborted).toBe(false);
-        calls += 1;
-        return [{runId: 'native-run', name: 'Native run', task: null, createdAt: 1}];
-      },
-    });
-    await using _manager = subject.manager;
-    const rows = await subject.hosts.projectRuns(LOCAL, '/srv/project');
-    expect(calls).toBe(enabled ? 1 : 0);
-    expect(link.helper.requests.filter(request => request.type === 'runs.list')).toHaveLength(
-      enabled ? 0 : 1,
-    );
-    if (enabled) expect(rows[0]?.runId).toBe('native-run');
+test('saved-run discovery always uses the registry', async () => {
+  const link = new FakeLink();
+  let calls = 0;
+  const subject = completionSubject(link, {
+    list: async (_host, project, signal) => {
+      expect(project).toBe('/srv/project');
+      expect(signal.aborted).toBe(false);
+      calls += 1;
+      return [{runId: 'native-run', name: 'Native run', task: null, createdAt: 1}];
+    },
   });
-}
+  await using _manager = subject.manager;
+  const rows = await subject.hosts.projectRuns(LOCAL, '/srv/project');
+  expect(calls).toBe(1);
+  expect(link.helper.requests).toHaveLength(0);
+  expect(rows[0]?.runId).toBe('native-run');
+});

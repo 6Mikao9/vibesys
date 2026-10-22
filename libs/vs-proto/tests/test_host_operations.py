@@ -13,6 +13,8 @@ from hypothesis import strategies as st
 from vs_proto.api import (
     ChatMessageRequest,
     ChatMessageResponse,
+    CreateChatSessionRequest,
+    CreateChatSessionResponse,
     FailureCategory,
     Oneof,
     OperationFailure,
@@ -142,6 +144,7 @@ def test_host_call_dispatch_uses_the_registered_slot_and_cap() -> None:
         ("post_intent", "post-intent", 10000, 5000),
         ("relaunch", "relaunch", 30000, 5000),
         ("chat_message", "chat-message", 10000, 5000),
+        ("create_chat_session", "create-chat-session", 10000, 5000),
     ]
     assert all(op.cap_ms + op.grace_ms > op.cap_ms for op in host_operations.HOST_CALLS)
     seen: list[object] = []
@@ -162,12 +165,17 @@ def test_host_call_dispatch_uses_the_registered_slot_and_cap() -> None:
         seen.append(request)
         return chatted
 
+    def create_chat_session(request: CreateChatSessionRequest) -> CreateChatSessionResponse:
+        seen.append(request)
+        return CreateChatSessionResponse(session_id="session")
+
     assert host_operations.dispatch_host_call(
         "post_intent",
         "request",
         post_intent=post_intent,
         relaunch=relaunch,
         chat_message=chat_message,
+        create_chat_session=create_chat_session,
     ) == Oneof("post_intent", posted)
     assert host_operations.dispatch_host_call(
         "relaunch",
@@ -175,6 +183,7 @@ def test_host_call_dispatch_uses_the_registered_slot_and_cap() -> None:
         post_intent=post_intent,
         relaunch=relaunch,
         chat_message=chat_message,
+        create_chat_session=create_chat_session,
     ) == Oneof("relaunch", relaunched)
     assert host_operations.dispatch_host_call(
         "chat_message",
@@ -182,6 +191,7 @@ def test_host_call_dispatch_uses_the_registered_slot_and_cap() -> None:
         post_intent=post_intent,
         relaunch=relaunch,
         chat_message=chat_message,
+        create_chat_session=create_chat_session,
     ) == Oneof("chat_message", chatted)
     assert seen == ["request", "request", "request"]
     assert (
@@ -191,6 +201,7 @@ def test_host_call_dispatch_uses_the_registered_slot_and_cap() -> None:
             post_intent=post_intent,
             relaunch=relaunch,
             chat_message=chat_message,
+            create_chat_session=create_chat_session,
         )
         is None
     )

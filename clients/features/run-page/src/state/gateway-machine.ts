@@ -1,4 +1,4 @@
-/** Gateway screen control owns the setting, loader, content request and selected log follower. */
+/** Gateway screen control owns the loader, content request and selected log follower. */
 import {emptyLogView, foldChunk, type LogView} from '@vibesys/logs';
 import {unprovided} from '@vibesys/machine';
 import type {RunLivenessHint, SkeletonLoad} from '@vibesys/run-skeleton';
@@ -27,15 +27,12 @@ export interface GatewayRecordsInput {
   readonly receive: (event: GatewayEvent) => void;
 }
 export type GatewayEvent =
-  | {type: 'setting-changed'}
-  | {type: 'toggle'; enabled: boolean}
   | {type: 'ui'; action: RunPageAction}
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
   | {type: 'log-failed'}
   | {type: 'records'; rows: readonly RecordRow[]}
   | {type: 'loaded'; load: SkeletonLoad | undefined; failed: boolean; hint?: RunLivenessHint};
 export interface GatewayRunContext extends GatewayInput {
-  enabled: boolean;
   load: SkeletonLoad | undefined;
   hint: RunLivenessHint | undefined;
   ui: RunPageState;
@@ -122,10 +119,6 @@ function receivedLog(
 export const gatewayRunMachine = setup({
   types: {context: {} as GatewayRunContext, input: {} as GatewayInput, events: {} as GatewayEvent},
   actors: {
-    watchSetting: fromCallback<GatewayEvent>(() => {
-      throw new Error('setting watch not provided');
-    }),
-    setting: unprovided<boolean, boolean | undefined>('transport setting'),
     loader: fromCallback<GatewayEvent, {runId: string}>(() => {
       throw new Error('loader not provided');
     }),
@@ -155,7 +148,6 @@ export const gatewayRunMachine = setup({
   id: 'gatewayRun',
   context: ({input}) => ({
     ...input,
-    enabled: false,
     load: undefined,
     hint: undefined,
     ui: runPageInitial(input.seed),
@@ -166,45 +158,8 @@ export const gatewayRunMachine = setup({
     error: null,
     recordsNextSeq: 0n,
   }),
-  initial: 'checking',
-  invoke: {id: 'watch-setting', src: 'watchSetting'},
-  on: {
-    'setting-changed': {target: '.checking', reenter: true},
-    toggle: {
-      target: '.saving',
-      reenter: true,
-      actions: assign({enabled: ({event}) => event.enabled, error: null}),
-    },
-  },
+  initial: 'active',
   states: {
-    checking: {
-      invoke: {
-        id: 'read-setting',
-        src: 'setting',
-        input: undefined,
-        onDone: [
-          {guard: ({event}) => event.output, target: 'active', actions: assign({enabled: true})},
-          {target: 'off', actions: assign({enabled: false})},
-        ],
-        onError: {target: 'failed', actions: assign({error: 'Unavailable'})},
-      },
-      after: {15000: {target: 'failed', actions: assign({error: 'Timeout'})}},
-    },
-    saving: {
-      invoke: {
-        id: 'save-setting',
-        src: 'setting',
-        input: ({context}) => context.enabled,
-        onDone: [
-          {guard: ({event}) => event.output, target: 'active', actions: assign({enabled: true})},
-          {target: 'off'},
-        ],
-        onError: {target: 'failed', actions: assign({error: 'Unavailable'})},
-      },
-      after: {15000: {target: 'failed', actions: assign({error: 'Timeout'})}},
-    },
-    off: {},
-    failed: {},
     active: {
       entry: assign({
         load: undefined,

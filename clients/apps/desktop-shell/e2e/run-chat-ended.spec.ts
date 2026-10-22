@@ -1,6 +1,7 @@
 import {expect, type Page, test} from '@playwright/test';
 import type {RunEvent} from '@vibesys/contracts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {emitChat} from './chat-events.js';
 import {settled} from './checks/settle.js';
 import {fixtureScripts, openFixture} from './fixture-world.js';
 import {addInitScripts} from './init-scripts.js';
@@ -81,10 +82,7 @@ test('a steer the agent proposed on an ended run cannot be sent', async ({page})
   await page.getByRole('button', {name: 'Chat', exact: true}).click();
   await expect(panel(page)).toBeVisible();
   await settled(page);
-  await page.evaluate(
-    events => (window as unknown as FixtureWindow).fakeHost.emit(events),
-    conversation(firstSequence()) as readonly unknown[],
-  );
+  await emitChat(page, conversation(firstSequence()));
   await settled(page);
 
   await expect(panel(page).getByRole('textbox', {name: 'Steer text'})).toHaveValue(
@@ -112,10 +110,7 @@ async function openEndedChat(page: Page, features?: readonly string[]): Promise<
   }
   await page.getByRole('button', {name: 'Chat', exact: true}).click();
   await settled(page);
-  await page.evaluate(
-    events => (window as unknown as FixtureWindow).fakeHost.emit(events),
-    conversation(firstSequence()) as readonly unknown[],
-  );
+  await emitChat(page, conversation(firstSequence()));
   await settled(page);
 }
 

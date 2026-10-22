@@ -27,8 +27,6 @@ function subject(peer: FakeReadCatalog, catalog = true) {
     settings,
     removeHost: id => settings.updateHosts(current => withoutHost(current, id)).then(() => {}),
     checkout: () => peer.checkout(),
-    connection: id => manager.acquire(id, '/checkout'),
-    transportV2: async () => true,
     ...(catalog ? {catalog: registryRunCatalog(peer)} : {}),
   });
   return {main, manager, link};

@@ -22,6 +22,8 @@ from vs_proto.api import (
     ChatSessionCreated,
     ChatSteerProposed,
     ChatToken,
+    CreateChatSessionRequest,
+    CreateChatSessionResponse,
     Keyframe,
     Lifecycle,
     Oneof,
@@ -37,7 +39,7 @@ from vs_proto.api import (
 from vs_proto.api import (
     ValidationError as ProtoValidationError,
 )
-from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLock, read_run_head
+from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLock, RunLogReader, read_run_head
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -108,6 +110,18 @@ class ChatSession:
     def close(self) -> None:
         """Drain the shared writer and release the process's lifetime lock."""
         self.writer.close()
+
+    def configuration(self, default: ChatSessionCreated) -> ChatSessionCreated:
+        """The first durable record owns this thread's harness, including after restart."""
+        records = self.writer.read()
+        if not records:
+            return default
+        first = records[0]
+        event = first.body.value.event if first.body and first.body.field == "chat" else None
+        if event is None or event.field != "created":
+            message = "chat session is missing its creation record"
+            raise ValueError(message)
+        return event.value
 
     def history(self) -> str:
         """Restore complete exchanges as untrusted data, using the authoritative log."""
@@ -356,3 +370,60 @@ class ChatSession:
                     body=Oneof("chat", event),
                 )
             )
+
+
+def create_session(
+    request: CreateChatSessionRequest, runtime: ChatRuntime
+) -> CreateChatSessionResponse:
+    """Durably create one empty thread, or reconcile the same immutable choice."""
+    validate(request)
+    project = Project.open(request.project_root)
+    project.state.load_run(request.run_id)
+    project.state.require_local_run(request.run_id)
+    epoch, _ = run_head(Project.run_head_path_for(request.project_root, request.run_id))
+    directory = Project.chat_session_directory_for(
+        request.project_root, request.run_id, request.session_id
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    gate = RunLock(directory / "admission.lock")
+    try:
+        path = directory / "session.log"
+        expected = ChatSessionCreated(
+            id=request.session_id, provider=request.provider, model=request.model
+        )
+        if path.exists():
+            with path.open("rb") as stream:
+                first = next(iter(RunLogReader(stream)), None)
+            if first is not None:
+                event = (
+                    first.body.value.event
+                    if first.body is not None and first.body.field == "chat"
+                    else None
+                )
+                if event is None or event.field != "created" or event.value != expected:
+                    message = "session_id already has different chat configuration"
+                    raise ValueError(message)
+                head_path = directory / "run.head"
+                if head_path.exists():
+                    head = RunHead.from_binary(head_path.read_bytes())
+                    validate(head)
+                    if head.committed_seq >= 1:
+                        return CreateChatSessionResponse(session_id=request.session_id)
+        with FileRunLogWriter(
+            path, clock=runtime.clock, threads=runtime.threads, headline=session_head
+        ) as writer:
+            if writer.sequence:
+                return CreateChatSessionResponse(session_id=request.session_id)
+            now = runtime.clock.now()
+            writer.append(
+                Record(
+                    seq=1,
+                    epoch=epoch,
+                    at=Timestamp(seconds=int(now), nanos=int((now - int(now)) * 1e9)),
+                    body=Oneof("chat", ChatRecord(event=Oneof("created", expected))),
+                )
+            )
+            writer.commit()
+    finally:
+        gate.close()
+    return CreateChatSessionResponse(session_id=request.session_id)

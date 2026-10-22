@@ -6,6 +6,15 @@ rules fail. Decoding preserves unknown fields for additive store evolution.
 The two schema hashes identify the canonical descriptors, not generated code.
 """
 
+from importlib import import_module
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vs_proto._generated.vibesys.testing.v1.client_replay_pb import (
+        ClientReplay,
+        ClientReplayBatch,
+    )
+
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from protovalidate import ValidationError
@@ -20,6 +29,8 @@ from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     ChatMessageRequest,
     ChatMessageResponse,
     ConfigurationFailed,
+    CreateChatSessionRequest,
+    CreateChatSessionResponse,
     HostCallRequest,
     HostCallResponse,
     PauseIntent,
@@ -269,9 +280,13 @@ __all__ = [
     "ChatSteerProposed",
     "ChatToken",
     "CheckoutStatus",
+    "ClientReplay",
+    "ClientReplayBatch",
     "ComparisonAttrs",
     "ComparisonVerdict",
     "ConfigurationFailed",
+    "CreateChatSessionRequest",
+    "CreateChatSessionResponse",
     "Direction",
     "DrainGoal",
     "Draining",
@@ -430,3 +445,12 @@ __all__ = [
     "validated_operation_bytes",
     "validation_rules",
 ]
+
+
+def __getattr__(name: str) -> object:
+    # Fixture-only codecs must not enter the host hello's production import graph.
+    if name in {"ClientReplay", "ClientReplayBatch"}:
+        return getattr(
+            import_module("vs_proto._generated.vibesys.testing.v1.client_replay_pb"), name
+        )
+    raise AttributeError(name)

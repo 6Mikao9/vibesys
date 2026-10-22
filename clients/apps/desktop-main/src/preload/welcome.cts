@@ -20,7 +20,6 @@ type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
 
 const CHANNELS: Channels = {
   overview: 'vibesys:welcome:overview',
-  runTransportV2: 'vibesys:welcome:run-transport-v2',
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
   signIn: 'vibesys:welcome:sign-in',
@@ -107,7 +106,6 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
   return {
     platform: capabilities.platform,
     onHostSettingsChanged: listener => capabilities.on(EVENTS.hostSettings, listener),
-    runTransportV2: (host, enabled) => call(CHANNELS.runTransportV2, host, enabled),
     overview: () => call(CHANNELS.overview),
     setCheckout: (host, path, change) => call(CHANNELS.setCheckout, host, path, change),
     cancelCheckout: change => call(CHANNELS.cancelCheckout, change),

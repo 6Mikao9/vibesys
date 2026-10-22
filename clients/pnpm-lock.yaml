@@ -151,6 +151,9 @@ importers:
       '@vibesys/run-skeleton':
         specifier: workspace:*
         version: link:../../libs/run-skeleton
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../../libs/run-state
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
@@ -656,6 +659,9 @@ importers:
       '@vibesys/request-identity':
         specifier: workspace:*
         version: link:../../libs/request-identity
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../../libs/run-state
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
@@ -684,6 +690,9 @@ importers:
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../../libs/proto
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../../libs/store
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport

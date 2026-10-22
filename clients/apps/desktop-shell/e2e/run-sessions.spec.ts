@@ -21,7 +21,11 @@ import {installGateway, wire} from './fake-gateway.js';
 import {openFixture} from './fixture-world.js';
 
 interface GatewayWindow {
-  fakeGateway: {appendChat(bytes: number[]): void; active(): number};
+  fakeGateway: {
+    appendChat(bytes: number[]): void;
+    sendChatFrame(bytes: number[]): void;
+    active(): number;
+  };
 }
 const shots = process.env['SCREENS_DIR'];
 const sheet: SheetEntry[] = [];
@@ -31,7 +35,6 @@ for (const width of [1000, 1440, 1920])
     const {fixture, requests} = await prepareSession(page);
     await installGateway(page, fixture);
     await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
-    await page.getByRole('switch', {name: 'Run transport v2'}).check();
     await page.getByRole('button', {name: 'Chat', exact: true}).click();
     const pane = page.getByRole('region', {name: 'Chat', exact: true}).last();
     await expect(
@@ -40,8 +43,8 @@ for (const width of [1000, 1440, 1920])
     expect(requests).toHaveLength(0);
     const capture = (state: string) => captureSession(page, width, state);
     await capture('history');
-    await pane.getByRole('button', {name: 'Send as steer'}).click();
-    await expect(page.getByText('Guidance · Pending', {exact: true})).toBeAttached();
+    await pane.getByRole('button', {name: 'Send', exact: true}).click();
+    await expect(pane.getByText('Sent', {exact: true})).toBeAttached();
     expect(requests[0]?.method).toMatchObject({
       case: 'postIntent',
       value: {
@@ -52,7 +55,7 @@ for (const width of [1000, 1440, 1920])
       },
     });
     await pane.getByRole('textbox', {name: 'Message'}).fill('Why did it win?');
-    await pane.getByRole('button', {name: 'Send', exact: true}).click();
+    await pane.getByRole('button', {name: 'Ask', exact: true}).click();
     await expect.poll(() => requests.length).toBe(2);
     const method = requests[1]?.method;
     if (method?.case !== 'chatMessage') throw new Error('Expected chat-message');
@@ -115,9 +118,9 @@ for (const width of [1000, 1440, 1920])
     await expect(pane.getByText('It reduces contention under load.', {exact: true})).toBeVisible();
     await capture('answered');
     await recoverHistory(page, pane, width, answer);
-    await pane.getByRole('button', {name: 'Close chat'}).click();
-    await expect(page.getByText('Guidance · Pending', {exact: true})).toBeVisible();
-    await page.getByRole('switch', {name: 'Run transport v2'}).uncheck();
+    await pane.getByRole('button', {name: 'Close', exact: true}).click();
+    await expect(pane).not.toBeVisible();
+    await page.getByRole('button', {name: 'Settings', exact: true}).click();
     expect(
       await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.active()),
     ).toBe(0);
@@ -129,7 +132,6 @@ for (const state of ['parked', 'stopped'] as const)
       const {fixture, requests} = await prepareSession(page, state);
       await installGateway(page, fixture);
       await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
-      await page.getByRole('switch', {name: 'Run transport v2'}).check();
       await page.getByRole('button', {name: 'Chat', exact: true}).click();
       const pane = page.getByRole('region', {name: 'Chat', exact: true}).last();
       await expect(
@@ -137,7 +139,7 @@ for (const state of ['parked', 'stopped'] as const)
       ).toBeVisible();
       await captureSession(page, width, `${state}-history`);
       expect(requests).toHaveLength(0);
-      await pane.getByRole('button', {name: 'Close chat'}).click();
+      await pane.getByRole('button', {name: 'Close', exact: true}).click();
       await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
     });
 
@@ -211,11 +213,12 @@ async function captureSession(page: Page, width: number, state: string): Promise
 
 async function recoverHistory(page: Page, pane: Locator, width: number, answer: Record) {
   await page.evaluate(
-    bytes => (window as unknown as GatewayWindow).fakeGateway.appendChat(bytes),
+    bytes => (window as unknown as GatewayWindow).fakeGateway.sendChatFrame(bytes),
     tail([create(RecordSchema, {...answer, seq: 10n})]),
   );
   await expect(pane.getByText('Unavailable', {exact: true})).toBeVisible();
   await captureSession(page, width, 'unavailable');
   await pane.getByRole('button', {name: 'Retry history'}).click();
   await expect(pane.getByText('Unavailable', {exact: true})).not.toBeVisible();
+  await expect(pane.getByText('It reduces contention under load.', {exact: true})).toBeVisible();
 }

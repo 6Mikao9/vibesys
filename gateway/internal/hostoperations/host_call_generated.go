@@ -23,6 +23,8 @@ func DispatchHostCall(request *apiv1.HostCallRequest) (HostCall, bool) {
 		return HostCall{CLI: "relaunch", Deadline: 30000 * time.Millisecond, Executor: 1, Effect: 3}, true
 	case request.GetChatMessage() != nil:
 		return HostCall{CLI: "chat-message", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 3}, true
+	case request.GetCreateChatSession() != nil:
+		return HostCall{CLI: "create-chat-session", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 3}, true
 	default:
 		return HostCall{}, false
 	}
@@ -39,6 +41,9 @@ func HostCallResponseValid(request *apiv1.HostCallRequest, response *apiv1.HostC
 	case request.GetChatMessage() != nil:
 		got := response.GetChatMessage()
 		return got != nil && got.GetRequestId() == request.GetChatMessage().GetRequestId() && got.GetSessionId() == request.GetChatMessage().GetSessionId()
+	case request.GetCreateChatSession() != nil:
+		got := response.GetCreateChatSession()
+		return got != nil && got.GetSessionId() == request.GetCreateChatSession().GetSessionId()
 	default:
 		return false
 	}

@@ -8,8 +8,6 @@
  */
 import {
   ConnectionError,
-  type ConnectionLease,
-  HelperRequestError,
   type InspectedCandidate,
   type RegistryClusters,
   type RegistryRunCatalog,
@@ -17,13 +15,7 @@ import {
   type RunWatch,
 } from '@vibesys/connection';
 import type {MachineDescription} from '@vibesys/hosts';
-import {
-  type HostId,
-  hostFromKey,
-  hostKey,
-  hostLabel,
-  missingRequiredFeatures,
-} from '@vibesys/hosts';
+import {type HostId, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
 import type {
   AgentLogin,
   CheckoutInspection,
@@ -37,7 +29,7 @@ import type {
 } from '@vibesys/ipc';
 import type {SettingsStore} from '@vibesys/settings';
 
-/** Catalog reads when `runTransportV2` is on. The connection shell owns the implementation. */
+/** Catalog reads when using the gateway. The connection shell owns the implementation. */
 export interface RegistryCatalog {
   describeMachine(
     host: HostId,
@@ -58,23 +50,19 @@ export interface MachinesMainDeps {
   readonly removeHost: (id: HostId) => Promise<void>;
   /** The checkout `id` runs VibeSys from (This Mac: the app's own unless one is saved). */
   readonly checkout: (id: HostId) => Promise<string | null>;
-  /** Lease `id`'s one connection, from its saved checkout. */
-  readonly connection: (id: HostId) => Promise<ConnectionLease>;
-  /** Per host. Absent or false keeps the helper JSON channel. */
-  readonly transportV2?: (id: HostId) => Promise<boolean>;
-  /** Required when `transportV2` is true. Missing it throws; it does not fall back. */
+  /** Required when using the gateway. Missing it throws; it does not fall back. */
   readonly registry?: RegistryCatalog;
   /** Login status reads over the gateway when transport v2 is enabled. */
   readonly catalog?: Pick<RegistryRunCatalog, 'logins'>;
-  /** Setup reads. Required when `transportV2` is true for inspect. */
+  /** Setup reads. Required when using the gateway for inspect. */
   readonly setup?: RegistrySetup;
-  /** Cluster changes. Required when `transportV2` is true for put, remove, and test. */
+  /** Cluster changes. Required when using the gateway for put, remove, and test. */
   readonly clusters?: RegistryClusters;
-  /** Live runs from WatchRuns. Required when `transportV2` is true for a report. */
+  /** Live runs from WatchRuns. Required when using the gateway for a report. */
   readonly runs?: Pick<RunWatch, 'live'>;
   /** The selection the caller still owns. A change across the await is stale. */
   readonly selectionRevision?: (id: HostId) => bigint;
-  /** Host logins when `transportV2` is on. The actor outlives the panel that started one. */
+  /** Host logins when using the gateway. The actor outlives the panel that started one. */
   readonly logins?: {
     start(host: HostId, provider: string): Promise<LoginStart>;
     cancelHost(host: HostId): void;
@@ -112,10 +100,6 @@ function inspectionOf(inspected: InspectedCandidate): CheckoutInspection {
   }
 }
 
-function notNegotiated(error: unknown): boolean {
-  return error instanceof HelperRequestError && error.code === 'feature_not_negotiated';
-}
-
 /** A failure the user reads: what was being done on which machine, then the helper's own words. */
 function explained(error: unknown, doing: string, id: HostId): Error {
   const detail = error instanceof Error ? error.message : String(error);
@@ -150,40 +134,16 @@ export class MachinesMain {
 
   /** What `id`'s facts say now: its connection's state, then what its helper describes. */
   async report(id: HostId, expectedCheckout: string | null = null): Promise<MachineReport> {
-    if (await this.#v2(id)) {
-      const registry = this.#registry();
-      try {
-        const facts = await registry.describeMachine(
-          id,
-          expectedCheckout,
-          new AbortController().signal,
-        );
-        const live = await this.#runs().live(id);
-        return {kind: 'ready', facts: {...facts, runs: {...facts.runs, live}}};
-      } catch (error) {
-        return unreachable(error);
-      }
-    }
-    // Temporary adapter owned by PR4: the off switch keeps the helper JSON channel.
-    let lease: ConnectionLease;
+    const registry = this.#registry();
     try {
-      lease = await this.#deps.connection(id);
+      const facts = await registry.describeMachine(
+        id,
+        expectedCheckout,
+        new AbortController().signal,
+      );
+      const live = await this.#runs().live(id);
+      return {kind: 'ready', facts: {...facts, runs: {...facts.runs, live}}};
     } catch (error) {
-      return unreachable(error);
-    }
-    await using held = lease;
-    try {
-      await held.connection.ready();
-    } catch (error) {
-      return unreachable(error);
-    }
-    const kind =
-      missingRequiredFeatures(held.connection.features).length === 0 ? 'ready' : 'needs-update';
-    try {
-      const reply = await held.connection.request({type: 'machine.describe'});
-      return {kind, facts: reply.machine};
-    } catch (error) {
-      if (notNegotiated(error)) return {kind, facts: null};
       return unreachable(error);
     }
   }
@@ -194,28 +154,16 @@ export class MachinesMain {
     path: string,
     revision: bigint | null = null,
   ): Promise<CheckoutInspection> {
-    if (await this.#v2(id)) {
-      const current = this.#deps.selectionRevision;
-      if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
-      const inspected = await this.#setup().inspectCandidate(
-        id,
-        path,
-        revision ?? 1n,
-        new AbortController().signal,
-      );
-      if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
-      return inspectionOf(inspected);
-    }
-    await using lease = await this.#deps.connection(id);
-    try {
-      const reply = await lease.connection.request({type: 'checkout.inspect', path});
-      return reply.inspection;
-    } catch (error) {
-      if (notNegotiated(error)) return {state: 'unsupported'};
-      throw error instanceof HelperRequestError
-        ? new Error(`Could not inspect the folder: ${error.message}`)
-        : error;
-    }
+    const current = this.#deps.selectionRevision;
+    if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
+    const inspected = await this.#setup().inspectCandidate(
+      id,
+      path,
+      revision ?? 1n,
+      new AbortController().signal,
+    );
+    if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
+    return inspectionOf(inspected);
   }
 
   /**
@@ -223,138 +171,67 @@ export class MachinesMain {
    * helper predates machine compute settings.
    */
   async compute(id: HostId): Promise<Offered<ComputeSettings>> {
-    if (await this.#v2(id)) {
-      const registry = this.#registry();
-      try {
-        const value = await registry.listCompute(id, null, new AbortController().signal);
-        return {kind: 'offered', value};
-      } catch (error) {
-        throw explained(error, 'read the clusters and clouds', id);
-      }
+    const registry = this.#registry();
+    try {
+      const value = await registry.listCompute(id, null, new AbortController().signal);
+      return {kind: 'offered', value};
+    } catch (error) {
+      throw explained(error, 'read the clusters and clouds', id);
     }
-    // Temporary adapter owned by PR4: the off switch keeps the helper JSON channel.
-    return this.#offered(id, 'read the clusters and clouds', async connection => {
-      const reply = await connection.request({type: 'compute.list'});
-      return reply.settings;
-    });
   }
 
   /** Try `cluster` from `id`: reach it, ask its scheduler, check its workspace. Saves nothing. */
   async testCluster(id: HostId, cluster: SlurmClusterSettings): Promise<ClusterTest> {
-    if (await this.#v2(id)) {
-      try {
-        return await this.#clusters().test(id, cluster, new AbortController().signal);
-      } catch (error) {
-        throw explained(error, 'test the cluster', id);
-      }
+    try {
+      return await this.#clusters().test(id, cluster, new AbortController().signal);
+    } catch (error) {
+      throw explained(error, 'test the cluster', id);
     }
-    return this.#changed(id, 'test the cluster', async connection => {
-      const reply = await connection.request({type: 'compute.test_cluster', cluster});
-      return reply.result;
-    });
   }
 
   /** Save `cluster` on `id`; its helper tests it again first. Answers the settings after. */
   async addCluster(id: HostId, cluster: SlurmClusterSettings): Promise<ComputeSettings> {
-    if (await this.#v2(id)) {
-      try {
-        return await this.#clusters().put(id, cluster, new AbortController().signal);
-      } catch (error) {
-        throw explained(error, 'save the cluster', id);
-      }
+    try {
+      return await this.#clusters().put(id, cluster, new AbortController().signal);
+    } catch (error) {
+      throw explained(error, 'save the cluster', id);
     }
-    return this.#changed(id, 'save the cluster', async connection => {
-      const reply = await connection.request({type: 'compute.add_cluster', cluster});
-      return reply.settings;
-    });
   }
 
   /** Remove the cluster `name` from `id`'s own file. Answers the settings after. */
   async removeCluster(id: HostId, name: string): Promise<ComputeSettings> {
-    if (await this.#v2(id)) {
-      try {
-        return await this.#clusters().remove(id, name, new AbortController().signal);
-      } catch (error) {
-        throw explained(error, 'remove the cluster', id);
-      }
+    try {
+      return await this.#clusters().remove(id, name, new AbortController().signal);
+    } catch (error) {
+      throw explained(error, 'remove the cluster', id);
     }
-    return this.#changed(id, 'remove the cluster', async connection => {
-      const reply = await connection.request({type: 'compute.remove_cluster', name});
-      return reply.settings;
-    });
   }
 
   /** Each vetted harness's login on `id`, or that its helper predates login state. */
   async agentLogins(id: HostId): Promise<Offered<readonly AgentLogin[]>> {
-    if (await this.#v2(id)) {
-      const catalog = this.#deps.catalog;
-      if (catalog === undefined)
-        throw new Error('run transport v2 is on and the login catalog is missing');
-      try {
-        return {kind: 'offered', value: await catalog.logins(id, new AbortController().signal)};
-      } catch (error) {
-        throw explained(error, 'read the agent logins', id);
-      }
+    const catalog = this.#deps.catalog;
+    if (catalog === undefined) throw new Error('the login catalog is missing');
+    try {
+      return {kind: 'offered', value: await catalog.logins(id, new AbortController().signal)};
+    } catch (error) {
+      throw explained(error, 'read the agent logins', id);
     }
-    return this.#offered(id, 'read the agent logins', async connection => {
-      const reply = await connection.request({type: 'agent_logins.list'});
-      return reply.logins;
-    });
   }
 
   /** Start `provider`'s own login on `id`. */
   async startLogin(id: HostId, provider: string): Promise<LoginStart> {
-    if (await this.#v2(id)) {
-      const logins = this.#deps.logins;
-      if (logins === undefined) {
-        throw new Error('run transport v2 is on and the login actor is missing');
-      }
-      return logins.start(id, provider);
+    const logins = this.#deps.logins;
+    if (logins === undefined) {
+      throw new Error('the login actor is missing');
     }
-    return this.#changed(id, 'start the login', async connection => {
-      const reply = await connection.request({type: 'agent_logins.start', provider});
-      return reply.result;
-    });
-  }
-
-  /** `read` over `id`'s connection, or `unsupported` from a helper that did not negotiate it. */
-  async #offered<T>(
-    id: HostId,
-    doing: string,
-    read: (connection: ConnectionLease['connection']) => Promise<T>,
-  ): Promise<Offered<T>> {
-    try {
-      await using lease = await this.#deps.connection(id);
-      return {kind: 'offered', value: await read(lease.connection)};
-    } catch (error) {
-      if (notNegotiated(error)) return {kind: 'unsupported'};
-      throw explained(error, doing, id);
-    }
-  }
-
-  /** `change` over `id`'s connection; a failure is worded for the user, a missing feature too. */
-  async #changed<T>(
-    id: HostId,
-    doing: string,
-    change: (connection: ConnectionLease['connection']) => Promise<T>,
-  ): Promise<T> {
-    try {
-      await using lease = await this.#deps.connection(id);
-      return await change(lease.connection);
-    } catch (error) {
-      throw explained(error, doing, id);
-    }
-  }
-
-  async #v2(id: HostId): Promise<boolean> {
-    return (await this.#deps.transportV2?.(id)) === true;
+    return logins.start(id, provider);
   }
 
   /** The setup port. A missing one is a wiring error, not a reason to use the helper. */
   #setup(): RegistrySetup {
     const setup = this.#deps.setup;
     if (setup === undefined) {
-      throw new Error('run transport v2 is on and the registry setup is missing');
+      throw new Error('the registry setup is missing');
     }
     return setup;
   }
@@ -363,7 +240,7 @@ export class MachinesMain {
   #runs(): Pick<RunWatch, 'live'> {
     const runs = this.#deps.runs;
     if (runs === undefined) {
-      throw new Error('run transport v2 is on and the run watch is missing');
+      throw new Error('the run watch is missing');
     }
     return runs;
   }
@@ -372,7 +249,7 @@ export class MachinesMain {
   #clusters(): RegistryClusters {
     const clusters = this.#deps.clusters;
     if (clusters === undefined) {
-      throw new Error('run transport v2 is on and the cluster registry is missing');
+      throw new Error('the cluster registry is missing');
     }
     return clusters;
   }
@@ -381,7 +258,7 @@ export class MachinesMain {
   #registry(): RegistryCatalog {
     const registry = this.#deps.registry;
     if (registry === undefined) {
-      throw new Error('run transport v2 is on and the registry reads are missing');
+      throw new Error('the registry reads are missing');
     }
     return registry;
   }

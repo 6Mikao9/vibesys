@@ -9,6 +9,7 @@ export interface RunChatPorts {
   createThread(
     harness: HarnessChoice | null,
     signal: AbortSignal,
+    requestId: string,
   ): Promise<ChatOutcome<{readonly threadId: string}>>;
   /** Put a question to a thread; the answer streams into the run as events. */
   ask(input: AskInput, signal: AbortSignal): Promise<ChatOutcome<unknown>>;

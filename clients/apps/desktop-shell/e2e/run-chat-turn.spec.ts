@@ -1,6 +1,7 @@
 import {expect, type Page, test} from '@playwright/test';
 import type {RunEvent} from '@vibesys/contracts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {emitChat} from './chat-events.js';
 import {settled} from './checks/settle.js';
 import {openFixture, playLive} from './fixture-world.js';
 
@@ -18,10 +19,6 @@ const QUESTION =
   'What is the best measured result of this run so far? Read-only question, change nothing.';
 const ANSWER = 'The best idea is the lock-free ring.';
 const CHAT = {agent_kind: 'chat', round_label: 'experiment-chat', chat_thread_id: THREAD} as const;
-
-interface FixtureWindow extends Window {
-  fakeHost: {emit(events: readonly unknown[]): void};
-}
 
 function event(sequence: number, type: string, fields: object = {}): RunEvent {
   return {timestamp: '2026-10-15T16:31:00Z', type, sequence, ...fields} as unknown as RunEvent;
@@ -76,10 +73,7 @@ function turn(from: number): readonly RunEvent[] {
 }
 
 async function emit(page: Page, events: readonly RunEvent[]): Promise<void> {
-  await page.evaluate(
-    batch => (window as unknown as FixtureWindow).fakeHost.emit(batch),
-    events as readonly unknown[],
-  );
+  await emitChat(page, events);
 }
 
 test('Chat opens on a run whose thread holds a question and an answer, and settles', async ({

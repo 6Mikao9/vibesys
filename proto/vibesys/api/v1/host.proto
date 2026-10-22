@@ -8,6 +8,7 @@ import "vibesys/api/v1/host_read_generated.proto";
 import "vibesys/api/v1/host_mutate_generated.proto";
 import "vibesys/api/v1/host_watch_generated.proto";
 import "vibesys/store/v1/skeleton.proto";
+import "vibesys/store/v1/chat.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
 
@@ -26,6 +27,7 @@ service HostService {
   // keeps running after the caller disconnects, until the operation cap.
   rpc Mutate(MutateRequest) returns (MutateResponse);
   rpc Hello(HelloRequest) returns (HelloResponse);
+  rpc ListChatSessions(ListChatSessionsRequest) returns (ListChatSessionsResponse);
   // Tail follows the log live until the client cancels, starting at from_seq
   // (inclusive). Record bytes pass through unchanged; only seq is decoded.
   rpc Tail(TailRequest) returns (stream TailResponse);
@@ -189,4 +191,13 @@ message TailStreamResponse {
     max_len: 65536
   }];
   uint64 next_offset = 2 [(buf.validate.field).uint64.lte = 9223372036854775807];
+}
+
+// Only committed session metadata is exposed. Empty sessions created before a
+// first question remain discoverable. Listing never starts an agent.
+message ListChatSessionsRequest {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+}
+message ListChatSessionsResponse {
+  repeated vibesys.store.v1.ChatSessionCreated sessions = 1 [(buf.validate.field).repeated.max_items = 4096];
 }

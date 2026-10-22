@@ -23,6 +23,9 @@ export {
   type HelloResponse,
   HelloResponseSchema,
   HostService,
+  ListChatSessionsRequestSchema,
+  type ListChatSessionsResponse,
+  ListChatSessionsResponseSchema,
   RunLiveness,
   SkeletonRequestSchema,
   type SkeletonResponse,
@@ -75,9 +78,9 @@ export {
 export * from './generated/vibesys/store/v1/skeleton_pb.js';
 export * from './generated/vibesys/store/v1/span_pb.js';
 export * from './generated/vibesys/store/v1/transcript_pb.js';
+export {ClientReplaySchema} from './generated/vibesys/testing/v1/client_replay_pb.js';
 export type {Accepted, OperationSignal, OperationTransport} from './operations.js';
 export {OperationFailed} from './operations.js';
 export {projectMessage} from './project.js';
 export {API_SCHEMA_HASH, HOST_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
-
 export {validatedExactFromBinary, validatedFromBinary, validateHostPayload} from './validation.js';

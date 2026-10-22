@@ -63,12 +63,6 @@ async function openIntents(page: Page, amendment = false) {
   });
   await installGateway(page, wire(fixture));
   await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
-  const toggle = page.getByRole('switch', {name: 'Run transport v2'});
-  await expect(toggle).not.toBeChecked();
-  expect(
-    await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.calls()),
-  ).toEqual([]);
-  await toggle.check();
   await expect(page.getByRole('button', {name: 'Guidance', exact: true})).toBeVisible();
   const outcome = async (index: number, result: 'applied' | 'refused'): Promise<void> => {
     const request = requests[index]?.request;
@@ -104,7 +98,7 @@ async function openIntents(page: Page, amendment = false) {
       bytes,
     );
   };
-  return {requests, outcome, toggle};
+  return {requests, outcome};
 }
 
 for (const width of [800, 1440]) {
@@ -139,7 +133,7 @@ async function capture(page: Page, name: string): Promise<void> {
 test('Pause escalates to Pause now in the same epoch and waits for journal outcomes', async ({
   page,
 }) => {
-  const {requests, outcome, toggle} = await openIntents(page);
+  const {requests, outcome} = await openIntents(page);
   await page.getByRole('button', {name: 'Pause', exact: true}).click();
   await expect(page.getByText('Pause · Pending', {exact: true})).toBeVisible();
   expect(requests[0]).toMatchObject({
@@ -165,7 +159,7 @@ test('Pause escalates to Pause now in the same epoch and waits for journal outco
       (window as unknown as GatewayWindow).fakeHost.calls.filter(call => call[0] === 'resume'),
     ),
   ).toEqual([]);
-  await toggle.uncheck();
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
   await expect(page.getByRole('button', {name: 'Chat', exact: true})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Guidance', exact: true})).toHaveCount(0);
   expect(await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.active())).toBe(

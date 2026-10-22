@@ -41,6 +41,7 @@ import {FAKE_OFFER} from './fake-offer.js';
 import {installFakeRun, type RunMethods} from './fake-run.js';
 import {type FakeSummarySpanSeed, installFakeSummarySpan} from './fake-summary-span.js';
 import {addInitScripts, initScript as script} from './init-scripts.js';
+import {nativeFixtureScript} from './native-fixture.js';
 import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/work/queue-rs';
@@ -236,6 +237,7 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
       script(installFakeSummarySpan, {...options.summaryServing, events: fixture.events}),
     );
   }
+  scripts.push(nativeFixtureScript(fixture));
   return scripts;
 }
 

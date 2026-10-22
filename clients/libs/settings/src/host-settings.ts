@@ -1,3 +1,4 @@
+import {getOption} from '@bufbuild/protobuf';
 /**
  * Which hosts the app offers and how it runs VibeSys on each, as pure, validated data.
  *
@@ -14,6 +15,7 @@ import {
   SSH_ALIAS,
   validHostPath,
 } from '@vibesys/hosts';
+import {RetainedDesktopHostSettingsSchema, retained_json_key} from '@vibesys/proto';
 import {object, onlyKeys, SettingsError} from './parse.js';
 import {sshHostPatternsMatch} from './ssh-pattern.js';
 
@@ -83,7 +85,10 @@ export function decodeRetainedSettings(value: unknown): SettingsFile {
     ...record,
     hosts: Object.fromEntries(
       Object.entries(hosts).map(([key, value]) => {
-        const {runTransportV2: _discarded, ...current} = object(value, `hosts.json: hosts.${key}`);
+        const current = {...object(value, `hosts.json: hosts.${key}`)};
+        delete current[
+          getOption(RetainedDesktopHostSettingsSchema.field.discardedSelection, retained_json_key)
+        ];
         return [key, current];
       }),
     ),

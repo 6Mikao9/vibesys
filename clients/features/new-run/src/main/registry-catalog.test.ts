@@ -22,7 +22,6 @@ function subject(peer: FakeReadCatalog) {
     },
     remember: async () => {},
     now: () => 1,
-    transportV2: async () => true,
     registryCatalog: registryRunCatalog(peer),
     registryReads: registryReads(peer),
   });
@@ -81,7 +80,6 @@ test('v2 with a missing catalog fails instead of negotiating helper features', a
     },
     remember: async () => {},
     now: () => 1,
-    transportV2: async () => true,
   });
   await expect(main.answer({kind: 'examples', host: HOST})).rejects.toThrow(
     'new-run registry is missing',

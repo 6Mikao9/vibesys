@@ -11,6 +11,7 @@ import (
 	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -793,11 +794,28 @@ func (x *DesktopRecent) GetRetained() []*DesktopRetainedRecentEntry {
 	return nil
 }
 
+var file_vibesys_desktop_v1_settings_proto_extTypes = []protoimpl.ExtensionInfo{
+	{
+		ExtendedType:  (*descriptorpb.FieldOptions)(nil),
+		ExtensionType: (*string)(nil),
+		Field:         50120,
+		Name:          "vibesys.desktop.v1.retained_json_key",
+		Tag:           "bytes,50120,opt,name=retained_json_key",
+		Filename:      "vibesys/desktop/v1/settings.proto",
+	},
+}
+
+// Extension fields to descriptorpb.FieldOptions.
+var (
+	// optional string retained_json_key = 50120;
+	E_RetainedJsonKey = &file_vibesys_desktop_v1_settings_proto_extTypes[0]
+)
+
 var File_vibesys_desktop_v1_settings_proto protoreflect.FileDescriptor
 
 const file_vibesys_desktop_v1_settings_proto_rawDesc = "" +
 	"\n" +
-	"!vibesys/desktop/v1/settings.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a vibesys/host/v1/operations.proto\"n\n" +
+	"!vibesys/desktop/v1/settings.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a vibesys/host/v1/operations.proto\"n\n" +
 	"\x13DesktopHostSettings\x12?\n" +
 	"\bcheckout\x18\x01 \x01(\tB#\xbaH r\x1e\x10\x01\x18\x80\b2\x17^(~$|/|~/)[^\\x00\\r\\n]*$R\bcheckoutJ\x04\b\x02\x10\x03R\x10run_transport_v2\"\x9d\x02\n" +
 	"\fDesktopHosts\x12!\n" +
@@ -806,10 +824,10 @@ const file_vibesys_desktop_v1_settings_proto_rawDesc = "" +
 	"\n" +
 	"HostsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12=\n" +
-	"\x05value\x18\x02 \x01(\v2'.vibesys.desktop.v1.DesktopHostSettingsR\x05value:\x028\x01\"\xac\x01\n" +
+	"\x05value\x18\x02 \x01(\v2'.vibesys.desktop.v1.DesktopHostSettingsR\x05value:\x028\x01\"\xc0\x01\n" +
 	"\x1bRetainedDesktopHostSettings\x12?\n" +
-	"\bcheckout\x18\x01 \x01(\tB#\xbaH r\x1e\x10\x01\x18\x80\b2\x17^(~$|/|~/)[^\\x00\\r\\n]*$R\bcheckout\x124\n" +
-	"\x13discarded_selection\x18\x02 \x01(\bH\x00R\x12discardedSelection\x88\x01\x01B\x16\n" +
+	"\bcheckout\x18\x01 \x01(\tB#\xbaH r\x1e\x10\x01\x18\x80\b2\x17^(~$|/|~/)[^\\x00\\r\\n]*$R\bcheckout\x12H\n" +
+	"\x13discarded_selection\x18\x02 \x01(\bB\x12¼\x18\x0erunTransportV2H\x00R\x12discardedSelection\x88\x01\x01B\x16\n" +
 	"\x14_discarded_selection\"\xb5\x02\n" +
 	"\x14RetainedDesktopHosts\x12!\n" +
 	"\aversion\x18\x01 \x01(\rB\a\xbaH\x04*\x02\b\x01R\aversion\x12\x8e\x01\n" +
@@ -874,7 +892,8 @@ const file_vibesys_desktop_v1_settings_proto_rawDesc = "" +
 	"\x12DESKTOP_THEME_SAND\x10\x03\x12\x15\n" +
 	"\x11DESKTOP_THEME_INK\x10\x04\x12\x1a\n" +
 	"\x16DESKTOP_THEME_MIDNIGHT\x10\x05\x12\x1a\n" +
-	"\x16DESKTOP_THEME_TERMINAL\x10\x06BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3"
+	"\x16DESKTOP_THEME_TERMINAL\x10\x06:K\n" +
+	"\x11retained_json_key\x12\x1d.google.protobuf.FieldOptions\x18ȇ\x03 \x01(\tR\x0fretainedJsonKeyBEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3"
 
 var (
 	file_vibesys_desktop_v1_settings_proto_rawDescOnce sync.Once
@@ -910,6 +929,7 @@ var file_vibesys_desktop_v1_settings_proto_goTypes = []any{
 	(*v1.StartRunOptions)(nil),          // 16: vibesys.host.v1.StartRunOptions
 	(*v1.StartRunAgent)(nil),            // 17: vibesys.host.v1.StartRunAgent
 	(*v1.StartRunMeasure)(nil),          // 18: vibesys.host.v1.StartRunMeasure
+	(*descriptorpb.FieldOptions)(nil),   // 19: google.protobuf.FieldOptions
 }
 var file_vibesys_desktop_v1_settings_proto_depIdxs = []int32{
 	13, // 0: vibesys.desktop.v1.DesktopHosts.hosts:type_name -> vibesys.desktop.v1.DesktopHosts.HostsEntry
@@ -929,10 +949,11 @@ var file_vibesys_desktop_v1_settings_proto_depIdxs = []int32{
 	11, // 14: vibesys.desktop.v1.DesktopRecent.retained:type_name -> vibesys.desktop.v1.DesktopRetainedRecentEntry
 	2,  // 15: vibesys.desktop.v1.DesktopHosts.HostsEntry.value:type_name -> vibesys.desktop.v1.DesktopHostSettings
 	4,  // 16: vibesys.desktop.v1.RetainedDesktopHosts.HostsEntry.value:type_name -> vibesys.desktop.v1.RetainedDesktopHostSettings
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
+	19, // 17: vibesys.desktop.v1.retained_json_key:extendee -> google.protobuf.FieldOptions
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	17, // [17:18] is the sub-list for extension extendee
 	0,  // [0:17] is the sub-list for field type_name
 }
 
@@ -951,13 +972,14 @@ func file_vibesys_desktop_v1_settings_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_desktop_v1_settings_proto_rawDesc), len(file_vibesys_desktop_v1_settings_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   13,
-			NumExtensions: 0,
+			NumExtensions: 1,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_desktop_v1_settings_proto_goTypes,
 		DependencyIndexes: file_vibesys_desktop_v1_settings_proto_depIdxs,
 		EnumInfos:         file_vibesys_desktop_v1_settings_proto_enumTypes,
 		MessageInfos:      file_vibesys_desktop_v1_settings_proto_msgTypes,
+		ExtensionInfos:    file_vibesys_desktop_v1_settings_proto_extTypes,
 	}.Build()
 	File_vibesys_desktop_v1_settings_proto = out.File
 	file_vibesys_desktop_v1_settings_proto_goTypes = nil

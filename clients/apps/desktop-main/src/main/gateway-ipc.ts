@@ -1,5 +1,6 @@
-/** Generic IPC composition. Authorization and per-host opt-in precede provisioning or dialing. */
+/** Generic IPC composition. Authorization precedes provisioning or dialing. */
 import {arch, platform} from 'node:os';
+import {fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   type ConnectionManager,
   GATEWAY_DIRECTORY,
@@ -10,30 +11,24 @@ import {
   gatewayTarget,
   localGateway,
   provisionGateway,
+  READ_METHOD,
   SshLink,
 } from '@vibesys/connection';
-import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
+import {type HostKey, hostFromKey} from '@vibesys/hosts';
 import {GATEWAY_CHANNEL, gatewayEnd, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
+import {ReadRequestSchema} from '@vibesys/proto';
 import {configuredHostCall, HOST_CALL_METHOD} from '@vibesys/runs/intents';
-import {type SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
+import {type SettingsStore, settingsFor} from '@vibesys/settings';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import type {IpcMain} from 'electron';
 import {rendererGeneration, type WelcomeInvokeEvent} from './welcome-ipc.js';
 
 export function createGatewayCalls(
   manager: ConnectionManager,
-  settings: SettingsStore,
   resources: string,
   schedule: ScheduleTimeout,
 ): GatewayCalls {
-  const calls = new GatewayCalls(
-    async key => {
-      const {settings: file} = await settings.hosts();
-      return settingsFor(file, hostFromKey(key))?.runTransportV2 === true;
-    },
-    key => gatewayFor(key, manager, resources, schedule),
-    schedule,
-  );
+  const calls = new GatewayCalls(key => gatewayFor(key, manager, resources, schedule), schedule);
   manager.onDisposing(() => calls.close());
   return calls;
 }
@@ -86,12 +81,16 @@ export function installGatewayIpc(
       };
       if (request.kind === 'unary') {
         let bytes = request.bytes;
-        if (request.method === HOST_CALL_METHOD) {
+        if (request.method === HOST_CALL_METHOD || request.method === READ_METHOD) {
           const {settings: file} = await settings.hosts();
-          bytes = configuredHostCall(
-            bytes,
-            settingsFor(file, hostFromKey(request.host))?.checkout ?? null,
-          );
+          const checkout = settingsFor(file, hostFromKey(request.host))?.checkout ?? null;
+          if (request.method === HOST_CALL_METHOD) bytes = configuredHostCall(bytes, checkout);
+          else {
+            if (checkout === null) throw new Error('No checkout configured for this host');
+            const read = fromBinary(ReadRequestSchema, bytes);
+            read.checkout = checkout;
+            bytes = toBinary(ReadRequestSchema, read);
+          }
         }
         receive(await calls.unary(request.host, request.method, bytes, abort.signal));
       } else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
@@ -151,30 +150,4 @@ function authorize(
     })
   )
     throw new Error('not an app-owned shell document');
-}
-
-export function gatewaySetting(
-  settings: SettingsStore,
-  checkoutFor: (host: import('@vibesys/hosts').HostId) => Promise<string | null>,
-  disable: (host: HostKey) => void,
-) {
-  return async (
-    host: import('@vibesys/hosts').HostId,
-    enabled: boolean | undefined,
-  ): Promise<boolean> => {
-    const {settings: file} = await settings.hosts();
-    const saved = settingsFor(file, host);
-    if (enabled === undefined) return saved?.runTransportV2 === true;
-    const checkout = saved?.checkout ?? (await checkoutFor(host));
-    if (checkout === null) throw new Error('Set a checkout first');
-    await settings.updateHosts(current =>
-      withHostSettings(current, host, {
-        ...settingsFor(current, host),
-        checkout,
-        runTransportV2: enabled,
-      }),
-    );
-    if (!enabled) disable(hostKey(host));
-    return enabled;
-  };
 }

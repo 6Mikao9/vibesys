@@ -9,7 +9,6 @@ import {
   type ConnectionManager,
   connectionStatus,
   HelperRequestError,
-  type HostConnection,
   type LogsLease,
   type RegistryRunCatalog,
   type RegistrySavedRuns,
@@ -19,7 +18,6 @@ import {
 import {
   type HarnessesListReply,
   type HelperMessage,
-  type PathsCompleteReply,
   RUN_EVENT_TYPES_BY_KINDS,
   type RunEventKinds,
   type UsageRecord,
@@ -37,7 +35,6 @@ import {
   type InstanceInspection,
   inspectionReply,
   type ListedRun,
-  listedRuns,
   type RunDigestsReply,
   type UsageWindowOutcome,
   usageWindowEntry,
@@ -95,9 +92,7 @@ export interface HostsDeps {
   readonly push: (listing: HostListing) => void;
   /** Forget a host's retained listing when it leaves the desired set. */
   readonly retire: (host: HostKey) => void;
-  /** Per host. Absent or false keeps the helper JSON channel. */
-  readonly transportV2?: (id: HostId) => Promise<boolean>;
-  /** Required when `transportV2` is true. Missing it throws; it does not fall back. */
+  /** Required when using the gateway. Missing it throws; it does not fall back. */
   readonly setup?: RegistrySetup;
   /** Stop a host login when its checkout is replaced or the host is removed. */
   readonly endLogin?: (id: HostId) => void;
@@ -342,16 +337,10 @@ export class Hosts {
     if (this.#removing.has(host)) throw new Error(`${hostLabel(id)} is being removed`);
     const key = checkoutChangeKey(change);
     if (this.#checkoutChanges.has(key)) throw new Error('the checkout change is already active');
-    const v2 = await this.#transportV2(id);
-    const operation = new CheckoutChange(
-      host,
-      v2 ? null : this.#deps.manager.candidate(id, checkout),
-    );
+    const operation = new CheckoutChange(host);
     this.#checkoutChanges.set(key, operation);
     try {
-      const root = v2
-        ? await this.#inspectForCheckout(id, checkout, change.sequence, operation)
-        : await this.#inspectWithHelper(operation);
+      const root = await this.#inspectForCheckout(id, checkout, change.sequence, operation);
       const outcome = await this.#deps.settings.updateHosts(
         current => withHostSettings(current, id, {...settingsFor(current, id), checkout}),
         operation.isCurrent,
@@ -367,21 +356,17 @@ export class Hosts {
         throw new Error('the checkout change was cancelled', {cause: error});
       throw error;
     } finally {
-      try {
-        await operation.closeCandidate();
-      } finally {
-        operation.settle();
-        if (this.#checkoutChanges.get(key) === operation) this.#checkoutChanges.delete(key);
-      }
+      operation.settle();
+      if (this.#checkoutChanges.get(key) === operation) this.#checkoutChanges.delete(key);
     }
   }
 
   /** Revoke one renderer checkout change and stop its candidate connection. */
-  async cancelCheckout(change: CheckoutChangeId): Promise<void> {
+  cancelCheckout(change: CheckoutChangeId): Promise<void> {
     const operation = this.#checkoutChanges.get(checkoutChangeKey(change));
-    if (operation === undefined) return;
+    if (operation === undefined) return Promise.resolve();
     operation.cancel();
-    await operation.closeCandidate();
+    return Promise.resolve();
   }
 
   /** Revoke and settle every checkout change owned by a renderer document that went away. */
@@ -390,15 +375,7 @@ export class Hosts {
       .filter(([key]) => key.startsWith(`${owner}\0`))
       .map(([, operation]) => operation);
     for (const operation of operations) operation.cancel();
-    const cleanup = await Promise.allSettled(
-      operations.map(operation => operation.closeCandidate()),
-    );
     await Promise.all(operations.map(operation => operation.settled));
-    const failures = cleanup.flatMap(result =>
-      result.status === 'rejected' ? [result.reason] : [],
-    );
-    if (failures.length > 0)
-      throw new AggregateError(failures, 'could not cancel checkout changes');
   }
 
   /** Remove `id` after revoking every older checkout save that could recreate it. */
@@ -411,18 +388,7 @@ export class Hosts {
       const operations = [...this.#checkoutChanges.values()].filter(
         operation => operation.host === key && operation.cancel(),
       );
-      const cleanup = await Promise.allSettled(
-        operations.map(operation => operation.closeCandidate()),
-      );
       await Promise.all(operations.map(operation => operation.settled));
-      for (const failure of cleanup) {
-        if (failure.status === 'rejected')
-          this.#deps.log(
-            `could not close ${hostLabel(id)} checkout validation: ${
-              failure.reason instanceof Error ? failure.reason.message : String(failure.reason)
-            }`,
-          );
-      }
       let persistenceFailure: {readonly error: unknown} | null = null;
       try {
         await this.#deps.settings.updateHosts(current => withoutHost(current, id));
@@ -450,17 +416,8 @@ export class Hosts {
   /** The tasks `project` defines on `id`. */
   async tasks(id: HostId, project: unknown): Promise<string[]> {
     const path = validHostPath(project, 'the project directory');
-    if (await this.#transportV2(id)) {
-      try {
-        return await this.#catalog().tasks(id, path, new AbortController().signal);
-      } catch (error) {
-        throw plain(error, 'Could not read the tasks of the project');
-      }
-    }
-    await using lease = await this.connection(id);
     try {
-      const reply = await lease.connection.request({type: 'tasks.list', project: path});
-      return reply.tasks.tasks.map(task => task.name);
+      return await this.#catalog().tasks(id, path, new AbortController().signal);
     } catch (error) {
       throw plain(error, 'Could not read the tasks of the project');
     }
@@ -649,49 +606,17 @@ export class Hosts {
 
   /** Every run of `project` on `id`, newest first (`runs.list`); a digest is asked for separately. */
   async projectRuns(id: HostId, project: string): Promise<readonly ListedRun[]> {
-    if (await this.#transportV2(id)) {
-      if (!this.#deps.savedRuns) throw new Error('saved-run registry is missing');
-      return this.#deps.savedRuns.list(id, project, new AbortController().signal);
-    }
-    await using lease = await this.connection(id);
-    try {
-      const reply = await lease.connection.request({type: 'runs.list', project});
-      return listedRuns(reply.runs.runs);
-    } catch (error) {
-      throw plain(error, 'Could not list the runs of the project');
-    }
+    if (!this.#deps.savedRuns) throw new Error('saved-run registry is missing');
+    return this.#deps.savedRuns.list(id, project, new AbortController().signal);
   }
 
   /** The vetted provider and model pairs runs on `id` may start with; `unsupported` on an older helper. */
   async harnesses(id: HostId): Promise<HarnessListing> {
-    if (await this.#transportV2(id)) {
-      try {
-        const harnesses = await this.#catalog().harnesses(id, new AbortController().signal);
-        return {
-          kind: 'listed',
-          harnesses: harnesses.map(({provider, model, default: isDefault, display}) => ({
-            provider,
-            model,
-            default: isDefault,
-            ...(display == null ? {} : {display: harnessDisplay(display)}),
-          })),
-        };
-      } catch (error) {
-        throw plain(error, `Could not read the vetted models of ${hostLabel(id)}`);
-      }
-    }
-    await using lease = await this.connection(id);
     try {
-      await lease.connection.ready();
-      // Makers and generations only from a helper that agreed to them in `hello`.
-      const generations = lease.connection.features?.includes('harness_generations') === true;
-      const reply = await lease.connection.request({
-        type: 'harnesses.list',
-        ...(generations ? {with_generations: true} : {}),
-      });
+      const harnesses = await this.#catalog().harnesses(id, new AbortController().signal);
       return {
         kind: 'listed',
-        harnesses: reply.harnesses.map(({provider, model, default: isDefault, display}) => ({
+        harnesses: harnesses.map(({provider, model, default: isDefault, display}) => ({
           provider,
           model,
           default: isDefault,
@@ -699,44 +624,18 @@ export class Hosts {
         })),
       };
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
-        return {kind: 'unsupported'};
-      }
       throw plain(error, `Could not read the vetted models of ${hostLabel(id)}`);
     }
   }
 
   /** The directories in `directory` (a path ending in `/`, or `~/`) on `id`. */
   async complete(id: HostId, directory: string): Promise<PathCompletion> {
-    if (await this.#transportV2(id)) {
-      const listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
-      return {
-        kind: 'listed',
-        directory: listed.directory,
-        entries: listed.entries,
-        truncated: listed.truncated,
-      };
-    }
-    await using lease = await this.connection(id);
-    let reply: PathsCompleteReply;
-    try {
-      reply = await lease.connection.request({type: 'paths.complete', prefix: directory});
-    } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
-        return {kind: 'unsupported'};
-      }
-      throw plain(error, 'Could not list the folder');
-    }
+    const listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
     return {
       kind: 'listed',
-      directory: reply.directory,
-      entries: reply.entries.map(entry => ({
-        name: entry.name,
-        path: entry.path,
-        checkout: entry.vibesys_checkout,
-        project: entry.vibesys_project,
-      })),
-      truncated: reply.truncated,
+      directory: listed.directory,
+      entries: listed.entries,
+      truncated: listed.truncated,
     };
   }
 
@@ -878,12 +777,9 @@ export class Hosts {
   }
 
   async #startRuns(key: HostKey, stopped: () => boolean): Promise<void> {
-    if ((await this.#deps.transportV2?.(hostFromKey(key))) !== true) return;
     if (stopped()) return;
     const runs = this.#deps.runs;
-    if (runs === undefined) {
-      throw new Error('run transport v2 is on and the run watch is missing');
-    }
+    if (runs === undefined) throw new Error('run watch is missing');
     runs.start(hostFromKey(key));
   }
 
@@ -1142,25 +1038,13 @@ export class Hosts {
     return catalog;
   }
 
-  async #transportV2(id: HostId): Promise<boolean> {
-    return (await this.#deps.transportV2?.(id)) === true;
-  }
-
   /** The setup port. A missing one is a wiring error, not a reason to use the helper. */
   #setup(): RegistrySetup {
     const setup = this.#deps.setup;
     if (setup === undefined) {
-      throw new Error('run transport v2 is on and the registry setup is missing');
+      throw new Error('the registry setup is missing');
     }
     return setup;
-  }
-
-  async #inspectWithHelper(operation: CheckoutChange): Promise<string | null> {
-    const candidate = await operation.ready();
-    const root = candidate.checkoutRoot;
-    await operation.closeCandidate();
-    operation.assertCurrent();
-    return root;
   }
 
   async #inspectForCheckout(
@@ -1273,14 +1157,11 @@ class CheckoutChange {
   readonly settled: Promise<void>;
   #resolveSettled: () => void = () => undefined;
   #state: 'current' | 'cancelled' | 'committed' = 'current';
-  #closing: Promise<void> | null = null;
 
   readonly #abort = new AbortController();
-  readonly #candidate: Promise<HostConnection> | null;
 
-  constructor(host: HostKey, candidate: Promise<HostConnection> | null) {
+  constructor(host: HostKey) {
     this.host = host;
-    this.#candidate = candidate;
     this.settled = new Promise(resolve => {
       this.#resolveSettled = resolve;
     });
@@ -1313,26 +1194,6 @@ class CheckoutChange {
 
   settle(): void {
     this.#resolveSettled();
-  }
-
-  async ready(): Promise<HostConnection> {
-    if (this.#candidate === null) throw new Error('the checkout change has no candidate');
-    const candidate = await this.#candidate;
-    this.assertCurrent();
-    await candidate.ready();
-    this.assertCurrent();
-    return candidate;
-  }
-
-  closeCandidate(): Promise<void> {
-    if (this.#candidate === null) return Promise.resolve();
-    // Acquisition itself may reject when the manager is closing. Cleanup must not replace the
-    // primary error from `ready`, but a candidate that was built always remains this operation's.
-    this.#closing ??= this.#candidate.then(
-      candidate => candidate[Symbol.asyncDispose](),
-      () => undefined,
-    );
-    return this.#closing;
   }
 }
 

@@ -5,16 +5,24 @@ import {
   type ChatMessageRequest,
   ChatMessageRequestSchema,
   type ChatMessageResponse,
+  type ChatSessionCreated,
   type ChatSteerProposed,
+  type CreateChatSessionRequest,
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
+  type HarnessOption,
   HostCallRequestSchema,
   HostCallResponseSchema,
   HostService,
+  ListChatSessionsRequestSchema,
+  ListChatSessionsResponseSchema,
+  ReadRequestSchema,
+  ReadResponseSchema,
   type Record,
   RecordSchema,
   TailRequestSchema,
   TailResponseSchema,
+  validatedExactFromBinary,
 } from '@vibesys/proto';
 import {addressedIntent, IntentRefused, type RunReference} from '../intents/index.js';
 
@@ -25,7 +33,7 @@ export type {
   ChatSteerProposed,
   Record,
 } from '@vibesys/proto';
-export {ChatRole} from '@vibesys/proto';
+export {ChatRole, SteerMode, SteerTargetKind} from '@vibesys/proto';
 export {HOST_CALL_METHOD, INTENT_TAIL_METHOD as CHAT_TAIL_METHOD} from '../intents/index.js';
 export const CHAT_BLOBS_METHOD = `/${HostService.typeName}/${HostService.method.getBlobs.name}`;
 
@@ -102,4 +110,50 @@ export function proposalIntent(
 
 export function copyChatRequest(request: ChatMessageRequest): ChatMessageRequest {
   return clone(ChatMessageRequestSchema, request);
+}
+
+export type {ChatSessionCreated, CreateChatSessionRequest, HarnessOption} from '@vibesys/proto';
+export const CHAT_SESSIONS_METHOD = `/${HostService.typeName}/${HostService.method.listChatSessions.name}`;
+export const CHAT_CATALOG_METHOD = `/${HostService.typeName}/${HostService.method.read.name}`;
+
+export function sessionListRequest(runId: string): Uint8Array {
+  return toBinary(ListChatSessionsRequestSchema, create(ListChatSessionsRequestSchema, {runId}));
+}
+export function sessionListResponse(bytes: Uint8Array): readonly ChatSessionCreated[] {
+  return validatedExactFromBinary(ListChatSessionsResponseSchema, bytes).sessions;
+}
+export function sessionCreateRequest(
+  request: Omit<CreateChatSessionRequest, '$typeName'>,
+): Uint8Array {
+  return toBinary(
+    HostCallRequestSchema,
+    create(HostCallRequestSchema, {
+      method: {case: 'createChatSession', value: request},
+    }),
+  );
+}
+export function sessionCreateResponse(bytes: Uint8Array, sessionId: string): string {
+  const result = validatedExactFromBinary(HostCallResponseSchema, bytes).result;
+  if (result.case === 'configurationFailed') throw new IntentRefused(result.value);
+  if (result.case !== 'createChatSession' || result.value.sessionId !== sessionId)
+    throw new Error('Chat creation identity mismatch');
+  return sessionId;
+}
+export function chatCatalogRequest(requestId: string): Uint8Array {
+  return toBinary(
+    ReadRequestSchema,
+    create(ReadRequestSchema, {
+      method: {case: 'listHarnesses', value: {requestId, withGenerations: true}},
+    }),
+  );
+}
+export function chatCatalogResponse(
+  bytes: Uint8Array,
+  requestId: string,
+): readonly HarnessOption[] {
+  const result = validatedExactFromBinary(ReadResponseSchema, bytes).result;
+  if (result.case === 'failure') throw new Error(result.value.message);
+  if (result.case !== 'listHarnesses' || result.value.requestId !== requestId)
+    throw new Error('Chat catalogue identity mismatch');
+  return result.value.harnesses;
 }

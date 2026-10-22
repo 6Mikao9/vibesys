@@ -4,7 +4,6 @@ export {
   intentWatchMachine,
   type RunIntentsContext,
   type RunIntentsEvent,
-  type RunIntentsInput,
   runIntentsMachine,
 } from './machine.js';
 

@@ -17,7 +17,6 @@ export function intentsActor(input: {
   readonly bridge: GatewayBridge;
   readonly host: HostKey;
   readonly runId: string;
-  readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
 }) {
   return createActor(
@@ -70,6 +69,6 @@ export function intentsActor(input: {
         }),
       },
     }),
-    {input: {enabled: input.enabled}, clock: clockFrom(input.schedule)},
+    {clock: clockFrom(input.schedule)},
   );
 }

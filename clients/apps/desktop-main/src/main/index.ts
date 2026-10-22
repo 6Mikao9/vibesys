@@ -41,7 +41,7 @@ import {
   type WelcomeEvent,
 } from '@vibesys/ipc';
 import {RunHistoryStore} from '@vibesys/run-history';
-import {remember, SettingsStore, settingsFor} from '@vibesys/settings';
+import {remember, SettingsStore} from '@vibesys/settings';
 import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor, shell} from 'electron';
 import {SHELL_URL} from './app-assets.js';
 import {AppLaunches} from './app-launches.js';
@@ -55,7 +55,7 @@ import {
 } from './app-security.js';
 import {AppStartup} from './app-startup.js';
 import {Desktop} from './desktop.js';
-import {createGatewayCalls, gatewaySetting, installGatewayIpc} from './gateway-ipc.js';
+import {createGatewayCalls, installGatewayIpc} from './gateway-ipc.js';
 import {type LaunchPlan, userDataOverride} from './launch-args.js';
 import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js';
 import {RunWindows} from './run-windows.js';
@@ -105,10 +105,6 @@ function newRunMain(
     connect: id => hosts.connection(id),
     remember: run => settings.updateRecent(recent => remember(recent, run)),
     now: () => Date.now(),
-    transportV2: async id => {
-      const {settings: file} = await settings.hosts();
-      return settingsFor(file, id)?.runTransportV2 === true;
-    },
     registryStart: (host, inputs, signal) => starts.start(host, inputs, signal),
     registryReads: registryReads({
       checkout: id => hosts.checkout(id),
@@ -171,10 +167,9 @@ function watchHostRuns(gateway: ReturnType<typeof installGateway>, manager: Conn
   return runs;
 }
 
-function installGateway(manager: ConnectionManager, settings: SettingsStore) {
+function installGateway(manager: ConnectionManager) {
   return createGatewayCalls(
     manager,
-    settings,
     fileURLToPath(new URL('../gateway/', import.meta.url)),
     realTimers,
   );
@@ -194,7 +189,7 @@ async function openWindow(
     preferencesPath: join(userData, 'preferences.json'),
     log,
   });
-  const gateway = installGateway(manager, settings);
+  const gateway = installGateway(manager);
   const watchedRuns = watchHostRuns(gateway, manager);
   const welcome = new WelcomeFeed();
   const preferences = new PreferencesMain({
@@ -250,14 +245,6 @@ async function openWindow(
     settings,
     preferences,
     newRun: newRunMain(hosts, settings, gateway, watchedRuns),
-    gatewaySetting: gatewaySetting(
-      settings,
-      host => hosts.checkout(host),
-      host => {
-        logins.cancelHost(hostFromKey(host));
-        gateway.disable(host);
-      },
-    ),
     runWindows: windows.runs,
     shellUrl: SHELL_URL,
     openExternal: url => shell.openExternal(url),
@@ -334,7 +321,9 @@ function listedHosts(parts: {
   readonly runs: ReturnType<typeof runWatch>;
 }): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
   const {manager, settings, gateway, history, notifier, welcome, broadcast, endLogin, runs} = parts;
-  const {transportV2, setup} = hostTransport(settings, gateway);
+  const setup = registrySetup({
+    unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+  });
   return {
     setup,
     hosts: new Hosts({
@@ -342,7 +331,6 @@ function listedHosts(parts: {
       settings,
       localCheckout: REPOSITORY_ROOT,
       sshConfigPath: join(homedir(), '.ssh', 'config'),
-      transportV2,
       setup,
       ...(endLogin === undefined ? {} : {endLogin}),
       runs,
@@ -370,20 +358,6 @@ function listedHosts(parts: {
         history.invalidateHost(host);
         welcome.retireHost(host);
       },
-    }),
-  };
-}
-
-/** The per-host switch and the setup reads that do not need a saved checkout. */
-function hostTransport(settings: SettingsStore, gateway: ReturnType<typeof installGateway>) {
-  return {
-    transportV2: async (id: HostId) => {
-      const {settings: file} = await settings.hosts();
-      return settingsFor(file, id)?.runTransportV2 === true;
-    },
-    setup: registrySetup({
-      unary: (id: HostId, bytes: Uint8Array, signal: AbortSignal) =>
-        gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
     }),
   };
 }
@@ -416,11 +390,6 @@ function machinesOver(
     settings,
     removeHost: id => hosts.remove(id),
     checkout: id => hosts.checkout(id),
-    connection: id => hosts.connection(id),
-    transportV2: async id => {
-      const {settings: file} = await settings.hosts();
-      return settingsFor(file, id)?.runTransportV2 === true;
-    },
     registry: registryReads({
       checkout: id => hosts.checkout(id),
       unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),

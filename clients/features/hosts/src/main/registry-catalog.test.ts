@@ -32,7 +32,6 @@ function subject(peer: FakeReadCatalog) {
     log: () => {},
     push: () => {},
     retire: () => {},
-    transportV2: async () => true,
     catalog: registryRunCatalog(peer),
   });
   return {hosts, manager};

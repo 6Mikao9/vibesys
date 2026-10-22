@@ -4,6 +4,9 @@ import type {HostId} from '@vibesys/hosts';
 import {
   Accelerator,
   type AgentLoginSchema,
+  API_SCHEMA_HASH,
+  type CandidateIdentitySchema,
+  CandidateState,
   type ExampleListSchema,
   type HarnessOptionSchema,
   MachineDescriptionSchema,
@@ -18,8 +21,25 @@ import {
 import type {RegistryReadPorts} from '../shell/registry-reads.js';
 
 export class FakeReadCatalog implements RegistryReadPorts {
+  #inspectionGate: {path: string; arrived: () => void; released: Promise<void>} | undefined;
+
+  deferInspection(path: string): {received: Promise<void>; release: () => void} {
+    if (this.#inspectionGate) throw new Error('inspection already held');
+    let arrived = () => {};
+    let release = () => {};
+    const received = new Promise<void>(resolve => {
+      arrived = resolve;
+    });
+    const released = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    this.#inspectionGate = {path, arrived, released};
+    return {received, release};
+  }
+
   savedCheckout: string | null = '/checkout';
   readonly requests: ReadRequest[] = [];
+  readonly candidates = new Map<string, MessageInitShape<typeof CandidateIdentitySchema>>();
   readonly projects = new Map<string, string[]>();
   readonly goals = new Map<string, MessageInitShape<typeof TaskGoalSchema>>();
   loginFacts: MessageInitShape<typeof AgentLoginSchema>[] = [];
@@ -43,10 +63,36 @@ export class FakeReadCatalog implements RegistryReadPorts {
     if (signal.aborted) throw new Error('operation cancelled');
     if (this.failure !== undefined) throw this.failure;
     const request = validatedFromBinary(ReadRequestSchema, bytes);
-    if (request.checkout !== this.savedCheckout) throw new Error('checkout changed');
+    if (request.method.case !== 'inspectCandidate' && request.checkout !== this.savedCheckout)
+      throw new Error('checkout changed');
     this.requests.push(request);
     const method = request.method;
     switch (method.case) {
+      case 'inspectCandidate': {
+        const gate = this.#inspectionGate;
+        if (gate?.path === method.value.path) {
+          this.#inspectionGate = undefined;
+          gate.arrived();
+          await gate.released;
+          if (signal.aborted) throw new Error('operation cancelled');
+        }
+
+        const identity = this.candidates.get(method.value.path);
+        return this.reply({
+          result: {
+            case: 'inspectCandidate',
+            value: {
+              requestId: method.value.requestId,
+              selectionRevision: method.value.selectionRevision,
+              schemaHash: API_SCHEMA_HASH,
+              minimumVersion: '0.1.1',
+              state: identity === undefined ? CandidateState.NOT_FOUND : CandidateState.FOUND,
+              ...(identity === undefined ? {} : {identity}),
+            },
+          },
+        });
+      }
+
       case 'listTasks': {
         const tasks = this.projects.get(method.value.project);
         if (tasks === undefined) throw new Error('unknown project');

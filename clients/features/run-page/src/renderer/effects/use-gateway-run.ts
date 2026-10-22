@@ -94,7 +94,6 @@ export function useGatewayRun(options: {
     state,
     dispatch: (action: import('../../state/index.js').RunPageAction) =>
       actor?.send({type: 'ui', action}),
-    toggle: (enabled: boolean) => actor?.send({type: 'toggle', enabled}),
   };
 }
 

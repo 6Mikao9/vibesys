@@ -118,7 +118,6 @@ async function openGateway(page: Page, fixture: StoreRunFixture): Promise<void> 
   await page.setViewportSize({width: 1440, height: 900});
   await installGateway(page, wire(fixture));
   await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
-  await page.getByRole('switch', {name: 'Run transport v2'}).check();
   await expect(page.getByRole('heading', {name: 'queue-rs · mpmc'})).toBeVisible();
   await settled(page);
 }

@@ -2,6 +2,7 @@ import {mkdirSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import type {RunEvent} from '@vibesys/contracts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
+import {emitChat} from './chat-events.js';
 import {settled} from './checks/settle.js';
 import {openFixture, playLive} from './fixture-world.js';
 
@@ -21,10 +22,6 @@ if (shots !== undefined) mkdirSync(shots, {recursive: true});
 
 const THREAD = 'thread-top';
 const CHAT = {agent_kind: 'chat', round_label: 'experiment-chat', chat_thread_id: THREAD} as const;
-
-interface FixtureWindow extends Window {
-  fakeHost: {emit(events: readonly unknown[]): void};
-}
 
 function event(sequence: number, type: string, fields: object = {}): RunEvent {
   return {timestamp: '2026-10-15T16:31:00Z', type, sequence, ...fields} as unknown as RunEvent;
@@ -69,10 +66,7 @@ function firstSequence(): number {
 }
 
 async function emit(page: Page, events: readonly RunEvent[]): Promise<void> {
-  await page.evaluate(
-    batch => (window as unknown as FixtureWindow).fakeHost.emit(batch),
-    events as readonly unknown[],
-  );
+  await emitChat(page, events);
 }
 
 for (const width of [1440, 1000]) {

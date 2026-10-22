@@ -25,6 +25,8 @@ from vs_proto.api import (
     ChatMessageRequest,
     ChatMessageResponse,
     ConfigurationFailed,
+    CreateChatSessionRequest,
+    CreateChatSessionResponse,
     HostCallRequest,
     HostCallResponse,
     Oneof,
@@ -76,6 +78,10 @@ def host_call(
             def chat_message(request: ChatMessageRequest) -> ChatMessageResponse:
                 return _chat_message(request, start_chat)
 
+            def create_chat_session(request: CreateChatSessionRequest) -> CreateChatSessionResponse:
+                chat = import_module("vibesys.api.chat")
+                return chat.create_session(request, chat.ChatRuntime(platform.clock, threads))
+
             result = host_operations.dispatch_host_call(
                 method.field,
                 method.value,
@@ -97,6 +103,7 @@ def host_call(
                 ),
                 relaunch=relaunch,
                 chat_message=chat_message,
+                create_chat_session=create_chat_session,
             )
         if result is None:
             return _failure("invalid_method", "HostCall.method is required")

@@ -168,22 +168,12 @@ describe('gateway public transport', () => {
   });
 });
 
-test('generic bridge opt-in gates dialing and two live calls share a single host session', {
+test('two live calls share a single host session', {
   timeout: 15000,
 }, async () => {
   const fake = new FakeGateway();
   const clock = new FakeClock();
-  let enabled = false;
-  const calls = new GatewayCalls(
-    async () => enabled,
-    () => fake,
-    clock.schedule,
-  );
-  await expect(
-    calls.unary('local', HELLO_METHOD, new Uint8Array(), new AbortController().signal),
-  ).rejects.toThrow('off');
-  expect(fake.forces).toEqual([]);
-  enabled = true;
+  const calls = new GatewayCalls(() => fake, clock.schedule);
   const first = new AbortController();
   const second = new AbortController();
   const one = calls
@@ -209,26 +199,6 @@ test('generic bridge opt-in gates dialing and two live calls share a single host
   }
 });
 
-test('disabling a host fences an opt-in read already in flight', {timeout: 15000}, async () => {
-  const fake = new FakeGateway();
-  const clock = new FakeClock();
-  let release = (_enabled: boolean): void => {};
-  const enabled = new Promise<boolean>(resolve => {
-    release = resolve;
-  });
-  const calls = new GatewayCalls(
-    () => enabled,
-    () => fake,
-    clock.schedule,
-  );
-  const call = calls.unary('local', HELLO_METHOD, new Uint8Array(), new AbortController().signal);
-  calls.disable('local');
-  release(true);
-  await expect(call).rejects.toThrow('cancelled');
-  expect(fake.forces).toEqual([]);
-  fake.close();
-});
-
 test('unary deadlines cancel a peer that leaves its response open without replaying the call', {
   timeout: 15000,
 }, async () => {
@@ -249,40 +219,12 @@ test('unary deadlines cancel a peer that leaves its response open without replay
   }
 });
 
-test('cancellation settles while a host-setting read is pending and discards its late answer', {
+test('closing the bridge cancels live Tail calls', {
   timeout: 15000,
 }, async () => {
   const fake = new FakeGateway();
   const clock = new FakeClock();
-  let release = (_enabled: boolean): void => {};
-  const enabled = new Promise<boolean>(resolve => {
-    release = resolve;
-  });
-  const calls = new GatewayCalls(
-    () => enabled,
-    () => fake,
-    clock.schedule,
-  );
-  const abort = new AbortController();
-  const call = calls.unary('local', HELLO_METHOD, new Uint8Array(), abort.signal);
-  abort.abort();
-  await expect(call).rejects.toThrow('cancelled');
-  release(true);
-  expect(fake.forces).toEqual([]);
-  expect(clock.pendingDelays()).toEqual([]);
-  fake.close();
-});
-
-test('closing the bridge cancels calls waiting on settings and live Tail calls', {
-  timeout: 15000,
-}, async () => {
-  const fake = new FakeGateway();
-  const clock = new FakeClock();
-  const calls = new GatewayCalls(
-    async () => true,
-    () => fake,
-    clock.schedule,
-  );
+  const calls = new GatewayCalls(() => fake, clock.schedule);
   const result = calls
     .stream('local', TAIL_METHOD, request(), new AbortController().signal, () => {})
     .catch(error => String(error));

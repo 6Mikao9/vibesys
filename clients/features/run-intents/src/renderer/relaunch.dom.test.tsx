@@ -55,13 +55,13 @@ class FakeTransport implements GatewayBridge {
   }
 }
 
-test('Relaunch starts when observation becomes available and cancels when disabled', async () => {
+test('Relaunch starts when observation becomes available and cancels when unmounted', async () => {
   const bridge = new FakeTransport();
   const clock = new FakeClock();
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const render = (enabled: boolean, observed: boolean) =>
+  const render = (observed: boolean) =>
     act(async () =>
       root.render(
         <RunIntents
@@ -69,7 +69,6 @@ test('Relaunch starts when observation becomes available and cancels when disabl
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
-          enabled={enabled}
           schedule={clock.schedule}
           {...(observed
             ? {
@@ -83,11 +82,9 @@ test('Relaunch starts when observation becomes available and cancels when disabl
       ),
     );
   try {
-    await render(false, false);
-    expect(bridge.streams).toBe(0);
-    await render(true, false);
+    await render(false);
     expect(bridge.streams).toBe(1);
-    await render(true, true);
+    await render(true);
     const relaunch = [...container.querySelectorAll('button')].find(
       button => button.textContent === 'Resume',
     );
@@ -95,7 +92,7 @@ test('Relaunch starts when observation becomes available and cancels when disabl
     expect(bridge.streams).toBe(2);
     await act(async () => relaunch?.click());
     expect(bridge.launches).toBe(1);
-    await render(false, true);
+    await act(async () => root.unmount());
     expect(container.textContent).toBe('');
     expect(bridge.streams).toBe(0);
     expect(bridge.cancelled).toBe(true);

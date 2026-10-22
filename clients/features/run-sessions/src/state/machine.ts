@@ -6,6 +6,7 @@ import {type ChatBatch, type ChatHistory, emptyHistory, foldChat} from './fold.j
 
 export interface ChatInput {
   readonly enabled: boolean;
+  readonly history?: ChatHistory;
 }
 export interface ChatContext {
   readonly enabled: boolean;
@@ -37,7 +38,7 @@ export const runSessionsMachine = setup({
   id: 'runSessions',
   context: ({input}) => ({
     enabled: input.enabled,
-    history: emptyHistory,
+    history: input.history ?? emptyHistory,
     queue: [],
     current: null,
     error: null,

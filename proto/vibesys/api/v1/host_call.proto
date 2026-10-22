@@ -20,6 +20,7 @@ message HostCallRequest {
     PostIntentRequest post_intent = 2;
     RelaunchRequest relaunch = 3;
     ChatMessageRequest chat_message = 4;
+    CreateChatSessionRequest create_chat_session = 6;
   }
 }
 
@@ -32,6 +33,7 @@ message HostCallResponse {
     ConfigurationFailed configuration_failed = 2;
     RelaunchResponse relaunch = 3;
     ChatMessageResponse chat_message = 4;
+    CreateChatSessionResponse create_chat_session = 6;
   }
 }
 
@@ -128,4 +130,17 @@ message ChatMessageRequest {
 message ChatMessageResponse {
   string session_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
   string request_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+}
+
+// A caller-chosen session id makes uncertain creation safe to retry. The first
+// session record owns its immutable provider/model; messages cannot change it.
+message CreateChatSessionRequest {
+  string project_root = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string session_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string provider = 4 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
+  string model = 5 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
+}
+message CreateChatSessionResponse {
+  string session_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
 }

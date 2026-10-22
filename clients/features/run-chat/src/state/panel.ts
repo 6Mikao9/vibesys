@@ -19,6 +19,7 @@ export type ChatOutcome<T> =
   | {readonly ok: false; readonly message: string};
 
 export interface AskInput {
+  readonly requestId: string;
   readonly threadId: string;
   readonly text: string;
 }
@@ -40,9 +41,16 @@ export interface PanelContext {
   readonly listOpen: boolean;
   readonly pickerOpen: boolean;
   /** The question sent and not yet answered; `threadId` is null while its thread is created. */
-  readonly pending: {readonly threadId: string | null; readonly text: string} | null;
+  readonly pending: PendingQuestion | null;
+  readonly uncertain: PendingQuestion | null;
   readonly userSteers: readonly UserSteer[];
   readonly error: string | null;
+}
+
+interface PendingQuestion {
+  readonly threadId: string | null;
+  readonly text: string;
+  readonly requestId: string;
 }
 
 export type PanelEvent =
@@ -61,6 +69,30 @@ export type PanelEvent =
   /** `threadId`: the thread on screen, null for a new chat. */
   | {readonly type: 'submit'; readonly threadId: string | null};
 
+export type PanelMachineEvent =
+  | Exclude<PanelEvent, {readonly type: 'submit'}>
+  | {
+      readonly type: 'submit';
+      readonly threadId: string | null;
+      readonly requestId: string;
+    };
+
+function pendingQuestion(
+  context: PanelContext,
+  event: Extract<PanelMachineEvent, {type: 'submit'}>,
+): PendingQuestion {
+  const text = context.composer.trim();
+  const previous = context.uncertain;
+  return {
+    threadId: event.threadId,
+    text,
+    requestId:
+      previous?.threadId === event.threadId && previous.text === text
+        ? previous.requestId
+        : event.requestId,
+  };
+}
+
 export const panelInitial: PanelContext = {
   choice: {kind: 'last'},
   harness: null,
@@ -70,13 +102,19 @@ export const panelInitial: PanelContext = {
   listOpen: false,
   pickerOpen: false,
   pending: null,
+  uncertain: null,
   userSteers: [],
   error: null,
 };
 
 /** The patch for an ask or a thread creation that did not go through: the text is the user's again. */
 function failed(context: PanelContext, message: string): Partial<PanelContext> {
-  return {pending: null, composer: context.pending?.text ?? context.composer, error: message};
+  return {
+    pending: null,
+    uncertain: context.pending,
+    composer: context.pending?.text ?? context.composer,
+    error: message,
+  };
 }
 
 function outcomeMessage(output: ChatOutcome<unknown>): string {
@@ -92,12 +130,12 @@ export function effectiveHarness(context: PanelContext): HarnessChoice | null {
 }
 
 export const panelMachine = setup({
-  types: {context: {} as PanelContext, events: {} as PanelEvent},
+  types: {context: {} as PanelContext, events: {} as PanelMachineEvent},
   actors: {
     loadCatalogue: unprovided<HarnessListing>('loadCatalogue'),
     createThread: unprovided<
       ChatOutcome<{readonly threadId: string}>,
-      {harness: HarnessChoice | null}
+      {harness: HarnessChoice | null; requestId: string}
     >('createThread'),
     ask: unprovided<ChatOutcome<unknown>, AskInput>('ask'),
   },
@@ -125,17 +163,26 @@ export const panelMachine = setup({
     'toggle-list': {actions: assign(({context}) => ({listOpen: !context.listOpen}))},
     'toggle-picker': {actions: assign(({context}) => ({pickerOpen: !context.pickerOpen}))},
     'set-preferred': {actions: assign(({event}) => ({preferred: event.preferred}))},
-    'set-harness': {actions: assign(({event}) => ({harness: event.harness, pickerOpen: false}))},
+    'set-harness': {
+      actions: assign(({event}) => ({harness: event.harness, pickerOpen: false, uncertain: null})),
+    },
     'choose-thread': {
+      target: '.chat.idle',
       actions: assign(({event}) => ({
         choice: {kind: 'thread', id: event.id},
+        pending: null,
+        uncertain: null,
         listOpen: false,
         pickerOpen: false,
       })),
     },
     'new-chat': {
+      target: '.chat.idle',
       actions: assign(() => ({
         choice: {kind: 'new'},
+        pending: null,
+        uncertain: null,
+        composer: '',
         listOpen: false,
         pickerOpen: false,
       })),
@@ -180,18 +227,15 @@ export const panelMachine = setup({
                 guard: 'hasThread',
                 target: 'asking',
                 actions: assign(({context, event}) => ({
-                  pending: {
-                    threadId: event.type === 'submit' ? event.threadId : null,
-                    text: context.composer.trim(),
-                  },
+                  pending: pendingQuestion(context, event),
                   composer: '',
                   error: null,
                 })),
               },
               {
                 target: 'creating',
-                actions: assign(({context}) => ({
-                  pending: {threadId: null, text: context.composer.trim()},
+                actions: assign(({context, event}) => ({
+                  pending: pendingQuestion(context, event),
                   composer: '',
                   error: null,
                 })),
@@ -203,7 +247,10 @@ export const panelMachine = setup({
           invoke: {
             id: 'createThread',
             src: 'createThread',
-            input: ({context}) => ({harness: effectiveHarness(context)}),
+            input: ({context}) => {
+              if (!context.pending) throw new Error('No pending chat');
+              return {harness: effectiveHarness(context), requestId: context.pending.requestId};
+            },
             onDone: [
               {
                 guard: ({event}) => event.output.ok,
@@ -215,6 +262,7 @@ export const panelMachine = setup({
                         pending: {
                           threadId: event.output.threadId,
                           text: context.pending?.text ?? '',
+                          requestId: context.pending?.requestId ?? '',
                         },
                       }
                     : {},
@@ -239,13 +287,14 @@ export const panelMachine = setup({
             src: 'ask',
             input: ({context}) => ({
               threadId: context.pending?.threadId ?? '',
+              requestId: context.pending?.requestId ?? '',
               text: context.pending?.text ?? '',
             }),
             onDone: [
               {
                 guard: ({event}) => event.output.ok,
                 target: 'idle',
-                actions: assign({pending: null}),
+                actions: assign({pending: null, uncertain: null}),
               },
               {
                 target: 'idle',

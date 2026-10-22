@@ -628,12 +628,14 @@ HOST_CALLS: tuple[HostCall, ...] = (
     HostCall("post_intent", "post-intent", 2, 1, 10000, 5000),
     HostCall("relaunch", "relaunch", 3, 3, 30000, 5000),
     HostCall("chat_message", "chat-message", 4, 4, 10000, 5000),
+    HostCall("create_chat_session", "create-chat-session", 6, 6, 10000, 5000),
 )
 
 HostCallResult: TypeAlias = (
     Oneof[Literal["post_intent"], host_call.PostIntentResponse]
     | Oneof[Literal["relaunch"], host_call.RelaunchResponse]
     | Oneof[Literal["chat_message"], host_call.ChatMessageResponse]
+    | Oneof[Literal["create_chat_session"], host_call.CreateChatSessionResponse]
 )
 
 
@@ -644,6 +646,9 @@ def dispatch_host_call(
     post_intent: Callable[[host_call.PostIntentRequest], host_call.PostIntentResponse],
     relaunch: Callable[[host_call.RelaunchRequest], host_call.RelaunchResponse],
     chat_message: Callable[[host_call.ChatMessageRequest], host_call.ChatMessageResponse],
+    create_chat_session: Callable[
+        [host_call.CreateChatSessionRequest], host_call.CreateChatSessionResponse
+    ],
 ) -> HostCallResult | None:
     """Run the handler registered for one generated HostCall slot."""
     match field:
@@ -653,6 +658,11 @@ def dispatch_host_call(
             return Oneof("relaunch", relaunch(cast(host_call.RelaunchRequest, request)))
         case "chat_message":
             return Oneof("chat_message", chat_message(cast(host_call.ChatMessageRequest, request)))
+        case "create_chat_session":
+            return Oneof(
+                "create_chat_session",
+                create_chat_session(cast(host_call.CreateChatSessionRequest, request)),
+            )
         case _:
             return None
 

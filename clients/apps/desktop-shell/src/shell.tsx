@@ -35,11 +35,7 @@ import {
   NewRunScreen,
   type NewRunSnapshot,
 } from '@vibesys/feature-new-run/renderer';
-import {
-  type RunPageNavigation,
-  type RunPagePage,
-  useRunPage,
-} from '@vibesys/feature-run-page/renderer';
+import type {RunPageNavigation, RunPagePage} from '@vibesys/feature-run-page/renderer';
 import {RUN_ROUTE, routeQuery, runRecord} from '@vibesys/feature-run-page/state';
 import {
   createGroupingStore,
@@ -70,7 +66,6 @@ import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
-import {RunWithChat} from './run-chat.js';
 import {runCounts, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
@@ -299,51 +294,22 @@ function RunRoute(props: {
   );
   const ports = typeof window === 'undefined' ? undefined : window.vibesysGateway;
   const gateway = useMemo(() => (ports === undefined ? undefined : gatewayBridge(ports)), [ports]);
-  const legacy = (toggle?: import('react').ReactNode) => (
-    <LegacyRunRoute seed={seed} record={record} stores={stores} place={place} toolbar={toggle} />
-  );
   return gateway === undefined ? (
-    legacy()
+    <Page>
+      <Card>
+        <EmptyState title="Run service unavailable" />
+      </Card>
+    </Page>
   ) : (
     <GatewayRun
       key={`${run.host}/${run.runId}`}
       seed={seed}
       bridge={gateway}
-      settings={stores.bridge}
       schedule={stores.schedule}
       address={stores.page.address}
-      legacy={legacy}
+      navigation={place.navigation(run)}
     />
   );
-}
-
-function LegacyRunRoute(props: {
-  readonly seed: import('@vibesys/feature-run-page/state').RunPageSeed;
-  readonly record: import('@vibesys/feature-run-page/state').RunRecord;
-  readonly stores: ShellStores;
-  readonly place: RunPlace;
-  readonly toolbar?: import('react').ReactNode;
-}): JSX.Element {
-  const {seed, record, stores, place} = props;
-  const run = seed.identity;
-  const page = useRunPage({
-    seed,
-    record,
-    bridge: stores.bridge,
-    navigation: place.navigation(run),
-    schedule: stores.schedule,
-    page: stores.page,
-  });
-  if (page === null)
-    return (
-      <Page>
-        {props.toolbar ? <Card>{props.toolbar}</Card> : null}
-        <Card>
-          <EmptyState title="Opening the run" />
-        </Card>
-      </Page>
-    );
-  return <RunWithChat page={page} run={run} bridge={stores.bridge} toolbar={props.toolbar} />;
 }
 
 /** The unfinished New run the dashboard offers, or null when there is not one. */

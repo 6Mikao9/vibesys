@@ -90,6 +90,7 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
         ("post_intent", 10000),
         ("relaunch", 30000),
         ("chat_message", 10000),
+        ("create_chat_session", 10000),
     ]
     assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_watch()] == [
         ("login", 600000),
