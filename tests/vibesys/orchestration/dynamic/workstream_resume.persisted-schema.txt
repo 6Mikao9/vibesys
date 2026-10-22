@@ -133,6 +133,7 @@ EvidenceRef.status required {"$ref":"#/$defs/ObservationStatus"}
 EvidenceRef.unmet_requirement optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 EvidenceRef.workload_digest required {"type":"string"}
 Failure {"additionalProperties":false,"type":"object"}
+Failure.blamed optional {"anyOf":[{"$ref":"#/$defs/MeasurementFailure"},{"type":"null"}],"default":null}
 Failure.blocker optional {"anyOf":[{"$ref":"#/$defs/Blocker"},{"type":"null"}],"default":null}
 Failure.cause optional {"anyOf":[{"$ref":"#/$defs/RejectionCode"},{"type":"null"}],"default":null}
 Failure.declined optional {"anyOf":[{"$ref":"#/$defs/CheckpointDecline"},{"type":"null"}],"default":null}

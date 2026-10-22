@@ -586,7 +586,11 @@ class Host:
             scope=request.scope,
             evidence=refs,
             status=ObservationStatus.FAILED if failed else ObservationStatus.SUCCEEDED,
-            failure=self.input_blame if is_input and self.baseline != "measured" else None,
+            failure=self.input_blame
+            if is_input and self.baseline != "measured"
+            else MeasurementFailure.WORKLOAD
+            if failed
+            else None,
         )
         self.run.answer(asked, MeasurementFinished(decision=asked.decision, result=result))
 

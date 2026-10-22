@@ -351,10 +351,11 @@ class Failure(Value):
     revision: RevisionRef | None = None
     dropped: DropReason | None = None
     superseded_by: str | None = None
-    blamed: MeasurementFailure | None = None
-    """Whom the backend blamed for a measurement that left no trusted evidence (None: not
-    classified, as in a record written before this was kept). Only a verdict charges the
-    candidate (`MeasurementFailure.charges_candidate`)."""
+    blamed: MeasurementFailure | None = Field(default=None, exclude_if=lambda value: value is None)
+    """Why a measurement that left no trusted evidence judged nothing about the candidate; None
+    is a verdict, which is also how a record written before this was kept reads. Only a verdict
+    charges the candidate (`MeasurementFailure.charges_candidate`). Left out of a dump while
+    None, so a decision that carries a verdict keeps the payload it had."""
 
     @property
     def judges_candidate(self) -> bool:
