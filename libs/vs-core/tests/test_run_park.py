@@ -12,11 +12,13 @@ from .test_session_yield_completion import terminal_yield
 from .test_write_turn_retention import answer, snapshots, write_turn_world
 
 
-def park(state: core.CoreState) -> core.Transition:
+def park(state: core.CoreState, *, immediate: bool = False) -> core.Transition:
     return core.step(
         state,
         core.RunControlEvent(
-            control=core.ControlInput(control_id=core.ControlId(root="park"), action="park"),
+            control=core.ControlInput(
+                control_id=core.ControlId(root="park"), action="pause_now" if immediate else "park"
+            ),
             now_at=state.run.now_at,
         ),
     )
@@ -51,9 +53,9 @@ def test_an_idle_park_is_terminal_for_the_epoch_and_idempotent(ticks: int) -> No
 
 
 @given(st.integers(min_value=1, max_value=20))
-def test_park_cancels_each_job_once_and_keeps_its_measurement_pending(ticks: int) -> None:
+def test_pause_now_cancels_each_job_once_and_keeps_its_measurement_pending(ticks: int) -> None:
     world = World(limits(1, 1))
-    result = park(world.state)
+    result = park(world.state, immediate=True)
     assert result.state.run.status == core.RunStatus.DRAINING
     cancels = [request for request in result.requests if isinstance(request, core.CancelOwnedJob)]
     assert len(cancels) == 1
@@ -242,3 +244,87 @@ def test_successor_resume_clears_an_interrupted_drain(epoch: int, *, immediate: 
     assert any(
         isinstance(event, core.StopLiftRecorded) and event.new_epoch for event in opening.events
     )
+
+
+@pytest.mark.regression
+@example(stops=[core.StopMode.DRAIN, core.StopMode.CANCEL])
+@given(stops=st.lists(st.sampled_from(core.StopMode), min_size=1, max_size=8))
+def test_stop_after_park_is_idempotent_and_cancel_escalates_without_stopping_search(
+    stops: list[core.StopMode],
+) -> None:
+    world = World(limits(1, 1))
+    state = park(world.state).state
+    for index, mode in enumerate(stops):
+        event = core.RunControlEvent(
+            control=core.ControlInput(
+                control_id=core.ControlId(root=f"stop-{index}"), action="stop", mode=mode
+            ),
+            now_at=state.run.now_at,
+        )
+        assert core.control_refusal(state, event.control) is None
+        result = core.step(state, event)
+        state = result.state
+        assert core.step(state, event).state.run == state.run
+        assert state.run.park is not None
+        assert state.run.park.immediate == (core.StopMode.CANCEL in stops[: index + 1])
+        for changed in result.events:
+            if isinstance(changed, core.ControlChanged):
+                assert not core.translate(state, (changed,)).events
+        assert state.evaluation.jobs[0].plan == world.job.plan
+        assert state.run.result is None
+
+
+@pytest.mark.regression
+@example(ticks=3)
+@given(ticks=st.integers(min_value=1, max_value=20))
+def test_park_finishes_an_admitted_evaluation_before_becoming_resumable(ticks: int) -> None:
+    world = World(limits(1, 1))
+    result = park(world.state)
+    assert not any(isinstance(r, core.CancelOwnedJob) for r in result.requests)
+    assert result.state.run.status is core.RunStatus.DRAINING
+    world.state = result.state
+    polls = world.tick(1.0)
+    assert len(polls) == 1
+    poll = polls[0]
+    assert poll.request_id is not None
+    world.state = core.step(world.state, core.DispatchAuthorized(request_id=poll.request_id)).state
+    for _ in range(ticks):
+        # The admitted evaluation's observations remain dispatchable even when
+        # its owning agent has suspended or finished its turn.
+        world.answer()
+        assert world.state.run.status is core.RunStatus.DRAINING
+    world.answer(core.ObservationStatus.SUCCEEDED)
+    observed = core.Observation(
+        event_id=core.EventId(root="poll-ended"),
+        request_id=poll.request_id,
+        scope=poll.scope,
+        admission_id=poll.admission_id,
+        sequence=1,
+        observed_at=world.state.run.now_at,
+        status=core.ObservationStatus.SUCCEEDED,
+        accepted=True,
+        terminal=True,
+        released=True,
+    )
+    ended = core.step(world.state, core.RequestObserved(observation=observed))
+    state = ended.state
+    for row in state.records.records:
+        if (
+            isinstance(row.request, core.CollectEvidence)
+            and row.phase is core.RequestPhase.PREPARED
+        ):
+            state = core.step(state, core.DispatchAuthorized(request_id=row.request_id)).state
+            state = core.step(
+                state,
+                core.RequestObserved(
+                    observation=observed.model_copy(
+                        update={
+                            "event_id": core.EventId(root="collected"),
+                            "request_id": row.request_id,
+                        }
+                    )
+                ),
+            ).state
+    assert state.run.status is core.RunStatus.PARKED
+    assert ended.state.evaluation.jobs[0].terminal
+    assert ended.state.evaluation.jobs[0].plan == world.job.plan

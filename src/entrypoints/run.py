@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 # one authority for its stop, and a stop there only escalates. The launcher
 # forwards each Ctrl-C once (this process leads its own session, so the
 # terminal's copy never reaches it) and sends a repeated one on as SIGTERM.
-# SIGTERM and SIGHUP end the run now: its task is cancelled, so its teardown
-# cancels external work before the process exits.
+# SIGTERM and SIGHUP commit a cancelling stop before process exit, so the
+# run ends cleanly and its next epoch can recover durable unfinished work.
 __all__ = ["failure_reason", "run_headless", "supervise"]
 
 _TERMINATION_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP)
@@ -33,7 +33,7 @@ _HANDLED_SIGNALS = (Signals.SIGINT, *_TERMINATION_SIGNALS)
 
 
 class _Supervisor:
-    """Turn stop requests and process signals into one run's stop or cancellation."""
+    """Turn process signals into the run's durable stop path."""
 
     def __init__(self, session: RunHandle, execution: asyncio.Task[RunResult]) -> None:
         self._session = session
@@ -49,13 +49,13 @@ class _Supervisor:
         self._session.stop(mode)
 
     def terminate(self) -> None:
-        """Cancel the run once; cancellation unwinds through its teardown."""
+        """Request a cancelling stop once; the run commits it before teardown."""
         if not self.terminating:
             self.terminating = True
-            self._session.cancel()
+            self._session.stop(StopMode.CANCEL)
 
     def on_signal(self, number: Signals) -> None:
-        """Stop, cancelling work in flight, on Ctrl-C; cancel the run on any other signal."""
+        """Stop through the run's control for every handled signal."""
         self.signalled = self.signalled or number
         if number is Signals.SIGINT:
             if not self.terminating:
@@ -87,7 +87,7 @@ async def supervise(
     typed stopped result. If cancelling this coroutine already asked for a draining
     stop, a SIGINT escalates it to ``StopMode.CANCEL`` and the cancellation still
     propagates once the run has ended. A repeated SIGINT changes nothing. SIGTERM or SIGHUP,
-    first or after a SIGINT, cancel the run and end in ``SystemExit(128 + n)``,
+    first or after a SIGINT, commit a cancelling stop and end in ``SystemExit(128 + n)``,
     where n is the first signal received.
     The handlers run on the event loop, so no signal raises inside a teardown step.
     *signals* is where they arrive: the process's own (``LoopSignalSource``, built

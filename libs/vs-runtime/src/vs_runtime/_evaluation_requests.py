@@ -809,7 +809,7 @@ class MeasurementRequests:
             or self._control.evaluation_is_dependency(record.handle_id)
         )
         finishing = not request.immediate and (polled.phase is PollPhase.RUNNING or dependency)
-        if not finishing and not record.parked:
+        if not finishing:
             try:
                 record = await self._hold_for_relaunch(record, polled)
             except ExecutorCancellationUnknownError as error:
@@ -845,12 +845,26 @@ class MeasurementRequests:
 
     async def _hold_for_relaunch(self, record: JobRecord, polled: ExecutorPoll) -> JobRecord:
         """Cancel queued physical work, retaining its logical submission for relaunch."""
+        if not record.parked:
+            record = record.model_copy(update={"parked": True})
+            self._store.replace(_JOBS, "job", record.handle_id, record)
         if record.reuses is None and polled.phase is not PollPhase.ENDED:
             with suppress(ExecutorCancellationUnconfirmedError):
                 await self._jobs.cancel(record.executor_handle)
-        record = record.model_copy(update={"parked": True})
-        self._store.replace(_JOBS, "job", record.handle_id, record)
         return record
+
+    async def _release_before_relaunch(self, record: JobRecord) -> str | None:
+        """Finish durable park intent before a replacement can own physical work."""
+        polled = await self._poll(record.executor_handle)
+        try:
+            await self._hold_for_relaunch(record, polled)
+        except ExecutorCancellationUnknownError as error:
+            return str(error)
+        released = (await self._poll(record.executor_handle)).phase in (
+            PollPhase.ENDED,
+            PollPhase.UNSUBMITTED,
+        )
+        return None if released else "park awaits physical job termination"
 
     async def _relaunch(
         self,
@@ -876,7 +890,13 @@ class MeasurementRequests:
             with self._store.exclusive():
                 if not self._enter(fences, by, context):
                     return self._rejected(request, context, _FENCED)
-                if record.parked:
+            if record.parked:
+                # A crash may follow the durable park marker but precede its
+                # physical cancellation. Release that job before creating another.
+                problem = await self._release_before_relaunch(record)
+                if problem is not None:
+                    return self._unknown(request, context, problem)
+                with self._store.exclusive():
                     record = record.model_copy(
                         update={"parked": False, "relaunch": record.relaunch + 1}
                     )

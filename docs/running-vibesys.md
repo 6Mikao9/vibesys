@@ -545,12 +545,17 @@ used, keeps its control: sending a different control under it is refused.
 The run has four operator controls: Pause, Pause now, Resume and Guidance.
 
 Pause closes admission of new turns and independent evaluations, finishes the turns already
-in flight, and exits. Evaluations requested by those turns still run within the turns' original
-deadlines, including requests made after Pause. Queued work outside that closure waits for Resume.
+in flight and every admitted evaluation, and exits. Admitted evaluations finish even if they
+are still queued or their agent has suspended. Evaluations requested by draining turns still
+run within the turns' original deadlines, including requests made after Pause. Work whose
+admission has not committed waits for Resume.
 
 Pause now cancels unfinished work and exits. **Unfinished work may need repeating and may still
 incur charges.** It is available immediately while Pause drains. Completed results and actual
 usage remain recorded; operator interruption does not count as a failed round or consume a retry.
+A stop during Pause is accepted and may escalate it to cancellation; repeated stops are harmless.
+Resume reloads durable submitted evaluations, including their first try, and preserves the live
+search's pending results. Interrupted evaluations may run again from their recorded plans.
 
 Resume starts the same run as a new epoch after any ending: pause, crash, success, failure,
 deadline or environment failure. Its fresh duration defaults to the original duration. Resume
@@ -563,8 +568,9 @@ present at Resume fail with a prerequisite diagnostic and preserve those edits. 
 Use `vibesys --resume <run-id>` to start the new epoch. A live writer must exit before another
 can launch. Guidance remains durable advice for upcoming work.
 
-In the terminal that started the run, Ctrl-C requests cancellation; a second Ctrl-C exits
-through teardown. Ctrl-Z suspends only the command while its run continues.
+In the terminal that started the run, Ctrl-C, SIGTERM and SIGHUP request a cancelling stop.
+The run commits its resumable ending before teardown. A second Ctrl-C is forwarded as SIGTERM.
+Ctrl-Z suspends only the command while its run continues.
 
 `vibesys control <run-id> status ID` prints `pending`, `applied`, or `rejected: <reason>`.
 Controls targeting an epoch that already exited cannot affect its successor. Retrying a

@@ -1335,7 +1335,23 @@ def _proposal(state: CoreState, event: ProposalSubmitted, dispatch: Dispatch) ->
 def _stop_control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
     """Use the ordinary accepted Finish receipt as run-drain authority."""
     if event.result is None:
-        return _soft_stop(state, event)
+        result = _soft_stop(state, event)
+        park = state.run.park
+        if park is not None and not park.immediate and event.control.mode is StopMode.CANCEL:
+            # A cancelling stop escalates a park without ending its search. The
+            # new authority gives cancellations their own durable identities.
+            run = result.state.run
+            run = run.model_copy(
+                update={
+                    "park": park.model_copy(
+                        update={"control_id": event.control.control_id, "immediate": True}
+                    )
+                }
+            )
+            result = result.model_copy(
+                update={"state": result.state.model_copy(update={"run": run})}
+            )
+        return result
     decision = Finish(
         decision_id=DecisionId(root=f"control:{event.control.control_id.root}"),
         scope=Scope(owner=state.run.run_id, generation=state.run.generation),

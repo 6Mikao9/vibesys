@@ -924,6 +924,11 @@ class RunControlBridge:
                 ),
                 immediate=immediate,
             )
+        for job in (*core.evaluation.jobs, *core.evaluation.registered_jobs):
+            if job.resource_id is not None and (
+                job.terminal or (job.progress is not None and job.progress.state == "running")
+            ):
+                self._channel.settle_drain_job(job.resource_id.root)
         held = {control.control_id for control in core.run.controls}
         self._settle_inbox(
             sorted(

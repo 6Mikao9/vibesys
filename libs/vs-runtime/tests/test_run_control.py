@@ -10,6 +10,7 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from vs_agent.api import AgentExecutionCancelledError
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -866,3 +867,23 @@ def test_a_stop_core_recorded_stays_in_force_across_a_runtime_restart(
         if polled:
             assert _never_weaker(stop_mode(core.run), process.channel.stop_mode())
     assert stop_mode(core.run) == process.channel.stop_mode()
+
+
+@pytest.mark.regression
+@example(starts=2)
+@given(starts=st.integers(min_value=1, max_value=8))
+def test_park_keeps_admitted_evaluations_authorized_through_executor_retries(starts: int) -> None:
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    control.land_park(("admitted",))
+    started: list[str] = []
+    for _ in range(starts):
+        control.start_execution(lambda: started.append("admitted"), evaluation_id="admitted")
+        control.settle_drain_job("admitted")
+        assert control.drain_ready
+    assert len(started) == starts
+    with pytest.raises(AgentExecutionCancelledError):
+        control.start_execution(lambda: started.append("new"), evaluation_id="new")
+    control.land_park(immediate=True)
+    with pytest.raises(AgentExecutionCancelledError):
+        control.start_execution(lambda: started.append("admitted"), evaluation_id="admitted")
+    assert len(started) == starts

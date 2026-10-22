@@ -274,8 +274,15 @@ def _ready(core: CoreState, event: AttemptReady) -> Event:
     return WorkspaceOpened(decision=event.admission_id, attempt=event.attempt)
 
 
-def _control(core: CoreState, event: ControlChanged) -> Event:
-    del core
+def _control(core: CoreState, event: ControlChanged) -> Event | None:
+    """A stop that finishes a park is the epoch's exit, not the search's.
+
+    The search treats ``StopRequested`` as the end of planning and drops every
+    candidate still waiting for evaluation. A park keeps those candidates: the
+    stop is recorded on the run, and the next epoch evaluates them.
+    """
+    if event.control.action == "stop" and core.run.park is not None:
+        return None
     return StopRequested(control=event.control)
 
 
