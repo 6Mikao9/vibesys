@@ -584,6 +584,7 @@ def core_policy_context() -> dict[str, object]:
         "target": revision,
         "baseline": (),
         "buildable": (),
+        "combinable": (),
         "history": (),
         "evidence": (),
         # What `RenderArtifactsOwner` binds for each cited record, read from the evidence ledger.

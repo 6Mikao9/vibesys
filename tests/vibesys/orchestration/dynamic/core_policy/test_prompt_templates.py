@@ -129,6 +129,10 @@ def test_the_planner_prompt_states_the_run_it_plans_for(context: PlannerPrompt) 
     for option in context.buildable:
         assert f"option `{option.option_id}`" in text
         assert f"submission {option.submission_index}" in text
+    for row in context.combinable:
+        assert row.hypothesis_id in text
+        assert f"facts {row.facts.value}" in text
+    assert ("starts with none" in text) is bool(context.combinable)
     for identifier in context.older_ids:
         assert identifier in text
     assert ("Older hypothesis IDs" in text) is bool(context.older_ids)
