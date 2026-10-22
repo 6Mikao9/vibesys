@@ -9,12 +9,15 @@ must not build; one that claims to break accuracy must build and fail the check.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.fast_cargo import fast_cargo_env
+from tests.support.shared_build import shared_build
 
 from vibesys.orchestration.dynamic.scripted.api import QUEUE_RECIPES, EditKind, Recipe
 
@@ -33,6 +36,39 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(scope="session")
+def recipe_tools(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    """Share the trusted evaluator and runner across recipes and xdist workers."""
+
+    def build(directory: Path) -> None:
+        run_test_command(
+            ["go", "build", "-o", str(directory / "queue-evaluator"), "."],
+            cwd=EVALUATOR,
+            check=True,
+            timeout=BUILD_TIMEOUT_S,
+        )
+        run_test_command(
+            [
+                "cargo",
+                "build",
+                "--quiet",
+                "--release",
+                "--locked",
+                "--manifest-path",
+                str(EVALUATOR / "native_runner/Cargo.toml"),
+                "--target-dir",
+                str(directory / "target"),
+            ],
+            cwd=EVALUATOR,
+            env=fast_cargo_env(),
+            check=True,
+            timeout=BUILD_TIMEOUT_S,
+        )
+
+    directory = shared_build(tmp_path_factory, "queue-recipe-tools", build)
+    return directory / "queue-evaluator", directory / "target/release/vibesys-queue-native-runner"
+
+
 def _build(workspace: Path) -> subprocess.CompletedProcess[str]:
     return run_test_command(
         ["make", "queue-candidate.so"],
@@ -43,15 +79,22 @@ def _build(workspace: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _check(workspace: Path) -> subprocess.CompletedProcess[str]:
-    command = ["go", "-C", str(EVALUATOR), "run", ".", "check", "--workspace", str(workspace)]
+def _check(workspace: Path, tools: tuple[Path, Path]) -> subprocess.CompletedProcess[str]:
+    evaluator, runner = tools
+    command = [str(evaluator), "check", "--workspace", str(workspace)]
     command += ["--scenario", "mpmc", "--operations", "24", "--trials", "30"]
-    return run_test_command(command, capture_output=True, text=True, timeout=CHECK_TIMEOUT_S)
+    return run_test_command(
+        command,
+        env={**os.environ, "VIBESYS_QUEUE_NATIVE_RUNNER": str(runner)},
+        capture_output=True,
+        text=True,
+        timeout=CHECK_TIMEOUT_S,
+    )
 
 
 @pytest.mark.parametrize("recipe", QUEUE_RECIPES, ids=lambda recipe: recipe.slug)
 def test_a_recipe_builds_and_passes_the_check_exactly_when_its_kind_says(
-    recipe: Recipe, tmp_path: Path
+    recipe: Recipe, tmp_path: Path, recipe_tools: tuple[Path, Path]
 ) -> None:
     workspace = tmp_path / "queue"
     shutil.copytree(QUEUE_EXAMPLE, workspace, ignore=shutil.ignore_patterns("target"))
@@ -66,7 +109,7 @@ def test_a_recipe_builds_and_passes_the_check_exactly_when_its_kind_says(
         assert build.returncode != 0, "the edit was meant not to compile"
         return
     assert build.returncode == 0, build.stderr[-2000:]
-    check = _check(workspace)
+    check = _check(workspace, recipe_tools)
     if recipe.kind is EditKind.BREAKS_ACCURACY:
         assert check.returncode != 0, "the edit was meant to fail the trusted check"
     else:
