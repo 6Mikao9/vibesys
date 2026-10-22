@@ -125,8 +125,9 @@ logged subject, the comparison the samples fresh at that moment make, so a base 
 stale is never counted as current (`latest_comparisons`). It reaches the run's
 events as `measurement_compared`, emitted by the commit observer from core's append-only log.
 The strategy's official measurement of an input the scope already measured is answered from the
-samples held (`vs_core._measurement_reuse`), and runs afresh only when the comparison is a close
-call that one more sample would narrow (not one that no run can settle). Its benchmark record enters the ledger stating the mean
+samples held (`vs_core._measurement_reuse`), whatever the comparison says: one trusted run per
+submitted commit, so a close call never adds an official run (its own reruns are further samples of
+the same measurement). Its benchmark record enters the ledger stating the mean
 of the scope's samples of the input (`vs_core._comparison.as_answer`; a failed record keeps its
 own reading), and each later sample of the input in the scope restates it
 (`restated_answers`) while the answer is open (`OwnedJob.answer_until`): from the official
