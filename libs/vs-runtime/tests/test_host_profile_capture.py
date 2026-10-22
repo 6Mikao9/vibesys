@@ -216,3 +216,42 @@ async def test_profile_without_a_command_is_refused_before_opening_a_checkout() 
             handle_id="profile",
         )
     assert not workspaces.candidates
+
+
+async def test_executor_offers_exact_capture_fields_and_refuses_unsupported_work_before_launch() -> (
+    None
+):
+    commands = FakeCommands()
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
+    capture = CommandProfileCapture(
+        commands,
+        TrustedEvaluationPlan(profile_command="profile", profile_fields=FIELDS),
+        lambda _: "profile",
+    )
+    executor = PollingEvaluationExecutor(
+        FakeEvaluation(run_id="run"), workspaces, clock=ManualClock(), profile_capture=capture
+    )
+    available = await executor.availability(ResourceRequirements())
+    assert available.supported_profile_fields == FIELDS
+    assert "profile" in available.supported_evidence_kinds
+    digest = ContentDigest.sha256(b"profile")
+    stage = SemanticEvaluationStage(
+        snapshot=TARGET,
+        kind=StageKind.PROFILE,
+        required_profile_fields=(ProfileField.HIP_API_TIMING,),
+        fingerprints=EvidenceFingerprints(
+            candidate=digest, evaluator=digest, workload=digest, environment=digest
+        ),
+    )
+    with pytest.raises(ExecutorRejectedError, match="hip_api_timing"):
+        await executor.submit(
+            EvaluationRequest(
+                key="profile",
+                stages=(EvaluationStep(name="profile", payload=stage.model_dump(mode="json")),),
+            ),
+            handle_id="profile",
+        )
+    assert not commands.calls
+    assert not workspaces.candidates

@@ -19,7 +19,7 @@ def test_the_task_profile_command_reaches_the_trusted_evaluation_plan(tmp_path: 
         'version = 1\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
         '[profile]\ncommand = ["python", "profile.py", "--label", "queue run"]\n'
-        "timeout_seconds = 37\n",
+        'timeout_seconds = 37\nfields = ["prefill_timing", "decode_timing"]\n',
     )
 
     plan = trusted_evaluation_plan(
@@ -32,5 +32,6 @@ def test_the_task_profile_command_reaches_the_trusted_evaluation_plan(tmp_path: 
 
     assert plan.profile_command == "python profile.py --label 'queue run'"
     assert plan.profile_timeout_seconds == 37
+    assert plan.profile_fields == ("prefill_timing", "decode_timing")
     assert (plan.accuracy_command, plan.benchmark_command) == ("trusted-accuracy", "trusted-bench")
     assert plan.framework_setup_timeout_seconds == 7
