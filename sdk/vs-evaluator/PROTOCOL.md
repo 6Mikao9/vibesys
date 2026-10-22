@@ -120,6 +120,18 @@ without it is unchanged.
 {"kind":"error","message":"no prefix-cache hits","error_kind":"requirement_not_met","requirement":"prefix_cache"}
 ```
 
+## Exit status
+
+A task's own evaluator commands (accuracy, benchmark and profile) exit `0` when
+they ran, and nonzero when they judged the candidate failing. One status is
+reserved: **75** (sysexits `EX_TEMPFAIL`) says the host refused to run the
+measurement before anything of the candidate was judged, for example a free-disk,
+device or lock preflight. The framework reads it as an infrastructure failure,
+whatever the stream holds: it measures the candidate again later within its retry
+bounds and never counts the refusal against the candidate. Print why on stderr.
+The candidate's own build command cannot declare a refusal; its status 75 is an
+ordinary failure.
+
 ## Serialization
 
 - One record per line, UTF-8, newline-terminated.

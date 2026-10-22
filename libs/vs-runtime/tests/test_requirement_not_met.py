@@ -14,6 +14,7 @@ import json
 from hypothesis import example, given
 from hypothesis import strategies as st
 
+from vs_evaluator_protocol.api import ENVIRONMENT_REFUSED_EXIT_STATUS
 from vs_runtime.api import BenchmarkFailureKind
 from vs_runtime.api.infrastructure import (
     ProtocolBenchmarkContract,
@@ -64,7 +65,12 @@ def test_an_unmet_requirement_is_kept_whatever_the_exit_status(
     assert decoded.reason == "no cache hits"
 
 
-@given(exit_code=st.integers(min_value=0, max_value=255), declared=st.booleans())
+@given(
+    exit_code=st.integers(min_value=0, max_value=255).filter(
+        lambda code: code != ENVIRONMENT_REFUSED_EXIT_STATUS
+    ),
+    declared=st.booleans(),
+)
 def test_an_error_without_a_kind_names_no_requirement_and_is_classified_as_before(
     exit_code: int, *, declared: bool
 ) -> None:
@@ -73,7 +79,10 @@ def test_an_error_without_a_kind_names_no_requirement_and_is_classified_as_befor
     decoded = _decode(framed, exited_cleanly=False)
 
     assert decoded.requirement is None
-    assert classify(signal_of(exit_code), decoded.record) is BenchmarkFailureKind.WORKLOAD
+    assert (
+        classify(signal_of(exit_code, trusted_evaluator=True), decoded.record)
+        is BenchmarkFailureKind.WORKLOAD
+    )
 
 
 @given(clean=st.booleans())

@@ -679,6 +679,8 @@ class SemanticSlurmEvaluationExecutor:
         ran = raw.executed and raw.exit_code is not None and raw.collection_failure is None
         signal = signal_of(
             raw.exit_code if ran else None,
+            # The build is the candidate's command; every other stage is the task's own.
+            trusted_evaluator=stage.kind is not EvidenceKind.BUILD,
             service_not_ready=service_not_ready,
             service_log=raw.output,
             candidate_startup_causes=self._trusted_plan.candidate_startup_causes,

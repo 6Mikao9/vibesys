@@ -647,7 +647,9 @@ class RuntimeTrustedEvaluation:
             failure=failure,
             operator_output=operator_failure,
             operator_failure=operator_failure,
-            failure_kind=_command_failure_kind(RecordState.OUTCOME, result, None),
+            failure_kind=_command_failure_kind(
+                RecordState.OUTCOME, result, None, trusted_evaluator=False
+            ),
         )
 
     def _build_refusal(
@@ -744,7 +746,9 @@ class RuntimeTrustedEvaluation:
                 if passed
                 else BenchmarkFailureKind.WORKLOAD
                 if mutated
-                else _command_failure_kind(RecordState.OUTCOME, result, execution_failure)
+                else _command_failure_kind(
+                    RecordState.OUTCOME, result, execution_failure, trusted_evaluator=True
+                )
             ),
             stdout=result.stdout,
             stderr=result.stderr,
@@ -868,7 +872,9 @@ class RuntimeTrustedEvaluation:
                 failure_kind=(
                     None
                     if passed
-                    else _command_failure_kind(record_state(framed), result, execution_failure)
+                    else _command_failure_kind(
+                        record_state(framed), result, execution_failure, trusted_evaluator=True
+                    )
                 ),
                 failure_reason=decoded.reason,
                 unmet_requirement=None if passed else decoded.requirement,
@@ -970,18 +976,24 @@ def record_state(framed: str) -> RecordState:
 
 
 def _command_failure_kind(
-    record: RecordState, result: CommandResult, execution_failure: str | None
+    record: RecordState,
+    result: CommandResult,
+    execution_failure: str | None,
+    *,
+    trusted_evaluator: bool,
 ) -> BenchmarkFailureKind:
     """Whose fault a failed trusted command is, by its exit status and its record.
 
     The one reading of a sandbox result for every trusted stage (accuracy and benchmark).
     A command that could not run, was cancelled, or timed out in the sandbox reported
     no exit status (negative or absent), which says nothing about the candidate.
+    ``trusted_evaluator`` says the command is the task's own (accuracy, benchmark), so
+    its environment-refused exit status counts; the candidate's build cannot declare one.
     """
     signal = (
         TerminalSignal.NO_EXIT_STATUS
         if execution_failure is not None or result.cancelled
-        else signal_of(result.exit_code)
+        else signal_of(result.exit_code, trusted_evaluator=trusted_evaluator)
     )
     return classify(signal, record)
 

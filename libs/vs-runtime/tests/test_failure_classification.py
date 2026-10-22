@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_core.api import MeasurementFailure
+from vs_evaluator_protocol.api import ENVIRONMENT_REFUSED_EXIT_STATUS
 from vs_runtime.api import BenchmarkFailureKind, EvaluationRetries
 from vs_runtime.api.infrastructure import (
     RecordState,
@@ -33,25 +34,47 @@ def test_every_signal_and_record_has_a_class(signal: TerminalSignal, record: Rec
     assert classify(signal, record) in _KINDS
 
 
-@given(exit_code=st.none() | st.integers(min_value=-300, max_value=300), ready=st.booleans())
-def test_every_exit_status_reads_as_a_signal(exit_code: int | None, *, ready: bool) -> None:
-    assert signal_of(exit_code, service_not_ready=not ready) in set(TerminalSignal)
+@given(
+    exit_code=st.none() | st.integers(min_value=-300, max_value=300),
+    ready=st.booleans(),
+    trusted=st.booleans(),
+)
+def test_every_exit_status_reads_as_a_signal(
+    exit_code: int | None, *, ready: bool, trusted: bool
+) -> None:
+    signal = signal_of(exit_code, trusted_evaluator=trusted, service_not_ready=not ready)
+    assert signal in set(TerminalSignal)
 
 
-@given(record=_RECORDS)
-def test_a_job_the_machinery_lost_is_never_the_candidates(record: RecordState) -> None:
-    assert classify(signal_of(None), record) is BenchmarkFailureKind.INFRASTRUCTURE
-    assert classify(signal_of(-9), record) is BenchmarkFailureKind.INFRASTRUCTURE
+@given(record=_RECORDS, trusted=st.booleans())
+def test_a_job_the_machinery_lost_is_never_the_candidates(
+    record: RecordState, *, trusted: bool
+) -> None:
+    for exit_code in (None, -9):
+        signal = signal_of(exit_code, trusted_evaluator=trusted)
+        assert classify(signal, record) is BenchmarkFailureKind.INFRASTRUCTURE
 
 
-@given(exit_code=st.integers(min_value=0, max_value=255))
-def test_a_stage_that_left_an_outcome_record_is_the_candidates(exit_code: int) -> None:
-    assert classify(signal_of(exit_code), RecordState.OUTCOME) is BenchmarkFailureKind.WORKLOAD
+# Exit statuses that carry no declaration: the trusted evaluator's refusal status is the
+# one that does, and `test_environment_refusal` covers it.
+_PLAIN_EXITS = st.integers(min_value=0, max_value=255).filter(
+    lambda code: code != ENVIRONMENT_REFUSED_EXIT_STATUS
+)
 
 
-@given(exit_code=st.integers(min_value=0, max_value=255))
-def test_a_process_that_died_with_no_record_is_retried_at_most_once(exit_code: int) -> None:
-    kind = classify(signal_of(exit_code), RecordState.ABSENT)
+@given(exit_code=_PLAIN_EXITS, trusted=st.booleans())
+def test_a_stage_that_left_an_outcome_record_is_the_candidates(
+    exit_code: int, *, trusted: bool
+) -> None:
+    signal = signal_of(exit_code, trusted_evaluator=trusted)
+    assert classify(signal, RecordState.OUTCOME) is BenchmarkFailureKind.WORKLOAD
+
+
+@given(exit_code=_PLAIN_EXITS, trusted=st.booleans())
+def test_a_process_that_died_with_no_record_is_retried_at_most_once(
+    exit_code: int, *, trusted: bool
+) -> None:
+    kind = classify(signal_of(exit_code, trusted_evaluator=trusted), RecordState.ABSENT)
     assert kind is BenchmarkFailureKind.AMBIGUOUS
 
 
@@ -95,7 +118,11 @@ _CAUSES = st.lists(st.sampled_from(_TASK_CAUSES), unique=True).map(tuple)
 def _startup_kind(log: str, causes: tuple[str, ...]) -> set[BenchmarkFailureKind]:
     """The class of a never-ready server's failure under every record state."""
     signal = signal_of(
-        None, service_not_ready=True, service_log=log, candidate_startup_causes=causes
+        None,
+        trusted_evaluator=True,
+        service_not_ready=True,
+        service_log=log,
+        candidate_startup_causes=causes,
     )
     return {classify(signal, record) for record in RecordState}
 
@@ -124,9 +151,15 @@ def test_a_task_cause_is_the_candidates_only_when_the_task_names_it(log: str, no
 def test_a_task_cause_only_adds_to_what_the_generic_facts_say(
     log: str, causes: tuple[str, ...], exit_code: int | None, *, ready: bool
 ) -> None:
-    bare = signal_of(exit_code, service_not_ready=not ready, service_log=log)
+    bare = signal_of(
+        exit_code, trusted_evaluator=True, service_not_ready=not ready, service_log=log
+    )
     with_task = signal_of(
-        exit_code, service_not_ready=not ready, service_log=log, candidate_startup_causes=causes
+        exit_code,
+        trusted_evaluator=True,
+        service_not_ready=not ready,
+        service_log=log,
+        candidate_startup_causes=causes,
     )
     if bare is TerminalSignal.SERVICE_CANDIDATE_FAULT:
         assert with_task is bare

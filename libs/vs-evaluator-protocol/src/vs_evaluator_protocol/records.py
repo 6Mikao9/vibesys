@@ -17,6 +17,17 @@ MAX_RECORD_LINE_BYTES = 4 * 1024 * 1024
 
 PROTOCOL_VERSION: int = 2
 
+ENVIRONMENT_REFUSED_EXIT_STATUS: int = 75
+"""The exit status of a trusted evaluator command whose host refused the measurement.
+
+A task's own evaluator command (accuracy, benchmark, profile) exits with this status,
+sysexits' ``EX_TEMPFAIL``, when a preflight of the host (free disk, a device, a lock it
+admits work under) refuses to run the measurement before anything of the candidate is
+judged. It says nothing about the candidate, so the framework measures the candidate again
+later. Only the trusted evaluator's status counts: a candidate's own build exiting with it
+is the candidate's failure.
+"""
+
 
 class ProfileField(StrEnum):
     """Measurement fields a profile must provide, never inferred from aggregate cost."""

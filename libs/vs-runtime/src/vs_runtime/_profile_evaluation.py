@@ -103,5 +103,5 @@ class CommandProfileCapture:
                 failure = str(error)
         return ProfileReading(
             failure=redact_diagnostic_text(failure or "profile produced no measurement"),
-            failure_kind=classify(signal_of(result.exit_code), state),
+            failure_kind=classify(signal_of(result.exit_code, trusted_evaluator=True), state),
         )

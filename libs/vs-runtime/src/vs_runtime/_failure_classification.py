@@ -16,6 +16,8 @@ signal                             absent      declared    outcome
 no exit status (node loss,         infra       infra       infra
 preemption, boot failure, job
 time limit, collection failure)
+exit 75 from a trusted evaluator   infra       infra       infra
+(its host refused the measurement)
 service never ready, log shows     candidate   candidate   candidate
 a candidate cause (out of memory,
 the task's own startup causes)
@@ -32,6 +34,10 @@ exit 0                             ambiguous   candidate   candidate
 "absent" means no result file between the trusted wrapper's markers, "declared"
 means only the evaluator's ``hello`` record (it started and stated its schema),
 "outcome" means a ``result`` or ``error`` record, even a malformed one.
+
+Exit 75 (``ENVIRONMENT_REFUSED_EXIT_STATUS``) is a refusal only from a command the task
+owns: the evaluator declares that its host refused to measure, so nothing of the
+candidate was judged. The candidate's own build exiting 75 is an ordinary nonzero exit.
 """
 
 from __future__ import annotations
@@ -41,6 +47,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from vs_core.api import MeasurementFailure
+from vs_evaluator_protocol.api import ENVIRONMENT_REFUSED_EXIT_STATUS
 from vs_runtime.contracts import BenchmarkFailureKind
 
 if TYPE_CHECKING:
@@ -67,6 +74,7 @@ class TerminalSignal(StrEnum):
     """How a stage ended, as far as its evidence shows."""
 
     NO_EXIT_STATUS = "no_exit_status"
+    ENVIRONMENT_REFUSED = "environment_refused"
     SERVICE_NOT_READY = "service_not_ready"
     SERVICE_CANDIDATE_FAULT = "service_candidate_fault"
     STAGE_TIMEOUT = "stage_timeout"
@@ -92,6 +100,7 @@ _TABLE: dict[
     TerminalSignal, tuple[BenchmarkFailureKind, BenchmarkFailureKind, BenchmarkFailureKind]
 ] = {
     TerminalSignal.NO_EXIT_STATUS: (_INFRA, _INFRA, _INFRA),
+    TerminalSignal.ENVIRONMENT_REFUSED: (_INFRA, _INFRA, _INFRA),
     TerminalSignal.SERVICE_NOT_READY: (_AMBIGUOUS, _AMBIGUOUS, _AMBIGUOUS),
     TerminalSignal.SERVICE_CANDIDATE_FAULT: (_CANDIDATE, _CANDIDATE, _CANDIDATE),
     TerminalSignal.STAGE_TIMEOUT: (_AMBIGUOUS, _CANDIDATE, _CANDIDATE),
@@ -164,6 +173,7 @@ def _startup_signal(service_log: str, domain_causes: tuple[str, ...]) -> Termina
 def signal_of(
     exit_code: int | None,
     *,
+    trusted_evaluator: bool,
     service_not_ready: bool = False,
     service_log: str = "",
     candidate_startup_causes: tuple[str, ...] = (),
@@ -175,6 +185,9 @@ def signal_of(
     server never answered its readiness probe, so the stage never ran; ``service_log`` is
     the tail of that server's log, which says whether the candidate caused it:
     out-of-memory always does, and so does any of the task's ``candidate_startup_causes``.
+    ``trusted_evaluator`` says the command is the task's own evaluator, whose
+    ``ENVIRONMENT_REFUSED_EXIT_STATUS`` is its host's refusal; a candidate's command
+    (its build) cannot declare one.
     """
     if exit_code is None or exit_code < 0:
         return (
@@ -184,6 +197,8 @@ def signal_of(
         )
     if exit_code == 0:
         return TerminalSignal.CLEAN_EXIT
+    if trusted_evaluator and exit_code == ENVIRONMENT_REFUSED_EXIT_STATUS:
+        return TerminalSignal.ENVIRONMENT_REFUSED
     if exit_code == _STAGE_TIMEOUT_EXIT:
         return TerminalSignal.STAGE_TIMEOUT
     if exit_code == _SIGKILL_EXIT:

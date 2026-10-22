@@ -4,7 +4,8 @@
 record stream; an ``ErrorRecord`` may carry a ``PartialMeasurement`` (with its
 ``Progress``) of what a failed run measured before it stopped, and an ``ErrorKind``
 (with the unmet ``requirement`` it names) saying whether measuring again could help.
-``parse_records`` validates its lines; ``read_measurement``
+``ENVIRONMENT_REFUSED_EXIT_STATUS`` is the exit status a trusted evaluator command
+uses to say its host refused the measurement. ``parse_records`` validates its lines; ``read_measurement``
 reduces the stream to a ``Measurement``. ``check_objectives`` validates metric
 names required by a caller. Invalid streams raise ``ProtocolError`` with a
 ``ReasonCode``. Evaluator execution and scoring belong to the caller.
@@ -17,6 +18,7 @@ from vs_evaluator_protocol.measurement import (
     read_measurement,
 )
 from vs_evaluator_protocol.records import (
+    ENVIRONMENT_REFUSED_EXIT_STATUS,
     PROTOCOL_VERSION,
     ErrorKind,
     ErrorRecord,
@@ -31,6 +33,7 @@ from vs_evaluator_protocol.records import (
 )
 
 __all__ = [
+    "ENVIRONMENT_REFUSED_EXIT_STATUS",
     "PROTOCOL_VERSION",
     "ErrorKind",
     "ErrorRecord",

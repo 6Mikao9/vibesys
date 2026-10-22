@@ -29,7 +29,11 @@ _LLM_SERVING_LOGS = (
 
 def _kinds(log: str, causes: tuple[str, ...]) -> set[BenchmarkFailureKind]:
     signal = signal_of(
-        None, service_not_ready=True, service_log=log, candidate_startup_causes=causes
+        None,
+        trusted_evaluator=True,
+        service_not_ready=True,
+        service_log=log,
+        candidate_startup_causes=causes,
     )
     return {classify(signal, record) for record in RecordState}
 
@@ -54,7 +58,7 @@ def test_a_domain_without_server_causes_gets_only_the_generic_facts(name: Domain
         assert _kinds(log, causes) == {BenchmarkFailureKind.AMBIGUOUS}
     for log in ("CUDA out of memory", "error: unrecognized arguments: --x"):
         assert _kinds(log, causes) == {BenchmarkFailureKind.WORKLOAD}
-    assert TerminalSignal.NO_EXIT_STATUS is signal_of(None)
+    assert TerminalSignal.NO_EXIT_STATUS is signal_of(None, trusted_evaluator=True)
 
 
 @pytest.mark.parametrize("name", list(DomainName))
