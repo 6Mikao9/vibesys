@@ -31,7 +31,7 @@ interface Context extends SkeletonLoaderInput {
   attempts: number;
 }
 
-export const RETRY_BASE_MS = 1000;
+const RETRY_BASE_MS = 1000;
 export const RETRY_CAP_MS = 30_000;
 /** Six tries span about a minute of backoff; the person then decides to retry. */
 export const MAX_ATTEMPTS = 6;
@@ -64,9 +64,9 @@ export const skeletonLoaderMachine = setup({
   guards: {
     hasError: ({context}) => context.error !== undefined,
     caughtUp: ({context}) => context.load?.complete === true,
-    exhausted: ({context}) => context.attempts >= MAX_ATTEMPTS,
+    // A complete terminal prefix loses nothing by waiting: a relaunch may still extend it.
+    exhausted: ({context}) => context.attempts >= MAX_ATTEMPTS && !isFinalLoad(context.load),
     hasLoad: ({context}) => context.load !== undefined,
-    settled: ({context}) => isFinalLoad(context.load),
     refused: ({event}) => refusalOf(errorOf(event)) !== undefined,
   },
 }).createMachine({
@@ -112,13 +112,9 @@ export const skeletonLoaderMachine = setup({
             receive: event => self.send(event),
           };
         },
-        onDone: [
-          {guard: 'settled', target: 'settled', actions: 'clearError'},
-          {target: 'recovering', actions: 'recordStreamEnded'},
-        ],
+        onDone: {target: 'recovering', actions: 'recordStreamEnded'},
         onError: [
           {guard: 'refused', target: 'failed', actions: 'recordRefusal'},
-          {guard: 'settled', target: 'settled', actions: 'clearError'},
           {target: 'recovering', actions: 'recordFailure'},
         ],
       },
@@ -134,13 +130,9 @@ export const skeletonLoaderMachine = setup({
         },
         failed: [
           {guard: 'refused', target: 'failed', actions: 'recordRefusal'},
-          {guard: 'settled', target: 'settled', actions: 'clearError'},
           {target: 'recovering', actions: 'recordFailure'},
         ],
-        closed: [
-          {guard: 'settled', target: 'settled', actions: 'clearError'},
-          {target: 'recovering', actions: 'recordStreamEnded'},
-        ],
+        closed: {target: 'recovering', actions: 'recordStreamEnded'},
       },
       states: {
         catchingUp: {
@@ -163,13 +155,11 @@ export const skeletonLoaderMachine = setup({
       always: {guard: 'exhausted', target: 'failed'},
       after: {
         retry: [
-          {guard: 'hasLoad', target: 'following', actions: assign({error: undefined})},
+          {guard: 'hasLoad', target: 'following', actions: 'clearError'},
           {target: 'loading'},
         ],
       },
     },
-    /** The complete terminal prefix is the whole run: nothing remains to follow. */
-    settled: {type: 'final'},
     failed: {type: 'final'},
   },
 });

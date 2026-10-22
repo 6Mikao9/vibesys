@@ -5,7 +5,6 @@ import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
-  TailRequestSchema,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
   WatchRunsRequestSchema,
@@ -15,12 +14,18 @@ import {
 import type {AbortSignalLike} from '@vibesys/transport';
 import {createActor, fromCallback, fromPromise} from 'xstate';
 import {
+  type LoadProgress,
+  loadProgress,
   type RunLivenessHint,
   type RunTransport,
   type SkeletonCache,
   type SkeletonLoad,
+  type SkeletonLoadFailure,
   startSkeletonLoader,
 } from './index.js';
+import type {RecordsListener} from './loader.js';
+
+export type {RecordsListener};
 
 import {isFinalLoad} from './loading.js';
 import {
@@ -35,16 +40,22 @@ export interface GatewayLogChunk {
   readonly offset: number;
   readonly next: number;
 }
+/** What a reader knows of one run's history and liveness; each field is a fact, not a message. */
+export interface GatewayObservation {
+  readonly load: SkeletonLoad | undefined;
+  readonly progress: LoadProgress;
+  /** Set while the history is not being read: a refusal, or a failure being retried. */
+  readonly failure: SkeletonLoadFailure | undefined;
+  /** The reader gave up on this failure; a new observation is the only retry. */
+  readonly terminal: boolean;
+  readonly hint: RunLivenessHint | undefined;
+}
 export interface GatewayReader {
-  records(
-    runId: string,
-    fromSeq: bigint,
-    signal: AbortSignalLike,
-    receive: (bytes: Uint8Array) => void,
-  ): Promise<void>;
+  /** One reader per run: history and records come from the same stream. */
   watch(
     runId: string,
-    receive: (load: SkeletonLoad | undefined, failed: boolean, hint?: RunLivenessHint) => void,
+    receive: (observation: GatewayObservation) => void,
+    records: RecordsListener,
   ): () => void;
   content(
     runId: string,
@@ -133,27 +144,18 @@ export function gatewayReader(
   schedule: ScheduleTimeout,
 ): GatewayReader {
   return {
-    async records(runId, fromSeq, signal, receive) {
-      for await (const bytes of transport.stream(
-        `${SERVICE}${HostService.method.tail.name}`,
-        toBinary(TailRequestSchema, create(TailRequestSchema, {runId, fromSeq})),
-        signal,
-      )) {
-        if (signal.aborted) return;
-        receive(bytes);
-      }
-    },
-    watch(runId, receive) {
+    watch(runId, receive, records) {
       const actor = createActor(
         runObservationMachine.provide({
           actors: {
             history: fromCallback<ObservationEvent, ObservationOperation>(({input}) => {
-              const loader = startSkeletonLoader(transport, schedule, input);
+              const loader = startSkeletonLoader(transport, schedule, input, records);
               const subscription = loader.subscribe(snapshot =>
                 input.receive({
                   type: 'read',
                   load: snapshot.context.load,
-                  failed: snapshot.context.error !== undefined,
+                  failure: snapshot.context.error,
+                  terminal: snapshot.matches('failed'),
                 }),
               );
               return () => {
@@ -188,11 +190,17 @@ export function gatewayReader(
         {input: {runId, timeoutMs: 30000}, clock: clockFrom(schedule)},
       ).start();
       const subscription = actor.subscribe(({context}) =>
-        receive(
-          context.load,
-          context.failed || (context.watchFailed && !isFinalLoad(context.load)),
-          context.hint,
-        ),
+        receive({
+          load: context.load,
+          progress: loadProgress(context.load),
+          failure:
+            context.failure ??
+            (context.watchFailed && !isFinalLoad(context.load)
+              ? {kind: 'transport', cause: 'liveness stream unavailable'}
+              : undefined),
+          terminal: context.terminal,
+          hint: context.hint,
+        }),
       );
       return () => {
         subscription.unsubscribe();

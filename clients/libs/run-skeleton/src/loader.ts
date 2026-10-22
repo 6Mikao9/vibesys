@@ -18,7 +18,13 @@ export interface RunTransport {
 }
 const SERVICE = `/${HostService.typeName}/`;
 
-export function skeletonLoaderMachineFor(transport: RunTransport): typeof skeletonLoaderMachine {
+/** Every record the loader reads reaches this once, so no other consumer reads the log again. */
+export type RecordsListener = (records: readonly Uint8Array[]) => void;
+
+export function skeletonLoaderMachineFor(
+  transport: RunTransport,
+  records: RecordsListener = () => {},
+): typeof skeletonLoaderMachine {
   return skeletonLoaderMachine.provide({
     actors: {
       skeleton: fromPromise(({input, signal}) =>
@@ -28,7 +34,11 @@ export function skeletonLoaderMachineFor(transport: RunTransport): typeof skelet
             toBinary(SkeletonRequestSchema, create(SkeletonRequestSchema, {runId: input})),
             signal,
           )
-          .then(bytes => fromBinary(SkeletonResponseSchema, bytes)),
+          .then(bytes => {
+            const response = fromBinary(SkeletonResponseSchema, bytes);
+            records(response.records);
+            return response;
+          }),
       ),
       tail: fromPromise<void, TailInput>(async ({input, signal}) => {
         const request = toBinary(
@@ -41,7 +51,9 @@ export function skeletonLoaderMachineFor(transport: RunTransport): typeof skelet
           signal,
         )) {
           if (signal.aborted) return;
-          input.receive({type: 'tail', response: fromBinary(TailResponseSchema, bytes)});
+          const response = fromBinary(TailResponseSchema, bytes);
+          records(response.records);
+          input.receive({type: 'tail', response});
         }
       }),
     },
@@ -53,10 +65,11 @@ export function startSkeletonLoader(
   transport: RunTransport,
   schedule: ScheduleTimeout,
   input: SkeletonLoaderInput,
+  records?: RecordsListener,
 ): Actor<typeof skeletonLoaderMachine> {
   if (!input.runId || !Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0)
     throw new Error('loader: runId and positive timeoutMs required');
-  return createActor(skeletonLoaderMachineFor(transport), {
+  return createActor(skeletonLoaderMachineFor(transport, records), {
     input,
     clock: clockFrom(schedule),
   }).start();

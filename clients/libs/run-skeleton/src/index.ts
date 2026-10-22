@@ -1,7 +1,13 @@
 /** Additive store.v1 read path. No desktop or legacy run-session coupling. */
 
 export type {SkeletonCache} from './cache-role.js';
-export {type RunTransport, skeletonLoaderMachineFor, startSkeletonLoader} from './loader.js';
+export {type RecordsFanout, recordsFanout} from './fanout.js';
+export {
+  type RecordsListener,
+  type RunTransport,
+  skeletonLoaderMachineFor,
+  startSkeletonLoader,
+} from './loader.js';
 export {
   MAX_ATTEMPTS,
   RETRY_CAP_MS,

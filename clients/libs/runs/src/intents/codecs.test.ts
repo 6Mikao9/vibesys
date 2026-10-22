@@ -8,7 +8,6 @@ import {
   RecordSchema,
   SteerMode,
   SteerTargetKind,
-  TailResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import {
@@ -17,7 +16,7 @@ import {
   hostIntentResponse,
   IntentRefused,
   intentAdmissionWarning,
-  intentTailResponse,
+  intentOutcomes,
   runIntent,
   runReference,
 } from '@vibesys/runs/intents';
@@ -74,14 +73,7 @@ test('only IntentState records are outcomes, with refusal reasons preserved', ()
     },
   });
   const ignored = create(RecordSchema, {seq: 2n});
-  const result = intentTailResponse(
-    toBinary(
-      TailResponseSchema,
-      create(TailResponseSchema, {
-        records: [toBinary(RecordSchema, record), toBinary(RecordSchema, ignored)],
-      }),
-    ),
-  );
+  const result = intentOutcomes([toBinary(RecordSchema, record), toBinary(RecordSchema, ignored)]);
   expect(result).toHaveLength(1);
   expect(result[0]?.reason).toBe('role ended');
 });
