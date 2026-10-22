@@ -1,5 +1,13 @@
 import {expect, test} from 'bun:test';
-import {remember, SettingsStore} from './index.js';
+import {
+  decodePreferences,
+  decodeRecent,
+  decodeSettings,
+  remember,
+  SettingsStore,
+  settingsBinaryPath,
+} from './index.js';
+import {recentDocument} from './recent.js';
 import {FakeSettingsFilesystem} from './testing/index.js';
 
 function run(index: number) {
@@ -36,7 +44,7 @@ test('synchronous listener and diagnostic failures cannot change a durable recen
 
   await settings.updateRecent(current => remember(current, run(1)));
 
-  expect(JSON.parse(filesystem.text('/settings/recent.json'))).toEqual({
+  expect(written(filesystem, '/settings/recent.json')).toEqual({
     version: 4,
     runs: [run(1)],
   });
@@ -66,7 +74,7 @@ test('rejected listener and diagnostic promises are terminally contained after c
   await settings.updateRecent(current => remember(current, run(1)));
   await Promise.resolve();
 
-  expect(JSON.parse(filesystem.text('/settings/recent.json'))).toEqual({
+  expect(written(filesystem, '/settings/recent.json')).toEqual({
     version: 4,
     runs: [run(1)],
   });
@@ -124,7 +132,7 @@ test('host settings notify every window only after a committed atomic write', as
   const first: boolean[] = [];
   const second: boolean[] = [];
   const stopFirst = settings.onHostsChanged(file => {
-    expect(JSON.parse(filesystem.text('/settings/hosts.json'))).toEqual(file);
+    expect(written(filesystem, '/settings/hosts.json')).toEqual(file);
     first.push(file.hosts['local']?.runTransportV2 ?? false);
   });
   const stopSecond = settings.onHostsChanged(file =>
@@ -149,3 +157,11 @@ test('host settings notify every window only after a committed atomic write', as
   expect(first).toEqual([true, false, true]);
   expect(second).toEqual(first);
 });
+
+function written(filesystem: FakeSettingsFilesystem, path: string): unknown {
+  const bytes = filesystem.bytes(settingsBinaryPath(path));
+  if (path.endsWith('hosts.json')) return decodeSettings(bytes);
+  if (path.endsWith('preferences.json')) return decodePreferences(bytes);
+  const recent = decodeRecent(bytes);
+  return recentDocument(recent.file, recent.invalid);
+}

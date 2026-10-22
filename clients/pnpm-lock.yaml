@@ -1100,9 +1100,15 @@ importers:
 
   libs/settings:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../hosts
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../proto
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../runs

@@ -75,6 +75,7 @@ from vs_proto._generated.vibesys.core.v1 import replay_workspace_pb as replay_wo
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
 from vs_proto._generated.vibesys.core.v1.vocabulary_pb import CheckoutStatus
+from vs_proto._generated.vibesys.desktop.v1 import settings_pb as desktop_settings
 from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb as admission
 from vs_proto._generated.vibesys.host.v1 import evaluation_receipts_pb as evaluation_receipts
 from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
@@ -407,6 +408,7 @@ __all__ = [
     "core_leaves",
     "core_value_options",
     "core_vocabulary",
+    "desktop_settings",
     "evaluation_receipts",
     "from_mapping",
     "host_operation_descriptors",

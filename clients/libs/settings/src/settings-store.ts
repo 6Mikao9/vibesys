@@ -1,6 +1,6 @@
 /**
- * The app's settings files, `hosts.json` (per-host checkouts), `recent.json` (runs this user
- * opened) and `preferences.json` (appearance, notifications, archived runs), and their one writer.
+ * The app's protobuf settings files, `hosts.pb`, `recent.pb` and `preferences.pb`, and their
+ * one writer. Original JSON siblings are strict, read-only import sources, retained unchanged.
  *
  * Guarantees:
  *
@@ -25,6 +25,7 @@
  *
  * Electron-free: the main process supplies the paths.
  */
+
 import {randomUUID} from 'node:crypto';
 import {open, readFile, rename, unlink} from 'node:fs/promises';
 import {dirname} from 'node:path';
@@ -38,8 +39,18 @@ import {
   type RecentFile,
   recentDocument,
 } from './recent.js';
+import {
+  decodePreferences,
+  decodeRecent,
+  decodeSettings,
+  encodePreferences,
+  encodeRecent,
+  encodeSettings,
+  settingsBinaryPath,
+} from './settings-codec.js';
 
 export interface SettingsStoreOptions {
+  /** Retained JSON source paths; protobuf siblings become authoritative after first import. */
   readonly settingsPath: string;
   readonly recentPath: string;
   readonly preferencesPath: string;
@@ -50,8 +61,9 @@ export interface SettingsStoreOptions {
 /** The filesystem operations needed to read and safely replace settings files. */
 export interface SettingsFilesystem {
   readText(path: string): Promise<string>;
-  /** Create and file-sync a complete private regular file exclusively beside `target`. */
-  stageDurablePrivateText(target: string, text: string): Promise<string>;
+  readBytes(path: string): Promise<Uint8Array>;
+  /** Exclusively create and file-sync private bytes beside the publication target. */
+  stageDurablePrivateBytes(target: string, bytes: Uint8Array): Promise<string>;
   remove(path: string): Promise<void>;
   /**
    * Atomically replace `target`, performing the implementation's available namespace-durability
@@ -118,85 +130,93 @@ export class SettingsStore {
 
   /** The host settings and this exact read's diagnostic, read afresh. */
   async hosts(): Promise<HostSettingsSnapshot> {
-    const read = await this.#readHosts();
+    const read = await this.#readHosts(read => this.#serialize(read));
     return {settings: read.value, problem: read.failure?.message ?? null};
   }
 
-  async #readHosts(): Promise<ReadResult<SettingsFile>> {
-    const read = await readText(this.#filesystem, this.#options.settingsPath);
+  async #readHosts(importQueue?: ImportQueue): Promise<ReadResult<SettingsFile>> {
+    const read = await readDocument(
+      this.#filesystem,
+      this.#options.settingsPath,
+      {
+        decode: decodeSettings,
+        encode: encodeSettings,
+        legacy: value => parseSettings(value),
+      },
+      importQueue,
+    );
     if (read.kind === 'missing') {
       return {value: EMPTY_SETTINGS, failure: null};
     }
     if (read.kind === 'failed') {
-      const failure = readFailure(this.#options.settingsPath, read.error);
+      const failure = readFailure(read.path, read.error);
       this.#log(failure.message);
       return {value: EMPTY_SETTINGS, failure};
     }
-    try {
-      const parsed = parseSettings(JSON.parse(read.text) as unknown);
-      return {value: parsed, failure: null};
-    } catch (error) {
-      const failure = invalidFile(this.#options.settingsPath, error);
-      this.#log(`ignoring ${failure.message}`);
-      return {value: EMPTY_SETTINGS, failure};
-    }
+    return {value: read.value, failure: null};
   }
 
   /** The recent runs, read afresh. */
   async recent(): Promise<RecentFile> {
-    return (await this.#readRecent()).value;
+    return (await this.#readRecent(read => this.#serialize(read))).value;
   }
 
   /** The recent runs and the entries left out of them, read afresh. */
   async recentSnapshot(): Promise<RecentSnapshot> {
-    const read = await this.#readRecent();
+    const read = await this.#readRecent(read => this.#serialize(read));
     return {recent: read.value, skipped: read.skipped};
   }
 
-  async #readRecent(): Promise<RecentRead> {
-    const read = await readText(this.#filesystem, this.#options.recentPath);
+  async #readRecent(importQueue?: ImportQueue): Promise<RecentRead> {
+    const read = await readDocument(
+      this.#filesystem,
+      this.#options.recentPath,
+      {
+        decode: decodeRecent,
+        encode: encodeRecent,
+        legacy: value => parseRecent(value),
+      },
+      importQueue,
+    );
     if (read.kind === 'missing')
       return {value: EMPTY_RECENT, failure: null, skipped: [], invalid: []};
     if (read.kind === 'failed') {
-      const failure = readFailure(this.#options.recentPath, read.error);
+      const failure = readFailure(read.path, read.error);
       this.#log(failure.message);
       return {value: EMPTY_RECENT, failure, skipped: [], invalid: []};
     }
-    try {
-      const {file, skipped, invalid} = parseRecent(JSON.parse(read.text) as unknown);
-      if (skipped.length > 0) {
-        const reasons = skipped.map(entry => entry.reason).join('; ');
-        this.#log(`skipping ${skipped.length} entries of ${this.#options.recentPath}: ${reasons}`);
-      }
-      return {value: file, failure: null, skipped, invalid};
-    } catch (error) {
-      const failure = invalidFile(this.#options.recentPath, error);
-      this.#log(`ignoring ${failure.message}`);
-      return {value: EMPTY_RECENT, failure, skipped: [], invalid: []};
+    const {file, skipped, invalid} = read.value;
+    if (skipped.length > 0) {
+      const reasons = skipped.map(entry => entry.reason).join('; ');
+      this.#log(`skipping ${skipped.length} entries of ${this.#options.recentPath}: ${reasons}`);
     }
+    return {value: file, failure: null, skipped, invalid};
   }
 
   /** The preferences, read afresh; the defaults when the file is absent or invalid. */
   async preferences(): Promise<Preferences> {
-    return (await this.#readPreferences()).value;
+    return (await this.#readPreferences(read => this.#serialize(read))).value;
   }
 
-  async #readPreferences(): Promise<ReadResult<Preferences>> {
+  async #readPreferences(importQueue?: ImportQueue): Promise<ReadResult<Preferences>> {
     const path = this.#options.preferencesPath;
-    const read = await readText(this.#filesystem, path);
+    const read = await readDocument(
+      this.#filesystem,
+      path,
+      {
+        decode: decodePreferences,
+        encode: encodePreferences,
+        legacy: value => parsePreferences(value),
+      },
+      importQueue,
+    );
     if (read.kind === 'missing') return {value: DEFAULT_PREFERENCES, failure: null};
     if (read.kind === 'failed') {
-      const failure = readFailure(path, read.error);
+      const failure = readFailure(read.path, read.error);
       this.#log(failure.message);
       return {value: DEFAULT_PREFERENCES, failure};
     }
-    try {
-      return {value: parsePreferences(JSON.parse(read.text) as unknown), failure: null};
-    } catch (error) {
-      const failure = invalidFile(path, error);
-      this.#log(`ignoring ${failure.message}`);
-      return {value: DEFAULT_PREFERENCES, failure};
-    }
+    return {value: read.value, failure: null};
   }
 
   /** Replace the preferences with `update` of the current ones, then tell the listeners. */
@@ -205,7 +225,11 @@ export class SettingsStore {
       const read = await this.#readPreferences();
       if (read.failure !== null) throw read.failure;
       const next = update(read.value);
-      await writeJson(this.#filesystem, this.#options.preferencesPath, next);
+      await writeBytes(
+        this.#filesystem,
+        settingsBinaryPath(this.#options.preferencesPath),
+        encodePreferences(next),
+      );
       this.#notify(this.#preferencesListeners, next, 'preferences');
       return next;
     });
@@ -231,7 +255,12 @@ export class SettingsStore {
       const hosts = await this.#readHosts();
       if (hosts.failure !== null) throw hosts.failure;
       const next = update(hosts.value);
-      const outcome = await writeJson(this.#filesystem, this.#options.settingsPath, next, current);
+      const outcome = await writeBytes(
+        this.#filesystem,
+        settingsBinaryPath(this.#options.settingsPath),
+        encodeSettings(next),
+        current,
+      );
       if (outcome === 'committed') this.#notify(this.#hostsListeners, next, 'host-settings');
       return outcome;
     });
@@ -258,8 +287,12 @@ export class SettingsStore {
       const next = update(recent.value);
       const document = recentDocument(next, recent.invalid);
       if (
-        (await writeJson(this.#filesystem, this.#options.recentPath, document, current)) ===
-        'cancelled'
+        (await writeBytes(
+          this.#filesystem,
+          settingsBinaryPath(this.#options.recentPath),
+          encodeRecent(parseRecent(document)),
+          current,
+        )) === 'cancelled'
       )
         return;
       this.#notify(this.#recentListeners, next, 'recent-runs');
@@ -316,12 +349,6 @@ function errorMessage(error: unknown): string {
   }
 }
 
-type TextRead =
-  | {readonly kind: 'text'; readonly text: string}
-  | {readonly kind: 'missing'}
-  | {readonly kind: 'failed'; readonly error: unknown};
-
-/** The Node implementation; its capability is injectable so platform branches are deterministic. */
 export class NodeSettingsFilesystem implements SettingsFilesystem {
   readonly #directorySync: DirectorySyncCapability;
 
@@ -333,8 +360,12 @@ export class NodeSettingsFilesystem implements SettingsFilesystem {
     return readFile(path, 'utf8');
   }
 
-  stageDurablePrivateText(target: string, text: string): Promise<string> {
-    return stagePrivateText(target, text, 0o600);
+  readBytes(path: string): Promise<Uint8Array> {
+    return readFile(path);
+  }
+
+  stageDurablePrivateBytes(target: string, bytes: Uint8Array): Promise<string> {
+    return stagePrivateBytes(target, bytes, 0o600);
   }
 
   async remove(path: string): Promise<void> {
@@ -354,12 +385,12 @@ const NODE_SETTINGS_FILESYSTEM: SettingsFilesystem = new NodeSettingsFilesystem(
 const MAX_STAGING_ATTEMPTS = 8;
 
 /** Create a complete private regular file without ever opening an existing path. */
-async function stagePrivateText(target: string, text: string, mode: number): Promise<string> {
+async function stagePrivateBytes(target: string, text: Uint8Array, mode: number): Promise<string> {
   let collision: unknown;
   for (let attempt = 0; attempt < MAX_STAGING_ATTEMPTS; attempt += 1) {
     const staging = `${target}.${randomUUID()}.tmp`;
     try {
-      await writeNewPrivateText(staging, text, mode);
+      await writeNewPrivateBytes(staging, text, mode);
       return staging;
     } catch (error) {
       if (!hasCode(error, 'EEXIST')) throw error;
@@ -369,7 +400,7 @@ async function stagePrivateText(target: string, text: string, mode: number): Pro
   throw new Error(`could not create a private staging file beside ${target}`, {cause: collision});
 }
 
-async function writeNewPrivateText(path: string, text: string, mode: number): Promise<void> {
+async function writeNewPrivateBytes(path: string, text: Uint8Array, mode: number): Promise<void> {
   const file = await open(path, 'wx', mode);
   try {
     await file.writeFile(text);
@@ -399,14 +430,45 @@ async function syncDirectory(path: string): Promise<void> {
   }
 }
 
-async function readText(filesystem: SettingsFilesystem, path: string): Promise<TextRead> {
+interface SettingsCodec<T> {
+  decode(bytes: Uint8Array): T;
+  encode(value: T): Uint8Array;
+  legacy(value: unknown): T;
+}
+
+type DocumentRead<T> =
+  | {readonly kind: 'value'; readonly value: T}
+  | {readonly kind: 'missing'}
+  | {readonly kind: 'failed'; readonly error: unknown; readonly path: string};
+
+type ImportQueue = <T>(read: () => Promise<DocumentRead<T>>) => Promise<DocumentRead<T>>;
+
+/** Read published files immediately; serialize and recheck only missing-file imports. */
+async function readDocument<T>(
+  filesystem: SettingsFilesystem,
+  path: string,
+  codec: SettingsCodec<T>,
+  importQueue?: ImportQueue,
+): Promise<DocumentRead<T>> {
+  const binaryPath = settingsBinaryPath(path);
   try {
-    return {kind: 'text', text: await filesystem.readText(path)};
+    return {kind: 'value', value: codec.decode(await filesystem.readBytes(binaryPath))};
   } catch (error) {
-    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
-      return {kind: 'missing'};
-    }
-    return {kind: 'failed', error};
+    if (!hasCode(error, 'ENOENT')) return {kind: 'failed', error, path: binaryPath};
+  }
+  if (importQueue !== undefined) return importQueue(() => readDocument(filesystem, path, codec));
+  let text: string;
+  try {
+    text = await filesystem.readText(path);
+  } catch (error) {
+    return hasCode(error, 'ENOENT') ? {kind: 'missing'} : {kind: 'failed', error, path};
+  }
+  try {
+    const value = codec.legacy(JSON.parse(text) as unknown);
+    await writeBytes(filesystem, binaryPath, codec.encode(value));
+    return {kind: 'value', value};
+  } catch (error) {
+    return {kind: 'failed', error, path};
   }
 }
 
@@ -419,22 +481,14 @@ function readFailure(path: string, cause: unknown): Error {
   return new Error(`could not read ${path}: ${detail}`, {cause});
 }
 
-function invalidFile(path: string, cause: unknown): Error {
-  const detail = cause instanceof Error ? cause.message : String(cause);
-  return new Error(`${path}: ${detail}`, {cause});
-}
-
-/** Replace `path` with private JSON (write aside, file sync, atomic rename, platform durability). */
-async function writeJson(
+/** Publish validated bytes through the settings owner's existing durability boundary. */
+async function writeBytes(
   filesystem: SettingsFilesystem,
   path: string,
-  value: unknown,
+  bytes: Uint8Array,
   current: () => boolean = () => true,
 ): Promise<SettingsUpdateOutcome> {
-  const staging = await filesystem.stageDurablePrivateText(
-    path,
-    `${JSON.stringify(value, null, 2)}\n`,
-  );
+  const staging = await filesystem.stageDurablePrivateBytes(path, bytes);
   try {
     if (!current()) {
       await filesystem.remove(staging);
