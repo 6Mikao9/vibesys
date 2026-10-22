@@ -286,10 +286,14 @@ class RunView(Value):
     measurements: tuple[EvidenceRef, ...]
     settlements: tuple[Settlement, ...]
     comparisons: tuple[StatedComparison, ...] = ()
-    measured_plans: tuple[MeasuredPlan, ...] = ()
-    """Plans core has admitted, so a search can repeat a stage list it did not choose."""
     """Every candidate input's comparison with its base as it stands now, and whether it is
     still settling; one per scope, candidate input and base input."""
+    measured_plans: tuple[MeasuredPlan, ...] = ()
+    """Plans core has admitted, so a search can repeat a stage list it did not choose.
+
+    Empty in a run view saved before the search repeated an agent's own stage list: the
+    search then measures the task's own stages.
+    """
 
 
 class DiscardReason(StrEnum):

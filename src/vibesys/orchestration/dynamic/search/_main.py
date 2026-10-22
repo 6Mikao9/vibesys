@@ -236,12 +236,13 @@ class MainLine:
     def finished(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord:
         """Fold a finished merge workstream: move main when its commit is sound, record it.
 
-        Main moves only to a retained commit that passed the trusted accuracy check, whose
-        headline metric is not worse than main's and that fails no benchmark check main passed.
-        A commit that passed accuracy but measures worse is recorded as regressed and main stays.
-        While the input's measurement is pending there is nothing to compare the commit with, so
-        it is unsound and main stays (a merge's measurement waits for the input, so this is a
-        guard, not a path a run takes).
+        Main moves only to a retained commit of this revision that passed the trusted accuracy
+        check and, when the task measures a benchmark, has a benchmark result on that same
+        revision. That benchmark is not worse than main's and fails no benchmark check main
+        passed. A commit that passed accuracy but measures worse is recorded as regressed and
+        main stays. While the input's measurement is pending there is nothing to compare the
+        commit with, so it is unsound and main stays (a merge's measurement waits for the
+        input, so this is a guard, not a path a run takes).
         """
         start = done.start
         report = done.merge
@@ -262,6 +263,7 @@ class MainLine:
             and settlement.retention == "candidate"
             and settlement.candidate is not None
             and accuracy_passed is True
+            and (benchmark is not None or "benchmark" not in terms.measured)
         )
         regressed = committed and self._regresses(
             main, metrics, benchmark_passed=benchmark_passed, terms=terms

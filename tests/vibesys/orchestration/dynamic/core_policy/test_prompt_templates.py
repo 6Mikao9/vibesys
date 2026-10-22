@@ -274,12 +274,47 @@ def test_the_implementer_chooses_which_trusted_gates_run(
 
     guidance = (
         "The evaluator is scarce",
+        "learns the most per GPU minute",
+        "a scheduling change is benchmark first",
+        "a numerics change is accuracy first",
         "Leave steps empty to run both, accuracy first",
         "A result already recorded for this revision is reused",
         "both a passing accuracy result and a benchmark no worse than main",
+        "not accuracy-verified",
         "request the remaining step or move on",
     )
     assert all(line in text for line in guidance) is offered
+
+
+@settings(max_examples=examples(pr=4, nightly=20))
+@given(context=PLANNER_PROMPTS)
+def test_a_benchmark_only_candidate_is_shown_not_accuracy_verified(
+    context: PlannerPrompt,
+) -> None:
+    """The planner ranks candidates. It sees each revision's facts and does not choose gates."""
+    benchmark_only = {
+        "hypothesis_id": "bench-only",
+        "sequence": 1,
+        "title": "scheduling",
+        "status": "measured",
+        "strategy": "implement",
+        "candidate": context.base_revision.model_dump(),
+        "benchmark_passed": True,
+    }
+    shown = PlannerPrompt.model_validate({**context.model_dump(), "history": (benchmark_only,)})
+    text = render(PromptTemplate.PORTFOLIO, shown)
+
+    assert "not accuracy-verified" in text
+    assert "benchmark passed: True" in text
+    assert "steps names the gates" not in text
+    assert "evaluation_order" in text
+
+    verified = {**benchmark_only, "accuracy_passed": True}
+    both = render(
+        PromptTemplate.PORTFOLIO,
+        PlannerPrompt.model_validate({**context.model_dump(), "history": (verified,)}),
+    )
+    assert "not accuracy-verified" not in both
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
