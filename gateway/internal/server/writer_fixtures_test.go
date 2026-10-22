@@ -76,11 +76,8 @@ func TestPythonWriterSkeletonFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var actual storev1.Keyframe
-			if err := proto.Unmarshal(got.Keyframe, &actual); err != nil {
-				t.Fatal(err)
-			}
-			if !proto.Equal(&actual, &keyframe) || got.CommittedSeq != keyframe.ThroughSeq || !got.Complete || len(got.Records) != 0 {
+			actual := restored(t, got, nil)
+			if !proto.Equal(actual, &keyframe) || got.CommittedSeq != keyframe.ThroughSeq || !got.Complete || len(got.Records) != 0 {
 				t.Fatalf("Python checkpoint did not round trip: %v", got)
 			}
 
