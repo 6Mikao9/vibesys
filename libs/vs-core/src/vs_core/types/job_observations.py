@@ -116,3 +116,13 @@ class MeasurementFailure(StrEnum):
     def retryable(self) -> bool:
         """Whether the failure is not proven the candidate's, so core may admit another submission."""
         return self in (MeasurementFailure.INFRASTRUCTURE, MeasurementFailure.AMBIGUOUS)
+
+    @property
+    def charges_candidate(self) -> bool:
+        """Whether the failure is a verdict about the candidate: the one class that charges it.
+
+        Every other class (the machinery, an ambiguous cause, an unclassified one, a run
+        environment that can run nothing) judged nothing, so it neither fails the candidate
+        nor costs it eligibility, however often it was measured again.
+        """
+        return self is MeasurementFailure.WORKLOAD

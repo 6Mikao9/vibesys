@@ -1,39 +1,44 @@
 """Whose fault a failed measurement stage is, decided by one table.
 
 A stage that ends without a pass is the candidate's fault (``WORKLOAD``), the
-machinery's (``INFRASTRUCTURE``), or cannot be told (``AMBIGUOUS``). The first
-is final, the second is measured again up to the submission bound, and the third
-is measured once more and then counts against the candidate (see
-``vs_core.api.may_resubmit``). Every executor reads its evidence into the same two
+machinery's (``INFRASTRUCTURE``), or cannot be told (``AMBIGUOUS``). Only a verdict about
+the candidate is ``WORKLOAD``: the evaluator ran the candidate's measurement and judged it
+(it wrote a result, or the stage's own exit status is its judgement). A stage the clock
+or the machinery stopped judged nothing, so it is never ``WORKLOAD``; ``INFRASTRUCTURE``
+and ``AMBIGUOUS`` are measured again up to the submission bound and then charge nobody
+(see ``vs_core.api.MeasurementFailure.charges_candidate``). Every executor reads its evidence into the same two
 facts, how the stage ended (``TerminalSignal``) and what the evaluator left behind
 (``RecordState``), and asks ``classify``. No executor branches on the cause itself.
 
 Command table (rows: how the stage ended, columns: what the evaluator wrote):
 
-=================================  ==========  ==========  ==========
-signal                             absent      declared    outcome
-=================================  ==========  ==========  ==========
-no exit status (node loss,         infra       infra       infra
+=================================  ==========  ==========  ==========  ===========
+signal                             absent      declared    outcome     exit status
+=================================  ==========  ==========  ==========  ===========
+no exit status (node loss,         infra       infra       infra       infra
 preemption, boot failure, job
 time limit, collection failure)
-exit 75 from a trusted evaluator   infra       infra       infra
+exit 75 from a trusted evaluator   infra       infra       infra       infra
 (its host refused the measurement)
-service never ready, log shows     candidate   candidate   candidate
+service never ready, log shows     candidate   candidate   candidate   candidate
 a candidate cause (out of memory,
 the task's own startup causes)
-service never ready, any other     ambiguous   ambiguous   ambiguous
+service never ready, any other     ambiguous   ambiguous   ambiguous   ambiguous
 log (node or ROCm fault, I/O
 error on shared storage, a hang)
-exit 124 (stage time limit)        ambiguous   candidate   candidate
-exit 137 (SIGKILL: out-of-memory   ambiguous   ambiguous   candidate
+exit 124 (stage time limit)        ambiguous   ambiguous   candidate   ambiguous
+exit 137 (SIGKILL: out-of-memory   ambiguous   ambiguous   candidate   ambiguous
 kill or timeout kill-after)
-other nonzero exit                 ambiguous   candidate   candidate
-exit 0                             ambiguous   candidate   candidate
-=================================  ==========  ==========  ==========
+other nonzero exit                 ambiguous   candidate   candidate   candidate
+exit 0                             ambiguous   candidate   candidate   candidate
+=================================  ==========  ==========  ==========  ===========
 
 "absent" means no result file between the trusted wrapper's markers, "declared"
 means only the evaluator's ``hello`` record (it started and stated its schema),
-"outcome" means a ``result`` or ``error`` record, even a malformed one.
+"outcome" means a ``result`` or ``error`` record, even a malformed one, and "exit status"
+means the stage has no result file: the accuracy command and the candidate's build, whose
+exit status is their whole judgement. A time limit never judges a candidate, so it is
+``WORKLOAD`` only when the evaluator wrote its own verdict first.
 
 Exit 75 (``ENVIRONMENT_REFUSED_EXIT_STATUS``) is a refusal only from a command the task
 owns: the evaluator declares that its host refused to measure, so nothing of the
@@ -89,24 +94,25 @@ class RecordState(StrEnum):
     ABSENT = "absent"
     DECLARED = "declared"
     OUTCOME = "outcome"
+    EXIT_STATUS = "exit_status"
+    """The stage writes no result file: its exit status is its whole judgement."""
 
 
 _CANDIDATE = BenchmarkFailureKind.WORKLOAD
 _INFRA = BenchmarkFailureKind.INFRASTRUCTURE
 _AMBIGUOUS = BenchmarkFailureKind.AMBIGUOUS
 
-# Rows are signals, entries are (absent, declared, outcome), in `RecordState` order.
-_TABLE: dict[
-    TerminalSignal, tuple[BenchmarkFailureKind, BenchmarkFailureKind, BenchmarkFailureKind]
-] = {
-    TerminalSignal.NO_EXIT_STATUS: (_INFRA, _INFRA, _INFRA),
-    TerminalSignal.ENVIRONMENT_REFUSED: (_INFRA, _INFRA, _INFRA),
-    TerminalSignal.SERVICE_NOT_READY: (_AMBIGUOUS, _AMBIGUOUS, _AMBIGUOUS),
-    TerminalSignal.SERVICE_CANDIDATE_FAULT: (_CANDIDATE, _CANDIDATE, _CANDIDATE),
-    TerminalSignal.STAGE_TIMEOUT: (_AMBIGUOUS, _CANDIDATE, _CANDIDATE),
-    TerminalSignal.SIGKILLED: (_AMBIGUOUS, _AMBIGUOUS, _CANDIDATE),
-    TerminalSignal.NONZERO_EXIT: (_AMBIGUOUS, _CANDIDATE, _CANDIDATE),
-    TerminalSignal.CLEAN_EXIT: (_AMBIGUOUS, _CANDIDATE, _CANDIDATE),
+_Row = tuple[BenchmarkFailureKind, BenchmarkFailureKind, BenchmarkFailureKind, BenchmarkFailureKind]
+# Rows are signals, entries are (absent, declared, outcome, exit status), in `RecordState` order.
+_TABLE: dict[TerminalSignal, _Row] = {
+    TerminalSignal.NO_EXIT_STATUS: (_INFRA, _INFRA, _INFRA, _INFRA),
+    TerminalSignal.ENVIRONMENT_REFUSED: (_INFRA, _INFRA, _INFRA, _INFRA),
+    TerminalSignal.SERVICE_NOT_READY: (_AMBIGUOUS, _AMBIGUOUS, _AMBIGUOUS, _AMBIGUOUS),
+    TerminalSignal.SERVICE_CANDIDATE_FAULT: (_CANDIDATE, _CANDIDATE, _CANDIDATE, _CANDIDATE),
+    TerminalSignal.STAGE_TIMEOUT: (_AMBIGUOUS, _AMBIGUOUS, _CANDIDATE, _AMBIGUOUS),
+    TerminalSignal.SIGKILLED: (_AMBIGUOUS, _AMBIGUOUS, _CANDIDATE, _AMBIGUOUS),
+    TerminalSignal.NONZERO_EXIT: (_AMBIGUOUS, _CANDIDATE, _CANDIDATE, _CANDIDATE),
+    TerminalSignal.CLEAN_EXIT: (_AMBIGUOUS, _CANDIDATE, _CANDIDATE, _CANDIDATE),
 }
 _COLUMNS = tuple(RecordState)
 

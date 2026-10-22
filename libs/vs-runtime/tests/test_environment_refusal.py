@@ -41,6 +41,8 @@ from vs_sim.api.testing import InlineBlockingRunner, SimThreads
 if TYPE_CHECKING:
     from vs_project.api import GitTracker
 
+_BENCHMARK_RECORDS = (RecordState.ABSENT, RecordState.DECLARED, RecordState.OUTCOME)
+"""What a benchmark evaluator can leave; the accuracy command and the build leave none."""
 _MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
 _END_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
 _DISK = (
@@ -113,7 +115,7 @@ def test_an_accuracy_check_whose_host_refused_is_retried_not_charged_to_the_cand
 
 
 @pytest.mark.regression
-@given(output=_REFUSALS, record=st.sampled_from(RecordState))
+@given(output=_REFUSALS, record=st.sampled_from(_BENCHMARK_RECORDS))
 @example(output=_DISK, record=RecordState.OUTCOME)
 def test_a_benchmark_whose_host_refused_is_retried_whatever_it_wrote(
     output: str, record: RecordState

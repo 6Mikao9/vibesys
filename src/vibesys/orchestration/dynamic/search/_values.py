@@ -19,6 +19,7 @@ from vs_core.api.search import (
     CheckpointDecline,
     EvidenceRef,
     FailureReason,
+    MeasurementFailure,
     ObservationStatus,
     RejectionCode,
     ReplyError,
@@ -321,7 +322,7 @@ _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
     FailureKind.CHECKPOINT_DECLINED: (frozenset({"declined"}), frozenset()),
     FailureKind.NO_TRUSTED_EVIDENCE: (
         frozenset({"status"}),
-        frozenset({"output", "operator_output"}),
+        frozenset({"output", "operator_output", "blamed"}),
     ),
     FailureKind.TURN_LIMIT: (frozenset({"turns", "limit", "blocker"}), frozenset()),
     FailureKind.REPEATED_TURN: (frozenset({"blocker"}), frozenset()),
@@ -350,6 +351,19 @@ class Failure(Value):
     revision: RevisionRef | None = None
     dropped: DropReason | None = None
     superseded_by: str | None = None
+    blamed: MeasurementFailure | None = None
+    """Whom the backend blamed for a measurement that left no trusted evidence (None: not
+    classified, as in a record written before this was kept). Only a verdict charges the
+    candidate (`MeasurementFailure.charges_candidate`)."""
+
+    @property
+    def judges_candidate(self) -> bool:
+        """Whether this failure is a verdict about the candidate rather than a fault of the run.
+
+        A measurement that left no evidence because the machinery failed, or because the cause
+        was never established, judged nothing. Every other kind is the workstream's own end.
+        """
+        return self.blamed is None or self.blamed.charges_candidate
 
     @model_validator(mode="after")
     def fields_match_kind(self) -> "Failure":
@@ -372,6 +386,7 @@ class Failure(Value):
                     "revision",
                     "dropped",
                     "superseded_by",
+                    "blamed",
                 )
                 if getattr(self, name) is not None
             }

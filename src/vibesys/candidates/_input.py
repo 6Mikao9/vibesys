@@ -143,9 +143,7 @@ def again_after(failure: InputFailure) -> bool:
         case InputFailureKind.WAIT_ENDED:
             return failure.ended in _ENDED_AGAIN
         case InputFailureKind.ACCURACY_FAILED | InputFailureKind.BENCHMARK_FAILED:
-            unblamed = (
-                failure.blamed is not None and failure.blamed is not MeasurementFailure.WORKLOAD
-            )
+            unblamed = failure.blamed is not None and not failure.blamed.charges_candidate
             return unblamed or not failure.output.strip()
         case InputFailureKind.READINGS_REFUSED | InputFailureKind.READINGS_UNDECODABLE:
             return False

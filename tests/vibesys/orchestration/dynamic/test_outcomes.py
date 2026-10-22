@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hypothesis import assume, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import TERMS
 from tests.vibesys.orchestration.dynamic._values import (
@@ -53,6 +53,8 @@ from vs_core.api import (
     EvidenceKind,
     Failed,
     FailureReason,
+    MeasurementFailure,
+    ObservationStatus,
     RejectionCode,
     ReplyError,
     ReplyErrorCode,
@@ -263,6 +265,38 @@ def test_a_candidate_is_eligible_exactly_when_the_task_the_review_and_the_input_
         assert accuracy is True  # a retained parent is always accuracy-verified
     if settle.candidate is not None:
         assert settle.retention == "candidate"
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(
+    blamed=st.none() | st.sampled_from(MeasurementFailure),
+    status=st.sampled_from([ObservationStatus.FAILED, ObservationStatus.REJECTED]),
+    retained=st.booleans(),
+)
+@example(blamed=MeasurementFailure.INFRASTRUCTURE, status=ObservationStatus.FAILED, retained=True)
+@example(blamed=MeasurementFailure.AMBIGUOUS, status=ObservationStatus.FAILED, retained=True)
+def test_a_measurement_that_left_no_evidence_fails_the_candidate_only_on_a_verdict(
+    blamed: MeasurementFailure | None, status: ObservationStatus, *, retained: bool
+) -> None:
+    """Only a workload verdict (or a record written before blame was kept) settles as failed."""
+    cause = Failure(kind=FailureKind.NO_TRUSTED_EVIDENCE, status=status, blamed=blamed)
+    closing = Closing(
+        result=result_of(
+            HypothesisOutcome.SUPPORTED, review=True, revision_=CANDIDATE if retained else None
+        ),
+        cause=cause,
+    )
+    start = workstream_start()
+    settle = assertion(start, closing, TERMS, start.baseline)
+
+    assert not settle.eligible
+    judged = blamed is None or blamed is MeasurementFailure.WORKLOAD
+    assert cause.judges_candidate == judged
+    assert (settle.outcome == "failed") == judged
+    if not judged:
+        assert settle.outcome == "cancelled"
+        assert settle.candidate == (CANDIDATE if retained else None)
+        assert settle.retention == ("wip" if retained else "discard")
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

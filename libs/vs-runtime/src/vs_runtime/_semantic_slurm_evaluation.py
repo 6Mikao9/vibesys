@@ -685,7 +685,7 @@ class SemanticSlurmEvaluationExecutor:
             service_log=raw.output,
             candidate_startup_causes=self._trusted_plan.candidate_startup_causes,
         )
-        record = RecordState.OUTCOME
+        record = RecordState.EXIT_STATUS
         contract = self._trusted_plan.benchmark_contract
         if stage.kind is EvidenceKind.BENCHMARK and contract is not None:
             required = frozenset(item.name for item in self._objectives)

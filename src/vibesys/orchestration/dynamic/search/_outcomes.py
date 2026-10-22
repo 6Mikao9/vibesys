@@ -434,7 +434,9 @@ def assertion(
         )
     if not w.plan.measured:
         return _unmeasured_step(closing, terms)
-    if closing.cause is not None and closing.cause.kind is FailureKind.NOT_MEASURED:
+    if closing.cause is not None and (
+        closing.cause.kind is FailureKind.NOT_MEASURED or not closing.cause.judges_candidate
+    ):
         return _not_measured(closing, terms)
     if closing.scored(w.plan) and baseline is None:
         message = "a candidate is scored only once the input's measurement is known"
@@ -498,10 +500,12 @@ def _unmeasured_step(closing: Closing, terms: TaskTerms) -> Settle:
 
 
 def _not_measured(closing: Closing, terms: TaskTerms) -> Settle:
-    """The settlement of a candidate dropped from the evaluation queue unmeasured.
+    """The settlement of a candidate that no verdict was reached on.
 
-    It is never eligible, but the code is kept as work in progress: a newer candidate that
-    superseded it was built on it, and a plan step may still build on it.
+    It was dropped unmeasured, or measured to no avail by a fault of the run
+    (`Failure.judges_candidate`). It is never eligible, but the code is kept as work in progress: a newer candidate that
+    superseded it was built on it, and a plan step may still build on it. It is not settled
+    as failed: nothing it did failed.
     """
     settled = settle_for(closing, gates=gates_of(terms), beats_input=False, unsettled=UNSETTLED)
     if closing.candidate is None:

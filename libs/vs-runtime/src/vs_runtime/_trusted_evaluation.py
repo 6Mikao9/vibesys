@@ -610,7 +610,7 @@ class RuntimeTrustedEvaluation:
         if refusal is not None or confinement is None:
             return refusal or TrustedBuildResult.failed(
                 NO_BUILD_CONFINEMENT,
-                BenchmarkFailureKind.WORKLOAD,
+                BenchmarkFailureKind.INFRASTRUCTURE,
                 command=build.command,
                 executed=False,
             )
@@ -648,7 +648,7 @@ class RuntimeTrustedEvaluation:
             operator_output=operator_failure,
             operator_failure=operator_failure,
             failure_kind=_command_failure_kind(
-                RecordState.OUTCOME, result, None, trusted_evaluator=False
+                RecordState.EXIT_STATUS, result, None, trusted_evaluator=False
             ),
         )
 
@@ -659,7 +659,7 @@ class RuntimeTrustedEvaluation:
         if confinement is None:
             return TrustedBuildResult.failed(
                 NO_BUILD_CONFINEMENT,
-                BenchmarkFailureKind.WORKLOAD,
+                BenchmarkFailureKind.INFRASTRUCTURE,
                 command=build.command,
                 executed=False,
             )
@@ -739,15 +739,15 @@ class RuntimeTrustedEvaluation:
             failure=None if passed else output,
             operator_output=operator_output,
             operator_failure=None if passed else operator_output,
-            # The exit status is the accuracy command's own verdict, so it leaves an outcome
-            # whenever it reported one; a candidate that changed evaluator-owned files owns it.
+            # The exit status is the accuracy command's own verdict, but a time limit or a kill
+            # judges nothing; a candidate that changed evaluator-owned files owns the failure.
             failure_kind=(
                 None
                 if passed
                 else BenchmarkFailureKind.WORKLOAD
                 if mutated
                 else _command_failure_kind(
-                    RecordState.OUTCOME, result, execution_failure, trusted_evaluator=True
+                    RecordState.EXIT_STATUS, result, execution_failure, trusted_evaluator=True
                 )
             ),
             stdout=result.stdout,
@@ -795,7 +795,7 @@ class RuntimeTrustedEvaluation:
                 failure=failure,
                 operator_output=operator_failure,
                 operator_failure=operator_failure,
-                failure_kind=BenchmarkFailureKind.WORKLOAD,
+                failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
             )
         if changed := self._git.trusted_input_changes():
             failure = "Evaluator-owned files were modified: " + ", ".join(changed)

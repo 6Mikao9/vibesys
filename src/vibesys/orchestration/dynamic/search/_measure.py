@@ -61,6 +61,7 @@ from vs_core.api.search import (
     EvidenceRef,
     Failed,
     Flow,
+    MeasurementFailure,
     MeasurementPlan,
     MeasurementPurpose,
     MeasurementRecipe,
@@ -352,6 +353,8 @@ async def evidence_of(
             status=found.status,
             output=found.diagnostic,
             operator_output=found.operator_diagnostic,
+            # a result core left unclassified proves nothing about the candidate
+            blamed=found.failure or MeasurementFailure.UNKNOWN,
         )
         raise WorkEndedError(none)
     readings = await interpret(ctx, ws, Proof(refs=shown))
