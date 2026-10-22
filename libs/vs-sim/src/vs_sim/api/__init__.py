@@ -58,7 +58,18 @@ if TYPE_CHECKING:
         OutputStream,
         tee,
     )
+    from vs_sim.owned_command import owned_command
     from vs_sim.probes import CommandProbe, ProbeResult, ProcessesProbe, SubprocessProbe
+    from vs_sim.process_family import (
+        OwnedChild,
+        OwnerEvent,
+        OwnerLifeline,
+        ProcessFamily,
+        ProcessIdentity,
+        ProcessTreeUnreapedError,
+        end_process_family,
+        supervise_process,
+    )
     from vs_sim.processes import (
         DEFAULT_MAX_OUTPUT_BYTES,
         LAUNCHER_LIFELINE_ENV,
@@ -113,6 +124,20 @@ if TYPE_CHECKING:
     from vs_sim.yields import yield_now
 
 _MODULES: dict[str, str] = {
+    "owned_command": "vs_sim.owned_command",
+    **dict.fromkeys(
+        (
+            "OwnedChild",
+            "OwnerEvent",
+            "OwnerLifeline",
+            "ProcessFamily",
+            "ProcessIdentity",
+            "ProcessTreeUnreapedError",
+            "end_process_family",
+            "supervise_process",
+        ),
+        "vs_sim.process_family",
+    ),
     "BlockingRunner": "vs_sim.blocking",
     "ThreadBlockingRunner": "vs_sim.blocking",
     "Clock": "vs_sim.clock",
@@ -269,13 +294,18 @@ __all__ = [
     "OsThreads",
     "OutputSink",
     "OutputStream",
+    "OwnedChild",
+    "OwnerEvent",
+    "OwnerLifeline",
     "PidfdProcessSignaller",
     "PipedProcess",
     "PipedProcessLauncher",
     "Platform",
     "PlatformHostProbe",
     "ProbeResult",
+    "ProcessFamily",
     "ProcessGroupUnreaped",
+    "ProcessIdentity",
     "ProcessLauncher",
     "ProcessOutcome",
     "ProcessOutputTooLarge",
@@ -284,6 +314,7 @@ __all__ = [
     "ProcessSpec",
     "ProcessTimedOut",
     "ProcessTimeoutError",
+    "ProcessTreeUnreapedError",
     "Processes",
     "ProcessesProbe",
     "RandomSource",
@@ -320,9 +351,12 @@ __all__ = [
     "WorkerStartRefusedError",
     "check_read",
     "derive_seed",
+    "end_process_family",
     "follow_launcher",
     "forward_output",
+    "owned_command",
     "run_foreground",
+    "supervise_process",
     "sync_descriptor",
     "tee",
     "utc_datetime",

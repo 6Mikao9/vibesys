@@ -83,6 +83,34 @@ Never rely on a provider flag for isolation. See
    `docker_project_path_resources`: read-only paths are re-mounted read-only,
    hidden paths are overlaid with empty operator-owned masks.
 
+### Host process lifetime
+
+Host agent turns and local shell commands run through `vs_sim`'s owned-command
+supervisor. Each command has a dedicated session. A keeper outside that session
+and the agent's confinement watches both the command leader and a private pipe
+held only by its caller. Normal completion, timeout, cancellation and loss of the
+caller all end the command's entire process family before its output closes.
+A caller killed with `SIGKILL` closes the pipe too; cleanup does not depend on
+that caller running a `finally` block.
+
+On macOS a fresh Seatbelt policy fingerprint is inherited across fork and exec,
+so `nohup`, `setsid`, double forks, reparenting and clearing the environment do
+not remove ownership. Cleanup freezes and kills the family and confirms no live
+members remain. Signals use PID-version audit tokens to avoid PID reuse. The
+agent may signal processes sharing its inherited confinement, but not the
+unconfined keeper or operator. On Linux a dedicated subreaper retains orphaned
+descendants; signalling uses pidfds. Failure to inspect or finish cleanup is an
+error, never a successful command result.
+
+The macOS owner merges its fingerprint into an existing inline Seatbelt profile.
+For an otherwise unconfined local command it applies a lifetime-only profile,
+with no filesystem restrictions. macOS refuses a second `sandbox-exec` inside
+an already-confined command, so a confined entrypoint must reach the executor as
+an argument vector. This ownership covers native descendants; work requested
+from an external daemon is governed by that service's lifecycle. Container
+commands and long-lived container agent transports retain their separate remote
+cleanup mechanisms.
+
 ### Operator controls
 
 | Variable | Effect |

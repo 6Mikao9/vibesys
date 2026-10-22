@@ -43,7 +43,7 @@ from vs_agent.session_environment import (
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
 from vs_sandbox.api import build_host_sandbox
-from vs_sim.api import CloseOnce, NothingLeft, Released
+from vs_sim.api import CloseOnce, NothingLeft, Released, owned_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -189,6 +189,14 @@ def confine_to_sandbox(
         return replace(request, argv=sandbox.wrap(list(request.argv), request.cwd))
 
     return agentshim.TransformingExecutor(executor, transform, find_binary=find_binary)
+
+
+def _owned_host_executor() -> agentshim.CommandExecutor:
+    """Own the complete native command family outside its confinement and session."""
+    return agentshim.TransformingExecutor(
+        agentshim.HostCommandExecutor(),
+        lambda request: replace(request, argv=owned_command(request.argv)),
+    )
 
 
 def _resolve_binary_path(binary: str, env: Mapping[str, str]) -> str | None:
@@ -378,7 +386,7 @@ class ConfinedSessionLauncher:
         self._docker_sandboxes = docker_sandboxes
         self._workspace_sandboxes = workspace_sandboxes
         self._log = log or _ignore_log
-        self._executor_factory: ExecutorFactory = executor_factory or agentshim.HostCommandExecutor
+        self._executor_factory: ExecutorFactory = executor_factory or _owned_host_executor
         self._check_timeout = (
             check_timeout
             if check_timeout is not None

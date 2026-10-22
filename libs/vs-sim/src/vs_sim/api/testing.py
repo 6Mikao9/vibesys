@@ -47,7 +47,9 @@ from vs_sim.crash import (
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
 from vs_sim.fake_byte_source import FakeByteSource
+from vs_sim.fake_owned_command import FakeFamilyPipedProcessLauncher
 from vs_sim.fake_piped_process import ScriptedPipedProcess
+from vs_sim.fake_process_family import FakeOwnedChild, FakeProcessFamily
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
     NO_PROCESSES,
@@ -169,12 +171,15 @@ __all__ = [
     "End",
     "EventTrace",
     "FakeByteSource",
+    "FakeFamilyPipedProcessLauncher",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
     "FakeHostProbe",
     "FakeLoopbackHttp",
     "FakeMainThreadWake",
+    "FakeOwnedChild",
     "FakePipedProcessLauncher",
+    "FakeProcessFamily",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
     "FakeProcesses",

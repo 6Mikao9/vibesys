@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox.command_execution import execute_command
 from vs_sandbox.process_execution import PipedStoppableProcess
+from vs_sim.api import owned_command
 
 if TYPE_CHECKING:
     from vs_sandbox.execution import CommandResult
@@ -79,9 +80,10 @@ class LocalShellRunner:
     ) -> CommandResult:
         """Run *command* under ``/bin/sh -c`` and return its bounded result.
 
-        The command runs in its own process group, so a timeout or a set
-        *cancel* stops every process it started (``SIGTERM``, then ``SIGKILL``
-        after a grace period). The result contract is documented in
+        The command has its own process family. Its leader's exit, a timeout,
+        or a set *cancel* ends every descendant, including detached children.
+        A stop allows ``SIGTERM`` cleanup before the caller's ``SIGKILL``;
+        a private supervisor lifeline also handles loss of the caller. The result contract is documented in
         :mod:`vs_sandbox.command_execution`; every command runner shares it.
         """
         return execute_command(
@@ -91,7 +93,9 @@ class LocalShellRunner:
             cancel=cancel,
             max_output_chars=self._max_output_chars,
             launch=lambda: PipedStoppableProcess(
-                self._launcher.start((_SHELL, "-c", command), cwd=self.root_dir, env=self.env),
+                self._launcher.start(
+                    owned_command((_SHELL, "-c", command)), cwd=self.root_dir, env=self.env
+                ),
                 threads=self._threads,
                 output=output,
             ),
