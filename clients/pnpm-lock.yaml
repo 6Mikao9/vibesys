@@ -142,6 +142,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/request-identity':
+        specifier: workspace:*
+        version: link:../../libs/request-identity
       '@vibesys/run-session':
         specifier: workspace:*
         version: link:../../libs/run-session
@@ -513,6 +516,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/request-identity':
+        specifier: workspace:*
+        version: link:../../libs/request-identity
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
@@ -574,6 +580,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/request-identity':
+        specifier: workspace:*
+        version: link:../../libs/request-identity
       '@vibesys/run-session':
         specifier: workspace:*
         version: link:../../libs/run-session
@@ -644,6 +653,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/request-identity':
+        specifier: workspace:*
+        version: link:../../libs/request-identity
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
@@ -816,6 +828,9 @@ importers:
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../proto
+      '@vibesys/request-identity':
+        specifier: workspace:*
+        version: link:../request-identity
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport
@@ -962,6 +977,15 @@ importers:
     devDependencies:
       typescript:
         specifier: 5.9.3
+        version: 5.9.3
+
+  libs/request-identity:
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      typescript:
+        specifier: ^5.8.3
         version: 5.9.3
 
   libs/run-fixtures:
@@ -1152,6 +1176,9 @@ importers:
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@vibesys/request-identity':
+        specifier: workspace:*
+        version: link:../request-identity
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

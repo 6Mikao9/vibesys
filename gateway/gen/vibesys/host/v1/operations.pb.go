@@ -10346,7 +10346,7 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\x1bAGENT_LOGIN_STATE_SIGNED_IN\x10\x01\x1a\r\xd2\xf3\x18\tsigned_in\x120\n" +
 	"\x1cAGENT_LOGIN_STATE_SIGNED_OUT\x10\x02\x1a\x0e\xd2\xf3\x18\n" +
 	"signed_out\x12*\n" +
-	"\x19AGENT_LOGIN_STATE_UNKNOWN\x10\x03\x1a\v\xd2\xf3\x18\aunknownB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"\x19AGENT_LOGIN_STATE_UNKNOWN\x10\x03\x1a\v\xd2\xf3\x18\aunknownBH\xda\xf3\x18\x050.1.1Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
 var (
 	file_vibesys_host_v1_operations_proto_rawDescOnce sync.Once
