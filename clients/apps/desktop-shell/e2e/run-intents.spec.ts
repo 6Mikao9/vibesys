@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
 import {
+  Change,
   HostCallRequestSchema,
   HostCallResponseSchema,
   IntentAction,
@@ -12,6 +13,7 @@ import {
   type PostIntentRequest,
   RecordSchema,
   RunLiveness,
+  SpanStatus,
   type Record as StoreRecord,
   TailResponseSchema,
   WatchRunsResponseSchema,
@@ -43,10 +45,10 @@ function appliedState(action: IntentAction) {
   }).state;
 }
 
-async function openIntents(page: Page, amendment = false) {
+async function openIntents(page: Page, options: {amendment?: boolean; history?: 'pending'} = {}) {
   const source = storeRunFixture('live');
   const fixture = {...source, records: [...source.records]};
-  if (amendment) {
+  if (options.amendment) {
     const header = fixture.records.find(record => record.body.case === 'epochStarted');
     if (header?.body.case !== 'epochStarted') throw new Error('fixture header required');
     fixture.records.push(
@@ -76,7 +78,7 @@ async function openIntents(page: Page, amendment = false) {
     const replay = intentReplay('pending', envelope.method.value.requestId);
     return [...toBinary(HostCallResponseSchema, replay.admission)];
   });
-  await page.addInitScript(installGateway, wire(fixture));
+  await page.addInitScript(installGateway, intentWire(fixture, options.history));
   await openFixture(page, {...fixtureNamed('queue-rs-live'), runId: 'run-a'});
   const toggle = page.getByRole('switch', {name: 'Run transport v2'});
   await expect(toggle).not.toBeChecked();
@@ -84,7 +86,8 @@ async function openIntents(page: Page, amendment = false) {
     await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.calls()),
   ).toEqual([]);
   await toggle.check();
-  await expect(page.getByRole('button', {name: 'Guidance', exact: true})).toBeVisible();
+  if (options.history !== 'pending')
+    await expect(page.getByRole('button', {name: 'Guidance', exact: true})).toBeVisible();
   const outcome = async (index: number, result: 'applied' | 'refused'): Promise<void> => {
     const request = requests[index]?.request;
     if (!request) throw new Error('No posted intent');
@@ -131,6 +134,21 @@ async function openIntents(page: Page, amendment = false) {
   };
 }
 
+function intentWire(fixture: ReturnType<typeof storeRunFixture>, history: 'pending' | undefined) {
+  const input = wire(fixture);
+  if (history === 'pending') {
+    input.tail = [
+      ...toBinary(
+        TailResponseSchema,
+        create(TailResponseSchema, {
+          throughSeq: fixture.records[fixture.initialCount - 1]?.seq ?? 0n,
+        }),
+      ),
+    ];
+  }
+  return input;
+}
+
 async function appendRecords(page: Page, records: StoreRecord[]) {
   const sequence = records.at(-1)?.seq;
   if (sequence === undefined) throw new Error('records required');
@@ -148,6 +166,31 @@ async function appendRecords(page: Page, records: StoreRecord[]) {
     bytes,
   );
 }
+function finishOpenSpans(records: StoreRecord[], next: () => bigint): StoreRecord[] {
+  const spans = new Map(
+    records.flatMap(record =>
+      record.body.case === 'span' && record.body.value.span
+        ? [[record.body.value.span.id, record.body.value.span] as const]
+        : [],
+    ),
+  );
+  return [...spans.values()]
+    .filter(span => span.endedAt === undefined)
+    .map(span =>
+      create(RecordSchema, {
+        seq: next(),
+        epoch: 2,
+        body: {
+          case: 'span',
+          value: {
+            change: Change.ENDED,
+            span: {...span, status: SpanStatus.STOPPED, endedAt: Math.max(10, span.startedAt)},
+          },
+        },
+      }),
+    );
+}
+
 async function observeWriter(page: Page, epoch: number, liveness: RunLiveness) {
   const bytes = [
     ...toBinary(
@@ -166,7 +209,7 @@ for (const width of [800, 1440]) {
     page,
   }) => {
     await page.setViewportSize({width, height: 900});
-    const {requests} = await openIntents(page, true);
+    const {requests} = await openIntents(page, {amendment: true});
     await expect(page.getByText('Saved run', {exact: true})).toHaveCount(0);
     await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
     await page.getByRole('button', {name: 'Pause', exact: true}).click();
@@ -297,6 +340,7 @@ test('live controls remain reachable with both readers and history follows pause
   await observe(1, RunLiveness.ENDED);
   const resume = page.getByRole('button', {name: 'Resume', exact: true});
   await expect(resume).toBeEnabled();
+  await expect(page.getByText('Paused', {exact: true}).first()).toBeVisible();
   await expect(pauseNow).toHaveCount(0);
   await capture(page, 'controls-parked');
   await resume.click();
@@ -328,6 +372,7 @@ test('live controls remain reachable with both readers and history follows pause
   await expect(pauseNow).toBeEnabled();
   await capture(page, 'controls-resumed');
   await append([
+    ...finishOpenSpans(fixture.records, next),
     create(RecordSchema, {
       seq: next(),
       epoch: 2,
@@ -341,7 +386,25 @@ test('live controls remain reachable with both readers and history follows pause
   await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
   await expect(pauseNow).toHaveCount(0);
   await expect(resume).toHaveCount(0);
+  await expect(page.getByText('Running', {exact: true})).toHaveCount(0);
   await capture(page, 'controls-finished');
+});
+
+test('Pause now is reachable while a live run is still loading history', async ({page}) => {
+  await page.setViewportSize({width: 800, height: 900});
+  const {requests, append, fixture} = await openIntents(page, {history: 'pending'});
+  await expect(page.getByText('Loading', {exact: true})).toBeVisible();
+  const pauseNow = page.getByRole('button', {name: 'Pause now', exact: true});
+  await expect(pauseNow).toBeEnabled();
+  await expect(pauseNow).toBeInViewport();
+  await capture(page, 'controls-loading-v2');
+  await pauseNow.click();
+  await expect(page.getByText('Pause now · Pending', {exact: true})).toBeVisible();
+  expect(requests[0]?.request.intent.case).toBe('pauseNow');
+  await append(fixture.records.slice(fixture.initialCount));
+  await expect(page.getByText('Loading', {exact: true})).toHaveCount(0);
+  await expect(pauseNow).toBeEnabled();
+  await expect(page.getByText('Pause now · Pending', {exact: true})).toBeVisible();
 });
 
 test('intent controls app-window contact sheet', async ({page}) => {

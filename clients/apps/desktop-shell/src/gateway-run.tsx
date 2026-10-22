@@ -17,29 +17,19 @@ import {Card, EmptyState, Page, Stack, Switch, Text} from '@vibesys/ui';
 import {type JSX, type ReactNode, useMemo} from 'react';
 import {gatewayTransport} from './gateway-transport.js';
 
-export function GatewayRun(props: {
+interface GatewayRunProps {
   readonly seed: RunPageSeed;
   readonly bridge: GatewayBridge;
   readonly settings: WelcomeBridge;
   readonly schedule: ScheduleTimeout;
   readonly address: RunPageAddress;
   readonly legacy: (toggle: ReactNode) => ReactNode;
-}): JSX.Element {
+}
+
+export function GatewayRun(props: GatewayRunProps): JSX.Element {
   const {bridge, settings, seed, schedule, address} = props;
-  const ports = useMemo<GatewayRunPorts>(
-    () => ({
-      watchSetting: listener => settings.onHostSettingsChanged(listener),
-      reader: gatewayReader(
-        gatewayTransport(bridge, seed.identity.host),
-        gatewayContentCache(indexedDB),
-        schedule,
-      ),
-      setting: async enabled => {
-        const reply = await settings.runTransportV2(seed.identity.host, enabled);
-        if (!reply.ok) throw new Error(reply.error);
-        return reply.value;
-      },
-    }),
+  const ports = useMemo(
+    () => runPorts(bridge, settings, seed.identity.host, schedule),
     [bridge, settings, seed.identity.host, schedule],
   );
   const page = useGatewayRun({seed, ports, schedule, address});
@@ -86,6 +76,12 @@ export function GatewayRun(props: {
       {...(busy ? {disabledReason: 'Connecting'} : {})}
     />
   );
+  const toolbar = (
+    <Stack gap="space-1" align="start">
+      {toggle}
+      {intents.controls}
+    </Stack>
+  );
   if (snapshot.matches('off')) return <>{props.legacy(toggle)}</>;
   if (
     page.state === null ||
@@ -94,12 +90,10 @@ export function GatewayRun(props: {
     !snapshot.matches('active')
   ) {
     return (
-      <Page>
-        <Card>{toggle}</Card>
-        <Card>
-          <EmptyState title={snapshot.context.error ?? page.projectionError ?? 'Loading'} />
-        </Card>
-      </Page>
+      <RunLoading
+        toolbar={toolbar}
+        title={snapshot.context.error ?? page.projectionError ?? 'Loading'}
+      />
     );
   }
   return (
@@ -112,16 +106,39 @@ export function GatewayRun(props: {
       zoom={page.zoom}
       dispatch={page.dispatch}
       chat={{...sessions, minimumMain: 'wide'}}
-      toolbar={
-        <Stack gap="space-1" align="start">
-          {toggle}
-          {intents.controls}
-        </Stack>
-      }
+      toolbar={toolbar}
       supplemental={
         snapshot.context.error ? <Text tone="err">{snapshot.context.error}</Text> : null
       }
     />
+  );
+}
+
+function runPorts(
+  bridge: GatewayBridge,
+  settings: WelcomeBridge,
+  host: RunPageSeed['identity']['host'],
+  schedule: ScheduleTimeout,
+): GatewayRunPorts {
+  return {
+    watchSetting: listener => settings.onHostSettingsChanged(listener),
+    reader: gatewayReader(gatewayTransport(bridge, host), gatewayContentCache(indexedDB), schedule),
+    setting: async enabled => {
+      const reply = await settings.runTransportV2(host, enabled);
+      if (!reply.ok) throw new Error(reply.error);
+      return reply.value;
+    },
+  };
+}
+
+function RunLoading(props: {readonly toolbar: ReactNode; readonly title: string}): JSX.Element {
+  return (
+    <Page>
+      <Card>{props.toolbar}</Card>
+      <Card>
+        <EmptyState title={props.title} />
+      </Card>
+    </Page>
   );
 }
 

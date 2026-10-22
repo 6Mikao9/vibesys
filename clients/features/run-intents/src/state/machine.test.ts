@@ -10,7 +10,7 @@ import {
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
-import {intentRows, runIntentsMachine} from './index.js';
+import {runIntentsMachine} from './index.js';
 
 const request = create(PostIntentRequestSchema, {
   requestId: 'r-1',
@@ -222,12 +222,12 @@ test('replaying writer outcomes includes Resume and requests posted in another w
   for (const batch of [outcomes.slice(0, 1), outcomes, outcomes.slice(1)]) {
     state = getNextSnapshot(runIntentsMachine, state, {type: 'outcomes', outcomes: batch});
   }
-  expect(intentRows(state.context).map(row => [row.id, row.action, row.status])).toEqual([
+  expect(state.context.outcomes.map(row => [row.id, row.action, row.status])).toEqual([
     ['elsewhere-pause', IntentAction.PAUSE, 'applied'],
     ['elsewhere-resume', IntentAction.RESUME, 'applied'],
   ]);
   const resume = outcomes[1];
   if (!resume) throw new Error('missing resume outcome');
   resume.controlId = 'mutated';
-  expect(intentRows(state.context)[1]?.id).toBe('elsewhere-resume');
+  expect(state.context.outcomes[1]?.id).toBe('elsewhere-resume');
 });
