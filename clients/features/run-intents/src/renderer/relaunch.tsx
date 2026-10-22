@@ -64,6 +64,11 @@ export function useRelaunch(props: {
         ? 'unavailable'
         : snapshot.value,
     result: relaunchLabel(snapshot.context.result),
+    appliedEpoch:
+      snapshot.context.result?.outcome.case === 'epoch'
+        ? snapshot.context.result.outcome.value
+        : null,
+    available: relaunchTarget(snapshot.context.observation, snapshot.context.liveness) !== null,
     launch: () => current.current?.send({type: 'relaunch'}),
   };
 }

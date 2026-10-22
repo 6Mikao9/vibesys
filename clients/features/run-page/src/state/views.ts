@@ -146,7 +146,9 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       commandReason(state),
     ),
     pauseNow: offer(
-      state.readOnly !== true && state.record.kind === 'live',
+      state.readOnly !== true &&
+        state.record.kind === 'live' &&
+        !['ended', 'historical', 'unlisted'].includes(phase.kind),
       state.pauseNow.kind === 'idle'
         ? commandReason(state)
         : state.pauseNow.kind === 'confirming'
@@ -585,7 +587,7 @@ export function endedView(state: RunPageState): EndedView | null {
             direction,
             end.uncompared === true,
           );
-  const resume = 'Resume';
+  const resume = end?.resumable === true ? 'Resume' : null;
   return {title: label, tone: tone === 'live' ? 'neutral' : tone, reason, resume};
 }
 

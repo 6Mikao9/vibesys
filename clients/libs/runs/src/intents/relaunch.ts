@@ -98,7 +98,7 @@ export function relaunchTarget(
   const state = observation.lifecycle?.state;
   if (state?.case === 'parked') return {epoch: observation.epoch, state: 'parked'};
   if (state?.case === 'ended') {
-    return {epoch: observation.epoch, state: 'ended'};
+    return state.value.resumable ? {epoch: observation.epoch, state: 'ended'} : null;
   }
   return live === RunLiveness.INTERRUPTED ? {epoch: observation.epoch, state: 'interrupted'} : null;
 }

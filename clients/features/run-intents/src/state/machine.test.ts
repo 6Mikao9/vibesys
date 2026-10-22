@@ -10,7 +10,7 @@ import {
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
-import {runIntentsMachine} from './index.js';
+import {intentRows, runIntentsMachine} from './index.js';
 
 const request = create(PostIntentRequestSchema, {
   requestId: 'r-1',
@@ -203,4 +203,31 @@ test('process observations stay pending until a canonical control outcome arrive
     } as never);
     expect(late.context.warning).toBeNull();
   }
+});
+
+test('replaying writer outcomes includes Resume and requests posted in another window exactly once', () => {
+  let state = getInitialSnapshot(runIntentsMachine, {enabled: true});
+  const outcomes = [
+    create(IntentStateSchema, {
+      controlId: 'elsewhere-pause',
+      action: IntentAction.PAUSE,
+      step: IntentStep.APPLIED,
+    }),
+    create(IntentStateSchema, {
+      controlId: 'elsewhere-resume',
+      action: IntentAction.RESUME,
+      step: IntentStep.APPLIED,
+    }),
+  ];
+  for (const batch of [outcomes.slice(0, 1), outcomes, outcomes.slice(1)]) {
+    state = getNextSnapshot(runIntentsMachine, state, {type: 'outcomes', outcomes: batch});
+  }
+  expect(intentRows(state.context).map(row => [row.id, row.action, row.status])).toEqual([
+    ['elsewhere-pause', IntentAction.PAUSE, 'applied'],
+    ['elsewhere-resume', IntentAction.RESUME, 'applied'],
+  ]);
+  const resume = outcomes[1];
+  if (!resume) throw new Error('missing resume outcome');
+  resume.controlId = 'mutated';
+  expect(intentRows(state.context)[1]?.id).toBe('elsewhere-resume');
 });

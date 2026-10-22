@@ -6,10 +6,15 @@ import {
   HostCallRequestSchema,
   HostCallResponseSchema,
   IntentAction,
+  IntentStep,
   LifecycleSchema,
+  Outcome,
   type PostIntentRequest,
   RecordSchema,
+  RunLiveness,
+  type Record as StoreRecord,
   TailResponseSchema,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {fixtureNamed, INTENT_REPLAYS, intentReplay, storeRunFixture} from '@vibesys/run-fixtures';
 import {contactSheetHtml, type SheetEntry} from './checks/contact-sheet.js';
@@ -24,6 +29,7 @@ interface GatewayWindow {
     active(): number;
     append(bytes: number[]): void;
     disconnect(): void;
+    observe(bytes: number[]): void;
   };
   fakeHost: {calls: unknown[][]; recent(runs: readonly unknown[]): void};
 }
@@ -56,6 +62,15 @@ async function openIntents(page: Page, amendment = false) {
   let sequence = fixture.records.at(-1)?.seq ?? 0n;
   await page.exposeFunction('postIntent', (host: string, bytes: number[]) => {
     const envelope = fromBinary(HostCallRequestSchema, new Uint8Array(bytes));
+    if (envelope.method.case === 'relaunch')
+      return [
+        ...toBinary(
+          HostCallResponseSchema,
+          create(HostCallResponseSchema, {
+            result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 2n}}},
+          }),
+        ),
+      ];
     if (envelope.method.case !== 'postIntent') throw new Error('Expected PostIntent');
     requests.push({host, request: envelope.method.value});
     const replay = intentReplay('pending', envelope.method.value.requestId);
@@ -104,7 +119,46 @@ async function openIntents(page: Page, amendment = false) {
       bytes,
     );
   };
-  return {requests, outcome, toggle};
+
+  return {
+    requests,
+    outcome,
+    toggle,
+    append: (records: StoreRecord[]) => appendRecords(page, records),
+    observe: (epoch: number, liveness: RunLiveness) => observeWriter(page, epoch, liveness),
+    next: () => ++sequence,
+    fixture,
+  };
+}
+
+async function appendRecords(page: Page, records: StoreRecord[]) {
+  const sequence = records.at(-1)?.seq;
+  if (sequence === undefined) throw new Error('records required');
+  const bytes = [
+    ...toBinary(
+      TailResponseSchema,
+      create(TailResponseSchema, {
+        records: records.map(record => toBinary(RecordSchema, record)),
+        throughSeq: sequence,
+      }),
+    ),
+  ];
+  await page.evaluate(
+    bytes => (window as unknown as GatewayWindow).fakeGateway.append(bytes),
+    bytes,
+  );
+}
+async function observeWriter(page: Page, epoch: number, liveness: RunLiveness) {
+  const bytes = [
+    ...toBinary(
+      WatchRunsResponseSchema,
+      create(WatchRunsResponseSchema, {runId: 'run-a', liveness, head: {epoch}}),
+    ),
+  ];
+  await page.evaluate(
+    bytes => (window as unknown as GatewayWindow).fakeGateway.observe(bytes),
+    bytes,
+  );
 }
 
 for (const width of [800, 1440]) {
@@ -212,6 +266,82 @@ test('guidance opens beside the controls and posts the typed text', async ({page
     case: 'steer',
     value: {text: 'Measure contention'},
   });
+});
+
+test('live controls remain reachable with both readers and history follows pause, resume and finish', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 800, height: 900});
+  const {outcome, toggle, append, observe, next, fixture} = await openIntents(page);
+  const pauseNow = page.getByRole('button', {name: 'Pause now', exact: true});
+  await expect(pauseNow).toBeEnabled();
+  await expect(pauseNow).toBeInViewport();
+  await capture(page, 'controls-live-v2');
+  await toggle.uncheck();
+  await expect(pauseNow).toBeEnabled();
+  await expect(pauseNow).toBeInViewport();
+  await pauseNow.click();
+  await expect(page.getByText('Pause now?', {exact: true})).toBeVisible();
+  await capture(page, 'controls-pause-now-legacy');
+  await page.getByRole('button', {name: 'Keep running', exact: true}).click();
+  await toggle.check();
+  await page.getByRole('button', {name: 'Pause', exact: true}).click();
+  await expect(page.getByText('Pause · Pending', {exact: true})).toBeVisible();
+  await outcome(0, 'applied');
+  await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
+  await expect(pauseNow).toBeEnabled();
+  await capture(page, 'controls-draining');
+  await pauseNow.click();
+  await expect(page.getByText('Pause now · Pending', {exact: true})).toBeVisible();
+  await outcome(1, 'applied');
+  await observe(1, RunLiveness.ENDED);
+  const resume = page.getByRole('button', {name: 'Resume', exact: true});
+  await expect(resume).toBeEnabled();
+  await expect(pauseNow).toHaveCount(0);
+  await capture(page, 'controls-parked');
+  await resume.click();
+  const header = fixture.records.find(record => record.body.case === 'epochStarted');
+  if (header?.body.case !== 'epochStarted') throw new Error('epoch header required');
+  await append([
+    create(RecordSchema, {
+      seq: next(),
+      epoch: 2,
+      body: {case: 'epochStarted', value: {...header.body.value, epoch: 2}},
+    }),
+    create(RecordSchema, {
+      seq: next(),
+      epoch: 2,
+      body: {case: 'lifecycle', value: {state: {case: 'running', value: {}}}},
+    }),
+    create(RecordSchema, {
+      seq: next(),
+      epoch: 2,
+      body: {
+        case: 'intent',
+        value: {controlId: 'resume-2', action: IntentAction.RESUME, step: IntentStep.APPLIED},
+      },
+    }),
+  ]);
+  await observe(2, RunLiveness.ALIVE);
+  await expect(page.getByText('Resume · Applied', {exact: true})).toHaveCount(1);
+  await expect(page.getByText('Pause · Applied · Earlier epoch', {exact: true})).toBeVisible();
+  await expect(pauseNow).toBeEnabled();
+  await capture(page, 'controls-resumed');
+  await append([
+    create(RecordSchema, {
+      seq: next(),
+      epoch: 2,
+      body: {
+        case: 'lifecycle',
+        value: {state: {case: 'ended', value: {outcome: Outcome.FINISHED, resumable: false}}},
+      },
+    }),
+  ]);
+  await observe(2, RunLiveness.ENDED);
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
+  await expect(pauseNow).toHaveCount(0);
+  await expect(resume).toHaveCount(0);
+  await capture(page, 'controls-finished');
 });
 
 test('intent controls app-window contact sheet', async ({page}) => {

@@ -251,3 +251,46 @@ def test_gate_enrichment_retains_command_and_runtime_label(command: str) -> None
     attrs = p.GateAttrs.from_binary(mapped.label.attrs.value)
     assert attrs.command == command
     assert mapped.ended_at == 4
+
+
+@pytest.mark.regression
+@given(
+    increments=st.lists(
+        st.tuples(
+            st.one_of(st.none(), st.integers(0, 1000000)),
+            st.one_of(st.none(), st.integers(0, 1000000)),
+        ),
+        min_size=1,
+        max_size=8,
+    )
+)
+@example(increments=[(424250, 0), (857297, 0)])
+def test_repeated_turn_usage_has_one_total_in_summary_and_native_spans(
+    increments: list[tuple[int | None, int | None]],
+) -> None:
+    events = journal(1700000000, [(1, "model-a")])
+    at = next(
+        i for i, event in enumerate(events) if event.type == e.CoreEventType.TURN_USAGE_RECORDED
+    )
+    source = events[at]
+    events[at : at + 1] = [
+        source.model_copy(
+            update={
+                "data": e.TurnUsageData(
+                    span_id="op:turn-0", input_tokens=inputs, output_tokens=outputs
+                )
+            }
+        )
+        for inputs, outputs in increments
+    ]
+    events = [event.model_copy(update={"sequence": i}) for i, event in enumerate(events, 1)]
+    spans, _, legacy = project(events)
+    label = spans["op:turn-0"].label
+    assert label is not None
+    assert label.attrs is not None
+    usage = p.AgentTurnAttrs.from_binary(label.attrs.value).usage
+    assert usage is not None
+    assert (usage.input if usage.has_field("input") else None) == legacy.tokens.input
+    assert (usage.output if usage.has_field("output") else None) == legacy.tokens.output
+    assert usage.has_field("input") == (legacy.tokens.input is not None)
+    assert usage.has_field("output") == (legacy.tokens.output is not None)

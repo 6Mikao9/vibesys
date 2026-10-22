@@ -170,7 +170,7 @@ test('off is inert, live records append while scrubbed and switching streams can
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await reached(actor, snapshot => snapshot.context.ui.views['build-log'] !== undefined);
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'missing'}});
-  await reached(actor, snapshot => snapshot.context.error === 'Log unavailable');
+  await reached(actor, snapshot => snapshot.context.ui.logProblem?.message === 'Log unavailable');
   actor.stop();
 });
 
@@ -259,7 +259,7 @@ test('failed unary and corrupt content surface errors without using the legacy p
   }
 });
 
-test('setting, content and first-log deadlines use the injected clock', async () => {
+test('setting and content deadlines do not impose a first-byte deadline on log subscriptions', async () => {
   const fixture = storeRunFixture();
   const clock = new FakeClock();
   const transport = new FakeRunTransport(fixture);
@@ -297,10 +297,11 @@ test('setting, content and first-log deadlines use the injected clock', async ()
   await transport.called(`${SERVICE}GetBlobs`);
   await transport.called(`${SERVICE}TailStream`);
   clock.advanceBy(30000);
-  expect(actor.getSnapshot().context.error).toBe('Log timeout');
+  expect(actor.getSnapshot().context.error).toBe('Content timeout');
+  expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
   expect(transport.calls.find(call => call.method.endsWith('GetBlobs'))?.signal.aborted).toBe(true);
   expect(transport.calls.find(call => call.method.endsWith('TailStream'))?.signal.aborted).toBe(
-    true,
+    false,
   );
   actor.stop();
 });
@@ -672,4 +673,50 @@ test('reply attachments load through the same verified content owner as objectiv
       .filter(call => !call.method.endsWith('Skeleton') && !call.method.endsWith('GetBlobs'))
       .every(call => call.signal.aborted),
   ).toBe(true);
+});
+
+test('a quiet live log remains subscribed and an error belongs only to that stream', async () => {
+  const fixture = storeRunFixture('live');
+  const transport = new FakeRunTransport({
+    ...fixture,
+    streams: {...fixture.streams, quiet: new Uint8Array()},
+  });
+  const clock = new FakeClock();
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
+      setting: async () => true,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await reached(
+      actor,
+      snapshot =>
+        snapshot.context.load?.complete === true && Object.keys(snapshot.context.text).length > 0,
+    );
+    transport.observe(
+      create(WatchRunsResponseSchema, {
+        runId: SEED.identity.runId,
+        liveness: RunLiveness.ALIVE,
+        head: {epoch: 1},
+      }),
+    );
+    actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'quiet'}});
+    await transport.called(`${SERVICE}TailStream`);
+    clock.advanceBy(60000);
+    expect(actor.getSnapshot().context.error).toBeNull();
+    expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
+    expect(actor.getSnapshot().matches({active: {logs: 'following'}})).toBe(true);
+    actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'missing'}});
+    await reached(actor, snapshot => snapshot.context.ui.logProblem !== undefined);
+    expect(actor.getSnapshot().context.error).toBeNull();
+    actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
+    await reached(actor, snapshot => snapshot.context.ui.views['build-log'] !== undefined);
+    expect(actor.getSnapshot().context.ui.logProblem).toBeUndefined();
+  } finally {
+    actor.stop();
+  }
 });

@@ -6,11 +6,12 @@ import {
   type RelaunchObservation,
   type RunIntentAction,
   runIntent,
+  runIntentActions,
   runReference,
 } from '@vibesys/runs/intents';
 import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
-import type {runIntentsMachine} from '../state/index.js';
+import {intentRows, type runIntentsMachine} from '../state/index.js';
 import {intentsActor} from './effects/controls.js';
 import {useRelaunch} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
@@ -61,7 +62,9 @@ export function useRunIntents(props: {
   ) => current.current?.send(request);
   if (!props.enabled || !snapshot || projectRoot === undefined)
     return {controls: null, busy, sendRequest};
+  const actions = runIntentActions(props.relaunch);
   const send = (action: RunIntentAction) => {
+    if (!actions.includes(action)) return;
     const request = runIntent(
       {
         ...runReference(projectRoot, props.runId),
@@ -77,8 +80,10 @@ export function useRunIntents(props: {
   const controls = (
     <IntentControls
       {...(relaunch ? {relaunch} : {})}
+      actions={actions}
+      epoch={props.relaunch?.epoch ?? 0n}
       busy={snapshot.matches({active: 'sending'})}
-      entries={snapshot.context.entries}
+      entries={intentRows(snapshot.context)}
       error={snapshot.context.error}
       warning={snapshot.context.warning}
       guidanceOpen={guidanceOpen}

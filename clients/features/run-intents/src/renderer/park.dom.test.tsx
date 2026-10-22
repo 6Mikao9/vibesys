@@ -2,7 +2,16 @@ import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge, GatewayCall} from '@vibesys/ipc';
-import {HostCallRequestSchema, HostCallResponseSchema} from '@vibesys/proto';
+import {
+  HostCallRequestSchema,
+  HostCallResponseSchema,
+  IntentAction,
+  IntentStep,
+  type Lifecycle,
+  LifecycleSchema,
+  RecordSchema,
+  TailResponseSchema,
+} from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
@@ -30,19 +39,45 @@ afterAll(async () => {
 /** The byte transport holds admissions until the simulated host acknowledges them. */
 class FakeBridge implements GatewayBridge {
   readonly calls: Array<{bytes: Uint8Array; admit: (bytes: Uint8Array) => void}> = [];
-  watching = false;
+  readonly listeners = new Set<(bytes: Uint8Array) => void>();
+  get watching() {
+    return this.listeners.size > 0;
+  }
   unary(_host: HostKey, _method: string, bytes: Uint8Array): GatewayCall<Uint8Array> {
     const {promise, resolve, reject} = Promise.withResolvers<Uint8Array>();
     this.calls.push({bytes, admit: resolve});
     return {result: promise, cancel: () => reject(new Error('cancelled'))};
   }
-  stream() {
-    this.watching = true;
+  stream(
+    _host: HostKey,
+    method: string,
+    _request: Uint8Array,
+    receive: (bytes: Uint8Array) => void,
+  ) {
+    if (method.endsWith('/Tail')) this.listeners.add(receive);
     return {
       cancel: () => {
-        this.watching = false;
+        this.listeners.delete(receive);
       },
     };
+  }
+  outcomes(controlId: string, action: IntentAction) {
+    const bytes = toBinary(
+      TailResponseSchema,
+      create(TailResponseSchema, {
+        records: [
+          toBinary(
+            RecordSchema,
+            create(RecordSchema, {
+              seq: 1n,
+              epoch: 1,
+              body: {case: 'intent', value: {controlId, action, step: IntentStep.APPLIED}},
+            }),
+          ),
+        ],
+      }),
+    );
+    for (const receive of this.listeners) receive(bytes);
   }
 }
 
@@ -61,7 +96,10 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
           enabled
-          relaunch={{epoch: 1n}}
+          relaunch={{
+            epoch: 1n,
+            lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+          }}
           schedule={clock.schedule}
         />,
       ),
@@ -99,4 +137,66 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
     container.remove();
   }
   expect(bridge.watching).toBe(false);
+});
+
+test('live, draining, parked, resumed and finished observations keep the right controls and history', async () => {
+  const bridge = new FakeBridge();
+  const clock = new FakeClock();
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const render = (epoch: bigint, lifecycle: Lifecycle) =>
+    act(async () =>
+      root.render(
+        <RunIntents
+          bridge={bridge}
+          host={'local' as HostKey}
+          projectRoot={recordedProjectRoot('/project')}
+          runId="run-1"
+          enabled
+          relaunch={{epoch, lifecycle}}
+          schedule={clock.schedule}
+        />,
+      ),
+    );
+  const labels = () => [...container.querySelectorAll('button')].map(button => button.textContent);
+  try {
+    await render(1n, create(LifecycleSchema, {state: {case: 'running', value: {}}}));
+    expect(labels()).toContain('Pause now');
+    await act(async () => bridge.outcomes('remote-pause', IntentAction.PAUSE));
+    expect(container.textContent).toContain('Pause · Applied');
+    await render(1n, create(LifecycleSchema, {state: {case: 'draining', value: {}}}));
+    expect(labels()).toContain('Pause now');
+    expect(labels()).not.toContain('Pause');
+    await render(1n, create(LifecycleSchema, {state: {case: 'parked', value: {}}}));
+    expect(labels()).toContain('Resume');
+    expect(labels()).not.toContain('Pause now');
+    const resume = [...container.querySelectorAll('button')].find(
+      button => button.textContent === 'Resume',
+    );
+    await act(async () => resume?.click());
+    const call = bridge.calls.at(-1);
+    if (!call) throw new Error('missing relaunch');
+    await act(async () =>
+      call.admit(
+        toBinary(
+          HostCallResponseSchema,
+          create(HostCallResponseSchema, {
+            result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 2n}}},
+          }),
+        ),
+      ),
+    );
+    await render(2n, create(LifecycleSchema, {state: {case: 'running', value: {}}}));
+    expect(container.textContent).toContain('Resume · Applied');
+    expect(container.textContent).toContain('Request history');
+    expect(labels()).toContain('Pause now');
+    await render(2n, create(LifecycleSchema, {state: {case: 'ended', value: {resumable: false}}}));
+    expect(labels()).not.toContain('Pause');
+    expect(labels()).not.toContain('Pause now');
+    expect(labels().filter(label => label === 'Resume')).toEqual([]);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });

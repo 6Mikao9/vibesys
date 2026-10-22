@@ -18,7 +18,7 @@ import {
 } from '@vibesys/proto';
 
 export type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/proto';
-export {IntentStep} from '@vibesys/proto';
+export {IntentAction, IntentStep} from '@vibesys/proto';
 
 export const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
 export const INTENT_TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
@@ -163,10 +163,15 @@ export function intentTailRequest(runId: string): Uint8Array {
   return toBinary(TailRequestSchema, create(TailRequestSchema, {runId}));
 }
 
-export function intentTailResponse(bytes: Uint8Array): readonly IntentState[] {
+/** Writer position accompanies outcomes so earlier epochs remain history after a relaunch. */
+export type IntentOutcome = IntentState & {readonly epoch?: bigint; readonly sequence?: bigint};
+
+export function intentTailResponse(bytes: Uint8Array): readonly IntentOutcome[] {
   return fromBinary(TailResponseSchema, bytes).records.flatMap(bytes => {
     const record = fromBinary(RecordSchema, bytes);
-    return record.body.case === 'intent' ? [record.body.value] : [];
+    return record.body.case === 'intent'
+      ? [{...record.body.value, epoch: BigInt(record.epoch), sequence: record.seq}]
+      : [];
   });
 }
 
@@ -189,3 +194,22 @@ export {
   relaunchRequest,
   relaunchTarget,
 } from './relaunch.js';
+
+/** Writer lifecycle determines available live actions, independent of the reader or scrubber. */
+export function runIntentActions(
+  observation: import('./relaunch.js').RelaunchObservation | undefined,
+): readonly RunIntentAction[] {
+  if (!observation || observation.epoch < 1n) return [];
+  switch (observation.lifecycle?.state.case) {
+    case 'starting':
+      return ['pause', 'pauseNow'];
+    case 'running':
+      return observation.lifecycle.state.value.hold?.reason.case === 'operator'
+        ? ['pauseNow', 'steer']
+        : ['pause', 'pauseNow', 'steer'];
+    case 'draining':
+      return ['pauseNow'];
+    default:
+      return [];
+  }
+}

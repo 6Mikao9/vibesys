@@ -1,6 +1,8 @@
 /** Typed intent controls; admission is pending until the run writes IntentState. */
 export {
   type IntentEntry,
+  type IntentRow,
+  intentRows,
   intentWatchMachine,
   type RunIntentsContext,
   type RunIntentsEvent,

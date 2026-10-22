@@ -7,7 +7,7 @@ import type {RunEvent, RunStatus} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
-import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
+import {type CoreState, hasRunEnded, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import type {RecordRow} from '@vibesys/run-state/records';
 import type {RunRef} from '@vibesys/runs';
 import {createMachine, getInitialSnapshot, getNextSnapshot, type SnapshotFrom} from 'xstate';
@@ -88,7 +88,7 @@ function isEndedRecord(record: RunRecord): boolean {
 
 /** Whether the run is over (ended, or a saved run whose tombstone expired) rather than live. */
 export function runHasEnded(state: RunPageState): boolean {
-  return isEndedRecord(state.record);
+  return isEndedRecord(state.record) || (state.run.core !== null && hasRunEnded(state.run.core));
 }
 
 /** The run's place in its lifecycle, as the screen shows it. */
@@ -250,6 +250,7 @@ export interface RunPageState {
    * picks a stream.
    */
   readonly followingLogs: boolean;
+  readonly logProblem?: {readonly streamId: string; readonly message: string} | undefined;
   readonly pauseNow: PauseNowFlow;
   readonly logs: RunLogs;
   /** The latest view of each followed stream, by stream id. */
@@ -480,6 +481,12 @@ export function runWallNow(state: RunPageState): number | null {
 
 /** The run's phase as the screen shows it. */
 export function runPhase(state: RunPageState): RunPhase {
+  const core = state.run.core;
+  if (state.record.kind === 'live' && core !== null && hasRunEnded(core)) {
+    const status = core.status === 'interrupted' ? 'stopped' : core.status;
+    const run = {...state.record.run, phase: status};
+    return {kind: 'ended', run, end: run.end};
+  }
   const phase = recordPhase(state.record);
   if (phase.kind === 'ended' || phase.kind === 'unlisted' || phase.kind === 'historical')
     return phase;
@@ -1026,7 +1033,7 @@ function confirmStep(state: RunPageState, action: RunPageAction): RunPageStep | 
 
 /** Whether a live pause command can reach the run now: its session's controls are up. */
 export function commandable(state: RunPageState): boolean {
-  return state.link.kind === 'attached' && state.session?.controls === true;
+  return !runHasEnded(state) && state.link.kind === 'attached' && state.session?.controls === true;
 }
 
 /** A command the screen offers, sent only when the current state offers it. */
@@ -1044,7 +1051,7 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
       });
     case 'resume-ended': {
       const end = phase.kind === 'ended' ? phase.end : null;
-      return offered(phase.kind === 'ended' || phase.kind === 'historical', {
+      return offered(phase.kind === 'ended' && end?.resumable === true, {
         kind: 'resume-ended',
         fromRound: end?.resume_from_round ?? null,
       });

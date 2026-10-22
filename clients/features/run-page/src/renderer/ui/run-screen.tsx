@@ -185,47 +185,49 @@ function Header(props: {
     {id: 'again', label: 'Run again with changes', press: () => dispatch({type: 'run-again'})},
   ];
   return (
-    <Row justify="between" align="start" wrap>
-      {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
-      <Stack gap="space-2" grow>
-        <Text as="h1" variant="heading">
-          {header.title}
-        </Text>
-        <RunFacts header={header} />
-      </Stack>
-      <Row gap="space-2">
-        {props.toolbar}
-        {chat === undefined ? null : (
-          <Button
-            variant={chat.open ? 'primary' : 'secondary'}
-            icon="chat"
-            label="Chat"
-            expanded={chat.open}
-            press={chat.toggle}
-            {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
-          />
-        )}
-        {header.pause.shown ? (
-          <Button
-            variant="secondary"
-            text="Pause"
-            press={() => dispatch({type: 'pause'})}
-            {...reason(header.pause)}
-          />
-        ) : null}
-        {header.pauseNow.shown ? (
-          <Button
-            variant="danger"
-            text="Pause now"
-            press={() => dispatch({type: 'ask-pause-now'})}
-            {...reason(header.pauseNow)}
-          />
-        ) : null}
-        {state.readOnly === true ? null : (
-          <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
-        )}
+    <Stack gap="space-2">
+      <Row justify="between" align="start" wrap>
+        {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
+        <Stack gap="space-2" grow>
+          <Text as="h1" variant="heading">
+            {header.title}
+          </Text>
+          <RunFacts header={header} />
+        </Stack>
+        <Row gap="space-2" wrap align="start">
+          {chat === undefined ? null : (
+            <Button
+              variant={chat.open ? 'primary' : 'secondary'}
+              icon="chat"
+              label="Chat"
+              expanded={chat.open}
+              press={chat.toggle}
+              {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
+            />
+          )}
+          {header.pause.shown ? (
+            <Button
+              variant="secondary"
+              text="Pause"
+              press={() => dispatch({type: 'pause'})}
+              {...reason(header.pause)}
+            />
+          ) : null}
+          {header.pauseNow.shown ? (
+            <Button
+              variant="danger"
+              text="Pause now"
+              press={() => dispatch({type: 'ask-pause-now'})}
+              {...reason(header.pauseNow)}
+            />
+          ) : null}
+          {state.readOnly === true ? null : (
+            <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
+          )}
+        </Row>
       </Row>
-    </Row>
+      {props.toolbar}
+    </Stack>
   );
 }
 
@@ -583,11 +585,11 @@ function RunScreenBody(props: {
           names={names}
           dispatch={dispatch}
           chat={props.chat}
-          toolbar={props.toolbar}
           scrubber={traceArrival(state) === 'arrived' && before === null}
         />
       }
     >
+      {props.toolbar}
       <PauseNowBanner state={state} dispatch={dispatch} />
       {state.notice === null ? null : (
         <Banner tone="err" title="The run did not take the command" body={state.notice} />

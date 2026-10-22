@@ -123,7 +123,7 @@ def usage(projection: Projection) -> None:
         raise TypeError(message)
     span, attrs = turn(projection)
     attrs.ended_at = p.Timestamp.from_datetime(projection.event.timestamp)
-    attrs.usage = p.TokenUsage(
+    increment = p.TokenUsage(
         input=data.input_tokens,
         cache_read=data.cache_read_input_tokens,
         cache_creation=data.cache_creation_input_tokens,
@@ -132,6 +132,19 @@ def usage(projection: Projection) -> None:
         cost_usd=data.total_cost_usd,
         duration_ms=data.duration_ms,
     )
+    total = attrs.usage if attrs.usage is not None else p.TokenUsage()
+    for name in (
+        "input",
+        "cache_read",
+        "cache_creation",
+        "output",
+        "reasoning",
+        "cost_usd",
+        "duration_ms",
+    ):
+        if increment.has_field(name):
+            setattr(total, name, (getattr(total, name) or 0) + getattr(increment, name))
+    attrs.usage = total
     update_turn(projection, span, attrs)
 
 

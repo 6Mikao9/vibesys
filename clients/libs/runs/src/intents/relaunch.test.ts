@@ -1,20 +1,32 @@
 import {expect, test} from 'bun:test';
 import {create, toBinary} from '@bufbuild/protobuf';
-import {LifecycleSchema, Outcome, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
-import {livenessResponse, relaunchTarget} from './index.js';
+import {
+  DrainGoal,
+  LifecycleSchema,
+  Outcome,
+  RunLiveness,
+  StageState,
+  StartupStage,
+  WatchRunsResponseSchema,
+} from '@vibesys/proto';
+import {livenessResponse, relaunchTarget, runIntentActions} from './index.js';
 
-test('every ended observation offers Resume while a live writer never does', () => {
+test('only resumable ended observations offer Resume while a live writer never does', () => {
   for (let epoch = 1; epoch <= 5; epoch += 1) {
     const observed = BigInt(epoch);
     for (const [state, lifecycle] of [
       ['parked', create(LifecycleSchema, {state: {case: 'parked', value: {}}})],
       [
         'ended',
-        create(LifecycleSchema, {state: {case: 'ended', value: {outcome: Outcome.STOPPED}}}),
+        create(LifecycleSchema, {
+          state: {case: 'ended', value: {outcome: Outcome.STOPPED, resumable: true}},
+        }),
       ],
       [
         'ended',
-        create(LifecycleSchema, {state: {case: 'ended', value: {outcome: Outcome.INTERRUPTED}}}),
+        create(LifecycleSchema, {
+          state: {case: 'ended', value: {outcome: Outcome.INTERRUPTED, resumable: true}},
+        }),
       ],
     ] as const) {
       expect(
@@ -28,7 +40,7 @@ test('every ended observation offers Resume while a live writer never does', () 
       const lifecycle = create(LifecycleSchema, {state: {case: 'ended', value: {outcome}}});
       for (const value of [RunLiveness.ALIVE, RunLiveness.ENDED, RunLiveness.INTERRUPTED])
         expect(relaunchTarget({epoch: observed, lifecycle}, {epoch: observed, value})).toEqual(
-          value === RunLiveness.ALIVE ? null : {epoch: observed, state: 'ended'},
+          null,
         );
     }
     const lifecycle = create(LifecycleSchema, {state: {case: 'running', value: {}}});
@@ -76,4 +88,50 @@ test('a newer host epoch fences an older parked snapshot', () => {
   for (const value of [RunLiveness.ALIVE, RunLiveness.INTERRUPTED, RunLiveness.ENDED]) {
     expect(relaunchTarget({epoch: 1n, lifecycle}, {epoch: 2n, value})).toBeNull();
   }
+});
+
+test('property: control availability is a projection of the latest writer lifecycle', () => {
+  const lifecycles = [
+    create(LifecycleSchema, {
+      state: {
+        case: 'starting',
+        value: {stage: StartupStage.PROBING_WORKSPACE, state: StageState.RUNNING},
+      },
+    }),
+    create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+    create(LifecycleSchema, {
+      state: {case: 'running', value: {hold: {reason: {case: 'operator', value: {}}}}},
+    }),
+    create(LifecycleSchema, {state: {case: 'draining', value: {goal: DrainGoal.PARK}}}),
+    create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+    ...[Outcome.FINISHED, Outcome.FAILED, Outcome.STOPPED, Outcome.INTERRUPTED].flatMap(outcome =>
+      [false, true].map(resumable =>
+        create(LifecycleSchema, {state: {case: 'ended', value: {outcome, resumable}}}),
+      ),
+    ),
+  ];
+  for (const epoch of [0n, 1n, 3n]) {
+    for (const lifecycle of lifecycles) {
+      const state = lifecycle.state;
+      const observation = {epoch, lifecycle};
+      const actions = runIntentActions(observation);
+      const live = ['starting', 'running', 'draining'].includes(state.case ?? '') && epoch > 0n;
+      expect(actions.includes('pauseNow')).toBe(live);
+      expect(actions.includes('pause')).toBe(
+        live &&
+          state.case !== 'draining' &&
+          !(state.case === 'running' && state.value.hold?.reason.case === 'operator'),
+      );
+      expect(actions.includes('steer')).toBe(epoch > 0n && state.case === 'running');
+      const canResume =
+        state.case === 'parked' || (state.case === 'ended' && state.value.resumable);
+      const values = [RunLiveness.UNSPECIFIED, RunLiveness.ALIVE, RunLiveness.ENDED];
+      for (const value of values) {
+        expect(relaunchTarget(observation, {epoch, value}) !== null).toBe(
+          epoch > 0n && value !== RunLiveness.ALIVE && canResume,
+        );
+      }
+    }
+  }
+  expect(runIntentActions(undefined)).toEqual([]);
 });

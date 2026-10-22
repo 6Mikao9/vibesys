@@ -1,19 +1,28 @@
-import type {RunIntentAction} from '@vibesys/runs/intents';
+import {IntentAction, type RunIntentAction} from '@vibesys/runs/intents';
 import {Button, Dialog, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
-import type {IntentEntry} from '../../state/index.js';
+import type {IntentRow} from '../../state/index.js';
 import {RelaunchAction, RelaunchStatus, type RelaunchView} from './relaunch.js';
 
-const ACTION_LABELS: Record<NonNullable<IntentEntry['request']['intent']['case']>, string> = {
+const ACTION_LABELS: Record<IntentAction, string> = {
+  [IntentAction.UNSPECIFIED]: 'Request',
+  [IntentAction.PAUSE]: 'Pause',
+  [IntentAction.PARK]: 'Pause',
+  [IntentAction.PAUSE_NOW]: 'Pause now',
+  [IntentAction.RESUME]: 'Resume',
+  [IntentAction.STOP]: 'Stop',
+  [IntentAction.STEER]: 'Guidance',
+  [IntentAction.WITHDRAW]: 'Withdraw guidance',
+  [IntentAction.CANCEL_ATTEMPT]: 'Cancel attempt',
+  [IntentAction.CANCEL_ITEM]: 'Cancel item',
+  [IntentAction.SET_MAX_PARALLEL]: 'Change parallelism',
+};
+const BUTTON_LABELS: Record<RunIntentAction, string> = {
   pause: 'Pause',
   pauseNow: 'Pause now',
   steer: 'Guidance',
-  withdraw: 'Withdraw guidance',
-  cancelAttempt: 'Cancel attempt',
-  cancelItem: 'Cancel item',
-  setParallelism: 'Change parallelism',
 };
-const STATUS_LABELS: Record<IntentEntry['status'], string> = {
+const STATUS_LABELS: Record<IntentRow['status'], string> = {
   sending: 'Sending',
   pending: 'Pending',
   applied: 'Applied',
@@ -23,8 +32,10 @@ const STATUS_LABELS: Record<IntentEntry['status'], string> = {
 
 export function IntentControls(props: {
   readonly busy: boolean;
+  readonly actions: readonly RunIntentAction[];
+  readonly epoch: bigint;
   readonly relaunch?: RelaunchView;
-  readonly entries: readonly IntentEntry[];
+  readonly entries: readonly IntentRow[];
   readonly error: string | null;
   readonly warning: string | null;
   readonly guidanceOpen: boolean;
@@ -37,21 +48,38 @@ export function IntentControls(props: {
   return (
     <Stack gap="space-1">
       <Row gap="space-2" wrap>
-        {(['pause', 'pauseNow'] as const).map(action => (
-          <Button
-            key={action}
-            variant={action === 'pauseNow' ? 'danger' : 'secondary'}
-            quietReason
-            {...(props.busy ? {disabledReason: 'Sending'} : {})}
-            press={() => props.send(action)}
-            text={ACTION_LABELS[action]}
-          />
-        ))}
+        {props.actions
+          .filter(action => action !== 'steer')
+          .map(action => (
+            <Button
+              key={action}
+              variant={action === 'pauseNow' ? 'danger' : 'secondary'}
+              quietReason
+              {...(props.busy ? {disabledReason: 'Sending'} : {})}
+              press={() => props.send(action)}
+              text={BUTTON_LABELS[action]}
+            />
+          ))}
         {props.relaunch ? <RelaunchAction {...props.relaunch} /> : null}
-        <Button text="Guidance" press={() => props.showGuidance(true)} />
+        {props.actions.includes('steer') ? (
+          <Button text="Guidance" press={() => props.showGuidance(true)} />
+        ) : null}
       </Row>
-      <Text tone="muted">Unfinished work may need repeating and may still incur charges.</Text>
-      {props.relaunch ? <RelaunchStatus {...props.relaunch} /> : null}
+      {props.actions.includes('pauseNow') ? (
+        <Text tone="muted">Unfinished work may need repeating and may still incur charges.</Text>
+      ) : null}
+      {props.entries.length > 0 || props.relaunch?.result ? (
+        <Text variant="small" tone="muted">
+          Request history
+        </Text>
+      ) : null}
+      {props.relaunch &&
+      !props.entries.some(
+        entry =>
+          entry.action === IntentAction.RESUME && entry.epoch === props.relaunch?.appliedEpoch,
+      ) ? (
+        <RelaunchStatus {...props.relaunch} />
+      ) : null}
       {props.warning ? (
         <Text tone="warn" title={props.warning}>
           Posting order unknown
@@ -63,15 +91,15 @@ export function IntentControls(props: {
         </Text>
       ) : null}
       {props.entries.map(entry => (
-        <Row key={entry.request.requestId} gap="space-2" wrap>
+        <Row key={entry.id} gap="space-2" wrap>
           <Text {...(entry.reason ? {title: entry.reason} : {})}>
-            {entry.request.intent.case ? ACTION_LABELS[entry.request.intent.case] : 'Request'} ·{' '}
-            {STATUS_LABELS[entry.status]}
+            {ACTION_LABELS[entry.action]} · {STATUS_LABELS[entry.status]}
+            {entry.epoch !== null && entry.epoch < props.epoch ? ' · Earlier epoch' : ''}
           </Text>
           {entry.status === 'uncertain' ? (
             <Button
               {...(props.busy ? {disabledReason: 'Sending'} : {})}
-              press={() => props.retry(entry.request.requestId)}
+              press={() => props.retry(entry.id)}
               text="Retry request"
             />
           ) : null}

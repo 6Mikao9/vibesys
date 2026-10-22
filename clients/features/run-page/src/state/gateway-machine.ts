@@ -137,7 +137,6 @@ export const gatewayRunMachine = setup({
   },
   guards: {
     needsContent: ({context}) => nextContentHash(context) !== '',
-    hasStream: ({context}) => context.ui.selected !== null,
   },
   actions: {
     receivedRecords: assign(({context, event}) => {
@@ -322,9 +321,15 @@ export const gatewayRunMachine = setup({
               {
                 guard: ({event, context}) =>
                   event.action.type === 'select-stream' &&
-                  event.action.streamId !== context.ui.selected,
+                  (event.action.streamId !== context.ui.selected ||
+                    context.ui.logProblem !== undefined),
                 target: '.following',
-                actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)}),
+                actions: assign({
+                  ui: ({context, event}) => ({
+                    ...uiStep(context.ui, event.action),
+                    logProblem: undefined,
+                  }),
+                }),
               },
               {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},
             ],
@@ -332,29 +337,6 @@ export const gatewayRunMachine = setup({
           states: {
             idle: {},
             following: {
-              initial: 'waiting',
-              states: {
-                waiting: {
-                  after: {
-                    30000: {
-                      target: '#gatewayRun.active.logs.idle',
-                      actions: assign({error: 'Log timeout'}),
-                    },
-                  },
-                  on: {
-                    log: {
-                      target: 'live',
-                      actions: assign({
-                        ui: ({context, event}) => ({
-                          ...context.ui,
-                          views: receivedLog(context, event),
-                        }),
-                      }),
-                    },
-                  },
-                },
-                live: {},
-              },
               invoke: {
                 id: 'log',
                 src: 'log',
@@ -363,15 +345,35 @@ export const gatewayRunMachine = setup({
                   streamId: context.ui.selected ?? '',
                   receive: event => self.send(event),
                 }),
-                onError: {target: 'idle', actions: assign({error: 'Log unavailable'})},
+                onError: {
+                  target: 'idle',
+                  actions: assign({
+                    ui: ({context}) => ({
+                      ...context.ui,
+                      logProblem: {streamId: context.ui.selected ?? '', message: 'Log unavailable'},
+                    }),
+                  }),
+                },
               },
               on: {
                 log: {
                   actions: assign({
-                    ui: ({context, event}) => ({...context.ui, views: receivedLog(context, event)}),
+                    ui: ({context, event}) => ({
+                      ...context.ui,
+                      views: receivedLog(context, event),
+                      logProblem: undefined,
+                    }),
                   }),
                 },
-                'log-failed': {target: 'idle', actions: assign({error: 'Log unavailable'})},
+                'log-failed': {
+                  target: 'idle',
+                  actions: assign({
+                    ui: ({context}) => ({
+                      ...context.ui,
+                      logProblem: {streamId: context.ui.selected ?? '', message: 'Log unavailable'},
+                    }),
+                  }),
+                },
               },
             },
           },
