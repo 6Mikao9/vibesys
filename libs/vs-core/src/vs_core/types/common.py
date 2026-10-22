@@ -534,7 +534,10 @@ class TaskTerms(Value):
     objectives: tuple[TaskObjective, ...] = ()
     """The directed axes candidates are ranked on, headline first."""
     relative_noise: float = Field(default=0.0, ge=0.0, lt=1.0)
-    """The benchmark's declared variation: a reading must beat the input by more than this."""
+    """The benchmark's declared variation: a reading must beat the input by more than this.
+
+    The default for an objective that declares no tolerance of its own
+    (``TaskObjective.noise``), which wins for its metric (`vs_core._comparison`)."""
     base_staleness: float = Field(default=21_600.0, gt=0, allow_inf_nan=False)
     """Seconds after which a measured base no longer stands for the host it was timed on.
 

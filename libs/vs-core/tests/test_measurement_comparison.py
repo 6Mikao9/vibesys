@@ -17,6 +17,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
+from vs_core.api.values import ObjectiveNoise
 from vs_sim.api.testing import examples
 
 from .test_measurement_reuse import (
@@ -55,7 +56,15 @@ _FAILED = core.EvaluationTerminalFacts(
 )
 
 
-def terms(*, floor: float = FLOOR, staleness: float = STALENESS) -> core.TaskTerms:
+def terms(
+    *, floor: float = FLOOR, staleness: float = STALENESS, tolerance: float | None = None
+) -> core.TaskTerms:
+    """The task's terms: ``floor`` is its ``relative_noise``, ``tolerance`` the headline's own."""
+    noise = (
+        None
+        if tolerance is None
+        else ObjectiveNoise(floor=0.0, relative_noise=tolerance, provenance="test")
+    )
     return core.TaskTerms(
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest="recipe"),
         stages=(
@@ -66,7 +75,7 @@ def terms(*, floor: float = FLOOR, staleness: float = STALENESS) -> core.TaskTer
         benchmark_stage="benchmark",
         queue_allowance=10.0,
         operation_seconds=10.0,
-        objectives=(core.TaskObjective(name=METRIC, direction="max"),),
+        objectives=(core.TaskObjective(name=METRIC, direction="max", noise=noise),),
         relative_noise=floor,
         base_staleness=staleness,
     )
@@ -97,10 +106,14 @@ def attempt(
 
 
 def stamped(
-    state: core.CoreState, *, now: float | None = None, **terms_fields: float
+    state: core.CoreState,
+    *,
+    now: float | None = None,
+    tolerance: float | None = None,
+    **terms_fields: float,
 ) -> core.CoreState:
     """``state`` with the task's terms (and the run clock) set."""
-    facts = state.run.facts.model_copy(update={"task": terms(**terms_fields)})
+    facts = state.run.facts.model_copy(update={"task": terms(tolerance=tolerance, **terms_fields)})
     run = state.run.model_copy(
         update={
             "facts": facts,
@@ -278,8 +291,9 @@ class Lab:
         floor: float = FLOOR,
         staleness: float = STALENESS,
         base_input: str | None = "base",
+        tolerance: float | None = None,
     ) -> Lab:
-        state = stamped(core.initial_state(), floor=floor, staleness=staleness)
+        state = stamped(core.initial_state(), floor=floor, staleness=staleness, tolerance=tolerance)
         scopes: dict[str, core.Scope] = {}
         for name in attempts:
             state, scopes[name] = attempt(
