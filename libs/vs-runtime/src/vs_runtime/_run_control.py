@@ -750,6 +750,9 @@ class RuntimeRunControlChannel:
         self._evaluation_dependencies: dict[str, frozenset[str]] = {}
         self._executing: dict[str, Scope] = {}
         self._drain_jobs: set[str] = set()
+        # Core's admitted evaluations keep their authority through bounded
+        # executor retries, after their first physical start cleared the ack barrier.
+        self._drain_evaluations: set[str] = set()
         self._now = threads.now
         self._capacity_turns = 0
         self._timed_turns = 0
@@ -817,7 +820,9 @@ class RuntimeRunControlChannel:
             allowed = not self._stop_requested and not self._execution_closed
             if not allowed and not self._stop_requested:
                 key = execution_id if execution_id is not None else evaluation_id
-                allowed = key is not None and key in self._permits
+                allowed = key is not None and (
+                    key in self._permits or key in self._drain_evaluations
+                )
             if not allowed:
                 message = "pause drain cancelled preparation before execution"
                 raise AgentExecutionCancelledError(message)
@@ -1142,6 +1147,9 @@ class RuntimeRunControlChannel:
             if immediate:
                 self._executing.clear()
                 self._permits.clear()
+                self._drain_evaluations.clear()
+            else:
+                self._drain_evaluations.update(jobs)
             self._drain_jobs.update(jobs)
             self._emit(RunControlTransitionKind.PARK_REQUESTED)
 

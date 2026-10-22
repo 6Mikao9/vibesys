@@ -24,10 +24,12 @@ from vs_evaluation.api import (
     EvaluationStep,
     EvidenceFingerprints,
     EvidenceKind,
+    PollPhase,
     ResourceRequirements,
     SemanticEvaluationStage,
 )
 from vs_evaluation.api.queue_status import EvaluationOccupancy, LocalQueueStatusReader
+from vs_evaluation.api.testing import InMemoryEvaluationNamespace
 from vs_project.api import Project
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -36,7 +38,9 @@ from vs_runtime.api import (
     BenchmarkFailureKind,
     BenchmarkObjective,
     EvaluationAdmission,
+    EvaluationRetries,
     PollingEvaluationExecutor,
+    RetryingEvaluationExecutor,
     Workspace,
 )
 from vs_runtime.api.core import MeasurementRequests, ReceiptStore
@@ -475,3 +479,76 @@ async def test_a_profile_job_shares_admission_and_releases_on_cancellation() -> 
         capture.cancel()
         await asyncio.gather(capture, return_exceptions=True)
         await executor.close()
+
+
+@example(count=17)
+@given(count=st.integers(min_value=1, max_value=8))
+async def test_restart_reacquires_every_submitted_jobs_durable_admission_lease(count: int) -> None:
+    namespace = InMemoryEvaluationNamespace()
+    retries = EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=1)
+    workspaces = FakeWorkspaces(
+        FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
+    )
+    snapshot = await workspaces.root.snapshot("candidate")
+    before = _OneGpu()
+    held = before.gate("accuracy", 0)
+    old_slots = EvaluationAdmission()
+    first = RetryingEvaluationExecutor(
+        PollingEvaluationExecutor(before, workspaces, clock=ManualClock(), admission=old_slots),
+        retries,
+        namespace,
+    )
+    try:
+        for index in range(count):
+            request = _request(snapshot, f"job-{index}").model_copy(
+                update={
+                    "owner_scope": f"attempt-{index}",
+                    "admission": {"key": f"durable-lease-{index}", "retain": False},
+                }
+            )
+            await first.submit(request, handle_id=f"job-{index}")
+        await yield_until(lambda: _entered(held), bool, "first evaluation holds its slot")
+        await yield_until(
+            old_slots.counts, lambda counts: counts == (1, count - 1), "all other evaluations queue"
+        )
+        assert len(before.accuracy_calls) == 1
+    finally:
+        await first.close()
+    assert await old_slots.counts() == (0, 0)
+
+    after = _OneGpu(interleave=True)
+    recovered = after.gate("accuracy", 0)
+    slots = EvaluationAdmission()
+    resumed = RetryingEvaluationExecutor(
+        PollingEvaluationExecutor(after, workspaces, clock=ManualClock(), admission=slots),
+        retries,
+        namespace,
+    )
+    try:
+        for index in range(count):
+            observed = await resumed.poll(f"job-{index}")
+            assert observed.phase is PollPhase.QUEUED
+        await yield_until(lambda: _entered(recovered), bool, "recovered job reacquires a slot")
+        await yield_until(
+            slots.counts,
+            lambda counts: counts == (1, count - 1),
+            "recovered plans queue behind the same capacity",
+        )
+        recovered.release()
+        for index in range(count):
+            result = await yield_until(
+                lambda handle=f"job-{index}": resumed.poll(handle),
+                lambda seen: seen.phase is PollPhase.ENDED,
+                "every recovered evaluation completes",
+                turns=1000,
+            )
+            assert result.terminal is not None
+            assert result.terminal.state is EvaluationState.SUCCEEDED
+        assert after.overlaps == 0
+        assert after.peak == 1
+        assert len(after.accuracy_calls) == count
+        assert len(after.benchmark_calls) == count
+        assert await slots.counts() == (0, 0)
+    finally:
+        recovered.release()
+        await resumed.close()

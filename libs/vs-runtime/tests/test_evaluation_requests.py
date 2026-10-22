@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from vs_core.api import (
@@ -67,7 +67,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
-from vs_sim.api import DISCARD
+from vs_sim.api import DISCARD, yield_now
 from vs_sim.api.testing import SimThreads, examples, swept
 from vs_slurm.api import SlurmJobStatus
 
@@ -1189,3 +1189,42 @@ async def test_an_accepted_cancel_ends_a_job_the_executor_holds_no_record_of_and
             else:
                 assert not (seen.terminal and seen.released)
                 assert not got.observation.observation.released
+
+
+@pytest.mark.regression
+@example(crash_at=1)
+@example(crash_at=2)
+@example(crash_at=3)
+@example(crash_at=4)
+@given(crash_at=st.integers(min_value=0, max_value=12))
+async def test_interrupted_park_keeps_the_plan_before_physical_cancellation(crash_at: int) -> None:
+    cluster = ScenarioCluster()
+    cluster.states = (SlurmJobStatus.PENDING,)
+    async with world(cluster) as current:
+        resource = resource_of(await submit(current))
+        await settled(current, resource)
+        park = query(CancelOwnedJob, "park-crash", resource).model_copy(
+            update={"for_park": True, "immediate": True}
+        )
+        with contextlib.suppress(ProcessKilledError):
+            await run(current, park, crash_at=crash_at)
+        # The new epoch resumes logical work without replaying the previous
+        # epoch's physical park request. Any replacement must release the old
+        # job before submitting its durable plan under a new physical identity.
+        cluster.states = (SlurmJobStatus.COMPLETED,)
+        cluster.finish_jobs()
+        await run(current, query(ObserveOwnedJob, "resume-park", resource), epoch=2)
+        # Wait on the owning executor's lifecycle, never on wall-clock time.
+        record = await run(current, query(ObserveOwnedJob, "resume-result", resource), epoch=2)
+        for index in range(1000):
+            jobs = [event for event in record.owner_events if isinstance(event, JobObserved)]
+            if jobs and jobs[0].observation.terminal:
+                assert jobs[0].observation.status is ObservationStatus.SUCCEEDED
+                return
+            await current.stack.executor.wait_for_change(resource.root, 0.0)
+            await yield_now()
+            record = await run(
+                current, query(ObserveOwnedJob, f"resume-result-{index}", resource), epoch=2
+            )
+        message = "the resumed parked measurement never completed"
+        raise AssertionError(message)

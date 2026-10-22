@@ -256,7 +256,9 @@ class FlowDriver[C]:
         item = journaled or kept
         if item is None:
             raise ContractError(("event",), "an event is journaled as itself or as a record")
-        if lifting and (run.concluded or event.new_epoch):
+        # A new writer does not change the search code or discard its journal.
+        # Live flows still own their pending decisions, even across a park.
+        if lifting and run.concluded:
             # The search ended the run under the stop, so no flow is left to take the lift:
             # every flow starts again from its latest checkpoint, with the stop taken back.
             state, run, restarting = self._restart(state, view, lifted=True)

@@ -38,7 +38,8 @@ if TYPE_CHECKING:
     from .types.sessions import Invocation, SessionsState
     from .types.strategy import Command
 # These effects finish work already performed by a turn. Everything else waits for
-# relaunch, including prepared turns, measurements, polls and queued attempts.
+# relaunch, including prepared turns, measurements and queued attempts.
+# Observations of admitted measurements continue until their results are durable.
 _DRAIN_EFFECTS = (
     SnapshotAndRetain,
     SnapshotAndRetainRun,
@@ -96,13 +97,8 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         return True
     if pause_withdraws(state, request):
         return False
-    return (
-        _request_bound(state, request) is not None
-        or isinstance(request, _DRAIN_EFFECTS)
-        or (
-            isinstance(request, ObserveOwnedJob | InspectOwnedJob)
-            and scope_in_flight(state.sessions, state.records, request.scope)
-        )
+    return _request_bound(state, request) is not None or isinstance(
+        request, (*_DRAIN_EFFECTS, ObserveOwnedJob, InspectOwnedJob)
     )
 
 
@@ -210,7 +206,7 @@ def _cancel_turns(state: CoreState) -> tuple[list[Scheduled], bool]:
 
 
 def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
-    """Request each live job's release once, then park after turns and their checkpoints drain."""
+    """Drain admitted evaluations and turns; immediate pause preserves cancelled work for resume."""
     park = state.run.park
     if state.run.status != RunStatus.DRAINING or park is None:
         return state, ()
@@ -224,6 +220,12 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
     pending, released = _cancel_turns(state)
     for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs):
         if job.terminal or job.resource_id is None:
+            continue
+        if not park.immediate:
+            # Admission already committed this measurement. Let its observations
+            # finish it; cancelling its physical job without a logical result
+            # strands any suspended turn waiting for that measurement.
+            released = False
             continue
         identity = RequestId(root=f"park:{park.control_id.root}:{job.resource_id.root}")
         held = state.records.record(identity)

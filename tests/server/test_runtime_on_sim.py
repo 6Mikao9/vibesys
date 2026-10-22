@@ -19,6 +19,7 @@ from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer, sim
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
+from entrypoints.server import _termination_signal
 from server.api.protocol import SubscribeRequest
 from server.events import RunInterruptedData
 from server.runtime import ServerRuntime
@@ -27,11 +28,13 @@ from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_runtime.api.infrastructure import ChannelRunControl
-from vs_runtime.api.testing import idle_environment_system
+from vs_runtime.api.infrastructure import ChannelRunControl, create_run_control_channel
+from vs_runtime.api.testing import FakeRunControlEventSink, idle_environment_system
 from vs_sim.api import OsThreads, Signals
 from vs_sim.api.testing import (
     HANG_GUARD_S,
+    FakeMainThreadWake,
+    FakeSignalRelay,
     ManualClock,
     SimNetwork,
     SimThreads,
@@ -519,3 +522,37 @@ def test_an_interrupted_run_is_journaled_by_the_signal_that_ended_it(
         assert interruptions[0].reason == reason
 
     _on_sim(seed, body)
+
+
+@pytest.mark.regression
+@example(signals=[Signals.SIGTERM])
+@given(
+    signals=st.lists(
+        st.sampled_from([Signals.SIGINT, Signals.SIGTERM, Signals.SIGHUP]), min_size=1, max_size=6
+    )
+)
+def test_server_signals_use_the_durable_stop_path_without_interrupting_the_driver(
+    tmp_path_factory: pytest.TempPathFactory,
+    signals: list[Signals],
+) -> None:
+    threads = SimThreads()
+    socket_path = tmp_path_factory.mktemp("signal") / "control.sock"
+
+    def story() -> None:
+        runtime = _runtime(socket_path, threads, SimNetwork(threads))
+        channel = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+        control = ChannelRunControl(channel, threads)
+        runtime.controls.install(control)
+        relay = FakeSignalRelay()
+        wake = FakeMainThreadWake()
+        try:
+            # test-isolation: the process entrypoint exposes its injected signal scope here.
+            with _termination_signal(runtime, relay, wake, threads):
+                for number in signals:
+                    assert relay.deliver(number)
+                    assert channel.stop_mode() is StopMode.CANCEL
+                assert wake.sent == 0
+        finally:
+            runtime.controls.release(control)
+
+    threads.run(story)
