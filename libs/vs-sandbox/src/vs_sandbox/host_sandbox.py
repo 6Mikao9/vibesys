@@ -590,6 +590,10 @@ def _sbpl_string(value: str) -> str:
     return f'"{escaped}"'
 
 
+_SHALLOW_PATH = 2
+"""A path this short is ``/`` or one directory such as ``/tmp``, never a Codex state root."""
+
+
 @dataclass(frozen=True)
 class SeatbeltSandbox(WorkspaceSandbox):
     """A macOS Seatbelt (``sandbox-exec``) policy for a canonical project.
@@ -666,9 +670,26 @@ class SeatbeltSandbox(WorkspaceSandbox):
         # must be able to write /dev/null, /dev/stdout, /dev/tty, ...).
         write_roots = [str(self.workspace)] + [str(p) for p in self.write_paths]
         write_roots += ["/private/tmp", "/private/var/tmp", "/dev"]
+        # Bubblewrap makes the parent of a file leaf an empty writable directory.
+        # Seatbelt sees the real parent, so a CLI that creates files beside the
+        # leaf (Codex writes its state database next to auth.json) needs that
+        # parent writable. Pre-existing children that were not granted stay
+        # write-denied below, so a sibling checkout is not modified. The home
+        # directory itself is never added.
+        parent_writes, sibling_denies = self._leaf_parent_writes()
+        write_roots += [str(path) for path in parent_writes]
+        write_roots += [str(path) for path in self._symlink_write_targets()]
         lines.append("(allow file-write*")
         lines += [f"    (subpath {_sbpl_string(w)})" for w in write_roots]
         lines.append(")")
+        for path in sibling_denies:
+            lines.append(
+                _seatbelt_path_rule(
+                    "deny file-write*",
+                    path,
+                    is_directory=path.is_dir() and not path.is_symlink(),
+                )
+            )
 
         # Blind nearby sibling projects by denying the project's ancestor
         # trees, then carve the project back out. The most-specific (last)
@@ -704,6 +725,82 @@ class SeatbeltSandbox(WorkspaceSandbox):
             )
 
         return "\n".join(lines) + "\n"
+
+    def _leaf_parent_writes(self) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
+        """Parents a file leaf needs writable, and the siblings that stay write-denied.
+
+        A grant of a file (``auth.json``) or of a directory beside that file
+        (``sessions``) does not make their parent writable. Codex creates its
+        state database, sockets and skill tree in that parent at startup, and
+        fails with ``Operation not permitted`` when it cannot. The parent is
+        allowed, then every child that already exists and was not granted is
+        denied, so ``worktrees`` and ``config.toml`` cannot be modified. A
+        parent that is the home directory, or not deeper than it, is skipped:
+        the profile never grants the whole home.
+        """
+        granted = {path.resolve() for path in self.write_paths}
+        granted.add(self.workspace.resolve())
+        home = Path.home().resolve()
+        parents: list[Path] = []
+        denies: list[Path] = []
+        seen: set[Path] = set()
+        # ``parent`` of a symlink is the dedicated home that holds the link.
+        # ``resolve()`` would follow it into the operator's real Codex directory.
+        file_parents = {
+            path.parent.resolve()
+            for path in self.write_paths
+            if path.is_file() or path.is_symlink()
+        }
+        for parent in sorted(file_parents):
+            # The home directory, its ancestors, and a one-component path such
+            # as ``/tmp`` are never opened up. A state root under or outside
+            # the home still is: Codex's dedicated home is one of those.
+            if (
+                parent in seen
+                or parent in granted
+                or parent == home
+                or parent in home.parents
+                or len(parent.parts) <= _SHALLOW_PATH
+            ):
+                continue
+            if any(
+                root.is_dir() and (parent == root or root in parent.parents) for root in granted
+            ):
+                continue
+            seen.add(parent)
+            parents.append(parent)
+            if not parent.is_dir():
+                continue
+            for child in sorted(parent.iterdir()):
+                if child.resolve() in granted:
+                    continue
+                denies.append(child)
+        return tuple(parents), tuple(denies)
+
+    def _symlink_write_targets(self) -> tuple[Path, ...]:
+        """Real files a granted symlink writes through, when they sit outside the grant.
+
+        A dedicated Codex home links ``auth.json`` at the operator's login.
+        Codex refreshes that file through the link, so the target has to be
+        writable. The target's directory is not granted.
+        """
+        targets: list[Path] = []
+        # A symlink's resolved path is the file it writes through, which the
+        # profile otherwise names as the link. Count only real grants as listed.
+        granted = {path.resolve() for path in self.write_paths if not path.is_symlink()}
+        granted_dirs = [path for path in granted if path.is_dir()]
+        for path in self.write_paths:
+            if not path.is_symlink():
+                continue
+            target = path.resolve()
+            if any(
+                target == directory or directory in target.parents for directory in granted_dirs
+            ):
+                continue
+            if target in granted:
+                continue
+            targets.append(target)
+        return tuple(targets)
 
     def wrap(self, argv: list[str], cwd: Path | str | None = None) -> list[str]:
         """Return *argv* wrapped so it runs inside the Seatbelt profile.
