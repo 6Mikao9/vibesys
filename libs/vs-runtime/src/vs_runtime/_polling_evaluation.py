@@ -84,8 +84,9 @@ class PollingEvaluationExecutor:
     Each submitted request evaluates its candidate snapshot in a fresh candidate
     workspace through the trusted ``Evaluation`` effects, one stage at a time.
     Resource gates share the admission pool: a gate stays queued until a lease
-    is free. A caller-chosen sequence retains that lease between jobs until its
-    final member or scope cancellation. Observations are process-local.
+    is free. A caller-chosen sequence retains an idle reservation between jobs
+    only while no other job waits; after yielding, its next member rejoins FIFO.
+    Observations are process-local.
     """
 
     def __init__(  # noqa: PLR0913  # lint-waiver: LW-241001 [PLR0913]; host_probe and admission are construction facts of this executor. A configure() after init can run once jobs exist and split admission from the executor that owns it, a carrier would only forward those resources, and making the probe required would force every test that does not sample the host to pass one.
@@ -164,6 +165,13 @@ class PollingEvaluationExecutor:
                     raise ExecutorRejectedError(message)
                 self._profile_capture.require(stage.required_profile_fields)
         self._register_lease(handle_id, request)
+        if request.admission is not None or any(
+            SemanticEvaluationStage.model_validate(step.payload).kind in _RESOURCE_KINDS
+            for step in request.stages
+        ):
+            # Register in submit order, before task scheduling can reorder jobs.
+            await self._admission.enqueue(self._lease_keys[handle_id])
+            self._reserved.add(self._lease_keys[handle_id])
         self._queued_at[handle_id] = self._clock.now()
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
         self._tasks[handle_id] = asyncio.create_task(self._run(handle_id, request))
@@ -241,7 +249,7 @@ class PollingEvaluationExecutor:
         holding = False
         retain = handle_id in self._retain
         try:
-            holding = await self._admit(handle_id, request)
+            holding = await self._admit(handle_id)
             self._admitted_at[handle_id] = self._clock.now()
             workspace = await self._workspaces.create_measured_candidate(first.snapshot)
             opened = False
@@ -345,8 +353,8 @@ class PollingEvaluationExecutor:
             )
         finally:
             key = self._lease_keys[handle_id]
-            if holding and not retain:
-                await self._release_lease(key)
+            if holding:
+                await self._finish_lease(key, retain=retain)
             self._members.pop(key, None)
             if workspace is not None:
                 await workspace.discard()
@@ -383,23 +391,23 @@ class PollingEvaluationExecutor:
         if lease is not None and lease.retain:
             self._retain.add(handle_id)
 
+    async def _finish_lease(self, key: str, *, retain: bool) -> None:
+        if retain:
+            await self._admission.park(key)
+        else:
+            await self._release_lease(key)
+
     async def _release_lease(self, key: str) -> None:
         self._reserved.discard(key)
         await self._admission.release(key)
 
-    async def _admit(self, handle_id: str, request: EvaluationRequest) -> bool:
-        # Admission covers the whole job. A build must not publish RUNNING
-        # before a following GPU gate acquires its resource: core would then
-        # charge that gate's queue wait against the measurement limit.
-        uses_resource = request.admission is not None or any(
-            SemanticEvaluationStage.model_validate(step.payload).kind in _RESOURCE_KINDS
-            for step in request.stages
-        )
+    async def _admit(self, handle_id: str) -> bool:
+        # Admission covers the whole job. No RUNNING observation or workspace
+        # creation precedes the slot, so queue wait spends no execution budget.
+        key = self._lease_keys[handle_id]
+        uses_resource = key in self._reserved
         if uses_resource:
-            key = self._lease_keys[handle_id]
-            if key not in self._reserved:
-                await self._admission.acquire(key)
-                self._reserved.add(key)
+            await self._admission.wait(key)
         return uses_resource
 
     def _open_output(self, run: StageRun) -> AbstractContextManager[OutputSink]:

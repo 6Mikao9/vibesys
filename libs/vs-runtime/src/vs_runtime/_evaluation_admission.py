@@ -27,6 +27,7 @@ class EvaluationAdmission:
         self.capacity = slots
         self._on_counts = on_counts
         self._active: set[str] = set()
+        self._idle: set[str] = set()
         self._queued: list[str] = []
         self._condition = asyncio.Condition()
 
@@ -49,13 +50,40 @@ class EvaluationAdmission:
             return len(self._active), len(self._queued)
 
     async def acquire(self, handle_id: str) -> None:
-        """Wait until ``handle_id`` is the next job and a slot is free."""
+        """Register and wait for a lease in FIFO order."""
+        await self.enqueue(handle_id)
+        try:
+            await self.wait(handle_id)
+        except BaseException:
+            await self.release(handle_id)
+            raise
+
+    async def enqueue(self, handle_id: str) -> None:
+        """Register before starting asynchronous work, without waiting for capacity.
+
+        The order of these calls fixes FIFO, independently of task scheduling.
+        An uncontended idle reservation is reactivated for its next member.
+        """
         async with self._condition:
+            if handle_id in self._idle:
+                self._idle.remove(handle_id)
+                return
             if handle_id in self._active or handle_id in self._queued:
                 message = f"evaluation handle {handle_id!r} already holds a slot"
                 raise ValueError(message)
             self._queued.append(handle_id)
+            self._yield_idle()
             self._notify()
+            self._condition.notify_all()
+
+    async def wait(self, handle_id: str) -> None:
+        """Wait for a previously enqueued lease; cancellation removes its queue entry."""
+        async with self._condition:
+            if handle_id in self._active:
+                return
+            if handle_id not in self._queued:
+                message = f"evaluation handle {handle_id!r} has not been enqueued"
+                raise ValueError(message)
             try:
                 await self._condition.wait_for(
                     lambda: (
@@ -73,11 +101,33 @@ class EvaluationAdmission:
             self._queued.pop(0)
             self._active.add(handle_id)
             self._notify()
+            self._condition.notify_all()
+
+    async def park(self, handle_id: str) -> None:
+        """Retain a completed member's slot only while no job waits for it.
+
+        A subsequent acquire may reclaim this idle reservation. The sequence's
+        next member calls acquire again and joins the same FIFO if it yielded.
+        """
+        async with self._condition:
+            if handle_id in self._active:
+                self._idle.add(handle_id)
+                self._yield_idle()
+                self._notify()
+                self._condition.notify_all()
+
+    def _yield_idle(self) -> None:
+        if self._queued:
+            self._active.difference_update(self._idle)
+            self._idle.clear()
 
     async def release(self, handle_id: str) -> None:
         """Return ``handle_id``'s lease, if it still holds one."""
         async with self._condition:
             self._active.discard(handle_id)
+            self._idle.discard(handle_id)
+            if handle_id in self._queued:
+                self._queued.remove(handle_id)
             self._notify()
             self._condition.notify_all()
 

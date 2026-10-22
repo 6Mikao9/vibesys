@@ -711,6 +711,12 @@ class SeatbeltSandbox(WorkspaceSandbox):
             lines += [f"    (subpath {_sbpl_string(str(r))})" for r in blind]
             lines.append(")")
             lines.append(f"(allow file-read* file-write* (subpath {ws}))")
+            # macOS /bin/sh resolves cd through stat calls on the workspace's
+            # ancestors, even when the target is inside the allowed workspace.
+            # Denying that metadata reports a misleading "Not a directory".
+            # Permit only those directory entries, never their contents or children.
+            for ancestor in blind:
+                lines.append(f"(allow file-read-metadata (literal {_sbpl_string(str(ancestor))}))")
 
         # The operator's runtime root holds the control socket's key; deny it after
         # every allow, so the last matching rule keeps it out of reach.
