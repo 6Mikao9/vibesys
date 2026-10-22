@@ -46,6 +46,8 @@ from vs_core._generated.vibesys.core.v1.common_cv import (
 from vs_core._generated.vibesys.core.v1.contracts_cv import (
     AdoptionPublication,
     CheckoutUpdate,
+    EvaluationLease,
+    EvaluationTiming,
     NullValue,
     OperationSchemaRef,
     PureOption,
@@ -119,6 +121,8 @@ __all__ = [
     "DigestScheme",
     "Direction",
     "EffectVerdict",
+    "EvaluationLease",
+    "EvaluationTiming",
     "EventId",
     "EvidenceAcceptanceReceipt",
     "EvidenceId",

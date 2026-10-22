@@ -236,3 +236,22 @@ def test_a_value_hashes_and_compares_like_a_fresh_copy_however_it_was_made(
     assert hash(changed) == hash(fresh)
     assert (changed == ref) == (other == commit)
     assert len({ref, changed, fresh}) == (1 if other == commit else 2)
+
+
+@given(
+    key=st.text(min_size=1),
+    retain=st.booleans(),
+    queued=st.floats(min_value=0, max_value=1e9),
+    wait=st.floats(min_value=0, max_value=1e6),
+)
+def test_evaluation_admission_values_round_trip(
+    key: str, *, retain: bool, queued: float, wait: float
+) -> None:
+    lease = core.EvaluationLease(key=key, retain=retain)
+    timing = core.EvaluationTiming(queued_at=queued, admitted_at=queued + wait)
+    assert core.EvaluationLease.model_validate_json(lease.model_dump_json()) == lease
+    assert core.EvaluationTiming.model_validate_json(timing.model_dump_json()) == timing
+    with pytest.raises(ValueError, match="admitted_at precedes queued_at"):
+        core.EvaluationTiming(queued_at=queued + 1.0, admitted_at=queued)
+    with pytest.raises(ValueError, match="key"):
+        core.EvaluationLease(key="", retain=retain)

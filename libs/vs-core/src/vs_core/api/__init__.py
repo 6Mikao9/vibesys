@@ -8,7 +8,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vs_core.api._exports import EXPORT_MODULES as _EXPORT_MODULES
-from vs_core.api.values import AdoptionPublication, CheckoutStatus, CheckoutUpdate
+from vs_core.api.values import (
+    AdoptionPublication,
+    CheckoutStatus,
+    CheckoutUpdate,
+    EvaluationLease,
+    EvaluationTiming,
+)
 
 if TYPE_CHECKING:
     from vs_core._attempt_track import AttemptTrack, Step
@@ -1334,11 +1340,13 @@ __all__ = [
     "EvaluationEvent",
     "EvaluationHistoryAvailability",
     "EvaluationHistoryCursor",
+    "EvaluationLease",
     "EvaluationRequest",
     "EvaluationStageOutcome",
     "EvaluationStageResult",
     "EvaluationState",
     "EvaluationTerminalFacts",
+    "EvaluationTiming",
     "Event",
     "EventCursor",
     "EventId",

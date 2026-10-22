@@ -106,11 +106,31 @@ def decode_CheckoutUpdate(m: pb.CheckoutUpdate) -> values.CheckoutUpdate:
     return values.CheckoutUpdate(status=decode_CheckoutStatus(m.status))
 
 
+def encode_EvaluationLease(v: values.EvaluationLease) -> pb.EvaluationLease:
+    return pb.EvaluationLease(key=v.key, retain=v.retain)
+
+
+def decode_EvaluationLease(m: pb.EvaluationLease) -> values.EvaluationLease:
+    return values.EvaluationLease(key=m.key, retain=m.retain)
+
+
+def encode_EvaluationTiming(v: values.EvaluationTiming) -> pb.EvaluationTiming:
+    return pb.EvaluationTiming(queued_at=v.queued_at, admitted_at=v.admitted_at)
+
+
+def decode_EvaluationTiming(m: pb.EvaluationTiming) -> values.EvaluationTiming:
+    return values.EvaluationTiming(
+        queued_at=m.queued_at, admitted_at=m.admitted_at if m.has_field("admitted_at") else None
+    )
+
+
 ENCODERS: dict[type, Callable[..., Message]] = {
     values.PureOption: encode_PureOption,
     values.OperationSchemaRef: encode_OperationSchemaRef,
     values.AdoptionPublication: encode_AdoptionPublication,
     values.CheckoutUpdate: encode_CheckoutUpdate,
+    values.EvaluationLease: encode_EvaluationLease,
+    values.EvaluationTiming: encode_EvaluationTiming,
 }
 DECODERS: dict[type, Callable[..., object]] = {
     pb.NullValue: decode_NullValue,
@@ -119,4 +139,6 @@ DECODERS: dict[type, Callable[..., object]] = {
     pb.OperationSchemaRef: decode_OperationSchemaRef,
     pb.AdoptionPublication: decode_AdoptionPublication,
     pb.CheckoutUpdate: decode_CheckoutUpdate,
+    pb.EvaluationLease: decode_EvaluationLease,
+    pb.EvaluationTiming: decode_EvaluationTiming,
 }

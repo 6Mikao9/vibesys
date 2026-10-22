@@ -18,6 +18,7 @@ from vs_proto.api import (
     TailResponse,
     Timestamp,
     ValidationError,
+    core_contracts,
     validate,
 )
 
@@ -71,3 +72,24 @@ def test_generated_runlog_limits_agree_across_languages() -> None:
     assert f"RunLogMaxRecordBytes = {RUN_LOG_MAX_RECORD_BYTES}" in go
     assert f"RUN_LOG_MAGIC = '{RUN_LOG_MAGIC.decode()}';" in typescript
     assert f'RunLogMagic = "{RUN_LOG_MAGIC.decode()}"' in go
+
+
+@given(queued=st.floats(min_value=0, max_value=1e9), wait=st.floats(min_value=0, max_value=1e6))
+def test_evaluation_admission_timing_is_validated_and_round_trips(
+    queued: float, wait: float
+) -> None:
+    timing = core_contracts.EvaluationTiming(queued_at=queued, admitted_at=queued + wait)
+    validate(timing)
+    assert core_contracts.EvaluationTiming.from_binary(timing.to_binary()) == timing
+    validate(core_contracts.EvaluationTiming(queued_at=queued))
+    with pytest.raises(ValidationError):
+        validate(core_contracts.EvaluationTiming(queued_at=queued + 1.0, admitted_at=queued))
+
+
+@given(key=_TEXT.filter(bool), retain=st.booleans())
+def test_evaluation_sequence_lease_requires_an_identity(key: str, *, retain: bool) -> None:
+    lease = core_contracts.EvaluationLease(key=key, retain=retain)
+    validate(lease)
+    assert core_contracts.EvaluationLease.from_binary(lease.to_binary()) == lease
+    with pytest.raises(ValidationError):
+        validate(core_contracts.EvaluationLease(key="", retain=retain))

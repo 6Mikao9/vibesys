@@ -223,9 +223,84 @@ class CheckoutUpdate(Message[_CheckoutUpdateFields]):
 
         status: CheckoutStatus
 
+_EvaluationLeaseFields: TypeAlias = Literal["key", "retain"]
+
+class EvaluationLease(Message[_EvaluationLeaseFields]):
+    """
+    A sequence of measurement jobs holds one slot until its final member ends.
+    Scoped by the submitting owner and generation. Closing that scope cancels
+    every member and returns the slot, including between members or after a crash.
+
+    ```proto
+    message vibesys.core.v1.EvaluationLease
+    ```
+
+    Attributes:
+        key:
+            ```proto
+            string key = 1;
+            ```
+        retain:
+            ```proto
+            bool retain = 2;
+            ```
+    """
+
+    __slots__ = ("key", "retain")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            key: str = "",
+            retain: bool = False,
+        ) -> None:
+            pass
+
+        key: str
+        retain: bool
+
+_EvaluationTimingFields: TypeAlias = Literal["queued_at", "admitted_at"]
+
+class EvaluationTiming(Message[_EvaluationTimingFields]):
+    """
+    Exact in-process admission times on the run clock. A queued gate spends only
+    the queue hang budget; its execution limit begins at admitted_at.
+
+    ```proto
+    message vibesys.core.v1.EvaluationTiming
+    ```
+
+    Attributes:
+        queued_at:
+            ```proto
+            double queued_at = 1;
+            ```
+        admitted_at:
+            ```proto
+            optional double admitted_at = 2;
+            ```
+    """
+
+    __slots__ = ("queued_at", "admitted_at")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            queued_at: float = 0,
+            admitted_at: float | None = None,
+        ) -> None:
+            pass
+
+        queued_at: float
+        admitted_at: float
+
 
 _DESC = file_desc(
-    b'\n\x1fvibesys/core/v1/contracts.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a#vibesys/core/v1/value_options.proto\x1a\x1cvibesys/core/v1/common.proto\x1a vibesys/core/v1/vocabulary.proto"\x13\n\tNullValue:\x06\xc2\xf3\x18\x028\x01"\xe4\x01\n\x0fPureOptionValue\x12\x14\n\x04text\x18\x01 \x01(\tH\x00R\x04text\x12<\n\x07integer\x18\x02 \x01(\tH\x00R\x07integerB \xbaH\x17r\x152\x13^(0|-?[1-9][0-9]*)$\xca\xf3\x18\x02\x10\x01\x12\x1d\n\x04real\x18\x03 \x01(\x01H\x00R\x04realB\x07\xbaH\x04\x12\x02@\x01\x12\x14\n\x04flag\x18\x04 \x01(\x08H\x00R\x04flag\x120\n\x04null\x18\x05 \x01(\x0b2\x1a.vibesys.core.v1.NullValueH\x00R\x04nullB\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01:\x06\xc2\xf3\x18\x02\x08\x01"g\n\nPureOption\x12\x19\n\x03key\x18\x01 \x01(\tR\x03keyB\x07\xbaH\x04r\x02\x10\x01\x12>\n\x05value\x18\x02 \x01(\x0b2 .vibesys.core.v1.PureOptionValueR\x05valueB\x06\xbaH\x03\xc8\x01\x01"\x9a\x02\n\x12OperationSchemaRef\x12\x1b\n\x04kind\x18\x01 \x01(\tR\x04kindB\x07\xbaH\x04r\x02\x10\x01\x12I\n\x0erequest_schema\x18\x02 \x01(\x0b2\x1a.vibesys.core.v1.SchemaRefR\rrequestSchemaB\x06\xbaH\x03\xc8\x01\x01\x12I\n\x0eoutcome_schema\x18\x03 \x01(\x0b2\x1a.vibesys.core.v1.SchemaRefR\routcomeSchemaB\x06\xbaH\x03\xc8\x01\x01\x12I\n\tlifecycle\x18\x04 \x01(\x0e2\x1f.vibesys.core.v1.LifecycleClassR\tlifecycleB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00:\x06\xc2\xf3\x18\x020\x01"\x8a\x01\n\x13AdoptionPublication\x12#\n\x08revision\x18\x01 \x01(\tR\x08revisionB\x07\xbaH\x04r\x02\x10\x01\x12-\n\x06commit\x18\x02 \x01(\tR\x06commitB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$\x12\x1f\n\x06branch\x18\x03 \x01(\tR\x06branchB\x07\xbaH\x04r\x02\x10\x01"U\n\x0eCheckoutUpdate\x12C\n\x06status\x18\x01 \x01(\x0e2\x1f.vibesys.core.v1.CheckoutStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
+    b'\n\x1fvibesys/core/v1/contracts.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a#vibesys/core/v1/value_options.proto\x1a\x1cvibesys/core/v1/common.proto\x1a vibesys/core/v1/vocabulary.proto"\x13\n\tNullValue:\x06\xc2\xf3\x18\x028\x01"\xe4\x01\n\x0fPureOptionValue\x12\x14\n\x04text\x18\x01 \x01(\tH\x00R\x04text\x12<\n\x07integer\x18\x02 \x01(\tH\x00R\x07integerB \xbaH\x17r\x152\x13^(0|-?[1-9][0-9]*)$\xca\xf3\x18\x02\x10\x01\x12\x1d\n\x04real\x18\x03 \x01(\x01H\x00R\x04realB\x07\xbaH\x04\x12\x02@\x01\x12\x14\n\x04flag\x18\x04 \x01(\x08H\x00R\x04flag\x120\n\x04null\x18\x05 \x01(\x0b2\x1a.vibesys.core.v1.NullValueH\x00R\x04nullB\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01:\x06\xc2\xf3\x18\x02\x08\x01"g\n\nPureOption\x12\x19\n\x03key\x18\x01 \x01(\tR\x03keyB\x07\xbaH\x04r\x02\x10\x01\x12>\n\x05value\x18\x02 \x01(\x0b2 .vibesys.core.v1.PureOptionValueR\x05valueB\x06\xbaH\x03\xc8\x01\x01"\x9a\x02\n\x12OperationSchemaRef\x12\x1b\n\x04kind\x18\x01 \x01(\tR\x04kindB\x07\xbaH\x04r\x02\x10\x01\x12I\n\x0erequest_schema\x18\x02 \x01(\x0b2\x1a.vibesys.core.v1.SchemaRefR\rrequestSchemaB\x06\xbaH\x03\xc8\x01\x01\x12I\n\x0eoutcome_schema\x18\x03 \x01(\x0b2\x1a.vibesys.core.v1.SchemaRefR\routcomeSchemaB\x06\xbaH\x03\xc8\x01\x01\x12I\n\tlifecycle\x18\x04 \x01(\x0e2\x1f.vibesys.core.v1.LifecycleClassR\tlifecycleB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00:\x06\xc2\xf3\x18\x020\x01"\x8a\x01\n\x13AdoptionPublication\x12#\n\x08revision\x18\x01 \x01(\tR\x08revisionB\x07\xbaH\x04r\x02\x10\x01\x12-\n\x06commit\x18\x02 \x01(\tR\x06commitB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$\x12\x1f\n\x06branch\x18\x03 \x01(\tR\x06branchB\x07\xbaH\x04r\x02\x10\x01"U\n\x0eCheckoutUpdate\x12C\n\x06status\x18\x01 \x01(\x0e2\x1f.vibesys.core.v1.CheckoutStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"D\n\x0fEvaluationLease\x12\x19\n\x03key\x18\x01 \x01(\tR\x03keyB\x07\xbaH\x04r\x02\x10\x01\x12\x16\n\x06retain\x18\x02 \x01(\x08R\x06retain"\x8d\x02\n\x10EvaluationTiming\x123\n\tqueued_at\x18\x01 \x01(\x01R\x08queuedAtB\x16\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xca\xf3\x18\x02\x08\x01\x126\n\x0badmitted_at\x18\x02 \x01(\x01H\x00R\nadmittedAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x0e\n\x0c_admitted_at:|\xbaHy\x1aw\n\x17evaluation_timing.order\x12\x1eadmitted_at precedes queued_at\x1a<!has(this.admitted_at) || this.admitted_at >= this.queued_atB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
     [
         validate_pb.desc(),
         value_options_pb.desc(),
@@ -239,6 +314,8 @@ _DESC = file_desc(
         "OperationSchemaRef": OperationSchemaRef,
         "AdoptionPublication": AdoptionPublication,
         "CheckoutUpdate": CheckoutUpdate,
+        "EvaluationLease": EvaluationLease,
+        "EvaluationTiming": EvaluationTiming,
     },
 )
 

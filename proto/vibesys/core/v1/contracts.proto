@@ -50,3 +50,23 @@ message AdoptionPublication {
 message CheckoutUpdate {
   CheckoutStatus status = 1 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
 }
+
+// A sequence of measurement jobs holds one slot until its final member ends.
+// Scoped by the submitting owner and generation. Closing that scope cancels
+// every member and returns the slot, including between members or after a crash.
+message EvaluationLease {
+  string key = 1 [(buf.validate.field).string.min_len = 1];
+  bool retain = 2;
+}
+
+// Exact in-process admission times on the run clock. A queued gate spends only
+// the queue hang budget; its execution limit begins at admitted_at.
+message EvaluationTiming {
+  option (buf.validate.message).cel = {
+    id: "evaluation_timing.order"
+    message: "admitted_at precedes queued_at"
+    expression: "!has(this.admitted_at) || this.admitted_at >= this.queued_at"
+  };
+  double queued_at = 1 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field).explicit = true];
+  optional double admitted_at = 2 [(buf.validate.field).double = {gte: 0, finite: true}];
+}

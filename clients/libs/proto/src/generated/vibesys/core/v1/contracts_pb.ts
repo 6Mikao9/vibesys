@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/core/v1/contracts.proto.
  */
 export const file_vibesys_core_v1_contracts: GenFile = /*@__PURE__*/
-  fileDesc("Ch92aWJlc3lzL2NvcmUvdjEvY29udHJhY3RzLnByb3RvEg92aWJlc3lzLmNvcmUudjEiEwoJTnVsbFZhbHVlOgbC8xgCOAEiwwEKD1B1cmVPcHRpb25WYWx1ZRIOCgR0ZXh0GAEgASgJSAASMwoHaW50ZWdlchgCIAEoCUIgukgXchUyE14oMHwtP1sxLTldWzAtOV0qKSTK8xgCEAFIABIXCgRyZWFsGAMgASgBQge6SAQSAkABSAASDgoEZmxhZxgEIAEoCEgAEioKBG51bGwYBSABKAsyGi52aWJlc3lzLmNvcmUudjEuTnVsbFZhbHVlSAA6BsLzGAIIAUIOCgV2YWx1ZRIFukgCCAEiWwoKUHVyZU9wdGlvbhIUCgNrZXkYASABKAlCB7pIBHICEAESNwoFdmFsdWUYAiABKAsyIC52aWJlc3lzLmNvcmUudjEuUHVyZU9wdGlvblZhbHVlQga6SAPIAQEi6wEKEk9wZXJhdGlvblNjaGVtYVJlZhIVCgRraW5kGAEgASgJQge6SARyAhABEjoKDnJlcXVlc3Rfc2NoZW1hGAIgASgLMhoudmliZXN5cy5jb3JlLnYxLlNjaGVtYVJlZkIGukgDyAEBEjoKDm91dGNvbWVfc2NoZW1hGAMgASgLMhoudmliZXN5cy5jb3JlLnYxLlNjaGVtYVJlZkIGukgDyAEBEj4KCWxpZmVjeWNsZRgEIAEoDjIfLnZpYmVzeXMuY29yZS52MS5MaWZlY3ljbGVDbGFzc0IKukgHggEEEAEgADoGwvMYAjABInAKE0Fkb3B0aW9uUHVibGljYXRpb24SGQoIcmV2aXNpb24YASABKAlCB7pIBHICEAESJQoGY29tbWl0GAIgASgJQhW6SBJyEDIOXlswLTlhLWZdezQwfSQSFwoGYnJhbmNoGAMgASgJQge6SARyAhABIk0KDkNoZWNrb3V0VXBkYXRlEjsKBnN0YXR1cxgBIAEoDjIfLnZpYmVzeXMuY29yZS52MS5DaGVja291dFN0YXR1c0IKukgHggEEEAEgAEI/Wj1naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2NvcmUvdjE7Y29yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_core_v1_value_options, file_vibesys_core_v1_common, file_vibesys_core_v1_vocabulary]);
+  fileDesc("Ch92aWJlc3lzL2NvcmUvdjEvY29udHJhY3RzLnByb3RvEg92aWJlc3lzLmNvcmUudjEiEwoJTnVsbFZhbHVlOgbC8xgCOAEiwwEKD1B1cmVPcHRpb25WYWx1ZRIOCgR0ZXh0GAEgASgJSAASMwoHaW50ZWdlchgCIAEoCUIgukgXchUyE14oMHwtP1sxLTldWzAtOV0qKSTK8xgCEAFIABIXCgRyZWFsGAMgASgBQge6SAQSAkABSAASDgoEZmxhZxgEIAEoCEgAEioKBG51bGwYBSABKAsyGi52aWJlc3lzLmNvcmUudjEuTnVsbFZhbHVlSAA6BsLzGAIIAUIOCgV2YWx1ZRIFukgCCAEiWwoKUHVyZU9wdGlvbhIUCgNrZXkYASABKAlCB7pIBHICEAESNwoFdmFsdWUYAiABKAsyIC52aWJlc3lzLmNvcmUudjEuUHVyZU9wdGlvblZhbHVlQga6SAPIAQEi6wEKEk9wZXJhdGlvblNjaGVtYVJlZhIVCgRraW5kGAEgASgJQge6SARyAhABEjoKDnJlcXVlc3Rfc2NoZW1hGAIgASgLMhoudmliZXN5cy5jb3JlLnYxLlNjaGVtYVJlZkIGukgDyAEBEjoKDm91dGNvbWVfc2NoZW1hGAMgASgLMhoudmliZXN5cy5jb3JlLnYxLlNjaGVtYVJlZkIGukgDyAEBEj4KCWxpZmVjeWNsZRgEIAEoDjIfLnZpYmVzeXMuY29yZS52MS5MaWZlY3ljbGVDbGFzc0IKukgHggEEEAEgADoGwvMYAjABInAKE0Fkb3B0aW9uUHVibGljYXRpb24SGQoIcmV2aXNpb24YASABKAlCB7pIBHICEAESJQoGY29tbWl0GAIgASgJQhW6SBJyEDIOXlswLTlhLWZdezQwfSQSFwoGYnJhbmNoGAMgASgJQge6SARyAhABIk0KDkNoZWNrb3V0VXBkYXRlEjsKBnN0YXR1cxgBIAEoDjIfLnZpYmVzeXMuY29yZS52MS5DaGVja291dFN0YXR1c0IKukgHggEEEAEgACI3Cg9FdmFsdWF0aW9uTGVhc2USFAoDa2V5GAEgASgJQge6SARyAhABEg4KBnJldGFpbhgCIAEoCCL3AQoQRXZhbHVhdGlvblRpbWluZxIpCglxdWV1ZWRfYXQYASABKAFCFrpIDRILQAEpAAAAAAAAAADK8xgCCAESKgoLYWRtaXR0ZWRfYXQYAiABKAFCELpIDRILQAEpAAAAAAAAAABIAIgBATp8ukh5GncKF2V2YWx1YXRpb25fdGltaW5nLm9yZGVyEh5hZG1pdHRlZF9hdCBwcmVjZWRlcyBxdWV1ZWRfYXQaPCFoYXModGhpcy5hZG1pdHRlZF9hdCkgfHwgdGhpcy5hZG1pdHRlZF9hdCA+PSB0aGlzLnF1ZXVlZF9hdEIOCgxfYWRtaXR0ZWRfYXRCP1o9Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9jb3JlL3YxO2NvcmV2MWIGcHJvdG8z", [file_buf_validate_validate, file_vibesys_core_v1_value_options, file_vibesys_core_v1_common, file_vibesys_core_v1_vocabulary]);
 
 /**
  * @generated from message vibesys.core.v1.NullValue
@@ -183,3 +183,54 @@ export type CheckoutUpdate = Message<"vibesys.core.v1.CheckoutUpdate"> & {
  */
 export const CheckoutUpdateSchema: GenMessage<CheckoutUpdate> = /*@__PURE__*/
   messageDesc(file_vibesys_core_v1_contracts, 5);
+
+/**
+ * A sequence of measurement jobs holds one slot until its final member ends.
+ * Scoped by the submitting owner and generation. Closing that scope cancels
+ * every member and returns the slot, including between members or after a crash.
+ *
+ * @generated from message vibesys.core.v1.EvaluationLease
+ */
+export type EvaluationLease = Message<"vibesys.core.v1.EvaluationLease"> & {
+  /**
+   * @generated from field: string key = 1;
+   */
+  key: string;
+
+  /**
+   * @generated from field: bool retain = 2;
+   */
+  retain: boolean;
+};
+
+/**
+ * Describes the message vibesys.core.v1.EvaluationLease.
+ * Use `create(EvaluationLeaseSchema)` to create a new message.
+ */
+export const EvaluationLeaseSchema: GenMessage<EvaluationLease> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_contracts, 6);
+
+/**
+ * Exact in-process admission times on the run clock. A queued gate spends only
+ * the queue hang budget; its execution limit begins at admitted_at.
+ *
+ * @generated from message vibesys.core.v1.EvaluationTiming
+ */
+export type EvaluationTiming = Message<"vibesys.core.v1.EvaluationTiming"> & {
+  /**
+   * @generated from field: double queued_at = 1;
+   */
+  queuedAt: number;
+
+  /**
+   * @generated from field: optional double admitted_at = 2;
+   */
+  admittedAt?: number | undefined;
+};
+
+/**
+ * Describes the message vibesys.core.v1.EvaluationTiming.
+ * Use `create(EvaluationTimingSchema)` to create a new message.
+ */
+export const EvaluationTimingSchema: GenMessage<EvaluationTiming> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_contracts, 7);

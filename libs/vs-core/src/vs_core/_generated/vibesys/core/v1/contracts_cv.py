@@ -105,7 +105,48 @@ class CheckoutUpdate(CoreValue):
     __hash__ = CoreValue.cached_hash
 
 
+@final
+@dataclass(
+    frozen=True,
+    slots=True,
+    kw_only=True,
+    config=ConfigDict(extra="forbid", strict=True, validate_default=True),
+)
+class EvaluationLease(CoreValue):
+    "A sequence of measurement jobs holds one slot until its final member ends.\nScoped by the submitting owner and generation. Closing that scope cancels\nevery member and returns the slot, including between members or after a crash."
+
+    model_fields: ClassVar[tuple[str, ...]] = ("key", "retain")
+    key: Annotated[str, Field(min_length=1)]
+    retain: bool = False
+
+    __hash__ = CoreValue.cached_hash
+
+
+@final
+@dataclass(
+    frozen=True,
+    slots=True,
+    kw_only=True,
+    config=ConfigDict(extra="forbid", strict=True, validate_default=True),
+)
+class EvaluationTiming(CoreValue):
+    "Exact in-process admission times on the run clock. A queued gate spends only\nthe queue hang budget; its execution limit begins at admitted_at."
+
+    model_fields: ClassVar[tuple[str, ...]] = ("queued_at", "admitted_at")
+    queued_at: Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
+    admitted_at: Annotated[float | None, Field(ge=0.0, allow_inf_nan=False)] = None
+
+    def __post_init__(self) -> None:
+        """Enforce the proto message rules at construction as well as decode."""
+        if not (not (self.admitted_at is not None) or self.admitted_at >= self.queued_at):
+            raise ValueError("admitted_at precedes queued_at")
+
+    __hash__ = CoreValue.cached_hash
+
+
 resolve_value(PureOption)
 resolve_value(OperationSchemaRef)
 resolve_value(AdoptionPublication)
 resolve_value(CheckoutUpdate)
+resolve_value(EvaluationLease)
+resolve_value(EvaluationTiming)
