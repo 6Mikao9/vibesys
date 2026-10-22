@@ -49,7 +49,12 @@ from vs_agent.api import (
     DurableSessionStore,
     ProviderRoutedExecutor,
 )
-from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
+from vs_runtime.api import (
+    EvaluationAdmission,
+    PollingEvaluationExecutor,
+    RetryingEvaluationExecutor,
+    TryHandles,
+)
 from vs_runtime.api.core import MeasurementDecisions
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
@@ -476,8 +481,7 @@ class _ProductHostFactory:
                         stage_output=stage_output,
                         control=self.integration.control,
                         host_probe=PlatformHostProbe(),
-                        slots=slots,
-                        on_counts=occupancy.note_executor,
+                        admission=EvaluationAdmission(slots, on_counts=occupancy.note_executor),
                     ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(

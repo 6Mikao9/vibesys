@@ -42,6 +42,7 @@ from vs_evaluation.api import (
     is_finished,
 )
 from vs_redaction.api import redact_diagnostic_tail
+from vs_runtime._evaluation_admission import EvaluationAdmission
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
 from vs_runtime._evaluation_jobs import headline_first
 from vs_runtime._failure_classification import is_unsettled
@@ -49,7 +50,6 @@ from vs_runtime._measurement_progress import StageRun
 from vs_sim.api import DISCARD, HostSample
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from contextlib import AbstractContextManager
 
     from vs_runtime._measurement_progress import StageOutputOpener
@@ -63,68 +63,6 @@ _GATING_KINDS = frozenset({EvidenceKind.BUILD, EvidenceKind.ACCURACY})
 
 _RESOURCE_KINDS = frozenset({EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK})
 """Trusted stages that use the evaluation resource and therefore take a slot."""
-
-
-class _EvaluationAdmission:
-    """Fair leases for the evaluation resource, one per admitted gate.
-
-    A job holds one lease across all its stages when any stage uses the resource, so
-    the next job's command starts only when a slot is free. Time spent queued is
-    not time the command has been running. ``on_counts`` is told ``(running,
-    waiting)`` after every change and must not call back into the admission.
-    """
-
-    def __init__(self, slots: int, on_counts: Callable[[int, int], None] | None) -> None:
-        if slots < 1:
-            message = "evaluation slots must be positive"
-            raise ValueError(message)
-        self.capacity = slots
-        self._on_counts = on_counts
-        self._active: set[str] = set()
-        self._queued: list[str] = []
-        self._condition = asyncio.Condition()
-
-    async def counts(self) -> tuple[int, int]:
-        """Return leases held and jobs waiting for one."""
-        async with self._condition:
-            return len(self._active), len(self._queued)
-
-    async def acquire(self, handle_id: str) -> None:
-        """Wait until ``handle_id`` is the next job and a slot is free."""
-        async with self._condition:
-            if handle_id in self._active or handle_id in self._queued:
-                message = f"evaluation handle {handle_id!r} already holds a slot"
-                raise ValueError(message)
-            self._queued.append(handle_id)
-            self._notify()
-            try:
-                await self._condition.wait_for(
-                    lambda: (
-                        bool(self._queued)
-                        and self._queued[0] == handle_id
-                        and len(self._active) < self.capacity
-                    )
-                )
-            except BaseException:
-                if handle_id in self._queued:
-                    self._queued.remove(handle_id)
-                    self._notify()
-                    self._condition.notify_all()
-                raise
-            self._queued.pop(0)
-            self._active.add(handle_id)
-            self._notify()
-
-    async def release(self, handle_id: str) -> None:
-        """Return ``handle_id``'s lease, if it still holds one."""
-        async with self._condition:
-            self._active.discard(handle_id)
-            self._notify()
-            self._condition.notify_all()
-
-    def _notify(self) -> None:
-        if self._on_counts is not None:
-            self._on_counts(len(self._active), len(self._queued))
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,8 +81,8 @@ class PollingEvaluationExecutor:
     command has not started, until a lease is free. Observations are process-local.
     """
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-241001 [PLR0913]; host_probe, slots and the count sink are construction facts of this executor. A configure() after init can run once jobs exist and split admission from the executor that owns it, a carrier would only forward those values, and making the probe required would force every test that does not sample the host to pass one.
-        # > Dropping the admission arguments would let accuracy and benchmark start before a slot is free.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-241001 [PLR0913]; host_probe and admission are construction facts of this executor. A configure() after init can run once jobs exist and split admission from the executor that owns it, a carrier would only forward those resources, and making the probe required would force every test that does not sample the host to pass one.
+        # > Dropping admission would let accuracy and benchmark start before a slot is free.
         self,
         evaluation: Evaluation,
         workspaces: Workspaces,
@@ -153,16 +91,15 @@ class PollingEvaluationExecutor:
         stage_output: StageOutputOpener | None = None,
         control: RunControlChannel | None = None,
         host_probe: HostProbe | None = None,
-        slots: int = 1,
-        on_counts: Callable[[int, int], None] | None = None,
+        admission: EvaluationAdmission | None = None,
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
         ``clock`` stamps availability observations. ``stage_output`` opens the stream
         each stage's command writes its raw output to while it runs; ``None`` discards it.
         ``host_probe`` reads host contention around a benchmark; ``None`` records none.
-        ``slots`` is how many accuracy or benchmark gates run at once. ``on_counts``
-        receives ``(running, waiting)`` whenever that admission changes.
+        ``admission`` shares slots with other evaluation-resource jobs; by default
+        this executor owns one slot.
         """
         self._control = control
         self._clock = clock
@@ -170,7 +107,7 @@ class PollingEvaluationExecutor:
         self._host_probe = host_probe
         self._evaluation = evaluation
         self._workspaces = workspaces
-        self._admission = _EvaluationAdmission(slots, on_counts)
+        self._admission = EvaluationAdmission() if admission is None else admission
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._lifecycle = LifecyclePublisher()
 

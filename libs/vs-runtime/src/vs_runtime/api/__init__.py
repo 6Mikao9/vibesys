@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         ArtifactStore,
         ArtifactStoreError,
     )
+    from vs_runtime._evaluation_admission import EvaluationAdmission
     from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
     from vs_runtime._local_validation import (
         VALIDATION_RECIPE_ARTIFACT_DESCRIPTION,
@@ -128,6 +129,7 @@ _MODULES: dict[str, str] = {
                 "ValidationRecipeArtifactPath "
             ),
         ),
+        ("vs_runtime._evaluation_admission", ("EvaluationAdmission ")),
         ("vs_runtime._polling_evaluation", ("PollingEvaluationExecutor ")),
         (
             "vs_runtime._retrying_evaluation",
@@ -213,6 +215,7 @@ __all__ = [
     "CorePolicy",
     "CoreRunContext",
     "Evaluation",
+    "EvaluationAdmission",
     "EvaluationRetries",
     "InvalidResponse",
     "InvocationConflictError",
