@@ -31,7 +31,7 @@ from vs_core.api import (
 )
 from vs_core.api.replay import proof_covers
 from vs_decode.api import Unreadable, decode_json
-from vs_proto.api import TokenUsage, core_vocabulary, validate
+from vs_proto.api import TokenUsage, core_vocabulary, replay, validate
 from vs_proto.api import replay_agent as pb
 from vs_runtime._access_settlement import AccessKey
 from vs_runtime._core_requests import ExecutionResult
@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._replay_operations import ReplayOperationHost
-    from vs_runtime._session_requests import SessionResolver
+    from vs_runtime._session_requests import SessionResolver, TurnYields
     from vs_sim.api import BlockingRunner
 
     type AgentRequest = EnsureSession | DispatchTurn | CancelTurn | CloseSession
@@ -67,6 +67,23 @@ if TYPE_CHECKING:
 class _AgentDelivery:
     request: AgentRequest
     replacement: bool
+    identity: str
+    bound: replay.ReplayTurnBound | None
+
+
+def _retained_yield(
+    request: AgentRequest, status: ObservationStatus, value: replay.ReplayTurnWait | None
+) -> replay.ReplayTurnWait | None:
+    if (
+        value is None
+        or not isinstance(request, DispatchTurn)
+        or status is not ObservationStatus.SUCCEEDED
+    ):
+        return None
+    if value.turn != request.turn.invocation_id.root:
+        problem = "retained yield belongs to another physical turn"
+        raise ReplayOperationError(problem)
+    return value
 
 
 @dataclass(frozen=True)
@@ -125,6 +142,8 @@ class ReplaySessionServices:
     sessions: ClientAgentSessions
     resolver: SessionResolver
     blocking: BlockingRunner
+    yields: TurnYields[str, replay.ReplayTurnWait]
+    """Required: a yielding turn's wait is part of its observation, never omitted."""
 
 
 class SessionReplayExecutor:
@@ -190,7 +209,12 @@ class SessionReplayExecutor:
         async def encode(
             delivery: _AgentDelivery, result: ExecutionResult
         ) -> ReplayResult | ReplayUnknown:
-            return await self._encode(delivery.request, result)
+            return await self._encode(
+                delivery.request,
+                result,
+                delivery.bound,
+                services.yields.yielded(delivery.identity),
+            )
 
         executor = ReceiptReplayExecutor(
             execute,
@@ -202,7 +226,12 @@ class SessionReplayExecutor:
 
     def _delivery(self, span: Span) -> _AgentDelivery:
         physical = span.replay_physical
-        return _AgentDelivery(self._request(span), physical is not None and physical.ordinal > 0)
+        return _AgentDelivery(
+            self._request(span),
+            physical is not None and physical.ordinal > 0,
+            span.id,
+            None if span.replay is None else span.replay.turn_bound,
+        )
 
     async def execute(self, span: Span, fence: StoreFence) -> ReplayResult:
         return await self._executor.execute(span, fence)
@@ -210,6 +239,13 @@ class SessionReplayExecutor:
     async def inspect(
         self, span: Span, fence: StoreFence
     ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
+        native = self._native(span)
+        if (
+            native.action is not None
+            and native.action.field == "turn"
+            and span.replay_physical is None
+        ):
+            return ReplayUnknown("agent turn is missing its recorded physical start and deadline")
         return await self._executor.inspect(span, fence)
 
     def _native(self, span: Span) -> pb.ReplayAgentRequest:
@@ -254,6 +290,9 @@ class SessionReplayExecutor:
             raise ReplayOperationError(problem)
         if native.action.field != "turn":
             return
+        if span.replay_physical is None:
+            problem = "agent turn is missing its recorded physical start and deadline"
+            raise ReplayOperationError(problem)
         if native.action.value.session is None:
             problem = "agent replay is missing required message fields"
             raise ReplayOperationError(problem)
@@ -388,7 +427,11 @@ class SessionReplayExecutor:
         )
 
     async def _encode(
-        self, request: AgentRequest, result: ExecutionResult
+        self,
+        request: AgentRequest,
+        result: ExecutionResult,
+        bound: replay.ReplayTurnBound | None,
+        suspension: replay.ReplayTurnWait | None,
     ) -> ReplayResult | ReplayUnknown:
         seen = result.observation.observation
         if not seen.terminal or seen.status is ObservationStatus.UNKNOWN:
@@ -398,6 +441,8 @@ class SessionReplayExecutor:
             resource=None if seen.resource_id is None else seen.resource_id.root,
             released=seen.released,
             detail=seen.diagnostic,
+            turn_bound=bound,
+            suspension=_retained_yield(request, seen.status, suspension),
         )
         if isinstance(request, EnsureSession):
             native.session = cast("core_common.SessionId", to_proto(request.spec.session_id))
@@ -418,6 +463,15 @@ class SessionReplayExecutor:
         validate(native)
         if not isinstance(request, DispatchTurn):
             return ReplayResult(native)
+        turn = (
+            None
+            if bound is None
+            else replay.ReplayTurnObservation(
+                bound=bound,
+                succeeded=seen.status is ObservationStatus.SUCCEEDED,
+                suspension=native.suspension,
+            )
+        )
         codec = self._replies[request.turn.output_schema]
         events = [event for event in result.owner_events if isinstance(event, TurnObserved)]
         if len(events) != 1:
@@ -444,14 +498,14 @@ class SessionReplayExecutor:
             self._receipts, scope_binding_key(request.scope, request.turn.session.session_id)
         )
         if binding is None:
-            return ReplayResult(outcome_value, paid=seen.accepted)
+            return ReplayResult(outcome_value, paid=seen.accepted, turn=turn)
         outcome = await self._blocking.run(
             self._sessions.inspect,
             AgentSessionKey.parse(binding.session_key),
             request.turn.invocation_id.root,
         )
         if not isinstance(outcome, Completed):
-            return ReplayResult(outcome_value, paid=seen.accepted)
+            return ReplayResult(outcome_value, paid=seen.accepted, turn=turn)
         usage = outcome.result.usage
         tokens = TokenUsage(
             input=usage.input_tokens,
@@ -463,4 +517,6 @@ class SessionReplayExecutor:
             duration_ms=usage.duration_ms,
         )
         validate(tokens)
-        return ReplayResult(outcome_value, paid=True, cost_usd=usage.total_cost_usd, usage=tokens)
+        return ReplayResult(
+            outcome_value, paid=True, cost_usd=usage.total_cost_usd, usage=tokens, turn=turn
+        )

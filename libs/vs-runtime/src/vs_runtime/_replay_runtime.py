@@ -22,6 +22,8 @@ from vs_core.api.replay import (
     ReplayScheduler,
     ReplaySettings,
     ReplayWriterRecovery,
+    SuspensionRefusal,
+    effective_deadline,
     physical_start,
     proof_covers,
     proof_digest,
@@ -98,6 +100,8 @@ class ReplayResult:
     paid: bool = False
     cost_usd: float | None = None
     usage: TokenUsage | None = None
+    turn: pb.ReplayTurnObservation | None = None
+    """A bound turn's bound and accepted yield; the archive checks both against the log."""
 
 
 @dataclass(frozen=True)
@@ -433,6 +437,7 @@ class ReplayRuntime:
                 started_at=self._archive.clock,
                 replay=operation,
             )
+            self._bind_turn(parent, now=now)
             self._append(
                 Oneof("span", SpanRecord(change=Change.STARTED, span=parent)), now=now, at=at
             )
@@ -445,6 +450,32 @@ class ReplayRuntime:
         self._known_starts.add(span.id)
         return deepcopy(span)
 
+    def _bind_turn(self, parent: Span, *, now: float) -> None:
+        operation = parent.replay
+        if operation is None or operation.policy is None or operation.policy.request is None:
+            return
+        request = operation.policy.request
+        if request.type_url != replay_agent.ReplayAgentRequest.desc().type_name:
+            return
+        native = replay_agent.ReplayAgentRequest.from_binary(request.value)
+        validate(native)
+        if native.action is None or native.action.field != "turn":
+            return
+        turn = native.action.value
+        if turn.continuation_of:
+            origin = self._archive.span(turn.continuation_of)
+            if origin.replay is None or origin.replay.turn_bound is None:
+                problem = "continuation requires its original recorded turn bound"
+                raise ReplayError(problem)
+            operation.turn_bound = deepcopy(origin.replay.turn_bound)
+            parent.parent = operation.turn_bound.origin
+        else:
+            operation.turn_bound = pb.ReplayTurnBound(
+                origin=parent.id,
+                deadline=now + native.within_seconds,
+                hold_credit_seconds=turn.hold_credit_seconds,
+            )
+
     def _start_physical(self, parent: Span, *, within: float, now: float, at: Timestamp) -> Span:
         if self._fence is None:
             problem = "physical execution requires current host exclusion"
@@ -454,7 +485,14 @@ class ReplayRuntime:
         if unresolved:
             raise ReplayRecoveryRequiredError(unresolved)
         prior = None if not children else children[0].replay_physical
-        deadline = now + within if prior is None else prior.deadline
+        bound = None if parent.replay is None else parent.replay.turn_bound
+        deadline = (
+            effective_deadline(bound)
+            if bound is not None
+            else now + within
+            if prior is None
+            else prior.deadline
+        )
         child = physical_start(
             parent,
             identity=f"physical/{self._archive.current_epoch.run_id}/{self._archive.sequence + 1}",
@@ -615,6 +653,7 @@ class ReplayRuntime:
             paid=result.paid,
             cost_usd=cost,
             usage=deepcopy(result.usage),
+            turn=deepcopy(result.turn),
         )
         if span.replay_observation is not None:
             if span.replay_observation == observed:
@@ -674,6 +713,53 @@ class ReplayRuntime:
     def writer_intent(self, manifest: pb.WriterManifest, *, now: float, at: Timestamp) -> None:
         """W2: commit the environment's complete closed grant set before cleanup I/O."""
         self._writer_fact(manifest, now=now, at=at)
+
+    def tool_fact(
+        self,
+        fact: pb.ReplayToolSubmission | pb.ReplayToolAcknowledgement | pb.ReplayTurnWait,
+        *,
+        now: float,
+        at: Timestamp,
+    ) -> SuspensionRefusal | None:
+        """Retain authenticated obligations before tool replies or yield acceptance.
+
+        Only the active physical turn may create submissions and waits. A wait the
+        suspension gate refuses is not recorded; its typed reason is returned. Reply
+        acknowledgements can settle retained obligations after a host restart.
+        """
+        _ = self._active_scheduler
+        validate(fact)
+        turn = self._archive.span(fact.turn)
+        if not isinstance(fact, pb.ReplayToolAcknowledgement) and (
+            self._fence is None
+            or turn.replay_physical is None
+            or turn.replay_physical.host_incarnation != f"{self._fence.host_id}/{self._fence.epoch}"
+        ):
+            problem = "tool submission or wait belongs to another host incarnation"
+            raise ReplayError(problem)
+        if isinstance(fact, pb.ReplayTurnWait):
+            refusal = self._archive.dependencies.refusal(fact, self._archive.span, now=now)
+            if refusal is not None and self._archive.dependencies.yielded(fact.turn) != fact:
+                return refusal
+        detail = Any(type_url=fact.desc().type_name, value=fact.to_binary())
+        dependencies = self._archive.dependencies.record(detail, self._archive.span)
+        if dependencies == self._archive.dependencies:
+            return None
+        self._record_schemas((type(fact),), now=now, at=at)
+        self._append(
+            Oneof(
+                "notice",
+                Notice(
+                    severity=Severity.WARNING,
+                    code=NoticeCode.FRAMEWORK_WARNING,
+                    message="Turn tool dependency retained.",
+                    detail=detail,
+                ),
+            ),
+            now=now,
+            at=at,
+        )
+        return None
 
     def writer_observation(
         self, result: pb.WriterReconciliation, *, now: float, at: Timestamp
@@ -743,7 +829,12 @@ class ReplayRuntime:
     def recovery(self) -> tuple[Span, ...]:
         """Inherited starts requiring their owner's inspection before any live dispatch."""
         _ = self._active_scheduler
-        return tuple(span for span in self._archive.unresolved if span.id not in self._known_starts)
+        unstarted = {span.id for span in self._archive.unstarted_turns}
+        return tuple(
+            span
+            for span in self._archive.unresolved
+            if span.id not in self._known_starts and span.id not in unstarted
+        )
 
     async def inspect(
         self, span_id: str, executor: ReplayExecutor, *, now: float
@@ -951,14 +1042,20 @@ class ReplayRuntime:
         if not state.resumable:
             problem = "replay epochs must remain resumable"
             raise ReplayError(problem)
+        unstarted = self._archive.unstarted_turns
+        without_execution = {span.id for span in unstarted}
         if (
             not scheduler.completed
             or scheduler.frontier().unused
-            or self._archive.unresolved
+            or any(span.id not in without_execution for span in self._archive.unresolved)
             or self._archive.epoch_closed
         ):
             problem = "an epoch can finish only after replay, disclosure and owned work settle"
             raise ReplayError(problem)
+        for span in unstarted:
+            span.status, span.ended_at = SpanStatus.STOPPED, self._archive.clock
+            span.stop = Stop(requested_at=self._archive.clock, landed=True)
+            self._append(Oneof("span", SpanRecord(change=Change.ENDED, span=span)), now=now, at=at)
         self._record_schemas(scheduler.schema_types, now=now, at=at)
         self._record_drift(now=now, at=at)
         if ending.detail is not None:

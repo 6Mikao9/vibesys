@@ -31,6 +31,11 @@ from ._replay_history import (
 from ._replay_identity import ENCODING_VERSION, EncodedIdentity, SemanticKey
 from ._replay_physical import execution_metadata, proof_covers, proof_digest, validate_physical
 from ._replay_sources import ReplayError
+from ._replay_turns import (
+    ReplayTurnDependencies,
+    validate_turn_bound,
+    validate_turn_observation,
+)
 from ._replay_writers import ReplayWriterRecovery
 
 if TYPE_CHECKING:
@@ -72,6 +77,7 @@ class ReplayArchive:
     _history: list[AcceptedReplay | AcceptedClock] = field(default_factory=list, init=False)
     _epochs: list[bytes] = field(default_factory=list, init=False, repr=False)
     acknowledgements: ReplayAcknowledgements = field(default_factory=ReplayAcknowledgements)
+    dependencies: ReplayTurnDependencies = field(default_factory=ReplayTurnDependencies)
     clock: float = 0.0
     _policy_drift: bytes | None = field(default=None, init=False, repr=False)
     _observed: str | None = field(default=None, init=False, repr=False)
@@ -110,6 +116,7 @@ class ReplayArchive:
         result._history = self._history.copy()
         result._epochs = self._epochs.copy()
         result.acknowledgements = self.acknowledgements
+        result.dependencies = self.dependencies
         result.clock = self.clock
         result._policy_drift = self._policy_drift
         result._observed = self._observed
@@ -181,6 +188,17 @@ class ReplayArchive:
     def unresolved(self) -> tuple[Span, ...]:
         return tuple(
             self.span(span_id) for span_id in self._unfinished if span_id not in self._children
+        )
+
+    @property
+    def unstarted_turns(self) -> tuple[Span, ...]:
+        """Logical turn bounds with no physical start, so no dispatch ever became legal."""
+        return tuple(
+            span
+            for span in self.unresolved
+            if span.replay_physical is None
+            and span.replay is not None
+            and span.replay.turn_bound is not None
         )
 
     def children(self, logical: str) -> tuple[Span, ...]:
@@ -292,6 +310,7 @@ class ReplayArchive:
     def _notice(self, detail: Any | None) -> None:
         if detail is None:
             return
+        self.dependencies = self.dependencies.record(detail, self.span)
         name = detail.type_url.rsplit("/", 1)[-1]
         if name == pb.ReplayPolicyDrift.desc().type_name:
             drift = _metadata(detail, pb.ReplayPolicyDrift)
@@ -424,6 +443,7 @@ class ReplayArchive:
             raise ReplayError(problem)
         if previous_bytes is None:
             self._new_logical(operation)
+            validate_turn_bound(span, self.span)
             if change != Change.STARTED or operation.outcome is not None or span.replay_observation:
                 problem = "replay operation must start before observation or outcome"
                 raise ReplayError(problem)
@@ -559,6 +579,10 @@ class ReplayArchive:
             self._children[parent.id] = (*children, span.id)
         if physical.has_field("termination_proof_digest"):
             self._termination_proof(span)
+        if span.replay_observation is not None and (
+            previous is None or previous.replay_observation is None
+        ):
+            validate_turn_observation(span, parent, self.dependencies.yielded)
         if span.replay_observation is not None and not physical.has_field("withdrawn_sequence"):
             if parent.replay is not None and parent.replay.outcome is None:
                 self._observation(span)
