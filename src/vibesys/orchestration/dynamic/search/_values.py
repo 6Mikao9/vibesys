@@ -577,6 +577,8 @@ class PlanProblem(Value):
     wanted: int = Field(default=0, ge=0)
     ended: FailureReason | None = None
     turn_failure: TurnFailureKind | None = None
+    detail: str = ""
+    """The CLI's error text, when a turn ended without a reply."""
 
     @model_validator(mode="after")
     def fields_match_kind(self) -> "PlanProblem":
@@ -586,6 +588,7 @@ class PlanProblem(Value):
             "violations": self.kind is ProblemKind.VIOLATIONS,
             "wanted": self.kind is ProblemKind.UNDERFILLED,
             "ended": self.kind is ProblemKind.NO_REPLY,
+            "detail": self.kind is ProblemKind.NO_REPLY,
         }
         for name, allowed in belongs.items():
             if bool(getattr(self, name)) and not allowed:

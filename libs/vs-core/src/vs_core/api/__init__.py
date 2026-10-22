@@ -660,6 +660,7 @@ if TYPE_CHECKING:
         SessionInput,
     )
     from vs_core.types.sessions import (
+        LAUNCH_FAILURE_PREFIX,
         TURN_FAILURE_DETAIL_LIMIT,
         Access,
         AcquisitionStalled,
@@ -1050,7 +1051,8 @@ _MODULES: dict[str, str] = {
         (
             "vs_core.types.sessions",
             (
-                "TURN_FAILURE_DETAIL_LIMIT Access AcquisitionStalled CancelTurn CheckpointFailure "
+                "LAUNCH_FAILURE_PREFIX TURN_FAILURE_DETAIL_LIMIT Access AcquisitionStalled "
+                "CancelTurn CheckpointFailure "
                 "CheckpointStalled CloseSession DispatchTurn EnsureSession InputAcceptanceObserved "
                 "InputMidTurnReleased InputOfferedMidTurn InputReservationReleased "
                 "InputReservationRequested InputTakenMidTurn InspectTurn InterruptClaim "
@@ -1135,6 +1137,7 @@ __all__ = [
     "IDENTITY_PATTERN",
     "INPUT",
     "INTERPRET_SUFFIX",
+    "LAUNCH_FAILURE_PREFIX",
     "MARKDOWN_PROSE_CONVENTION",
     "MAX_CORE_BASE_RUNS",
     "MAX_CORRECTIONS",

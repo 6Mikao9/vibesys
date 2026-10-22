@@ -17,7 +17,7 @@ Mechanisms:
   will. A ``Pending`` row means the dispatch call has not returned, here or in an
   earlier host that a restart replaced: Unknown, because a new host cannot prove the
   old provider process stopped. A ``Completed`` or ``InvalidResponse`` row shows the
-  turn ended. An ``Unknown`` row was written by a dispatch call that returned, so the
+  turn ended, as does a launch failure. An ``Unknown`` row was written by a dispatch call that returned, so the
   key is released with ``release_interrupted``, which itself refuses an active
   invocation.
 * **CloseSession** first closes the episode's fence, which every EnsureSession enters
@@ -46,14 +46,13 @@ from pydantic import BaseModel, ConfigDict
 
 from vs_agent.api import (
     AgentSessionKey,
-    Completed,
-    InvalidResponse,
     InvocationConflictError,
     Pending,
     SessionConfigurationError,
     SessionPersistenceError,
     SessionResumeError,
     Unknown,
+    invocation_settled,
 )
 from vs_core.api import (
     CancelTurn,
@@ -195,7 +194,7 @@ def _writer_ended(row: AgentInvocationRecord | None) -> bool:
     """Whether the journal row proves the invocation's writer ended: judged or released."""
     if row is None:
         return False
-    if isinstance(row.outcome, (Completed, InvalidResponse)):
+    if invocation_settled(row.outcome):
         return True
     return row.interrupted and isinstance(row.outcome, Unknown)
 
@@ -465,7 +464,7 @@ class SessionLifecycleRequests:
                 return _unknown(
                     "the turn is not proven stopped: its dispatch has not returned", binding
                 )
-            if isinstance(record.outcome, (Completed, InvalidResponse)):
+            if invocation_settled(record.outcome):
                 return _released(
                     ObservationStatus.CANCELLED,
                     binding,

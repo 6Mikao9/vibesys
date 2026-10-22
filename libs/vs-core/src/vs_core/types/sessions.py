@@ -478,6 +478,13 @@ class InterruptRequested(Value):
 TURN_FAILURE_DETAIL_LIMIT = 4000
 """Longest failure text a TurnResult carries, in characters."""
 
+LAUNCH_FAILURE_PREFIX = "agent launch failed: "
+"""Diagnostic prefix of a turn whose agent process exited before the turn started.
+
+The session executor records the CLI's own error after this prefix. Core classifies
+that diagnostic as ``TurnFailureKind.LAUNCH_FAILED`` and does not ask the turn again.
+"""
+
 
 class TurnResult(Value):
     """Terminal result of one turn, with the failure text when it did not succeed.

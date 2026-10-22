@@ -25,8 +25,10 @@ cannot prove unaccepted, because ``AgentSessions.start`` and ``resume`` return t
 journal's outcome for a known invocation instead of dispatching again.
 
 Outcome mapping: Completed is SUCCEEDED and terminal; an invalid response is a
-terminal FAILED observation of an accepted turn; Pending and Unknown are UNKNOWN
-and never sealed. The executor never returns ``ExecutorRefusal``.
+terminal FAILED observation of an accepted turn; a launch failure is a terminal
+FAILED observation of a process that exited before a turn started, and it is not
+asked again; Pending and Unknown are UNKNOWN and never sealed. The executor
+never returns ``ExecutorRefusal``.
 """
 
 from __future__ import annotations
@@ -46,6 +48,7 @@ from vs_agent.api import (
     InvalidResponse,
     InvocationConflictError,
     InvocationOutcome,
+    LaunchFailed,
     Pending,
     SchemaViolation,
     SessionConfigurationError,
@@ -53,9 +56,11 @@ from vs_agent.api import (
     SessionResumeError,
     SteerOutcome,
     Unknown,
+    invocation_settled,
     parse_typed_response,
 )
 from vs_core.api import (
+    LAUNCH_FAILURE_PREFIX,
     REPLY_ERROR_MESSAGE_LIMIT,
     DispatchTurn,
     EnsureSession,
@@ -885,9 +890,7 @@ class RuntimeSessionRequests:
             ) as error:
                 message = f"invocation evidence is unreadable: {error}"
                 raise AccessSettlementError(message) from error
-            if isinstance(outcome, (Completed, InvalidResponse)) or (
-                isinstance(outcome, Unknown) and never_journaled
-            ):
+            if invocation_settled(outcome) or (isinstance(outcome, Unknown) and never_journaled):
                 await self.settlement.settle(peer)
 
     def _inspect_peer(
@@ -985,7 +988,7 @@ class RuntimeSessionRequests:
         recorded = await self._blocking.run(
             self._sessions.inspect, dispatch.key, dispatch.invocation
         )
-        if isinstance(recorded, (Completed, InvalidResponse)):
+        if invocation_settled(recorded):
             return recorded
         established = await self._established(bkey, excluding=dispatch.invocation)
         if established:
@@ -1042,7 +1045,7 @@ class RuntimeSessionRequests:
         """
         facts = self._translate(outcome, binding, dispatch.schema, ref)
         key = AccessKey(binding=bkey, invocation=dispatch.invocation)
-        if not isinstance(outcome, (Completed, InvalidResponse)):
+        if not invocation_settled(outcome):
             return facts
         try:
             violation = await self.settlement.settle(key)
@@ -1181,6 +1184,14 @@ class RuntimeSessionRequests:
                 return _unknown("the turn is in flight", resource)
             case Unknown():
                 return _unknown(outcome.detail, resource)
+            case LaunchFailed():
+                return _Facts(
+                    ObservationStatus.FAILED,
+                    accepted=False,
+                    resource_id=resource,
+                    diagnostic=f"{LAUNCH_FAILURE_PREFIX}{outcome.detail}",
+                    setup_failure=SetupFailureKind.PERMANENT,
+                )
             case _:
                 assert_never(outcome)
 
@@ -1225,7 +1236,7 @@ class RuntimeSessionRequests:
         ) as error:
             raise _RefusalError(_unknown(str(error), binding.resource_id)) from error
         target = self._translate(outcome, binding, schema, link.output_schema)
-        if isinstance(outcome, (Completed, InvalidResponse)):
+        if invocation_settled(outcome):
             try:
                 violation = await self.settlement.settle(
                     AccessKey(binding=bkey, invocation=invocation.invocation_id.root)
@@ -1351,7 +1362,7 @@ class JournalRunInvocations:
             InvocationConflictError,
         ) as error:
             return f"invocation evidence is unreadable: {error}"
-        if isinstance(outcome, (Completed, InvalidResponse)):
+        if invocation_settled(outcome):
             return None
         return "the invocation is not proven terminal, so its writer may still run"
 

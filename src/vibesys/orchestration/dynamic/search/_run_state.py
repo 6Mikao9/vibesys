@@ -1104,12 +1104,16 @@ class RunRecord:
     def _no_winner_reason(self, *, trusted: bool) -> str:
         problem = self.gate.last_error
         asked = problem.kind.value if problem is not None else ""
+        cli = "" if problem is None or not problem.detail else problem.detail
         if trusted or self.baseline is None:
-            return asked or "no candidate could be adopted"
+            text = asked or "no candidate could be adopted"
+            return f"{text}: {cli}" if cli else text
         why = candidates.failure(self.baseline)
         detail = why.kind.value if why is not None else "the input did not pass its measurement"
         if asked:
             detail = f"{detail}; the planner's last reply: {asked}"
+            if cli:
+                detail = f"{detail}: {cli}"
         return candidates.ending_reason(RunEnding.NO_TRUSTED_RESULT, detail)
 
     # -- the record ----------------------------------------------------------------------------

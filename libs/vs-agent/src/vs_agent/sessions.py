@@ -172,9 +172,98 @@ class InvalidResponse(_InvocationObservation):
     violations: tuple[SchemaViolation, ...] = ()
 
 
+class LaunchFailed(_InvocationObservation):
+    """The agent process exited before a turn started. The same invocation is not sent again.
+
+    ``detail`` is the CLI's own error text. A transient, quota, auth, or schema
+    failure is not this, and neither is an exit after the provider emitted a
+    turn: those stay :class:`Unknown`, because acceptance may already have happened.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["launch_failed"] = "launch_failed"
+    session_key: str
+    invocation_id: str = Field(min_length=1)
+    detail: str
+    checkpoint: AgentSessionCheckpoint | None = None
+
+
 type InvocationOutcome = Annotated[
-    Completed | Pending | Unknown | InvalidResponse, Field(discriminator="kind")
+    Completed | Pending | Unknown | InvalidResponse | LaunchFailed,
+    Field(discriminator="kind"),
 ]
+
+
+def invocation_settled(outcome: InvocationOutcome) -> bool:
+    """Whether the provider call has returned a final result and is not still writing.
+
+    A launch failure is final: the process exited before a turn started, so it
+    holds no workspace writes. Pending and Unknown are not.
+    """
+    return isinstance(outcome, (Completed, InvalidResponse, LaunchFailed))
+
+
+def _launch_failure_detail(error: BaseException) -> str | None:
+    """The CLI's own text when the process exited before a turn started, else None.
+
+    A nonzero exit is that case only when the provider classified it as other
+    and the stream never started a turn. A spawn error stays unknown: the
+    process may not have been the one that failed, and setup can be retried.
+    A missing conversation is not: the next turn may start a fresh one.
+    Transient, quota, auth, and schema failures are not.
+    """
+    # lint-waiver: LW-910211 [PLC0415]; a module-level agentshim import would load provider CLIs into every vs_agent.api import, and this helper runs only after a turn has already failed.
+    import agentshim  # noqa: PLC0415
+
+    if isinstance(error, agentshim.SessionResumeError):
+        return None
+    if not isinstance(error, agentshim.CliExitError):
+        return None
+    # An exit the provider did not classify is the same as "other": the CLI
+    # died without a quota, auth, or schema reason. A classified transient
+    # failure is left unknown so the caller can wait it out.
+    if error.kind not in (None, agentshim.FailureKind.OTHER):
+        return None
+    if "turn.started" in error.stdout or "turn.completed" in error.stdout:
+        return None
+    text = (error.detail or error.stderr or str(error)).strip()
+    return text or None
+
+
+def _unaccepted_outcome(
+    error: BaseException,
+    *,
+    session_key: str,
+    invocation_id: str,
+    checkpoint: AgentSessionCheckpoint | None,
+) -> tuple[InvocationOutcome, bool]:
+    """The journal row for a dispatch that raised, and whether the error still propagates.
+
+    A process that exited before a turn started did not accept work. Everything
+    else stays Unknown: classifying it as safe to replay would repeat a turn
+    the provider may already have executed. A cancellation still propagates
+    after the row is written.
+    """
+    launch = _launch_failure_detail(error)
+    if launch is not None:
+        return (
+            LaunchFailed(
+                session_key=session_key,
+                invocation_id=invocation_id,
+                detail=launch,
+                checkpoint=checkpoint,
+            ),
+            False,
+        )
+    return (
+        Unknown(
+            session_key=session_key,
+            invocation_id=invocation_id,
+            detail=f"{type(error).__name__}: {error}",
+            checkpoint=checkpoint,
+        ),
+        not isinstance(error, Exception),
+    )
 
 
 class AgentSessions(Protocol):
@@ -694,16 +783,13 @@ class ClientAgentSessions:
         except AgentOutputSchemaError as error:
             outcome = self._schema_failure(pending, error, initial=initial)
         except BaseException as error:
-            # Invocation acceptance is unknowable after any external failure.
-            # Classifying a specific provider exception as safe would permit a
-            # replay that the provider may already have executed.
-            outcome = Unknown(
+            outcome, propagate = _unaccepted_outcome(
+                error,
                 session_key=str(key),
                 invocation_id=invocation_id,
-                detail=f"{type(error).__name__}: {error}",
                 checkpoint=checkpoint,
             )
-            if not isinstance(error, Exception):
+            if propagate:
                 raise
         finally:
             with self._lock:
@@ -802,7 +888,7 @@ class ClientAgentSessions:
                 and not isinstance(outcome, Completed)
                 and not record.interrupted
             ):
-                if isinstance(outcome, Unknown):
+                if isinstance(outcome, Unknown | LaunchFailed):
                     detail = outcome.detail
                 elif isinstance(outcome, Pending):
                     detail = "unfinished dispatch recovered without acceptance evidence"

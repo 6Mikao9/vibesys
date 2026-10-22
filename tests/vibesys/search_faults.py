@@ -320,7 +320,9 @@ FAULTS: tuple[Fault, ...] = (
     Fault("lost", _work, lambda run, asked: run.fail(asked, FailureReason.LOST)),
     Fault("timed-out", _work, lambda run, asked: run.fail(asked, FailureReason.TIMED_OUT)),
     Fault("transport-lost", _turn, lambda run, asked: run.lose(asked)),
-    *(_turn_failed(kind) for kind in TurnFailureKind),
+    # A launch failure ends the dynamic planner on that turn. Injecting it into
+    # every search's fault set would stop a plan the other faults still correct.
+    *(_turn_failed(kind) for kind in TurnFailureKind if kind is not TurnFailureKind.LAUNCH_FAILED),
     _raw("not json"),
     _raw("{}"),
     _raw(json.dumps([1, 2])),

@@ -44,6 +44,7 @@ from vs_core.api.search import (
     RetryPolicy,
     Session,
     Tries,
+    TurnFailureKind,
     TurnFinished,
 )
 
@@ -179,6 +180,10 @@ async def ask_planner(
         case Failed(reason=FailureReason.INVALID_REPLY, errors=errors, turn=turn):
             unparsed = PlanProblem(kind=ProblemKind.UNPARSEABLE, errors=errors)
             return Reply(None, unparsed, turn, world)
+        case Failed(reason=FailureReason.TURN_FAILED, turn_failure=TurnFailureKind.LAUNCH_FAILED):
+            # The process exited before a turn started. A correction or a fresh
+            # ask fails the same way, so the call ends on this one turn.
+            return _no_plan(world, _no_reply(event))
         case Failed(reason=FailureReason.TIMED_OUT | FailureReason.TURN_FAILED, turn=turn):
             return Reply(None, _no_reply(event), turn, world)
         case Failed(reason=FailureReason.LOST, turn=lost_turn) if lost_turn is not None:
@@ -230,7 +235,10 @@ def _held(check: PlanCheck | None) -> PlanCheck | None:
 
 def _no_reply(event: Failed) -> PlanProblem:
     return PlanProblem(
-        kind=ProblemKind.NO_REPLY, ended=event.reason, turn_failure=event.turn_failure
+        kind=ProblemKind.NO_REPLY,
+        ended=event.reason,
+        turn_failure=event.turn_failure,
+        detail=event.detail,
     )
 
 
@@ -238,9 +246,11 @@ def _no_plan(world: PlanWorld, problem: PlanProblem | None) -> NoPlan:
     """A call that ended empty; it is stuck only when nothing is in flight to wait for.
 
     The input's measurement still running is something to wait for: planning is asked again
-    when it lands.
+    when it lands. A launch failure is not: the agent cannot start, so the call is stuck
+    as soon as nothing else is in flight, and the run ends when the measurement does.
     """
-    stuck = world.active == 0 and world.baseline is not None
+    launch = problem is not None and problem.turn_failure is TurnFailureKind.LAUNCH_FAILED
+    stuck = world.active == 0 and (world.baseline is not None or launch)
     return NoPlan(problem=problem, stuck=stuck, blocked_at_done=world.done)
 
 
