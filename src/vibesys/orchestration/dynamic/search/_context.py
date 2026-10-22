@@ -23,7 +23,12 @@ from vibesys.orchestration.dynamic.models import ProfileOffer
 from vibesys.orchestration.dynamic.search import _briefs as briefs
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._main import MergeOptions
-from vibesys.orchestration.dynamic.search._parents import ParentOption, ParentSnapshot, options
+from vibesys.orchestration.dynamic.search._parents import (
+    ParentOption,
+    ParentSnapshot,
+    eligible,
+    options,
+)
 from vibesys.orchestration.dynamic.search._plan import PlanLedger
 from vibesys.orchestration.dynamic.search._prompts import (
     BuildableRow,
@@ -38,16 +43,20 @@ from vibesys.orchestration.dynamic.search._prompts import (
     ProfileHistoryStatus,
     WorkstreamHistoryRow,
 )
+from vibesys.orchestration.dynamic.search._queue import Submission
 from vibesys.orchestration.dynamic.search._values import (
     COMBINE_MIN_PARTS,
     CombineSource,
+    FactCoverage,
     FinishedWork,
     HypothesisRecord,
+    ImplementedRevision,
     MainMeasurement,
     MergeRecord,
     PlanProblem,
     WorkKind,
     WorkPlan,
+    fact_coverage,
 )
 from vs_core.api.search import EvidenceKind, InvocationRef, RevisionRef
 
@@ -99,6 +108,108 @@ def offered_parents(
     return tuple(
         item for item in options(parents) if item.snapshot.revision.revision_id.root not in withheld
     )
+
+
+class _RevisionFacts:
+    """Facts accrued on one revision, never from another revision."""
+
+    def __init__(self, revision: RevisionRef) -> None:
+        self.revision = revision
+        self.passed = False
+        self.failed = False
+        self.benchmark = False
+
+    def note(self, *, accuracy: bool | None, benchmark: bool) -> None:
+        """Record an accuracy result and whether a benchmark reading exists, on this revision."""
+        self.passed = self.passed or accuracy is True
+        self.failed = self.failed or accuracy is False
+        self.benchmark = self.benchmark or benchmark
+
+    def coverage(self) -> FactCoverage:
+        """Accuracy counts only while a pass on this revision has not been withdrawn."""
+        return fact_coverage(accuracy=self.passed and not self.failed, benchmark=self.benchmark)
+
+
+class _RevisionIndex:
+    """Candidate revisions accumulated from one run, keyed by hypothesis and revision."""
+
+    def __init__(self, withheld: tuple[str, ...]) -> None:
+        self._hidden = set(withheld)
+        self._rows: dict[tuple[str, str], _RevisionFacts] = {}
+
+    def slot(self, hypothesis_id: str, revision: RevisionRef) -> _RevisionFacts | None:
+        """The facts row for this revision, or none when the revision is withheld."""
+        root = revision.revision_id.root
+        if root in self._hidden:
+            return None
+        key = (hypothesis_id, root)
+        found = self._rows.get(key)
+        if found is None:
+            found = _RevisionFacts(revision)
+            self._rows[key] = found
+        return found
+
+    def note_rounds(self, hypotheses: Iterable[HypothesisRecord]) -> None:
+        """Record each finished round's accuracy and benchmark on its own candidate."""
+        for record in hypotheses:
+            for item in record.rounds:
+                if item.candidate is None:
+                    continue
+                found = self.slot(record.hypothesis_id, item.candidate)
+                if found is None:
+                    continue
+                found.note(
+                    accuracy=item.accuracy_passed,
+                    benchmark=item.benchmark_passed is not None,
+                )
+
+    def note_parents(self, parents: Iterable[ParentSnapshot]) -> None:
+        """Record an eligible parent's proved accuracy, and its benchmark when it has one."""
+        for snapshot in parents:
+            if not eligible(snapshot):
+                continue
+            found = self.slot(snapshot.hypothesis_id, snapshot.revision)
+            if found is None:
+                continue
+            found.note(accuracy=True, benchmark=snapshot.benchmark is not None)
+
+    def note_waiting(self, submitted: Iterable[Submission]) -> None:
+        """A candidate waiting for measurement is implemented and has no facts yet."""
+        for submission in submitted:
+            if submission.kind is WorkKind.IMPLEMENT:
+                self.slot(submission.work_id, submission.candidate)
+
+    def implemented(self) -> tuple[ImplementedRevision, ...]:
+        """The revisions, in hypothesis then revision order."""
+        return tuple(
+            ImplementedRevision(
+                hypothesis_id=hypothesis_id,
+                revision=found.revision,
+                facts=found.coverage(),
+            )
+            for (hypothesis_id, _), found in sorted(self._rows.items())
+        )
+
+
+def implemented_revisions(
+    *,
+    hypotheses: Iterable[HypothesisRecord],
+    parents: Iterable[ParentSnapshot],
+    submitted: Iterable[Submission],
+    withheld: tuple[str, ...],
+) -> tuple[ImplementedRevision, ...]:
+    """Every candidate revision an implementer produced, with the facts on that revision only.
+
+    A waiting submission has none yet. A finished round contributes the accuracy and benchmark
+    recorded for its candidate. A parent snapshot contributes the accuracy it proved and its
+    benchmark, if that proof names the snapshot's revision. A failed accuracy on the revision
+    withdraws the pass. Nothing is copied from a parent revision onto a child.
+    """
+    index = _RevisionIndex(withheld)
+    index.note_rounds(hypotheses)
+    index.note_parents(parents)
+    index.note_waiting(submitted)
+    return index.implemented()
 
 
 def offer_snapshot(base: RevisionRef, offered: tuple[ParentOption, ...]) -> str:
@@ -315,6 +426,8 @@ class PlanWorld:
     """Which candidates a merge may name now; its rows are the prompt's mergeable list."""
     space: MetricSpace | None = None
     """The space candidates are compared in: a composite is compared with its parts in it."""
+    implemented: tuple[ImplementedRevision, ...] = ()
+    """Implemented candidate revisions a combine may name, measured or not."""
 
     @property
     def working(self) -> tuple[RunningWork, ...]:
@@ -376,6 +489,7 @@ class PlanWorld:
             merge_ids=frozenset(merges | running_merges),
             merging=bool(running_merges),
             merge_options=self.merge_options,
+            implemented=self.implemented,
         )
 
     def _waiting_ids(self) -> frozenset[str]:
@@ -424,6 +538,7 @@ class PlanWorld:
             base_accuracy_passed=None if seen is None else seen.accuracy_passed,
             offer_snapshot=offer_snapshot(self.base, self.offered),
             buildable=tuple(_buildable(item) for item in self.offered),
+            combinable=self.implemented,
             history=shown,
             older_ids=tuple(
                 row.hypothesis_id

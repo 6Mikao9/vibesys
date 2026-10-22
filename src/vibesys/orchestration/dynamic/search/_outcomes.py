@@ -619,6 +619,19 @@ def _failing_tail(done: WorkstreamDone) -> str:
     return "" if done.failure is None else done.failure.output
 
 
+def _produced(result: Result | None, retained: RevisionRef | None) -> RevisionRef | None:
+    """The revision the implementer produced, whether or not settlement retained it.
+
+    Settlement names a candidate only when its accuracy passed. The round still records the
+    checkpointed revision, so a combine can name it before or without that pass.
+    """
+    if retained is not None:
+        return retained
+    if result is None:
+        return None
+    return result.candidate.revision
+
+
 def round_of(done: WorkstreamDone) -> RoundRecord:
     """The round an implement workstream adds to its hypothesis."""
     start = done.start
@@ -640,7 +653,7 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
         outcome=outcome,
         summary="" if result is None else result.candidate.summary,
         review_passed=None if result is None or result.verdict is None else result.verdict.passed,
-        candidate=None if settlement is None else settlement.candidate,
+        candidate=_produced(result, None if settlement is None else settlement.candidate),
         accuracy_passed=None if accuracy is None else accuracy.passed,
         benchmark_passed=None if benchmark is None else benchmark.passed,
         metrics=() if benchmark is None else benchmark.metrics,

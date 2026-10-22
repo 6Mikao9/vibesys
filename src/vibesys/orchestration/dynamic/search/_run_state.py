@@ -20,6 +20,7 @@ from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._context import (
     PlanWorld,
     free_slots,
+    implemented_revisions,
     offered_parents,
     remaining,
 )
@@ -72,11 +73,13 @@ from vibesys.orchestration.dynamic.search._values import (
     CombineSource,
     FinishedWork,
     HypothesisRecord,
+    ImplementedRevision,
     MainMeasurement,
     MergeOutcome,
     MergeRecord,
     MergeSource,
     PlanProblem,
+    RoundRecord,
     Step,
     Unreachable,
     WorkKind,
@@ -520,6 +523,15 @@ class RunRecord:
         """The parents the planner may choose from now."""
         return offered_parents(self.parents, self.withheld)
 
+    def implemented(self) -> tuple[ImplementedRevision, ...]:
+        """Candidate revisions a combine may name, measured or not, facts on each revision only."""
+        return implemented_revisions(
+            hypotheses=self.hypotheses.values(),
+            parents=self.parents,
+            submitted=self.submitted.values(),
+            withheld=self.withheld,
+        )
+
     # -- the input's measurement ---------------------------------------------------------------
 
     def measured(self, baseline: candidates.Baseline) -> None:
@@ -662,6 +674,7 @@ class RunRecord:
             evaluations=self._queue_view(now),
             input_overdue=self._overdue_view(now),
             space=candidates.space_of(self.terms),
+            implemented=self.implemented(),
         )
 
     def _queue_view(self, now: float | None) -> EvaluationQueueView | None:
@@ -796,10 +809,26 @@ class RunRecord:
         if plan.kind is not WorkKind.IMPLEMENT or not plan.continue_hypothesis or prior is None:
             return None
         last = prior.rounds[-1] if prior.rounds else None
-        if last is not None and last.candidate is not None:
+        if (
+            last is not None
+            and last.candidate is not None
+            and self._continues_from(plan.work_id, last)
+        ):
             return last.candidate, prior.lineage_parent_id
         earlier = [item for item in self.finished_work if item.plan.work_id == plan.work_id]
         return (earlier[-1].parent, earlier[-1].parent_hypothesis_id) if earlier else None
+
+    def _continues_from(self, hypothesis_id: str, last: RoundRecord) -> bool:
+        """Whether a continuation builds on ``last``'s candidate.
+
+        A retained candidate (accuracy passed, or still a parent) is that base. A revision kept
+        only so a combine can name it, accuracy failed or never passed, is not.
+        """
+        if last.candidate is None:
+            return False
+        if last.accuracy_passed is True:
+            return True
+        return resolve(self.parents, hypothesis_id, last.candidate.revision_id.root) is not None
 
     def ready_to_start(self, free: int) -> list[WorkstreamStart]:
         """A workstream for each accepted plan that fits in ``free`` slots, now running.
@@ -872,30 +901,53 @@ class RunRecord:
         )
 
     def _parts(self, plan: WorkPlan) -> tuple[CombineSource, ...]:
-        """A combine's parts as the exact revisions offered now, each with its own change.
+        """A combine's parts as the implemented revisions named now, each with its own change.
 
-        A part whose revision is no longer offered (its verification failed since) is left out,
-        and the implementer is told so. A part's change starts at the main revision its tree
-        includes (`main_base_at`).
+        A part that is no longer an implemented candidate is left out, and the implementer is
+        told so. A measured part's change starts where its tree's does (`main_base_at`); a
+        candidate still waiting for measurement starts where its submission's parent does.
         """
         offered = {
             (item.snapshot.hypothesis_id, item.snapshot.revision.revision_id.root): item.snapshot
             for item in self.offered()
         }
+        known = {
+            (item.hypothesis_id, item.revision.revision_id.root): item
+            for item in self.implemented()
+        }
         parts: list[CombineSource] = []
         for pick in plan.combine:
-            found = offered.get((pick.hypothesis_id, pick.revision))
+            key = (pick.hypothesis_id, pick.revision)
+            found = known.get(key)
             if found is None:
                 continue
+            snapshot = offered.get(key)
+            benchmark = None if snapshot is None else snapshot.benchmark
             parts.append(
                 CombineSource(
                     hypothesis_id=pick.hypothesis_id,
                     revision=found.revision,
-                    built_on=self.main_base_at(found.revision),
-                    metric=None if found.benchmark is None else found.benchmark.headline(),
+                    built_on=self._change_base(found.revision),
+                    metric=None if benchmark is None else benchmark.headline(),
                 )
             )
         return tuple(parts)
+
+    def _change_base(self, revision: RevisionRef) -> RevisionRef:
+        """Where ``revision``'s own change starts, including a candidate still being measured.
+
+        A finished candidate uses `main_base_at`. A candidate waiting for its measurement was
+        built on its submission's parent, and its change starts where that parent's does.
+        """
+        if self._made(revision.revision_id.root) is not None:
+            return self.main_base_at(revision)
+        for submission in self.submitted.values():
+            if (
+                submission.kind is WorkKind.IMPLEMENT
+                and submission.candidate.revision_id.root == revision.revision_id.root
+            ):
+                return self.main_base_at(submission.parent)
+        return self.main_base_at(revision)
 
     def main_base_at(self, revision: RevisionRef) -> RevisionRef:
         """Where ``revision``'s own change against main starts: a revision its tree wholly holds.

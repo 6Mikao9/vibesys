@@ -23,6 +23,7 @@ from launch import built_in_orchestrations
 from vibesys.metrics import MetricRow
 from vibesys.orchestration.dynamic.search.api import (
     EvidenceCitation,
+    FactCoverage,
     MergeableRow,
     MergePrompt,
     MergeSource,
@@ -303,6 +304,13 @@ _PLANNER = PlannerPrompt.model_validate(
                 "best_partial": False,
             },
         ),
+        "combinable": (
+            {
+                "hypothesis_id": "combinable-hyp-c8",
+                "revision": _revision("c8"),
+                "facts": FactCoverage.NONE,
+            },
+        ),
         "history": (
             {
                 "hypothesis_id": "history-hyp-a2",
@@ -421,6 +429,7 @@ def cases() -> dict[str, Case]:
                 "capacity": "at most 7 new",
                 "remaining": "13 more",
                 "buildable": "option-c4",
+                "combinable": "combinable-hyp-c8",
                 "mergeable": "mergeable-hyp-d5",
                 "history": "history-hyp-a2",
                 "baseline": "baseline-metric-b3",

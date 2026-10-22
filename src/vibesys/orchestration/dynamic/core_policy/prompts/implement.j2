@@ -23,7 +23,7 @@ the revision the part was built on to the part), in this order:
 {{ loop.index }}. hypothesis `{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}`{% if part.metric %}, which measured {{ metric(part.metric) }} alone{% endif %}: {{ apply_change('git diff ' ~ rev(part.built_on) ~ ' ' ~ rev(part.revision), agent_git_writable) }}
 {% endfor %}
 {% for pick in combine_missing %}
-- hypothesis `{{ pick.hypothesis_id }}` at `{{ pick.revision }}` is no longer buildable: leave it out.
+- hypothesis `{{ pick.hypothesis_id }}` at `{{ pick.revision }}` is no longer an implemented candidate: leave it out.
 {% endfor %}
 {{ apply_conflicts(agent_git_writable) }} Combine the parts as the task says, without
 redesigning any of them.
