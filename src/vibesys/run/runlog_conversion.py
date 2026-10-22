@@ -207,6 +207,8 @@ class RunConversion:
 
     run: str
     result: ConversionResult
+    # The row that already attempted this host index entry's target, if any.
+    alias_of: str | None = None
 
 
 def _attempt(
@@ -249,11 +251,11 @@ def iter_conversions(
     is skipped and left untouched.
     """
     entries = [(entry, _indexed_target(entry)) for entry in project.indexed_run_directories()]
-    seen: set[Path] = set()
+    seen: dict[Path, str] = {}
     ids = set(project.logged_run_ids_for(project.root)) | set(project.state.checkout_run_ids())
     for run_id in sorted(ids):
         directory = project.log_directory_for(project.root, run_id)
-        seen.add(directory.resolve())
+        seen[directory.resolve()] = run_id
         try:
             result = convert_run(project, run_id, clock=clock, threads=threads)
         except (OSError, ValueError, TypeError, ProjectError) as exc:
@@ -269,15 +271,17 @@ def iter_conversions(
         yield RunConversion(run_id, result)
     for entry, target in entries:
         if isinstance(target, ConversionResult):
-            result = target
+            yield RunConversion(str(entry), target)
         elif target in seen:
-            result = ConversionResult(
-                ConversionStatus.SKIPPED, "already processed this index target"
+            yield RunConversion(
+                str(entry),
+                ConversionResult(ConversionStatus.SKIPPED, "already processed this index target"),
+                alias_of=seen[target],
             )
         else:
             result = _attempt(target, entry.name, clock=clock, threads=threads)
-            seen.add(target)
-        yield RunConversion(str(entry), result)
+            seen[target] = str(entry)
+            yield RunConversion(str(entry), result)
 
 
 def convert_runs(
@@ -285,7 +289,9 @@ def convert_runs(
 ) -> tuple[RunConversion, ...]:
     """Convert every run :func:`iter_conversions` finds; an existing conversion is skipped."""
     return tuple(
-        RunConversion(row.run, ConversionResult(ConversionStatus.SKIPPED, row.result.reason))
+        RunConversion(
+            row.run, ConversionResult(ConversionStatus.SKIPPED, row.result.reason), row.alias_of
+        )
         if row.result.status is ConversionStatus.EXISTS
         else row
         for row in iter_conversions(project, clock=clock, threads=threads)

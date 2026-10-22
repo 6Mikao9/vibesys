@@ -10,10 +10,19 @@ import pytest
 from tests.support.task_project import write_task
 
 from entrypoints.host import main
+from vibesys.events import CoreEventType, SpanStartedData
+from vibesys.run import EventJournal
+from vs_core.api import Span, SpanStatus, SpanType
 from vs_project.api import Project
 from vs_proto.api import MutateRequest, MutateResponse, Oneof, ReadRequest, ReadResponse, validate
 from vs_proto.api import host_payloads as pb
-from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScript
+from vs_sim.api.testing import (
+    FakeProcesses,
+    FakeProcessSignaller,
+    ManualClock,
+    ProcessScript,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -195,3 +204,41 @@ def test_candidate_inspection_is_a_registered_binary_read(host_root: Path, sim: 
     assert response.result.value.request_id == "candidate-a"
     assert response.result.value.selection_revision == 3
     assert response.result.value.state == pb.CandidateState.NOT_FOUND
+
+
+def test_saved_run_conversion_is_a_registered_mutation(host_root: Path, sim: Sim) -> None:
+    folder = host_root / "projects"
+    folder.mkdir()
+    journal = EventJournal(ManualClock(start=100), SimThreads())
+    journal.attach(Project.log_directory_for(folder, "run-1"), "run-1")
+    journal.emit(
+        CoreEventType.SPAN_STARTED,
+        data=SpanStartedData(
+            span=Span(
+                id="flow:run#1",
+                parent=None,
+                type=SpanType.FLOW,
+                name="run",
+                status=SpanStatus.RUNNING,
+                started_at=0.0,
+            )
+        ),
+    )
+    request = MutateRequest(
+        checkout="/src/checkout",
+        method=Oneof(
+            "convert_saved_runs",
+            pb.ConvertSavedRunsRequest(request_id="convert-a", project="projects"),
+        ),
+    )
+    response = MutateResponse.from_binary(invoke("convert-saved-runs", request.to_binary(), sim))
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "convert_saved_runs"
+    converted = response.result.value
+    assert converted.complete
+    assert converted.project_root == str(folder.resolve())
+    assert [(row.run_id, row.status) for row in converted.runs] == [
+        ("run-1", pb.RunConversionStatus.CONVERTED)
+    ]
+    assert Project.run_log_path_for(folder, "run-1").is_file()

@@ -4,8 +4,8 @@ Conversion is idempotent, so no admission receipt is kept: a repeat skips what
 an earlier call converted. A call stops starting runs when less than
 ``_RESERVE_SECONDS`` of the cap remains and answers ``complete=false``; the
 caller repeats until ``complete`` is true. Rows are bounded; already converted
-runs are only counted, and attempted runs beyond the row limit are counted as
-unreported.
+runs are only counted, attempted runs beyond the row limit are counted as
+unreported, and a host index entry for a run already attempted is omitted.
 """
 
 from __future__ import annotations
@@ -121,6 +121,8 @@ def _convert(
         if row is None:
             return
         status = row.result.status.value
+        if row.alias_of is not None:
+            continue
         if status == "exists":
             response.already_converted += 1
         elif len(response.runs) < _MAX_ROWS:
