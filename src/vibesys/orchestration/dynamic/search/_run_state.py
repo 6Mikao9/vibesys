@@ -936,8 +936,8 @@ class RunRecord:
     def _change_base(self, revision: RevisionRef) -> RevisionRef:
         """Where ``revision``'s own change starts, including a candidate still being measured.
 
-        A finished candidate uses `main_base_at`. A candidate waiting for its measurement was
-        built on its submission's parent, and its change starts where that parent's does.
+        A finished candidate uses `main_base_at`. A waiting candidate starts at the main its
+        running workstream caught up with, else where its submission's parent's change starts.
         """
         if self._made(revision.revision_id.root) is not None:
             return self.main_base_at(revision)
@@ -946,6 +946,9 @@ class RunRecord:
                 submission.kind is WorkKind.IMPLEMENT
                 and submission.candidate.revision_id.root == revision.revision_id.root
             ):
+                start = self.running.get(submission.key)
+                if start is not None and start.rebase_onto is not None:
+                    return start.rebase_onto
                 return self.main_base_at(submission.parent)
         return self.main_base_at(revision)
 

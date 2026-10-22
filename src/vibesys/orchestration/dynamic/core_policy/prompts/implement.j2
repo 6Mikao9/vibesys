@@ -16,7 +16,7 @@ Evidence references:
 {{ citations(evidence) }}
 {% if combine or combine_missing %}
 
-This workstream combines retained candidates into one new candidate. Your workspace is a
+This workstream combines implemented candidates into one new candidate. Your workspace is a
 checkout of main at `{{ rev(parent_revision) }}`. Apply each part's own change (the diff from
 the revision the part was built on to the part), in this order:
 {% for part in combine %}
@@ -27,6 +27,7 @@ the revision the part was built on to the part), in this order:
 {% endfor %}
 {{ apply_conflicts(agent_git_writable) }} Combine the parts as the task says, without
 redesigning any of them.
+Parts may be unmeasured; their facts do not transfer to this revision, which needs its own accuracy pass and benchmark no worse than main before it can become main.
 {% if watch_for %}
 Where the parts interact, watch for: {{ watch_for }}
 {% endif %}

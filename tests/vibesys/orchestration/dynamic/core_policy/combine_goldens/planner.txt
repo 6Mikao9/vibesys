@@ -1,0 +1,208 @@
+Schedule at most 1 new workstreams for free slots. 2 other
+workstreams are still running (their history rows show non-terminal phases), and the
+run may schedule 4 more workstreams in total, including these. Each
+workstream counts once, whether it starts a hypothesis or continues one.
+
+Objective (authoritative, including operator constraints):
+Raise queue throughput.
+
+Editor commands: use python3 for Python code. Run executable shell scripts with
+bash. The target's interpreter is determined by its declared launch command and can
+differ from the editor's.
+
+Measurement: only the framework's trusted evaluation produces performance and
+accuracy numbers that count. It runs on the target hardware, which need not be this
+machine, so local device probes say nothing about the target. Never report a number
+that did not come from a trusted evaluation.
+
+## Performance bounds
+
+A bound is an estimate of a fixed limit, never a prediction of the current code.
+Name the scored metric and the unit of work. Name the resource each unit must
+consume: bytes moved, operations, round trips, or a serialized dependency.
+Divide that work by the hardware rate. State the result as a range, and state
+each assumption with the kind of evidence behind it.
+
+Keep two limits separate. The hardware limit is what this computation can reach
+on this hardware for the fixed workload, independent of the current design. The
+design ceiling is what the current design can reach. It may sit far below the
+hardware limit, and that gap is a reason to change the design, not a reason to
+lower the hardware limit.
+
+Write the bounds before any measurement exists. Revise them when understanding
+improves: a measured hardware rate against the spec sheet, the real shape of the
+workload, a byte count taken from the code, a measurement that beats the bound
+(then the bound is wrong), or a plateau far below the bound (check the bound,
+then the code). Never derive a bound from a candidate's own speed. A revision
+needs independent evidence: a microbenchmark, a byte count from the code, or a
+profile. Hardware rates come from the platform notes for this run's backend.
+
+Report every measurement as a fraction of its bound. Rank proposed work by the
+time that could still be recovered between the measurement and the bound.
+
+If an earlier handoff records no performance bounds, the next plan must supply
+them.
+Assign work only where it can succeed: never assign edits to read-only inputs, and
+never plan work that needs target hardware outside trusted evaluation.
+
+Base revision (the run's input): `input`
+Exact base accuracy PASS status: True (null means unknown).
+Main revision (a new workstream that names no parent starts from it): the base revision; no merge has moved it yet.
+Immutable parent offer offer.
+Your workspace holds the run's input, not candidate work: a workstream's files exist
+only at the revision in its history row (read them with git show REVISION:PATH).
+Workstreams in one reply are independent: a parent must be an offered buildable
+candidate, never another workstream of this reply. No candidate is
+offered as a parent now, so leave `parent_hypothesis_id` null.
+For work that must change code, add a feature, fix correctness, or produce a
+candidate, choose an implement workstream: `kind` "implement", `hypothesis_id`,
+`title` (implementation goal), `hypothesis` (the claim to test), `task` (concrete
+changes), and `pass_criteria` (observable success). Set `continue_hypothesis` to false
+for a new ID and true to continue an existing one; `parent_hypothesis_id` selects its
+starting candidate, and `evidence` cites measurements by location and measured revision.
+A measurement applies only to the revision it measured.
+
+Every implement workstream must start with a first measurable step: begin its `task` with
+the smallest change to the claim that one implementer turn can finish and submit for
+trusted evaluation, then say what follows. An architecture-scale hypothesis is split so
+that its first step already produces a measurement. A workstream whose implementer turns
+end without a candidate settles as failed, and its history row says why: do not assign the
+same task again, narrow it to a first step that fits one turn.
+
+Fill every free slot: a slot left free idles until a running workstream finishes.
+
+To combine candidates, choose a merge workstream: `kind` "merge", a new `merge_id`,
+`candidates` (hypothesis IDs whose latest verified candidates to merge into main, in
+the order to apply them), `instructions` (how to combine them, and how to resolve
+conflicts), and `watch_for` (what the merger must check or be careful of). A new merger
+session applies them on a checkout of main and runs the tests; when its commit passes the
+trusted accuracy check and measures no worse than main (a headline metric no worse, and no
+benchmark check main passed now failing), main moves to it and its measurement is reported here.
+A merge may name only candidates listed as mergeable below. A merger that cannot follow the
+instructions refuses and main stays where it is. Only one merge runs at a
+time. A hypothesis that continues after main moved rebases onto
+main first.
+No candidate is mergeable now: none passed accuracy and beat main's latest measurement.
+Any implemented candidate may be a combine part, measured or not. Facts on each line (`none`, `accuracy`, `benchmark`, or `both`) are that revision's own; a combination is a new revision and starts with none.
+- hypothesis `h0`, revision `c0`, facts none
+- hypothesis `h1`, revision `c1`, facts accuracy
+- hypothesis `h2`, revision `c2`, facts benchmark
+- hypothesis `h3`, revision `c3`, facts both
+
+To build one new candidate out of several implemented candidates, choose a combine workstream:
+`kind` "combine", a new `hypothesis_id`, `title`, `hypothesis` (why the parts work
+better together than alone), `parents` (the parts in the order to apply them, each an
+exact pair of `hypothesis_id` and `revision` from the implemented candidates above, each a different
+hypothesis), `instructions` (how to combine them, and which side wins a conflict),
+`watch_for` and `pass_criteria`. A new implementer applies each part's own change on a
+checkout of main, runs the tests and submits. The composite is a candidate of the new
+hypothesis, measured and judged like any other; it does not move main. Its history row shows
+its trusted result beside each part's, with a verdict against the best part, and a composite
+that beats main can then be merged.
+A part need not beat main or the input. Combine when parts were designed to work together and
+each lost or tied alone, when several candidates each measured within noise of the bar, or when
+a part's benefit depends on another (a design document naming parts that need each other).
+Each combine takes a slot: combine parts for such a reason, not every pair.
+Choose workstreams that investigate distinct mechanisms, competing hypotheses, or
+combinations of existing candidates. Do not
+split one implementation into parallel fragments and do not assign duplicate
+hypothesis IDs. New IDs must not occur in the history. A continued workstream must
+reuse its existing ID and set `continue_hypothesis`. Use `hypothesis_updates` to park
+or abandon completed directions when evidence makes that decision clear; every update
+needs `reason_kind` and a nonempty `reason`.
+
+The framework provides isolated candidate workspaces, runs independent reviews, and
+owns trusted evaluation and winner adoption. Only evaluated, passed candidates can
+be adopted or offered as a parent.
+
+## Compact workstream history
+none yet
+
+## Handoff notes of earlier planners
+Each planning call starts a new planner with no memory of the calls before it. Every call
+that scheduled a plan left a handoff file: its reasoning, the workstreams it scheduled, what it
+expected of each, what it meant to do next on each outcome, its performance bounds, and its
+open doubts.
+None exists yet: this is the first plan of the run.
+Leave the same for the planner after you in `handoff`: in `expectations`, one entry
+per workstream of your reply with its `work_id`, what you expect it to show
+(`expected`), and what you would plan next if it does (`if_it_succeeds`) and if it does not
+(`if_it_fails`); in `bounds`, one or more limits, at least one hardware limit
+(`bound_kind`), each with `metric`, `low`, `high`, `unit`,
+and `assumptions` (`statement`, `evidence_kind`); set `measured`
+when a trusted value exists, and `revisions` (`previous_low`, `previous_high`,
+`reason`) when you replace a range; in `doubts`, what you are unsure of and how a
+later plan could check it. If those files have no performance bounds, this turn must supply them.
+
+Answer with the structured response, filling its top-level fields directly:
+`reasoning` (why this portfolio), `workstreams` (one entry per new workstream),
+`hypothesis_updates` (parks and abandonments; empty when there are none), and `handoff`
+(your note to the next planner). Do not wrap
+the plan in another field or write it as JSON text inside a field. Each workstream entry
+carries every field listed above. This reply is valid; its values are placeholders, and your
+hypothesis IDs must not occur in the history:
+{
+  "reasoning": "Why these workstreams test different mechanisms.",
+  "workstreams": [
+    {
+      "kind": "implement",
+      "hypothesis_id": "first-idea",
+      "title": "Name of the first goal",
+      "hypothesis": "The claim the first workstream tests.",
+      "task": "The concrete changes the first implementer makes.",
+      "pass_criteria": "Observable evidence that the first goal is met.",
+      "continue_hypothesis": false,
+      "evidence": [],
+      "parent_hypothesis_id": null
+    },
+    {
+      "kind": "implement",
+      "hypothesis_id": "second-idea",
+      "title": "Name of the second goal",
+      "hypothesis": "The claim the second workstream tests.",
+      "task": "The concrete changes the second implementer makes.",
+      "pass_criteria": "Observable evidence that the second goal is met.",
+      "continue_hypothesis": false,
+      "evidence": [],
+      "parent_hypothesis_id": null
+    }
+  ],
+  "hypothesis_updates": [],
+  "handoff": {
+    "expectations": [
+      {
+        "work_id": "first-idea",
+        "expected": "What the first workstream should show.",
+        "if_it_succeeds": "What to plan next if the first claim holds.",
+        "if_it_fails": "What to plan next if the first claim fails."
+      },
+      {
+        "work_id": "second-idea",
+        "expected": "What the second workstream should show.",
+        "if_it_succeeds": "What to plan next if the second claim holds.",
+        "if_it_fails": "What to plan next if the second claim fails."
+      }
+    ],
+    "doubts": [
+      "What is still unclear and how to check it."
+    ],
+    "bounds": [
+      {
+        "metric": "the scored metric",
+        "bound_kind": "hardware_limit",
+        "low": 1.0,
+        "high": 2.0,
+        "unit": "the metric's unit",
+        "assumptions": [
+          {
+            "statement": "What the range assumes, and why the ends differ.",
+            "evidence_kind": "stated_assumption"
+          }
+        ],
+        "measured": null,
+        "revisions": []
+      }
+    ]
+  },
+  "evaluation_order": []
+}

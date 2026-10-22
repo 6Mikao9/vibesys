@@ -149,7 +149,6 @@ from vibesys.orchestration.dynamic.search._values import (
     ViolationCode,
     WorkKind,
     WorkPlan,
-    fact_coverage,
 )
 
 __all__ = [
@@ -279,7 +278,6 @@ __all__ = [
     "dynamic",
     "ended_by",
     "evaluations",
-    "fact_coverage",
     "failure_of",
     "fence",
     "implement_prompt",

@@ -131,11 +131,12 @@ class _RevisionFacts:
 
 
 class _RevisionIndex:
-    """Candidate revisions accumulated from one run, keyed by hypothesis and revision."""
+    """Candidate labels from one run, with one facts row per revision across all labels."""
 
     def __init__(self, withheld: tuple[str, ...]) -> None:
         self._hidden = set(withheld)
         self._rows: dict[tuple[str, str], _RevisionFacts] = {}
+        self._facts: dict[str, _RevisionFacts] = {}
 
     def slot(self, hypothesis_id: str, revision: RevisionRef) -> _RevisionFacts | None:
         """The facts row for this revision, or none when the revision is withheld."""
@@ -145,7 +146,7 @@ class _RevisionIndex:
         key = (hypothesis_id, root)
         found = self._rows.get(key)
         if found is None:
-            found = _RevisionFacts(revision)
+            found = self._facts.setdefault(root, _RevisionFacts(revision))
             self._rows[key] = found
         return found
 

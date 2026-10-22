@@ -36,6 +36,7 @@ from vibesys.orchestration.dynamic.search.api import (
     MergeReport,
     RoundRecord,
     RunRecord,
+    Scheduled,
     Submission,
     WorkKind,
     WorkstreamDone,
@@ -207,6 +208,22 @@ def test_an_unmeasured_candidate_may_be_combined_and_facts_stay_on_their_revisio
         assert before[part.name] == _part_facts(part)
 
     made = revision("k-r1")
+    run.planned(Scheduled(check=result))
+    (start,) = run.ready_to_start(1)
+    assert [(part.hypothesis_id, part.revision.revision_id.root) for part in start.combine] == list(
+        picks
+    )
+    run.submit(
+        Submission(
+            key=start.key,
+            work_id="k",
+            kind=WorkKind.IMPLEMENT,
+            candidate=made,
+            parent=start.parent,
+            at=0,
+        )
+    )
+    assert next(row.facts.value for row in run.implemented() if row.hypothesis_id == "k") == "none"
     recorded = hypothesis_record("k", HypothesisOutcome.INCONCLUSIVE)
     run.hypotheses["k"] = recorded.model_copy(
         update={
@@ -245,3 +262,65 @@ def test_an_unmeasured_candidate_may_be_combined_and_facts_stay_on_their_revisio
     assert (line.revision == made) is _may_move(
         accuracy=case.accuracy, benchmark=case.benchmark, throughput=case.throughput
     )
+
+
+@pytest.mark.regression
+@example(accuracy=True, benchmark=True)
+@given(
+    accuracy=st.sampled_from((None, True, False)),
+    benchmark=st.sampled_from((None, True, False)),
+)
+def test_facts_follow_the_commit_across_labels_but_never_follow_it_to_another_commit(
+    *, accuracy: bool | None, benchmark: bool | None
+) -> None:
+    run = run_record()
+    for name, candidate, acc, bench in (
+        ("source", revision("same"), accuracy, benchmark),
+        ("alias", revision("same"), None, None),
+        ("child", revision("different"), None, None),
+    ):
+        record = hypothesis_record(name, HypothesisOutcome.INCONCLUSIVE)
+        run.hypotheses[name] = record.model_copy(
+            update={
+                "rounds": (_round(name=name, candidate=candidate, accuracy=acc, benchmark=bench),)
+            }
+        )
+    facts = {row.hypothesis_id: row.facts.value for row in run.implemented()}
+    assert facts["source"] == facts["alias"] == _coverage(accuracy=accuracy, benchmark=benchmark)
+    assert facts["child"] == "none"
+
+
+@pytest.mark.regression
+@example(rows=(("a", True, None), ("b", None, True)))
+@example(rows=(("a", True, None), ("a", False, True)))
+@given(
+    rows=st.lists(
+        st.tuples(
+            st.sampled_from(("a", "b", "c")),
+            st.sampled_from((None, True, False)),
+            st.sampled_from((None, True, False)),
+        ),
+        min_size=1,
+        max_size=8,
+    ).map(tuple)
+)
+def test_revision_coverage_never_splices_facts_from_different_round_revisions(
+    rows: tuple[tuple[str, bool | None, bool | None], ...],
+) -> None:
+    run = run_record()
+    record = hypothesis_record("combined", HypothesisOutcome.INCONCLUSIVE)
+    rounds = tuple(
+        _round(name="combined", candidate=revision(name), accuracy=acc, benchmark=bench).model_copy(
+            update={"sequence": i + 1}
+        )
+        for i, (name, acc, bench) in enumerate(rows)
+    )
+    run.hypotheses["combined"] = record.model_copy(update={"rounds": rounds})
+    facts = {row.revision.revision_id.root: row.facts.value for row in run.implemented()}
+    for name in {name for name, _, _ in rows}:
+        own = [(acc, bench) for candidate, acc, bench in rows if candidate == name]
+        accuracy = any(acc is True for acc, _ in own) and not any(acc is False for acc, _ in own)
+        has_benchmark = any(bench is not None for _, bench in own)
+        assert facts[name] == _coverage(
+            accuracy=accuracy, benchmark=True if has_benchmark else None
+        )
