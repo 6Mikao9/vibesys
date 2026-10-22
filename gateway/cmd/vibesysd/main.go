@@ -97,7 +97,7 @@ func bridge(ctx context.Context, root string, startup time.Duration) error {
 		return err
 	}
 	startupCtx, cancel := context.WithTimeout(ctx, startup)
-	connection, err := connect.Dial(startupCtx, lifecycle.SocketPath(root, schema.APISchemaHash), binary, []string{"serve", "--root", root})
+	connection, err := connect.Dial(startupCtx, lifecycle.SocketPath(root, schema.APISchemaHash), binary, []string{"serve", "--root", root}, os.Stderr)
 	cancel()
 	if err != nil {
 		return err

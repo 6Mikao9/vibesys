@@ -12,13 +12,14 @@ import {
   type WatchRunsResponse,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
-import type {AbortSignalLike} from '@vibesys/transport';
+import {type AbortSignalLike, isNotFound} from '@vibesys/transport';
 import {createActor, fromCallback, fromPromise} from 'xstate';
 import {
   type RunLivenessHint,
   type RunTransport,
   type SkeletonCache,
   type SkeletonLoad,
+  type SkeletonLoadFailure,
   startSkeletonLoader,
 } from './index.js';
 
@@ -26,6 +27,7 @@ import {isFinalLoad} from './loading.js';
 import {
   type ObservationEvent,
   type ObservationOperation,
+  type RunReadStatus,
   runObservationMachine,
 } from './observation.js';
 
@@ -36,15 +38,20 @@ export interface GatewayLogChunk {
   readonly next: number;
 }
 export interface GatewayReader {
+  /** Resolves `missing` when the host holds no such run; other failures reject. */
   records(
     runId: string,
     fromSeq: bigint,
     signal: AbortSignalLike,
     receive: (bytes: Uint8Array) => void,
-  ): Promise<void>;
+  ): Promise<'ended' | 'missing'>;
   watch(
     runId: string,
-    receive: (load: SkeletonLoad | undefined, failed: boolean, hint?: RunLivenessHint) => void,
+    receive: (
+      load: SkeletonLoad | undefined,
+      status: RunReadStatus,
+      hint?: RunLivenessHint,
+    ) => void,
   ): () => void;
   content(
     runId: string,
@@ -134,14 +141,20 @@ export function gatewayReader(
 ): GatewayReader {
   return {
     async records(runId, fromSeq, signal, receive) {
-      for await (const bytes of transport.stream(
-        `${SERVICE}${HostService.method.tail.name}`,
-        toBinary(TailRequestSchema, create(TailRequestSchema, {runId, fromSeq})),
-        signal,
-      )) {
-        if (signal.aborted) return;
-        receive(bytes);
+      try {
+        for await (const bytes of transport.stream(
+          `${SERVICE}${HostService.method.tail.name}`,
+          toBinary(TailRequestSchema, create(TailRequestSchema, {runId, fromSeq})),
+          signal,
+        )) {
+          if (signal.aborted) return 'ended';
+          receive(bytes);
+        }
+      } catch (error) {
+        if (isNotFound(error)) return 'missing';
+        throw error;
       }
+      return 'ended';
     },
     watch(runId, receive) {
       const actor = createActor(
@@ -153,7 +166,7 @@ export function gatewayReader(
                 input.receive({
                   type: 'read',
                   load: snapshot.context.load,
-                  failed: snapshot.context.error !== undefined,
+                  status: readStatus(snapshot.context.error),
                 }),
               );
               return () => {
@@ -190,7 +203,9 @@ export function gatewayReader(
       const subscription = actor.subscribe(({context}) =>
         receive(
           context.load,
-          context.failed || (context.watchFailed && !isFinalLoad(context.load)),
+          context.status === 'ok' && context.watchFailed && !isFinalLoad(context.load)
+            ? 'failed'
+            : context.status,
           context.hint,
         ),
       );
@@ -203,6 +218,11 @@ export function gatewayReader(
     log: (runId, streamId, signal, receive, fromOffset) =>
       log(transport, runId, streamId, signal, receive, fromOffset),
   };
+}
+
+function readStatus(error: SkeletonLoadFailure | undefined): RunReadStatus {
+  if (error === undefined) return 'ok';
+  return error.kind === 'not-found' ? 'missing' : 'failed';
 }
 
 function observedEpoch(response: WatchRunsResponse): number {

@@ -8,7 +8,7 @@ import {
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
-import {type AbortSignalLike, registerAbort} from '@vibesys/transport';
+import {type AbortSignalLike, GrpcCode, GrpcError, registerAbort} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {Actor, SnapshotFrom} from 'xstate';
 import {type RunTransport, skeletonLoaderMachine, startSkeletonLoader} from './index.js';
@@ -69,6 +69,9 @@ class FakeRunTransport implements RunTransport {
   endStream: () => void = () => {
     throw new Error('no stream');
   };
+  failStream: (error: Error) => void = () => {
+    throw new Error('no stream');
+  };
   streamClosed = false;
 
   unary(method: string, request: Uint8Array, signal: AbortSignalLike): Promise<Uint8Array> {
@@ -89,7 +92,7 @@ class FakeRunTransport implements RunTransport {
     return {
       [Symbol.asyncIterator]: () => ({
         next: () =>
-          new Promise<IteratorResult<Uint8Array>>(resolve => {
+          new Promise<IteratorResult<Uint8Array>>((resolve, reject) => {
             const abort = () => {
               this.streamClosed = true;
               resolve({done: true, value: undefined});
@@ -104,6 +107,10 @@ class FakeRunTransport implements RunTransport {
             this.push = value => {
               registration.detach();
               resolve({done: false, value});
+            };
+            this.failStream = error => {
+              registration.detach();
+              reject(error);
             };
           }),
         return: async () => {
@@ -226,4 +233,29 @@ test('closed streams recover from a fresh Skeleton and release retries when stop
   actor.stop();
   expect(clock.pending).toBe(0);
   expect(transport.unarySignal?.aborted).toBe(true);
+});
+
+// gRPC defines codes 0 through 16; only the host's NotFound answer is final.
+test.each(
+  Array.from({length: 17}, (_, code) => code).flatMap(code =>
+    (['skeleton', 'tail'] as const).map(call => [code, call] as const),
+  ),
+)('gRPC code %i on %s retries unless the host holds no such run', async (code, call) => {
+  const transport = new FakeRunTransport();
+  const clock = new FakeClock();
+  const actor = startSkeletonLoader(transport, clock.schedule, INPUT);
+  const failure = new GrpcError(code, 'lstat run: no such file or directory');
+  if (call === 'skeleton') transport.failSkeleton(failure);
+  else {
+    transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
+    await reached(actor, snapshot => snapshot.matches('following'));
+    transport.failStream(failure);
+  }
+  const missing = code === GrpcCode.NOT_FOUND;
+  await reached(actor, snapshot => snapshot.matches(missing ? 'failed' : 'recovering'));
+  expect(actor.getSnapshot().context.error?.kind).toBe(missing ? 'not-found' : 'transport');
+  // A final answer arms no retry; a transient one arms exactly one.
+  expect(clock.pending).toBe(missing ? 0 : 1);
+  actor.stop();
+  expect(clock.pending).toBe(0);
 });

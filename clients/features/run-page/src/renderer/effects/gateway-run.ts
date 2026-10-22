@@ -29,8 +29,8 @@ export function startGatewayRun(
         ),
         setting: fromPromise(({input}) => ports.setting(input)),
         loader: fromCallback<GatewayEvent, {runId: string}>(({input, sendBack}) =>
-          ports.reader.watch(input.runId, (load, failed, hint) =>
-            sendBack({type: 'loaded', load, failed, ...(hint ? {hint} : {})}),
+          ports.reader.watch(input.runId, (load, status, hint) =>
+            sendBack({type: 'loaded', load, status, ...(hint ? {hint} : {})}),
           ),
         ),
         content: fromPromise(({input, signal}) =>
@@ -45,11 +45,12 @@ export function startGatewayRun(
             if (!signal.aborted) input.receive({type: 'log-failed'});
           }
         }),
-        records: fromPromise<void, GatewayRecordsInput>(({input, signal}) =>
-          ports.reader.records(input.runId, input.fromSeq, signal, bytes =>
+        records: fromPromise<void, GatewayRecordsInput>(async ({input, signal}) => {
+          const end = await ports.reader.records(input.runId, input.fromSeq, signal, bytes =>
             input.receive({type: 'records', rows: tailRecordRows(bytes)}),
-          ),
-        ),
+          );
+          if (end === 'missing') input.receive({type: 'records-missing'});
+        }),
       },
     }),
     {input, clock: clockFrom(schedule)},

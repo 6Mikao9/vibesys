@@ -196,7 +196,7 @@ export const runIntentsMachine = setup({
 
 /** Outcome delivery owns its retry independently of admission calls. */
 export const intentWatchMachine = setup({
-  types: {events: {} as {type: 'ended'}},
+  types: {events: {} as {type: 'ended'} | {type: 'missing'}},
   actors: {
     read: fromCallback(() => {
       throw new Error('read was not provided');
@@ -206,7 +206,12 @@ export const intentWatchMachine = setup({
 }).createMachine({
   initial: 'watching',
   states: {
-    watching: {invoke: {src: 'read', onError: 'recovering'}, on: {ended: 'recovering'}},
+    watching: {
+      invoke: {src: 'read', onError: 'recovering'},
+      on: {ended: 'recovering', missing: 'missing'},
+    },
     recovering: {after: {retry: 'watching'}},
+    /** The host holds no such run: retrying cannot find it. */
+    missing: {type: 'final'},
   },
 });

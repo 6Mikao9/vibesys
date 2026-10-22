@@ -19,10 +19,10 @@ import {
   validatedFromBinary,
   validateHostPayload,
 } from '@vibesys/proto';
-import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
+import {GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {createActor, fromPromise} from 'xstate';
 import {gatewayMachine} from '../state/gateway.js';
-import {GatewaySession, GrpcError} from './grpc.js';
+import {GatewaySession} from './grpc.js';
 
 export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello.name}`;
 export const TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;

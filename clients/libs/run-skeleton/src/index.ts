@@ -16,3 +16,4 @@ export {
   type SkeletonLoad,
 } from './loading.js';
 export {foldSkeleton, type Skeleton, seedSkeleton, seekSkeleton} from './model.js';
+export type {RunReadStatus} from './observation.js';

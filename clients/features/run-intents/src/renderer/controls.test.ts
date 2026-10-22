@@ -223,6 +223,20 @@ test('an ended outcome stream retries independently of an in-flight admission', 
   expect(clock.pending).toBe(0);
 });
 
+test('only a NotFound outcome stream is final; every other end retries', () => {
+  for (let code = 0; code <= 16; code += 1) {
+    const {actor, bridge, clock} = fixture();
+    try {
+      bridge.streams[0]?.ended('lstat runs/run-1: no such file or directory', code);
+      for (let tick = 0; tick < 3; tick += 1) clock.advanceBy(1000);
+      expect(bridge.streams.length > 1).toBe(code !== 5);
+    } finally {
+      actor.stop();
+    }
+    expect(clock.pending).toBe(0);
+  }
+});
+
 test('relaunch confirms an epoch or a typed refusal and owns every transport call', async () => {
   for (const outcome of [
     {case: 'epoch', value: 2n} as const,

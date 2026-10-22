@@ -24,6 +24,8 @@ export {
   type GatewayCall,
   type GatewayReply,
   type GatewayRequest,
+  gatewayFailure,
+  isNotFoundCode,
   parseGatewayRequest,
 } from './gateway.js';
 export {openPortSocket, type PagePort} from './port-socket.js';

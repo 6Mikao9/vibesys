@@ -2,17 +2,7 @@
 import {type ClientHttp2Session, connect, constants, type IncomingHttpHeaders} from 'node:http2';
 import type {Duplex} from 'node:stream';
 import {HOST_API_MAX_MESSAGE_BYTES as MAX_MESSAGE} from '@vibesys/proto';
-import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
-
-export class GrpcError extends Error {
-  constructor(
-    readonly code: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'GrpcError';
-  }
-}
+import {GrpcError, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 
 export function grpcFrame(bytes: Uint8Array): Buffer {
   if (bytes.byteLength > MAX_MESSAGE)

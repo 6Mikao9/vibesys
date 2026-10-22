@@ -14,6 +14,7 @@ import {foldSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
+import {GrpcCode, GrpcError} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {SnapshotFrom} from 'xstate';
 import {
@@ -560,6 +561,43 @@ test.each([
     actor.stop();
     expect(clock.pending).toBe(0);
   }
+});
+
+test.each([
+  'Skeleton',
+  'Tail',
+] as const)('a run the host does not hold (%s NotFound) is final, not Disconnected', async method => {
+  const fixture = storeRunFixture('live');
+  const transport = new FakeRunTransport(fixture);
+  const clock = new FakeClock();
+  const settings = new HostSetting();
+  const missing = new GrpcError(GrpcCode.NOT_FOUND, 'lstat runs/run-a: no such file or directory');
+  if (method === 'Skeleton') transport.fail(`${SERVICE}Skeleton`, missing);
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      setting: settings.setting,
+      watchSetting: settings.watch,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  if (method === 'Tail') {
+    await reached(actor, snapshot => snapshot.context.load !== undefined);
+    transport.fail(`${SERVICE}Tail`, missing);
+  }
+  await reached(actor, snapshot => snapshot.context.error === 'Not on this host');
+  const reads = () => transport.calls.filter(call => /\/(Skeleton|Tail)$/.test(call.method)).length;
+  const before = reads();
+  // WatchRuns keeps reporting the link as healthy; the reader's answer stays final.
+  for (let tick = 0; tick < 5; tick += 1) {
+    clock.advanceBy(1000);
+    await Promise.resolve();
+  }
+  expect(actor.getSnapshot().context.error).toBe('Not on this host');
+  expect(reads()).toBe(before);
+  actor.stop();
+  expect(clock.pending).toBe(0);
 });
 
 test.each([

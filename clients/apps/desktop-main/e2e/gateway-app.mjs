@@ -45,6 +45,7 @@ const calls = new GatewayCalls(
           : gatewayProcess(
               fromChild(spawn(binary, ['connect', '--root', root], {stdio: 'pipe'})),
               schedule,
+              line => console.error(line),
             );
       gatewayState.vibesysGatewayClosed = new Promise(resolve =>
         duplex.once('close', () => resolve()),

@@ -7,8 +7,10 @@ export interface ObservationInput {
   readonly runId: string;
   readonly timeoutMs: number;
 }
+/** How a reader stands: `missing` is the host's final answer, `failed` a transient loss. */
+export type RunReadStatus = 'ok' | 'failed' | 'missing';
 export type ObservationEvent =
-  | {type: 'read'; load: SkeletonLoad | undefined; failed: boolean}
+  | {type: 'read'; load: SkeletonLoad | undefined; status: RunReadStatus}
   | {type: 'hint'; hint: RunLivenessHint | undefined}
   | {type: 'ready'};
 export interface ObservationOperation extends ObservationInput {
@@ -17,7 +19,7 @@ export interface ObservationOperation extends ObservationInput {
 interface Context extends ObservationInput {
   load: SkeletonLoad | undefined;
   hint: RunLivenessHint | undefined;
-  failed: boolean;
+  status: RunReadStatus;
   watchFailed: boolean;
 }
 export const runObservationMachine = setup({
@@ -35,17 +37,17 @@ export const runObservationMachine = setup({
     ...input,
     load: undefined,
     hint: undefined,
-    failed: false,
+    status: 'ok',
     watchFailed: false,
   }),
   invoke: {
     id: 'history',
     src: 'history',
     input: ({context, self}) => ({...context, receive: event => self.send(event)}),
-    onError: {actions: assign({failed: true})},
+    onError: {actions: assign({status: 'failed'})},
   },
   on: {
-    read: {actions: assign({load: ({event}) => event.load, failed: ({event}) => event.failed})},
+    read: {actions: assign({load: ({event}) => event.load, status: ({event}) => event.status})},
     hint: {actions: assign({hint: ({event}) => event.hint})},
   },
   initial: 'watching',

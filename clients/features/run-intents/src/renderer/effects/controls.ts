@@ -1,5 +1,5 @@
 import type {HostKey} from '@vibesys/hosts';
-import type {GatewayBridge} from '@vibesys/ipc';
+import {type GatewayBridge, isNotFoundCode} from '@vibesys/ipc';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
   HOST_CALL_METHOD,
@@ -52,7 +52,11 @@ export function intentsActor(input: {
                         sendBack({type: 'watchFailed', error: String(error)});
                       }
                     },
-                    error => {
+                    (error, code) => {
+                      if (isNotFoundCode(code)) {
+                        ended({type: 'missing'});
+                        return;
+                      }
                       sendBack({
                         type: 'watchFailed',
                         error: error ?? 'Intent outcome stream ended',

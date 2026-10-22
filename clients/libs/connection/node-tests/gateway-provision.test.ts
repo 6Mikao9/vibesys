@@ -1,5 +1,6 @@
 /** Deterministic pipe/clock tests of the same provisioner Electron main calls. */
 import {createHash} from 'node:crypto';
+import {once} from 'node:events';
 import {test} from 'node:test';
 import {gunzipSync, gzipSync} from 'node:zlib';
 import {create, toBinary} from '@bufbuild/protobuf';
@@ -7,8 +8,14 @@ import {API_SCHEMA_HASH, HelloRequestSchema} from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {expect} from 'expect';
-import {GatewayConnection, HELLO_METHOD, provisionGateway} from '../src/index.js';
-import {fakeProcess} from '../src/testing/index.js';
+import {
+  GATEWAY_STDERR_BYTES,
+  GatewayConnection,
+  gatewayProcess,
+  HELLO_METHOD,
+  provisionGateway,
+} from '../src/index.js';
+import {fakeProcess, pipeHeldProcess} from '../src/testing/index.js';
 
 type Command = ReturnType<typeof fakeProcess>;
 
@@ -318,4 +325,35 @@ test('verification rejects a decompressed artifact that fails the original diges
   (await commands.next()).end(0);
   expect(await outcome).toContain('gateway artifact verification failed');
   expect(clock.pendingDelays()).toEqual([]);
+});
+
+test('the connect process stderr reaches the app log as a bounded tail when it exits', {
+  timeout: 15000,
+}, async () => {
+  const clock = new FakeClock();
+  for (const size of [0, 10, GATEWAY_STDERR_BYTES, 3 * GATEWAY_STDERR_BYTES]) {
+    // Pipes end before the exit, as a real child's do; the exit then destroys stdin.
+    const child = pipeHeldProcess();
+    const lines: string[] = [];
+    const logged = new Promise<void>(resolve => {
+      const duplex = gatewayProcess(child.process, clock.schedule, line => {
+        lines.push(line);
+        resolve();
+      });
+      duplex.on('error', () => {});
+      duplex.resume();
+    });
+    child.stderr.end(`${'x'.repeat(size)}serve: listen failed`);
+    child.stdout.end();
+    await once(child.stdout, 'end');
+    child.end(1);
+    await logged;
+    expect(lines).toHaveLength(1);
+    const [line = ''] = lines;
+    expect(line.startsWith('gateway connect exited: 1')).toBe(true);
+    expect(line.endsWith('serve: listen failed')).toBe(true);
+    expect(line.length).toBeLessThanOrEqual(
+      'gateway connect exited: 1\n'.length + GATEWAY_STDERR_BYTES,
+    );
+  }
 });

@@ -1,7 +1,15 @@
 /** Shared main-process ownership for the generic bridge: one session per opted-in host. */
 import type {HostKey} from '@vibesys/hosts';
-import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
+import {grpcCode, registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {GatewayConnection, type GatewayDialer} from './gateway.js';
+
+export interface GatewayCallFailure {
+  readonly host: HostKey;
+  readonly method: string;
+  /** The gRPC status, absent when the call failed before or outside the gateway. */
+  readonly code: number | undefined;
+  readonly error: string;
+}
 
 export class GatewayCalls {
   #closed = false;
@@ -12,6 +20,8 @@ export class GatewayCalls {
     private readonly enabled: (host: HostKey) => Promise<boolean>,
     private readonly dialer: (host: HostKey) => GatewayDialer,
     private readonly schedule: ScheduleTimeout,
+    /** Every failed call that its caller did not cancel. Names only: never payloads. */
+    private readonly failed: (failure: GatewayCallFailure) => void = () => {},
   ) {}
 
   unary(
@@ -20,7 +30,9 @@ export class GatewayCalls {
     bytes: Uint8Array,
     signal: AbortSignal,
   ): Promise<Uint8Array> {
-    return this.#use(host, signal, (connection, owned) => connection.unary(method, bytes, owned));
+    return this.#use(host, method, signal, (connection, owned) =>
+      connection.unary(method, bytes, owned),
+    );
   }
 
   stream(
@@ -30,7 +42,7 @@ export class GatewayCalls {
     signal: AbortSignal,
     receive: (bytes: Uint8Array) => void,
   ): Promise<void> {
-    return this.#use(host, signal, (connection, owned) =>
+    return this.#use(host, method, signal, (connection, owned) =>
       connection.stream(method, bytes, owned, receive),
     );
   }
@@ -78,6 +90,20 @@ export class GatewayCalls {
   }
 
   async #use<T>(
+    host: HostKey,
+    method: string,
+    signal: AbortSignal,
+    call: (connection: GatewayConnection, owned: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await this.#owned(host, signal, call);
+    } catch (error) {
+      if (!signal.aborted) this.failed({host, method, code: grpcCode(error), error: String(error)});
+      throw error;
+    }
+  }
+
+  async #owned<T>(
     host: HostKey,
     signal: AbortSignal,
     call: (connection: GatewayConnection, owned: AbortSignal) => Promise<T>,

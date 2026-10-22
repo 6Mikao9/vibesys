@@ -257,22 +257,22 @@ function openGateway(
   method: string,
   bytes: Uint8Array,
   receive: (bytes: Uint8Array) => void,
-  ended: (error?: string) => void,
+  ended: (error?: string, code?: number) => void,
 ): () => void {
   const electron: typeof import('electron') = require('electron');
   const {port1, port2} = new MessageChannel();
   let closed = false;
-  const finish = (error?: string): void => {
+  const finish = (error?: string, code?: number): void => {
     if (closed) return;
     closed = true;
     port1.postMessage({cancel: true});
     port1.close();
-    ended(error);
+    ended(error, code);
   };
   port1.onmessage = event => {
     const reply = event.data as import('@vibesys/ipc').GatewayReply;
     if ('bytes' in reply) receive(reply.bytes);
-    else finish(reply.error);
+    else finish(reply.error, reply.code);
   };
   electron.ipcRenderer.postMessage('vibesys:gateway', {kind, host, method, bytes}, [port2]);
   return () => finish('cancelled');

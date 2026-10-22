@@ -1,5 +1,6 @@
 import {unprovided} from '@vibesys/machine';
 import type {SkeletonResponse, TailResponse} from '@vibesys/proto';
+import {isNotFound} from '@vibesys/transport';
 import {assign, setup} from 'xstate';
 import {ingestSkeleton, ingestTail, isFinalLoad, type SkeletonLoad} from './loading.js';
 
@@ -19,6 +20,8 @@ export type LoaderEvent =
 export type SkeletonLoadFailure =
   | {readonly kind: 'deadline'; readonly operation: 'skeleton' | 'catch-up'}
   | {readonly kind: 'transport'; readonly cause: unknown}
+  /** The host answered that it holds no such run. Final: retrying cannot find it. */
+  | {readonly kind: 'not-found'}
   | {readonly kind: 'data'; readonly cause: unknown}
   | {readonly kind: 'stream-ended'};
 
@@ -35,8 +38,10 @@ export const skeletonLoaderMachine = setup({
     tail: unprovided<void, TailInput>('tail'),
   },
   delays: {deadline: ({context}) => context.timeoutMs, retry: 1000},
+  actions: {notFound: assign({error: (): SkeletonLoadFailure => ({kind: 'not-found'})})},
   guards: {
     hasError: ({context}) => context.error !== undefined,
+    notFound: ({event}) => 'error' in event && isNotFound(event.error),
     caughtUp: ({context}) => context.load?.complete === true,
   },
 }).createMachine({
@@ -53,12 +58,15 @@ export const skeletonLoaderMachine = setup({
           target: 'loaded',
           actions: assign(({event}) => safely(() => ingestSkeleton(event.output))),
         },
-        onError: {
-          target: 'recovering',
-          actions: assign(({context, event}) => ({
-            error: tailFailure(context, transportFailure(event.error)),
-          })),
-        },
+        onError: [
+          {guard: 'notFound', target: 'failed', actions: 'notFound'},
+          {
+            target: 'recovering',
+            actions: assign(({context, event}) => ({
+              error: tailFailure(context, transportFailure(event.error)),
+            })),
+          },
+        ],
       },
       after: {
         deadline: {
@@ -88,12 +96,15 @@ export const skeletonLoaderMachine = setup({
           target: 'recovering',
           actions: assign(({context}) => ({error: tailFailure(context, {kind: 'stream-ended'})})),
         },
-        onError: {
-          target: 'recovering',
-          actions: assign(({context, event}) => ({
-            error: tailFailure(context, transportFailure(event.error)),
-          })),
-        },
+        onError: [
+          {guard: 'notFound', target: 'failed', actions: 'notFound'},
+          {
+            target: 'recovering',
+            actions: assign(({context, event}) => ({
+              error: tailFailure(context, transportFailure(event.error)),
+            })),
+          },
+        ],
       },
       on: {
         tail: {
@@ -104,12 +115,15 @@ export const skeletonLoaderMachine = setup({
             }),
           ),
         },
-        failed: {
-          target: 'recovering',
-          actions: assign(({context, event}) => ({
-            error: tailFailure(context, transportFailure(event.error)),
-          })),
-        },
+        failed: [
+          {guard: 'notFound', target: 'failed', actions: 'notFound'},
+          {
+            target: 'recovering',
+            actions: assign(({context, event}) => ({
+              error: tailFailure(context, transportFailure(event.error)),
+            })),
+          },
+        ],
         closed: {
           target: 'recovering',
           actions: assign(({context}) => ({error: tailFailure(context, {kind: 'stream-ended'})})),

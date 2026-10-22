@@ -1,7 +1,7 @@
 /** Gateway screen control owns the setting, loader, content request and selected log follower. */
 import {emptyLogView, foldChunk, type LogView} from '@vibesys/logs';
 import {unprovided} from '@vibesys/machine';
-import type {RunLivenessHint, SkeletonLoad} from '@vibesys/run-skeleton';
+import type {RunLivenessHint, RunReadStatus, SkeletonLoad} from '@vibesys/run-skeleton';
 import {type RecordRow, recordRows} from '@vibesys/run-state/records';
 import type {SkeletonContent} from '@vibesys/run-state/skeleton';
 import {assign, fromCallback, setup} from 'xstate';
@@ -33,7 +33,8 @@ export type GatewayEvent =
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
   | {type: 'log-failed'}
   | {type: 'records'; rows: readonly RecordRow[]}
-  | {type: 'loaded'; load: SkeletonLoad | undefined; failed: boolean; hint?: RunLivenessHint};
+  | {type: 'loaded'; load: SkeletonLoad | undefined; status: RunReadStatus; hint?: RunLivenessHint}
+  | {type: 'records-missing'};
 export interface GatewayRunContext extends GatewayInput {
   enabled: boolean;
   load: SkeletonLoad | undefined;
@@ -76,6 +77,14 @@ function replyAttachments(
     ];
   }
   return replies;
+}
+
+const READ_ERRORS = {failed: 'Disconnected', missing: 'Not on this host'} as const;
+
+/** Reader status owns only its own words; other errors stay until their owner clears them. */
+function readError(previous: string | null, status: RunReadStatus): string | null {
+  if (status !== 'ok') return READ_ERRORS[status];
+  return Object.values<string | null>(READ_ERRORS).includes(previous) ? null : previous;
 }
 
 /** Presentation changes reuse the existing pure reducer; gateway commands never reach legacy ports. */
@@ -225,12 +234,7 @@ export const gatewayRunMachine = setup({
           actions: assign({
             load: ({event}) => event.load,
             hint: ({event}) => event.hint,
-            error: ({context, event}) =>
-              event.failed
-                ? 'Disconnected'
-                : context.error === 'Disconnected'
-                  ? null
-                  : context.error,
+            error: ({context, event}) => readError(context.error, event.status),
           }),
         },
         ui: {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},
@@ -271,8 +275,17 @@ export const gatewayRunMachine = setup({
                 },
                 live: {},
               },
-              on: {records: {actions: 'receivedRecords'}},
+              on: {
+                records: {actions: 'receivedRecords'},
+                'records-missing': {
+                  target: 'missing',
+                  actions: assign({
+                    ui: ({context}) => ({...context.ui, recordLogError: 'Not on this host'}),
+                  }),
+                },
+              },
             },
+            missing: {},
             retrying: {after: {1000: 'reading'}},
           },
         },

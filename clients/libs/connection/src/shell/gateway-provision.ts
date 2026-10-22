@@ -71,11 +71,27 @@ export async function gatewayArtifact(
   }
 }
 
-/** Convert existing process pipes to a single owned duplex, honoring stream backpressure. */
-export function gatewayProcess(process: SpawnedProcess, schedule: ScheduleTimeout): Duplex {
+/** The connect process's stderr kept for the app log: its newest bytes, never more. */
+export const GATEWAY_STDERR_BYTES = 4096;
+
+/**
+ * Convert existing process pipes to a single owned duplex, honoring stream backpressure. The
+ * process's stderr tail (which carries the serve daemon's) goes to `log` when it exits.
+ */
+export function gatewayProcess(
+  process: SpawnedProcess,
+  schedule: ScheduleTimeout,
+  log: (line: string) => void,
+): Duplex {
   const duplex = Duplex.from({readable: process.stdout, writable: process.stdin});
-  process.stderr.resume();
+  let stderr = '';
+  process.stderr.setEncoding('utf8');
+  process.stderr.on('data', (chunk: string) => {
+    stderr = `${stderr}${chunk}`.slice(-GATEWAY_STDERR_BYTES);
+  });
   void process.exit.then(code => {
+    const tail = stderr.trim();
+    log(`gateway connect exited: ${code}${tail === '' ? '' : `\n${tail}`}`);
     if (!duplex.destroyed) duplex.destroy(new Error(`gateway connect exited: ${code}`));
   });
   duplex.once('close', () => {

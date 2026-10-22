@@ -899,6 +899,9 @@ importers:
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../runs
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../transport
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../ui

@@ -15,6 +15,7 @@ import {
   ReadRequestSchema,
   TailRequestSchema,
 } from '@vibesys/proto';
+import {GrpcError} from '@vibesys/transport';
 import {
   type GatewayDialer,
   HELLO_METHOD,
@@ -22,7 +23,7 @@ import {
   READ_METHOD,
   TAIL_METHOD,
 } from '../shell/gateway.js';
-import {GrpcDecoder, GrpcError, grpcFrame} from '../shell/grpc.js';
+import {GrpcDecoder, grpcFrame} from '../shell/grpc.js';
 
 export interface FakeTail {
   readonly fromSeq: bigint;

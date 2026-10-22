@@ -1,5 +1,6 @@
 /** Generic protobuf bridge. The caller owns every call and cancels it on leaving its screen. */
 import {type HostKey, hostFromKey} from '@vibesys/hosts';
+import {GrpcCode, GrpcError} from '@vibesys/transport';
 
 export const GATEWAY_CHANNEL = 'vibesys:gateway';
 export interface GatewayCall<T> {
@@ -13,7 +14,8 @@ export interface GatewayBridge {
     method: string,
     bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
-    ended: (error?: string) => void,
+    /** `code` is the gateway's gRPC status when the host answered with one. */
+    ended: (error?: string, code?: number) => void,
   ): {cancel(): void};
 }
 export interface GatewayRequest {
@@ -24,7 +26,7 @@ export interface GatewayRequest {
 }
 export type GatewayReply =
   | {readonly bytes: Uint8Array}
-  | {readonly end: true; readonly error?: string};
+  | {readonly end: true; readonly error?: string; readonly code?: number};
 
 export function parseGatewayRequest(value: unknown): GatewayRequest {
   if (value === null || typeof value !== 'object')
@@ -43,4 +45,14 @@ export function parseGatewayRequest(value: unknown): GatewayRequest {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength > 16 * 1024 * 1024)
     throw new Error('gateway bytes must be at most 16 MiB');
   return {kind, host: host as HostKey, method, bytes};
+}
+
+/** The renderer's typed failure for an ended call: the gRPC status survives the bridge. */
+export function gatewayFailure(error: string, code?: number): Error {
+  return code === undefined ? new Error(error) : new GrpcError(code, error);
+}
+
+/** The host answered that it holds no such run or stream. */
+export function isNotFoundCode(code: number | undefined): boolean {
+  return code === GrpcCode.NOT_FOUND;
 }
