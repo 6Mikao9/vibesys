@@ -8,14 +8,14 @@ finished merge workstreams and read by planning; like the record, it is rebuilt 
 
 What a merge must beat is a closed `MainReading`: pending while the input's measurement has not
 landed (nothing is mergeable and main cannot move), no headline when main and the input have no
-headline metric (any verified candidate beats it), or main's headline metric.
+metrics (any verified candidate beats it), or main's complete metric row.
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from vibesys.candidates import api as candidates
-from vibesys.metrics import HostContention, MetricRow, MetricSpace, reading_of
+from vibesys.metrics import HostContention, MetricComparison, MetricRow, MetricSpace, reading_of
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
 from vibesys.orchestration.dynamic.search._parents import ParentOption
 from vibesys.orchestration.dynamic.search._prompts import MergeableRow
@@ -42,9 +42,9 @@ class NoHeadline:
 
 @dataclass(frozen=True)
 class Headline:
-    """Main's headline metric now: its own measurement's, else the input's."""
+    """Main's complete metric row now: its own measurement's, else the input's."""
 
-    row: MetricRow
+    metrics: tuple[MetricRow, ...]
 
 
 type MainReading = BaselinePending | NoHeadline | Headline
@@ -145,12 +145,12 @@ class MainLine:
         else:
             seen = candidates.reading(self.baseline)
             metrics = () if seen is None else seen.metrics
-        return Headline(metrics[0]) if metrics else NoHeadline()
+        return Headline(metrics) if metrics else NoHeadline()
 
     def headline(self) -> MetricRow | None:
         """Main's headline metric now, when it has one."""
         reading = self.reading()
-        return reading.row if isinstance(reading, Headline) else None
+        return reading.metrics[0] if isinstance(reading, Headline) else None
 
     def _benchmark_passed(self) -> bool | None:
         if self.measurement is not None:
@@ -186,7 +186,7 @@ class MainLine:
                 bar = ViolationCode.MERGE_CANDIDATE_IS_MAIN
             elif key in self.merged:
                 bar = ViolationCode.MERGE_CANDIDATE_MERGED
-            elif not _beats(headline, main, space):
+            elif not _beats(() if benchmark is None else benchmark.metrics, main, space):
                 bar = (
                     ViolationCode.MERGE_BASELINE_PENDING
                     if isinstance(main, BaselinePending)
@@ -253,7 +253,7 @@ class MainLine:
         benchmark_passed = None if benchmark is None else benchmark.passed
         metrics = () if benchmark is None else benchmark.metrics
         reading = self.reading()
-        main = reading.row if isinstance(reading, Headline) else None
+        main = reading.metrics if isinstance(reading, Headline) else ()
         committed = (
             not isinstance(reading, BaselinePending)
             and report is not None
@@ -292,7 +292,7 @@ class MainLine:
             accuracy_passed=accuracy_passed,
             benchmark_passed=benchmark_passed,
             metrics=metrics,
-            main_metrics=() if main is None or not committed else (main,),
+            main_metrics=main if committed else (),
             main_benchmark_passed=self._benchmark_passed() if committed else None,
             failure=failure,
         )
@@ -317,20 +317,14 @@ class MainLine:
 
     def _regresses(
         self,
-        main: MetricRow | None,
+        main: tuple[MetricRow, ...],
         metrics: tuple[MetricRow, ...],
         *,
         benchmark_passed: bool | None,
         terms: TaskTerms,
     ) -> bool:
         """Whether a commit measures worse than main beyond noise, or fails a check main passed."""
-        new = metrics[0] if metrics else None
-        worse = main is not None and candidates.improves_on(
-            candidates.measurement(main),
-            candidates.measurement(new),
-            space=candidates.space_of(terms),
-            when_input_unmeasured=False,
-        )
+        worse = bool(main) and not candidates.space_of(terms).no_worse_metrics(metrics, main)
         lost_check = benchmark_passed is not True and self._benchmark_passed() is True
         return worse or lost_check
 
@@ -354,17 +348,12 @@ class MainLine:
         }
 
 
-def _beats(headline: MetricRow | None, main: MainReading, space: MetricSpace) -> bool:
-    """Whether a candidate's headline metric beats main beyond noise; nothing beats a pending one."""
+def _beats(metrics: tuple[MetricRow, ...], main: MainReading, space: MetricSpace) -> bool:
+    """Whether a candidate Pareto-dominates main; nothing beats a pending measurement."""
     match main:
         case BaselinePending():
             return False
         case NoHeadline():
             return True
-        case Headline(row=row):
-            return candidates.improves_on(
-                candidates.measurement(headline),
-                candidates.measurement(row),
-                space=space,
-                when_input_unmeasured=False,
-            )
+        case Headline(metrics=baseline):
+            return space.compare_metrics(metrics, baseline) is MetricComparison.BETTER

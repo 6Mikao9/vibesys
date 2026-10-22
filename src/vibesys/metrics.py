@@ -247,6 +247,56 @@ class MetricSpace(BaseModel):
                 best, best_reading = point, item
         return best
 
+    def compare_metrics(
+        self, candidate: tuple[MetricRow, ...], baseline: tuple[MetricRow, ...]
+    ) -> MetricComparison:
+        """Compare complete objective rows by noise-aware Pareto dominance.
+
+        Configured axes supply directions, regardless of metric order or a
+        reporting default on a secondary metric. Tradeoffs and missing axes
+        are incomparable. With no configured axes, preserve headline comparison.
+        """
+        comparisons = set(self._metric_comparisons(candidate, baseline))
+        if not comparisons or MetricComparison.INCOMPARABLE in comparisons:
+            return MetricComparison.INCOMPARABLE
+        comparisons.discard(MetricComparison.WITHIN_NOISE)
+        if not comparisons:
+            return MetricComparison.WITHIN_NOISE
+        return comparisons.pop() if len(comparisons) == 1 else MetricComparison.INCOMPARABLE
+
+    def no_worse_metrics(
+        self, candidate: tuple[MetricRow, ...], baseline: tuple[MetricRow, ...]
+    ) -> bool:
+        """Whether every objective is present and none regresses beyond its tolerance.
+
+        Unlike reversing dominance, this rejects a tradeoff with a material
+        regression, even when another objective improves.
+        """
+        comparisons = self._metric_comparisons(candidate, baseline)
+        return bool(comparisons) and all(
+            item in {MetricComparison.BETTER, MetricComparison.WITHIN_NOISE} for item in comparisons
+        )
+
+    def _metric_comparisons(
+        self, candidate: tuple[MetricRow, ...], baseline: tuple[MetricRow, ...]
+    ) -> tuple[MetricComparison, ...]:
+        if not self.objectives:
+            return (
+                self.compare(
+                    Measurement(candidate[0].name, candidate[0].value, candidate[0].direction)
+                    if candidate
+                    else None,
+                    Measurement(baseline[0].name, baseline[0].value, baseline[0].direction)
+                    if baseline
+                    else None,
+                ),
+            )
+        mine = {item.name: item.value for item in candidate}
+        theirs = {item.name: item.value for item in baseline}
+        return tuple(
+            self.compare(_reading(axis, mine), _reading(axis, theirs)) for axis in self.objectives
+        )
+
     def compare_to_best(
         self,
         candidate: Measurement | None,

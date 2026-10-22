@@ -62,13 +62,21 @@ def choose_winner(
 
     Earlier rounds win ties. ``when_unranked`` says what happens when no round has a metric.
     """
-    best = best_by(
-        rounds,
-        space=space,
-        reading=lambda item: measurement(item.metrics[0] if item.metrics else None),
-        order=lambda item: item.sequence,
-        when_unranked=when_unranked,
-    )
+    points = sorted(rounds, key=lambda item: item.sequence)
+    if len(space.objectives) > 1:
+        # Only complete rows can be ranked. Retain the earliest non-dominated
+        # alternative instead of inventing a scalar ordering for tradeoffs.
+        complete = [item for item in points if space.complete(_metrics(item))]
+        frontier = space.frontier(complete, _metrics)
+        best = frontier[0] if frontier else None
+    else:
+        best = best_by(
+            points,
+            space=space,
+            reading=lambda item: measurement(item.metrics[0] if item.metrics else None),
+            order=lambda item: item.sequence,
+            when_unranked=when_unranked,
+        )
     if best is None:
         return Winner(settlement=None, revision=baseline, hypothesis_id=None)
     return Winner(
@@ -77,3 +85,7 @@ def choose_winner(
         hypothesis_id=best.hypothesis_id,
         value=best.metrics[0].value if best.metrics else None,
     )
+
+
+def _metrics(item: EligibleRound) -> dict[str, float]:
+    return {metric.name: metric.value for metric in item.metrics}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Literal
 
 import pytest
 from hypothesis import example, given, settings
@@ -16,6 +17,7 @@ from tests.vibesys.orchestration.dynamic._values import (
     SCOPE,
     evidence_of,
     evidence_ref,
+    result_of,
     revision,
     settlement_of,
     workstream_start,
@@ -31,6 +33,7 @@ from vibesys.candidates.api import (
     measurement,
     space_of,
 )
+from vibesys.hypothesis import HypothesisOutcome
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, accept_readings
 from vibesys.orchestration.dynamic.search.api import (
     Closing,
@@ -46,9 +49,11 @@ from vibesys.orchestration.dynamic.search.api import (
     WorkstreamStart,
     assertion,
     compose_jobs,
+    options,
     round_of,
     snapshot_of,
 )
+from vibesys.serial_search.api import beats_input as serial_beats_input
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -63,6 +68,8 @@ from vs_core.api import (
     RunView,
     Scope,
     StageBudget,
+    TaskObjective,
+    TaskTerms,
 )
 from vs_core.api.search import trusted_keys
 from vs_evaluation.api import SubmitCall
@@ -647,3 +654,168 @@ def test_a_profile_measurement_is_not_scored_as_an_unverified_benchmark() -> Non
     )
     assert composed.unverified == ()
     assert composed.decisive is result
+
+
+# -- multi-objective promotion -----------------------------------------------------------------
+
+_Axis = tuple[Literal["min", "max"], float, float]
+_AXES = st.lists(
+    st.tuples(
+        st.sampled_from(("min", "max")),
+        st.integers(0, 50000).map(float),
+        st.integers(0, 50000).map(float),
+    ),
+    min_size=2,
+    max_size=5,
+).map(tuple)
+_FLINT_AXES: tuple[_Axis, ...] = (
+    ("min", 49.62709677419356, 50.36629032258063),
+    ("min", 30577.0, 18744.17),
+    ("max", 2.0, 2.0),
+)
+
+
+def _multi_evidence(metrics: tuple[MetricRow, ...]) -> Evidence:
+    evidence = evidence_of(accuracy=True, benchmark=True, throughput=1.0)
+    return evidence.model_copy(
+        update={
+            "readings": tuple(
+                reading.model_copy(update={"metrics": metrics})
+                if reading.kind is EvidenceKind.BENCHMARK
+                else reading
+                for reading in evidence.readings
+            )
+        }
+    )
+
+
+def _multi_start(
+    metrics: tuple[MetricRow, ...], *, kind: WorkKind = WorkKind.IMPLEMENT
+) -> WorkstreamStart:
+    baseline = Measured(
+        reading=InputReading(accuracy_passed=True, benchmark_passed=True, metrics=metrics)
+    )
+    return workstream_start(kind).model_copy(update={"baseline": baseline})
+
+
+def _multi_rows(axes: tuple[_Axis, ...]) -> tuple[tuple[MetricRow, ...], tuple[MetricRow, ...]]:
+    # Secondary metrics can carry a reporting default of max even when the
+    # task declares min. Configured axes, rather than those defaults, govern.
+    baseline = tuple(
+        MetricRow(name=f"axis-{index}", value=base, direction="max")
+        for index, (_, base, _) in enumerate(axes)
+    )
+    candidate = tuple(
+        MetricRow(name=f"axis-{index}", value=value, direction="max")
+        for index, (_, _, value) in enumerate(axes)
+    )
+    return baseline, candidate
+
+
+def _multi_terms(axes: tuple[_Axis, ...], noise: float) -> TaskTerms:
+    return TERMS.model_copy(
+        update={
+            "objectives": tuple(
+                TaskObjective(name=f"axis-{index}", direction=direction)
+                for index, (direction, _, _) in enumerate(axes)
+            ),
+            "relative_noise": noise,
+        }
+    )
+
+
+@pytest.mark.regression
+@example(axes=_FLINT_AXES, noise=0.05, reverse=False)
+@example(axes=_FLINT_AXES, noise=0.05, reverse=True)
+@example(axes=_FLINT_AXES, noise=0.0, reverse=False)
+@example(axes=(("min", 100.0, 105.0), ("max", 100.0, 120.0)), noise=0.05, reverse=False)
+@example(axes=(("min", 100.0, 106.0), ("max", 100.0, 120.0)), noise=0.05, reverse=False)
+@given(axes=_AXES, noise=st.sampled_from((0.0, 0.01, 0.05)), reverse=st.booleans())
+def test_promotion_merge_offer_and_winner_use_every_objective_with_its_noise(
+    axes: tuple[_Axis, ...], noise: float, *, reverse: bool
+) -> None:
+    baseline, candidate = _multi_rows(axes)
+    terms = _multi_terms(axes, noise)
+    if reverse:
+        terms = terms.model_copy(update={"objectives": tuple(reversed(terms.objectives))})
+        candidate = tuple(reversed(candidate))
+    gains = [
+        value - base if direction == "max" else base - value for direction, base, value in axes
+    ]
+    tolerances = [abs(base) * noise for _, base, _ in axes]
+    no_regression = all(
+        gain >= -tolerance for gain, tolerance in zip(gains, tolerances, strict=True)
+    )
+    improves = no_regression and any(
+        gain > tolerance for gain, tolerance in zip(gains, tolerances, strict=True)
+    )
+    start = _multi_start(baseline)
+    evidence = _multi_evidence(candidate)
+    closing = Closing(
+        result=result_of(HypothesisOutcome.INCONCLUSIVE, review=True), evidence=evidence
+    )
+    proposed = assertion(start, closing, terms, start.baseline)
+    assert proposed.eligible is improves
+    assert start.baseline is not None
+    assert serial_beats_input(start.baseline, evidence.readings, terms) is improves
+    assert proposed.retention == "candidate"  # ties/tradeoffs still remain buildable
+    done = WorkstreamDone(
+        start=start,
+        failure=None,
+        result=closing.result,
+        evidence=evidence,
+        settlement=settlement_of(eligible=improves, retention="candidate"),
+    )
+    parent = snapshot_of(done)
+    assert parent is not None
+    line = MainLine(revision=BASE, baseline=start.baseline)
+    offered = line.options(options((parent,)), terms, frozenset())
+    assert offered.mergeable(start.plan.work_id) is improves
+    rounds = tuple(
+        EligibleRound(
+            hypothesis_id=f"h{index}",
+            sequence=index,
+            settlement=settlement_of(
+                eligible=True, retention="candidate", name=str(index)
+            ).settlement_id,
+            candidate=revision(f"c{index}"),
+            metrics=metrics,
+        )
+        for index, metrics in enumerate((baseline, candidate))
+    )
+    winner = choose_winner(
+        rounds, space=space_of(terms), baseline=BASE, when_unranked=Unranked.NONE
+    )
+    assert winner.hypothesis_id == ("h1" if improves else "h0")
+
+
+@pytest.mark.regression
+@example(axes=_FLINT_AXES, noise=0.05, missing=False)
+@example(axes=(("min", 100.0, 106.0), ("max", 100.0, 120.0)), noise=0.05, missing=False)
+@example(axes=_FLINT_AXES, noise=0.05, missing=True)
+@given(axes=_AXES, noise=st.sampled_from((0.0, 0.01, 0.05)), missing=st.booleans())
+def test_a_merge_cannot_hide_a_secondary_regression_or_missing_objective(
+    axes: tuple[_Axis, ...], noise: float, *, missing: bool
+) -> None:
+    baseline, candidate = _multi_rows(axes)
+    if missing:
+        candidate = candidate[:-1]
+    terms = _multi_terms(axes, noise)
+    start = _multi_start(baseline, kind=WorkKind.MERGE)
+    done = WorkstreamDone(
+        start=start,
+        failure=None,
+        settlement=settlement_of(eligible=True, retention="candidate"),
+        evidence=_multi_evidence(candidate),
+        merge=MergeReport(outcome=MergeOutcome.MERGED, revision=CANDIDATE),
+    )
+    expected = not missing and all(
+        (value - base if direction == "max" else base - value) >= -abs(base) * noise
+        for direction, base, value in axes
+    )
+    line = MainLine(revision=BASE, baseline=start.baseline)
+    record = line.finished(done, terms)
+    assert (line.revision == CANDIDATE) is expected
+    assert record.main_metrics == baseline
+    resumed = MainLine.resumed(start.baseline, line.state())
+    assert resumed.state() == line.state()

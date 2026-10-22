@@ -15,15 +15,13 @@ from typing import TYPE_CHECKING
 from vibesys.candidates.api import (
     Baseline,
     gates_of,
-    improves_on,
     input_metrics,
-    measurement,
     settle_for,
     space_of,
 )
 from vibesys.candidates.api import turned_down as checks_turned_down
 from vibesys.hypothesis import CandidateDisposition
-from vibesys.metrics import FrameworkBenchmarkOutcome, MetricRow, reading_of
+from vibesys.metrics import FrameworkBenchmarkOutcome, MetricComparison, MetricRow, reading_of
 from vs_core.api.search import Assessment, EvidenceKind
 
 if TYPE_CHECKING:
@@ -69,12 +67,10 @@ def beats_input(
     """
     benchmark = reading_of(readings, EvidenceKind.BENCHMARK)
     bar = input_metrics(baseline)
-    return improves_on(
-        measurement(None if benchmark is None else benchmark.headline()),
-        measurement(bar[0] if bar else None),
-        space=space_of(terms),
-        when_input_unmeasured=True,
-    )
+    if not bar:
+        return True
+    metrics = () if benchmark is None else benchmark.metrics
+    return space_of(terms).compare_metrics(metrics, bar) is MetricComparison.BETTER
 
 
 def settle(

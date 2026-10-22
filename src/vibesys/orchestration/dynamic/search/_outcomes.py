@@ -16,15 +16,13 @@ from vibesys.candidates.api import (
     Baseline,
     assessment,
     gates_of,
-    improves_on,
     input_metrics,
-    measurement,
     settle_for,
     space_of,
 )
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active
-from vibesys.metrics import AcceptedReading, MetricRow, reading_of
+from vibesys.metrics import AcceptedReading, MetricComparison, reading_of
 from vibesys.orchestration.dynamic.models import UnappliedPart
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._parents import ParentSnapshot
@@ -442,31 +440,19 @@ def assertion(
     )
 
 
-def headline(closing: Closing) -> MetricRow | None:
-    """The candidate's headline benchmark value, when it was measured."""
-    benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
-    return None if benchmark is None else benchmark.headline()
-
-
-def input_headline(baseline: Baseline | None) -> MetricRow | None:
-    """The input's headline value: the first number of the bar a candidate must beat, if any."""
-    bar = input_metrics(baseline)
-    return bar[0] if bar else None
-
-
 def beats_input(closing: Closing, terms: TaskTerms, baseline: Baseline | None) -> bool:
-    """Whether the candidate's headline improves on the input's bar (no bar is beaten).
+    """Whether the candidate Pareto-dominates the input's bar beyond per-axis noise.
 
     The bar is `input_metrics`: a measured input's benchmark, or that of one that failed only
     its accuracy check. With no bar the candidate is judged on the task's gates alone, and a
     run that adopts it says so (`RunRecord.ending`).
     """
-    return improves_on(
-        measurement(headline(closing)),
-        measurement(input_headline(baseline)),
-        space=space_of(terms),
-        when_input_unmeasured=True,
-    )
+    bar = input_metrics(baseline)
+    if not bar:
+        return True
+    benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
+    metrics = () if benchmark is None else benchmark.metrics
+    return space_of(terms).compare_metrics(metrics, bar) is MetricComparison.BETTER
 
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})

@@ -244,9 +244,19 @@ way, the official result's headline objective states the mean of the samples of 
 input held when the result is stored, the value its comparison states then, and
 that mean is the candidate's headline value in ranking. A task's other objectives
 (for example p99 latency beside throughput) are the answering run's own values: a
-sample holds only the headline reading. The strategies' "beats the input" checks
-(merge and adoption) still compare that value with the input's own baseline run
-under `relative_noise`, not with the comparison's verdict.
+sample holds only the headline reading.
+
+Dynamic search compares all declared objectives for promotion, merge eligibility
+and adoption, using Pareto dominance: at least one objective must improve beyond
+`abs(baseline value) * relative_noise`, and none may regress beyond its own
+tolerance. Objective order selects the display headline, not optimization priority.
+Missing objectives and material tradeoffs do not establish improvement. A merged
+commit must have every objective and regress none beyond tolerance. Among eligible
+candidates, adoption chooses the earliest member of the non-dominated frontier.
+These checks use the input or main's metric row under the task's declared
+`relative_noise`, not the statistical comparison's verdict. An absent `[pareto]`
+table means zero tolerance for promotion; a prose estimate of noise does not
+configure it.
 
 An agent's evaluation is compared with its base, the revision its workspace
 started from. The base is measured once per (measured input, gates, host) and
