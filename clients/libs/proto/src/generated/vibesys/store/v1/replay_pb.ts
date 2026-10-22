@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/replay.proto.
  */
 export const file_vibesys_store_v1_replay: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlcGxheS5wcm90bxIQdmliZXN5cy5zdG9yZS52MSJZCgxPcGVyYXRpb25LZXkSGgoJb3BlcmF0aW9uGAEgASgJQge6SARyAhABEi0KBXNjb3BlGAIgAygLMh4udmliZXN5cy5zdG9yZS52MS5LZXlDb21wb25lbnQiZAoMS2V5Q29tcG9uZW50EjwKBGtpbmQYASABKA4yIi52aWJlc3lzLnN0b3JlLnYxLktleUNvbXBvbmVudEtpbmRCCrpIB4IBBBABIAASFgoFdmFsdWUYAiABKAlCB7pIBHICEAEikgEKD1JlcGxheUFsbG93YW5jZRISCgppdGVyYXRpb25zGAEgASgEEhAKCGNhcGFjaXR5GAIgASgEEiMKCXJlbWFpbmluZxgDIAEoAUIQukgNEgtAASkAAAAAAAAAABI0CglyZXNvdXJjZXMYBCABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVJlc291cmNlcyKjAQoPUmVwbGF5UmVzb3VyY2VzEigKCW1vbmV5X3VzZBgBIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAiAEBEhkKDGlucHV0X3Rva2VucxgCIAEoBEgBiAEBEhoKDW91dHB1dF90b2tlbnMYAyABKARIAogBAUIMCgpfbW9uZXlfdXNkQg8KDV9pbnB1dF90b2tlbnNCEAoOX291dHB1dF90b2tlbnMi0gIKDFJlcGxheVBvbGljeRIMCgRyb2xlGAEgASgJEhAKCHRlbXBsYXRlGAIgASgJEg8KB2NvbnRlbnQYAyABKAwSGwoKcmVwbHlfdHlwZRgEIAEoCUIHukgEcgIQARIpChNyZXBseV9zY2hlbWFfZGlnZXN0GAUgASgMQge6SAR6AmggSACIAQESJQoHcmVxdWVzdBgGIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnkSNgoLcmVzZXJ2YXRpb24YByABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVJlc291cmNlcxI2ChdwaHlzaWNhbF93aXRoaW5fc2Vjb25kcxgIIAEoAUIQukgNEgtAASEAAAAAAAAAAEgBiAEBQhYKFF9yZXBseV9zY2hlbWFfZGlnZXN0QhoKGF9waHlzaWNhbF93aXRoaW5fc2Vjb25kcyL7BgoPT3BlcmF0aW9uUmVwbGF5EjMKA2tleRgBIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuT3BlcmF0aW9uS2V5Qga6SAPIAQESIQoQZW5jb2RpbmdfdmVyc2lvbhgCIAEoDUIHukgEKgIIARIZCghpZGVudGl0eRgDIAEoDEIHukgEegIQARIgCg9pZGVudGl0eV9kaWdlc3QYBCABKAxCB7pIBHoCaCASHQoMZGVwZW5kZW5jaWVzGAUgASgMQge6SAR6AmggEjYKBnBvbGljeRgGIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5UG9saWN5Qga6SAPIAQESJQoHb3V0Y29tZRgHIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnkSDAoEcGFpZBgIIAEoCBInCghjb3N0X3VzZBgJIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAiAEBEjwKCWFsbG93YW5jZRgKIAEoCzIhLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5QWxsb3dhbmNlQga6SAPIAQESJwoRYWNjZXB0ZWRfc2VxdWVuY2UYCyABKARCB7pIBDICIABIAYgBARIkCg5hY2NlcHRlZF9jaGlsZBgMIAEoCUIHukgEcgIQAUgCiAEBOtoCukjWAhqWAQodb3BlcmF0aW9uX3JlcGxheS5yZXBseV9zY2hlbWESO3JlY29yZGVkIG9wZXJhdGlvbnMgcmVxdWlyZSB0aGUgd3JpdGVyJ3MgcmVwbHkgc2NoZW1hIHByb29mGjhoYXModGhpcy5wb2xpY3kpICYmIGhhcyh0aGlzLnBvbGljeS5yZXBseV9zY2hlbWFfZGlnZXN0KRq6AQobb3BlcmF0aW9uX3JlcGxheS5hY2NlcHRhbmNlEjVhbiBvdXRjb21lIHJlcXVpcmVzIGl0cyBpbW11dGFibGUgYWNjZXB0YW5jZSBzZXF1ZW5jZRpkaGFzKHRoaXMub3V0Y29tZSkgPT0gaGFzKHRoaXMuYWNjZXB0ZWRfc2VxdWVuY2UpICYmICghaGFzKHRoaXMuYWNjZXB0ZWRfY2hpbGQpIHx8IGhhcyh0aGlzLm91dGNvbWUpKUILCglfY29zdF91c2RCFAoSX2FjY2VwdGVkX3NlcXVlbmNlQhEKD19hY2NlcHRlZF9jaGlsZCLKAwoOUmVwbGF5UGh5c2ljYWwSGAoHbG9naWNhbBgBIAEoCUIHukgEcgIQARIcCgtleHRlcm5hbF9pZBgCIAEoCUIHukgEcgIQARIhChBob3N0X2luY2FybmF0aW9uGAMgASgJQge6SARyAhABEiIKCGRlYWRsaW5lGAQgASgBQhC6SA0SC0ABKQAAAAAAAAAAEg8KB29yZGluYWwYBSABKAQSKAoSd2l0aGRyYXduX3NlcXVlbmNlGAYgASgEQge6SAQyAiAASACIAQESJwoRb2JzZXJ2ZWRfc2VxdWVuY2UYByABKARCB7pIBDICIABIAYgBARIuChh0ZXJtaW5hdGlvbl9wcm9vZl9kaWdlc3QYCCABKAxCB7pIBHoCaCBIAogBARIYChBjb25maXJtZWRfYWJzZW50GAkgASgIEikKE3NldHRsZW1lbnRfc2VxdWVuY2UYCiABKARCB7pIBDICIABIA4gBAUIVChNfd2l0aGRyYXduX3NlcXVlbmNlQhQKEl9vYnNlcnZlZF9zZXF1ZW5jZUIbChlfdGVybWluYXRpb25fcHJvb2ZfZGlnZXN0QhYKFF9zZXR0bGVtZW50X3NlcXVlbmNlIngKDVdyaXRlckJhY2tpbmcSHAoLZW52aXJvbm1lbnQYASABKAlCB7pIBHICEAESGQoIaWRlbnRpdHkYAiABKAlCB7pIBHICEAESEgoKZ2VuZXJhdGlvbhgDIAEoBBIaCglhdXRob3JpdHkYBCABKAlCB7pIBHICEAEihgEKDldyaXRlcklkZW50aXR5EhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQARIhChBob3N0X2luY2FybmF0aW9uGAIgASgJQge6SARyAhABEhwKC3BoeXNpY2FsX2lkGAMgASgJQge6SARyAhABEhoKCWRvbWFpbl9pZBgEIAEoCUIHukgEcgIQASKEAgoOV3JpdGVyTWFuaWZlc3QSOAoHYmFja2luZxgBIAEoCzIfLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyQmFja2luZ0IGukgDyAEBEjEKB3dyaXRlcnMYAiADKAsyIC52aWJlc3lzLnN0b3JlLnYxLldyaXRlcklkZW50aXR5Eg4KBmNsb3NlZBgDIAEoCDp1ukhyGnAKFndyaXRlcl9tYW5pZmVzdC51bmlxdWUSKXdyaXRlciBwaHlzaWNhbCBpZGVudGl0aWVzIG11c3QgYmUgdW5pcXVlGit0aGlzLndyaXRlcnMubWFwKHgsIHgucGh5c2ljYWxfaWQpLnVuaXF1ZSgpIqMDChZXcml0ZXJUZXJtaW5hdGlvblByb29mEjoKCG1hbmlmZXN0GAEgASgLMiAudmliZXN5cy5zdG9yZS52MS5Xcml0ZXJNYW5pZmVzdEIGukgDyAEBEiAKDmFic2VudF9kb21haW5zGAIgAygJQgi6SAWSAQIYATqqArpIpgIaowIKE3dyaXRlcl9wcm9vZi5jbG9zZWQSSnRlcm1pbmF0aW9uIHByb29mIG5lZWRzIGEgY2xvc2VkIG1hbmlmZXN0IGFuZCBldmVyeSBkb21haW4gdmVyaWZpZWQgYWJzZW50Gr8BaGFzKHRoaXMubWFuaWZlc3QpICYmIHRoaXMubWFuaWZlc3QuY2xvc2VkICYmIHRoaXMubWFuaWZlc3Qud3JpdGVycy5hbGwoeCwgeC5kb21haW5faWQgaW4gdGhpcy5hYnNlbnRfZG9tYWlucykgJiYgdGhpcy5hYnNlbnRfZG9tYWlucy5hbGwoeCwgdGhpcy5tYW5pZmVzdC53cml0ZXJzLmV4aXN0cyh3LCB3LmRvbWFpbl9pZCA9PSB4KSkiwQMKFFdyaXRlclJlY29uY2lsaWF0aW9uEjoKCG1hbmlmZXN0GAEgASgLMiAudmliZXN5cy5zdG9yZS52MS5Xcml0ZXJNYW5pZmVzdEIGukgDyAEBEkgKBnN0YXR1cxgCIAEoDjIsLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyUmVjb25jaWxpYXRpb25TdGF0dXNCCrpIB4IBBBABIAASNwoFcHJvb2YYAyABKAsyKC52aWJlc3lzLnN0b3JlLnYxLldyaXRlclRlcm1pbmF0aW9uUHJvb2YSDgoGZGV0YWlsGAQgASgJOtkBukjVARrSAQobd3JpdGVyX3JlY29uY2lsaWF0aW9uLnByb29mEk5Qcm92ZW5TdG9wcGVkIHJlcXVpcmVzIHRlcm1pbmF0aW9uIHByb29mIGZvciB0aGUgZXhhY3QgcmVjb25jaWxpYXRpb24gbWFuaWZlc3QaYyh0aGlzLnN0YXR1cyA9PSAxKSA9PSBoYXModGhpcy5wcm9vZikgJiYgKCFoYXModGhpcy5wcm9vZikgfHwgdGhpcy5wcm9vZi5tYW5pZmVzdCA9PSB0aGlzLm1hbmlmZXN0KSKRAgoTV3JpdGVyUmVnaXN0cnlTdGF0ZRI6CghtYW5pZmVzdBgBIAEoCzIgLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyTWFuaWZlc3RCBrpIA8gBARI3CgVwcm9vZhgCIAEoCzIoLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyVGVybWluYXRpb25Qcm9vZjqEAbpIgAEafgoVd3JpdGVyX3JlZ2lzdHJ5LnByb29mEityZWdpc3RyeSBwcm9vZiBtdXN0IGJpbmQgaXRzIGV4YWN0IG1hbmlmZXN0GjghaGFzKHRoaXMucHJvb2YpIHx8IHRoaXMucHJvb2YubWFuaWZlc3QgPT0gdGhpcy5tYW5pZmVzdCJLCgtSZXBsYXlDbG9jaxI8CglhbGxvd2FuY2UYASABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheUFsbG93YW5jZUIGukgDyAEBIpgCCgxSZXBsYXlOb3RpY2USEwoCaWQYASABKAlCB7pIBHICEAESOwoGdW51c2VkGAIgAygLMiEudmliZXN5cy5zdG9yZS52MS5PcGVyYXRpb25SZXBsYXlCCLpIBZIBAggBEi8KB3BlbmRpbmcYAyADKAsyHi52aWJlc3lzLnN0b3JlLnYxLk9wZXJhdGlvbktleTqEAbpIgAEafgoacmVwbGF5X25vdGljZS5wYWlkX3Jlc3VsdHMSMnVudXNlZCBlbnRyaWVzIG11c3QgaWRlbnRpZnkgYWNjZXB0ZWQgcGFpZCByZXN1bHRzGix0aGlzLnVudXNlZC5hbGwoeCwgeC5wYWlkICYmIGhhcyh4Lm91dGNvbWUpKSJqChVSZXBsYXlBY2tub3dsZWRnZW1lbnQSHwoJbm90aWNlX2lkGAEgASgJQge6SARyAhABSACIAQESIgoRbGF1bmNoX3JlcXVlc3RfaWQYAiABKAlCB7pIBHICEAFCDAoKX25vdGljZV9pZCKBAwoRUmVwbGF5T2JzZXJ2YXRpb24SLQoHb3V0Y29tZRgBIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnlCBrpIA8gBARIMCgRwYWlkGAIgASgIEicKCGNvc3RfdXNkGAMgASgBQhC6SA0SC0ABKQAAAAAAAAAASACIAQESKwoFdXNhZ2UYBCABKAsyHC52aWJlc3lzLnN0b3JlLnYxLlRva2VuVXNhZ2U6ywG6SMcBGsQBCh1yZXBsYXlfb2JzZXJ2YXRpb24udXNhZ2VfY29zdBI0cmVwb3J0ZWQgdXNhZ2UgY29zdCBtdXN0IGFncmVlIHdpdGggb2JzZXJ2YXRpb24gY29zdBptIWhhcyh0aGlzLnVzYWdlKSB8fCAhaGFzKHRoaXMudXNhZ2UuY29zdF91c2QpIHx8IChoYXModGhpcy5jb3N0X3VzZCkgJiYgdGhpcy5jb3N0X3VzZCA9PSB0aGlzLnVzYWdlLmNvc3RfdXNkKUILCglfY29zdF91c2QiTwoRUmVwbGF5UG9saWN5RHJpZnQSGAoHcmVzdWx0cxgBIAEoBEIHukgEMgIgABINCgVyb2xlcxgCIAMoCRIRCgl0ZW1wbGF0ZXMYAyADKAkqcgoPUmVwbGF5RmllbGRLaW5kEiEKHVJFUExBWV9GSUVMRF9LSU5EX1VOU1BFQ0lGSUVEEAASHgoaUkVQTEFZX0ZJRUxEX0tJTkRfSURFTlRJVFkQARIcChhSRVBMQVlfRklFTERfS0lORF9QT0xJQ1kQAircAQoQS2V5Q29tcG9uZW50S2luZBIiCh5LRVlfQ09NUE9ORU5UX0tJTkRfVU5TUEVDSUZJRUQQABIdChlLRVlfQ09NUE9ORU5UX0tJTkRfUEFSRU5UEAESGwoXS0VZX0NPTVBPTkVOVF9LSU5EX0lURU0QAhIdChlLRVlfQ09NUE9ORU5UX0tJTkRfU0FNUExFEAMSHwobS0VZX0NPTVBPTkVOVF9LSU5EX1JFVklTSU9OEAQSKAokS0VZX0NPTVBPTkVOVF9LSU5EX1JFQ09SREVEX1BPU0lUSU9OEAUq/QEKGldyaXRlclJlY29uY2lsaWF0aW9uU3RhdHVzEiwKKFdSSVRFUl9SRUNPTkNJTElBVElPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIvCitXUklURVJfUkVDT05DSUxJQVRJT05fU1RBVFVTX1BST1ZFTl9TVE9QUEVEEAESKAokV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19QRU5ESU5HEAISKAokV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19VTktOT1dOEAMSLAooV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19VTlNVUFBPUlRFRBAEOkgKDnJlcGxheV9jb250ZXh0Eh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGJ6PAyABKAhSDXJlcGxheUNvbnRleHQ6ZQoMcmVwbGF5X2ZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxicjwMgASgOMiEudmliZXN5cy5zdG9yZS52MS5SZXBsYXlGaWVsZEtpbmRSC3JlcGxheUZpZWxkOj4KCnJlcGxheV9zZXQSHS5nb29nbGUucHJvdG9idWYuRmllbGRPcHRpb25zGJ2PAyABKAhSCXJlcGxheVNldEJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_any, file_google_protobuf_descriptor, file_vibesys_store_v1_agent_attrs]);
+  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlcGxheS5wcm90bxIQdmliZXN5cy5zdG9yZS52MSJZCgxPcGVyYXRpb25LZXkSGgoJb3BlcmF0aW9uGAEgASgJQge6SARyAhABEi0KBXNjb3BlGAIgAygLMh4udmliZXN5cy5zdG9yZS52MS5LZXlDb21wb25lbnQiZAoMS2V5Q29tcG9uZW50EjwKBGtpbmQYASABKA4yIi52aWJlc3lzLnN0b3JlLnYxLktleUNvbXBvbmVudEtpbmRCCrpIB4IBBBABIAASFgoFdmFsdWUYAiABKAlCB7pIBHICEAEikgEKD1JlcGxheUFsbG93YW5jZRISCgppdGVyYXRpb25zGAEgASgEEhAKCGNhcGFjaXR5GAIgASgEEiMKCXJlbWFpbmluZxgDIAEoAUIQukgNEgtAASkAAAAAAAAAABI0CglyZXNvdXJjZXMYBCABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVJlc291cmNlcyKjAQoPUmVwbGF5UmVzb3VyY2VzEigKCW1vbmV5X3VzZBgBIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAiAEBEhkKDGlucHV0X3Rva2VucxgCIAEoBEgBiAEBEhoKDW91dHB1dF90b2tlbnMYAyABKARIAogBAUIMCgpfbW9uZXlfdXNkQg8KDV9pbnB1dF90b2tlbnNCEAoOX291dHB1dF90b2tlbnMi0gIKDFJlcGxheVBvbGljeRIMCgRyb2xlGAEgASgJEhAKCHRlbXBsYXRlGAIgASgJEg8KB2NvbnRlbnQYAyABKAwSGwoKcmVwbHlfdHlwZRgEIAEoCUIHukgEcgIQARIpChNyZXBseV9zY2hlbWFfZGlnZXN0GAUgASgMQge6SAR6AmggSACIAQESJQoHcmVxdWVzdBgGIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnkSNgoLcmVzZXJ2YXRpb24YByABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVJlc291cmNlcxI2ChdwaHlzaWNhbF93aXRoaW5fc2Vjb25kcxgIIAEoAUIQukgNEgtAASEAAAAAAAAAAEgBiAEBQhYKFF9yZXBseV9zY2hlbWFfZGlnZXN0QhoKGF9waHlzaWNhbF93aXRoaW5fc2Vjb25kcyKyBwoPT3BlcmF0aW9uUmVwbGF5EjMKA2tleRgBIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuT3BlcmF0aW9uS2V5Qga6SAPIAQESIQoQZW5jb2RpbmdfdmVyc2lvbhgCIAEoDUIHukgEKgIIARIZCghpZGVudGl0eRgDIAEoDEIHukgEegIQARIgCg9pZGVudGl0eV9kaWdlc3QYBCABKAxCB7pIBHoCaCASHQoMZGVwZW5kZW5jaWVzGAUgASgMQge6SAR6AmggEjYKBnBvbGljeRgGIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5UG9saWN5Qga6SAPIAQESJQoHb3V0Y29tZRgHIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnkSDAoEcGFpZBgIIAEoCBInCghjb3N0X3VzZBgJIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAiAEBEjwKCWFsbG93YW5jZRgKIAEoCzIhLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5QWxsb3dhbmNlQga6SAPIAQESJwoRYWNjZXB0ZWRfc2VxdWVuY2UYCyABKARCB7pIBDICIABIAYgBARIkCg5hY2NlcHRlZF9jaGlsZBgMIAEoCUIHukgEcgIQAUgCiAEBEjUKCnR1cm5fYm91bmQYDSABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVR1cm5Cb3VuZDraArpI1gIalgEKHW9wZXJhdGlvbl9yZXBsYXkucmVwbHlfc2NoZW1hEjtyZWNvcmRlZCBvcGVyYXRpb25zIHJlcXVpcmUgdGhlIHdyaXRlcidzIHJlcGx5IHNjaGVtYSBwcm9vZho4aGFzKHRoaXMucG9saWN5KSAmJiBoYXModGhpcy5wb2xpY3kucmVwbHlfc2NoZW1hX2RpZ2VzdCkaugEKG29wZXJhdGlvbl9yZXBsYXkuYWNjZXB0YW5jZRI1YW4gb3V0Y29tZSByZXF1aXJlcyBpdHMgaW1tdXRhYmxlIGFjY2VwdGFuY2Ugc2VxdWVuY2UaZGhhcyh0aGlzLm91dGNvbWUpID09IGhhcyh0aGlzLmFjY2VwdGVkX3NlcXVlbmNlKSAmJiAoIWhhcyh0aGlzLmFjY2VwdGVkX2NoaWxkKSB8fCBoYXModGhpcy5vdXRjb21lKSlCCwoJX2Nvc3RfdXNkQhQKEl9hY2NlcHRlZF9zZXF1ZW5jZUIRCg9fYWNjZXB0ZWRfY2hpbGQingIKFVJlcGxheVR1cm5PYnNlcnZhdGlvbhI4CgVib3VuZBgBIAEoCzIhLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5VHVybkJvdW5kQga6SAPIAQESEQoJc3VjY2VlZGVkGAIgASgIEjQKCnN1c3BlbnNpb24YAyABKAsyIC52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVR1cm5XYWl0OoEBukh+GnwKInJlcGxheV90dXJuX29ic2VydmF0aW9uLnN1c3BlbnNpb24SLW9ubHkgYSBzdWNjZWVkZWQgdHVybiB5aWVsZHMgaXRzIGR1cmFibGUgd2FpdBonIWhhcyh0aGlzLnN1c3BlbnNpb24pIHx8IHRoaXMuc3VjY2VlZGVkIn0KD1JlcGxheVR1cm5Cb3VuZBIXCgZvcmlnaW4YASABKAlCB7pIBHICEAESIgoIZGVhZGxpbmUYAiABKAFCELpIDRILQAEpAAAAAAAAAAASLQoTaG9sZF9jcmVkaXRfc2Vjb25kcxgDIAEoAUIQukgNEgtAASkAAAAAAAAAACLKAwoOUmVwbGF5UGh5c2ljYWwSGAoHbG9naWNhbBgBIAEoCUIHukgEcgIQARIcCgtleHRlcm5hbF9pZBgCIAEoCUIHukgEcgIQARIhChBob3N0X2luY2FybmF0aW9uGAMgASgJQge6SARyAhABEiIKCGRlYWRsaW5lGAQgASgBQhC6SA0SC0ABKQAAAAAAAAAAEg8KB29yZGluYWwYBSABKAQSKAoSd2l0aGRyYXduX3NlcXVlbmNlGAYgASgEQge6SAQyAiAASACIAQESJwoRb2JzZXJ2ZWRfc2VxdWVuY2UYByABKARCB7pIBDICIABIAYgBARIuChh0ZXJtaW5hdGlvbl9wcm9vZl9kaWdlc3QYCCABKAxCB7pIBHoCaCBIAogBARIYChBjb25maXJtZWRfYWJzZW50GAkgASgIEikKE3NldHRsZW1lbnRfc2VxdWVuY2UYCiABKARCB7pIBDICIABIA4gBAUIVChNfd2l0aGRyYXduX3NlcXVlbmNlQhQKEl9vYnNlcnZlZF9zZXF1ZW5jZUIbChlfdGVybWluYXRpb25fcHJvb2ZfZGlnZXN0QhYKFF9zZXR0bGVtZW50X3NlcXVlbmNlIngKDVdyaXRlckJhY2tpbmcSHAoLZW52aXJvbm1lbnQYASABKAlCB7pIBHICEAESGQoIaWRlbnRpdHkYAiABKAlCB7pIBHICEAESEgoKZ2VuZXJhdGlvbhgDIAEoBBIaCglhdXRob3JpdHkYBCABKAlCB7pIBHICEAEihgEKDldyaXRlcklkZW50aXR5EhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQARIhChBob3N0X2luY2FybmF0aW9uGAIgASgJQge6SARyAhABEhwKC3BoeXNpY2FsX2lkGAMgASgJQge6SARyAhABEhoKCWRvbWFpbl9pZBgEIAEoCUIHukgEcgIQASKEAgoOV3JpdGVyTWFuaWZlc3QSOAoHYmFja2luZxgBIAEoCzIfLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyQmFja2luZ0IGukgDyAEBEjEKB3dyaXRlcnMYAiADKAsyIC52aWJlc3lzLnN0b3JlLnYxLldyaXRlcklkZW50aXR5Eg4KBmNsb3NlZBgDIAEoCDp1ukhyGnAKFndyaXRlcl9tYW5pZmVzdC51bmlxdWUSKXdyaXRlciBwaHlzaWNhbCBpZGVudGl0aWVzIG11c3QgYmUgdW5pcXVlGit0aGlzLndyaXRlcnMubWFwKHgsIHgucGh5c2ljYWxfaWQpLnVuaXF1ZSgpIqMDChZXcml0ZXJUZXJtaW5hdGlvblByb29mEjoKCG1hbmlmZXN0GAEgASgLMiAudmliZXN5cy5zdG9yZS52MS5Xcml0ZXJNYW5pZmVzdEIGukgDyAEBEiAKDmFic2VudF9kb21haW5zGAIgAygJQgi6SAWSAQIYATqqArpIpgIaowIKE3dyaXRlcl9wcm9vZi5jbG9zZWQSSnRlcm1pbmF0aW9uIHByb29mIG5lZWRzIGEgY2xvc2VkIG1hbmlmZXN0IGFuZCBldmVyeSBkb21haW4gdmVyaWZpZWQgYWJzZW50Gr8BaGFzKHRoaXMubWFuaWZlc3QpICYmIHRoaXMubWFuaWZlc3QuY2xvc2VkICYmIHRoaXMubWFuaWZlc3Qud3JpdGVycy5hbGwoeCwgeC5kb21haW5faWQgaW4gdGhpcy5hYnNlbnRfZG9tYWlucykgJiYgdGhpcy5hYnNlbnRfZG9tYWlucy5hbGwoeCwgdGhpcy5tYW5pZmVzdC53cml0ZXJzLmV4aXN0cyh3LCB3LmRvbWFpbl9pZCA9PSB4KSkiwQMKFFdyaXRlclJlY29uY2lsaWF0aW9uEjoKCG1hbmlmZXN0GAEgASgLMiAudmliZXN5cy5zdG9yZS52MS5Xcml0ZXJNYW5pZmVzdEIGukgDyAEBEkgKBnN0YXR1cxgCIAEoDjIsLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyUmVjb25jaWxpYXRpb25TdGF0dXNCCrpIB4IBBBABIAASNwoFcHJvb2YYAyABKAsyKC52aWJlc3lzLnN0b3JlLnYxLldyaXRlclRlcm1pbmF0aW9uUHJvb2YSDgoGZGV0YWlsGAQgASgJOtkBukjVARrSAQobd3JpdGVyX3JlY29uY2lsaWF0aW9uLnByb29mEk5Qcm92ZW5TdG9wcGVkIHJlcXVpcmVzIHRlcm1pbmF0aW9uIHByb29mIGZvciB0aGUgZXhhY3QgcmVjb25jaWxpYXRpb24gbWFuaWZlc3QaYyh0aGlzLnN0YXR1cyA9PSAxKSA9PSBoYXModGhpcy5wcm9vZikgJiYgKCFoYXModGhpcy5wcm9vZikgfHwgdGhpcy5wcm9vZi5tYW5pZmVzdCA9PSB0aGlzLm1hbmlmZXN0KSKRAgoTV3JpdGVyUmVnaXN0cnlTdGF0ZRI6CghtYW5pZmVzdBgBIAEoCzIgLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyTWFuaWZlc3RCBrpIA8gBARI3CgVwcm9vZhgCIAEoCzIoLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyVGVybWluYXRpb25Qcm9vZjqEAbpIgAEafgoVd3JpdGVyX3JlZ2lzdHJ5LnByb29mEityZWdpc3RyeSBwcm9vZiBtdXN0IGJpbmQgaXRzIGV4YWN0IG1hbmlmZXN0GjghaGFzKHRoaXMucHJvb2YpIHx8IHRoaXMucHJvb2YubWFuaWZlc3QgPT0gdGhpcy5tYW5pZmVzdCJLCgtSZXBsYXlDbG9jaxI8CglhbGxvd2FuY2UYASABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheUFsbG93YW5jZUIGukgDyAEBIpgCCgxSZXBsYXlOb3RpY2USEwoCaWQYASABKAlCB7pIBHICEAESOwoGdW51c2VkGAIgAygLMiEudmliZXN5cy5zdG9yZS52MS5PcGVyYXRpb25SZXBsYXlCCLpIBZIBAggBEi8KB3BlbmRpbmcYAyADKAsyHi52aWJlc3lzLnN0b3JlLnYxLk9wZXJhdGlvbktleTqEAbpIgAEafgoacmVwbGF5X25vdGljZS5wYWlkX3Jlc3VsdHMSMnVudXNlZCBlbnRyaWVzIG11c3QgaWRlbnRpZnkgYWNjZXB0ZWQgcGFpZCByZXN1bHRzGix0aGlzLnVudXNlZC5hbGwoeCwgeC5wYWlkICYmIGhhcyh4Lm91dGNvbWUpKSJqChVSZXBsYXlBY2tub3dsZWRnZW1lbnQSHwoJbm90aWNlX2lkGAEgASgJQge6SARyAhABSACIAQESIgoRbGF1bmNoX3JlcXVlc3RfaWQYAiABKAlCB7pIBHICEAFCDAoKX25vdGljZV9pZCK4AwoRUmVwbGF5T2JzZXJ2YXRpb24SLQoHb3V0Y29tZRgBIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnlCBrpIA8gBARIMCgRwYWlkGAIgASgIEicKCGNvc3RfdXNkGAMgASgBQhC6SA0SC0ABKQAAAAAAAAAASACIAQESKwoFdXNhZ2UYBCABKAsyHC52aWJlc3lzLnN0b3JlLnYxLlRva2VuVXNhZ2USNQoEdHVybhgFIAEoCzInLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5VHVybk9ic2VydmF0aW9uOssBukjHARrEAQodcmVwbGF5X29ic2VydmF0aW9uLnVzYWdlX2Nvc3QSNHJlcG9ydGVkIHVzYWdlIGNvc3QgbXVzdCBhZ3JlZSB3aXRoIG9ic2VydmF0aW9uIGNvc3QabSFoYXModGhpcy51c2FnZSkgfHwgIWhhcyh0aGlzLnVzYWdlLmNvc3RfdXNkKSB8fCAoaGFzKHRoaXMuY29zdF91c2QpICYmIHRoaXMuY29zdF91c2QgPT0gdGhpcy51c2FnZS5jb3N0X3VzZClCCwoJX2Nvc3RfdXNkIk8KEVJlcGxheVBvbGljeURyaWZ0EhgKB3Jlc3VsdHMYASABKARCB7pIBDICIAASDQoFcm9sZXMYAiADKAkSEQoJdGVtcGxhdGVzGAMgAygJIn0KFFJlcGxheVRvb2xTdWJtaXNzaW9uEhUKBHR1cm4YASABKAlCB7pIBHICEAESGAoHY2FsbF9pZBgCIAEoCUIHukgEcgIQARIZCghyZXBseV9pZBgDIAEoCUIHukgEcgIQARIZCghwcm9kdWNlchgEIAEoCUIHukgEcgIQASJNChlSZXBsYXlUb29sQWNrbm93bGVkZ2VtZW50EhUKBHR1cm4YASABKAlCB7pIBHICEAESGQoIcmVwbHlfaWQYAiABKAlCB7pIBHICEAEiTAoOUmVwbGF5VHVybldhaXQSFQoEdHVybhgBIAEoCUIHukgEcgIQARIjCglyZXBseV9pZHMYAiADKAlCELpIDZIBCggBGAEiBHICEAEqcgoPUmVwbGF5RmllbGRLaW5kEiEKHVJFUExBWV9GSUVMRF9LSU5EX1VOU1BFQ0lGSUVEEAASHgoaUkVQTEFZX0ZJRUxEX0tJTkRfSURFTlRJVFkQARIcChhSRVBMQVlfRklFTERfS0lORF9QT0xJQ1kQAircAQoQS2V5Q29tcG9uZW50S2luZBIiCh5LRVlfQ09NUE9ORU5UX0tJTkRfVU5TUEVDSUZJRUQQABIdChlLRVlfQ09NUE9ORU5UX0tJTkRfUEFSRU5UEAESGwoXS0VZX0NPTVBPTkVOVF9LSU5EX0lURU0QAhIdChlLRVlfQ09NUE9ORU5UX0tJTkRfU0FNUExFEAMSHwobS0VZX0NPTVBPTkVOVF9LSU5EX1JFVklTSU9OEAQSKAokS0VZX0NPTVBPTkVOVF9LSU5EX1JFQ09SREVEX1BPU0lUSU9OEAUq/QEKGldyaXRlclJlY29uY2lsaWF0aW9uU3RhdHVzEiwKKFdSSVRFUl9SRUNPTkNJTElBVElPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIvCitXUklURVJfUkVDT05DSUxJQVRJT05fU1RBVFVTX1BST1ZFTl9TVE9QUEVEEAESKAokV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19QRU5ESU5HEAISKAokV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19VTktOT1dOEAMSLAooV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19VTlNVUFBPUlRFRBAEOkgKDnJlcGxheV9jb250ZXh0Eh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGJ6PAyABKAhSDXJlcGxheUNvbnRleHQ6ZQoMcmVwbGF5X2ZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxicjwMgASgOMiEudmliZXN5cy5zdG9yZS52MS5SZXBsYXlGaWVsZEtpbmRSC3JlcGxheUZpZWxkOj4KCnJlcGxheV9zZXQSHS5nb29nbGUucHJvdG9idWYuRmllbGRPcHRpb25zGJ2PAyABKAhSCXJlcGxheVNldEJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_any, file_google_protobuf_descriptor, file_vibesys_store_v1_agent_attrs]);
 
 /**
  * Names are semantic, never source locations or live collection positions.
@@ -264,6 +264,13 @@ export type OperationReplay = Message<"vibesys.store.v1.OperationReplay"> & {
    * @generated from field: optional string accepted_child = 12;
    */
   acceptedChild?: string | undefined;
+
+  /**
+   * Recorded with the logical start, before the first physical child can exist.
+   *
+   * @generated from field: vibesys.store.v1.ReplayTurnBound turn_bound = 13;
+   */
+  turnBound?: ReplayTurnBound | undefined;
 };
 
 /**
@@ -272,6 +279,65 @@ export type OperationReplay = Message<"vibesys.store.v1.OperationReplay"> & {
  */
 export const OperationReplaySchema: GenMessage<OperationReplay> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_replay, 5);
+
+/**
+ * A turn's observation names its immutable bound and the durable wait it yielded.
+ *
+ * @generated from message vibesys.store.v1.ReplayTurnObservation
+ */
+export type ReplayTurnObservation = Message<"vibesys.store.v1.ReplayTurnObservation"> & {
+  /**
+   * @generated from field: vibesys.store.v1.ReplayTurnBound bound = 1;
+   */
+  bound?: ReplayTurnBound | undefined;
+
+  /**
+   * @generated from field: bool succeeded = 2;
+   */
+  succeeded: boolean;
+
+  /**
+   * @generated from field: vibesys.store.v1.ReplayTurnWait suspension = 3;
+   */
+  suspension?: ReplayTurnWait | undefined;
+};
+
+/**
+ * Describes the message vibesys.store.v1.ReplayTurnObservation.
+ * Use `create(ReplayTurnObservationSchema)` to create a new message.
+ */
+export const ReplayTurnObservationSchema: GenMessage<ReplayTurnObservation> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 6);
+
+/**
+ * deadline is the stated limit. The turn ends at that limit plus its credited hold,
+ * by the same rule as the positional turn bound.
+ *
+ * @generated from message vibesys.store.v1.ReplayTurnBound
+ */
+export type ReplayTurnBound = Message<"vibesys.store.v1.ReplayTurnBound"> & {
+  /**
+   * @generated from field: string origin = 1;
+   */
+  origin: string;
+
+  /**
+   * @generated from field: double deadline = 2;
+   */
+  deadline: number;
+
+  /**
+   * @generated from field: double hold_credit_seconds = 3;
+   */
+  holdCreditSeconds: number;
+};
+
+/**
+ * Describes the message vibesys.store.v1.ReplayTurnBound.
+ * Use `create(ReplayTurnBoundSchema)` to create a new message.
+ */
+export const ReplayTurnBoundSchema: GenMessage<ReplayTurnBound> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 7);
 
 /**
  * A child is execution evidence, never another semantic operation.
@@ -339,7 +405,7 @@ export type ReplayPhysical = Message<"vibesys.store.v1.ReplayPhysical"> & {
  * Use `create(ReplayPhysicalSchema)` to create a new message.
  */
 export const ReplayPhysicalSchema: GenMessage<ReplayPhysical> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 6);
+  messageDesc(file_vibesys_store_v1_replay, 8);
 
 /**
  * The environment records every writable grant before execution, including
@@ -375,7 +441,7 @@ export type WriterBacking = Message<"vibesys.store.v1.WriterBacking"> & {
  * Use `create(WriterBackingSchema)` to create a new message.
  */
 export const WriterBackingSchema: GenMessage<WriterBacking> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 7);
+  messageDesc(file_vibesys_store_v1_replay, 9);
 
 /**
  * @generated from message vibesys.store.v1.WriterIdentity
@@ -409,7 +475,7 @@ export type WriterIdentity = Message<"vibesys.store.v1.WriterIdentity"> & {
  * Use `create(WriterIdentitySchema)` to create a new message.
  */
 export const WriterIdentitySchema: GenMessage<WriterIdentity> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 8);
+  messageDesc(file_vibesys_store_v1_replay, 10);
 
 /**
  * @generated from message vibesys.store.v1.WriterManifest
@@ -436,7 +502,7 @@ export type WriterManifest = Message<"vibesys.store.v1.WriterManifest"> & {
  * Use `create(WriterManifestSchema)` to create a new message.
  */
 export const WriterManifestSchema: GenMessage<WriterManifest> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 9);
+  messageDesc(file_vibesys_store_v1_replay, 11);
 
 /**
  * @generated from message vibesys.store.v1.WriterTerminationProof
@@ -458,7 +524,7 @@ export type WriterTerminationProof = Message<"vibesys.store.v1.WriterTermination
  * Use `create(WriterTerminationProofSchema)` to create a new message.
  */
 export const WriterTerminationProofSchema: GenMessage<WriterTerminationProof> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 10);
+  messageDesc(file_vibesys_store_v1_replay, 12);
 
 /**
  * @generated from message vibesys.store.v1.WriterReconciliation
@@ -490,7 +556,7 @@ export type WriterReconciliation = Message<"vibesys.store.v1.WriterReconciliatio
  * Use `create(WriterReconciliationSchema)` to create a new message.
  */
 export const WriterReconciliationSchema: GenMessage<WriterReconciliation> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 11);
+  messageDesc(file_vibesys_store_v1_replay, 13);
 
 /**
  * @generated from message vibesys.store.v1.WriterRegistryState
@@ -512,7 +578,7 @@ export type WriterRegistryState = Message<"vibesys.store.v1.WriterRegistryState"
  * Use `create(WriterRegistryStateSchema)` to create a new message.
  */
 export const WriterRegistryStateSchema: GenMessage<WriterRegistryState> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 12);
+  messageDesc(file_vibesys_store_v1_replay, 14);
 
 /**
  * Timer-only progress is an observation, not a keyed paid operation.
@@ -531,7 +597,7 @@ export type ReplayClock = Message<"vibesys.store.v1.ReplayClock"> & {
  * Use `create(ReplayClockSchema)` to create a new message.
  */
 export const ReplayClockSchema: GenMessage<ReplayClock> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 13);
+  messageDesc(file_vibesys_store_v1_replay, 15);
 
 /**
  * @generated from message vibesys.store.v1.ReplayNotice
@@ -558,7 +624,7 @@ export type ReplayNotice = Message<"vibesys.store.v1.ReplayNotice"> & {
  * Use `create(ReplayNoticeSchema)` to create a new message.
  */
 export const ReplayNoticeSchema: GenMessage<ReplayNotice> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 14);
+  messageDesc(file_vibesys_store_v1_replay, 16);
 
 /**
  * @generated from message vibesys.store.v1.ReplayAcknowledgement
@@ -582,7 +648,7 @@ export type ReplayAcknowledgement = Message<"vibesys.store.v1.ReplayAcknowledgem
  * Use `create(ReplayAcknowledgementSchema)` to create a new message.
  */
 export const ReplayAcknowledgementSchema: GenMessage<ReplayAcknowledgement> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 15);
+  messageDesc(file_vibesys_store_v1_replay, 17);
 
 /**
  * A surviving observation can complete its operation after a writer crash.
@@ -610,6 +676,13 @@ export type ReplayObservation = Message<"vibesys.store.v1.ReplayObservation"> & 
    * @generated from field: vibesys.store.v1.TokenUsage usage = 4;
    */
   usage?: TokenUsage | undefined;
+
+  /**
+   * Required for a physical child of a bound turn; the archive checks it against the log.
+   *
+   * @generated from field: vibesys.store.v1.ReplayTurnObservation turn = 5;
+   */
+  turn?: ReplayTurnObservation | undefined;
 };
 
 /**
@@ -617,7 +690,7 @@ export type ReplayObservation = Message<"vibesys.store.v1.ReplayObservation"> & 
  * Use `create(ReplayObservationSchema)` to create a new message.
  */
 export const ReplayObservationSchema: GenMessage<ReplayObservation> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 16);
+  messageDesc(file_vibesys_store_v1_replay, 18);
 
 /**
  * Earlier answers remain usable when only prompts or limits change.
@@ -646,7 +719,86 @@ export type ReplayPolicyDrift = Message<"vibesys.store.v1.ReplayPolicyDrift"> & 
  * Use `create(ReplayPolicyDriftSchema)` to create a new message.
  */
 export const ReplayPolicyDriftSchema: GenMessage<ReplayPolicyDrift> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 17);
+  messageDesc(file_vibesys_store_v1_replay, 19);
+
+/**
+ * Authenticated execution evidence. The producer start precedes this obligation,
+ * and this obligation precedes the tool reply or a turn's accepted yield.
+ *
+ * @generated from message vibesys.store.v1.ReplayToolSubmission
+ */
+export type ReplayToolSubmission = Message<"vibesys.store.v1.ReplayToolSubmission"> & {
+  /**
+   * @generated from field: string turn = 1;
+   */
+  turn: string;
+
+  /**
+   * @generated from field: string call_id = 2;
+   */
+  callId: string;
+
+  /**
+   * @generated from field: string reply_id = 3;
+   */
+  replyId: string;
+
+  /**
+   * @generated from field: string producer = 4;
+   */
+  producer: string;
+};
+
+/**
+ * Describes the message vibesys.store.v1.ReplayToolSubmission.
+ * Use `create(ReplayToolSubmissionSchema)` to create a new message.
+ */
+export const ReplayToolSubmissionSchema: GenMessage<ReplayToolSubmission> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 20);
+
+/**
+ * @generated from message vibesys.store.v1.ReplayToolAcknowledgement
+ */
+export type ReplayToolAcknowledgement = Message<"vibesys.store.v1.ReplayToolAcknowledgement"> & {
+  /**
+   * @generated from field: string turn = 1;
+   */
+  turn: string;
+
+  /**
+   * @generated from field: string reply_id = 2;
+   */
+  replyId: string;
+};
+
+/**
+ * Describes the message vibesys.store.v1.ReplayToolAcknowledgement.
+ * Use `create(ReplayToolAcknowledgementSchema)` to create a new message.
+ */
+export const ReplayToolAcknowledgementSchema: GenMessage<ReplayToolAcknowledgement> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 21);
+
+/**
+ * @generated from message vibesys.store.v1.ReplayTurnWait
+ */
+export type ReplayTurnWait = Message<"vibesys.store.v1.ReplayTurnWait"> & {
+  /**
+   * @generated from field: string turn = 1;
+   */
+  turn: string;
+
+  /**
+   * @generated from field: repeated string reply_ids = 2;
+   */
+  replyIds: string[];
+};
+
+/**
+ * Describes the message vibesys.store.v1.ReplayTurnWait.
+ * Use `create(ReplayTurnWaitSchema)` to create a new message.
+ */
+export const ReplayTurnWaitSchema: GenMessage<ReplayTurnWait> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 22);
 
 /**
  * Every prompt-context field declares whether it changes semantic input or policy.
