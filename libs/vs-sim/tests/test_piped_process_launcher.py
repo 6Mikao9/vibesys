@@ -65,6 +65,22 @@ def test_a_bounded_read_returns_unterminated_output_without_waiting_for_eof() ->
     assert process.stdout.read(10) == ""
 
 
+def test_a_timed_wait_on_a_live_child_times_out_without_reaping() -> None:
+    """A live child stays unreaped when a timed wait expires.
+
+    On macOS, CPython has no ``os.waitid``. The exit watcher used to die on
+    that, set its event, and the timed wait then blocked in ``reap`` until the
+    child actually exited, so ``wait(0)`` never returned.
+    """
+    process = SubprocessPipedProcessLauncher().start(_python("import signal; signal.pause()"))
+    try:
+        with pytest.raises(ProcessTimeoutError):
+            process.wait(0)
+    finally:
+        process.kill_group()
+    assert process.wait(HANG_GUARD_S) == -signal.SIGKILL
+
+
 def test_a_timed_wait_does_not_hold_back_a_signal_from_another_caller() -> None:
     process = SubprocessPipedProcessLauncher().start(
         _python(

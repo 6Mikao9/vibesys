@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import errno
 import io
 import os
+import select
 import selectors
 import signal
 import subprocess
@@ -637,29 +639,84 @@ class _ProcessGroupLeader(Protocol):
     def wait(self, timeout: float | None = None) -> int: ...
 
 
+def _wait_for_exit_without_reaping(pid: int) -> None:
+    """Block until ``pid`` has exited, and leave the zombie for the reaper.
+
+    ``os.waitid`` with ``WNOWAIT`` is that wait where CPython provides it. On
+    macOS it does not (``os`` has no ``waitid``), so a kqueue ``NOTE_EXIT``
+    filter blocks on the same fact: the kernel reports the exit and does not
+    reap. Either failure is raised to the caller; a watcher thread must not
+    swallow it and look like an exit.
+    """
+    waitid = getattr(os, "waitid", None)
+    if waitid is not None:
+        waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
+        return
+    _kqueue_wait_for_exit(pid)
+
+
+def _kqueue_wait_for_exit(pid: int) -> None:
+    """Block on ``NOTE_EXIT`` for ``pid``. An error note is ``ESRCH`` once it was reaped."""
+    kqueue = getattr(select, "kqueue", None)
+    if kqueue is None:
+        message = f"this host cannot wait for process {pid} to exit without reaping it"
+        raise OSError(message)
+    queue = kqueue()
+    try:
+        change = select.kevent(
+            pid,
+            select.KQ_FILTER_PROC,
+            select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+            select.KQ_NOTE_EXIT,
+        )
+        happened = queue.control([change], 1, None)
+    finally:
+        queue.close()
+    if not happened:
+        message = f"process {pid} exit watch ended without an event"
+        raise OSError(message)
+    event = happened[0]
+    # An already-exited child is reported as NOTE_EXIT together with EV_ERROR/ESRCH.
+    # The zombie is still unreaped; only the absence of NOTE_EXIT means it is gone.
+    if event.fflags & select.KQ_NOTE_EXIT:
+        return
+    if event.flags & select.KQ_EV_ERROR and event.data == errno.ESRCH:
+        raise ChildProcessError(errno.ECHILD, os.strerror(errno.ECHILD), pid)
+    if event.flags & select.KQ_EV_ERROR:
+        raise OSError(event.data, os.strerror(event.data), pid)
+    message = f"process {pid} exit watch ended without an exit"
+    raise OSError(message)
+
+
 class _OwnedProcessGroup:
     """Serialize process-group signals with leader reaping while its PGID is reserved."""
 
     def __init__(self, process: _ProcessGroupLeader) -> None:
         self._process = process
+        self._exit_wait = _wait_for_exit_without_reaping
         self._reap_lock = threading.Lock()
         self._returncode: int | None = None
         self._exit_watch_lock = threading.Lock()
         self._exited: threading.Event | None = None
+        self._watch_error: Exception | None = None
 
     def wait(self, timeout: float | None) -> int | None:
         """Wait without reaping until a signal can no longer race PGID reuse.
 
         Returns ``None`` when the leader is still running after *timeout*
         seconds. A concurrent signal is never held back by a wait in progress.
+        A watcher that fails raises that failure here instead of reporting an exit.
         """
+        self._raise_watch_error()
         with self._reap_lock:
             if self._returncode is not None:
                 return self._returncode
         if timeout is None:
             self._wait_until_exited_without_reaping()
         elif not self._exit_watch().wait(timeout):
+            self._raise_watch_error()
             return None
+        self._raise_watch_error()
         return self.reap(timeout=None)
 
     def _exit_watch(self) -> threading.Event:
@@ -671,12 +728,23 @@ class _OwnedProcessGroup:
                 def watch() -> None:
                     try:
                         self._wait_until_exited_without_reaping()
+                    except Exception as error:  # noqa: BLE001  # lint-waiver: LW-884412 [BLE001]; a watcher thread that lets this escape dies after setting the exit event, so a timed wait treats the crash as an exit and blocks in reap. Catching only OSError would hide the AttributeError this host raises when os.waitid is missing.
+                        self._watch_error = error
                     finally:
                         exited.set()
 
                 threading.Thread(target=watch, name="vs-sim-group-exit", daemon=True).start()
                 self._exited = exited
             return self._exited
+
+    def _raise_watch_error(self) -> None:
+        """Raise a watcher failure, reaping first when the leader has already exited."""
+        error = self._watch_error
+        if error is None:
+            return
+        with suppress(subprocess.TimeoutExpired):
+            self.reap(timeout=0)
+        raise error
 
     def reap(self, timeout: float | None) -> int:
         """Reap the leader once while excluding every process-group signal."""
@@ -702,7 +770,7 @@ class _OwnedProcessGroup:
 
     def _wait_until_exited_without_reaping(self) -> None:
         try:
-            os.waitid(os.P_PID, self._process.pid, os.WEXITED | os.WNOWAIT)
+            self._exit_wait(self._process.pid)
         except ChildProcessError:
             with self._reap_lock:
                 if self._returncode is not None:
