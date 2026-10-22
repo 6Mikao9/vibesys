@@ -23,6 +23,7 @@ from vs_evaluation.api.queue_status import (
     QUEUE_READING,
     READ_QUEUE_STATUS_TOOL,
     CachedQueueStatusReader,
+    EvaluationOccupancy,
     LocalQueueStatusReader,
     OpaqueQueueStatusReader,
     QueueContention,
@@ -131,6 +132,23 @@ class TestFakeReader(QueueStatusReaderContract):
     def reader_under_test(self, seed: int) -> QueueStatusReaderUnderTest:
         reading = _reading(seed)
         return QueueStatusReaderUnderTest(FakeQueueStatusReader([reading]), expected=reading)
+
+
+@pytest.mark.regression
+def test_a_local_reader_counts_gates_waiting_for_the_evaluation_slot() -> None:
+    """One admitted benchmark and seven candidates the search has not submitted yet."""
+    occupancy = EvaluationOccupancy(SimThreads(schedule_seed=0))
+    occupancy.note_executor(running=1, waiting=0)
+    occupancy.note_search(7)
+
+    reading = LocalQueueStatusReader(occupancy).read()
+
+    assert isinstance(reading, QueueStatus)
+    assert reading.items is None
+    assert (reading.contention.jobs_running, reading.contention.jobs_waiting) == (1, 7)
+    occupancy.note_executor(running=1, waiting=2)
+    again = LocalQueueStatusReader(occupancy).read()
+    assert (again.contention.jobs_running, again.contention.jobs_waiting) == (1, 9)
 
 
 class TestLocalReader(QueueStatusReaderContract):

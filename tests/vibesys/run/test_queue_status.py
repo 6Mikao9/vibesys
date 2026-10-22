@@ -8,6 +8,7 @@ run's private socket directory, and the launch catalog's tool server reads it th
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,7 +16,12 @@ import pytest
 from launch.composition import STATELESS_TOOL_SERVERS
 from vibesys.api.wiring import AgentToolContext
 from vibesys.run.evaluation_socket import evaluation_socket_directory, prepare_queue_status_socket
-from vibesys.run.queue_status import queue_status_reader, queue_status_service
+from vibesys.run.queue_status import (
+    published_search_waiting,
+    queue_status_reader,
+    queue_status_service,
+    search_waiting_of,
+)
 from vs_evaluation.api.queue_status import (
     FRESH_FOR_S,
     QueueKind,
@@ -49,6 +55,23 @@ __VS_QUEUE_NODES__
 gpu-node-01|gpu|mix|gpu:h100:8|gpu:h100:6|
 cpu-node-01|cpu|idle|(null)|gpu:0|
 """
+
+
+@pytest.mark.regression
+def test_a_published_dynamic_queue_counts_candidates_waiting_for_a_slot() -> None:
+    pending = [{"work_id": str(index)} for index in range(7)]
+    published = json.dumps(
+        {
+            "kind": "dynamic-run-snapshot",
+            "evaluations": {"pending": pending, "holding": ["input"]},
+        }
+    )
+
+    assert published_search_waiting(published) == 7
+    assert published_search_waiting(None) == 0
+    assert published_search_waiting("{") == 0
+    assert published_search_waiting(json.dumps({"kind": "other"})) == 0
+    assert search_waiting_of(object()) == 0
 
 
 @pytest.mark.parametrize(

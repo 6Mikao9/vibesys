@@ -508,7 +508,7 @@ depends_on = ["vs_project", "vs_sandbox"]
 [[modules]]
 path = "vibesys.run.queue_status"
 layer = "orchestration_host"
-depends_on = ["vs_evaluation.api.queue_status", "vs_runtime", "vs_sandbox", "vs_sim.api"]
+depends_on = ["vs_core", "vs_evaluation.api.queue_status", "vs_runtime", "vs_sandbox", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.core_services"

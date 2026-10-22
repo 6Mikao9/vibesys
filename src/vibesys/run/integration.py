@@ -584,11 +584,13 @@ class _CoreCommitObserver:
         run_id: str,
         projector: CommittedStateProjector | None,
         namespace: str,
+        note_search_waiting: Callable[[BaseModel], None] | None = None,
     ) -> None:
         self._integration = integration
         self._run_id = run_id
         self._projector = projector
         self._namespace = namespace
+        self._note_search_waiting = note_search_waiting
         self._shown: _RunProjection | None = None
         """The last view that was built, which the next commit's events are diffed against."""
         self._seeded = False
@@ -605,6 +607,8 @@ class _CoreCommitObserver:
         failure first appears; the run goes on.
         """
         self._integration.publish_committed_state(self._namespace, current)
+        if self._note_search_waiting is not None:
+            self._note_search_waiting(current)
         if not self._seeded:
             # The first commit this process sees: what it held before was already announced.
             before = self._project(previous)
@@ -857,9 +861,12 @@ class LocalRunIntegration:
         run_id: str,
         projector: CommittedStateProjector | None,
         namespace: str,
+        note_search_waiting: Callable[[BaseModel], None] | None = None,
     ) -> _CoreCommitObserver:
         """Bind a core run's confirmed commits to product hints and semantic events."""
-        return _CoreCommitObserver(self, run_id, projector, namespace)
+        return _CoreCommitObserver(
+            self, run_id, projector, namespace, note_search_waiting=note_search_waiting
+        )
 
     def publish_committed_state(
         self,

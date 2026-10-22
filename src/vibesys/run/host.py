@@ -31,7 +31,12 @@ from vibesys.run.evaluation import CoreLocalValidationEvents, create_evaluation
 from vibesys.run.evaluation_socket import prepare_queue_status_socket
 from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
-from vibesys.run.queue_status import queue_status_reader, queue_status_service
+from vibesys.run.queue_status import (
+    EvaluationOccupancy,
+    queue_status_reader,
+    queue_status_service,
+    search_waiting_of,
+)
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import (
@@ -116,6 +121,18 @@ def _tool_context(resources: _PreparedRun, queue_status_socket: Path) -> AgentTo
     return AgentToolContext(
         resources.facts.profiler_id, env, queue_status_socket=str(queue_status_socket)
     )
+
+
+def _evaluation_slots(options: BaseModel, capacity: int) -> int:
+    """How many evaluation-resource gates the local executor admits at once.
+
+    An operator's ``evaluation_slots`` is the same number the search queue uses.
+    Otherwise the run environment's capacity, and at least one.
+    """
+    chosen = getattr(options, "evaluation_slots", None)
+    if isinstance(chosen, int) and chosen > 0:
+        return chosen
+    return max(capacity, 1)
 
 
 def _slurm_handle_root(namespace: StateNamespace) -> Path:
@@ -409,6 +426,18 @@ class _ProductHostFactory:
         tries = TryHandles()
         decisions = MeasurementDecisions()
         stage_output = tries.stage_output(decisions.stage_output(resources.stage_output))
+        view = resources.environment_resources.view
+        capacity = (
+            view.cluster_evaluation.evaluation_capacity
+            if view.cluster_evaluation is not None
+            else 1
+        )
+        slots = _evaluation_slots(self.options, capacity)
+        occupancy = EvaluationOccupancy(self.integration.threads)
+
+        def note_search(state: BaseModel) -> None:
+            occupancy.note_search(search_waiting_of(state))
+
         executor = self._semantic_executor(
             resources,
             workspaces,
@@ -418,7 +447,9 @@ class _ProductHostFactory:
         )
         tool_context = _tool_context(
             resources,
-            self._serve_queue_status(resources, _slurm_handle_root(namespace), ownership),
+            self._serve_queue_status(
+                resources, _slurm_handle_root(namespace), ownership, occupancy
+            ),
         )
         configuration = partial(self._agent_configuration, resources)
         return build_core_services(
@@ -439,6 +470,8 @@ class _ProductHostFactory:
                         clock=self.timing.clock,
                         stage_output=stage_output,
                         control=self.integration.control,
+                        slots=slots,
+                        on_counts=occupancy.note_executor,
                     ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
@@ -478,7 +511,10 @@ class _ProductHostFactory:
                 measurement_decisions=decisions,
                 epoch=lambda: self.integration.events.epoch,
                 commit_observer=self.integration.core_commit_observer(
-                    project.state.run_id, self.projector, self.plugin.id
+                    project.state.run_id,
+                    self.projector,
+                    self.plugin.id,
+                    note_search_waiting=note_search,
                 ),
                 session_spec=agent_session_spec(
                     environments={
@@ -550,7 +586,11 @@ class _ProductHostFactory:
         return _ProviderAgents(environment, client)
 
     def _serve_queue_status(
-        self, resources: _PreparedRun, handle_root: Path, ownership: ReleaseStack
+        self,
+        resources: _PreparedRun,
+        handle_root: Path,
+        ownership: ReleaseStack,
+        occupancy: EvaluationOccupancy,
     ) -> Path:
         """Serve the run's read-only queue status to its agents; return the socket path.
 
@@ -566,6 +606,7 @@ class _ProductHostFactory:
                 handle_root=handle_root,
                 processes=self.integration.system.slurm_processes,
                 clock=self.timing.clock,
+                occupancy=occupancy,
             ),
             socket_path,
             network=self.network,

@@ -8,15 +8,19 @@ reading serves every agent for ``FRESH_FOR_S`` seconds.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
+from vs_core.api import FlowState
 from vs_evaluation.api.queue_status import (
     FRESH_FOR_S,
     CachedQueueStatusReader,
+    EvaluationOccupancy,
     LocalQueueStatusReader,
     OpaqueQueueStatusReader,
     QueueStatusService,
 )
+from vs_runtime.api.core import RuntimeRecord
 from vs_sandbox.api.slurm import slurm_queue_status_reader
 
 if TYPE_CHECKING:
@@ -29,14 +33,49 @@ if TYPE_CHECKING:
 #: Run environments whose evaluations wait in a service that reports no queue.
 _OPAQUE_ENVIRONMENTS = frozenset({"modal", "skypilot"})
 
+# The dynamic search publishes this kind on its run record (`RunSnapshot.kind`).
+_DYNAMIC_SNAPSHOT = "dynamic-run-snapshot"
 
-def queue_status_reader(
+
+def published_search_waiting(published: str | None) -> int:
+    """How many candidates a published dynamic snapshot has waiting for a slot.
+
+    The count is the search queue's ``pending`` list, in pick-policy order. Any
+    other published record has none waiting.
+    """
+    if not published:
+        return 0
+    try:
+        data = json.loads(published)
+    except json.JSONDecodeError:
+        return 0
+    if not isinstance(data, dict) or data.get("kind") != _DYNAMIC_SNAPSHOT:
+        return 0
+    evaluations = data.get("evaluations")
+    if not isinstance(evaluations, dict):
+        return 0
+    pending = evaluations.get("pending")
+    return len(pending) if isinstance(pending, list) else 0
+
+
+def search_waiting_of(state: object) -> int:
+    """Candidates waiting for a slot in a committed dynamic run; 0 otherwise."""
+    if not isinstance(state, RuntimeRecord):
+        return 0
+    strategy = state.envelope.strategy
+    if not isinstance(strategy, FlowState):
+        return 0
+    return published_search_waiting(strategy.live.published)
+
+
+def queue_status_reader(  # noqa: PLR0913  # lint-waiver: LW-221004 [PLR0913]; occupancy is the local queue's count source, beside the environment the reader already selects. Building the local reader in the host would duplicate that selection, and a wrapper would only store the same object.
     view: RunEnvironmentView,
     *,
     run_id: str,
     handle_root: Path,
     processes: Processes,
     clock: Clock,
+    occupancy: EvaluationOccupancy | None = None,
 ) -> QueueStatusReader:
     """The reader for the run's environment: its Slurm cluster, an opaque service, or this host.
 
@@ -54,7 +93,7 @@ def queue_status_reader(
         )
     if view.env_kind in _OPAQUE_ENVIRONMENTS:
         return OpaqueQueueStatusReader()
-    return LocalQueueStatusReader()
+    return LocalQueueStatusReader(occupancy)
 
 
 def queue_status_service(
@@ -79,4 +118,10 @@ def queue_status_service(
     )
 
 
-__all__ = ["queue_status_reader", "queue_status_service"]
+__all__ = [
+    "EvaluationOccupancy",
+    "published_search_waiting",
+    "queue_status_reader",
+    "queue_status_service",
+    "search_waiting_of",
+]

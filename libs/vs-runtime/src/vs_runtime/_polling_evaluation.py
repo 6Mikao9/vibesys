@@ -46,6 +46,7 @@ from vs_runtime._measurement_progress import StageRun
 from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from contextlib import AbstractContextManager
 
     from vs_runtime._measurement_progress import StageOutputOpener
@@ -56,6 +57,71 @@ if TYPE_CHECKING:
 
 _GATING_KINDS = frozenset({EvidenceKind.BUILD, EvidenceKind.ACCURACY})
 """Stages whose failed outcome skips the stages after them: nothing later can count."""
+
+_RESOURCE_KINDS = frozenset({EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK})
+"""Trusted stages that use the evaluation resource and therefore take a slot."""
+
+
+class _EvaluationAdmission:
+    """Fair leases for the evaluation resource, one per admitted gate.
+
+    A job holds one lease across its consecutive accuracy and benchmark stages, so
+    the next job's command starts only when a slot is free. Time spent queued is
+    not time the command has been running. ``on_counts`` is told ``(running,
+    waiting)`` after every change and must not call back into the admission.
+    """
+
+    def __init__(self, slots: int, on_counts: Callable[[int, int], None] | None) -> None:
+        if slots < 1:
+            message = "evaluation slots must be positive"
+            raise ValueError(message)
+        self.capacity = slots
+        self._on_counts = on_counts
+        self._active: set[str] = set()
+        self._queued: list[str] = []
+        self._condition = asyncio.Condition()
+
+    async def counts(self) -> tuple[int, int]:
+        """Return leases held and jobs waiting for one."""
+        async with self._condition:
+            return len(self._active), len(self._queued)
+
+    async def acquire(self, handle_id: str) -> None:
+        """Wait until ``handle_id`` is the next job and a slot is free."""
+        async with self._condition:
+            if handle_id in self._active or handle_id in self._queued:
+                message = f"evaluation handle {handle_id!r} already holds a slot"
+                raise ValueError(message)
+            self._queued.append(handle_id)
+            self._notify()
+            try:
+                await self._condition.wait_for(
+                    lambda: (
+                        bool(self._queued)
+                        and self._queued[0] == handle_id
+                        and len(self._active) < self.capacity
+                    )
+                )
+            except BaseException:
+                if handle_id in self._queued:
+                    self._queued.remove(handle_id)
+                    self._notify()
+                    self._condition.notify_all()
+                raise
+            self._queued.pop(0)
+            self._active.add(handle_id)
+            self._notify()
+
+    async def release(self, handle_id: str) -> None:
+        """Return ``handle_id``'s lease, if it still holds one."""
+        async with self._condition:
+            self._active.discard(handle_id)
+            self._notify()
+            self._condition.notify_all()
+
+    def _notify(self) -> None:
+        if self._on_counts is not None:
+            self._on_counts(len(self._active), len(self._queued))
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,10 +136,11 @@ class PollingEvaluationExecutor:
 
     Each submitted request evaluates its candidate snapshot in a fresh candidate
     workspace through the trusted ``Evaluation`` effects, one stage at a time.
-    Observations are process-local: nothing survives a restart.
+    Accuracy and benchmark share ``slots`` leases: a gate stays queued, and its
+    command has not started, until a lease is free. Observations are process-local.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-221003 [PLR0913]; slots and the count sink are the admission's construction facts. A configure() call after init can run once jobs exist and split the policy from the executor that owns it, and a carrier object would only forward those two values.
         self,
         evaluation: Evaluation,
         workspaces: Workspaces,
@@ -81,28 +148,34 @@ class PollingEvaluationExecutor:
         clock: Clock,
         stage_output: StageOutputOpener | None = None,
         control: RunControlChannel | None = None,
+        slots: int = 1,
+        on_counts: Callable[[int, int], None] | None = None,
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
         ``clock`` stamps availability observations. ``stage_output`` opens the stream
         each stage's command writes its raw output to while it runs; ``None`` discards it.
+        ``slots`` is how many accuracy or benchmark gates run at once. ``on_counts``
+        receives ``(running, waiting)`` whenever that admission changes.
         """
         self._control = control
         self._clock = clock
         self._stage_output = stage_output
         self._evaluation = evaluation
         self._workspaces = workspaces
+        self._admission = _EvaluationAdmission(slots, on_counts)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._lifecycle = LifecyclePublisher()
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         del requirements
-        active = sum(not task.done() for task in self._tasks.values())
+        active, queued = await self._admission.counts()
+        busy = active > 0 or queued > 0
         return AvailabilitySnapshot(
-            state=AvailabilityState.IMMEDIATE if active == 0 else AvailabilityState.BUSY,
-            capacity=1,
+            state=AvailabilityState.BUSY if busy else AvailabilityState.IMMEDIATE,
+            capacity=self._admission.capacity,
             in_flight=active,
-            queue_depth=max(0, active - 1),
+            queue_depth=queued,
             reuse_status=ReuseStatus.UNKNOWN,
             cost_class=CostClass.UNKNOWN,
             observed_at=self._clock.now(),
@@ -166,23 +239,27 @@ class PollingEvaluationExecutor:
         results: list[EvaluationStepResult] = []
         failure: str | None = None
         operator_failure: str | None = None
+        holding = False
         try:
             workspace = await self._workspaces.create_measured_candidate(first.snapshot)
-
-            def started() -> None:
+            opened = False
+            for step in request.stages:
+                stage = SemanticEvaluationStage.model_validate(step.payload)
+                holding = await self._hold(handle_id, stage.kind, holding=holding)
+                if not opened:
+                    # The drain learns the job is executing once a stage is admitted,
+                    # not while it is still waiting for a slot.
+                    if self._control is not None:
+                        self._control.start_execution(lambda: None, evaluation_id=request.key)
+                    opened = True
                 self._publish(
                     handle_id,
                     ExecutorObservation(
-                        state=EvaluationState.RUNNING, current_stage=request.stages[0].name
+                        state=EvaluationState.RUNNING,
+                        current_stage=step.name,
+                        stage_results=tuple(results),
                     ),
                 )
-
-            if self._control is None:
-                started()
-            else:
-                self._control.start_execution(started, evaluation_id=request.key)
-            for step in request.stages:
-                stage = SemanticEvaluationStage.model_validate(step.payload)
                 with self._open_output(
                     StageRun(handle_id, step.name, purpose=stage.purpose)
                 ) as output:
@@ -229,16 +306,6 @@ class PollingEvaluationExecutor:
                             ((observed.operator_summary, evidence.kind),), None
                         )
                     break
-                if len(results) < len(request.stages):
-                    # A waiting agent sees each finished stage and the one now running.
-                    self._publish(
-                        handle_id,
-                        ExecutorObservation(
-                            state=EvaluationState.RUNNING,
-                            current_stage=request.stages[len(results)].name,
-                            stage_results=tuple(results),
-                        ),
-                    )
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -275,8 +342,20 @@ class PollingEvaluationExecutor:
                 ),
             )
         finally:
+            if holding:
+                await self._admission.release(handle_id)
             if workspace is not None:
                 await workspace.discard()
+
+    async def _hold(self, handle_id: str, kind: EvidenceKind, *, holding: bool) -> bool:
+        """Take one lease for a resource stage, or return it when the job leaves them."""
+        if kind in _RESOURCE_KINDS:
+            if not holding:
+                await self._admission.acquire(handle_id)
+            return True
+        if holding:
+            await self._admission.release(handle_id)
+        return False
 
     def _open_output(self, run: StageRun) -> AbstractContextManager[OutputSink]:
         if self._stage_output is None:
