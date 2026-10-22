@@ -55,6 +55,7 @@ from server.host_compute import (
     ClusterTestFailed,
     ClusterTestPassed,
     ClusterTestStage,
+    ComputeError,
     LoginNodeReach,
     ModalStatus,
     ModalTarget,
@@ -66,7 +67,6 @@ from server.host_compute import (
 )
 from server.host_helper_compute import (
     COMPUTE_FILE,
-    ComputeError,
     MachineCompute,
     accelerator_of_gpu_model,
     parse_sinfo,

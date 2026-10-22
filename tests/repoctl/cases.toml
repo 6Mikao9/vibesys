@@ -378,3 +378,12 @@ jobs = ["python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "native host read adapter selects its Python consumers"
+paths = ["src/server/host_operation_reads.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

@@ -5,8 +5,8 @@ from pathlib import Path
 from tests.server.host_helper_support import fake_host
 
 from server.host_api import ExamplesDestinationRequest, HelperError, HelperErrorCode
-from server.host_examples import CreatedProject
-from server.host_helper_requests import ProjectLookupError, answer, apply_registered_project
+from server.host_examples import CreatedProject, ProjectLookupError
+from server.host_helper_requests import answer, apply_registered_project
 from vs_proto.api import host_payloads as pb
 from vs_sim.api.testing import SimNetwork, SimThreads
 

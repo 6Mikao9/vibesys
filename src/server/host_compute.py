@@ -13,7 +13,7 @@ Light: Pydantic, the standard library and ``server.host_envelope`` and
 ``server.host_machine_facts``. ``server.host_api`` imports the messages into the helper's
 request and reply unions.
 
-Public surface: ``ClusterName``, ``SameMachine``, ``SlurmTarget``, ``ModalTarget``,
+Public surface: ``ComputeError``, ``ClusterName``, ``SameMachine``, ``SlurmTarget``, ``ModalTarget``,
 ``MeasurementTarget``, ``SshReach``, ``LoginNodeReach``, ``ClusterReach``, ``ClusterHardware``,
 ``SlurmClusterSettings``, ``ClusterSource``, ``ListedCluster``, ``ModalTokenSource``,
 ``ModalStatus``, ``ComputeSettings``, ``ClusterTestStage``, ``ClusterTestPassed``,
@@ -35,7 +35,7 @@ from pydantic import (
     model_validator,
 )
 
-from server.host_envelope import HelperReplyBase, HelperRequestBase
+from server.host_envelope import HelperErrorCode, HelperReplyBase, HelperRequestBase
 from server.host_machine_facts import Accelerator
 
 ClusterName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")]
@@ -43,6 +43,16 @@ ClusterName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_
 
 _Text = Annotated[str, StringConstraints(min_length=1, max_length=256, pattern=r"^[^\n\r]*$")]
 _Line = Annotated[str, StringConstraints(min_length=1, max_length=300, pattern=r"^[^\n\r]*$")]
+
+
+class ComputeError(Exception):
+    """A compute request the machine's settings cannot honor; ``code`` says why."""
+
+    def __init__(self, code: HelperErrorCode, message: str, path: str | None = None) -> None:
+        """Name the failure ``code``; ``message`` is for a person and ``path`` the file it is about."""
+        super().__init__(message)
+        self.code = code
+        self.path = path
 
 
 class SameMachine(BaseModel):

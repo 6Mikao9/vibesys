@@ -11,15 +11,14 @@ decisions it needs (:func:`negotiate`, :func:`select_completions`,
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
-Public surface: ``answer``, ``answer_registered_read``, ``apply_registered_cluster``,
+Public surface: ``answer``, ``apply_registered_cluster``,
 ``RegisteredClusterHost``, ``apply_registered_project``, ``RegisteredProjectHost``,
 ``launch_registered_run``, ``registry_start_request``,
-``read_failure_category``,
 ``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
 ``HelperHost``; the interfaces ``Projects``, ``Directories``, ``ClusterCompute``,
 ``ProjectMutationExamples``, ``ProjectMutationDirectories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
-``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
+``ScannedEntry``, ``Scan``, ``PathHints``);
 ``home_relative``, ``without_home``, ``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
 ``event_page``, ``EventPage``, ``SpanEventPage``, ``TailPage``,
 ``launch_arguments``, ``refused_argument``, ``unvetted_harness``; and the limit
@@ -111,6 +110,7 @@ from server.host_api import (
 )
 from server.host_compute import (
     ClusterTestResult,
+    ComputeError,
     ComputeSettings,
     MeasurementTarget,
     ModalTarget,
@@ -118,7 +118,7 @@ from server.host_compute import (
     SlurmClusterSettings,
     SlurmTarget,
 )
-from server.host_helper_compute import ComputeError, MachineCompute
+from server.host_examples import ProjectLookupError
 from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
 from server.host_helper_preflight import (
     PreflightFacts,
@@ -179,14 +179,15 @@ if TYPE_CHECKING:
         TaskGoal,
         TaskList,
     )
+    from server.host_helper_compute import MachineCompute
     from server.host_helper_readers import Readers
+    from server.host_operation_reads import HostReadSource
     from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
     from server.host_preflight import PreflightReport, RoleOption, RunOptions
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
     from server.usage_window import RunUsage
     from vs_project.api import OperatorDialer
-    from vs_proto.api import FailureCategory
     from vs_proto.api import host_payloads as pb
     from vs_sim.api import Clock, Connection
 
@@ -238,16 +239,6 @@ class ProjectRun:
     task: str | None
     display_name: str
     created_at: datetime
-
-
-class ProjectLookupError(Exception):
-    """A project's tasks or runs could not be read; ``code`` says why and ``path`` where."""
-
-    def __init__(self, code: HelperErrorCode, path: str, message: str) -> None:
-        """Name the failure ``code`` for ``path``; ``message`` is for a person."""
-        super().__init__(message)
-        self.code = code
-        self.path = path
 
 
 class Projects(Protocol):
@@ -903,9 +894,7 @@ def answer(
         if is_registry_read(request):
             return read_reply(
                 request,
-                HelperReadSource(
-                    host, request, describe=describe_machine, preflight=_preflight_facts
-                ),
+                registry_read_source(host, request),
             )
         return _answer(request, host, withdrawal)
     except (ProjectLookupError, ComputeError) as error:
@@ -1473,141 +1462,14 @@ def _error(request_id: str | None, code: HelperErrorCode, message: str) -> Helpe
 _REPLY: TypeAdapter[HelperReply] = TypeAdapter(HelperReply)
 
 
-class _ReadRefusedError(Exception):
-    def __init__(self, refusal: HelperError) -> None:
-        self.refusal = refusal
-        super().__init__(refusal.message)
-
-
-class HelperReadSource:
-    """Translate existing host I/O results at the adapter boundary only."""
-
-    def __init__(
-        self,
-        host: HelperHost,
-        legacy_request: HelperRequest | None,
-        *,
-        describe: Callable[[HelperHost], MachineDescription],
-        preflight: Callable[[RunPreflightRequest, HelperHost], RunPreflightReply | HelperError],
-    ) -> None:
-        """Bind host I/O and the existing machine/preflight probe adapters."""
-        self._host = host
-        self._legacy_request = legacy_request
-        self._describe = describe
-        self._preflight = preflight
-
-    def _path(self, text: str) -> Path:
-        expanded = Path(self._host.directories.expand(text))
-        return (
-            expanded if expanded.is_absolute() else Path(self._host.directories.home()) / expanded
-        )
-
-    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
-        """Read native discovery through the existing project catalog owner."""
-        request = type(request).from_binary(request.to_binary())
-        request.project = str(self._path(request.project))
-        return self._host.projects.saved_runs(request)
-
-    def tasks(self, project: str) -> pb.TaskList:
-        """Read through the existing project's task owner."""
-        return _wire().from_mapping(
-            _wire().host_payloads.TaskList,
-            self._host.projects.tasks(self._path(project)).model_dump(mode="json"),
-        )
-
-    def harnesses(self) -> list[pb.HarnessOption]:
-        """Project vetted harness facts; ordering belongs to the product handler."""
-        return [
-            _wire().from_mapping(
-                _wire().host_payloads.HarnessOption, option.model_dump(mode="json")
-            )
-            for option in self._host.harnesses()
-        ]
-
-    def installed_harnesses(self) -> tuple[str, ...]:
-        """Observe the installed providers once for display ordering."""
-        return self._host.machine.harness_clis()
-
-    def inspect_destination(self, example: str, destination: str) -> pb.InspectDestinationResponse:
-        """What creating ``example`` would find at ``destination``."""
-        models = import_module("server.host_examples")
-        state, project = self._host.examples.destination(
-            example, Path(_host_path(destination, self._host.directories))
-        )
-        payloads = _wire().host_payloads
-        states = {
-            models.ExampleDestination.ABSENT: payloads.DestinationState.ABSENT,
-            models.ExampleDestination.EMPTY: payloads.DestinationState.EMPTY,
-            models.ExampleDestination.EXAMPLE_PROJECT: payloads.DestinationState.EXAMPLE_PROJECT,
-            models.ExampleDestination.OCCUPIED: payloads.DestinationState.OCCUPIED,
-        }
-        return payloads.InspectDestinationResponse(
-            state=states[state],
-            **({} if project is None else {"project": project}),
-        )
-
-    def examples(self, *, with_catalogue: bool) -> pb.ExampleList:
-        """Project the checkout owner's example metadata without dropping details."""
-        return _wire().from_mapping(
-            _wire().host_payloads.ExampleList,
-            self._host.examples.list(with_catalogue=with_catalogue).model_dump(mode="json"),
-        )
-
-    def task_goal(self, project: str, task: str) -> pb.TaskGoal:
-        """Read the bounded authored task goal."""
-        return _wire().from_mapping(
-            _wire().host_payloads.TaskGoal,
-            self._host.projects.task_goal(self._path(project), task).model_dump(mode="json"),
-        )
-
-    def machine(self) -> pb.MachineDescription:
-        """Project the current machine probe snapshot."""
-        return _wire().from_mapping(
-            _wire().host_payloads.MachineDescription,
-            self._describe(self._host).model_dump(mode="json"),
-        )
-
-    def compute(self) -> pb.ComputeSettings:
-        """Project source-aware settings; this operation performs no mutation."""
-        return _wire().from_mapping(
-            _wire().host_payloads.ComputeSettings,
-            self._host.compute.settings().model_dump(mode="json"),
-        )
-
-    def preflight(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
-        """Revalidate the temporary legacy projection before invoking its probe owner."""
-        payload = _wire().to_mapping(request)
-        # Legacy diagnostics choose the first role in insertion order. Protobuf
-        # maps have no ordering, so retain only that display preference here.
-        if (
-            isinstance(self._legacy_request, RunPreflightRequest)
-            and self._legacy_request.agents is not None
-        ):
-            agents = payload["agents"]
-            if not isinstance(agents, dict):
-                message = "agents: expected a projected role mapping"
-                raise TypeError(message)
-            payload["agents"] = {role: agents[role] for role in self._legacy_request.agents}
-        legacy = RunPreflightRequest.model_validate(
-            {**payload, "deadline_ms": _wire().host_operations.PreflightRun.total_ms}
-        )
-        result = self._preflight(legacy, self._host)
-        if isinstance(result, HelperError):
-            raise _ReadRefusedError(result)
-        return _wire().from_mapping(
-            _wire().host_payloads.PreflightRunResponse,
-            result.model_dump(mode="json", exclude={"type"}),
-        )
-
-
-def read_reply(request: HelperRequest, source: HelperReadSource) -> HelperReply | HelperError:
+def read_reply(request: HelperRequest, source: HostReadSource) -> HelperReply | HelperError:
     """Execute a registered helper read; pairing and routing come from descriptors."""
     operation = _wire().host_operations.ADAPTER_OPERATIONS[request.type]
     payload = request.model_dump(mode="json", exclude={"type", "deadline_ms"})
     accepted = operation.accept(_wire().from_mapping(operation.request, payload))
     try:
         encoded = import_module("vibesys.api.host_operations.api").execute_read(accepted, source)
-    except _ReadRefusedError as error:
+    except import_module("server.host_operation_reads").ReadRefusedError as error:
         return error.refusal
     response = operation.response.from_binary(encoded)
     return _REPLY.validate_python({"type": request.type, **_wire().to_mapping(response)})
@@ -1618,78 +1480,19 @@ def _wire() -> ModuleType:
     return import_module("vs_proto.api")
 
 
-def registry_read_source(host: HelperHost) -> HelperReadSource:
-    """Temporary adapter owned by PR4, shared by the helper channel and ``vibesys host``.
-
-    A registry read has no legacy JSON request, so preflight keeps protobuf map order.
-    """
-    return HelperReadSource(host, None, describe=describe_machine, preflight=_preflight_facts)
-
-
-def read_failure_category(code: HelperErrorCode) -> FailureCategory:
-    """Map one helper refusal onto the closed failure category.
-
-    Callers branch on the category. ``CLUSTER_READ_ONLY`` is permission denied:
-    the file's owner is not this helper.
-    """
-    failure = _wire().FailureCategory
-    categories = {
-        HelperErrorCode.INVALID_REQUEST: failure.INVALID_INPUT,
-        HelperErrorCode.TASK_INVALID: failure.INVALID_INPUT,
-        HelperErrorCode.PATH_NOT_DIRECTORY: failure.INVALID_INPUT,
-        HelperErrorCode.UNVETTED_HARNESS: failure.INVALID_INPUT,
-        HelperErrorCode.CLUSTER_INVALID: failure.INVALID_INPUT,
-        HelperErrorCode.INCOMPATIBLE: failure.CONFIGURATION,
-        HelperErrorCode.EXAMPLES_UNAVAILABLE: failure.CONFIGURATION,
-        HelperErrorCode.COMPUTE_CONFIG_UNREADABLE: failure.CONFIGURATION,
-        HelperErrorCode.MODAL_NOT_CONFIGURED: failure.CONFIGURATION,
-        HelperErrorCode.DUPLICATE_REQUEST_ID: failure.CONFLICT,
-        HelperErrorCode.DESTINATION_EXISTS: failure.CONFLICT,
-        HelperErrorCode.DESTINATION_NESTED: failure.CONFLICT,
-        HelperErrorCode.NOT_NESTED: failure.CONFLICT,
-        HelperErrorCode.CLUSTER_EXISTS: failure.CONFLICT,
-        HelperErrorCode.UNKNOWN_WATCH: failure.NOT_FOUND,
-        HelperErrorCode.PROJECT_MISSING: failure.NOT_FOUND,
-        HelperErrorCode.PROJECT_UNINITIALIZED: failure.NOT_FOUND,
-        HelperErrorCode.PATH_MISSING: failure.NOT_FOUND,
-        HelperErrorCode.RUN_GONE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_INSTANCE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_LOG_STREAM: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_EXAMPLE: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_RUN: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_CLUSTER: failure.NOT_FOUND,
-        HelperErrorCode.UNKNOWN_PROVIDER: failure.NOT_FOUND,
-        HelperErrorCode.PERMISSION_DENIED: failure.PERMISSION_DENIED,
-        HelperErrorCode.CONNECT_DENIED: failure.PERMISSION_DENIED,
-        HelperErrorCode.CLUSTER_READ_ONLY: failure.PERMISSION_DENIED,
-        HelperErrorCode.HANDSHAKE_REQUIRED: failure.UNSUPPORTED,
-        HelperErrorCode.FEATURE_NOT_NEGOTIATED: failure.UNSUPPORTED,
-        HelperErrorCode.CHANNEL_BUSY: failure.RESOURCE_EXHAUSTED,
-        HelperErrorCode.CONNECT_FAILED: failure.TRANSIENT,
-        HelperErrorCode.DEADLINE_EXCEEDED: failure.DEADLINE_EXCEEDED,
-        HelperErrorCode.LOG_STORE_CORRUPT: failure.INTERNAL,
-        HelperErrorCode.PROJECT_CREATE_FAILED: failure.INTERNAL,
-        HelperErrorCode.CLUSTER_TEST_FAILED: failure.INTERNAL,
-        HelperErrorCode.READER_FAILED: failure.INTERNAL,
-        HelperErrorCode.INTERNAL: failure.INTERNAL,
-    }
-    found = categories.get(code)
-    if found is None:
-        message = f"unmapped helper code {code}"
-        raise ValueError(message)
-    return found
-
-
-def answer_registered_read(cli: str, payload: bytes, host: HelperHost) -> bytes:
-    """Run one registered read for ``vibesys host`` and return the envelope bytes."""
-    operations = import_module("vibesys.api.host_operations.api")
-    try:
-        return operations.execute_host_read(payload, registry_read_source(host), cli=cli)
-    except _ReadRefusedError as error:
-        category = read_failure_category(error.refusal.code)
-        return operations.host_read_failure(category, error.refusal.message)
-    except (ProjectLookupError, ComputeError) as error:
-        return operations.host_read_failure(read_failure_category(error.code), str(error))
+def registry_read_source(host: HelperHost, request: HelperRequest | None = None) -> HostReadSource:
+    """Bind shared read facts; preserve only a legacy request's role display order."""
+    role_order = (
+        tuple(request.agents)
+        if isinstance(request, RunPreflightRequest) and request.agents is not None
+        else None
+    )
+    return import_module("server.host_operation_reads").HostReadSource(
+        host,
+        role_order,
+        describe=lambda: describe_machine(host),
+        preflight=lambda value: _preflight_facts(value, host),
+    )
 
 
 def launch_registered_run(

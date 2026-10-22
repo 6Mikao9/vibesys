@@ -16,8 +16,8 @@ from server.host_examples import (
     ExampleDestination,
     ExampleList,
     ExampleSummary,
+    ProjectLookupError,
 )
-from server.host_helper_requests import ProjectLookupError
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:

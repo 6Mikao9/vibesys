@@ -11,7 +11,8 @@ import pytest
 from tests.server.host_helper_support import fake_host
 
 from server.host_helper_os import FileProjects
-from server.host_helper_requests import answer_registered_read
+from server.host_helper_requests import registry_read_source
+from server.host_operation_reads import answer_registered_read
 from server.host_saved_runs import page_saved_runs
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
@@ -175,7 +176,9 @@ def test_registry_read_discovers_native_history_through_the_public_host_handler(
     )
     lock = RunLock(path.parent / "run.lock") if live else None
     try:
-        encoded = answer_registered_read("list-saved-runs", request.to_binary(), host)
+        encoded = answer_registered_read(
+            "list-saved-runs", request.to_binary(), registry_read_source(host)
+        )
     finally:
         if lock is not None:
             lock.close()
@@ -226,7 +229,7 @@ def test_discovery_dates_native_only_runs_from_the_first_epoch_and_sorts_them(
         ),
     )
     response = ReadResponse.from_binary(
-        answer_registered_read("list-saved-runs", request.to_binary(), host)
+        answer_registered_read("list-saved-runs", request.to_binary(), registry_read_source(host))
     )
     validate(response)
     assert response.result is not None

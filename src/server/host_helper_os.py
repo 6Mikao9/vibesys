@@ -46,7 +46,14 @@ from server.host_api import (
     RunDigest,
     RunDigestUnreadable,
 )
-from server.host_examples import ExampleObjective, TaskGoal, TaskList, TaskSummary, bounded_goal
+from server.host_examples import (
+    ExampleObjective,
+    ProjectLookupError,
+    TaskGoal,
+    TaskList,
+    TaskSummary,
+    bounded_goal,
+)
 from server.host_helper_logs import (
     LogStoreCorruptError,
     RunLocation,
@@ -59,7 +66,6 @@ from server.host_helper_preflight import preflight_unavailable
 from server.host_helper_requests import (
     EventPage,
     PathHints,
-    ProjectLookupError,
     ProjectRun,
     Scan,
     ScannedEntry,

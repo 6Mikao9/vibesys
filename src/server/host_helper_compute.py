@@ -17,7 +17,7 @@ token is only ever tested for, never read into a reply. Light like the helper
 ``vs_slurm`` (through ``server.host_helper_slurm``, loaded on first use) and light ``server``
 modules.
 
-Public surface: ``MachineCompute``, ``ConfigFiles``, ``ComputeError``, ``COMPUTE_FILE``,
+Public surface: ``MachineCompute``, ``ConfigFiles``, ``COMPUTE_FILE``,
 ``SLURM_FILE``, ``parse_sinfo``, ``accelerator_of_gpu_model``, ``render_toml``, ``remote_command``.
 """
 
@@ -40,6 +40,7 @@ from server.host_compute import (
     ClusterTestPassed,
     ClusterTestResult,
     ClusterTestStage,
+    ComputeError,
     ComputeSettings,
     ListedCluster,
     ModalStatus,
@@ -75,16 +76,6 @@ _MODAL_VARIABLES: Final = ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET")
 """The variables that together hold a Modal token; only whether both are set is ever read."""
 _MODAL_CONFIG_VARIABLE: Final = "MODAL_CONFIG_PATH"
 _LINE_MAX: Final = 300
-
-
-class ComputeError(Exception):
-    """A compute request the machine's settings cannot honor; ``code`` says why."""
-
-    def __init__(self, code: HelperErrorCode, message: str, path: str | None = None) -> None:
-        """Name the failure ``code``; ``message`` is for a person and ``path`` the file it is about."""
-        super().__init__(message)
-        self.code = code
-        self.path = path
 
 
 class ConfigFiles(Protocol):
@@ -516,7 +507,6 @@ def _failed(stage: ClusterTestStage, stderr: str | None, fallback: str) -> Clust
 __all__ = [
     "COMPUTE_FILE",
     "SLURM_FILE",
-    "ComputeError",
     "ConfigFiles",
     "MachineCompute",
     "accelerator_of_gpu_model",

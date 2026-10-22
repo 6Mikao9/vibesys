@@ -16,8 +16,8 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from server.host_examples import ProjectLookupError
 from server.host_helper_os import FileProjects
-from server.host_helper_requests import ProjectLookupError
 from vs_project.api import Git, git_repositories
 from vs_sim.api import OsProcesses, OsThreads
 
