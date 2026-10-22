@@ -58,6 +58,7 @@ validates them and implements their requested access.
 from __future__ import annotations
 
 import enum
+import hashlib
 import os
 import posixpath
 import shutil
@@ -631,6 +632,24 @@ class SeatbeltSandbox(WorkspaceSandbox):
     #: Desktop's, say) stays reachable. By analogy with Landlock; not probed on macOS.
     claims_operator_control_boundary: ClassVar[bool] = False
 
+    #: Unsuffixed Darwin temp/cache roots, discovered by the builder. A stable
+    #: workspace suffix keeps scratch across turns without sharing trusted caches.
+    darwin_user_dirs: tuple[Path, Path] | None = field(default=None, kw_only=True)
+
+    @property
+    def env(self) -> Mapping[str, str]:
+        """Redirect libc/Metal caches and temporary files to this workspace's namespace."""
+        env = dict(super().env)
+        if self.darwin_user_dirs is not None:
+            suffix = self._darwin_suffix()
+            env["DIRHELPER_USER_DIR_SUFFIX"] = suffix
+            temp = str(self.darwin_user_dirs[0] / suffix) + "/"
+            env.update(dict.fromkeys(_TEMP_ENV_NAMES, temp))
+        return env
+
+    def _darwin_suffix(self) -> str:
+        return "vibesys-" + hashlib.sha256(os.fsencode(self.workspace.resolve())).hexdigest()
+
     def blind_roots(self) -> list[Path]:
         """Project ancestor directories to deny for sibling isolation.
 
@@ -717,6 +736,30 @@ class SeatbeltSandbox(WorkspaceSandbox):
             # Permit only those directory entries, never their contents or children.
             for ancestor in blind:
                 lines.append(f"(allow file-read-metadata (literal {_sbpl_string(str(ancestor))}))")
+
+        if self.darwin_user_dirs is not None:
+            # Metal obtains its frontend (com.apple.metalfe), shader
+            # (com.apple.metal), and archive (com.apple.gpuarchiver) caches via
+            # confstr, not TMPDIR or XDG_CACHE_HOME. dirhelper's process-start
+            # suffix redirects all of them; never grant the shared user cache
+            # root or the unsuffixed Metal caches used by trusted evaluations.
+            private_dirs = [root / self._darwin_suffix() for root in self.darwin_user_dirs]
+            for path in private_dirs:
+                lines.append(
+                    _seatbelt_path_rule("allow file-read* file-write*", path, is_directory=True)
+                )
+                # The framework owns the namespace entry. Keep the agent from
+                # replacing it with a symlink while another turn is launched.
+                lines.append(
+                    _seatbelt_path_rule("deny file-write-unlink", path, is_directory=False)
+                )
+            # MTLCompilerService has its own confinement. Metal sends it an
+            # extension for its cache; writing the cache alone is insufficient.
+            lines.append("(allow file-issue-extension (require-all")
+            lines.append('    (extension-class "com.apple.app-sandbox.read-write")')
+            lines.append("    (require-any")
+            lines += [f"        (subpath {_sbpl_string(str(path))})" for path in private_dirs]
+            lines.append(")))")
 
         # The operator's runtime root holds the control socket's key; deny it after
         # every allow, so the last matching rule keeps it out of reach.
@@ -1220,11 +1263,33 @@ def _build_macos(
         )
 
     read_paths, write_paths = _resource_paths(workspace, options.log, options.resources)
-    return SeatbeltSandbox(
+    darwin_dirs: list[Path] = []
+    for name in ("DARWIN_USER_TEMP_DIR", "DARWIN_USER_CACHE_DIR"):
+        result = options.probe.run(["/usr/bin/getconf", name], timeout_seconds=10)
+        value = result.stdout.strip() if result is not None and result.returncode == 0 else ""
+        if not value or not Path(value).is_absolute() or Path(value) == Path("/"):
+            message = f"[hostsandbox] cannot resolve {name}; refusing shared-cache fallback"
+            raise SandboxUnavailableError(message)
+        darwin_dirs.append(Path(value).resolve())
+    confinement = SeatbeltSandbox(
         sandbox_exec_path=sandbox_exec,
         workspace=workspace,
         read_paths=tuple(read_paths),
         write_paths=tuple(write_paths),
         project_path_policy=options.project_path_policy,
         build_env=options.env,
+        darwin_user_dirs=(darwin_dirs[0], darwin_dirs[1]),
     )
+    for root in darwin_dirs:
+        private = root / confinement.env["DIRHELPER_USER_DIR_SUFFIX"]
+        if private.is_symlink():
+            message = f"[hostsandbox] private Darwin directory is a symlink: {private}"
+            raise SandboxUnavailableError(message)
+        private.mkdir(mode=0o700, exist_ok=True)
+    options.log(
+        "[hostsandbox] Darwin scratch and Metal caches are workspace-private. "
+        "Shared uv/task-environment caches remain read-only: use a prepared environment, "
+        "or put a separate environment and UV_CACHE_DIR under TMPDIR. "
+        "Run state stays hidden; use the run tools and supplied artifacts instead."
+    )
+    return confinement

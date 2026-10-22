@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal
@@ -12,9 +13,18 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-from vs_sandbox.api import ProjectPathPolicy, SeatbeltSandbox
+from vs_sandbox.api import (
+    ProjectPathPolicy,
+    SandboxUnavailableError,
+    SeatbeltSandbox,
+    build_host_sandbox,
+)
+from vs_sim.api import ProbeResult
+from vs_sim.api.testing import ScriptedProbe
 
-type _Operation = Literal["file-read-metadata", "file-read-data", "file-write-data"]
+type _Operation = Literal[
+    "file-read-metadata", "file-read-data", "file-write-data", "file-write-unlink"
+]
 _PATH = r'\((literal|subpath)\s+("(?:[^"\\]|\\.)*")\)'
 _RULE = re.compile(
     r"\((allow|deny)\s+((?:file-[a-z*-]+\s*)+)"
@@ -109,3 +119,96 @@ def test_operator_root_denial_overrides_ancestor_metadata(tmp_path: Path) -> Non
     filesystem = _FakeSeatbeltFilesystem(confinement.profile())
 
     assert not filesystem.permits("file-read-metadata", workspace.parent)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS builder owns Darwin directories")
+@pytest.mark.regression
+def test_metal_and_temp_writes_are_redirected_without_granting_shared_caches(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "attempts" / "one" / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "run-record").mkdir()
+    # Use a synthetic host tree outside the policy's existing /tmp write grants.
+    roots = (tmp_path / "darwin" / "T", tmp_path / "darwin" / "C")
+    for root in roots:
+        root.mkdir(parents=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "sandbox-exec").write_text("#!/bin/sh\n")
+    (bin_dir / "sandbox-exec").chmod(0o755)
+
+    def script(argv: tuple[str, ...]) -> ProbeResult:
+        index = ("DARWIN_USER_TEMP_DIR", "DARWIN_USER_CACHE_DIR").index(argv[1])
+        return ProbeResult(0, str(roots[index]))
+
+    logs: list[str] = []
+
+    def build(target: Path) -> SeatbeltSandbox:
+        confinement = build_host_sandbox(
+            target,
+            env={
+                "PATH": str(bin_dir),
+                "TMPDIR": str(roots[0]),
+                "DIRHELPER_USER_DIR_SUFFIX": "inherited-shared",
+            },
+            probe=ScriptedProbe(script),
+            log=logs.append,
+            project_path_policy=ProjectPathPolicy(hidden_paths=(Path("run-record"),)),
+            require_enforcement=True,
+        )
+        assert isinstance(confinement, SeatbeltSandbox)
+        return confinement
+
+    confinement = build(workspace)
+    suffix = confinement.env["DIRHELPER_USER_DIR_SUFFIX"]
+    assert suffix != "inherited-shared"
+    assert any(
+        "UV_CACHE_DIR under TMPDIR" in message and "Run state" in message for message in logs
+    )
+    assert "/" not in suffix
+    assert confinement.env["TMPDIR"] == str(roots[0].resolve() / suffix) + "/"
+    assert all(confinement.env[name] == confinement.env["TMPDIR"] for name in ("TMP", "TEMP"))
+    profile = confinement.wrap(["true"])[2]
+    # The synthetic roots happen to live in the test host's /tmp. Remove only
+    # those pre-existing scratch grants to observe the new rule in isolation.
+    profile = profile.replace('    (subpath "/private/tmp")\n', "")
+    profile = profile.replace('    (subpath "/private/var/tmp")\n', "")
+    filesystem = _FakeSeatbeltFilesystem(profile)
+    for root in roots:
+        private = root.resolve() / suffix
+        assert private.is_dir()
+        assert private.stat().st_mode & 0o777 == 0o700
+        assert filesystem.permits("file-write-data", private / "scratch")
+        assert filesystem.permits("file-write-unlink", private / "scratch")
+        assert not filesystem.permits("file-write-unlink", private)
+        assert not filesystem.permits("file-write-data", root / "other-session" / "scratch")
+        for cache in ("com.apple.metalfe", "com.apple.metal", "com.apple.gpuarchiver"):
+            assert filesystem.permits("file-write-data", private / cache / "module.pcm")
+            assert not filesystem.permits("file-write-data", root / cache / "module.pcm")
+    assert not filesystem.permits("file-write-data", workspace / "run-record" / "state")
+    assert '(extension-class "com.apple.app-sandbox.read-write")' in profile
+    assert "(allow mach-lookup)" in profile
+    assert "(allow iokit-open)" in profile
+    other = tmp_path / "other" / "workspace"
+    other.mkdir(parents=True)
+    (other / "run-record").mkdir()
+    assert build(other).env["DIRHELPER_USER_DIR_SUFFIX"] != suffix
+    assert build(workspace).env["DIRHELPER_USER_DIR_SUFFIX"] == suffix
+    assert not filesystem.permits("file-write-data", tmp_path / "trusted-cache" / "uv" / "entry")
+    private_cache = roots[1] / suffix
+    private_cache.rmdir()
+    private_cache.symlink_to(workspace, target_is_directory=True)
+    with pytest.raises(SandboxUnavailableError, match="private Darwin directory is a symlink"):
+        build(workspace)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS builder owns Darwin directories")
+@pytest.mark.parametrize(
+    "answer", [None, ProbeResult(1, ""), ProbeResult(0, "relative"), ProbeResult(0, "/")]
+)
+def test_missing_darwin_directory_fails_closed(tmp_path: Path, answer: ProbeResult | None) -> None:
+    with pytest.raises(SandboxUnavailableError, match="DARWIN_USER_TEMP_DIR"):
+        build_host_sandbox(
+            tmp_path, env={}, probe=ScriptedProbe(lambda _: answer), require_enforcement=True
+        )

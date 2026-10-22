@@ -32,6 +32,8 @@ from vs_agent import host_resource_declarations
 from vs_agent.session_launch import confine_to_sandbox
 from vs_sandbox import host_resources
 from vs_sandbox import host_sandbox as hostsandbox
+from vs_sim.api import ProbeResult
+from vs_sim.api.testing import ScriptedProbe
 
 
 def _declared_resources(
@@ -313,6 +315,14 @@ def _has_pair(argv: list[str], flag: str, *operands: str) -> bool:
 
 
 class TestMacosBuild:
+    def _probe(self, tmp_path: Path) -> ScriptedProbe:
+        roots = {
+            name: tmp_path / name for name in ("DARWIN_USER_TEMP_DIR", "DARWIN_USER_CACHE_DIR")
+        }
+        for root in roots.values():
+            root.mkdir()
+        return ScriptedProbe(lambda argv: ProbeResult(0, str(roots[argv[1]])))
+
     def _patch(
         self, monkeypatch: pytest.MonkeyPatch, sandbox_exec: object = "/usr/bin/sandbox-exec"
     ) -> None:
@@ -325,7 +335,7 @@ class TestMacosBuild:
         self._patch(monkeypatch)
         workspace = tmp_path / "ws"
         workspace.mkdir()
-        sb = hostsandbox.build(workspace, env={})
+        sb = hostsandbox.build(workspace, env={}, probe=self._probe(tmp_path))
         assert isinstance(sb, hostsandbox.SeatbeltSandbox)
         assert sb.workspace == workspace.resolve()
 
@@ -348,6 +358,7 @@ class TestMacosBuild:
             workspace,
             env=env,
             resources=_declared_resources(env),
+            probe=self._probe(tmp_path),
         )
         assert isinstance(sb, hostsandbox.SeatbeltSandbox)
         assert tmp_path.resolve() not in sb.read_paths

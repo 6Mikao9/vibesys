@@ -206,6 +206,24 @@ existing protected-input integrity checks and execute outside agent confinement.
   is no unconfined fallback. The environment is recorded as `host`, and resume
   keeps it (only the retired `local` record migrates to Docker). Metal on any
   other platform still selects Docker and fails when its container starts.
+  Seatbelt gives each workspace a separate Darwin temp/cache namespace through
+  dirhelper's process-start `DIRHELPER_USER_DIR_SUFFIX`, and points `TMPDIR`,
+  `TMP` and `TEMP` into that namespace. Metal's frontend, shader and archive
+  caches follow `confstr` into it; changing `TMPDIR` alone does not redirect
+  them. Only that namespace receives write access and compiler-service
+  read-write extensions. The shared per-user Metal caches, task environments
+  and uv cache receive no additional access. Scratch survives successive turns
+  of the same workspace as ordinary Darwin temporary/cache data.
+
+  A confined probe should use the task's prepared environment. If that
+  environment is missing or stale, the operator must prepare it outside agent
+  confinement. For extra dependencies, use a private environment and set
+  `UV_CACHE_DIR` to a private scratch directory; do not install into the prepared
+  interpreter. Run-state denials are intentional: use the run tools and supplied
+  artifacts instead of traversing `.vibesys/state`. The deterministic
+  `test_metal_and_temp_writes_are_redirected_without_granting_shared_caches`
+  regression covers the environment and policy together.
+
 - **Landlock** only adds rights, so it cannot carve a restriction out of the
   writable project. Read-only and hidden project paths are not enforced; each
   unenforced tier is logged at startup. Evaluator-input integrity is detected
