@@ -79,7 +79,7 @@ none recorded
 
 ## Merges so far
 {% for item in merges %}
-- merge `{{ item.merge_id }}` of {% for source in item.candidates %}`{{ source.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %}: {{ item.outcome.value }}{% if item.failure %} ({{ item.failure.kind.value }}){% endif %}{% if item.revision %}, commit `{{ item.revision.revision_id.root }}`{% endif %}{% if item.summary %}: {{ item.summary }}{% endif %}
+- {% if item.fast_forward %}fast-forward of `{{ item.merge_id }}`, built on main, no merge ran:{% else %}merge `{{ item.merge_id }}` of {% for source in item.candidates %}`{{ source.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %}:{% endif %} {{ item.outcome.value }}{% if item.failure %} ({{ item.failure.kind.value }}){% endif %}{% if item.revision %}, commit `{{ item.revision.revision_id.root }}`{% endif %}{% if item.summary %}: {{ item.summary }}{% endif %}
 
 {% if item.reason %}
   Why the merger refused: {{ item.reason }}

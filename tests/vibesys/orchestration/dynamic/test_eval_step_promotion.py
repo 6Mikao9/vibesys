@@ -769,7 +769,7 @@ def test_promotion_merge_offer_and_winner_use_every_objective_with_its_noise(
     parent = snapshot_of(done)
     assert parent is not None
     line = MainLine(revision=BASE, baseline=start.baseline)
-    offered = line.options(options((parent,)), terms, frozenset())
+    offered = line.options(options((parent,)), terms, frozenset(), frozenset())
     assert offered.mergeable(start.plan.work_id) is improves
     rounds = tuple(
         EligibleRound(

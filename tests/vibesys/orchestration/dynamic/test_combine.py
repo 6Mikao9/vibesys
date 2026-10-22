@@ -637,11 +637,10 @@ def test_a_child_of_the_later_of_two_merged_sources_on_one_line_starts_at_the_la
 
 
 LATE = {**DECOY_THROUGHPUT, "c1": 300.0, "c2": 250.0, "c3": 40.0, "c4": 250.0, "c5": 300.0}
-LATE["c6"] = 40.0
 
 
 @MODES
-def test_merging_an_ancestor_after_its_descendant_does_not_move_a_childs_start_back(
+def test_an_ancestor_main_holds_is_not_offered_and_does_not_move_a_childs_start_back(
     *, restarting: bool
 ) -> None:
     host = begin(config(max_rounds=15, max_in_flight=2), restarting=restarting, throughputs=LATE)
@@ -651,13 +650,17 @@ def test_merging_an_ancestor_after_its_descendant_does_not_move_a_childs_start_b
     _plan(host, implement("h3", parent_hypothesis_id="h2", parent_revision="c2"))
     _implemented(host, "h3", "c3", "inconclusive")
     _merged(host, "m1", "h2", "c4")  # main holds c2, so c1 too
-    _merged(host, "m2", "h1", "c5")  # c1's own change starts at the input, not at c2
 
-    # h3's start stays c2: c1 holds less, and starting there would apply h2's change again.
-    _plan(host, implement("h3", continue_hypothesis=True))
+    # c1 brings main nothing now: a merge is not offered it, and h3's start stays c2, since
+    # starting at c1 would apply h2's change again.
+    _plan(host, implement("h3", continue_hypothesis=True))  # answers the turn asked before m1
     asked = _implemented(host, "h3", "c6", "inconclusive")
+    host.drain_until_turn(PLANNER_LABEL)
+    context = planner_context(host)
+    assert isinstance(context, PlannerPrompt)
+    assert "h1" not in [row.hypothesis_id for row in context.mergeable]
     caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
-    assert "`git diff c2 c5 | git apply --reject`" in caught_up, caught_up
+    assert "`git diff c2 c4 | git apply --reject`" in caught_up, caught_up
 
 
 # h1 is brought up to the decoy's main (c1b) before it is combined, so its change against main

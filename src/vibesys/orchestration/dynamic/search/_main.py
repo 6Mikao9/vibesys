@@ -11,7 +11,6 @@ landed (nothing is mergeable and main cannot move), no headline when main and th
 metrics (any verified candidate beats it), or main's complete metric row.
 """
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from vibesys.candidates import api as candidates
@@ -160,10 +159,16 @@ class MainLine:
         return None if seen is None else seen.benchmark_passed
 
     def options(
-        self, offered: tuple[ParentOption, ...], terms: TaskTerms, merge_ids: frozenset[str]
+        self,
+        offered: tuple[ParentOption, ...],
+        terms: TaskTerms,
+        merge_ids: frozenset[str],
+        held: frozenset[str],
     ) -> MergeOptions:
         """Which candidates a merge may name now: the one rule the prompt and validation share.
 
+        ``held`` is every revision main holds wholly (`RunRecord.main_holds`), by id: a candidate
+        main holds, whether a merge named it or came in with another, brings nothing.
         Only the latest verified candidate of a hypothesis is judged; an older revision is not a
         merge candidate at all. Every offered candidate already passed the trusted accuracy check. On a task without a trusted accuracy check nothing is mergeable,
         since main could never move; while the input's measurement is pending nothing is either,
@@ -185,7 +190,7 @@ class MainLine:
             bar: ViolationCode | None = None
             if snapshot.hypothesis_id in merge_ids:
                 bar = ViolationCode.MERGE_CANDIDATE_IS_MAIN
-            elif key in self.merged:
+            elif key in self.merged or key[1] in held:
                 bar = ViolationCode.MERGE_CANDIDATE_MERGED
             elif not _beats(() if benchmark is None else benchmark.metrics, main, space):
                 bar = (
@@ -204,35 +209,6 @@ class MainLine:
                 )
             )
         return MergeOptions(checkable=True, rows=tuple(rows), barred=tuple(barred))
-
-    def start_of(self, start: RevisionRef, lineage: Mapping[str, frozenset[str]]) -> RevisionRef:
-        """Where a tree's own change against main starts, given where it started (``start``).
-
-        ``lineage`` maps each revision the tree holds to the revisions that one holds. A merge
-        that brought in a candidate the tree holds, whose own change started at ``start``, put
-        that candidate wholly into main, so the tree's own change starts there instead: from it,
-        the tree holds only its own change, and main holds the candidate. Of several such
-        candidates, the one holding all the others. The merge commit is never a start: the
-        merger may edit beyond its sources (a fix-up), and a diff from it would remove the edit.
-        """
-        for merge in self.merges:
-            if merge.outcome is not MergeOutcome.MERGED or merge.revision is None:
-                continue
-            took = [
-                item.revision
-                for item in merge.candidates
-                if item.revision.revision_id.root in lineage
-                and item.built_on is not None
-                and item.built_on.revision_id.root == start.revision_id.root
-            ]
-            latest = [
-                found
-                for found in took
-                if all(item.revision_id.root in lineage[found.revision_id.root] for item in took)
-            ]
-            if latest:
-                start = latest[0]
-        return start
 
     def fast_forward(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord | None:
         """Move main to a settled candidate built on it that its one measurement shows beats it.
@@ -276,6 +252,7 @@ class MainLine:
                     built_on=start.parent,
                 ),
             ),
+            fast_forward=True,
             base=start.parent,
             outcome=MergeOutcome.MERGED,
             revision=settlement.candidate,

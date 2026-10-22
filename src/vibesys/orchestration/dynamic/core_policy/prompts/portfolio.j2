@@ -167,7 +167,7 @@ No candidate is mergeable now: none passed accuracy and beat main's latest measu
 
 Merges so far, oldest first:
 {% for item in merges %}
-- merge `{{ item.merge_id }}` #{{ item.sequence }} of {% for source in item.candidates %}`{{ source.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %} onto `{{ rev(item.base) }}`: {{ item.outcome.value }}{% if item.revision %}, commit `{{ rev(item.revision) }}`{% endif %}{% if item.accuracy_passed is not none %}, accuracy passed: {{ item.accuracy_passed }}{% endif %}{% for m in item.metrics %}; {{ metric(m) }}{% endfor %}{% if item.summary %}: {{ item.summary }}{% endif %}
+- {% if item.fast_forward %}fast-forward #{{ item.sequence }} of `{{ item.merge_id }}` from `{{ rev(item.base) }}`, built on main, no merge ran:{% else %}merge `{{ item.merge_id }}` #{{ item.sequence }} of {% for source in item.candidates %}`{{ source.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %} onto `{{ rev(item.base) }}`:{% endif %} {{ item.outcome.value }}{% if item.revision %}, commit `{{ rev(item.revision) }}`{% endif %}{% if item.accuracy_passed is not none %}, accuracy passed: {{ item.accuracy_passed }}{% endif %}{% for m in item.metrics %}; {{ metric(m) }}{% endfor %}{% if item.summary %}: {{ item.summary }}{% endif %}
 
 {% if item.reason %}
   Why the merger refused: {{ item.reason }}

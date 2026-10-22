@@ -238,6 +238,7 @@ MergeRecord.base required {"$ref":"#/$defs/RevisionRef"}
 MergeRecord.benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
 MergeRecord.candidates required {"items":{"$ref":"#/$defs/MergeSource"},"type":"array"}
 MergeRecord.failure optional {"anyOf":[{"$ref":"#/$defs/Failure"},{"type":"null"}],"default":null}
+MergeRecord.fast_forward optional {"default":false,"type":"boolean"}
 MergeRecord.main_benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
 MergeRecord.main_metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
 MergeRecord.merge_id required {"type":"string"}

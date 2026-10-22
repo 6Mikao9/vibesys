@@ -489,11 +489,18 @@ class MergeOutcome(StrEnum):
 
 
 class MergeRecord(Value):
-    """A finished merge workstream, as the planner and the handoff files are told of it."""
+    """A finished merge workstream, as the planner and the handoff files are told of it.
+
+    Main also moves without a merge workstream, when a candidate built on main beats it
+    (`MainLine.fast_forward`); that move is kept in this record too, with ``fast_forward`` set.
+    """
 
     merge_id: str
     sequence: int = Field(gt=0)
     candidates: tuple[MergeSource, ...]
+    fast_forward: bool = False
+    """Main moved to the one candidate, built on it, with no merge workstream; ``merge_id`` is its
+    hypothesis."""
     base: RevisionRef
     """The main revision the merge started from."""
     outcome: MergeOutcome

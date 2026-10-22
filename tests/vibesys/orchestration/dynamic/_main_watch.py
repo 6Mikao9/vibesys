@@ -14,7 +14,7 @@ from tests.vibesys.orchestration.dynamic._host import CANDIDATE_THROUGHPUT, INPU
 from vibesys.orchestration.dynamic.search.api import MergeOutcome, WorkKind
 
 if TYPE_CHECKING:
-    from vibesys.orchestration.dynamic.search.api import MergeRecord, RunSnapshot
+    from vibesys.orchestration.dynamic.search.api import RunSnapshot
     from vs_core.api import RevisionRef
 
 
@@ -72,7 +72,7 @@ class MainWatch:
         (anything does while main and the input have no throughput); a merge that merged passed
         accuracy and measures no lower than main before it.
         """
-        merge_ids = {item.merge_id for item in record.merges if not _moved_by_itself(item)} | {
+        merge_ids = {item.merge_id for item in record.merges if not item.fast_forward} | {
             item.plan.work_id for item in record.running if item.plan.kind is WorkKind.MERGE
         }
         main = self.input_throughput
@@ -91,12 +91,8 @@ class MainWatch:
             assert item.accuracy_passed is True, item
             assert item.benchmark_passed is True, item
             assert item.metrics, item
+            assert item.revision is not None, item
             assert main is None or item.metrics[0].value >= main, (item, main)
             main = item.metrics[0].value
             began_on[item.revision.revision_id.root] = main
             merged |= {(s.hypothesis_id, s.revision.revision_id.root) for s in item.candidates}
-
-
-def _moved_by_itself(item: MergeRecord) -> bool:
-    """Whether a merge record is a candidate that moved main at its settlement, with no merge."""
-    return {source.hypothesis_id for source in item.candidates} == {item.merge_id}
