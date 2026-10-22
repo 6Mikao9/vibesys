@@ -239,10 +239,10 @@ def _member(snapshot: str, index: int, *, final: bool, benchmark_first: bool) ->
 @example(waiters=8, benchmark_first=False)
 @example(waiters=8, benchmark_first=True)
 @given(waiters=st.integers(min_value=1, max_value=12), benchmark_first=st.booleans())
-async def test_official_sequence_holds_its_slot_between_jobs(
+async def test_official_sequence_rejoins_fifo_between_jobs(
     waiters: int, *, benchmark_first: bool
 ) -> None:
-    """Queued local validations cannot slip between an official's separately chosen gates."""
+    """An official's next member follows the local validations already waiting for its slot."""
     evaluation = _OneGpu()
     first_kind = "benchmark" if benchmark_first else "accuracy"
     first = evaluation.gate(first_kind, 0)
@@ -266,23 +266,29 @@ async def test_official_sequence_holds_its_slot_between_jobs(
         for handle in handles:
             await executor.submit(_request(snapshot, handle), handle_id=handle)
         await yield_until(admission.counts, lambda counts: counts == (1, waiters), "agents queue")
+        agent_gate = evaluation.gate("accuracy", 0 if benchmark_first else 1)
         first.release()
         await _finished(executor, "official-0")
-        assert await admission.counts() == (1, waiters)
-        assert reader.read().contention.jobs_running == 1
-        assert reader.read().contention.jobs_waiting == waiters
-        assert len(evaluation.accuracy_calls) + len(evaluation.benchmark_calls) == 1
+        await yield_until(lambda: _entered(agent_gate), bool, "oldest validation starts")
+        assert await admission.counts() == (1, waiters - 1)
         second_kind = "accuracy" if benchmark_first else "benchmark"
-        second = evaluation.gate(second_kind, 0)
+        second = evaluation.gate(second_kind, waiters)
         await executor.submit(
             _member(snapshot, 1, final=True, benchmark_first=benchmark_first),
             handle_id="official-1",
         )
+        await yield_until(
+            admission.counts, lambda counts: counts == (1, waiters), "successor queues"
+        )
+        waiting = await executor.inspect("official-1")
+        assert waiting is not None
+        assert waiting.state is EvaluationState.QUEUED
+        agent_gate.release()
         await yield_until(lambda: _entered(second), bool, "second official gate starts")
-        assert await admission.counts() == (1, waiters)
+        assert await admission.counts() == (1, 0)
         assert reader.read().contention.jobs_running == 1
-        assert reader.read().contention.jobs_waiting == waiters
-        assert len(evaluation.accuracy_calls) + len(evaluation.benchmark_calls) == 2
+        assert reader.read().contention.jobs_waiting == 0
+        assert len(evaluation.accuracy_calls) + len(evaluation.benchmark_calls) == 2 + 2 * waiters
         second.release()
         for handle in ("official-1", *handles):
             await _finished(executor, handle)
@@ -349,7 +355,7 @@ async def test_an_interrupted_sequence_returns_the_shared_slot(exit_at: str) -> 
 async def test_mixed_official_sequences_and_agent_gates_share_capacity(
     capacity: int, candidates: int, *, benchmark_first: bool
 ) -> None:
-    """Generated interleavings retain each official lease and obey the shared N-slot bound."""
+    """Generated interleavings preserve official stage order and the shared N-slot bound."""
     evaluation = _OneGpu(capacity, interleave=True)
     counts: list[tuple[int, int]] = []
     admission = EvaluationAdmission(
@@ -404,8 +410,7 @@ async def test_mixed_official_sequences_and_agent_gates_share_capacity(
             assert kinds == (
                 ("benchmark", "accuracy") if benchmark_first else ("accuracy", "benchmark")
             )
-            if capacity == 1:
-                assert positions[1] == positions[0] + 1
+            assert positions[1] > positions[0]
     finally:
         for task in tasks:
             task.cancel()

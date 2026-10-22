@@ -113,7 +113,7 @@ class CheckoutUpdate(CoreValue):
     config=ConfigDict(extra="forbid", strict=True, validate_default=True),
 )
 class EvaluationLease(CoreValue):
-    "A sequence of measurement jobs holds one slot until its final member ends.\nScoped by the submitting owner and generation. Closing that scope cancels\nevery member and returns the slot, including between members or after a crash."
+    "A sequence may retain an idle slot between members while no job waits for it.\nAfter yielding to waiting work, its next member reacquires in submission FIFO.\nScoped by the submitting owner and generation. Closing that scope cancels\nevery member and returns any reservation, including after a crash."
 
     model_fields: ClassVar[tuple[str, ...]] = ("key", "retain")
     key: Annotated[str, Field(min_length=1)]

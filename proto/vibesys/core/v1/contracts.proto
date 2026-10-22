@@ -51,9 +51,10 @@ message CheckoutUpdate {
   CheckoutStatus status = 1 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
 }
 
-// A sequence of measurement jobs holds one slot until its final member ends.
+// A sequence may retain an idle slot between members while no job waits for it.
+// After yielding to waiting work, its next member reacquires in submission FIFO.
 // Scoped by the submitting owner and generation. Closing that scope cancels
-// every member and returns the slot, including between members or after a crash.
+// every member and returns any reservation, including after a crash.
 message EvaluationLease {
   string key = 1 [(buf.validate.field).string.min_len = 1];
   bool retain = 2;
