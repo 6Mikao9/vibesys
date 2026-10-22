@@ -1,4 +1,6 @@
 /** Browser fixture for the same protobuf port ABI the Electron preload exposes. */
+
+import {fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   type GatewayBridge,
   type GatewayPortBridge,
@@ -6,7 +8,6 @@ import {
   gatewayReply,
   parseGatewayRequest,
 } from '@vibesys/ipc';
-import {fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   RecordSchema,
   SkeletonResponseSchema,
@@ -21,25 +22,7 @@ export function installGateway(input: WireFixture): void {
   const streams = new Set<(bytes: Uint8Array) => void>();
   const ended = new Set<(error?: string) => void>();
   const history = [input.tail];
-  const records = [
-    ...fromBinary(SkeletonResponseSchema, new Uint8Array(input.skeleton)).records,
-    ...fromBinary(TailResponseSchema, new Uint8Array(input.tail)).records,
-  ].map(bytes => fromBinary(RecordSchema, bytes));
-  // Match the gateway's retained-head decoder using canonical log facts.
-  // A process identity is never a source of epoch authority, including in a Fake.
-  const observation = (bytes: Uint8Array): Uint8Array => {
-    const response = fromBinary(WatchRunsResponseSchema, bytes);
-    const head = response.head;
-    if (head && head.epoch === 0) {
-      const prefix = records.filter(
-        record =>
-          head.committedSeq === undefined ||
-          (head.committedSeq > 0n && record.seq <= head.committedSeq),
-      );
-      head.epoch = observeRun(foldSkeleton(seedSkeleton(), prefix)).epoch;
-    }
-    return toBinary(WatchRunsResponseSchema, response);
-  };
+  const observations = fixtureObservations(input);
   const chats = new Set<(bytes: Uint8Array) => void>();
   const watchers = new Set<(bytes: Uint8Array) => void>();
   let active = 0;
@@ -87,7 +70,7 @@ export function installGateway(input: WireFixture): void {
         }
       } else if (method === input.methods.watchRuns) {
         watchers.add(receive);
-        receive(observation(new Uint8Array(input.watchRuns)));
+        receive(observations.decode(new Uint8Array(input.watchRuns)));
       } else if (method === input.methods.log) receive(new Uint8Array(input.log));
       else throw new Error('Unknown stream');
       return {
@@ -117,14 +100,10 @@ export function installGateway(input: WireFixture): void {
       calls: () => calls,
       active: () => active,
       observe: (bytes: number[]) => {
-        for (const receive of watchers) receive(observation(new Uint8Array(bytes)));
+        for (const receive of watchers) receive(observations.decode(new Uint8Array(bytes)));
       },
       append: (bytes: number[]) => {
-        records.push(
-          ...fromBinary(TailResponseSchema, new Uint8Array(bytes)).records.map(record =>
-            fromBinary(RecordSchema, record),
-          ),
-        );
+        observations.append(bytes);
         history.push(bytes);
         for (const receive of streams) receive(new Uint8Array(bytes));
       },
@@ -163,6 +142,38 @@ function preloadOver(bridge: GatewayBridge): GatewayPortBridge {
           call.cancel();
         },
       };
+    },
+  };
+}
+
+function fixtureObservations(input: WireFixture) {
+  const records = [
+    ...fromBinary(SkeletonResponseSchema, new Uint8Array(input.skeleton)).records,
+    ...fromBinary(TailResponseSchema, new Uint8Array(input.tail)).records,
+  ].map(bytes => fromBinary(RecordSchema, bytes));
+  // Match the gateway's retained-head decoder using canonical log facts.
+  // A process identity is never a source of epoch authority, including in a Fake.
+  const decode = (bytes: Uint8Array): Uint8Array => {
+    const response = fromBinary(WatchRunsResponseSchema, bytes);
+    const head = response.head;
+    if (head && head.epoch === 0) {
+      const prefix = records.filter(
+        record =>
+          head.committedSeq === undefined ||
+          (head.committedSeq > 0n && record.seq <= head.committedSeq),
+      );
+      head.epoch = observeRun(foldSkeleton(seedSkeleton(), prefix)).epoch;
+    }
+    return toBinary(WatchRunsResponseSchema, response);
+  };
+  return {
+    decode,
+    append(bytes: number[]): void {
+      records.push(
+        ...fromBinary(TailResponseSchema, new Uint8Array(bytes)).records.map(record =>
+          fromBinary(RecordSchema, record),
+        ),
+      );
     },
   };
 }

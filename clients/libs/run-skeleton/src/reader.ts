@@ -9,6 +9,7 @@ import {
   TailStreamRequestSchema,
   TailStreamResponseSchema,
   WatchRunsRequestSchema,
+  type WatchRunsResponse,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
@@ -172,13 +173,7 @@ export function gatewayReader(
                 if (response.runId !== input.runId) continue;
                 input.receive({
                   type: 'hint',
-                  hint: response.removed
-                    ? undefined
-                    : {
-                        epoch: response.head?.epoch ?? 0,
-                        value: response.liveness,
-                        head: response.head,
-                      },
+                  hint: livenessHint(response),
                 });
               }
             }),
@@ -202,4 +197,10 @@ export function gatewayReader(
     log: (runId, streamId, signal, receive, fromOffset) =>
       log(transport, runId, streamId, signal, receive, fromOffset),
   };
+}
+
+/** Project only the gateway's canonical epoch; removed runs clear their hint. */
+function livenessHint(response: WatchRunsResponse): RunLivenessHint | undefined {
+  if (response.removed) return undefined;
+  return {epoch: response.head?.epoch ?? 0, value: response.liveness, head: response.head};
 }
