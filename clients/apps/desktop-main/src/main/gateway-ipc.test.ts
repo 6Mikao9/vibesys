@@ -2,6 +2,8 @@ import {expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {HostCallRequestSchema} from '@vibesys/proto';
 import {configuredHostCall} from '@vibesys/runs/intents';
+import {GrpcError} from '@vibesys/transport';
+import {gatewayEnd} from './gateway-ipc.js';
 
 test('HostCall uses the current host configuration and preserves its typed method', () => {
   const request = create(HostCallRequestSchema, {
@@ -29,4 +31,19 @@ test('HostCall uses the current host configuration and preserves its typed metho
 test('HostCall refuses missing host configuration and malformed protobuf', () => {
   expect(() => configuredHostCall(new Uint8Array(), null)).toThrow('Set a checkout first');
   expect(() => configuredHostCall(new Uint8Array([255]), '/src/vibesys')).toThrow();
+});
+
+test('terminal replies keep every gRPC code and a single error prefix', () => {
+  for (let code = 0; code <= 16; code++) {
+    expect(gatewayEnd(new GrpcError(code, 'missing run'))).toEqual({
+      end: true,
+      error: 'missing run',
+      code,
+    });
+  }
+  expect(gatewayEnd(new Error('caller cancelled'))).toEqual({
+    end: true,
+    error: 'Error: caller cancelled',
+  });
+  expect(gatewayEnd()).toEqual({end: true});
 });

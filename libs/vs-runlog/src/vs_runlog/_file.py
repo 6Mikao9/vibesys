@@ -428,7 +428,11 @@ class FileRunLogWriter:
 
 
 def install_run_log(
-    staged: Path, destination: Path, *, prepare: Callable[[], None] | None = None
+    staged: Path,
+    destination: Path,
+    *,
+    prepare: Callable[[], None] | None = None,
+    sync: FileSync | None = None,
 ) -> None:
     """Install a quiescent conversion with its head and keyframes.
 
@@ -440,24 +444,29 @@ def install_run_log(
     if staged.parent == destination.parent:
         message = "staged run.log needs a separate disposable directory"
         raise ValueError(message)
+    durable = OsFileSync() if sync is None else sync
     lock = RunLock(destination.parent / "run.lock")
     try:
         if prepare is not None:
             prepare()
+        sync_directory(staged.parent, sync=durable)
         keyframes = destination.parent / "keyframes"
         if keyframes.exists():
             keyframes.replace(staged.parent / "previous-keyframes")
+            sync_directory(destination.parent, sync=durable)
         staged.replace(destination)
+        sync_directory(destination.parent, sync=durable)
         staged_keyframes = staged.parent / "keyframes"
         if staged_keyframes.exists():
             staged_keyframes.replace(keyframes)
+            sync_directory(destination.parent, sync=durable)
         head = destination.parent / "run.head"
         staged_head = staged.parent / "run.head"
         if staged_head.exists():
             staged_head.replace(head)
         else:
             head.unlink(missing_ok=True)
-        sync_directory(destination.parent)
+        sync_directory(destination.parent, sync=durable)
     finally:
         lock.close()
 

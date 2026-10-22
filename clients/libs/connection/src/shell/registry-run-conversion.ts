@@ -24,7 +24,7 @@ export interface RegistryRunConversionPorts {
 /** One run the host reported on; a run already converted is only counted. */
 export interface ConvertedRun {
   readonly runId: string;
-  readonly status: 'converted' | 'skipped' | 'failed';
+  readonly status: 'converted' | 'skipped' | 'failed' | 'cannot-convert';
   readonly reason: string;
 }
 
@@ -53,6 +53,7 @@ const STATUSES: ReadonlyMap<RunConversionStatus, ConvertedRun['status']> = new M
   [RunConversionStatus.CONVERTED, 'converted'],
   [RunConversionStatus.SKIPPED, 'skipped'],
   [RunConversionStatus.FAILED, 'failed'],
+  [RunConversionStatus.CANNOT_CONVERT, 'cannot-convert'],
 ]);
 
 export function registryRunConversion(ports: RegistryRunConversionPorts): RegistryRunConversion {
@@ -65,13 +66,17 @@ export function registryRunConversion(ports: RegistryRunConversionPorts): Regist
       );
       const runs: ConvertedRun[] = [];
       let unreported = 0;
+      let alreadyConverted = 0;
+      let afterRun = '';
       for (let call = 0; call < RUN_CONVERSION_CALLS; call++) {
-        const response = await convertOnce(transport, project, signal);
+        if (signal.aborted) throw new Error('run conversion cancelled');
+        const response = await convertOnce(transport, project, afterRun, signal);
         if (response === 'needs-update') return {kind: 'needs-update'};
         runs.push(...response.runs.map(convertedRun));
         unreported += response.unreported;
-        if (response.complete)
-          return {kind: 'converted', runs, alreadyConverted: response.alreadyConverted, unreported};
+        alreadyConverted += response.alreadyConverted;
+        afterRun = response.nextRun;
+        if (response.complete) return {kind: 'converted', runs, alreadyConverted, unreported};
       }
       throw new Error(`run conversion did not finish in ${RUN_CONVERSION_CALLS} calls`);
     },
@@ -96,12 +101,13 @@ function mutateTransport(ports: RegistryRunConversionPorts, host: HostId, checko
 async function convertOnce(
   transport: ReturnType<typeof mutateTransport>,
   project: string,
+  afterRun: string,
   signal: AbortSignal,
 ): Promise<ConvertSavedRunsResponse | 'needs-update'> {
   try {
     return await callConvertSavedRuns(
       transport,
-      acceptConvertSavedRuns({requestId: newRequestId(), project}),
+      acceptConvertSavedRuns({requestId: newRequestId(), project, afterRun}),
       signal,
     );
   } catch (error) {

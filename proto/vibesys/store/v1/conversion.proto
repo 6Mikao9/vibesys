@@ -1,0 +1,17 @@
+syntax = "proto3";
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// A final refusal for one immutable revision of a retained JSONL journal.
+// A changed journal is eligible for a fresh attempt.
+message RunConversionRefusal {
+  uint64 journal_size = 1;
+  uint64 journal_modified_ns = 2 [(buf.validate.field).uint64.gt = 0];
+  string reason = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}

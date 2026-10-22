@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import closing
 from typing import TYPE_CHECKING
 
@@ -72,32 +73,35 @@ def snapshot(directory: Path) -> dict[str, bytes | None]:
     }
 
 
-def payload(project: str, request_id: str = "convert-a") -> bytes:
+def payload(project: str, request_id: str = "convert-a", after_run: str = "") -> bytes:
     """One ConvertSavedRuns envelope."""
     request = MutateRequest(
         checkout="/src/checkout",
         method=Oneof(
             "convert_saved_runs",
-            pb.ConvertSavedRunsRequest(request_id=request_id, project=project),
+            pb.ConvertSavedRunsRequest(request_id=request_id, project=project, after_run=after_run),
         ),
     )
     validate(request)
     return request.to_binary()
 
 
-def real(clock: ManualClock) -> Callable[[Project], Iterator[RunConversion]]:
+def real(clock: ManualClock) -> Callable[[Project, str], Iterator[RunConversion]]:
     """The shipping converter on simulated time."""
-    return lambda opened: iter_conversions(opened, clock=clock, threads=SimThreads())
+    return lambda opened, after_run: iter_conversions(
+        opened, clock=clock, threads=SimThreads(), after_run=after_run
+    )
 
 
 def serve(
     project: Project,
     clock: ManualClock,
-    conversions: Callable[[Project], Iterator[RunConversion]] | None = None,
+    conversions: Callable[[Project, str], Iterator[RunConversion]] | None = None,
+    after_run: str = "",
 ) -> pb.ConvertSavedRunsResponse:
     """Call the handler and unwrap a validated, correlated response."""
     encoded = serve_convert_saved_runs(
-        payload(str(project.root)),
+        payload(str(project.root), after_run=after_run),
         conversions=real(clock) if conversions is None else conversions,
         clock=clock,
         home=project.root.parent,
@@ -165,8 +169,8 @@ def test_a_call_stops_before_its_cap_and_repeats_make_progress(project: Project)
     clock = ManualClock()
     per_conversion = (_CAP_SECONDS - _RESERVE_SECONDS) * 0.6
 
-    def slow(opened: Project) -> Iterator[RunConversion]:
-        for row in iter_conversions(opened, clock=clock, threads=SimThreads()):
+    def slow(opened: Project, after_run: str) -> Iterator[RunConversion]:
+        for row in iter_conversions(opened, clock=clock, threads=SimThreads(), after_run=after_run):
             if row.result.status is ConversionStatus.CONVERTED:
                 clock.advance(per_conversion)
             yield row
@@ -175,9 +179,9 @@ def test_a_call_stops_before_its_cap_and_repeats_make_progress(project: Project)
     assert not first.complete
     assert [row.run_id for row in first.runs] == ["run-1", "run-2"]
 
-    second = serve(project, clock, slow)
+    second = serve(project, clock, slow, first.next_run)
     assert second.complete
-    assert second.already_converted == 2
+    assert second.already_converted == 0
     assert [(row.run_id, row.status) for row in second.runs] == [
         ("run-3", pb.RunConversionStatus.CONVERTED)
     ]
@@ -198,7 +202,7 @@ def test_every_attempted_run_is_a_row_or_counted(
     ]
     clock = ManualClock()
     encoded = serve_convert_saved_runs(
-        payload(str(root)), conversions=lambda _: iter(rows), clock=clock, home=root
+        payload(str(root)), conversions=lambda _, _after: iter(rows), clock=clock, home=root
     )
     response = MutateResponse.from_binary(encoded)
     validate(response)
@@ -242,3 +246,84 @@ def test_a_bad_envelope_is_invalid_input(envelope: bytes, tmp_path: Path) -> Non
         envelope, conversions=real(clock), clock=clock, home=tmp_path
     )
     assert failure(encoded) is FailureCategory.INVALID_INPUT
+
+
+def test_prelock_live_journal_is_deferred_without_creating_a_lock(project: Project) -> None:
+    directory = legacy_run(project, "prelock")
+    journal = directory / "core-events.jsonl"
+    os.utime(journal, (1000, 1000))
+    before = snapshot(directory)
+    clock = ManualClock(start=1001)
+
+    response = serve(project, clock)
+
+    assert response.runs[0].status is pb.RunConversionStatus.SKIPPED
+    assert "live" in response.runs[0].reason
+    assert snapshot(directory) == before
+    clock.advance(300)
+    assert serve(project, clock).runs[0].status is pb.RunConversionStatus.CONVERTED
+
+
+def test_large_project_resumes_past_failed_and_skipped_prefix_within_call_cap(
+    project: Project,
+) -> None:
+    clock = ManualClock()
+    rows = [
+        RunConversion(
+            f"old-{index:03}",
+            ConversionResult(
+                ConversionStatus.FAILED if index % 2 else ConversionStatus.SKIPPED, "old journal"
+            ),
+            cursor=f"project:old-{index:03}",
+        )
+        for index in range(200)
+    ]
+    rows.append(
+        RunConversion(
+            "z-stopped",
+            ConversionResult(ConversionStatus.CONVERTED, "converted"),
+            cursor="project:z-stopped",
+        )
+    )
+    attempted: list[str] = []
+
+    def costly(_opened: Project, after_run: str) -> Iterator[RunConversion]:
+        for row in rows:
+            if row.cursor <= after_run:
+                continue
+            attempted.append(row.run)
+            clock.advance(6)
+            yield row
+
+    cursor = ""
+    for _ in range(20):
+        response = serve(project, clock, costly, cursor)
+        if response.complete:
+            break
+        assert response.next_run != cursor
+        cursor = response.next_run
+    else:
+        pytest.fail("large project exhausted the client call cap")
+    assert response.runs[-1].run_id == "z-stopped"
+    assert attempted == [row.run for row in rows]
+
+
+def test_iterator_cursor_skips_previously_attempted_failed_and_skipped_runs(
+    project: Project,
+) -> None:
+    for run_id, content in (("a", b""), ("b", b"invalid")):
+        path = Project.event_journal_path_for(project.root, run_id)
+        path.parent.mkdir(parents=True)
+        path.write_bytes(content)
+    legacy_run(project, "c")
+    clock = ManualClock()
+    rows = list(iter_conversions(project, clock=clock, threads=SimThreads()))
+    assert [row.result.status for row in rows[:3]] == [
+        ConversionStatus.SKIPPED,
+        ConversionStatus.FAILED,
+        ConversionStatus.CONVERTED,
+    ]
+    resumed = list(
+        iter_conversions(project, clock=clock, threads=SimThreads(), after_run=rows[1].cursor)
+    )
+    assert [row.run for row in resumed if row.alias_of is None] == ["c"]

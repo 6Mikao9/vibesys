@@ -14,7 +14,7 @@ import {
   SshLink,
 } from '@vibesys/connection';
 import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
-import {GATEWAY_CHANNEL, parseGatewayRequest} from '@vibesys/ipc';
+import {GATEWAY_CHANNEL, type GatewayReply, parseGatewayRequest} from '@vibesys/ipc';
 import {configuredHostCall, HOST_CALL_METHOD} from '@vibesys/runs/intents';
 import {type SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import {grpcCode, type ScheduleTimeout} from '@vibesys/transport';
@@ -64,12 +64,7 @@ export function installGatewayIpc(
       abort.abort();
       event.sender.removeListener('destroyed', cancelled);
       event.sender.removeListener('did-start-navigation', navigated);
-      const code = grpcCode(error);
-      port.postMessage({
-        end: true,
-        ...(error === undefined ? {} : {error: String(error)}),
-        ...(code === undefined ? {} : {code}),
-      });
+      port.postMessage(gatewayEnd(error));
       port.close();
     };
     const cancelled = (): void => finish(new Error('gateway caller closed'));
@@ -105,6 +100,18 @@ export function installGatewayIpc(
       } else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
     })().then(() => finish(), finish);
   });
+}
+
+/** Serialize one terminal reply without duplicating the renderer's Error name. */
+export function gatewayEnd(error?: unknown): Extract<GatewayReply, {end: true}> {
+  const code = grpcCode(error);
+  return {
+    end: true,
+    ...(error === undefined
+      ? {}
+      : {error: code !== undefined && error instanceof Error ? error.message : String(error)}),
+    ...(code === undefined ? {} : {code}),
+  };
 }
 
 /** One bounded line per failed call: host, method and status, never request or reply bytes. */

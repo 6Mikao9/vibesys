@@ -6,6 +6,7 @@ import gzip
 import json
 import runpy
 from contextlib import closing
+from functools import partial
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,6 +22,7 @@ from vibesys.run import EventJournal
 from vibesys.run.runlog_tee import RunLogTee
 from vs_core.api import ENVELOPE_SCHEMA_VERSION, FlowState, RunEnvelope, Span, SpanStatus, SpanType
 from vs_core.api.testing import FAKE_REGISTRY
+from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
 from vs_project.api import Project, StoredEnvelope
 from vs_proto.api import (
     API_SCHEMA_HASH,
@@ -36,6 +38,7 @@ from vs_proto.api import (
 from vs_runlog.api import (
     FileRunContent,
     FileRunLogWriter,
+    OsFileSync,
     RunLock,
     RunLogReader,
     encode_frame,
@@ -145,6 +148,7 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     assert source.read_bytes() == original
     assert sorted(path.name for path in destination.parent.iterdir()) == [
         "blobs",
+        "convert.lock",
         "core-events.jsonl",
         "keyframes",
         "run.head",
@@ -420,12 +424,14 @@ def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failur
     (index / "unsupported").write_bytes(b"keep")
     rows = {
         row.run: row.result
-        for row in convert_runs(project, clock=ManualClock(), threads=SimThreads())
+        for row in convert_runs(
+            project, clock=ManualClock(), threads=SimThreads(), include_host_index=True
+        )
     }
     assert rows["run-1"].status is ConversionStatus.CONVERTED
     assert rows["bad"].status is ConversionStatus.FAILED
     assert rows["empty"].status is ConversionStatus.SKIPPED
-    assert rows["old"].status is ConversionStatus.SKIPPED
+    assert rows["old"].status is ConversionStatus.CANNOT_CONVERT
     assert "unsupported journal event" in rows["old"].reason
     assert "predates" in rows["pretrace"].reason
     assert rows[str(external_link)].status is ConversionStatus.CONVERTED
@@ -435,7 +441,9 @@ def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failur
     assert len(rows) == 9
     second = {
         row.run: row.result
-        for row in convert_runs(project, clock=ManualClock(), threads=SimThreads())
+        for row in convert_runs(
+            project, clock=ManualClock(), threads=SimThreads(), include_host_index=True
+        )
     }
     assert second["run-1"].status is ConversionStatus.SKIPPED
     assert second["run-1"].reason == "already converted"
@@ -543,7 +551,9 @@ def test_bulk_reports_index_publication_failure_and_preserves_the_entry(
     home = tmp_path / "home"
     (home / "runs").mkdir()
     (home / "runs/run-1").write_bytes(b"keep")
-    results = convert_runs(project, clock=ManualClock(), threads=SimThreads())
+    results = convert_runs(
+        project, clock=ManualClock(), threads=SimThreads(), include_host_index=True
+    )
     assert results[0].result.status is ConversionStatus.FAILED
     assert "not a symlink" in results[0].result.reason
     assert results[1].result.status is ConversionStatus.SKIPPED
@@ -573,3 +583,167 @@ def test_typed_tee_explicit_commit_publishes_pending_checkpoint(
         assert not checkpoint.exists()
         tee.commit()
         assert Keyframe.from_binary(checkpoint.read_bytes()).through_seq == records[-1].seq
+
+
+@pytest.mark.parametrize("crash_at", range(1, 6))
+def test_conversion_crash_at_each_install_step_recovers_without_in_run_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_at: int
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    journal.emit(
+        CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="single-agent", input="input")
+    )
+    record_trace(journal)
+    journal.close()
+    destination = Project.run_log_path_for(project.root, "run-1")
+    source = Project.event_journal_path_for(project.root, "run-1")
+    original = source.read_bytes()
+    # Force replacement of older derived output, including the backup-keyframes step.
+    (destination.parent / "keyframes").mkdir()
+    (destination.parent / "keyframes" / "old.pb").write_bytes(b"old")
+    gate = FaultGate(
+        FaultPlan(
+            seed=0,
+            rules=(
+                FaultRule(
+                    boundary=Boundary.DURABLE_WRITE,
+                    target="install",
+                    at=crash_at,
+                    fault=HostFault.CRASH_AFTER,
+                ),
+            ),
+        )
+    )
+    real = OsFileSync()
+    images: list[dict[str, bytes | None]] = []
+
+    def sync(descriptor: int, /) -> None:
+        # Capture the crash image before Python's lexical cleanup can remove the stage.
+        images.append(
+            {
+                str(p.relative_to(destination.parent.parent)): p.read_bytes()
+                if p.is_file()
+                else None
+                for p in destination.parent.parent.rglob("*")
+            }
+        )
+        gate.around(Boundary.DURABLE_WRITE, "install", partial(real, descriptor))
+
+    with pytest.raises(HostCrashError):
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads(), install_sync=sync)
+
+    assert len(images) == crash_at
+    assert all(
+        not any(part.startswith(".convert-run-") for part in Path(name).parts)
+        for image in images
+        for name in image
+    )
+    assert source.read_bytes() == original
+    assert convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status in {
+        ConversionStatus.CONVERTED,
+        ConversionStatus.EXISTS,
+    }
+    head = RunHead.from_binary((destination.parent / "run.head").read_bytes())
+    frame = Keyframe.from_binary(
+        (destination.parent / "keyframes" / f"{head.committed_seq}.pb").read_bytes()
+    )
+    assert frame.log_offset == destination.stat().st_size
+    assert source.read_bytes() == original
+
+
+def test_staging_stays_outside_run_even_during_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    journal.close()
+    directory = Project.log_directory_for(project.root, "run-1")
+    observed: list[Path] = []
+
+    class InspectingClock(ManualClock):
+        def now(self) -> float:
+            assert not list(directory.parent.rglob(".convert-run-*"))
+            observed.extend(directory.parent.parent.glob(".convert-run-*"))
+            return super().now()
+
+    result = convert_run(project, "run-1", clock=InspectingClock(), threads=SimThreads())
+    assert result.status is ConversionStatus.CONVERTED
+    assert observed
+
+
+def test_stale_stages_are_swept_only_with_exclusive_conversion_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    journal.close()
+    directory = Project.log_directory_for(project.root, "run-1")
+    stale = directory / ".convert-run-stale"
+    stale.mkdir()
+    (stale / "previous-keyframes").mkdir()
+    (stale / "previous-keyframes" / "old.pb").write_bytes(b"derived")
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    (directory / ".convert-run-link").symlink_to(unrelated, target_is_directory=True)
+    with closing(RunLock(directory / "convert.lock")):
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.SKIPPED
+        )
+        assert stale.is_dir()
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CONVERTED
+    )
+    assert not stale.exists()
+    assert unrelated.is_dir()
+    assert (directory / ".convert-run-link").is_symlink()
+
+
+def test_repeated_failed_installs_leave_no_temporary_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    journal.close()
+    directory = Project.log_directory_for(project.root, "run-1")
+
+    def refused_sync(_descriptor: int, /) -> None:
+        message = "installation refused"
+        raise OSError(message)
+
+    for _ in range(3):
+        with pytest.raises(OSError, match="installation refused"):
+            convert_run(
+                project,
+                "run-1",
+                clock=ManualClock(),
+                threads=SimThreads(),
+                install_sync=refused_sync,
+            )
+        assert not list(directory.parent.parent.rglob(".convert-run-*"))
+        assert (directory / "core-events.jsonl").is_file()
+
+
+def test_final_refusal_retries_only_after_the_journal_revision_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    journal.close()
+    path = Project.event_journal_path_for(project.root, "run-1")
+    fixture = Path(__file__).parent / "fixtures/pre-agent-identity.jsonl"
+    path.write_bytes(fixture.read_bytes())
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CANNOT_CONVERT
+    )
+    event = json.loads(path.read_bytes())
+    event["data"]["span"]["label"]["attrs_json"] = json.dumps(
+        {"agent": "agent-a", "role": "implementer"}
+    )
+    path.write_text(json.dumps(event) + "\n")
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CONVERTED
+    )
+    assert not (path.parent / "run.conversion.pb").exists()

@@ -136,6 +136,7 @@ from vs_proto._generated.vibesys.store.v1.content_pb import (
     StreamRef,
     StreamState,
 )
+from vs_proto._generated.vibesys.store.v1.conversion_pb import RunConversionRefusal
 from vs_proto._generated.vibesys.store.v1.environment_attrs_pb import (
     CapacityCondition,
     CapacityPolicy,
@@ -337,6 +338,7 @@ __all__ = [
     "RelaunchRequest",
     "RelaunchResponse",
     "ReplayStore",
+    "RunConversionRefusal",
     "RunDescription",
     "RunFailure",
     "RunFailureKind",

@@ -104,7 +104,7 @@ export interface HostsDeps {
   /** WatchRuns while this host is shown. Cancel reaps the stream. */
   readonly runs?: Pick<RunWatch, 'start' | 'cancel'>;
   readonly savedRuns?: RegistrySavedRuns;
-  /** Converts a project's stopped pre-transport runs once per session before the v2 run list. */
+  /** Converts stopped pre-transport runs in the background for a connected host. */
   readonly runConversion?: RegistryRunConversion;
 }
 
@@ -244,13 +244,19 @@ export class Hosts {
   #configured = new Set<HostKey>();
   /** The one replacement currently allowed to install for each host. */
   readonly #watchIntents = new Map<HostKey, WatchIntent>();
-  /** One run conversion per host and project in this session; a failed one is tried again. */
-  readonly #conversions = new Map<string, Promise<void>>();
+  /** One bounded pass per project and host connection, including unsuccessful passes. */
+  readonly #conversions = new Map<
+    HostKey,
+    {abort: AbortController; projects: Map<string, Promise<void>>}
+  >();
   /** Advances before desired-set changes, fencing reads against the desired-host union. */
   #generation = 0;
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
+    deps.manager.onDisposing(() => {
+      for (const key of this.#conversions.keys()) this.#stopConversions(key);
+    });
   }
 
   /** Why the settings file is ignored, reading it afresh; null when it is fine or absent. */
@@ -647,8 +653,12 @@ export class Hosts {
   async projectRuns(id: HostId, project: string): Promise<readonly ListedRun[]> {
     if (await this.#transportV2(id)) {
       if (!this.#deps.savedRuns) throw new Error('saved-run registry is missing');
-      await this.#convertRuns(id, project);
-      return this.#deps.savedRuns.list(id, project, new AbortController().signal);
+      void this.#convertRuns(id, project);
+      return this.#deps.savedRuns.list(
+        id,
+        project,
+        this.#conversionScope(hostKey(id)).abort.signal,
+      );
     }
     await using lease = await this.connection(id);
     try {
@@ -659,16 +669,32 @@ export class Hosts {
     }
   }
 
-  /** Convert `project`'s stopped pre-transport runs on `id` once, so the listing includes them. */
+  #conversionScope(key: HostKey) {
+    let scope = this.#conversions.get(key);
+    if (scope === undefined) {
+      scope = {abort: new AbortController(), projects: new Map<string, Promise<void>>()};
+      this.#conversions.set(key, scope);
+    }
+    return scope;
+  }
+
+  #stopConversions(key: HostKey): void {
+    this.#conversions.get(key)?.abort.abort();
+    this.#conversions.delete(key);
+  }
+
+  /** Convert a project once per connection; failures retry only after reconnecting. */
   #convertRuns(id: HostId, project: string): Promise<void> {
     const conversion = this.#deps.runConversion;
     if (conversion === undefined) return Promise.resolve();
-    const key = `${hostKey(id)}\n${project}`;
-    const known = this.#conversions.get(key);
+    const scope = this.#conversionScope(hostKey(id));
+    const signal = scope.abort.signal;
+    const known = scope.projects.get(project);
     if (known !== undefined) return known;
     const label = hostLabel(id);
-    const converting = conversion.convert(id, project, new AbortController().signal).then(
+    const converting = conversion.convert(id, project, signal).then(
       outcome => {
+        if (signal.aborted) return;
         if (outcome.kind === 'needs-update') {
           this.#deps.log(`${label}: run conversion needs a newer checkout`);
           return;
@@ -676,17 +702,19 @@ export class Hosts {
         const count = (status: string) => outcome.runs.filter(run => run.status === status).length;
         this.#deps.log(
           `${label}: runs converted ${count('converted')}, skipped ${count('skipped')}, ` +
-            `failed ${count('failed')}, already converted ${outcome.alreadyConverted}`,
+            `failed ${count('failed')}, cannot convert ${count('cannot-convert')}, already converted ${outcome.alreadyConverted}`,
         );
-        for (const run of outcome.runs.filter(item => item.status === 'failed'))
+        for (const run of outcome.runs.filter(
+          item => item.status === 'failed' || item.status === 'cannot-convert',
+        ))
           this.#deps.log(`${label}: run ${run.runId} did not convert: ${run.reason}`);
       },
       (error: unknown) => {
-        this.#conversions.delete(key);
+        if (signal.aborted) return;
         this.#deps.log(`${label}: run conversion failed: ${(error as Error).message}`);
       },
     );
-    this.#conversions.set(key, converting);
+    scope.projects.set(project, converting);
     return converting;
   }
 
@@ -889,22 +917,22 @@ export class Hosts {
     };
   }
 
-  async #startRuns(key: HostKey, stopped: () => boolean): Promise<void> {
+  async #startRuns(key: HostKey, signal: AbortSignal): Promise<void> {
     if ((await this.#deps.transportV2?.(hostFromKey(key))) !== true) return;
-    if (stopped()) return;
+    if (signal.aborted) return;
     const runs = this.#deps.runs;
     if (runs === undefined) {
       throw new Error('run transport v2 is on and the run watch is missing');
     }
     runs.start(hostFromKey(key));
-    await this.#convertRecentProjects(key, stopped);
+    await this.#convertRecentProjects(key, signal);
   }
 
   /**
    * Convert the stopped pre-transport runs of every project the app has met on `key`, one project
    * at a time, so the host's run index (and so WatchRuns) lists them.
    */
-  async #convertRecentProjects(key: HostKey, stopped: () => boolean): Promise<void> {
+  async #convertRecentProjects(key: HostKey, signal: AbortSignal): Promise<void> {
     if (this.#deps.runConversion === undefined) return;
     const projects = new Set(
       (await this.#deps.settings.recent()).runs
@@ -912,7 +940,7 @@ export class Hosts {
         .map(run => run.project),
     );
     for (const project of projects) {
-      if (stopped()) return;
+      if (signal.aborted) return;
       await this.#convertRuns(hostFromKey(key), project);
     }
   }
@@ -933,21 +961,27 @@ export class Hosts {
     }
     const push = this.#deps.push;
     let stopped = false;
-    void this.#startRuns(key, () => stopped).catch((error: unknown) => {
-      const detail = error instanceof Error ? error.message : String(error);
-      this.#deps.log(detail);
-    });
+    const startRuns = (): void => {
+      if (stopped) return;
+      const signal = this.#conversionScope(key).abort.signal;
+      void this.#startRuns(key, signal).catch((error: unknown) => {
+        if (!signal.aborted) this.#deps.log(error instanceof Error ? error.message : String(error));
+      });
+    };
+    if (connection.phase.kind === 'ready') startRuns();
     const stopListing = connection.watchInstances(listing => push(hostListing(key, listing)));
     const stopPhase = connection.onPhase(phase => {
       if (phase.kind !== 'ready') {
+        this.#stopConversions(key);
         push({kind: 'unavailable', host: key, connection: connectionStatus(phase)});
-      }
+      } else startRuns();
     });
     this.#watched.set(key, {
       checkout,
       lease,
       stop: () => {
         stopped = true;
+        this.#stopConversions(key);
         stopListing();
         stopPhase();
         this.#deps.runs?.cancel(hostFromKey(key));

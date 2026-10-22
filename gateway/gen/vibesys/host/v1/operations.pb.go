@@ -1184,10 +1184,11 @@ func (TerminateRunOutcome) EnumDescriptor() ([]byte, []int) {
 type RunConversionStatus int32
 
 const (
-	RunConversionStatus_RUN_CONVERSION_STATUS_UNSPECIFIED RunConversionStatus = 0
-	RunConversionStatus_RUN_CONVERSION_STATUS_CONVERTED   RunConversionStatus = 1
-	RunConversionStatus_RUN_CONVERSION_STATUS_SKIPPED     RunConversionStatus = 2
-	RunConversionStatus_RUN_CONVERSION_STATUS_FAILED      RunConversionStatus = 3
+	RunConversionStatus_RUN_CONVERSION_STATUS_UNSPECIFIED    RunConversionStatus = 0
+	RunConversionStatus_RUN_CONVERSION_STATUS_CONVERTED      RunConversionStatus = 1
+	RunConversionStatus_RUN_CONVERSION_STATUS_SKIPPED        RunConversionStatus = 2
+	RunConversionStatus_RUN_CONVERSION_STATUS_FAILED         RunConversionStatus = 3
+	RunConversionStatus_RUN_CONVERSION_STATUS_CANNOT_CONVERT RunConversionStatus = 4
 )
 
 // Enum value maps for RunConversionStatus.
@@ -1197,12 +1198,14 @@ var (
 		1: "RUN_CONVERSION_STATUS_CONVERTED",
 		2: "RUN_CONVERSION_STATUS_SKIPPED",
 		3: "RUN_CONVERSION_STATUS_FAILED",
+		4: "RUN_CONVERSION_STATUS_CANNOT_CONVERT",
 	}
 	RunConversionStatus_value = map[string]int32{
-		"RUN_CONVERSION_STATUS_UNSPECIFIED": 0,
-		"RUN_CONVERSION_STATUS_CONVERTED":   1,
-		"RUN_CONVERSION_STATUS_SKIPPED":     2,
-		"RUN_CONVERSION_STATUS_FAILED":      3,
+		"RUN_CONVERSION_STATUS_UNSPECIFIED":    0,
+		"RUN_CONVERSION_STATUS_CONVERTED":      1,
+		"RUN_CONVERSION_STATUS_SKIPPED":        2,
+		"RUN_CONVERSION_STATUS_FAILED":         3,
+		"RUN_CONVERSION_STATUS_CANNOT_CONVERT": 4,
 	}
 )
 
@@ -9053,9 +9056,11 @@ func (x *TerminateRunResponse) GetDetail() string {
 }
 
 type ConvertSavedRunsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Project       string                 `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Project   string                 `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
+	// Resume after the last row of a previous bounded call; empty starts a fresh pass.
+	AfterRun      string `protobuf:"bytes,3,opt,name=after_run,json=afterRun,proto3" json:"after_run,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9104,6 +9109,13 @@ func (x *ConvertSavedRunsRequest) GetProject() string {
 	return ""
 }
 
+func (x *ConvertSavedRunsRequest) GetAfterRun() string {
+	if x != nil {
+		return x.AfterRun
+	}
+	return ""
+}
+
 // One row per attempted run, except runs already converted, which are only counted.
 type ConvertSavedRunsResponse struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
@@ -9114,7 +9126,9 @@ type ConvertSavedRunsResponse struct {
 	Complete         bool   `protobuf:"varint,4,opt,name=complete,proto3" json:"complete,omitempty"`
 	AlreadyConverted uint32 `protobuf:"varint,5,opt,name=already_converted,json=alreadyConverted,proto3" json:"already_converted,omitempty"`
 	// Attempted runs beyond the row limit.
-	Unreported    uint32 `protobuf:"varint,6,opt,name=unreported,proto3" json:"unreported,omitempty"`
+	Unreported uint32 `protobuf:"varint,6,opt,name=unreported,proto3" json:"unreported,omitempty"`
+	// Opaque position to pass as after_run when complete is false.
+	NextRun       string `protobuf:"bytes,7,opt,name=next_run,json=nextRun,proto3" json:"next_run,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9189,6 +9203,13 @@ func (x *ConvertSavedRunsResponse) GetUnreported() uint32 {
 		return x.Unreported
 	}
 	return 0
+}
+
+func (x *ConvertSavedRunsResponse) GetNextRun() string {
+	if x != nil {
+		return x.NextRun
+	}
+	return ""
 }
 
 type RunConversion struct {
@@ -9975,13 +9996,14 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12J\n" +
 	"\aoutcome\x18\x02 \x01(\x0e2$.vibesys.host.v1.TerminateRunOutcomeB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aoutcome\x12!\n" +
-	"\x06detail\x18\x03 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x06detail\"j\n" +
+	"\x06detail\x18\x03 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x06detail\"\x91\x01\n" +
 	"\x17ConvertSavedRunsRequest\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01\x18\x80\x01R\trequestId\x12$\n" +
 	"\aproject\x18\x02 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80 R\aproject\"\x9b\x02\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\aproject\x12%\n" +
+	"\tafter_run\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80@R\bafterRun\"\xc0\x02\n" +
 	"\x18ConvertSavedRunsResponse\x12)\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\n" +
@@ -9993,7 +10015,8 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\x11already_converted\x18\x05 \x01(\rR\x10alreadyConverted\x12\x1e\n" +
 	"\n" +
 	"unreported\x18\x06 \x01(\rR\n" +
-	"unreported\"\x9e\x01\n" +
+	"unreported\x12#\n" +
+	"\bnext_run\x18\a \x01(\tB\b\xbaH\x05r\x03(\x80@R\anextRun\"\x9e\x01\n" +
 	"\rRunConversion\x12!\n" +
 	"\x06run_id\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\x05runId\x12H\n" +
@@ -10139,12 +10162,13 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"!TERMINATE_RUN_OUTCOME_UNSUPPORTED\x10\x03\x12/\n" +
 	"+TERMINATE_RUN_OUTCOME_REQUESTED_UNCONFIRMED\x10\x04\x12-\n" +
 	")TERMINATE_RUN_OUTCOME_OBSERVATION_UNKNOWN\x10\x05\x12(\n" +
-	"$TERMINATE_RUN_OUTCOME_PROCESS_ABSENT\x10\x06*\xa6\x01\n" +
+	"$TERMINATE_RUN_OUTCOME_PROCESS_ABSENT\x10\x06*\xd0\x01\n" +
 	"\x13RunConversionStatus\x12%\n" +
 	"!RUN_CONVERSION_STATUS_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fRUN_CONVERSION_STATUS_CONVERTED\x10\x01\x12!\n" +
 	"\x1dRUN_CONVERSION_STATUS_SKIPPED\x10\x02\x12 \n" +
-	"\x1cRUN_CONVERSION_STATUS_FAILED\x10\x03BH\xda\xf3\x18\x050.1.1Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"\x1cRUN_CONVERSION_STATUS_FAILED\x10\x03\x12(\n" +
+	"$RUN_CONVERSION_STATUS_CANNOT_CONVERT\x10\x04BH\xda\xf3\x18\x050.1.1Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
 var (
 	file_vibesys_host_v1_operations_proto_rawDescOnce sync.Once

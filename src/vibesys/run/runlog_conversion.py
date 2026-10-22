@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+from contextlib import closing
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -11,11 +13,12 @@ from typing import TYPE_CHECKING
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
-from vs_project.api import Project, ProjectError
-from vs_proto.api import Keyframe, RunHead, validate
+from vs_project.api import Project, ProjectError, atomic_write_bytes
+from vs_proto.api import Keyframe, RunConversionRefusal, RunHead, validate
 from vs_runlog.api import (
     FileRunContent,
     FileRunLogWriter,
+    FileSync,
     RunLock,
     RunLogReader,
     RunLogStopReason,
@@ -26,6 +29,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vs_sim.api import SleepingClock, Threads
+
+
+_PRELOCK_QUIET_SECONDS = 300
 
 
 class RunLogConversionError(ValueError):
@@ -43,6 +49,7 @@ class ConversionStatus(StrEnum):
     EXISTS = "exists"
     SKIPPED = "skipped"
     FAILED = "failed"
+    CANNOT_CONVERT = "cannot-convert"
 
 
 @dataclass(frozen=True)
@@ -111,18 +118,26 @@ def _has_checkpoint(directory: Path, sequence: int) -> bool:
 
 
 def convert_run(
-    project: Project, run_id: str, *, clock: SleepingClock, threads: Threads
+    project: Project,
+    run_id: str,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    install_sync: FileSync | None = None,
 ) -> ConversionResult:
     """Convert one stopped project run; leave its journal and core store untouched.
+
+    Pre-lock journals need five quiet minutes. Historical writers idle longer
+    than that cannot be detected without an ownership record. Final mapping
+    refusals are retained for the journal revision and displayed by discovery.
 
     Core envelopes remain the resume authority until phase 3 introduces state.pb.
     A read-path conversion needs only the trace journal, not strategy state codecs.
     """
     directory = project.log_directory_for(project.root, run_id)
-    try:
-        result = _convert_directory(directory, run_id, clock=clock, threads=threads)
-    except _UnsupportedJournalError as exc:
-        return ConversionResult(ConversionStatus.SKIPPED, str(exc))
+    result = _convert_directory(
+        directory, run_id, clock=clock, threads=threads, install_sync=install_sync
+    )
     if result.status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}:
         project.publish_run_for(project.root, run_id)
     if project.state.state_store_namespace(run_id).read_bytes("store.json") is not None:
@@ -132,11 +147,14 @@ def convert_run(
     return result
 
 
-def _writer_is_live(directory: Path) -> bool:
-    """Probe the writer lock without creating it; every live writer holds run.lock."""
+def _writer_is_live(directory: Path, clock: SleepingClock) -> bool:
+    """Probe modern writer ownership and conservatively defer recent pre-lock journals."""
     path = directory / "run.lock"
     if not path.exists():
-        return False
+        journal = directory / "core-events.jsonl"
+        return (
+            journal.exists() and 0 <= clock.now() - journal.stat().st_mtime < _PRELOCK_QUIET_SECONDS
+        )
     try:
         RunLock(path).close()
     except BlockingIOError:
@@ -145,16 +163,90 @@ def _writer_is_live(directory: Path) -> bool:
 
 
 def _convert_directory(
-    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+    directory: Path,
+    run_id: str,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    install_sync: FileSync | None = None,
 ) -> ConversionResult:
     """Convert a stopped run; a run whose writer holds ``run.lock`` is left untouched."""
-    if _writer_is_live(directory):
-        return ConversionResult(ConversionStatus.SKIPPED, "run is live: a writer holds run.lock")
-    return _convert_stopped(directory, run_id, clock=clock, threads=threads)
+    if not directory.is_dir():
+        return ConversionResult(ConversionStatus.SKIPPED, "journal is missing")
+    if _writer_is_live(directory, clock):
+        return ConversionResult(
+            ConversionStatus.SKIPPED,
+            "run is live: writer lock or recently modified pre-lock journal",
+        )
+    try:
+        ownership = RunLock(directory / "convert.lock")
+    except BlockingIOError:
+        return ConversionResult(ConversionStatus.SKIPPED, "another conversion holds this run")
+    with closing(ownership):
+        try:
+            writer = RunLock(directory / "run.lock")
+        except BlockingIOError:
+            return ConversionResult(
+                ConversionStatus.SKIPPED, "run is live: a writer holds run.lock"
+            )
+        with closing(writer):
+            for entry in directory.iterdir():
+                if (
+                    entry.name.startswith(".convert-run-")
+                    and not entry.is_symlink()
+                    and entry.is_dir()
+                ):
+                    shutil.rmtree(entry)
+        return _convert_revision(
+            directory, run_id, clock=clock, threads=threads, install_sync=install_sync
+        )
+
+
+def _convert_revision(
+    directory: Path,
+    run_id: str,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    install_sync: FileSync | None,
+) -> ConversionResult:
+    journal = directory / "core-events.jsonl"
+    refusal_path = directory / "run.conversion.pb"
+    source = journal.stat() if journal.is_file() else None
+    if source is not None and refusal_path.is_file():
+        refusal = RunConversionRefusal.from_binary(refusal_path.read_bytes())
+        validate(refusal)
+        if (refusal.journal_size, refusal.journal_modified_ns) == (
+            source.st_size,
+            source.st_mtime_ns,
+        ):
+            return ConversionResult(ConversionStatus.CANNOT_CONVERT, refusal.reason)
+    try:
+        result = _convert_stopped(
+            directory, run_id, clock=clock, threads=threads, install_sync=install_sync
+        )
+    except (_UnsupportedJournalError, TypeError) as error:
+        if source is None:
+            raise
+        reason = ("cannot convert: " + str(error)).encode()[:2048].decode(errors="ignore")
+        refusal = RunConversionRefusal(
+            journal_size=source.st_size, journal_modified_ns=source.st_mtime_ns, reason=reason
+        )
+        validate(refusal)
+        atomic_write_bytes(refusal_path, refusal.to_binary())
+        return ConversionResult(ConversionStatus.CANNOT_CONVERT, reason)
+    if result.status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}:
+        refusal_path.unlink(missing_ok=True)
+    return result
 
 
 def _convert_stopped(
-    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+    directory: Path,
+    run_id: str,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    install_sync: FileSync | None = None,
 ) -> ConversionResult:
     """Atomically convert a quiescent run with trace events, preserving the JSONL source.
 
@@ -186,7 +278,7 @@ def _convert_stopped(
         return ConversionResult(ConversionStatus.SKIPPED, "journal has no events")
     if not has_trace:
         return ConversionResult(ConversionStatus.SKIPPED, "journal predates the run trace")
-    with TemporaryDirectory(prefix=".convert-run-", dir=destination.parent) as temporary:
+    with TemporaryDirectory(prefix=".convert-run-", dir=directory.parent.parent) as temporary:
         staged = Path(temporary) / "run.log"
 
         def prepare() -> None:
@@ -197,7 +289,7 @@ def _convert_stopped(
                     tee.append(line)
                 writer.checkpoint()
 
-        install_run_log(staged, destination, prepare=prepare)
+        install_run_log(staged, destination, prepare=prepare, sync=install_sync)
     return ConversionResult(ConversionStatus.CONVERTED, "converted journal to run.log")
 
 
@@ -209,6 +301,7 @@ class RunConversion:
     result: ConversionResult
     # The row that already attempted this host index entry's target, if any.
     alias_of: str | None = None
+    cursor: str = ""
 
 
 def _attempt(
@@ -216,8 +309,6 @@ def _attempt(
 ) -> ConversionResult:
     try:
         return _convert_directory(directory, run_id, clock=clock, threads=threads)
-    except _UnsupportedJournalError as exc:
-        return ConversionResult(ConversionStatus.SKIPPED, str(exc))
     except (OSError, ValueError, TypeError, ProjectError) as exc:
         return ConversionResult(ConversionStatus.FAILED, str(exc))
 
@@ -238,9 +329,14 @@ def _indexed_target(entry: Path) -> Path | ConversionResult:
 
 
 def iter_conversions(
-    project: Project, *, clock: SleepingClock, threads: Threads
+    project: Project,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    after_run: str = "",
+    include_host_index: bool = False,
 ) -> Iterator[RunConversion]:
-    """Convert stopped project runs and every host index entry, once per target, lazily.
+    """Convert stopped project runs lazily; include the host index only by explicit opt-in.
 
     Each run is attempted only when the caller asks for the next outcome, so a
     caller with a deadline stops between runs. A run already converted reports
@@ -250,12 +346,19 @@ def iter_conversions(
     reported, including dangling links. A run whose writer holds ``run.lock``
     is skipped and left untouched.
     """
-    entries = [(entry, _indexed_target(entry)) for entry in project.indexed_run_directories()]
+    entries = (
+        [(entry, _indexed_target(entry)) for entry in project.indexed_run_directories()]
+        if include_host_index
+        else []
+    )
     seen: dict[Path, str] = {}
     ids = set(project.logged_run_ids_for(project.root)) | set(project.state.checkout_run_ids())
     for run_id in sorted(ids):
+        cursor = f"project:{run_id}"
         directory = project.log_directory_for(project.root, run_id)
         seen[directory.resolve()] = run_id
+        if cursor <= after_run:
+            continue
         try:
             result = convert_run(project, run_id, clock=clock, threads=threads)
         except (OSError, ValueError, TypeError, ProjectError) as exc:
@@ -268,24 +371,28 @@ def iter_conversions(
                 ConversionStatus.SKIPPED,
                 "unsupported: no trace journal; store.json core state requires phase 3 state.pb",
             )
-        yield RunConversion(run_id, result)
-    for entry, target in entries:
+        yield RunConversion(run_id, result, cursor=cursor)
+    for entry, target in sorted(entries):
+        cursor = f"zindex:{entry}"
+        if cursor <= after_run:
+            continue
         if isinstance(target, ConversionResult):
-            yield RunConversion(str(entry), target)
+            yield RunConversion(str(entry), target, cursor=cursor)
         elif target in seen:
             yield RunConversion(
                 str(entry),
                 ConversionResult(ConversionStatus.SKIPPED, "already processed this index target"),
                 alias_of=seen[target],
+                cursor=cursor,
             )
         else:
             result = _attempt(target, entry.name, clock=clock, threads=threads)
             seen[target] = str(entry)
-            yield RunConversion(str(entry), result)
+            yield RunConversion(str(entry), result, cursor=cursor)
 
 
 def convert_runs(
-    project: Project, *, clock: SleepingClock, threads: Threads
+    project: Project, *, clock: SleepingClock, threads: Threads, include_host_index: bool = False
 ) -> tuple[RunConversion, ...]:
     """Convert every run :func:`iter_conversions` finds; an existing conversion is skipped."""
     return tuple(
@@ -294,5 +401,7 @@ def convert_runs(
         )
         if row.result.status is ConversionStatus.EXISTS
         else row
-        for row in iter_conversions(project, clock=clock, threads=threads)
+        for row in iter_conversions(
+            project, clock=clock, threads=threads, include_host_index=include_host_index
+        )
     )

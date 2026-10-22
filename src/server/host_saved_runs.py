@@ -29,7 +29,8 @@ def _import(project: Project, run: pb.SavedRun, clock: SleepingClock, threads: T
 
     path = project.run_log_path_for(project.root, run.run_id)
     try:
-        assert_run_unlocked(path)
+        if (path.parent / "run.lock").exists():
+            assert_run_unlocked(path)
     except RuntimeError:
         if path.is_file():
             project.publish_run_for(project.root, run.run_id)

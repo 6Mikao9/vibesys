@@ -45,13 +45,14 @@ _STATUS = {
     "converted": pb.RunConversionStatus.CONVERTED,
     "skipped": pb.RunConversionStatus.SKIPPED,
     "failed": pb.RunConversionStatus.FAILED,
+    "cannot-convert": pb.RunConversionStatus.CANNOT_CONVERT,
 }
 
 
 def serve_convert_saved_runs(
     payload: bytes,
     *,
-    conversions: Callable[[Project], Iterator[RunConversion]],
+    conversions: Callable[[Project, str], Iterator[RunConversion]],
     clock: Clock,
     home: Path,
 ) -> bytes:
@@ -76,7 +77,7 @@ def serve_convert_saved_runs(
         request_id=request.request_id, project_root=str(project.root), complete=True
     )
     try:
-        _convert(response, conversions(project), clock=clock, deadline=deadline)
+        _convert(response, conversions(project, request.after_run), clock=clock, deadline=deadline)
     except (ProjectError, ValueError) as exc:
         return _failure(FailureCategory.INVALID_INPUT, str(exc))
     except PermissionError as exc:
@@ -120,6 +121,7 @@ def _convert(
         row = next(rows, None)
         if row is None:
             return
+        response.next_run = row.cursor
         status = row.result.status.value
         if row.alias_of is not None:
             continue

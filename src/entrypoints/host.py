@@ -83,7 +83,7 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
     convert = methods.add_parser("convert-run", help="convert a stopped run's JSONL journal")
     convert.add_argument("run", help="run id")
     convert.add_argument("--project", type=Path, default=cwd, help="project directory")
-    bulk = methods.add_parser("convert-runs", help="convert stopped project and host-index runs")
+    bulk = methods.add_parser("convert-runs", help="convert stopped runs in the selected project")
     bulk.add_argument("--project", type=Path, default=cwd, help="project directory")
     args = parser.parse_args(argv)
     conversion = import_module("vibesys.api.transport")
@@ -100,7 +100,15 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
             summary = ", ".join(
                 f"{status}={counts[status]}" for status in conversion.ConversionStatus
             )
-            return int(counts[conversion.ConversionStatus.FAILED] > 0), output + summary + "\n", ""
+            return (
+                int(
+                    counts[conversion.ConversionStatus.FAILED]
+                    + counts[conversion.ConversionStatus.CANNOT_CONVERT]
+                    > 0
+                ),
+                output + summary + "\n",
+                "",
+            )
         result = conversion.convert_run(project, args.run, clock=clock, threads=OsThreads())
     except (OSError, ValueError, TypeError, ProjectError) as exc:
         return 1, "", f"vibesys host {args.method}: {exc}\n"
@@ -261,8 +269,10 @@ def _serve_conversion(payload: bytes, platform: Platform) -> bytes:
     """Convert stopped runs; the conversion engine loads only for this command."""
     transport = import_module("vibesys.api.transport")
 
-    def conversions(project: Project) -> Iterator[RunConversion]:
-        return transport.iter_conversions(project, clock=platform.clock, threads=platform.threads)
+    def conversions(project: Project, after_run: str) -> Iterator[RunConversion]:
+        return transport.iter_conversions(
+            project, clock=platform.clock, threads=platform.threads, after_run=after_run
+        )
 
     return serve_convert_saved_runs(
         payload, conversions=conversions, clock=platform.clock, home=Path.home()

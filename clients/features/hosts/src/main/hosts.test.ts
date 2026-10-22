@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
 import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
-import {FAKE_MODEL_CATALOGUE, FakeLink, record} from '@vibesys/connection/testing';
+import {FAKE_MODEL_CATALOGUE, FakeLink, phaseReached, record} from '@vibesys/connection/testing';
 import {RUN_EVENT_TYPES_BY_KINDS, type RunSummary} from '@vibesys/contracts/host-helper';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
@@ -2778,7 +2778,7 @@ for (const enabled of [false, true]) {
   });
 }
 
-test('a v2 run list converts each project once, before listing, and retries a failed conversion', async () => {
+test('a v2 run list starts one conversion pass per project without retry storms', async () => {
   const link = new FakeLink();
   const events: string[] = [];
   const logs: string[] = [];
@@ -2816,21 +2816,22 @@ test('a v2 run list converts each project once, before listing, and retries a fa
     message => logs.push(message),
   );
   await using _manager = subject.manager;
-  for (const project of ['/srv/a', '/srv/a', '/srv/a', '/srv/b', '/srv/b'])
+  for (const project of ['/srv/a', '/srv/a', '/srv/a', '/srv/b', '/srv/b', '/srv/c'])
     await subject.hosts.projectRuns(LOCAL, project);
   expect(events).toEqual([
     'convert /srv/a',
     'list /srv/a',
-    'convert /srv/a',
     'list /srv/a',
     'list /srv/a',
     'convert /srv/b',
     'list /srv/b',
     'list /srv/b',
+    'convert /srv/c',
+    'list /srv/c',
   ]);
   expect(logs.filter(line => line.includes('conver'))).toEqual([
     'This Mac: run conversion failed: gateway closed',
-    'This Mac: runs converted 1, skipped 1, failed 1, already converted 2',
+    'This Mac: runs converted 1, skipped 1, failed 1, cannot convert 0, already converted 2',
     'This Mac: run torn did not convert: journal is torn',
     'This Mac: run conversion needs a newer checkout',
   ]);
@@ -2888,3 +2889,103 @@ test('a v2 host converts each project the app has met on it once, when it is sho
   await hosts.projectRuns(ALPHA, '/srv/a');
   expect(asked.sort()).toEqual(['ssh:alpha /srv/a', 'ssh:alpha /srv/b']);
 });
+
+test('listing finishes while conversion is held and disposal aborts the host signal', async () => {
+  const started = Promise.withResolvers<AbortSignal>();
+  const held = Promise.withResolvers<import('@vibesys/connection').RunConversionOutcome>();
+  const subject = completionSubject(new FakeLink(), {
+    enabled: true,
+    list: async () => [],
+    convert: async (_host, _project, signal) => {
+      started.resolve(signal);
+      return held.promise;
+    },
+  });
+  const listed = subject.hosts.projectRuns(LOCAL, '/project');
+  const signal = await started.promise;
+  expect(await listed).toEqual([]);
+  await subject.manager[Symbol.asyncDispose]();
+  expect(signal.aborted).toBe(true);
+  held.resolve({kind: 'converted', runs: [], alreadyConverted: 0, unreported: 0});
+});
+
+for (const exit of ['retire', 'switch', 'disconnect', 'needs-update'] as const) {
+  test(`a host ${exit} aborts its conversion and reconnect retries needs-update`, async () => {
+    const clock = new FakeClock();
+    const link = new FakeLink();
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateRecent(current =>
+      remember(current, {
+        host: 'ssh:alpha',
+        project: '/project',
+        task: null,
+        runId: 'old',
+        instanceId: null,
+        attachedAt: 1,
+      }),
+    );
+    // Visible-only hosts leave the desired set on a switch or owner retirement.
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/src'}));
+    await settings.updateHosts(current => withHostSettings(current, BETA, {checkout: '/src'}));
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: clock.scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const calls: AbortSignal[] = [];
+    const started = Promise.withResolvers<void>();
+    const restarted = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<import('@vibesys/connection').RunConversionOutcome>();
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      transportV2: async () => true,
+      runs: {start: () => {}, cancel: () => {}},
+      savedRuns: {list: async () => []},
+      runConversion: {
+        convert: async (_host, _project, signal) => {
+          calls.push(signal);
+          if (calls.length === 1) {
+            started.resolve();
+            if (exit === 'needs-update') return {kind: 'needs-update'};
+            return held.promise;
+          }
+          restarted.resolve();
+          return {kind: 'needs-update'};
+        },
+      },
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.host(ALPHA, 'owner');
+    await started.promise;
+    if (exit === 'retire' || exit === 'needs-update') await hosts.retireOwner('owner');
+    else if (exit === 'switch') await hosts.host(BETA, 'owner');
+    else {
+      const connection = manager.existing('ssh:alpha');
+      if (connection === null) throw new Error('missing host connection');
+      const disconnected = phaseReached(connection, 'reconnecting');
+      link.helper.drop();
+      await disconnected;
+    }
+    expect(calls[0]?.aborted).toBe(true);
+    held.resolve({kind: 'needs-update'});
+    if (exit === 'disconnect') {
+      clock.advanceBy(1);
+    } else await hosts.host(ALPHA, 'owner');
+    await restarted.promise;
+    expect(calls[1]?.aborted).toBe(false);
+  });
+}

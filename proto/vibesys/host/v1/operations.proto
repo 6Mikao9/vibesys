@@ -1727,6 +1727,8 @@ message ConvertSavedRunsRequest {
     min_len: 1
     max_bytes: 4096
   }];
+  // Resume after the last row of a previous bounded call; empty starts a fresh pass.
+  string after_run = 3 [(buf.validate.field).string.max_bytes = 8192];
 }
 // One row per attempted run, except runs already converted, which are only counted.
 message ConvertSavedRunsResponse {
@@ -1744,6 +1746,8 @@ message ConvertSavedRunsResponse {
   uint32 already_converted = 5;
   // Attempted runs beyond the row limit.
   uint32 unreported = 6;
+  // Opaque position to pass as after_run when complete is false.
+  string next_run = 7 [(buf.validate.field).string.max_bytes = 8192];
 }
 message RunConversion {
   // A project run id, or the host index entry path of a run outside the project.
@@ -1762,4 +1766,5 @@ enum RunConversionStatus {
   RUN_CONVERSION_STATUS_CONVERTED = 1;
   RUN_CONVERSION_STATUS_SKIPPED = 2;
   RUN_CONVERSION_STATUS_FAILED = 3;
+  RUN_CONVERSION_STATUS_CANNOT_CONVERT = 4;
 }

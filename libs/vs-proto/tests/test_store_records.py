@@ -109,6 +109,9 @@ def message_examples() -> dict[str, Message]:
         ]
         for message in walk(root)
     }
+    examples["RunConversionRefusal"] = p.RunConversionRefusal(
+        journal_size=1, journal_modified_ns=1, reason="cannot convert: historical attrs"
+    )
     examples["Failure"] = p.Failure(kind=p.SpanFailureKind.OUTCOME, message="Gate failed")
     return examples
 
