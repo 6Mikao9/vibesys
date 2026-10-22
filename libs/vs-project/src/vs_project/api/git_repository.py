@@ -293,7 +293,11 @@ class GitRepository(Protocol):
     def root_commit(self, revision: Revision) -> str | None:
         """The oldest parentless commit reachable from ``revision``, or ``None``.
 
-        Raises ``GitCommandError`` when ``revision`` does not resolve (portable).
+        A commit listed in ``.git/shallow`` counts as parentless, the way
+        ``git rev-list --max-parents=0`` treats the shallow boundary. Raises
+        ``GitCommandError`` when ``revision`` does not resolve. When the
+        repository is shallow and the history still cannot be walked, the error
+        names the repository and ``git fetch --unshallow`` (portable).
         """
         ...
 

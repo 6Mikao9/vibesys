@@ -245,9 +245,28 @@ class CliGitRepository:
         return self._run(["merge-base", "--is-ancestor", ancestor, descendant]).returncode == 0
 
     def root_commit(self, revision: Revision) -> str | None:
-        output = self._run_checked(["rev-list", "--max-parents=0", "--reverse", revision]).stdout
-        roots = _text(output).splitlines()
+        args = ["rev-list", "--max-parents=0", "--reverse", revision]
+        result = self._run(args)
+        if result.returncode != 0:
+            detail = _text(result.stderr).strip()
+            if self._is_shallow():
+                detail = (
+                    f"{detail}; {self._root} is shallow, so history stops at .git/shallow. "
+                    "If commits before that boundary are required, "
+                    f"run `git fetch --unshallow` in {self._root}"
+                )
+            error = GitCommandError(["git", *args], result.returncode, detail)
+            self._faults.warning(
+                f"git command failed: git {' '.join(args)}",
+                detail=f"exit code {result.returncode}: {detail}",
+            )
+            raise error
+        roots = _text(result.stdout).splitlines()
         return roots[0] if roots else None
+
+    def _is_shallow(self) -> bool:
+        result = self._run(["rev-parse", "--is-shallow-repository"])
+        return result.returncode == 0 and _text(result.stdout).strip() == "true"
 
     def first_commit_adding(self, pathspecs: Sequence[Pathspec]) -> str | None:
         output = self._run_checked(
