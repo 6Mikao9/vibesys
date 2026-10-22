@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
-from vs_core._comparison import SETTLE_RUNS
+from vs_core._comparison import SETTLE_RUNS, measures
 from vs_core._registry import ContractError
 from vs_core._strategy_operations import (
     CommandCapture,
@@ -22,7 +22,6 @@ from vs_core._strategy_operations import (
 from vs_core.types.common import (
     THIS_RUN,
     DecisionId,
-    EvidenceKind,
     ObservationStatus,
     RevisionRef,
     Value,
@@ -295,17 +294,19 @@ class Evaluation:
         )
 
     def recorded(
-        self, revision: RevisionRef, *, purpose: str, kind: EvidenceKind, recipe: MeasurementRecipe
+        self, revision: RevisionRef, *, purpose: str, recipe: MeasurementRecipe
     ) -> tuple[EvidenceRef, ...]:
-        """Every conclusive trusted record of ``kind`` the ledger holds of ``revision`` for ``purpose``.
+        """Every measurement the ledger holds of ``revision`` for ``purpose``: its samples.
 
-        Whichever scope took it (the strategy's own measurement, or a run core made on its
-        behalf) and whichever request, as long as it was taken under ``recipe``'s evaluator,
-        workload and environment, so the samples are of one measurement. Oldest first. The
-        read is journaled with the flow, so a replay sees the records the decision saw.
+        A measurement is the record that gives core a sample (`vs_core._comparison.measures`),
+        one core took itself and did not re-read from another run. Whichever scope took it (the
+        strategy's own, or a run core made on its behalf) and whichever request, as long as it
+        was taken under ``recipe``'s evaluator, workload and environment, so the samples are of
+        one measurement. Oldest first. The read is journaled with the flow, so a replay sees
+        the records the decision saw.
         """
         return self._kit.read(
-            lambda view: _recorded(view.measurements, revision, purpose, kind, recipe), _REFS
+            lambda view: _recorded(view.measurements, revision, purpose, recipe), _REFS
         )
 
     def last_evaluated(self, workspace: Workspace) -> RevisionRef | None:
@@ -324,17 +325,15 @@ def _recorded(
     measurements: tuple[EvidenceRef, ...],
     revision: RevisionRef,
     purpose: str,
-    kind: EvidenceKind,
     recipe: MeasurementRecipe,
 ) -> tuple[EvidenceRef, ...]:
     held = (
         item
         for item in measurements
-        if item.provenance == "trusted"
-        and item.status == ObservationStatus.SUCCEEDED
+        if measures(item)
+        and item.reused_from is None
         and item.candidate == revision
         and item.purpose == purpose
-        and item.kind is kind
         and item.evaluator_digest == recipe.evaluator_digest
         and item.workload_digest == recipe.workload_digest
         and item.environment_digest == recipe.environment_digest

@@ -87,14 +87,13 @@ the first run alone would leave every close call inconclusive.
 
 Without a declared floor the candidate needs those three runs too, and nobody else gives them:
 an agent's call for content it already measured is answered with that evaluation, and the
-official check adds at most one run. So a close call without a floor also earns the candidate's
+official check adds none. So a close call without a floor also earns the candidate's
 input more runs in its scope (`remeasures_candidate`), up to ``MIN_SAMPLES_WITHOUT_FLOOR`` in
 all. Under a floor one run a side can give a verdict, and core takes no run of the candidate.
 
 A comparison without a floor whose ``MIN_SAMPLES_WITHOUT_FLOOR`` runs a side all read alike can
 never give a verdict (`verdict_unreachable`): a deterministic benchmark reads the same again. It
-earns neither side another run, and the official check is answered by the samples held instead
-of adding one (`official_needs_samples`), so the runs a comparison costs are bounded.
+earns neither side another run, so the runs a comparison costs are bounded.
 """
 
 from __future__ import annotations
@@ -167,8 +166,8 @@ __all__ = [
     "feeding_run_under_way",
     "fresh",
     "latest_comparisons",
+    "measures",
     "moment_of",
-    "official_needs_samples",
     "opened_answer",
     "policy_of",
     "remeasures_base",
@@ -269,6 +268,17 @@ class ComparisonPolicy:
         """Whether the task stated the noise of ``metric``; a floor of 0 states nothing (module docstring)."""
         return self.floor_of(metric) > 0
 
+    @property
+    def headline_floor_declared(self) -> bool:
+        """Whether the task stated the noise of its headline metric, which every comparison states.
+
+        A sample carries the headline reading of its run (`sample_of`), and the objectives come
+        headline first (``TaskTerms.objectives``). With no objectives only ``relative_noise`` can
+        state it.
+        """
+        headline = next((name for name, _ in self.directions), None)
+        return self.noise_floor > 0 if headline is None else self.declares_floor(headline)
+
 
 @dataclass(frozen=True, slots=True)
 class Moment:
@@ -335,7 +345,7 @@ def evaluation_of(identity: MeasurementIdentity) -> str:
     )
 
 
-def _measures(evidence: EvidenceRef) -> bool:
+def measures(evidence: EvidenceRef) -> bool:
     """Whether ``evidence`` is a measurement: a trusted, successful benchmark record with a reading.
 
     Only such a record gives a sample (`sample_of`) and only such a record states an answer
@@ -364,7 +374,7 @@ def sample_of(
     named = plan.measured_input or measured_input
     if (
         job.reuses is not None
-        or not _measures(evidence)
+        or not measures(evidence)
         or evidence.reading is None
         or named is None
         or not isinstance(plan.candidate, RevisionRef)
@@ -402,7 +412,7 @@ def as_answer(
     figure that answer closed on (`_closed_answer`), so a run that lands later does not part the
     ledger from the verdict the strategy took.
 
-    Only a measurement record states an answer (`_measures`): a failed or untrusted record
+    Only a measurement record states an answer (`measures`): a failed or untrusted record
     keeps the reading its run reported, so a failed run never reads as the mean of runs that
     passed. Any other record, and a record whose samples read another metric, is returned as
     it is. Only the headline metric is aggregated: a record's other objectives are the
@@ -413,7 +423,7 @@ def as_answer(
     if (
         plan.purpose != "official"
         or reading is None
-        or not _measures(evidence)
+        or not measures(evidence)
         or plan.measured_input is None
         or not isinstance(plan.candidate, RevisionRef)
     ):
@@ -457,7 +467,7 @@ def _closed_answer(
             == measured.evaluation
         ):
             for record in other.evidence:
-                if _measures(record):
+                if measures(record):
                     return record.reading
     return None
 
@@ -594,8 +604,8 @@ def scope_samples(state: EvaluationState, scope: Scope, measured: Measured) -> t
     A candidate's side of a comparison is its own scope's samples only (`comparison_of`): each
     attempt, and each generation of a reopened one, is compared on the runs it made, though
     another holds samples of the same input. Everything that counts a candidate's samples
-    counts them here, so the comparison, the official answer (`as_answer`) and the sample cap
-    (`official_needs_samples`) never disagree on how many there are.
+    counts them here, so the comparison and the official answer (`as_answer`) never disagree
+    on how many there are.
     """
     return tuple(s for s in samples_of(state, measured) if s.scope == scope)
 
@@ -1251,58 +1261,4 @@ def remeasures_candidate(
         and comparison.candidate_samples < MIN_SAMPLES_WITHOUT_FLOOR
         and not base_in_flight(state, candidate, comparison.scope)
         and not base_run_stalled(state, comparison, evaluation, moment)
-    )
-
-
-def official_needs_samples(
-    state: EvaluationState, scope: Scope, measured: Measured, moment: Moment
-) -> bool:
-    """Whether the scope's samples of an input fall short of settling its comparison.
-
-    The official measurement of an input the scope already measured adds a run only then:
-
-    - the samples held are a close call against the base, so one more narrows the noise,
-      unless no run can give them a verdict (`verdict_unreachable`), or, without a declared
-      floor, the samples held and the candidate's runs under way already make the sample cap;
-    - or the samples name a base but no sample of it is fresh at ``moment`` (its runs went
-      stale, failed or are still running), so they have no verdict at all, and the answer must
-      not rest on the runs the agent happened to make: the official check adds a run of its
-      own.
-
-    With no base named, or samples that cannot be compared (another metric, no direction), the
-    samples held are all there is to ask for.
-    """
-    _, anchor = _anchored(state, scope, measured)
-    if anchor is None:
-        return False
-    if not fresh(samples_of(state, Measured(measured.evaluation, anchor.measured_input)), moment):
-        return True
-    held = comparison_of(state, scope, measured, moment)
-    return (
-        held is not None
-        and close_call(held)
-        and not verdict_unreachable(held, moment.policy)
-        and not _candidate_runs_spoken_for(state, scope, measured, moment.policy, held.metric)
-    )
-
-
-def _candidate_runs_spoken_for(
-    state: EvaluationState,
-    scope: Scope,
-    measured: Measured,
-    policy: ComparisonPolicy,
-    metric: str,
-) -> bool:
-    """Whether the candidate's samples and its runs under way already make the sample cap.
-
-    Without a declared floor a candidate holds at most ``MIN_SAMPLES_WITHOUT_FLOOR`` runs
-    (`remeasures_candidate`). A run of its input still under way, core's last re-run or another
-    one, lands a sample of its own, so an official run added beside it would be one too many.
-    The official measurement is then answered by the samples held, and the comparison settles
-    when the run under way lands. Both counts are the scope's own, as the comparison's are
-    (`scope_samples`): another attempt's samples of the same input are not this candidate's.
-    """
-    return not policy.declares_floor(metric) and (
-        len(scope_samples(state, scope, measured)) + runs_in_flight(state, measured, scope)
-        >= MIN_SAMPLES_WITHOUT_FLOOR
     )

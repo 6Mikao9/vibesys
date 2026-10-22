@@ -191,9 +191,7 @@ async def the_bar(ctx: Flow, ws: Workspace, baseline: Baseline) -> Baseline:
     decision gives the same bar; a settlement already asked for is not decided again.
     """
     recipe = MeasurementRecipe.of(ctx.facts)
-    refs = ctx.evaluation.recorded(
-        ctx.facts.baseline, purpose="baseline", kind=EvidenceKind.BENCHMARK, recipe=recipe
-    )
+    refs = ctx.evaluation.recorded(ctx.facts.baseline, purpose="baseline", recipe=recipe)
     if not refs:
         return baseline
     return with_samples(baseline, await interpret(ctx, ws, Proof(refs=refs)))

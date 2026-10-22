@@ -1,9 +1,10 @@
-"""A flow sees every trusted sample the ledger holds of a revision, whichever scope took it.
+"""A flow sees every sample the ledger holds of a revision, whichever scope took it.
 
 The strategy measures the input once, and core takes more runs of it in attempts' scopes when a
 comparison is a close call. A decision that compares with the input reads all of them
-(``ctx.evaluation.recorded``), so it must offer the conclusive trusted records of the revision
-for the purpose under the recipe's evaluator, workload and environment, and no other.
+(``ctx.evaluation.recorded``), so it must offer the records that give core a sample (not a
+re-read) of the revision for the purpose under the recipe's evaluator, workload and
+environment, and no other.
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ def record(
         environment_digest="n",
         provenance="trusted",
         status=core.ObservationStatus.SUCCEEDED,
+        reading=core.Reading(metric="rate", value=1.0, direction="max"),
     )
     return ref.model_copy(update=changes)
 
@@ -60,6 +62,8 @@ FOREIGN = {
     "another revision": {"candidate": OTHER},
     "another purpose": {"purpose": "official"},
     "accuracy": {"kind": core.EvidenceKind.CORRECTNESS},
+    "no reading": {"reading": None},
+    "re-read of another run": {"reused_from": core.RequestId(root="source")},
     "untrusted": {"provenance": "self-report"},
     "failed": {"status": core.ObservationStatus.FAILED},
     "another evaluator": {"evaluator_digest": "x"},
@@ -73,9 +77,7 @@ def offered(measurements: tuple[core.EvidenceRef, ...]) -> tuple[str, ...]:
     """The evidence IDs ``recorded`` offers for the input's baseline benchmarks."""
 
     async def decide(ctx: core.Flow, _config: Config) -> None:
-        found = ctx.evaluation.recorded(
-            INPUT, purpose="baseline", kind=core.EvidenceKind.BENCHMARK, recipe=RECIPE
-        )
+        found = ctx.evaluation.recorded(INPUT, purpose="baseline", recipe=RECIPE)
         ctx.publish(Seen(ids=tuple(item.evidence_id.root for item in found)))
 
     run = start(decide, view=FakeView(changes={"measurements": measurements}))

@@ -43,7 +43,7 @@ class ComparisonRule(Value):
     """
 
     noise_declared: bool
-    """Whether the task declares its per-run noise (``relative_noise`` above 0)."""
+    """Whether the task declares the per-run noise of its headline metric (above 0)."""
     verdict_noises: float = Field(gt=0)
     """Under a declared noise, how many noises a difference must exceed for a verdict."""
     min_runs: int = Field(ge=1)
@@ -59,7 +59,7 @@ def core_protocol_variables(policy: ComparisonPolicy) -> dict[str, object]:
     """
     return {
         "comparison_rule": ComparisonRule(
-            noise_declared=policy.floor_declared,
+            noise_declared=policy.headline_floor_declared,
             verdict_noises=VERDICT_NOISES,
             min_runs=MIN_SAMPLES_WITHOUT_FLOOR,
         )

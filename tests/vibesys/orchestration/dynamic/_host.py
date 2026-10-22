@@ -65,6 +65,7 @@ from vs_core.api import (
     OperationFinished,
     OperationId,
     OperationResult,
+    Reading,
     RejectionCode,
     RequestId,
     RequestTurn,
@@ -119,6 +120,9 @@ OUTLINER_LABEL = "outliner"
 INPUT_PATH = "input/"
 """Where the waits of the task that measures the input are asked from."""
 INPUT_THROUGHPUT = 50.0
+
+_HEADLINE = Reading(metric="throughput", value=INPUT_THROUGHPUT, direction="max")
+"""The headline reading a benchmark record of the world's ledger carries (it is a sample)."""
 CANDIDATE_THROUGHPUT = 100.0
 
 
@@ -570,6 +574,7 @@ class Host:
                     status=ObservationStatus.FAILED
                     if self._benchmark_fails(stage.stage_id, candidate, is_input=is_input)
                     else self._status_of(stage.stage_id, is_input=is_input),
+                    reading=_HEADLINE if _KINDS[stage.stage_id] is EvidenceKind.BENCHMARK else None,
                 )
                 for index, stage in enumerate(plan.stages)
             )
@@ -603,6 +608,7 @@ class Host:
                 environment_digest=refs[0].environment_digest,
                 provenance="trusted",
                 status=ObservationStatus.SUCCEEDED,
+                reading=_HEADLINE,
             )
             for index, _ in enumerate(self.input_samples)
             if refs

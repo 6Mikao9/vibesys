@@ -88,6 +88,6 @@ def test_the_latest_comparison_states_the_noise(
 @across_restarts
 def test_a_comparison_that_estimates_no_noise_states_none(*, restarting: bool) -> None:
     """Runs that read alike show no noise, which is no measurement that there is none."""
-    assert core.terms_policy(TERMS).floor_declared is False
+    assert core.terms_policy(TERMS).headline_floor_declared is False
 
     assert next_designer(restarting=restarting, noises=(0.0,)).measurement_noise is None
