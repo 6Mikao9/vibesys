@@ -23,6 +23,7 @@ export interface WireFixture {
   chatRequest: number[];
   chat: number[];
   watchRuns: number[];
+  behavior?: GatewayBehavior;
 }
 export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixture {
   const encoded = fixture.records.map(record => toBinary(RecordSchema, record));
@@ -107,6 +108,12 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
   };
 }
 
+/** How the gateway misbehaves: a refusal carries its gRPC status; the Tail can be held back. */
+export interface GatewayBehavior {
+  readonly skeleton?: {readonly status: number; readonly message: string};
+  readonly holdTail?: boolean;
+}
+
 export function installGateway(input: WireFixture): void {
   const calls: string[] = [];
   const streams = new Set<(bytes: Uint8Array) => void>();
@@ -114,11 +121,27 @@ export function installGateway(input: WireFixture): void {
   const history = [input.tail];
   const chats = new Set<(bytes: Uint8Array) => void>();
   const watchers = new Set<(bytes: Uint8Array) => void>();
+  const held = new Set<(bytes: Uint8Array) => void>();
+  const openTail = (request: Uint8Array, receive: (bytes: Uint8Array) => void): void => {
+    if ([...request].slice(-input.chatRequest.length).join(',') === input.chatRequest.join(',')) {
+      chats.add(receive);
+      receive(new Uint8Array(input.chat));
+      return;
+    }
+    streams.add(receive);
+    if (input.behavior?.holdTail) held.add(receive);
+    else for (const bytes of history) receive(new Uint8Array(bytes));
+  };
   let active = 0;
   Object.assign(window, {
     vibesysGateway: {
       unary: (host: string, method: string, request: Uint8Array) => {
         calls.push(method);
+        const refused = input.behavior?.skeleton;
+        if (method === input.methods.skeleton && refused) {
+          const error = Object.assign(new Error(refused.message), {status: refused.status});
+          return {result: Promise.reject(error), cancel: () => undefined};
+        }
         if (method === input.methods.hostCall) {
           const peer = window as unknown as {
             postIntent(host: string, bytes: number[]): Promise<number[]>;
@@ -149,15 +172,7 @@ export function installGateway(input: WireFixture): void {
         active += 1;
         let closed = false;
         if (method === input.methods.tail) {
-          if (
-            [..._bytes].slice(-input.chatRequest.length).join(',') === input.chatRequest.join(',')
-          ) {
-            chats.add(receive);
-            receive(new Uint8Array(input.chat));
-          } else {
-            streams.add(receive);
-            for (const bytes of history) receive(new Uint8Array(bytes));
-          }
+          openTail(_bytes, receive);
         } else if (method === input.methods.watchRuns) {
           watchers.add(receive);
           receive(new Uint8Array(input.watchRuns));
@@ -169,6 +184,7 @@ export function installGateway(input: WireFixture): void {
               closed = true;
               active -= 1;
               streams.delete(receive);
+              held.delete(receive);
               ended.delete(finish);
               chats.delete(receive);
               watchers.delete(receive);
@@ -178,6 +194,10 @@ export function installGateway(input: WireFixture): void {
       },
     },
     fakeGateway: {
+      releaseTail: () => {
+        for (const receive of held) for (const bytes of history) receive(new Uint8Array(bytes));
+        held.clear();
+      },
       appendChat: (bytes: number[]) => {
         for (const receive of chats) receive(new Uint8Array(bytes));
       },
