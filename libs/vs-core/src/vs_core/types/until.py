@@ -200,7 +200,7 @@ class Failed(Value):
     turn_failure: TurnFailureKind | None = None
     digest: str | None = None
     detail: str = ""
-    """The executor's failure text, for a turn that failed. Empty for every other reason."""
+    """The executor's failure text, for a failed turn or a lost transport. Empty otherwise."""
     refusal: WaitRefusal | None = None
 
     @model_validator(mode="after")
@@ -220,7 +220,7 @@ class Failed(Value):
         if self.digest is not None and self.reason != FailureReason.TURN_FAILED:
             message = f"digest does not belong to reason {self.reason.value}"
             raise ValueError(message)
-        if self.detail and self.reason != FailureReason.TURN_FAILED:
+        if self.detail and self.reason not in (FailureReason.TURN_FAILED, FailureReason.LOST):
             message = f"detail does not belong to reason {self.reason.value}"
             raise ValueError(message)
         for name, allowed in expected.items():

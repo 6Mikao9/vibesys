@@ -313,6 +313,30 @@ def test_a_lost_turn_is_asked_again_as_often_and_after_as_long_as_the_role_says(
     assert run.sleeping_until == ()
 
 
+@_RESTARTING
+def test_a_lost_turn_reports_why_the_transport_lost_it(*, restarting: bool) -> None:
+    """A transport loss keeps the cause the turn result carried.
+
+    Before, the give-up was ``Failed(reason=lost)`` with an empty detail, so the
+    run's end reason could not say why.
+    """
+    cause = "SessionResumeError: Operation not permitted"
+    role = role_of(lost_turns=0)
+
+    async def root(ctx: core.Flow, config: Config) -> None:
+        del config
+        result = await ctx.agents.session(role).turn(Prompt(text="go"))
+        ctx.publish(result)
+
+    search = fake_search("govern", Config, (role,))(root)
+    run = FlowRun.start(search, Config(), restarting=restarting)
+    run.lose(turn(run), detail=cause)
+    failed = run.driver.published(run.state, core.Failed)
+    assert failed is not None
+    assert failed.reason is core.FailureReason.LOST
+    assert failed.detail == cause
+
+
 # -- a turn that waited, and was lost when resumed ---------------------------------------------------------
 
 

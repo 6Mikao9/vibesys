@@ -139,6 +139,9 @@ async def test_cancel_of_an_interrupted_turn_releases_it_without_dispatching_aga
         cancelled = await w.execute(cancel_request())
         assert status(cancelled) is ObservationStatus.CANCELLED
         assert cancelled.observation.observation.released
+        assert "provider died after accepting the turn" in (
+            cancelled.observation.observation.diagnostic
+        )
         assert len(w.host.turns) == 1, "cancel never re-dispatches"
         assert_core_accepts([lost, cancelled], expect_retry=False)
 

@@ -438,13 +438,16 @@ class FlowRun[C]:
         self._timeline.append(f"{asked.decision.root}:raw")
         self.send(self._ended(asked, ObservationStatus.SUCCEEDED, output=output_json))
 
-    def lose(self, asked: Asked) -> None:
-        """The transport lost the turn."""
+    def lose(self, asked: Asked, *, detail: str = "") -> None:
+        """The transport lost the turn. ``detail`` is the cause the failure keeps."""
         self._close(asked)
         self._timeline.append(f"{asked.decision.root}:lost")
-        self.send(
-            self._ended(asked, ObservationStatus.FAILED, failure=TurnFailureKind.TRANSPORT_LOST)
-        )
+        ended = self._ended(asked, ObservationStatus.FAILED, failure=TurnFailureKind.TRANSPORT_LOST)
+        if detail:
+            ended = ended.model_copy(
+                update={"result": ended.result.model_copy(update={"detail": detail})}
+            )
+        self.send(ended)
 
     def fail_turn(self, asked: Asked, failure: TurnFailureKind, *, detail: str = "") -> None:
         """The provider failed the turn for good."""

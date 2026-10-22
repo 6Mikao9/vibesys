@@ -452,6 +452,7 @@ class SessionLifecycleRequests:
     ) -> ObservationFacts:
         """Stop the turn this instance runs, then judge it from its journal row."""
         key = AgentSessionKey.parse(binding.session_key)
+        cause = ""
         try:
             self._sessions.cancel(key, invocation_id)
             record = _journal_row(self._sessions, key, invocation_id)
@@ -472,10 +473,16 @@ class SessionLifecycleRequests:
                 )
             # Unknown was recorded by a dispatch call that returned, so the provider turn
             # of that call is over. release_interrupted still refuses an active invocation.
+            # The row's detail is why the transport was lost; an empty one still names the loss.
             self._sessions.release_interrupted(key, invocation_id)
+            if isinstance(record.outcome, Unknown):
+                cause = (
+                    record.outcome.detail.strip()
+                    or "the transport lost the turn and reported no cause"
+                )
         except _SESSION_ERRORS as error:
             return _unknown(f"the invocation cannot be settled: {error}", binding)
-        return _released(ObservationStatus.CANCELLED, binding)
+        return _released(ObservationStatus.CANCELLED, binding, cause)
 
     def _never_journaled(self, closure: MayHold, binding: SessionBinding) -> ObservationFacts:
         """A dispatched invocation with no journal row: no provider call began, yet.

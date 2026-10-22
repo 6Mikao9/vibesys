@@ -477,7 +477,7 @@ class _Ask:
     async def _unsuccessful(self, result: TurnResult) -> Failed | _Again:
         role, turn = self.role, result.invocation
         if result.failure is TurnFailureKind.TRANSPORT_LOST:
-            return await self._lost(turn)
+            return await self._lost(turn, result.detail)
         if result.failure is TurnFailureKind.PROVIDER_UNAVAILABLE:
             return await self._unavailable(turn)
         if result.reply_errors:
@@ -534,7 +534,7 @@ class _Ask:
         self.resuming = False
         return _AGAIN
 
-    async def _lost(self, lost: InvocationRef) -> Failed | _Again:
+    async def _lost(self, lost: InvocationRef, detail: str = "") -> Failed | _Again:
         """The transport lost the turn: ask the same question again after a backoff, or report it.
 
         A turn that continued a wait is asked again at most once, and only if the role asks
@@ -547,7 +547,9 @@ class _Ask:
         role = self.role
         allowed = min(1, role.lost_turns) if self.resuming else role.lost_turns
         if self.drops >= allowed:
-            return Failed(reason=FailureReason.LOST, decision=self.decision, turn=lost)
+            return Failed(
+                reason=FailureReason.LOST, decision=self.decision, turn=lost, detail=detail
+            )
         await self.kit.timer(self.kit.now() + role.lost_turn_backoff.delay(self.drops))
         self.charge = "correction"
         self.predecessor = lost
