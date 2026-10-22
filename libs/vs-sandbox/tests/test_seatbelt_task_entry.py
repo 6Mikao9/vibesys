@@ -22,7 +22,9 @@ from vs_sandbox.api import (
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import ScriptedProbe
 
-type _Operation = Literal["file-read-metadata", "file-read-data", "file-write-data"]
+type _Operation = Literal[
+    "file-read-metadata", "file-read-data", "file-write-data", "file-write-unlink"
+]
 _PATH = r'\((literal|subpath)\s+("(?:[^"\\]|\\.)*")\)'
 _RULE = re.compile(
     r"\((allow|deny)\s+((?:file-[a-z*-]+\s*)+)"
@@ -140,6 +142,8 @@ def test_metal_and_temp_writes_are_redirected_without_granting_shared_caches(
         index = ("DARWIN_USER_TEMP_DIR", "DARWIN_USER_CACHE_DIR").index(argv[1])
         return ProbeResult(0, str(roots[index]))
 
+    logs: list[str] = []
+
     def build(target: Path) -> SeatbeltSandbox:
         confinement = build_host_sandbox(
             target,
@@ -149,6 +153,7 @@ def test_metal_and_temp_writes_are_redirected_without_granting_shared_caches(
                 "DIRHELPER_USER_DIR_SUFFIX": "inherited-shared",
             },
             probe=ScriptedProbe(script),
+            log=logs.append,
             project_path_policy=ProjectPathPolicy(hidden_paths=(Path("run-record"),)),
             require_enforcement=True,
         )
@@ -158,6 +163,9 @@ def test_metal_and_temp_writes_are_redirected_without_granting_shared_caches(
     confinement = build(workspace)
     suffix = confinement.env["DIRHELPER_USER_DIR_SUFFIX"]
     assert suffix != "inherited-shared"
+    assert any(
+        "UV_CACHE_DIR under TMPDIR" in message and "Run state" in message for message in logs
+    )
     assert "/" not in suffix
     assert confinement.env["TMPDIR"] == str(roots[0].resolve() / suffix) + "/"
     assert all(confinement.env[name] == confinement.env["TMPDIR"] for name in ("TMP", "TEMP"))
@@ -172,6 +180,8 @@ def test_metal_and_temp_writes_are_redirected_without_granting_shared_caches(
         assert private.is_dir()
         assert private.stat().st_mode & 0o777 == 0o700
         assert filesystem.permits("file-write-data", private / "scratch")
+        assert filesystem.permits("file-write-unlink", private / "scratch")
+        assert not filesystem.permits("file-write-unlink", private)
         assert not filesystem.permits("file-write-data", root / "other-session" / "scratch")
         for cache in ("com.apple.metalfe", "com.apple.metal", "com.apple.gpuarchiver"):
             assert filesystem.permits("file-write-data", private / cache / "module.pcm")

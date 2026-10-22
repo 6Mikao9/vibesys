@@ -748,6 +748,11 @@ class SeatbeltSandbox(WorkspaceSandbox):
                 lines.append(
                     _seatbelt_path_rule("allow file-read* file-write*", path, is_directory=True)
                 )
+                # The framework owns the namespace entry. Keep the agent from
+                # replacing it with a symlink while another turn is launched.
+                lines.append(
+                    _seatbelt_path_rule("deny file-write-unlink", path, is_directory=False)
+                )
             # MTLCompilerService has its own confinement. Metal sends it an
             # extension for its cache; writing the cache alone is insufficient.
             lines.append("(allow file-issue-extension (require-all")
@@ -1284,7 +1289,7 @@ def _build_macos(
     options.log(
         "[hostsandbox] Darwin scratch and Metal caches are workspace-private. "
         "Shared uv/task-environment caches remain read-only: use a prepared environment, "
-        "or install into a workspace-private environment with UV_CACHE_DIR there. "
+        "or put a separate environment and UV_CACHE_DIR under TMPDIR. "
         "Run state stays hidden; use the run tools and supplied artifacts instead."
     )
     return confinement
