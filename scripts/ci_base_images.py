@@ -26,7 +26,10 @@ class ImagePin:
         repository = self.source.split(":", 1)[0]
         if "/" not in repository:
             repository = "library/" + repository
-        return f"docker.io/{repository}@{self.digest}"
+        registry = repository.split("/", 1)[0]
+        if "." not in registry:
+            repository = "docker.io/" + repository
+        return f"{repository}@{self.digest}"
 
     @property
     def mirror(self) -> str:

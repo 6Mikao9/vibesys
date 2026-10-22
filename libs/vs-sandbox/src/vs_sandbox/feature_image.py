@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import stat
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -346,27 +348,52 @@ class _Docker:
 
 
 def image_context_digest(context: Path, relative_paths: Iterable[str]) -> str:
-    """Hash sorted paths, entry types, permissions, file bytes and link targets.
+    """Hash Docker context entries, including links, permissions and Linux xattrs.
 
-    Callers select the entries Docker can read, including directories and links,
-    after applying their context's ignore policy. Modification times and ownership
-    are excluded: Docker COPY does not use modification times for cache identity,
-    and the builders assign container ownership themselves.
+    Callers select entries after their context's ignore policy. Hard-link groups
+    use their first relative path, so inode numbers never enter the identity.
+    Modification times are excluded consistently with Docker's cache checksum.
+    Python stages extended attributes on Linux; other supported platforms do not
+    expose those filesystem attributes through Python's copy2 implementation.
     """
     digest = hashlib.sha256()
+    hardlinks: dict[tuple[int, int], str] = {}
     for relative in sorted(relative_paths):
         path = context / relative
-        mode = path.lstat().st_mode
+        metadata = path.lstat()
+        mode = metadata.st_mode
+        link = ""
         if stat.S_ISLNK(mode):
-            payload = str(path.readlink()).encode()
+            payload = os.fsencode(path.readlink())
         elif stat.S_ISREG(mode):
+            link = hardlinks.setdefault((metadata.st_dev, metadata.st_ino), relative)
             payload = path.read_bytes()
         elif stat.S_ISDIR(mode):
             payload = b""
         else:
             message = f"unsupported image input: {path}"
             raise ValueError(message)
-        for part in (relative.encode(), str(mode).encode(), payload):
+        parts = (
+            os.fsencode(relative),
+            str(mode).encode(),
+            str(metadata.st_uid).encode(),
+            str(metadata.st_gid).encode(),
+            os.fsencode(link),
+            payload,
+            *_image_xattrs(path),
+        )
+        digest.update(len(parts).to_bytes(8, "big"))
+        for part in parts:
             digest.update(len(part).to_bytes(8, "big"))
             digest.update(part)
     return digest.hexdigest()
+
+
+def _image_xattrs(path: Path) -> tuple[bytes, ...]:
+    if sys.platform != "linux":
+        return ()
+    return tuple(
+        part
+        for name in sorted(os.listxattr(path, follow_symlinks=False))
+        for part in (os.fsencode(name), os.getxattr(path, name, follow_symlinks=False))
+    )

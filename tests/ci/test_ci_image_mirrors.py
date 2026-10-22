@@ -109,3 +109,16 @@ def test_malformed_inventory_shapes_are_rejected(tmp_path: Path, content: str) -
     path.write_text(content)
     with pytest.raises(ValueError, match=r"pins\.toml"):
         image_pins(path)
+
+
+@pytest.mark.parametrize(
+    ("source", "repository"),
+    [
+        ("python:3", "docker.io/library/python"),
+        ("vendor/image:1", "docker.io/vendor/image"),
+        ("registry.example.com/team/base:1", "registry.example.com/team/base"),
+    ],
+)
+def test_mirror_sources_follow_docker_registry_naming(source: str, repository: str) -> None:
+    pin = ImagePin(source, "sha256:" + "a" * 64)
+    assert pin.upstream == f"{repository}@{pin.digest}"

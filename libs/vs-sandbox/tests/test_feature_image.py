@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -530,3 +532,21 @@ def test_identical_feature_trees_with_permissions_and_links_have_the_same_tag(
             _build(runner, [feature])
             tags.extend(_tags(runner))
         assert tags[0] == tags[1]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Python copies extended attributes on Linux")
+@pytest.mark.regression
+@given(value=st.binary(max_size=40))
+@example(value=b"capability")
+def test_feature_extended_attributes_are_install_inputs(value: bytes) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        feature = _local(Path(directory), "tool-a", {})
+        payload = feature.directory / "payload"
+        payload.write_bytes(b"unchanged")
+        os.setxattr(payload, "user.vibesys-input", value)
+        runner = _Runner()
+        _build(runner, [feature])
+        before = set(runner.built)
+        os.setxattr(payload, "user.vibesys-input", value + b"\0")
+        _build(runner, [feature])
+        assert len(set(runner.built) - before) == 1
