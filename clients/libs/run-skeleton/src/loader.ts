@@ -11,6 +11,7 @@ import {
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
 import {type Actor, createActor, fromPromise} from 'xstate';
+import {DescriptorCache} from './descriptors.js';
 import {type SkeletonLoaderInput, skeletonLoaderMachine, type TailInput} from './loader-machine.js';
 
 /** Generic unary/server-stream byte bridge. Both operations must release resources on abort. */
@@ -26,6 +27,7 @@ export type RecordsListener = (records: readonly Uint8Array[]) => void;
 export function skeletonLoaderMachineFor(
   transport: RunTransport,
   records: RecordsListener = () => {},
+  descriptors: DescriptorCache = new DescriptorCache(),
 ): typeof skeletonLoaderMachine {
   return skeletonLoaderMachine.provide({
     actors: {
@@ -33,11 +35,17 @@ export function skeletonLoaderMachineFor(
         transport
           .unary(
             `${SERVICE}${HostService.method.skeleton.name}`,
-            toBinary(SkeletonRequestSchema, create(SkeletonRequestSchema, {runId: input})),
+            toBinary(
+              SkeletonRequestSchema,
+              create(SkeletonRequestSchema, {
+                runId: input,
+                knownDescriptorsSha256: descriptors.known(),
+              }),
+            ),
             signal,
           )
           .then(bytes => {
-            const response = fromBinary(SkeletonResponseSchema, bytes);
+            const response = descriptors.restore(fromBinary(SkeletonResponseSchema, bytes));
             records(response.records);
             return response;
           }),
@@ -81,10 +89,11 @@ export function startSkeletonLoader(
   schedule: ScheduleTimeout,
   input: SkeletonLoaderInput,
   records?: RecordsListener,
+  descriptors?: DescriptorCache,
 ): Actor<typeof skeletonLoaderMachine> {
   if (!input.runId || !Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0)
     throw new Error('loader: runId and positive timeoutMs required');
-  return createActor(skeletonLoaderMachineFor(transport, records), {
+  return createActor(skeletonLoaderMachineFor(transport, records, descriptors), {
     input,
     clock: clockFrom(schedule),
   }).start();
