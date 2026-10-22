@@ -6,7 +6,9 @@ import {
   ConnectionError,
   type ConnectionLease,
   HelperRequestError,
+  type RegistryCatalog,
   type RegistryProjects,
+  type RegistryRunCatalog,
   type RunWatch,
 } from '@vibesys/connection';
 import type {
@@ -69,6 +71,8 @@ export interface NewRunMainDeps {
   ) => Promise<{readonly runId: string; readonly instanceId: string}>;
   /** Create, copy, and destination checks when `transportV2` is on. */
   readonly registryProjects?: RegistryProjects;
+  readonly registryCatalog?: RegistryRunCatalog;
+  readonly registryReads?: RegistryCatalog;
   /** WatchRuns for the host a v2 start just launched on. */
   readonly watchRuns?: Pick<RunWatch, 'start'>;
 }
@@ -134,12 +138,7 @@ export class NewRunMain {
   answer(request: NewRunMainRequest): Promise<unknown> {
     switch (request.kind) {
       case 'describe-machine':
-        return this.#offered(
-          request.host,
-          {type: 'machine.describe'},
-          'Could not describe',
-          reply => (reply as {machine: MachineDescription}).machine,
-        );
+        return this.#describe(request.host);
       case 'preflight':
         return this.#preflight(request.host, request.inputs);
       case 'examples':
@@ -155,13 +154,54 @@ export class NewRunMain {
       case 'helper-features':
         return this.#features(request.host);
       case 'task-goal':
-        return this.#offered(
-          request.host,
-          {type: 'project.task_goal', project: request.project, task: request.task},
-          `Could not read the goal of ${request.task}`,
-          reply => (reply as {goal: TaskGoal}).goal,
-        );
+        return this.#taskGoal(request.host, request.project, request.task);
     }
+  }
+
+  async #taskGoal(host: HostId, project: string, task: string): Promise<Offered<TaskGoal>> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        return {
+          kind: 'offered',
+          value: await this.#catalog().taskGoal(host, project, task, new AbortController().signal),
+        };
+      } catch (error) {
+        throw plain(error, `Could not read the goal of ${task}`);
+      }
+    }
+    return this.#offered(
+      host,
+      {type: 'project.task_goal', project, task},
+      `Could not read the goal of ${task}`,
+      reply => (reply as {goal: TaskGoal}).goal,
+    );
+  }
+
+  async #describe(host: HostId): Promise<Offered<MachineDescription>> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      const reads = this.#deps.registryReads;
+      if (reads === undefined) throw new Error('machine registry is missing');
+      try {
+        return {
+          kind: 'offered',
+          value: await reads.describeMachine(host, null, new AbortController().signal),
+        };
+      } catch (error) {
+        throw plain(error, 'Could not describe the machine');
+      }
+    }
+    return this.#offered(
+      host,
+      {type: 'machine.describe'},
+      'Could not describe',
+      reply => (reply as {machine: MachineDescription}).machine,
+    );
+  }
+
+  #catalog(): RegistryRunCatalog {
+    const catalog = this.#deps.registryCatalog;
+    if (catalog === undefined) throw new Error('new-run registry is missing');
+    return catalog;
   }
 
   /** What `host`'s helper agreed to in `hello`, once the host is ready. */
@@ -189,6 +229,20 @@ export class NewRunMain {
    * of every other failed setting when it agreed to `run_causes`.
    */
   async #preflight(host: HostId, inputs: RunInputs): Promise<Offered<PreflightResult>> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        return {
+          kind: 'offered',
+          value: await this.#catalog().preflight(host, inputs, new AbortController().signal),
+        };
+      } catch (error) {
+        throw plain(error, `Could not check the run on ${hostLabel(host)}`);
+      }
+    }
+    return this.#preflightLegacy(host, inputs);
+  }
+
+  async #preflightLegacy(host: HostId, inputs: RunInputs): Promise<Offered<PreflightResult>> {
     try {
       await using lease = await this.#deps.connect(host);
       await lease.connection.ready();
@@ -225,6 +279,16 @@ export class NewRunMain {
    * when the helper agreed to `example_catalogue`; a helper that did not lists them plain.
    */
   async #examples(host: HostId): Promise<Offered<ExampleList>> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        return {
+          kind: 'offered',
+          value: await this.#catalog().examples(host, new AbortController().signal),
+        };
+      } catch (error) {
+        throw plain(error, `Could not list the examples on ${hostLabel(host)}`);
+      }
+    }
     try {
       await using lease = await this.#deps.connect(host);
       await lease.connection.ready();

@@ -11,6 +11,7 @@ import {
   HelperRequestError,
   type HostConnection,
   type LogsLease,
+  type RegistryRunCatalog,
   type RegistrySavedRuns,
   type RegistrySetup,
   type RunWatch,
@@ -103,6 +104,7 @@ export interface HostsDeps {
   /** WatchRuns while this host is shown. Cancel reaps the stream. */
   readonly runs?: Pick<RunWatch, 'start' | 'cancel'>;
   readonly savedRuns?: RegistrySavedRuns;
+  readonly catalog?: RegistryRunCatalog;
 }
 
 /** How many times a summary is read again when its pages disagree on where the run stood. */
@@ -448,6 +450,13 @@ export class Hosts {
   /** The tasks `project` defines on `id`. */
   async tasks(id: HostId, project: unknown): Promise<string[]> {
     const path = validHostPath(project, 'the project directory');
+    if (await this.#transportV2(id)) {
+      try {
+        return await this.#catalog().tasks(id, path, new AbortController().signal);
+      } catch (error) {
+        throw plain(error, 'Could not read the tasks of the project');
+      }
+    }
     await using lease = await this.connection(id);
     try {
       const reply = await lease.connection.request({type: 'tasks.list', project: path});
@@ -655,6 +664,22 @@ export class Hosts {
 
   /** The vetted provider and model pairs runs on `id` may start with; `unsupported` on an older helper. */
   async harnesses(id: HostId): Promise<HarnessListing> {
+    if (await this.#transportV2(id)) {
+      try {
+        const harnesses = await this.#catalog().harnesses(id, new AbortController().signal);
+        return {
+          kind: 'listed',
+          harnesses: harnesses.map(({provider, model, default: isDefault, display}) => ({
+            provider,
+            model,
+            default: isDefault,
+            ...(display == null ? {} : {display: harnessDisplay(display)}),
+          })),
+        };
+      } catch (error) {
+        throw plain(error, `Could not read the vetted models of ${hostLabel(id)}`);
+      }
+    }
     await using lease = await this.connection(id);
     try {
       await lease.connection.ready();
@@ -1109,6 +1134,12 @@ export class Hosts {
       if (this.#watchIntents.get(key) === intent) this.#watchIntents.delete(key);
     }
     return true;
+  }
+
+  #catalog(): RegistryRunCatalog {
+    const catalog = this.#deps.catalog;
+    if (catalog === undefined) throw new Error('host catalog registry is missing');
+    return catalog;
   }
 
   async #transportV2(id: HostId): Promise<boolean> {

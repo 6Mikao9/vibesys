@@ -40,6 +40,7 @@ export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {type Link, LocalLink, SshLink} from './shell/link.js';
 export {LoginActor, type LoginPorts, type LoginStart} from './shell/login-actor.js';
 export {fromChild, type SpawnedProcess} from './shell/process.js';
+export {type RegistryRunCatalog, registryRunCatalog} from './shell/registry-catalog.js';
 export {
   type RegistryClusterPorts,
   type RegistryClusters,

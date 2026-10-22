@@ -18,6 +18,7 @@ import {
   registryClusters,
   registryProjects,
   registryReads,
+  registryRunCatalog,
   registrySavedRuns,
   registrySetup,
   registryStart,
@@ -109,6 +110,14 @@ function newRunMain(
       return settingsFor(file, id)?.runTransportV2 === true;
     },
     registryStart: (host, inputs, signal) => starts.start(host, inputs, signal),
+    registryReads: registryReads({
+      checkout: id => hosts.checkout(id),
+      unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+    }),
+    registryCatalog: registryRunCatalog({
+      checkout: id => hosts.checkout(id),
+      unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+    }),
     registryProjects: registryProjects({
       checkout: id => hosts.checkout(id),
       read: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
@@ -337,6 +346,12 @@ function listedHosts(parts: {
       setup,
       ...(endLogin === undefined ? {} : {endLogin}),
       runs,
+      catalog: registryRunCatalog({
+        checkout: async id =>
+          (await settings.hosts()).settings.hosts[hostKey(id)]?.checkout ??
+          (id.kind === 'local' ? REPOSITORY_ROOT : null),
+        unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+      }),
       savedRuns: registrySavedRuns({
         checkout: async id =>
           (await settings.hosts()).settings.hosts[hostKey(id)]?.checkout ??
