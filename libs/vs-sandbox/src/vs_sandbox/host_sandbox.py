@@ -680,7 +680,9 @@ class SeatbeltSandbox(WorkspaceSandbox):
             # Map code-signed executable pages — without this, Apple-Silicon code
             # signing aborts every dynamically linked binary (dyld) at startup.
             "(allow file-map-executable)",
-            "(allow signal (target self))",
+            # Children inherit this kernel policy, including across exec and setsid.
+            # Do not grant signals to the operator or a different confinement.
+            "(allow signal (target same-sandbox))",
             "(allow sysctl-read)",
             "(allow mach-lookup)",
             "(allow mach-per-user-lookup)",
