@@ -8,6 +8,8 @@ from vs_evaluation.agent_evidence import (
     EvidenceKind,
     EvidenceMetric,
     EvidenceOutcome,
+    HostSampleRecord,
+    HostSnapshotRecord,
     PartialMeasurement,
     TrustedEvidence,
 )
@@ -125,6 +127,8 @@ __all__ = [
     "ExecutorRejectedError",
     "ExecutorSubmissionError",
     "FilesystemEvaluationStore",
+    "HostSampleRecord",
+    "HostSnapshotRecord",
     "LifecyclePublisher",
     "PartialMeasurement",
     "PollPhase",

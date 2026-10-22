@@ -47,6 +47,8 @@ __all__ = [
     "AcceptedReading",
     "EvidenceReading",
     "FrameworkBenchmarkOutcome",
+    "HostContention",
+    "HostSampleView",
     "Measurement",
     "MetricComparison",
     "MetricRow",
@@ -353,6 +355,28 @@ class PartialRow(Value):
     progress_unit: str | None = None
 
 
+class HostSampleView(Value):
+    """One host-contention reading beside a benchmark. ``None`` means unavailable.
+
+    ``gpu_processes`` is ``None`` when no query ran, and empty when a query ran and listed nobody.
+    """
+
+    load_1: float | None = None
+    load_5: float | None = None
+    load_15: float | None = None
+    cpu_count: int | None = Field(default=None, ge=0)
+    memory_free_bytes: int | None = Field(default=None, ge=0)
+    memory_pressure: str | None = None
+    gpu_processes: tuple[str, ...] | None = None
+
+
+class HostContention(Value):
+    """Host contention at the start and end of one benchmark of one revision."""
+
+    start: HostSampleView
+    end: HostSampleView
+
+
 class EvidenceReading(Value):
     """Typed reading of one core `EvidenceRef`, decoded by the evidence owner."""
 
@@ -366,6 +390,10 @@ class EvidenceReading(Value):
     feedback: str = ""
     unmet_requirement: str | None = Field(default=None, exclude_if=lambda value: value is None)
     """The capability a failed benchmark's evaluator named as unmet, when it named one."""
+    host_snapshot: HostContention | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """Host contention around this benchmark, when the executor could read the host."""
 
     def headline(self) -> MetricRow | None:
         """The first reported metric, the benchmark's headline reading."""

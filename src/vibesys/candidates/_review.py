@@ -10,7 +10,7 @@ never searches the filesystem for results.
 
 from typing import TYPE_CHECKING
 
-from vibesys.metrics import MetricRow, PartialRow
+from vibesys.metrics import HostContention, MetricRow, PartialRow
 from vs_core.api.search import (
     EvidenceId,
     EvidenceKind,
@@ -44,6 +44,7 @@ class ReviewEvaluation(Value):
     partial: PartialRow | None = None
     feedback: str = ""
     feedback_cut: bool = False
+    host_snapshot: HostContention | None = None
 
 
 def review_evaluations(
@@ -66,4 +67,5 @@ def _evaluation(ref: "EvidenceRef", reading: "AcceptedReading | None") -> Review
         partial=None if reading is None else reading.partial,
         feedback=feedback[-_FAILURE_TAIL_CHARS:],
         feedback_cut=len(feedback) > _FAILURE_TAIL_CHARS,
+        host_snapshot=None if reading is None else reading.host_snapshot,
     )

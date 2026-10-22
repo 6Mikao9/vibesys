@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from vibesys.candidates import api as candidates
-from vibesys.metrics import MetricRow, MetricSpace, reading_of
+from vibesys.metrics import HostContention, MetricRow, MetricSpace, reading_of
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
 from vibesys.orchestration.dynamic.search._parents import ParentOption
 from vibesys.orchestration.dynamic.search._prompts import MergeableRow
@@ -296,7 +296,11 @@ class MainLine:
         )
         self.merges.append(record)
         if sound and settlement is not None and settlement.candidate is not None:
-            self._advance(record, settlement.candidate)
+            self._advance(
+                record,
+                settlement.candidate,
+                None if benchmark is None else benchmark.host_snapshot,
+            )
             if settlement.eligible:
                 self.rounds.append(
                     candidates.EligibleRound(
@@ -328,7 +332,9 @@ class MainLine:
         lost_check = benchmark_passed is not True and self._benchmark_passed() is True
         return worse or lost_check
 
-    def _advance(self, record: MergeRecord, revision: RevisionRef) -> None:
+    def _advance(
+        self, record: MergeRecord, revision: RevisionRef, host_snapshot: HostContention | None
+    ) -> None:
         """Move main to a sound merged commit."""
         self.measurement = MainMeasurement(
             revision=revision,
@@ -337,6 +343,7 @@ class MainLine:
             benchmark_passed=record.benchmark_passed,
             metrics=record.metrics,
             previous=record.main_metrics,
+            host_snapshot=host_snapshot,
         )
         self.revision = revision
         self.generation += 1

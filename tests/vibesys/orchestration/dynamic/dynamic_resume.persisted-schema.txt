@@ -11,6 +11,7 @@ $root.version optional {"const":1,"default":1,"type":"integer"}
 AcceptedReading {"additionalProperties":false,"type":"object"}
 AcceptedReading.evidence_id required {"$ref":"#/$defs/EvidenceId"}
 AcceptedReading.feedback optional {"default":"","type":"string"}
+AcceptedReading.host_snapshot optional {"anyOf":[{"$ref":"#/$defs/HostContention"},{"type":"null"}],"default":null}
 AcceptedReading.kind required {"$ref":"#/$defs/EvidenceKind"}
 AcceptedReading.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
 AcceptedReading.partial optional {"anyOf":[{"$ref":"#/$defs/PartialRow"},{"type":"null"}],"default":null}
@@ -156,6 +157,17 @@ FinishedWork.readings optional {"default":[],"items":{"$ref":"#/$defs/AcceptedRe
 FinishedWork.sequence required {"exclusiveMinimum":0,"type":"integer"}
 Finite {"type":"number"}
 Generation {"minimum":0,"type":"integer"}
+HostContention {"additionalProperties":false,"type":"object"}
+HostContention.end required {"$ref":"#/$defs/HostSampleView"}
+HostContention.start required {"$ref":"#/$defs/HostSampleView"}
+HostSampleView {"additionalProperties":false,"type":"object"}
+HostSampleView.cpu_count optional {"anyOf":[{"minimum":0,"type":"integer"},{"type":"null"}],"default":null}
+HostSampleView.gpu_processes optional {"anyOf":[{"items":{"type":"string"},"type":"array"},{"type":"null"}],"default":null}
+HostSampleView.load_1 optional {"anyOf":[{"type":"number"},{"type":"null"}],"default":null}
+HostSampleView.load_15 optional {"anyOf":[{"type":"number"},{"type":"null"}],"default":null}
+HostSampleView.load_5 optional {"anyOf":[{"type":"number"},{"type":"null"}],"default":null}
+HostSampleView.memory_free_bytes optional {"anyOf":[{"minimum":0,"type":"integer"},{"type":"null"}],"default":null}
+HostSampleView.memory_pressure optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 HypothesisOutcome {"enum":["continue","supported","nominated","disproven","implementation_failed","inconclusive","blocked"],"type":"string"}
 HypothesisRecord {"additionalProperties":false,"type":"object"}
 HypothesisRecord.combined_from optional {"default":[],"items":{"$ref":"#/$defs/CombineSource"},"type":"array"}
@@ -201,6 +213,7 @@ Kept.settlement required {"$ref":"#/$defs/Settlement"}
 MainMeasurement {"additionalProperties":false,"type":"object"}
 MainMeasurement.accuracy_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
 MainMeasurement.benchmark_passed optional {"anyOf":[{"type":"boolean"},{"type":"null"}],"default":null}
+MainMeasurement.host_snapshot optional {"anyOf":[{"$ref":"#/$defs/HostContention"},{"type":"null"}],"default":null}
 MainMeasurement.merge_id required {"type":"string"}
 MainMeasurement.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
 MainMeasurement.previous optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}

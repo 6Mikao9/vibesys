@@ -12,7 +12,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
-from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
+from vibesys.metrics import AcceptedReading, HostContention, MetricRow, PartialRow
 from vibesys.orchestration.dynamic.models import PerformanceBound, StrategyReason, UnappliedPart
 from vs_core.api.search import (
     AttemptId,
@@ -490,6 +490,8 @@ class MainMeasurement(Value):
     metrics: tuple[MetricRow, ...] = ()
     previous: tuple[MetricRow, ...] = ()
     """What main measured before this merge (the input's measurement before the first merge)."""
+    host_snapshot: HostContention | None = None
+    """Host contention around the benchmark of this revision, when the executor read the host."""
 
 
 # -- what the planner is told about a reply that cannot be scheduled -------------------------------

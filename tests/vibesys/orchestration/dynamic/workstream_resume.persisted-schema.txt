@@ -21,6 +21,7 @@ $root.workspace required {"$ref":"#/$defs/AttemptRef"}
 AcceptedReading {"additionalProperties":false,"type":"object"}
 AcceptedReading.evidence_id required {"$ref":"#/$defs/EvidenceId"}
 AcceptedReading.feedback optional {"default":"","type":"string"}
+AcceptedReading.host_snapshot optional {"anyOf":[{"$ref":"#/$defs/HostContention"},{"type":"null"}],"default":null}
 AcceptedReading.kind required {"$ref":"#/$defs/EvidenceKind"}
 AcceptedReading.metrics optional {"default":[],"items":{"$ref":"#/$defs/MetricRow"},"type":"array"}
 AcceptedReading.partial optional {"anyOf":[{"$ref":"#/$defs/PartialRow"},{"type":"null"}],"default":null}
@@ -149,6 +150,17 @@ FailureKind {"enum":["stopped","parent-unverified","refused","ended","out-of-bud
 FailureReason {"enum":["timed-out","workspace-closed","owner-gone","refused","lost","invalid-reply","render-failed","turn-failed","wait-refused","queue-budget-spent","out-of-budget","measurement-untrusted"],"type":"string"}
 Finite {"type":"number"}
 Generation {"minimum":0,"type":"integer"}
+HostContention {"additionalProperties":false,"type":"object"}
+HostContention.end required {"$ref":"#/$defs/HostSampleView"}
+HostContention.start required {"$ref":"#/$defs/HostSampleView"}
+HostSampleView {"additionalProperties":false,"type":"object"}
+HostSampleView.cpu_count optional {"anyOf":[{"minimum":0,"type":"integer"},{"type":"null"}],"default":null}
+HostSampleView.gpu_processes optional {"anyOf":[{"items":{"type":"string"},"type":"array"},{"type":"null"}],"default":null}
+HostSampleView.load_1 optional {"anyOf":[{"type":"number"},{"type":"null"}],"default":null}
+HostSampleView.load_15 optional {"anyOf":[{"type":"number"},{"type":"null"}],"default":null}
+HostSampleView.load_5 optional {"anyOf":[{"type":"number"},{"type":"null"}],"default":null}
+HostSampleView.memory_free_bytes optional {"anyOf":[{"minimum":0,"type":"integer"},{"type":"null"}],"default":null}
+HostSampleView.memory_pressure optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 HypothesisOutcome {"enum":["continue","supported","nominated","disproven","implementation_failed","inconclusive","blocked"],"type":"string"}
 InputFailure {"additionalProperties":false,"type":"object"}
 InputFailure.blamed optional {"anyOf":[{"$ref":"#/$defs/MeasurementFailure"},{"type":"null"}],"default":null}

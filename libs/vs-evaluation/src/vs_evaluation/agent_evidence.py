@@ -87,6 +87,33 @@ class EvidenceMetric(BaseModel):
     unit: str | None = None
 
 
+class HostSampleRecord(BaseModel):
+    """One host-contention reading stored with a benchmark. ``None`` is unavailable.
+
+    ``gpu_processes`` is ``None`` when no query ran, and empty when a query ran
+    and listed nobody.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    load_1: float | None = None
+    load_5: float | None = None
+    load_15: float | None = None
+    cpu_count: int | None = Field(default=None, ge=0)
+    memory_free_bytes: int | None = Field(default=None, ge=0)
+    memory_pressure: str | None = None
+    gpu_processes: tuple[str, ...] | None = None
+
+
+class HostSnapshotRecord(BaseModel):
+    """Host contention at the start and end of one benchmark of one revision."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    start: HostSampleRecord
+    end: HostSampleRecord
+
+
 class ArtifactDigest(BaseModel):
     """One content-addressed artifact relative to its evaluation root."""
 
@@ -122,6 +149,9 @@ class TrustedEvidence(BaseModel):
     unmet_requirement: str | None = Field(default=None, min_length=1)
     artifacts: tuple[ArtifactDigest, ...] = ()
     accepted_round: int = Field(ge=0)
+    # Host contention around this benchmark, when the executor could read the host.
+    # Absent on evidence recorded before snapshots, and on stages that are not a benchmark.
+    host_snapshot: HostSnapshotRecord | None = None
 
     @model_validator(mode="after")
     def _kind_only_when_failed(self) -> Self:
@@ -143,6 +173,8 @@ __all__ = [
     "EvidenceKind",
     "EvidenceMetric",
     "EvidenceOutcome",
+    "HostSampleRecord",
+    "HostSnapshotRecord",
     "PartialMeasurement",
     "TrustedEvidence",
 ]

@@ -59,6 +59,7 @@ from vs_runtime.api.infrastructure import (
     release_all,
     stop_gated_evaluation,
 )
+from vs_sim.api import PlatformHostProbe
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -439,6 +440,7 @@ class _ProductHostFactory:
                         clock=self.timing.clock,
                         stage_output=stage_output,
                         control=self.integration.control,
+                        host_probe=PlatformHostProbe(),
                     ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(

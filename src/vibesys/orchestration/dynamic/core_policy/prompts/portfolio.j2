@@ -1,6 +1,6 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
-{% from '_macros.j2' import metric, partial %}
+{% from '_macros.j2' import host_sample, metric, partial %}
 {% from '_problems.j2' import problem_text with context %}
 {% from '_failure.j2' import failure_text, input_failure_text %}
 Schedule at most {{ capacity }} new workstreams for free slots. {{ in_flight }} other
@@ -22,7 +22,7 @@ Your workspace holds the run's input, not candidate work: a workstream's files e
 only at the revision in its history row (read them with git show REVISION:PATH).
 {% if main_measurement %}
 
-Main's latest trusted measurement (merge `{{ main_measurement.merge_id }}`): accuracy passed: {{ main_measurement.accuracy_passed }}, benchmark passed: {{ main_measurement.benchmark_passed }}{% for m in main_measurement.metrics %}; {{ metric(m) }}{% endfor %}.
+Main's latest trusted measurement (merge `{{ main_measurement.merge_id }}`): accuracy passed: {{ main_measurement.accuracy_passed }}, benchmark passed: {{ main_measurement.benchmark_passed }}{% for m in main_measurement.metrics %}; {{ metric(m) }}{% endfor %}.{% if main_measurement.host_snapshot %} Host at start: {{ host_sample(main_measurement.host_snapshot.start) }}. Host at end: {{ host_sample(main_measurement.host_snapshot.end) }}.{% endif %}
 {% endif %}
 {% if baseline %}
 
