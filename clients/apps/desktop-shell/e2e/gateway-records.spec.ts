@@ -98,7 +98,8 @@ test('native history opens without legacy history and usage retains its model an
     sheet.push({name: 'Usage by model, dated', file});
   }
 
-  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
+  // A finished run offers Resume: every ending can be resumed.
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
 });
 
 test('store Run app-window contact sheet', async ({page}) => {
