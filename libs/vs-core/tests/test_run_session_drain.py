@@ -31,7 +31,9 @@ ENDINGS = (
 )
 
 type Action = tuple[
-    Literal["turn", "stop_control", "stop_decision", "tick", "answer", "answer_twice"], int, int
+    Literal["turn", "stop_control", "stop_decision", "tick", "answer", "answer_twice", "restart"],
+    int,
+    int,
 ]
 
 
@@ -62,6 +64,7 @@ class Executor:
     authorized: set[str] = field(default_factory=set)
     turns: int = 0
     stops: int = 0
+    epoch: int = 1
     now: float = 1.0
 
     def feed(self, event: core.CoreEvent) -> None:
@@ -118,6 +121,12 @@ class Executor:
             )
         )
 
+    def restart(self) -> None:
+        """The host dies and a new one takes over: recovery inspects what was left open."""
+        self.epoch += 1
+        self.now += 1
+        self.feed(core.RecoveryStarted(epoch=self.epoch, now_at=self.now))
+
     def tick(self, seconds: int) -> None:
         self.now += seconds
         self.feed(core.ClockAdvanced(now_at=self.now))
@@ -149,8 +158,21 @@ class Executor:
             children_complete=children_complete,
         )
 
+    def dispatchable(self, request: core.Request) -> bool:
+        """Whether the shell may send the request now: ordinary work waits for recovery."""
+        return self.state.records.recovery.phase == core.RecoveryPhase.READY or isinstance(
+            request,
+            core.InspectRequest
+            | core.InspectTurn
+            | core.CancelTurn
+            | core.CancelOwnedResource
+            | core.BlockRequest,
+        )
+
     def answer(self, request: core.Request, status: core.ObservationStatus, *, twice: bool) -> None:
         assert request.request_id is not None
+        if not self.dispatchable(request):
+            return
         if request.request_id.root not in self.authorized:
             self.authorized.add(request.request_id.root)
             self.feed(core.DispatchAuthorized(request_id=request.request_id))
@@ -162,6 +184,8 @@ class Executor:
         self, request: core.Request, status: core.ObservationStatus
     ) -> list[core.CoreEvent]:
         """What the executor reports for one request, owner events included."""
+        if isinstance(request, core.InspectRequest) and request.resource_id is None:
+            return self.inspection(request, status)
         if isinstance(request, core.EnsureSession):
             resource = core.ResourceId(root=f"conversation-{request.spec.session_id.root}")
             seen = self.observation(request, core.ObservationStatus.SUCCEEDED, resource_id=resource)
@@ -202,12 +226,57 @@ class Executor:
             )
         ]
 
+    def inspection(
+        self, request: core.InspectRequest, status: core.ObservationStatus
+    ) -> list[core.CoreEvent]:
+        """What the executor says of a request a dead host left: its result, sealed, with its owner events.
+
+        The inspection reports the target's facts on the inspecting request's own observation, and
+        the owner's event travels beside it, as the production executors send them.
+        """
+        target = next(row for row in self.state.records.records if row.request_id == request.target)
+        own = self.observation(
+            request, core.ObservationStatus.SUCCEEDED, released=True, children_complete=True
+        )
+        if target.phase == core.RequestPhase.COMPLETED and target.observation is not None:
+            return [
+                core.RequestObserved(
+                    observation=own, target=core.TargetObservation(observation=target.observation)
+                )
+            ]
+        if target.phase == core.RequestPhase.PREPARED:
+            # Never sent: nothing began, and the request goes out again.
+            refused = self.observation(
+                target.request,
+                core.ObservationStatus.REJECTED,
+                released=True,
+                children_complete=True,
+            ).model_copy(update={"accepted": False})
+            return [
+                core.RequestObserved(
+                    observation=own,
+                    target=core.TargetObservation(
+                        observation=refused, reissue=core.ReissueProof.NEVER_BEGAN
+                    ),
+                )
+            ]
+        sealed = self.answers(target.request, status)
+        reported = sealed[0]
+        assert isinstance(reported, core.RequestObserved)
+        return [
+            core.RequestObserved(
+                observation=own, target=core.TargetObservation(observation=reported.observation)
+            ),
+            *sealed[1:],
+        ]
+
 
 actions = st.one_of(
     st.tuples(st.just("turn"), st.integers(0, 1), st.just(0)),
     st.tuples(st.just("stop_control"), st.integers(0, 2), st.just(0)),
     st.tuples(st.just("stop_decision"), st.integers(0, 1), st.just(0)),
     st.tuples(st.just("tick"), st.integers(0, 3), st.just(0)),
+    st.tuples(st.just("restart"), st.just(0), st.just(0)),
     st.tuples(st.just("answer"), st.integers(0, 20), st.integers(0, len(ENDINGS) - 1)),
     st.tuples(st.just("answer_twice"), st.integers(0, 20), st.integers(0, len(ENDINGS) - 1)),
 )
@@ -224,6 +293,8 @@ def _drive(executor: Executor, plan: list[Action]) -> None:
             executor.stop_decision("drain" if index else "cancel")
         elif kind == "tick":
             executor.tick(index)
+        elif kind == "restart":
+            executor.restart()
         elif pending:
             executor.answer(
                 pending[index % len(pending)], ENDINGS[other], twice=kind == "answer_twice"
@@ -236,12 +307,19 @@ def _settle(executor: Executor) -> None:
         pending = executor.pending()
         if not pending:
             break
-        executor.answer(pending[0], core.ObservationStatus.SUCCEEDED, twice=False)
+        ready = [request for request in pending if executor.dispatchable(request)]
+        if not ready:
+            executor.tick(1000)  # recovery waits on nothing the executor can answer: time passes
+            continue
+        executor.answer(ready[0], core.ObservationStatus.SUCCEEDED, twice=False)
     executor.tick(1)
 
 
 @settings(max_examples=examples(pr=3, nightly=300), deadline=None)
 @example(plan=[("turn", 0, 0)], final_stop=0)  # stop while the session is still being created
+@example(  # the host dies after a stop: recovery's inspection reports the last close and its owner
+    plan=[("turn", 0, 0), ("stop_decision", 0, 0), ("restart", 0, 0)], final_stop=0
+)
 @given(plan=st.lists(actions, min_size=1, max_size=30), final_stop=st.integers(0, 2))
 def test_every_run_owned_session_is_closed_and_the_run_ends_after_any_control_sequence(
     plan: list[Action], final_stop: int

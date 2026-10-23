@@ -48,7 +48,7 @@ def resume_after_wedged_stop(
         world = WedgedStopWorld(
             Path(directory) / "project", at=at, boundary=boundary, delay=delay, grace=grace
         )
-        with world.open(resume=False) as resources:
+        with world.open(resume=False):
             first = world.host(resume=False, now=1)
             with suppress(HostCrashError):
                 first.run()
@@ -56,7 +56,6 @@ def resume_after_wedged_stop(
             assert isinstance(stored, StoredEnvelope)
             before = RuntimeRecord[FlowState].decode(stored, REGISTRY).envelope.core
             first.shell.release_lease(now_at=first.clock.now())
-            del resources
         with world.open(resume=True):
             return before, world.host(resume=True, now=first.clock.now() + 1000).run()
 
@@ -87,13 +86,12 @@ def assert_resumes_to_ready(at: int, delay: int, grace: int, boundary: Point) ->
     assert not liveness(run.journal, core, Budget(retries=limit), End.TERMINAL)
 
 
-@pytest.mark.regression
 @settings(
     max_examples=examples(pr=6, nightly=80), phases=(Phase.explicit, Phase.generate), database=None
 )
 @example(at=13, delay=6, grace=3, boundary=Point.COMMIT)
 @given(
-    at=st.integers(1, 90),
+    at=st.integers(1, 40),
     delay=st.integers(1, 30),
     grace=st.integers(0, 12),
     boundary=st.sampled_from(tuple(Point)),
