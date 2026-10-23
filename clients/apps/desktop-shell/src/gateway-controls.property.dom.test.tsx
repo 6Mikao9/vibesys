@@ -1,9 +1,10 @@
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import type {HostKey} from '@vibesys/hosts';
+import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import {FakeGatewayBridge} from '@vibesys/ipc/testing';
 import {
   DrainGoal,
+  EpochStartedSchema,
   HostCallResponseSchema,
   IntentAction,
   IntentStep,
@@ -223,6 +224,7 @@ async function verifyOffers(input: Scenario) {
           }}
         >
           <GatewayRun
+            projectRoot={recordedProjectRoot('/project')}
             seed={{
               identity: {host: 'local' as HostKey, runId: 'run-a'},
               title: {project: '/project', task: 'mpmc'},
@@ -242,6 +244,7 @@ async function verifyOffers(input: Scenario) {
       ),
     );
     const buttons = [...container.querySelectorAll('button')].map(button => button.textContent);
+    expect(buttons).not.toContain('Stop');
     const state = input.lifecycle.state;
     const live = state.case === 'starting' || state.case === 'running' || state.case === 'draining';
     // What the host would admit: live actions need a writer that is not dead, and Resume needs
@@ -291,6 +294,7 @@ test('property: ready run controls follow the writer lifecycle and liveness, inc
 async function withPeer(
   peer: RunPeer,
   work: (container: HTMLElement, clock: FakeClock) => Promise<void>,
+  location = {projectRoot: recordedProjectRoot('/project')},
 ) {
   const clock = new FakeClock();
   const container = document.createElement('div');
@@ -299,6 +303,7 @@ async function withPeer(
     await act(async () =>
       root.render(
         <GatewayRun
+          projectRoot={location.projectRoot}
           seed={{
             identity: {host: 'local' as HostKey, runId: 'run-a'},
             title: {project: '/project', task: 'mpmc'},
@@ -584,4 +589,82 @@ test('property: every offered writer control changes visible content across life
     {numRuns: 32, seed: 34364},
   );
   expect([...exercised].sort()).toEqual(['Guidance', 'Pause', 'Pause now', 'Resume']);
+});
+
+test('property: optional recorded facts never erase the catalog-addressed controls or the missing-location reason', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      STATE,
+      BACKGROUND,
+      fc.boolean(),
+      fc.boolean(),
+      async (lifecycle, background, recorded, addressed) => {
+        const peer = peerFor({
+          ...background,
+          lifecycle,
+          liveness: RunLiveness.ENDED,
+          loading: false,
+        });
+        if (!recorded) {
+          const source = storeRunFixture('live');
+          const fixture = {
+            ...source,
+            initialCount: peer.records.length,
+            records: peer.records.map(record =>
+              record.body.case === 'epochStarted'
+                ? create(RecordSchema, {
+                    ...record,
+                    body: {
+                      case: 'epochStarted',
+                      value: create(EpochStartedSchema, {epoch: record.epoch, runId: 'run-a'}),
+                    },
+                  })
+                : record,
+            ),
+          };
+          const replacement = wire(fixture, RunLiveness.ENDED);
+          peer.input.skeleton = replacement.skeleton;
+          peer.records.splice(0, peer.records.length, ...fixture.records);
+        }
+        await withPeer(
+          peer,
+          async container => {
+            const buttons = controlButtons(container);
+            if (!addressed) {
+              expect(buttons).toEqual([]);
+              expect(container.textContent).toContain('Waiting for the host to locate this run');
+            } else if (lifecycle.state.case === 'ended' || lifecycle.state.case === 'parked') {
+              expect(buttons).toEqual(['Resume']);
+              const before = container.textContent;
+              await act(async () =>
+                [...container.querySelectorAll('button')]
+                  .find(button => button.textContent === 'Resume')
+                  ?.click(),
+              );
+              expect(container.textContent).not.toBe(before);
+            } else assertVisible(container);
+          },
+          {projectRoot: addressed ? recordedProjectRoot('/catalog/project') : undefined},
+        );
+      },
+    ),
+    {
+      numRuns: 16,
+      seed: 34367,
+      examples: [
+        [
+          create(LifecycleSchema, {state: {case: 'ended', value: {outcome: Outcome.FINISHED}}}),
+          {epoch: 1, modernHead: true, history: []},
+          false,
+          true,
+        ],
+        [
+          create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+          {epoch: 1, modernHead: true, history: []},
+          true,
+          false,
+        ],
+      ],
+    },
+  );
 });

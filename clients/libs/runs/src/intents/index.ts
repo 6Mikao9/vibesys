@@ -20,6 +20,7 @@ import {
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import type {RunIntentAction} from './controls.js';
+import type {RunReference} from './reference.js';
 import {refusalMessage} from './refusal.js';
 
 export type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/proto';
@@ -28,20 +29,7 @@ export {IntentAction, IntentStep} from '@vibesys/proto';
 export const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
 export const INTENT_TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
 
-const referenceBrand: unique symbol = Symbol('RunReference');
-
-/** An addressed run; only the validating constructor can supply the project path. */
-export interface RunReference {
-  readonly [referenceBrand]: true;
-  readonly projectRoot: string;
-  readonly runId: string;
-}
-
-export function runReference(projectRoot: string, runId: string): RunReference {
-  if (projectRoot.trim() === '') throw new Error('run.projectRoot is required');
-  if (runId.trim() === '') throw new Error('run.runId is required');
-  return {[referenceBrand]: true, projectRoot, runId};
-}
+export {type RunReference, runReference} from './reference.js';
 
 export function addressedIntent(
   reference: RunReference,

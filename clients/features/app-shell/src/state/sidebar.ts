@@ -22,6 +22,7 @@ import {
   RUN_GONE_WORDS,
   type RunDigestEntry,
   type RunDigestsReply,
+  recordedProjectRoot,
 } from '@vibesys/hosts';
 import {type RecentRun, type RunRef, type SkippedRecent, sameRun} from '@vibesys/runs';
 import type {Step} from '@vibesys/store';
@@ -268,6 +269,16 @@ function recentRuns(state: SidebarState): RecentRun[] {
     .filter(recent => !state.archived.some(archived => sameRun(archived, recent)))
     .filter(recent => !live.some(row => sameRun(row.run, recent)))
     .sort((left, right) => right.attachedAt - left.attachedAt);
+}
+
+/** Address from host catalog/registry or the saved catalog selection, never run history. */
+export function runProjectRoot(state: SidebarState, run: RunRef) {
+  const listed = reportedRunRefs(state.allRuns, state.listings).find(each =>
+    sameRun({host: each.host, runId: each.run.runId}, run),
+  );
+  return recordedProjectRoot(
+    listed?.project ?? state.recent.find(each => sameRun(each, run))?.project,
+  );
 }
 
 /** A run whose digest a row of the sidebar or the All runs screen shows. */

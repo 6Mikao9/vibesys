@@ -1,6 +1,6 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
 import {
   Change,
@@ -12,6 +12,7 @@ import {
   Outcome,
   type PostIntentRequest,
   RecordSchema,
+  RelaunchRefusal,
   RunLiveness,
   SpanStatus,
   type Record as StoreRecord,
@@ -429,4 +430,44 @@ test('a pause drain confirmation survives the run reader reconnecting', async ({
   await expect(page.getByText('Pause · Applied', {exact: true})).toBeVisible();
   expect(requests).toHaveLength(1);
   await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
+});
+
+test('a catalog-addressed historical run offers Resume without optional epoch context', async ({
+  page,
+}) => {
+  const source = storeRunFixture('short');
+  const fixture = {
+    ...source,
+    records: source.records.map(record => {
+      const copy = clone(RecordSchema, record);
+      if (copy.body.case === 'epochStarted') copy.body.value.projectRoot = undefined;
+      return copy;
+    }),
+  };
+  const requests: {projectRoot: string; runId: string}[] = [];
+  await page.exposeFunction('postIntent', (_host: string, bytes: number[]) => {
+    const envelope = fromBinary(HostCallRequestSchema, new Uint8Array(bytes));
+    if (envelope.method.case !== 'relaunch') throw new Error('Expected Resume');
+    requests.push(envelope.method.value);
+    return [
+      ...toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {
+            case: 'relaunch',
+            value: {outcome: {case: 'refusal', value: RelaunchRefusal.CHECKOUT_MISSING}},
+          },
+        }),
+      ),
+    ];
+  });
+  await page.addInitScript(installGateway, wire(fixture));
+  await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
+  await page.getByRole('switch', {name: 'Run transport v2'}).check();
+  await page.getByRole('button', {name: 'Resume', exact: true}).click();
+  await expect(page.getByText('Resume · Refused: checkout missing', {exact: true})).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({projectRoot: '/work/queue-rs', runId: 'run-a'});
+  await settled(page);
+  expect(await screenCheck(page)).toEqual([]);
 });

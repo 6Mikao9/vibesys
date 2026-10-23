@@ -17,7 +17,7 @@ import {useRelaunch, useWriterRecovery} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
 
 /** Mount with a key of host/runId. enabled is the host's runTransportV2 setting. */
-export function useRunIntents(props: {
+interface RunIntentsProps {
   readonly bridge: GatewayBridge;
   readonly host: HostKey;
   readonly projectRoot: RecordedProjectRoot | undefined;
@@ -26,10 +26,10 @@ export function useRunIntents(props: {
   readonly schedule: ScheduleTimeout;
   readonly relaunch?: RelaunchObservation;
   readonly refreshWriter?: () => void;
-}) {
+}
+
+function useIntentActor(props: RunIntentsProps) {
   const [snapshot, setSnapshot] = useState<SnapshotFrom<typeof runIntentsMachine> | null>(null);
-  const [text, setText] = useState('');
-  const [guidanceOpen, showGuidance] = useState(false);
   const current = useRef<ReturnType<typeof intentsActor> | null>(null);
   useEffect(() => {
     const actor = intentsActor({
@@ -48,22 +48,34 @@ export function useRunIntents(props: {
       actor.stop();
     };
   }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
+  return {snapshot, current};
+}
+
+function enabledObservation(props: RunIntentsProps) {
+  return props.enabled && props.projectRoot !== undefined ? props.relaunch : undefined;
+}
+
+export function useRunIntents(props: RunIntentsProps) {
+  const {snapshot, current} = useIntentActor(props);
+  const [text, setText] = useState('');
+  const [guidanceOpen, showGuidance] = useState(false);
   const projectRoot = props.projectRoot;
+  const committed = snapshot ? historyEpoch(snapshot.context) : 0n;
   const {view: machineRelaunch, liveness} = useRelaunch({
     bridge: props.bridge,
     host: props.host,
     projectRoot: projectRoot ?? '',
     runId: props.runId,
-    observation: props.enabled && projectRoot !== undefined ? props.relaunch : undefined,
+    observation: enabledObservation(props),
     schedule: props.schedule,
   });
   const busy = snapshot?.matches({active: 'sending'}) ?? false;
   const sendRequest = (
     request: Parameters<NonNullable<typeof current.current>['send']>[0] & {type: 'send'},
   ) => current.current?.send(request);
-  const committed = snapshot ? historyEpoch(snapshot.context) : 0n;
   const acknowledged = machineRelaunch?.appliedEpoch ?? 0n;
   const writer = writerControls({
+    reference: projectRoot === undefined ? undefined : runReference(projectRoot, props.runId),
     observation: props.relaunch,
     liveness,
     historyEpoch: committed,
@@ -74,8 +86,7 @@ export function useRunIntents(props: {
     props.enabled && writer.status !== 'ready',
     props.refreshWriter,
   );
-  if (!props.enabled || !snapshot || projectRoot === undefined)
-    return {controls: null, busy, sendRequest};
+
   const relaunch = machineRelaunch && {
     ...machineRelaunch,
     available: machineRelaunch.available && writer.relaunch !== null,
@@ -84,10 +95,10 @@ export function useRunIntents(props: {
   const epoch = writer.epoch > confirmedEpoch ? writer.epoch : confirmedEpoch;
   const actions = writer.actions;
   const send = (action: RunIntentAction) => {
-    if (!actions.includes(action)) return;
+    if (writer.status !== 'ready' || !writer.actions.includes(action)) return;
     const request = runIntent(
       {
-        ...runReference(projectRoot, props.runId),
+        ...writer.reference,
         requestId: newRequestId(),
         expectedEpoch: props.relaunch?.epoch ?? 0n,
       },
@@ -103,10 +114,10 @@ export function useRunIntents(props: {
       actions={actions}
       status={writer.status}
       epoch={epoch}
-      busy={snapshot.matches({active: 'sending'})}
-      entries={intentRows(snapshot.context, epoch)}
-      error={snapshot.context.error}
-      warning={snapshot.context.warning}
+      busy={busy}
+      entries={snapshot ? intentRows(snapshot.context, epoch) : []}
+      error={snapshot?.context.error ?? null}
+      warning={snapshot?.context.warning ?? null}
       guidanceOpen={guidanceOpen}
       showGuidance={showGuidance}
       text={text}
@@ -115,7 +126,15 @@ export function useRunIntents(props: {
       retry={requestId => current.current?.send({type: 'retry', requestId})}
     />
   );
-  return {controls, busy, sendRequest};
+  const surface = intentSurface(props.enabled, controls);
+  return {...surface, busy, sendRequest};
+}
+
+function intentSurface(
+  enabled: boolean,
+  controls: JSX.Element,
+): {kind: 'enabled'; controls: JSX.Element} | {kind: 'disabled'; controls: null} {
+  return enabled ? {kind: 'enabled', controls} : {kind: 'disabled', controls: null};
 }
 
 export function RunIntents(props: Parameters<typeof useRunIntents>[0]): JSX.Element | null {

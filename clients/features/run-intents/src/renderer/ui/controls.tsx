@@ -31,7 +31,7 @@ const STATUS_LABELS: Record<IntentRow['status'], string> = {
 };
 
 export function IntentControls(props: {
-  readonly status?: 'ready' | 'catching-up' | 'unknown';
+  readonly status?: 'ready' | 'catching-up' | 'unknown' | 'locating';
   readonly busy: boolean;
   readonly actions: readonly RunIntentAction[];
   readonly epoch: bigint;
@@ -143,9 +143,14 @@ export function IntentControls(props: {
   );
 }
 
-function WriterStatus({status}: {readonly status: 'ready' | 'catching-up' | 'unknown'}) {
+function WriterStatus({
+  status,
+}: {
+  readonly status: 'ready' | 'catching-up' | 'unknown' | 'locating';
+}) {
   const words = {
     ready: null,
+    locating: 'Waiting for the host to locate this run…',
     'catching-up': 'Catching up with the run… Reconnecting automatically.',
     unknown: 'Run status unknown. Reconnecting automatically.',
   };

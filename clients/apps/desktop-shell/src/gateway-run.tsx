@@ -1,10 +1,11 @@
+import type {RecordedProjectRoot} from '@vibesys/hosts';
 import {newRequestId} from '@vibesys/request-identity';
 /** The app chooses one reader for a run, using the existing host setting. */
 
 import {useRunIntents} from '@vibesys/feature-run-intents/renderer';
 import type {RunPageAddress} from '@vibesys/feature-run-page/renderer';
 import {type GatewayRunPorts, RunScreen, useGatewayRun} from '@vibesys/feature-run-page/renderer';
-import {type RunPageSeed, recordedRunRoot} from '@vibesys/feature-run-page/state';
+import type {RunPageSeed} from '@vibesys/feature-run-page/state';
 import {useRunSessions} from '@vibesys/feature-run-sessions/renderer';
 import type {GatewayBridge, WelcomeBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
@@ -19,6 +20,7 @@ import {gatewayTransport} from './gateway-transport.js';
 
 interface GatewayRunProps {
   readonly seed: RunPageSeed;
+  readonly projectRoot: RecordedProjectRoot | undefined;
   readonly bridge: GatewayBridge;
   readonly settings: Pick<WelcomeBridge, 'onHostSettingsChanged' | 'runTransportV2'>;
   readonly schedule: ScheduleTimeout;
@@ -35,7 +37,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
   const observation = observationOf(snapshot.context.load?.skeleton);
-  const projectRoot = recordedRunRoot(snapshot.context.load?.skeleton);
+  const projectRoot = props.projectRoot;
   const intents = useRunIntents({
     bridge,
     host: seed.identity.host,

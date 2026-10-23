@@ -1,4 +1,5 @@
 import {RunLiveness} from '@vibesys/proto';
+import type {RunReference} from './reference.js';
 import type {RelaunchLiveness, RelaunchObservation, RelaunchTarget} from './relaunch.js';
 
 /** The actions the visible controls offer. */
@@ -6,6 +7,7 @@ export type RunIntentAction = 'pause' | 'pauseNow' | 'steer';
 
 /** Everything the host has said about the writer: each fact carries the epoch it describes. */
 export interface WriterFacts {
+  readonly reference: RunReference | undefined;
   readonly observation: RelaunchObservation | undefined;
   readonly liveness: RelaunchLiveness;
   /** The newest epoch in committed history, which can lead the lifecycle stream. */
@@ -13,7 +15,7 @@ export interface WriterFacts {
   readonly acknowledgedEpoch?: bigint;
 }
 
-export type WriterControls = {readonly epoch: bigint} & (
+type WriterAvailability = {readonly epoch: bigint} & (
   | {
       readonly status: 'ready';
       readonly actions: readonly [RunIntentAction, ...RunIntentAction[]];
@@ -25,8 +27,8 @@ export type WriterControls = {readonly epoch: bigint} & (
       readonly relaunch: RelaunchTarget;
     }
   | {
-      readonly status: 'catching-up' | 'unknown';
-      readonly actions: readonly RunIntentAction[];
+      readonly status: 'catching-up' | 'unknown' | 'locating';
+      readonly actions: readonly [];
       readonly relaunch: null;
     }
 );
@@ -40,13 +42,25 @@ export type WriterControls = {readonly epoch: bigint} & (
  * re-read lifecycle within 30 seconds, repeatedly while the gap persists. Machine/DOM properties
  * enforce these bounds. Resume follows the host contract: every ending is eligible.
  */
+export type WriterControls = WriterAvailability &
+  (
+    | {readonly status: 'ready'; readonly reference: RunReference}
+    | {readonly status: 'catching-up' | 'unknown' | 'locating'; readonly reference?: never}
+  );
+
 export function writerControls(facts: WriterFacts): WriterControls {
+  const offered = writerAvailability(facts);
+  if (!facts.reference) return {...offered, status: 'locating', actions: [], relaunch: null};
+  return offered.status === 'ready' ? {...offered, reference: facts.reference} : offered;
+}
+
+function writerAvailability(facts: Omit<WriterFacts, 'reference'>): WriterAvailability {
   const {observation, liveness, historyEpoch, acknowledgedEpoch = 0n} = facts;
   const observed = observation?.epoch ?? 0n;
   const epoch = [observed, liveness.epoch, historyEpoch, acknowledgedEpoch].reduce((a, b) =>
     a > b ? a : b,
   );
-  const waiting = (status: 'catching-up' | 'unknown'): WriterControls => ({
+  const waiting = (status: 'catching-up' | 'unknown'): WriterAvailability => ({
     epoch,
     actions: [],
     relaunch: null,
@@ -95,5 +109,5 @@ export function relaunchTarget(
   observation: RelaunchObservation,
   liveness: RelaunchLiveness,
 ): RelaunchTarget | null {
-  return writerControls({observation, liveness, historyEpoch: 0n}).relaunch;
+  return writerAvailability({observation, liveness, historyEpoch: 0n}).relaunch;
 }
