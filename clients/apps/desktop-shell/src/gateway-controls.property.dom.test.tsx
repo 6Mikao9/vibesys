@@ -127,7 +127,8 @@ const STATE = fc.oneof(
 
 const BACKGROUND = fc.record({
   epoch: fc.integer({min: 1, max: 8}),
-  modernHead: fc.boolean(),
+  // The gateway states a head's epoch from the committed log, so no reader sees one without it.
+  modernHead: fc.constant(true),
   history: fc.array(
     fc.record({
       action: fc.constantFrom(

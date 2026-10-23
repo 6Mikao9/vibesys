@@ -220,9 +220,7 @@ function Header(props: {
               {...reason(header.pauseNow)}
             />
           ) : null}
-          {state.readOnly === true ? null : (
-            <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
-          )}
+          <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
         </Row>
       </Row>
       {props.toolbar}
@@ -272,11 +270,31 @@ function EndedBanner(props: {
   const {state, dispatch} = props;
   const ended = endedView(state);
   if (ended === null) return null;
+  const logsAndAgain = (
+    <>
+      <Button
+        variant="secondary"
+        text="View logs"
+        press={() => {
+          dispatch({type: 'view-logs'});
+          props.zoom({type: 'jump', route: {...RUN_ROUTE, mode: 'logs'}});
+        }}
+      />
+      <Button variant="secondary" text="Run again" press={() => dispatch({type: 'run-again'})} />
+    </>
+  );
   if (state.readOnly === true) {
+    // Resume belongs to the run controls, which know the writer; logs and Run again need no writer.
     const reason = state.record.kind === 'ended' ? state.record.run.reason : null;
-    return reason ? (
-      <Banner tone={ended.tone} title={state.lifecycleWord ?? ended.title} body={reason} />
-    ) : null;
+    if (ended.title === 'Finished') return <Row gap="space-2">{logsAndAgain}</Row>;
+    return (
+      <Banner
+        tone={ended.tone}
+        title={state.lifecycleWord ?? ended.title}
+        body={reason ?? ''}
+        actions={logsAndAgain}
+      />
+    );
   }
   const actions = (
     <>

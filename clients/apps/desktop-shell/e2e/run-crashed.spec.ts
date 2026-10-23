@@ -37,5 +37,11 @@ test('the idea, the turn and the clock stop where the run did', async ({page}) =
 test('the banner gives the whole reason the run failed', async ({page}) => {
   const fixture = fixtureNamed('crashed-after-turn');
   await openFixture(page, fixture);
-  await expect(page.getByRole('main').getByText(fixture.end?.reason ?? '')).toBeVisible();
+  // The header's facts and the banner each give it whole; the first match is the whole reason.
+  await expect(
+    page
+      .getByRole('main')
+      .getByText(fixture.end?.reason ?? '')
+      .first(),
+  ).toBeVisible();
 });
