@@ -249,6 +249,31 @@ def test_a_routing_prompt_saved_before_the_base_was_shown_still_decodes() -> Non
     assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, restored, profiler_kind="neuron")
 
 
+_BASE_FIELDS = ("base_revision", "base_round", "base_value")
+
+
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(context=_PRE_ROUND, kept=st.sets(st.sampled_from(_BASE_FIELDS)))
+def test_a_saved_routing_prompt_re_encodes_to_the_document_that_was_saved(
+    context: PreRoundPrompt, kept: set[str]
+) -> None:
+    """Every routing prompt a run recorded re-encodes byte-for-byte, so its digest still holds.
+
+    Runs recorded these prompts with the base fields absent (before they existed), present as
+    ``null`` (while they were optional and always written), or set. Recovery proves each
+    record against the digest of what was saved; any of them re-encoding differently blocks a
+    resume with "recovery blocked: outcome unknown".
+    """
+    full = context.model_dump(mode="json")
+    saved = {
+        name: value for name, value in full.items() if name not in _BASE_FIELDS or name in kept
+    }
+    for name in kept:
+        saved.setdefault(name, None)
+
+    assert PreRoundPrompt.model_validate(saved).model_dump(mode="json") == saved
+
+
 @settings(max_examples=examples(pr=20, nightly=200))
 @given(context=_PRE_ROUND)
 def test_a_routing_prompt_saved_before_the_base_fields_keeps_its_digest(
