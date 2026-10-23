@@ -81,7 +81,7 @@ class Verify(core.VerifyParentRevisionBase):
 
 
 class Readings(core.EvidenceReadingsBase[core.Value]):
-    """No readings: the toy search never interprets evidence."""
+    """No readings: the toy search interprets evidence only to ask for it, and reads nothing."""
 
 
 class Interpret(core.InterpretEvidenceBase):
@@ -132,10 +132,12 @@ JUDGE = core.Role(
 
 
 class Config(core.Value):
-    """How many workstreams the toy search runs, and how many at once."""
+    """How many workstreams the toy search runs, how many at once, and what a workstream reads."""
 
     workstreams: int = 1
     in_flight: int = 1
+    interpret: bool = False
+    """Whether a workstream interprets the evidence its agents took before it asks the next role."""
 
 
 class Done(core.Value):
@@ -156,8 +158,14 @@ class Summary(core.Value):
     done: tuple[Done, ...] = ()
 
 
-async def workstream(ctx: core.Flow, key: str, number: int, roles: tuple[core.Role, ...]) -> Done:
-    """Open a workspace, ask each role in turn in it, let the workspace settle."""
+async def workstream(
+    ctx: core.Flow, key: str, number: int, roles: tuple[core.Role, ...], config: Config
+) -> Done:
+    """Open a workspace, ask each role in turn in it, let the workspace settle.
+
+    With ``config.interpret``, the evidence the agents took of the candidate is interpreted
+    before the next role is asked, as a search that reads a measurement before it judges does.
+    """
     asked: list[str] = []
     failed: list[str] = []
     async with ctx.workspaces.open(
@@ -181,6 +189,9 @@ async def workstream(ctx: core.Flow, key: str, number: int, roles: tuple[core.Ro
                 case core.Failed():
                     failed.append(role.name)
                     break
+            taken = ctx.evaluation.taken(workspace, revision) if config.interpret else ()
+            if taken:
+                await ctx.evaluation.readings(taken, workspace=workspace, within=500.0)
         if revision != ctx.facts.baseline:
             ctx.workspaces.keep(
                 workspace, revision, core.Assessment(outcome="failed", retention="discard")
@@ -198,12 +209,13 @@ def toy_search(
     @search("toy", config=Config, operations=OPERATIONS, roles=roles)
     async def toy(ctx: core.Flow, config: Config) -> None:
         """Run the workstreams ``in_flight`` at a time; the framework then adopts the input."""
+        ctx.checkpoint(config)  # the root restarts from its arguments when a relaunch needs it
         started = 0
         done: list[Done] = []
         async with ctx.group(limit=config.in_flight) as group:
             while len(done) < config.workstreams:
                 while started < config.workstreams and group.free:
-                    group.start(f"w{started}", workstream, f"w{started}", started, roles)
+                    group.start(f"w{started}", workstream, f"w{started}", started, roles, config)
                     started += 1
                 ended = await ctx.first(group)
                 if not isinstance(ended, Done):
@@ -254,11 +266,13 @@ _IN_FLIGHT = frozenset(
 )
 
 
-def _control(action: Literal["pause", "resume"], now_at: float) -> core.RunControlEvent:
+def _control(
+    action: Literal["pause", "resume"],
+    now_at: float,
+    owner: core.PauseOwner = core.PauseOwner.QUOTA,
+) -> core.RunControlEvent:
     control = (
-        core.ControlInput(
-            control_id=core.ControlId(root=action), action=action, owner=core.PauseOwner.QUOTA
-        )
+        core.ControlInput(control_id=core.ControlId(root=action), action=action, owner=owner)
         if action == "pause"
         else core.ControlInput(control_id=core.ControlId(root=action), action=action, when="now")
     )
@@ -292,9 +306,16 @@ class ToyHost:
     pause_at: int | None = None
     """The operator pauses the run just before the executor of the n-th request answers (from 0),
     if the run is open then, and resumes it once nothing of the paused run is in flight."""
+    pause_owner: core.PauseOwner = core.PauseOwner.QUOTA
+    """Who pauses. A quota pause holds the run in place. An operator pause drains it and parks
+    it; the operator then relaunches it as a successor epoch."""
     paused_with: str | None = None
     """The kind of the request the pause came before, once the operator paused."""
+    parked: list[core.CoreState] = field(default_factory=list)
+    """The run as it stood each time it parked, before the operator relaunched it."""
     shares: bool = True
+    max_steps: int = 2000
+    """A hang guard: a drive still going after this many steps is stuck."""
     calls: list[tuple[str, str, str]] = field(default_factory=list)
     """(attempt, role, call id) of every evaluation a turn asked for."""
     _fresh: int = 0
@@ -332,7 +353,7 @@ class ToyHost:
         if ordinal != self.pause_at or run.status != core.RunStatus.RUNNING or run.result:
             return ()
         self.paused_with = type(request).__name__
-        return (_control("pause", run.now_at),)
+        return (_control("pause", run.now_at, self.pause_owner),)
 
     def operator(self, state: core.CoreState) -> tuple[core.CoreEvent, ...]:
         """Resume a paused run once nothing of it is in flight (asked while nothing dispatches).
@@ -340,6 +361,10 @@ class ToyHost:
         That is where the run sits while it waits on the operator: whatever it was doing when
         it was paused has finished, and what it decided since is held until the resume.
         """
+        if state.run.status == core.RunStatus.PARKED:
+            self.parked.append(state)
+            epoch = state.records.recovery.epoch + 1
+            return (core.EpochResumed(epoch=epoch, now_at=state.run.now_at),)
         if state.run.status != core.RunStatus.PAUSED:
             return ()
         if core.project(state).next_observe_at is not None or any(
@@ -371,6 +396,10 @@ class ToyHost:
                 return self._submit(request)
             case core.DispatchTurn() | core.ResumeSessionTurn():
                 return self._turn(request, state)
+            case core.ExecuteRegisteredOperation() if request.operation.schema_ref.kind == (
+                Interpret.model_fields["kind"].default
+            ):
+                return Succeeded(outcome=Readings(status="succeeded"))
             case core.ExecuteRegisteredOperation():
                 prompt = core.ArtifactId(root=f"prompt:{request.operation_id.root}")
                 return Succeeded(
@@ -525,6 +554,7 @@ def toy_harness(
         envelope_type=core.RunEnvelope[core.FlowState],
         events=host.events,
         reducers=reducers,
+        max_steps=host.max_steps,
     )
 
 

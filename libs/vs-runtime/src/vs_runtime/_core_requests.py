@@ -27,6 +27,7 @@ from vs_core.api import (
     ContractError,
     DiscardWorkspace,
     DispatchTurn,
+    DrainPermit,
     EnsureSession,
     EnsureWorkspace,
     EvaluationEvent,
@@ -49,7 +50,6 @@ from vs_core.api import (
     SnapshotAndRetain,
     SnapshotAndRetainRun,
     SubmitMeasurement,
-    TurnPermit,
     Until,
     VerifyAdoption,
 )
@@ -103,7 +103,7 @@ class ExecutionContext(BaseModel):
     reports the request as ``Failed``.
     """
     lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
-    permit: TurnPermit | None = None
+    permit: DrainPermit | None = None
     """The logical-turn permit core issued for this request, when the request consumes one."""
 
 

@@ -149,9 +149,11 @@ through `HostCall` to the existing ordered inbox. Admission acknowledges persist
 `IntentState` records application or refusal. Request IDs retain their disposition across retries.
 Scoped guidance and work-item actions continue to use the same inbox.
 
-**Pause** closes admission, drains every in-flight logical turn and its evaluation requests
-within the turn's original deadline, releases this run's evaluation interests, and exits.
-Independent queued evaluations do not start. **Pause now** cancels unfinished work and exits,
+**Pause** closes admission of new attempts, settles every attempt the run admitted (each
+runs its continuations to the close of its workspace; the successors of a turn in flight and
+their evaluation requests stay within that turn's original deadline), releases this run's
+evaluation interests, and exits. Queued attempts and independent queued evaluations do not
+start. **Pause now** cancels unfinished work and exits,
 including as escalation during a drain. It warns: "Unfinished work may need repeating and may
 still incur charges." Neither interruption becomes a policy failure or retry debit. Actual
 usage and accepted results remain saved. The quota hold is internal.

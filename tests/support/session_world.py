@@ -35,6 +35,7 @@ from vs_core.api import (
     ArtifactId,
     ArtifactRef,
     DispatchTurn,
+    DrainPermit,
     EnsureSession,
     InspectTurn,
     InvocationId,
@@ -50,7 +51,6 @@ from vs_core.api import (
     SessionSpec,
     SnapshotAndRetainRun,
     TurnObserved,
-    TurnPermit,
     TurnSpec,
     Until,
     WorkspaceRef,
@@ -230,7 +230,7 @@ class FakeSessionResolver:
             policy=AgentExecutionPolicy(require_enforcement=False),
         )
 
-    def hold_permit(self, execution_id: str, scope: Scope, permit: TurnPermit) -> None:
+    def hold_permit(self, execution_id: str, scope: Scope, permit: DrainPermit) -> None:
         """This resolver has no control channel, so the permit is not a gate here."""
         del execution_id, scope, permit
 

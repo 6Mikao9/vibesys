@@ -572,11 +572,12 @@ used, keeps its control: sending a different control under it is refused.
 
 The run has four operator controls: Pause, Pause now, Resume and Guidance.
 
-Pause closes admission of new turns and independent evaluations, finishes the turns already
-in flight and every admitted evaluation, and exits. Admitted evaluations finish even if they
-are still queued or their agent has suspended. Evaluations requested by draining turns still
-run within the turns' original deadlines, including requests made after Pause. Work whose
-admission has not committed waits for Resume.
+Pause closes admission of new attempts and settles every attempt the run already admitted,
+then exits. An admitted attempt carries on to the close of its workspace: its turns finish, its
+evaluations end (even if they are still queued or their agent has suspended), the turn that
+waited for an evaluation resumes, and its evidence is interpreted, judged and settled. The
+successors of a turn in flight and the evaluations they request still run within that turn's
+original deadline. Work whose admission has not committed waits for Resume.
 
 Pause now cancels unfinished work and exits. **Unfinished work may need repeating and may still
 incur charges.** It is available immediately while Pause drains. Completed results and actual

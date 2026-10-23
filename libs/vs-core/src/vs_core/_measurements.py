@@ -63,7 +63,7 @@ from ._submissions import (
     rejected,
     submission_released,
 )
-from ._turn_permit import _executing_turn, _Facts, _permit_for_turn
+from ._turn_permit import permit_for_agent_call
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     CloseAttemptScope,
@@ -468,12 +468,10 @@ def _agent_requested(
     if any(call.call_id == event.call_id for call in state.agent_calls):
         return AreaChange(state=state)
     identity = identity_of(event.plan)
-    facts = _Facts(context.run, context.sessions, context.records, state)
-    requester = _executing_turn(context.sessions, event.scope)
-    permit = _permit_for_turn(facts, requester, live=True)
+    requester, permit = permit_for_agent_call(context, state, event.scope)
     rejection: AgentRejection | None = None
-    if not continues_admitted_work(context.run) and not (
-        context.run.status == RunStatus.DRAINING and permit is not None
+    if not continues_admitted_work(context.run) or (
+        context.run.status == RunStatus.DRAINING and permit is None
     ):
         rejection = AgentRejection.RUN_STOPPING
     elif not isinstance(current(context, event.scope), Proven):

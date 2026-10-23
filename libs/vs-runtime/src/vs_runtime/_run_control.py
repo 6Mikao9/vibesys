@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_agent.api import AgentExecutionCancelledError
-from vs_core.api import PauseOwner, RunPause, StopMode, TurnPermit, escalate_stop
+from vs_core.api import DrainPermit, PauseOwner, RunPause, StopMode, escalate_stop
 from vs_runtime._operator_control import (
     ControlAction,
     PauseNowRequest,
@@ -515,7 +515,7 @@ class RunControlChannel(Protocol):
         ...
 
     def prepare_evaluation(
-        self, resource_id: str, scope: Scope, permit: TurnPermit | None = None
+        self, resource_id: str, scope: Scope, permit: DrainPermit | None = None
     ) -> None:
         """Identify an evaluation requested by an admitted turn, rather than the strategy.
 
@@ -529,7 +529,7 @@ class RunControlChannel(Protocol):
         ...
 
     def prepare_execution(
-        self, execution_id: str, scope: Scope, permit: TurnPermit | None = None
+        self, execution_id: str, scope: Scope, permit: DrainPermit | None = None
     ) -> None:
         """Associate the turn's execution identity with its declared owner.
 
@@ -745,7 +745,7 @@ class RuntimeRunControlChannel:
         self._capacity_standing = False
         self._stop_listeners: list[Callable[[], object]] = []
         self._execution_closed = False
-        self._permits: dict[str, TurnPermit] = {}
+        self._permits: dict[str, DrainPermit] = {}
         self._prepared_executions: dict[str, Scope] = {}
         self._evaluation_dependencies: dict[str, frozenset[str]] = {}
         self._executing: dict[str, Scope] = {}
@@ -766,7 +766,7 @@ class RuntimeRunControlChannel:
         self._resumed_by = PauseWake.RESUMED
 
     def prepare_evaluation(
-        self, resource_id: str, scope: Scope, permit: TurnPermit | None = None
+        self, resource_id: str, scope: Scope, permit: DrainPermit | None = None
     ) -> None:
         """Capture the executing callers once; a later turn cannot inherit their queued jobs.
 
@@ -789,7 +789,7 @@ class RuntimeRunControlChannel:
             return not self._stop_requested and not owners.isdisjoint(self._executing)
 
     def prepare_execution(
-        self, execution_id: str, scope: Scope, permit: TurnPermit | None = None
+        self, execution_id: str, scope: Scope, permit: DrainPermit | None = None
     ) -> None:
         """Associate dispatch identity with its declared owner before preparation ends."""
         with self._lock:

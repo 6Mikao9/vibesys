@@ -63,6 +63,7 @@ from vs_core.api import (
     LAUNCH_FAILURE_PREFIX,
     REPLY_ERROR_MESSAGE_LIMIT,
     DispatchTurn,
+    DrainPermit,
     EnsureSession,
     InputId,
     InputMidTurnReleased,
@@ -86,7 +87,6 @@ from vs_core.api import (
     SnapshotAndRetainRun,
     TargetObservation,
     TurnObserved,
-    TurnPermit,
     TurnSpec,
     WorkspaceRef,
 )
@@ -225,7 +225,7 @@ class SessionResolver(Protocol):
         """The provider session configuration for *turn* (role, workspace, policy)."""
         ...
 
-    def hold_permit(self, execution_id: str, scope: Scope, permit: TurnPermit) -> None:
+    def hold_permit(self, execution_id: str, scope: Scope, permit: DrainPermit) -> None:
         """Record the logical-turn permit before preparation publishes the execution.
 
         A resolver with no control channel records nothing.
@@ -803,7 +803,7 @@ class RuntimeSessionRequests:
             ) from error
 
     async def _resolve(
-        self, request: DispatchTurn, bkey: str, permit: TurnPermit | None = None
+        self, request: DispatchTurn, bkey: str, permit: DrainPermit | None = None
     ) -> tuple[SessionBinding, _Dispatch]:
         """The ensured session and the resolved dispatch, or a refusal naming what is missing."""
         turn = request.turn

@@ -1,12 +1,14 @@
-"""One permit for a logical turn: its identity and the deadline it was admitted with.
+"""What a non-immediate operator Pause lets run: a logical turn's permit and its attempt's.
 
-Core issues the permit when the turn is dispatched. While that turn runs, the
+Core issues a turn's permit when the turn is dispatched. While that turn runs, the
 evaluations it requests consume the permit and cannot outlive it. A non-immediate
-operator Pause of this epoch admits only that turn's successors and caps them at
-the permit. Outside that drain, a quota pause, a suspended resume, an
-evaluation-wait continuation, a correction and a host-restart replay keep the
-deadline the running run already gave them. A pause is acknowledged only when
-no permit-holding work remains.
+operator Pause of this epoch admits that turn's successors and caps them at the permit.
+It closes admission of new attempts only: an attempt that began and is still open keeps
+carrying on, so its next role's turn, its interpretation of evidence and its settlement
+run to the close of its workspace, bounded by the run's deadline. Outside that drain, a
+quota pause, a suspended resume, an evaluation-wait continuation, a correction and a
+host-restart replay keep the deadline the running run already gave them. A pause is
+acknowledged only when no permit-holding work remains.
 """
 
 from __future__ import annotations
@@ -18,7 +20,8 @@ from pydantic import BaseModel, ConfigDict
 
 from ._strategy_operations import RenderRoleArtifactsBase
 from ._wait_clock import turn_bound
-from .types.common import ExecuteRegisteredOperation, InvocationRef, Scope
+from .types.attempts import AttemptPhase
+from .types.common import AttemptRef, ExecuteRegisteredOperation, InvocationRef, Scope
 from .types.evaluation import EvaluationState, SubmitMeasurement
 from .types.records import RecordsState, RequestPhase, Scheduled
 from .types.sessions import (
@@ -30,10 +33,12 @@ from .types.sessions import (
     SessionsState,
     TurnSpec,
 )
-from .types.strategy import Command, Operation, RequestTurn
+from .types.strategy import Command, Operation, RequestTurn, Withdraw
 
 if TYPE_CHECKING:
-    from .types.kernel import CoreState, RunState
+    from .types.attempts import AttemptsState
+    from .types.kernel import CoreState, EvaluationContext, RunState
+    from .types.records import Request
 
 
 class TurnPermit(BaseModel):
@@ -49,15 +54,31 @@ class TurnPermit(BaseModel):
     deadline_at: float
 
 
+class AttemptPermit(BaseModel):
+    """The admission of an attempt the run holds open: its work carries on through a Pause.
+
+    ``deadline_at`` is the run's deadline, the outer bound every request already carries.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    scope: Scope
+    deadline_at: float
+
+
+type DrainPermit = TurnPermit | AttemptPermit
+"""What lets work run in an operator Pause's drain: a turn's permit, or its attempt's."""
+
+
 @dataclass(frozen=True)
 class _Facts:
     run: RunState
+    attempts: AttemptsState
     sessions: SessionsState
     records: RecordsState
     evaluation: EvaluationState
 
 
-def permit_for_request(state: CoreState, request: object) -> TurnPermit | None:
+def permit_for_request(state: CoreState, request: Request) -> DrainPermit | None:
     """The live permit ``request`` consumes, or None when the turn was not admitted."""
     return _for_request(_facts(state), request, live=True)
 
@@ -77,6 +98,24 @@ def admitted_work_remains(state: CoreState, *, running: bool = False) -> bool:
     return any(
         not job.terminal for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs)
     )
+
+
+def permit_for_agent_call(
+    context: EvaluationContext, evaluation: EvaluationState, scope: Scope
+) -> tuple[InvocationRef | None, DrainPermit | None]:
+    """The turn running in ``scope`` and the permit its evaluation call consumes.
+
+    The call takes the running turn's bound. During an operator Pause, a turn that does not
+    descend from an admitted one runs under the permit of its open attempt; one that does
+    and whose bound passed is refused, as every successor of it is.
+    """
+    facts = _Facts(context.run, context.attempts, context.sessions, context.records, evaluation)
+    requester = _executing_turn(context.sessions, scope)
+    if requester is None:
+        return None, None
+    if _permit_for_turn(facts, requester, live=False) is not None:
+        return requester, _permit_for_turn(facts, requester, live=True)
+    return requester, _of_open_attempt(facts, scope, live=True)
 
 
 def cap_scheduled(state: CoreState, scheduled: Scheduled) -> Scheduled:
@@ -132,7 +171,7 @@ def cap_to_permits(state: CoreState) -> CoreState:
     return state.model_copy(update={"records": ledger, "evaluation": evaluation})
 
 
-def cap_dispatch_until(facts: _Facts, request: object, at: float) -> float:
+def cap_dispatch_until(facts: _Facts, request: Request, at: float) -> float:
     """The dispatch deadline, no later than the permit ``request`` consumes."""
     permit = _for_request(facts, request, live=False)
     if permit is None:
@@ -143,19 +182,20 @@ def cap_dispatch_until(facts: _Facts, request: object, at: float) -> float:
 def facts_for(
     *,
     run: RunState,
+    attempts: AttemptsState,
     sessions: SessionsState,
     records: RecordsState,
     evaluation: EvaluationState,
 ) -> _Facts:
     """The permit's inputs when the caller has them apart from a ``CoreState``."""
-    return _Facts(run, sessions, records, evaluation)
+    return _Facts(run, attempts, sessions, records, evaluation)
 
 
 def _facts(state: CoreState) -> _Facts:
-    return _Facts(state.run, state.sessions, state.records, state.evaluation)
+    return _Facts(state.run, state.attempts, state.sessions, state.records, state.evaluation)
 
 
-def _cap_pair(now_at: float, scheduled: Scheduled, permit: TurnPermit | None) -> Scheduled:
+def _cap_pair(now_at: float, scheduled: Scheduled, permit: DrainPermit | None) -> Scheduled:
     if permit is None:
         return scheduled
     until = scheduled.until
@@ -180,7 +220,13 @@ def _operator_drain(facts: _Facts) -> bool:
     return park is not None and not park.immediate and park.epoch == facts.records.recovery.epoch
 
 
-def _for_request(facts: _Facts, request: object, *, live: bool) -> TurnPermit | None:
+def _for_request(facts: _Facts, request: Request, *, live: bool) -> DrainPermit | None:
+    if _from_turns(facts, request, live=False) is not None:
+        return _from_turns(facts, request, live=live)
+    return _of_open_attempt(facts, request.scope, live=live)
+
+
+def _from_turns(facts: _Facts, request: Request, *, live: bool) -> TurnPermit | None:
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
         return _for_turn(facts, request, live=live)
     if isinstance(request, SubmitMeasurement) and request.decision_id is None:
@@ -192,6 +238,40 @@ def _for_request(facts: _Facts, request: object, *, live: bool) -> TurnPermit | 
     if isinstance(request, ExecuteRegisteredOperation):
         return _for_operation(facts, request, live=live)
     return None
+
+
+def _of_open_attempt(facts: _Facts, scope: Scope, *, live: bool) -> AttemptPermit | None:
+    """The permit an operator Pause leaves an attempt that was admitted and is still open.
+
+    A Pause closes admission of new attempts, not the continuations of the ones admitted:
+    whatever the attempt's flow asks next (its first turn, the judge's turn, the
+    interpretation of its evidence, its settlement) runs until its workspace closes. An
+    attempt still queued, one the run parked for reopening and one that is closing hold no
+    permit, so nothing here opens admission. The work is bounded by the run's deadline, the
+    outer bound every request already carries.
+    """
+    if not _operator_drain(facts):
+        return None
+    attempt = next(
+        (
+            row
+            for row in facts.attempts.attempts
+            if row.attempt_id == scope.owner and row.generation == scope.generation
+        ),
+        None,
+    )
+    if (
+        attempt is None
+        or attempt.phase not in (AttemptPhase.ACQUIRING, AttemptPhase.ACTIVE)
+        or attempt.admission_id is None
+        or attempt.closure is not None
+        or attempt.terminal_reason is not None
+    ):
+        return None
+    deadline = facts.run.deadline_at
+    if live and facts.run.now_at >= deadline:
+        return None
+    return AttemptPermit(scope=scope, deadline_at=deadline)
 
 
 def _for_turn(
@@ -274,10 +354,17 @@ def _for_operation(
     )
     if receipt is None or receipt.decision is None:
         return None
-    return _for_command(facts, receipt.decision, live=live)
+    return _from_ancestor(facts, receipt.decision, live=live)
 
 
-def _for_command(facts: _Facts, command: Command, *, live: bool) -> TurnPermit | None:
+def _for_command(facts: _Facts, command: Command, *, live: bool) -> DrainPermit | None:
+    if _from_ancestor(facts, command, live=False) is not None:
+        return _from_ancestor(facts, command, live=live)
+    subject = _subject(facts, command)
+    return None if subject is None else _of_open_attempt(facts, subject, live=live)
+
+
+def _from_ancestor(facts: _Facts, command: Command, *, live: bool) -> TurnPermit | None:
     if isinstance(command, RequestTurn):
         return _lookup(facts, _turn_anchor(facts.evaluation, command.turn), live=live)
     if isinstance(command, Operation) and isinstance(command.request, RenderRoleArtifactsBase):
@@ -285,14 +372,34 @@ def _for_command(facts: _Facts, command: Command, *, live: bool) -> TurnPermit |
     return None
 
 
-def permit_for_command(state: CoreState, command: Command) -> TurnPermit | None:
+def _subject(facts: _Facts, command: Command) -> Scope | None:
+    """The scope ``command`` works in: for a withdrawal, the scope of what it withdraws."""
+    if isinstance(command, Withdraw):
+        target = command.target
+        if isinstance(target, AttemptRef):
+            return Scope(owner=target.attempt_id, generation=target.generation)
+        if isinstance(target, InvocationRef):
+            row = _invocation(facts.sessions, target)
+            return None if row is None else row.scope
+    return command.scope
+
+
+def permit_for_command(state: CoreState, command: Command) -> DrainPermit | None:
     """The live permit a drain successor of ``command`` consumes."""
     return _for_command(_facts(state), command, live=True)
 
 
-def invocation_permit(state: CoreState, ref: InvocationRef) -> TurnPermit | None:
-    """The live permit of ``ref`` or the admitted ancestor it continues."""
-    return _lookup(_facts(state), ref, live=True)
+def invocation_permit(state: CoreState, ref: InvocationRef) -> DrainPermit | None:
+    """The live permit of ``ref`` or the admitted ancestor it continues, else its attempt's.
+
+    A turn that descends from an admitted turn is held to that turn's bound, and waits for
+    the relaunch once it passed. Any other turn runs under the permit of its open attempt.
+    """
+    facts = _facts(state)
+    if _lookup(facts, ref, live=False) is not None:
+        return _lookup(facts, ref, live=True)
+    invocation = _invocation(facts.sessions, ref)
+    return None if invocation is None else _of_open_attempt(facts, invocation.scope, live=True)
 
 
 def _turn_anchor(evaluation: EvaluationState, turn: TurnSpec) -> InvocationRef | None:

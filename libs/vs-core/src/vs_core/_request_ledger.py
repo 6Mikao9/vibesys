@@ -253,6 +253,7 @@ def _dispatched(
         at = cap_dispatch_until(
             facts_for(
                 run=context.run,
+                attempts=context.attempts,
                 sessions=context.sessions,
                 records=state,
                 evaluation=context.evaluation,

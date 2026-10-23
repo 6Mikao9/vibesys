@@ -67,7 +67,11 @@ the resume, so a pause never reaches the search as a refusal. A pause holds
 only that intake (and queued starts): work already admitted carries on and what
 it yields is delivered while paused (`continues_admitted_work`), such as a
 turn's evaluation call and wait, a job's end, or the resume of a wait whose
-jobs ended. `RunDrained` defers final publication while attempts, sessions, jobs,
+jobs ended. An operator Pause drains instead of holding: it closes admission of new
+attempts only, and each attempt it admitted runs its continuations (the resume of a
+wait, the next role's turn, the interpretation of its evidence, its settlement) to the
+close of its workspace, under the permit of its open attempt (`_turn_permit`); the run
+parks once nothing admitted is left to wait for. `RunDrained` defers final publication while attempts, sessions, jobs,
 records or child ownership remain unresolved. Evidence and assessment kinds are
 closed, and eligibility requirements retain exact provenance, purpose, revision
 and source ownership attribution.

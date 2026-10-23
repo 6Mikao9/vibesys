@@ -1,13 +1,17 @@
 """Drain a run without settling its search or consuming unfinished measurements.
 
-Park owns only admission and physical job release. Existing turn/checkpoint transitions
-finish normally, and the ordinary persisted search and request ledger resume next epoch.
+Park closes admission of new attempts and releases physical jobs when the operator asks it to.
+A Pause lets every attempt the run admitted carry on to the close of its workspace
+(``_turn_permit``): turns finish, evaluations end, and what they yield is delivered. The run
+parks once nothing admitted is left to wait for. Pause now cancels what is unfinished instead.
+The ordinary persisted search and request ledger resume next epoch.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._continuations import owes_resume
 from ._turn_permit import invocation_permit, permit_for_command, permit_for_request
 from .types.attempts import CloseAttemptScope, DiscardWorkspace, RetainRevision, SnapshotAndRetain
 from .types.common import RequestId, RunStatus
@@ -37,8 +41,9 @@ if TYPE_CHECKING:
     from .types.records import RecordsState, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
     from .types.strategy import Command
-# These effects finish work already performed by a turn. Everything else waits for
-# relaunch, including prepared turns, measurements and queued attempts.
+# These effects finish work already performed by a turn, whoever holds it. Everything else
+# runs only under a permit (``_turn_permit``): an admitted turn's successors, and the work of
+# an attempt the run admitted. The rest waits for relaunch, including the queued attempts.
 # Observations of admitted measurements continue until their results are durable.
 _DRAIN_EFFECTS = (
     SnapshotAndRetain,
@@ -146,14 +151,28 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
 
 
 def _turns_in_flight(state: CoreState) -> bool:
-    """A prepared dispatch marks its invocation executing before I/O actually starts."""
+    """A prepared dispatch marks its invocation executing before I/O actually starts.
+
+    A suspended turn is in flight while its wait still owes the resume. Its row stays
+    suspended after the resume ran (the resume is a row of its own), so the phase alone says
+    nothing: counting it would hold the drain until the turn's deadline.
+    """
     return any(
         _executing(turn, state.records)
         or (
             turn.phase is SessionPhase.SUSPENDED
+            and _owes_resume(state, turn)
             and invocation_permit(state, turn.invocation) is not None
         )
         for turn in state.sessions.invocations
+    )
+
+
+def _owes_resume(state: CoreState, turn: Invocation) -> bool:
+    """Whether a wait of ``turn`` is recorded, or about to be, and has not been resumed."""
+    return turn.pending_suspension is not None or any(
+        row.invocation == turn.invocation and owes_resume(row, state.sessions)
+        for row in state.evaluation.continuations
     )
 
 

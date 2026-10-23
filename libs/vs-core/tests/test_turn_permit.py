@@ -775,7 +775,8 @@ def test_a_measurement_is_capped_at_the_requesting_turns_bound(
     already past or still ahead. An earlier deadline of one of those applies only
     when an operator Pause of this epoch is draining and that invocation is the
     ancestor the drain selects. A quota pause is not that drain. With no single
-    executing turn, nothing in the scope is asked to stand in.
+    executing turn, nothing in the scope is asked to stand in. A turn that descends
+    from no admitted one asks as its open attempt's work, bounded by the run's deadline.
     """
     state, scope, asking, deadlines, predecessor = _measurement_world(
         requester_when, others, hold, requester_captured=requester_captured
@@ -796,7 +797,8 @@ def test_a_measurement_is_capped_at_the_requesting_turns_bound(
         ),
     )
     submissions = [row for row in result.requests if isinstance(row, core.SubmitMeasurement)]
-    if drain and live is None:
+    if drain and live is None and (hard is not None or asking is None):
+        # No single turn is asking, or an admitted ancestor's bound passed: it waits for the relaunch.
         assert submissions == [], (live, hard, result.events)
         return
     assert len(submissions) == 1, (live, hard, result.events)

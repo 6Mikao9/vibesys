@@ -540,8 +540,10 @@ workspaces, adoption) a toy search runs through the real core with scripted exec
   journaled, so they replay to the same value.
 - `Group.free` is a large constant when the group has no limit. `ctx.stopped` yields the
   `StopRequested` event itself. A stopped `Task` yields `TaskStopped(key)`.
-- Pause closes new admission while admitted logical turns finish their corrections,
-  evaluation waits, and continuations within the original deadline. Pause now withdraws
+- Pause closes admission of new attempts. Admitted logical turns finish their corrections,
+  evaluation waits, and continuations within the original deadline, and every admitted
+  attempt carries on (the next role's turn, the interpretation of its evidence, its
+  settlement) until its workspace closes; then the run parks. Pause now withdraws
   completion authority, cancels active invocations and releases evaluation interests with
   bounded cleanup. Interrupted work stays unfinished without spending a role's correction
   or lost-turn allowance.

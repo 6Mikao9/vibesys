@@ -3,7 +3,7 @@
 from typing import Literal
 
 import pytest
-from hypothesis import example, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -88,11 +88,14 @@ def test_controls_are_fenced_to_their_epoch(actions: list[_Action]) -> None:
 
 
 @pytest.mark.regression
-@example(immediate=False, independent=False)
-@given(immediate=st.booleans(), independent=st.booleans())
-def test_pause_preserves_only_an_admitted_logical_turns_successors(
-    *, immediate: bool, independent: bool
+@example(immediate=False, independent=False, open_attempt=True)
+@given(immediate=st.booleans(), independent=st.booleans(), open_attempt=st.booleans())
+def test_pause_admits_only_the_work_of_an_admitted_attempt(
+    *, immediate: bool, independent: bool, open_attempt: bool
 ) -> None:
+    """Pause now admits nothing. A Pause admits an admitted turn's successors, within its
+    deadline, and every other turn only while its attempt is open: new attempts wait."""
+    assume(independent or open_attempt)  # a closed attempt's own successor is refused as closed
     state, turn = write_turn_world(access=core.Access.READ_ONLY)
     paused = core.step(
         state,
@@ -103,6 +106,10 @@ def test_pause_preserves_only_an_admitted_logical_turns_successors(
         ended = terminal_yield(paused, turn, None)
         paused = core.step(paused, core.RequestObserved(observation=ended.observation)).state
         paused = core.step(paused, ended).state
+    if not open_attempt:
+        (owner,) = paused.attempts.attempts
+        closed = owner.model_copy(update={"phase": core.AttemptPhase.TERMINAL})
+        paused = paused.model_copy(update={"attempts": core.AttemptsState(attempts=(closed,))})
     successor = turn.turn.model_copy(
         update={
             "invocation_id": core.InvocationId(root="successor"),
@@ -116,8 +123,9 @@ def test_pause_preserves_only_an_admitted_logical_turns_successors(
         ),
         until=core.Within(limit=1000),
     )
-    assert core.deferred(paused, command) is (immediate or independent)
-    if not immediate and not independent:
+    admitted = not immediate and (open_attempt or not independent)
+    assert core.deferred(paused, command) is not admitted
+    if admitted:
         accepted = core.step(
             paused, core.DecisionSubmitted(decision=command, expected_revision=paused.revision)
         )
@@ -128,7 +136,8 @@ def test_pause_preserves_only_an_admitted_logical_turns_successors(
             if row.decision_id == command.request.decision_id
         )
         assert receipt.until is not None
-        assert receipt.until.at <= original.until.at
+        if not independent:
+            assert receipt.until.at <= original.until.at
 
 
 def test_pause_now_releases_active_invocations_before_the_epoch_exits() -> None:

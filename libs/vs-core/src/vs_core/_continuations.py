@@ -209,7 +209,7 @@ def exhausted(attempts: AttemptsState, scope: Scope) -> bool:
     )
 
 
-def _open(context: EvaluationContext, row: Continuation) -> bool:
+def owes_resume(row: Continuation, sessions: SessionsState) -> bool:
     """Whether the continuation still owes its single resume.
 
     A waiting, parked or reopening continuation does. An authorized one does until its
@@ -223,8 +223,12 @@ def _open(context: EvaluationContext, row: Continuation) -> bool:
     ):
         return True
     return row.phase == ContinuationPhase.AUTHORIZED and not any(
-        held.invocation == row.next_invocation for held in context.sessions.invocations
+        held.invocation == row.next_invocation for held in sessions.invocations
     )
+
+
+def _open(context: EvaluationContext, row: Continuation) -> bool:
+    return owes_resume(row, context.sessions)
 
 
 def wait_refused_at_turn_end(

@@ -705,7 +705,7 @@ def admission_remaining(
 
 
 def continues_admitted_work(run: RunState) -> bool:
-    """Whether the run carries on with work it already admitted: it is running or paused.
+    """Whether the run carries on with work it already admitted: it is running, paused or draining.
 
     The one definition of what a pause holds. A pause holds intake only: core takes no
     decision but a Finish or a Withdraw (``takes_command``) and admits no queued start
@@ -714,7 +714,13 @@ def continues_admitted_work(run: RunState) -> bool:
     turn that resume asks for is a decision the shell holds until the run is resumed. A gate
     that refused these while paused would drop them for good, because a resume re-sends
     only held decisions and nothing else re-delivers a fact that came while paused.
+
+    An operator Pause drains: it closes admission of new attempts and the attempts already
+    admitted run to the close of their workspaces (``_turn_permit``). So a draining run
+    carries on too, and only Pause now, which cancels what is unfinished, does not.
     """
+    if run.status == RunStatus.DRAINING:
+        return run.park is not None and not run.park.immediate
     return run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
 
 

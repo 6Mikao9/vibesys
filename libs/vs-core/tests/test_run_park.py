@@ -128,15 +128,15 @@ def test_a_turn_in_flight_finishes_and_its_revision_is_saved_before_park(
     assert finished.state.run.result is None
 
 
-def test_a_prepared_turn_is_saved_without_starting_or_holding_the_drain() -> None:
-    state, turn = write_turn_world()
-    state = state.model_copy(
+def _prepared(state: core.CoreState, request_id: core.RequestId | None) -> core.CoreState:
+    """``state`` with the dispatch ``request_id`` prepared, not yet started."""
+    return state.model_copy(
         update={
             "records": state.records.model_copy(
                 update={
                     "records": tuple(
                         row.model_copy(update={"phase": core.RequestPhase.PREPARED})
-                        if row.request_id == turn.request_id
+                        if row.request_id == request_id
                         else row
                         for row in state.records.records
                     )
@@ -144,35 +144,50 @@ def test_a_prepared_turn_is_saved_without_starting_or_holding_the_drain() -> Non
             )
         }
     )
+
+
+def _closed(state: core.CoreState) -> core.CoreState:
+    """``state`` with its attempt ended: the run holds no open attempt for its work."""
+    (owner,) = state.attempts.attempts
+    ended = owner.model_copy(update={"phase": core.AttemptPhase.TERMINAL})
+    return state.model_copy(update={"attempts": core.AttemptsState(attempts=(ended,))})
+
+
+def test_a_prepared_turn_of_an_open_attempt_starts_in_the_drain() -> None:
+    """A Pause closes admission of new attempts; a turn its open attempt prepared still starts."""
+    state, turn = write_turn_world()
+    result = park(_prepared(state, turn.request_id))
+    assert result.state.run.status == core.RunStatus.DRAINING
+    assert turn.request_id is not None
+    started = core.step(result.state, core.DispatchAuthorized(request_id=turn.request_id))
+    assert started.state.run.status == core.RunStatus.DRAINING
+    record = started.state.records.record(turn.request_id)
+    assert record is not None
+    assert record.phase == core.RequestPhase.DISPATCHED
+
+
+def test_a_prepared_turn_of_no_open_attempt_is_saved_without_starting_or_holding_the_drain() -> (
+    None
+):
+    state, turn = write_turn_world()
+    state = _closed(_prepared(state, turn.request_id))
     result = park(state)
     assert result.state.run.status == core.RunStatus.PARKED
-    assert result.state.sessions == state.sessions
     assert not result.requests
     assert turn.request_id is not None
     with pytest.raises(core.ContractError, match="park"):
         core.step(result.state, core.DispatchAuthorized(request_id=turn.request_id))
 
 
-@given(prepared=st.booleans())
-def test_pause_drain_admits_only_an_executing_turns_evaluation_dependency(
-    *, prepared: bool
+@given(prepared=st.booleans(), open_attempt=st.booleans())
+def test_pause_drain_admits_the_evaluation_dependency_of_an_open_attempt_only(
+    *, prepared: bool, open_attempt: bool
 ) -> None:
     state, turn = write_turn_world(access=core.Access.READ_ONLY)
     if prepared:
-        state = state.model_copy(
-            update={
-                "records": state.records.model_copy(
-                    update={
-                        "records": tuple(
-                            row.model_copy(update={"phase": core.RequestPhase.PREPARED})
-                            if row.request_id == turn.request_id
-                            else row
-                            for row in state.records.records
-                        )
-                    }
-                )
-            }
-        )
+        state = _prepared(state, turn.request_id)
+    if not open_attempt:
+        state = _closed(state)
     draining = park(state)
     result = core.step(
         draining.state,
@@ -184,15 +199,15 @@ def test_pause_drain_admits_only_an_executing_turns_evaluation_dependency(
         ),
     )
     submissions = [r for r in result.requests if isinstance(r, core.SubmitMeasurement)]
-    if prepared:
+    if not open_attempt:
         assert submissions == []
-    else:
-        assert len(submissions) == 1
-        assert submissions[0].request_id is not None
-        authorized = core.step(
-            result.state, core.DispatchAuthorized(request_id=submissions[0].request_id)
-        )
-        assert authorized.state.run.status is core.RunStatus.DRAINING
+        return
+    assert len(submissions) == 1
+    assert submissions[0].request_id is not None
+    authorized = core.step(
+        result.state, core.DispatchAuthorized(request_id=submissions[0].request_id)
+    )
+    assert authorized.state.run.status is core.RunStatus.DRAINING
 
 
 @pytest.mark.regression
