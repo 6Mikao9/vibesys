@@ -44,7 +44,7 @@ from vibesys.orchestration.dynamic.search._handoff import HANDOFF
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, INPUT_MEASURED
 from vibesys.orchestration.dynamic.search._measure import InputPending, measure_the_input
 from vibesys.orchestration.dynamic.search._operations import OPERATIONS
-from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
+from vibesys.orchestration.dynamic.search._outcomes import CandidateMeasured, WorkstreamDone
 from vibesys.orchestration.dynamic.search._planner import plan
 from vibesys.orchestration.dynamic.search._queue import Submission
 from vibesys.orchestration.dynamic.search._reports import (
@@ -187,7 +187,13 @@ def fold(ctx: Flow, run: RunRecord, event: Event) -> None:
             run.finished(done)
             ctx.choose(*run.leading())
         case (
-            Submission() | Released() | InputOverdue() | Opened() | Suspended() | Resuming()
+            Submission()
+            | Released()
+            | InputOverdue()
+            | Opened()
+            | Suspended()
+            | Resuming()
+            | CandidateMeasured()
         ) as report:
             fold_report(run, report)
         case TaskStopped(key=key):
@@ -213,5 +219,7 @@ def fold_report(run: RunRecord, report: Report) -> None:
             run.suspend(suspended)
         case Resuming() as resuming:
             run.resume(resuming)
+        case CandidateMeasured() as measured:
+            run.candidate_measured(measured)
         case unexpected:
             assert_never(unexpected)

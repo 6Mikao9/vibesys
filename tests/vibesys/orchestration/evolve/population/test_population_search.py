@@ -13,6 +13,7 @@ import copy
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.vibesys.the_one_rule import beats
 
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.evolve.population import (
@@ -343,9 +344,10 @@ def test_admitted_ids_unique_and_increasing(outcomes: list[CandidateOutcome]) ->
 )
 @settings(max_examples=examples(pr=10, nightly=50))
 def test_frontier_never_dominated(perf_metrics: list[float]) -> None:
-    """Every member of the returned frontier is Pareto-non-dominated by any
-    other passed individual (single-axis space: this reduces to "the
-    frontier is exactly the set of maxima").
+    """The returned frontier is exactly the passed individuals no other one beats.
+
+    One axis: another individual beats this one when vs-core's rule says so, so readings within
+    the noise of the best all stay on the frontier (a gain inside the noise is not a dominance).
     """
     space = MetricSpace(objectives=(Objective(name="throughput", direction="max"),))
     search = PopulationSearch(PopulationConfig(space=space, seed=2))
@@ -367,7 +369,12 @@ def test_frontier_never_dominated(perf_metrics: list[float]) -> None:
     # Nothing on the frontier is beaten by another admitted individual.
     for individual in front:
         value = individual.metric_map()["throughput"]
-        assert not any(other > value for other in perf_metrics)
+        assert not any(beats(other, value) for other in perf_metrics)
+    # Everything off the frontier is beaten by one.
+    assert all(
+        value in front_values or any(beats(other, value) for other in perf_metrics)
+        for value in perf_metrics
+    )
     # The maximum is always on the frontier.
     assert best_value in front_values
 

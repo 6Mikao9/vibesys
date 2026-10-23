@@ -28,6 +28,7 @@ from vibesys.candidates.api import (
     InputReading,
     Measured,
     Unranked,
+    beats_input,
     choose_winner,
     improves_on,
     measurement,
@@ -53,10 +54,10 @@ from vibesys.orchestration.dynamic.search.api import (
     round_of,
     snapshot_of,
 )
-from vibesys.serial_search.api import beats_input as serial_beats_input
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
+    ComparisonVerdict,
     EvidenceKind,
     EvidenceRef,
     MeasurementPlan,
@@ -65,11 +66,14 @@ from vs_core.api import (
     ObservationStatus,
     RequestId,
     RevisionRef,
+    Runs,
     RunView,
     Scope,
     StageBudget,
     TaskObjective,
     TaskTerms,
+    dominance,
+    judge,
 )
 from vs_core.api.search import trusted_keys
 from vs_evaluation.api import SubmitCall
@@ -675,6 +679,19 @@ _FLINT_AXES: tuple[_Axis, ...] = (
 )
 
 
+def _by_the_rule(axes: tuple[_Axis, ...], noise: float) -> ComparisonVerdict:
+    """The candidate's result over every axis, stated from vs-core's one rule alone."""
+    return dominance(
+        judge(
+            Runs(mean=value, count=1),
+            Runs(mean=base, count=1),
+            direction=direction,
+            declared=noise,
+        ).verdict
+        for direction, base, value in axes
+    )
+
+
 def _multi_evidence(metrics: tuple[MetricRow, ...]) -> Evidence:
     evidence = evidence_of(accuracy=True, benchmark=True, throughput=1.0)
     return evidence.model_copy(
@@ -739,16 +756,7 @@ def test_promotion_merge_offer_and_winner_use_every_objective_with_its_noise(
     if reverse:
         terms = terms.model_copy(update={"objectives": tuple(reversed(terms.objectives))})
         candidate = tuple(reversed(candidate))
-    gains = [
-        value - base if direction == "max" else base - value for direction, base, value in axes
-    ]
-    tolerances = [abs(base) * noise for _, base, _ in axes]
-    no_regression = all(
-        gain >= -tolerance for gain, tolerance in zip(gains, tolerances, strict=True)
-    )
-    improves = no_regression and any(
-        gain > tolerance for gain, tolerance in zip(gains, tolerances, strict=True)
-    )
+    improves = _by_the_rule(axes, noise) is ComparisonVerdict.BETTER
     start = _multi_start(baseline)
     evidence = _multi_evidence(candidate)
     closing = Closing(
@@ -757,7 +765,7 @@ def test_promotion_merge_offer_and_winner_use_every_objective_with_its_noise(
     proposed = assertion(start, closing, terms, start.baseline)
     assert proposed.eligible is improves
     assert start.baseline is not None
-    assert serial_beats_input(start.baseline, evidence.readings, terms) is improves
+    assert beats_input(start.baseline, evidence.readings, terms) is improves
     assert proposed.retention == "candidate"  # ties/tradeoffs still remain buildable
     done = WorkstreamDone(
         start=start,
@@ -809,10 +817,10 @@ def test_a_merge_cannot_hide_a_secondary_regression_or_missing_objective(
         evidence=_multi_evidence(candidate),
         merge=MergeReport(outcome=MergeOutcome.MERGED, revision=CANDIDATE),
     )
-    expected = not missing and all(
-        (value - base if direction == "max" else base - value) >= -abs(base) * noise
-        for direction, base, value in axes
-    )
+    expected = not missing and _by_the_rule(axes, noise) in {
+        ComparisonVerdict.BETTER,
+        ComparisonVerdict.WITHIN_NOISE,
+    }
     line = MainLine(revision=BASE, baseline=start.baseline)
     record = line.finished(done, terms)
     assert (line.revision == CANDIDATE) is expected

@@ -2,12 +2,12 @@
 # with UPDATE_GOLDEN=1. scripts/check_persisted_schema_compat.py checks a change keeps
 # every saved document, or raises the version.
 shape DynamicResume
-version 1
+version 2
 $root {"additionalProperties":false,"type":"object"}
 $root.config required {"$ref":"#/$defs/DynamicConfig"}
 $root.kind optional {"const":"dynamic-resume","default":"dynamic-resume","type":"string"}
 $root.record required {"$ref":"#/$defs/RecordState"}
-$root.version optional {"const":1,"default":1,"type":"integer"}
+$root.version optional {"default":2,"enum":[1,2],"type":"integer"}
 AcceptedReading {"additionalProperties":false,"type":"object"}
 AcceptedReading.evidence_id required {"$ref":"#/$defs/EvidenceId"}
 AcceptedReading.feedback optional {"default":"","type":"string"}
@@ -227,6 +227,7 @@ MainState.merged required {"items":{"maxItems":2,"minItems":2,"prefixItems":[{"t
 MainState.merges required {"items":{"$ref":"#/$defs/MergeRecord"},"type":"array"}
 MainState.revision required {"$ref":"#/$defs/RevisionRef"}
 MainState.rounds required {"items":{"$ref":"#/$defs/EligibleRound"},"type":"array"}
+MainState.seen optional {"default":[],"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"integer"}],"type":"array"},"type":"array"}
 Measured {"additionalProperties":false,"type":"object"}
 Measured.first_attempt optional {"anyOf":[{"$ref":"#/$defs/InputFailure"},{"type":"null"}],"default":null}
 Measured.kind optional {"const":"measured","default":"measured","type":"string"}
@@ -256,6 +257,8 @@ MergeSource.revision required {"$ref":"#/$defs/RevisionRef"}
 MetricRow {"additionalProperties":false,"type":"object"}
 MetricRow.direction required {"$ref":"#/$defs/Direction"}
 MetricRow.name required {"minLength":1,"type":"string"}
+MetricRow.runs optional {"default":1,"minimum":1,"type":"integer"}
+MetricRow.spread optional {"default":0.0,"minimum":0.0,"type":"number"}
 MetricRow.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 MetricRow.value required {"$ref":"#/$defs/Finite"}
 NonNegative {"maximum":1000,"minimum":0,"type":"integer"}

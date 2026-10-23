@@ -17,8 +17,8 @@ from vibesys.hypothesis.transitions import (
     trusted_perf_provenance,
     unmeasured_candidate_retained,
 )
-from vibesys.metrics import Measurement, MetricComparison
-from vs_core.api import EffectVerdict
+from vibesys.metrics import Measurement
+from vs_core.api import ComparisonVerdict, EffectVerdict
 
 if TYPE_CHECKING:
     from vibesys.hypothesis.attempts import AttemptState, PerformanceProjection
@@ -79,16 +79,16 @@ class MeasurementEvidence:
     official_metric: float | None
     parent_record: RoundRecord | None
     baseline_metric: float | None
-    comparison: MetricComparison | None
+    comparison: ComparisonVerdict | None
     delta_pct: float | None
     trusted: bool
 
 
 _EFFECT_COMPARISON = {
-    EffectVerdict.SUPPORTED: MetricComparison.BETTER,
-    EffectVerdict.WITHIN_NOISE: MetricComparison.WITHIN_NOISE,
-    EffectVerdict.DISPROVEN: MetricComparison.WORSE,
-    EffectVerdict.INCONCLUSIVE: MetricComparison.INCOMPARABLE,
+    EffectVerdict.SUPPORTED: ComparisonVerdict.BETTER,
+    EffectVerdict.WITHIN_NOISE: ComparisonVerdict.WITHIN_NOISE,
+    EffectVerdict.DISPROVEN: ComparisonVerdict.WORSE,
+    EffectVerdict.INCONCLUSIVE: ComparisonVerdict.INCONCLUSIVE,
 }
 """How the framework's verdict on the expected effect is recorded as the round's comparison."""
 
@@ -164,10 +164,10 @@ def _measurement(
         _EFFECT_COMPARISON[data.effect]
         if data.effect is not None and official and trusted
         else data.state.metrics.compare(
-            reading,
-            Measurement(metric=metric_name, value=baseline, direction=direction)
+            () if reading is None else (reading,),
+            (Measurement(metric=metric_name, value=baseline, direction=direction),)
             if metric_name is not None and baseline is not None
-            else None,
+            else (),
         )
         if official and official_metric is not None and trusted
         else None

@@ -10,6 +10,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.vibesys.serial_search._host import TERMS
+from tests.vibesys.the_one_rule import lead_of
 
 from vibesys.candidates.api import NotConfigured
 from vibesys.hypothesis import HypothesisConfig, HypothesisOutcome
@@ -224,9 +225,8 @@ def test_the_best_eligible_candidate_leads(drawn: list[tuple[bool, bool, float]]
     leader = run.leader()
     if eligible:
         assert isinstance(leader, Kept)
-        best = max(item.metrics[0].value for item in eligible)
         led = next(item for item in eligible if item.kept == leader)
-        assert led.metrics[0].value == best
+        assert led.kept == lead_of([(item.kept, item.metrics[0].value) for item in eligible])
 
 
 def test_a_run_whose_input_is_trusted_ends_with_the_input_standing_when_nothing_was_eligible() -> (

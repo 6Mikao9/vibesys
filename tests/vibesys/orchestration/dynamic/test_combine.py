@@ -41,7 +41,6 @@ from tests.vibesys.orchestration.dynamic._values import run_record, snapshot
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
 from tests.vibesys.vibesys_flows import across_restarts
 
-from vibesys.candidates.api import measurement
 from vibesys.dynamic_handoff import render_handoff
 from vibesys.hypothesis import HypothesisStrategy
 from vibesys.metrics import MetricRow, MetricSpace, Objective
@@ -244,8 +243,10 @@ def test_a_combine_of_two_candidates_that_lost_alone_is_built_from_main_and_repo
     assert composite.verdict.value == "better"
     assert composite.best_part == "h2"  # the stronger part alone
     shown = render(PromptTemplate.PORTFOLIO, after)
-    # The task declares no noise: the verdict is a strict comparison and must not claim noise.
-    assert "better in a strict comparison" in _flat(shown), shown
+    # The task declares no noise: the verdict is held against the framework's default, not a declared noise.
+    assert "better beyond the framework's default noise: the task declares none" in _flat(shown), (
+        shown
+    )
     assert "beyond" not in _flat(shown).split("combined from `h1`")[1].split(".")[0]
     assert "combined from `h1`" in shown, shown
     assert "`h2`" in shown
@@ -407,15 +408,17 @@ def _space(noise: float, direction: Direction = "max") -> MetricSpace:
 
 
 def test_the_composite_is_compared_with_the_strongest_part_not_the_first_within_noise() -> None:
-    # B (102) is within 3% of A (100); the composite (104) is 4% over A but only 2% over B.
-    parts = (_part("a", 100.0), _part("b", 102.0))
-    composite = (MetricRow(name="throughput", value=104.0, direction="max"),)
+    # B (120) is far over A (100); the composite (130) is 30% over A but only 8% over B, which
+    # is inside the band two standard errors wide of a declared 3% a run (about 9%).
+    parts = (_part("a", 100.0), _part("b", 120.0))
+    composite = (MetricRow(name="throughput", value=130.0, direction="max"),)
     space = _space(0.03)
     best = best_part(parts, space)
     assert best is not None
     assert best.hypothesis_id == "b"
     assert versus_parts(composite, parts, space) is PartsVerdict.WITHIN_NOISE
-    assert versus_parts(composite, parts, _space(0.0)) is PartsVerdict.BETTER
+    clearly_better = (MetricRow(name="throughput", value=160.0, direction="max"),)
+    assert versus_parts(clearly_better, parts, space) is PartsVerdict.BETTER
 
 
 def test_a_composite_on_another_metric_than_its_parts_is_not_compared() -> None:
@@ -442,9 +445,9 @@ def test_the_parts_verdict_is_the_composite_against_the_raw_best_part_in_any_ord
     space = _space(noise, direction)
     strongest = max(values) if direction == "max" else min(values)
     row = MetricRow(name="throughput", value=composite, direction=direction)
-    reference = space.compare(
-        measurement(row), measurement(_part("ref", strongest, direction).metric)
-    )
+    ref = _part("ref", strongest, direction).metric
+    assert ref is not None
+    reference = space.compare((row.reading(),), (ref.reading(),))
     got = versus_parts((row,), parts, space)
     assert got.value == reference.value
     shuffled = list(parts)

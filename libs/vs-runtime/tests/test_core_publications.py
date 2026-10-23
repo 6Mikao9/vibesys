@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_core.api import (
@@ -339,6 +339,7 @@ def _legacy(document: object) -> object:
 
 
 @pytest.mark.regression
+@example(values=[1.0], direction="max")
 @given(
     values=st.lists(st.floats(min_value=0.1, max_value=1e6), min_size=1, max_size=3),
     direction=st.sampled_from(["max", "min"]),

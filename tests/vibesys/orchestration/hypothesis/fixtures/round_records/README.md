@@ -4,6 +4,9 @@ persisted fields, `legacy.json` preserves retired policy strings and defaults,
 and `deferred.json` preserves contradictory-review normalization.
 `legacy-input.json` is the sparse historical input for `legacy.json`.
 
+`recorded-with-incomparable-verdict.json` is `deferred.json` stored with the verdict word
+`incomparable`, which `inconclusive` replaced; it must keep loading as the same record.
+
 Tests compare decoded records to independently constructed records, persisted
 fields, and JSON bytes. Regenerate only for a deliberate, reviewed format change:
 

@@ -45,7 +45,8 @@ from vibesys.hypothesis.attempts import (
     JudgeSkipReason,
 )
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
-from vibesys.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.metrics import MetricSpace, Objective
+from vs_core.api import ComparisonVerdict
 from vs_sim.api.testing import examples
 
 # --- helpers -----------------------------------------------------------
@@ -83,7 +84,7 @@ def _round(  # noqa: PLR0913  # LW-040074 [PLR0913]; the parameters are independ
     parent_commit: str | None = None,
     direction: Literal["max", "min"] | None = "max",
     retained: bool | None = True,
-    comparison: MetricComparison | None = None,
+    comparison: ComparisonVerdict | None = None,
     passed: bool = True,
     reviewed: bool = True,
     judge_verdict: Literal["pass", "fail", "deferred"] | None = "pass",
@@ -118,7 +119,7 @@ def _round(  # noqa: PLR0913  # LW-040074 [PLR0913]; the parameters are independ
         perf_comparison=(
             comparison
             if comparison is not None or provenance != "framework" or metric is None
-            else MetricComparison.INCOMPARABLE
+            else ComparisonVerdict.INCONCLUSIVE
         ),
         perf_provenance=provenance if metric is not None else None,
     )
@@ -548,7 +549,7 @@ def test_within_noise_delta_resolves_inconclusive() -> None:
             parent_round=1,
             parent_commit=records[0].commit,
             outcome="inconclusive",
-            comparison=MetricComparison.WITHIN_NOISE,
+            comparison=ComparisonVerdict.WITHIN_NOISE,
             baseline_metric=100.0,
             delta_pct=1.0,
         ),

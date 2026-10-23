@@ -29,7 +29,7 @@
   "perf_baseline_commit": null,
   "perf_baseline_metric": null,
   "perf_delta_pct": null,
-  "perf_comparison": "incomparable",
+  "perf_comparison": "inconclusive",
   "perf_provenance": "implementer",
   "implementer_provider": null,
   "implementer_model": null,

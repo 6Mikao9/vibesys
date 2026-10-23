@@ -143,9 +143,10 @@ the order to apply them), {{ reply.instructions }} (how to combine them, and how
 conflicts), and {{ reply.watch_for }} (what the merger must check or be careful of). A new merger
 session applies them on a checkout of main and runs the tests; when its commit passes the
 trusted accuracy check and measures no worse than main (no declared objective worse beyond its
-noise tolerance, and no benchmark check main passed now failing), main moves to it and its
-measurement is reported here.
-A merge candidate must improve at least one declared objective beyond its noise tolerance
+noise, and no benchmark check main passed now failing), main moves to it and its
+measurement is reported here. A candidate built on main moves it by the same rule the moment
+its own measurement lands, without a merge.
+A merge candidate must improve at least one declared objective beyond its noise
 and regress none beyond theirs; objective order is not priority order.
 A merge may name only candidates listed as mergeable below. A merger that cannot follow the
 instructions refuses and main stays where it is. Only one merge runs at a
@@ -268,7 +269,7 @@ be adopted or offered as a parent.
 {% if row.composite and row.composite.cancelled %}
   This combine never started: when it was to start, {% if row.composite.parts %}only {% for part in row.composite.parts %}`{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}`{% endfor %} of its parts was{% else %}none of its parts were{% endif %} still implemented, and a combine needs two. Its slot was not spent.
 {% elif row.composite %}
-  This candidate was combined from {% for part in row.composite.parts %}`{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}` ({% if part.metric %}{{ metric(part.metric) }}{% else %}no trusted headline{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}; {% if row.composite.verdict.value == 'unknown' %}it is not comparable with its parts yet: a trusted headline is missing, or they measured different metrics{% else %}against the strongest part, `{{ row.composite.best_part }}`, it is {% if row.composite.relative_noise %}{% if row.composite.verdict.value == 'better' %}better beyond{% elif row.composite.verdict.value == 'worse' %}worse beyond{% else %}within{% endif %} the task's declared noise of {{ '%g' | format(row.composite.relative_noise * 100) }}%{% else %}{% if row.composite.verdict.value == 'better' %}better{% elif row.composite.verdict.value == 'worse' %}worse{% else %}equal{% endif %} in a strict comparison: the task declares no noise, so a small difference may be noise{% endif %}{% endif %}.
+  This candidate was combined from {% for part in row.composite.parts %}`{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}` ({% if part.metric %}{{ metric(part.metric) }}{% else %}no trusted headline{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}; {% if row.composite.verdict.value == 'unknown' %}it is not comparable with its parts yet: a trusted headline is missing, or they measured different metrics{% else %}against the strongest part, `{{ row.composite.best_part }}`, it is {% if row.composite.relative_noise %}{% if row.composite.verdict.value == 'better' %}better beyond{% elif row.composite.verdict.value == 'worse' %}worse beyond{% else %}within{% endif %} the task's declared noise of {{ '%g' | format(row.composite.relative_noise * 100) }}%{% else %}{% if row.composite.verdict.value == 'better' %}better beyond{% elif row.composite.verdict.value == 'worse' %}worse beyond{% else %}within{% endif %} the framework's default noise: the task declares none{% endif %}{% endif %}.
 {% for item in row.composite.unapplied %}
   Not applied from `{{ item.hypothesis_id }}`: {{ item.part }} ({{ item.why }})
 {% endfor %}

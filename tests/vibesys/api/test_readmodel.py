@@ -35,7 +35,7 @@ from vibesys.hypothesis.state import (
 from vibesys.hypothesis.transitions import measurement_delta_reason
 
 if TYPE_CHECKING:
-    from vibesys.api.metrics import MetricComparison
+    from vs_core.api import ComparisonVerdict
 
 
 def _project_agent_view(
@@ -72,7 +72,7 @@ class _RoundFields(TypedDict, total=False):
     candidate_disposition: str
     perf_delta_pct: float | None
     perf_provenance: Literal["framework", "implementer"] | None
-    perf_comparison: MetricComparison | None
+    perf_comparison: ComparisonVerdict | None
 
 
 class _HypothesisFields(TypedDict, total=False):

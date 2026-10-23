@@ -38,7 +38,7 @@ from vibesys.api.hypothesis import (
     PerfProvenance,
     RoundRecord,
 )
-from vibesys.api.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.api.metrics import MetricSpace, Objective
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.readmodel import (
     project_run_view,
@@ -52,6 +52,7 @@ from vibesys.hypothesis.state import (
     HypothesisStrategy,
 )
 from vibesys.hypothesis.transitions import reproject_run_evidence
+from vs_core.api import ComparisonVerdict
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoreRecord
 from vs_project.api.testing import run_execution_record
 from vs_sim.api import OsThreads
@@ -96,7 +97,7 @@ class _RoundFields(TypedDict, total=False):
     perf_baseline_commit: str | None
     perf_baseline_metric: float | None
     perf_delta_pct: float | None
-    perf_comparison: MetricComparison | None
+    perf_comparison: ComparisonVerdict | None
     perf_provenance: PerfProvenance | None
 
 
@@ -930,7 +931,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
                             perf_unit="ops_s",
                             perf_direction="max",
                             perf_provenance="framework",
-                            perf_comparison=MetricComparison.INCOMPARABLE,
+                            perf_comparison=ComparisonVerdict.INCONCLUSIVE,
                         )
                     ],
                 ),
@@ -955,7 +956,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
                             perf_unit="ops_s",
                             perf_direction="max",
                             perf_provenance="framework",
-                            perf_comparison=MetricComparison.WITHIN_NOISE,
+                            perf_comparison=ComparisonVerdict.WITHIN_NOISE,
                         )
                     ],
                 ),

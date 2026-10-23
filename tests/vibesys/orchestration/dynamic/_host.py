@@ -210,6 +210,10 @@ class World(TypedDict, total=False):
     """The input's measurement ends as ``baseline`` once only: measured again, it is measured."""
     handoff_writes_open: bool
     """Leave each handoff write open for the story to answer; else the owner writes it at once."""
+    rows: dict[str, tuple[MetricRow, ...]]
+    """The whole benchmark row of a candidate, by its revision's id, in place of its throughput."""
+    input_rows: tuple[MetricRow, ...]
+    """The whole benchmark row of the input, in place of its throughput."""
     input_samples: list[float]
     """The throughputs of further trusted baseline benchmarks the ledger holds of the input once
     it is measured, as core's own runs of the base leave them (the input's own is 50)."""
@@ -263,6 +267,8 @@ class Host:
     input_measurements: int = 0
     """How many times the host measured the input."""
     input_samples: list[float] = field(default_factory=list)
+    rows: dict[str, tuple[MetricRow, ...]] = field(default_factory=dict)
+    input_rows: tuple[MetricRow, ...] = ()
     handoff_writes_open: bool = False
     merging: bool = False
     merger_answers: list[int] = field(default_factory=list)
@@ -674,6 +680,12 @@ class Host:
                 else self.throughputs.get(ref.candidate.revision_id.root, CANDIDATE_THROUGHPUT)
             )
             metrics = (MetricRow(name="throughput", value=value, direction="max", unit="tokens/s"),)
+            whole = (
+                self.input_rows
+                if ref.purpose == "baseline"
+                else self.rows.get(ref.candidate.revision_id.root, ())
+            )
+            metrics = whole or metrics
         return EvidenceReading(
             evidence_id=ref.evidence_id,
             kind=ref.kind,

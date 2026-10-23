@@ -1,4 +1,4 @@
 Configured axes: throughput:max, latency:min
-Dominance is variance-aware: a point removes another only when it is no worse within 2% on every axis and better by more than 2% on at least one.
+Dominance is the framework's one comparison: a point removes another only when no axis is worse and at least one is better, each by more than 2 noises of the difference; the noise of one run is 2%, as the task declares.
 Latest completed round: round 1, commit 010101010101, official metrics: 33 tok/s; retained: None.
 Trusted frontier parents: none recorded yet.

@@ -27,13 +27,16 @@ _ORCHESTRATION = _SRC / "orchestration"
 # compositions run; issue_queue_core.py and issue_queue_board.py are the issue queue's, for its roles
 # and its tracker; dynamic_handoff.py is the owner of the dynamic search's handoff write;
 # api/display_catalog.py gathers the role titles each built-in search declares, as catalog.py
-# gathers the registrations.
+# gathers the registrations; dynamic_migration.py rewrites the dynamic search's checkpoint
+# (`DynamicResume`) for an objective policy a run declares later, so it reads the search's own
+# values, as dynamic_handoff.py does for the handoff.
 _ALLOWED_EXTERNAL_POLICY_IMPORTS = {
     "api/evolve.py",
     "api/catalog.py",
     "api/display_catalog.py",
     "dynamic_core.py",
     "dynamic_handoff.py",
+    "dynamic_migration.py",
     "dynamic_roles.py",
     "issue_queue_board.py",
     "issue_queue_core.py",

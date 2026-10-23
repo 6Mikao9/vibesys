@@ -14,7 +14,7 @@ the input at all.
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
@@ -148,6 +148,7 @@ def _record(host: Host) -> RunSnapshot:
 
 @MODES
 @settings(max_examples=examples(pr=4, nightly=20), deadline=None, derandomize=True, database=None)
+@example(rounds=2)
 @given(rounds=st.integers(2, 5))
 def test_by_default_the_planner_fills_agent_slots_while_candidates_wait_for_a_measurement(
     *, restarting: bool, rounds: int

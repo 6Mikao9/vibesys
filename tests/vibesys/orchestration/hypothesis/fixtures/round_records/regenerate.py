@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from vibesys.hypothesis import RoundRecord, parse_round_record, serialize_round_record
-from vibesys.metrics import MetricComparison
+from vs_core.api import ComparisonVerdict
 
 out = Path(__file__).parent
 out.mkdir(parents=True, exist_ok=True)
@@ -38,7 +38,7 @@ cases = {
         perf_baseline_commit="b" * 40,
         perf_baseline_metric=100.0,
         perf_delta_pct=12.5,
-        perf_comparison=MetricComparison.BETTER,
+        perf_comparison=ComparisonVerdict.BETTER,
         perf_provenance="framework",
         implementer_provider="codex",
         implementer_model="gpt-5.6-sol",
@@ -67,7 +67,7 @@ cases = {
         hypothesis_outcome="continue",
         profile_skipped=True,
         perf_provenance="implementer",
-        perf_comparison=MetricComparison.INCOMPARABLE,
+        perf_comparison=ComparisonVerdict.INCONCLUSIVE,
     ),
 }
 for name, record in cases.items():

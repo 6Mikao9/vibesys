@@ -156,6 +156,7 @@ def test_an_evaluator_that_wrote_its_verdict_is_charged_whatever_stopped_it(
 
 
 @pytest.mark.regression
+@example(cancelled=False)
 @given(cancelled=st.booleans())
 def test_a_stage_that_reported_no_exit_status_is_the_machinerys(*, cancelled: bool) -> None:
     assert _accuracy(None, cancelled=cancelled) is _FAULT

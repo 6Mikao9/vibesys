@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys.events import BenchmarkVersions, EvaluatorIdentity, ObjectiveOverview, RunOverview
+from vibesys.events import (
+    BenchmarkVersions,
+    EvaluatorIdentity,
+    ObjectiveAxis,
+    ObjectiveOverview,
+    RunOverview,
+)
 
 if TYPE_CHECKING:
     from vibesys.inputs import InputBundle
@@ -27,7 +33,7 @@ def overview_of(bundle: InputBundle, objectives: tuple[TaskObjective, ...] = ())
             text=bundle.objective,
             metric=manifest.metric
             or (manifest.benchmark.result.metric if manifest.benchmark.result else None),
-            objectives=objectives,
+            objectives=tuple(ObjectiveAxis(name=o.name, direction=o.direction) for o in objectives),
             correctness_check=bundle.accuracy_command,
         ),
         benchmarks=BenchmarkVersions(

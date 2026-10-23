@@ -1,10 +1,19 @@
-"""The run's main revision: where new work starts, and what merges move it.
+"""The run's main revision: where new work starts, and what moves it.
 
-Main starts at the run's input. Only a merge workstream moves it: when the merger's commit
-passed the trusted accuracy check and measures no worse than main, main becomes that commit; a
-refusal, a failed check, a regression or a lost merge leaves it where it was. Each move bumps main's generation, which tells the search that a
-hypothesis started on an older main should rebase. `MainLine` is folded by the run record from
-finished merge workstreams and read by planning; like the record, it is rebuilt by replay.
+Main starts at the run's input. Two inputs move it, and nothing else does:
+
+- a candidate's settled trusted measurement (`MainLine.measured`): a candidate that holds main
+  wholly, passed the trusted accuracy and benchmark checks, and whose measurement dominates
+  main's (the one rule of `MetricSpace.compare`: no objective worse, one better) becomes main
+  at the moment its measurement lands, whether or not its workstream has closed;
+- a finished merge workstream (`MainLine.finished`): when the merger's commit passed the
+  trusted accuracy check and measures no worse than main, main becomes that commit. A candidate
+  that does not hold main (built on an older main) is brought in by a merge.
+
+A refusal, a failed check, a regression or a lost merge leaves main where it was. Each move bumps
+main's generation, which tells the search that a hypothesis started on an older main should
+rebase. `MainLine` is folded by the run record and read by planning; like the record, it is
+rebuilt by replay.
 
 What a merge must beat is a closed `MainReading`: pending while the input's measurement has not
 landed (nothing is mergeable and main cannot move), no headline when main and the input have no
@@ -14,8 +23,12 @@ metrics (any verified candidate beats it), or main's complete metric row.
 from dataclasses import dataclass, field
 
 from vibesys.candidates import api as candidates
-from vibesys.metrics import HostContention, MetricComparison, MetricRow, MetricSpace, reading_of
-from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
+from vibesys.metrics import HostContention, MetricRow, MetricSpace, reading_of
+from vibesys.orchestration.dynamic.search._outcomes import (
+    CandidateMeasured,
+    WorkstreamDone,
+    WorkstreamStart,
+)
 from vibesys.orchestration.dynamic.search._parents import ParentOption
 from vibesys.orchestration.dynamic.search._prompts import MergeableRow
 from vibesys.orchestration.dynamic.search._values import (
@@ -27,6 +40,7 @@ from vibesys.orchestration.dynamic.search._values import (
     MergeSource,
     ViolationCode,
 )
+from vs_core.api import ComparisonVerdict
 from vs_core.api.search import EvidenceKind, RevisionRef, TaskTerms, Value
 
 
@@ -91,6 +105,9 @@ class MainState(Value):
     merges: tuple[MergeRecord, ...]
     rounds: tuple[candidates.EligibleRound, ...]
     merged: tuple[tuple[str, str], ...]
+    seen: tuple[tuple[str, int], ...] = ()
+    """The workstreams whose measurement main has judged (`MainLine.measured`): a checkpoint
+    from before they were kept holds none, and then a workstream's close is the first sight."""
 
 
 @dataclass
@@ -111,6 +128,9 @@ class MainLine:
     """The merged mains that are winner-eligible, as the winner is chosen among them."""
     merged: set[tuple[str, str]] = field(default_factory=set)
     """The (hypothesis, revision) candidates a merge already brought into main."""
+    seen: set[tuple[str, int]] = field(default_factory=set)
+    """The (hypothesis, sequence) workstreams whose measurement main judged once: a measurement is
+    judged at the first sight of it, whether its workstream reports it or only closes with it."""
 
     def state(self) -> MainState:
         """What main knows, to resume it from (`resumed`); ``merged`` sorted, as a set has no order."""
@@ -121,6 +141,7 @@ class MainLine:
             merges=tuple(self.merges),
             rounds=tuple(self.rounds),
             merged=tuple(sorted(self.merged)),
+            seen=tuple(sorted(self.seen)),
         )
 
     @classmethod
@@ -134,6 +155,7 @@ class MainLine:
             merges=list(state.merges),
             rounds=list(state.rounds),
             merged=set(state.merged),
+            seen=set(state.seen),
         )
 
     def reading(self) -> MainReading:
@@ -144,7 +166,7 @@ class MainLine:
             return BaselinePending()
         else:
             seen = candidates.reading(self.baseline)
-            metrics = () if seen is None else seen.metrics
+            metrics = () if seen is None else seen.bar()
         return Headline(metrics) if metrics else NoHeadline()
 
     def headline(self) -> MetricRow | None:
@@ -210,27 +232,34 @@ class MainLine:
             )
         return MergeOptions(checkable=True, rows=tuple(rows), barred=tuple(barred))
 
-    def fast_forward(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord | None:
-        """Move main to a settled candidate built on it that its one measurement shows beats it.
+    def measured(
+        self, start: WorkstreamStart, seen: CandidateMeasured, terms: TaskTerms
+    ) -> MergeRecord | None:
+        """Judge a candidate's settled trusted measurement once, and move main to it if it dominates.
 
-        This is the loop without a merge: the candidate is already main plus its own change and
-        was measured once, officially, so a second workstream and a second measurement would only
-        reproduce them. It qualifies when its parent is main now, it is winner-eligible and
-        retained, it passed the trusted accuracy and benchmark checks, and its benchmark beats
-        main's (`_beats`: beyond noise on the declared axes). It is folded as a merge of itself
-        (`MergeRecord`), so main's lineage and the planner's history need no second case; any other
-        candidate, built on an older main, still goes through a merge workstream. Everything it
-        reads is recorded with the settlement, so a replay decides the same.
+        This is the loop without a merge: a candidate built on main now (its parent is main) is
+        already main plus its own change, and was measured once, officially, so a second
+        workstream and a second measurement would only reproduce them. Main moves to it when it
+        is winner-eligible and retained, passed the trusted accuracy and benchmark checks, and
+        its benchmark beats main's: the one comparison of `MetricSpace.compare`, so a gain on
+        one objective is never lost to a headline that moved within its noise. It is folded as a
+        merge of itself (`MergeRecord`), so main's lineage and the planner's history need no
+        second case; any other candidate, built on an older main, still goes through a merge
+        workstream. It does not wait for its workstream to close.
+
+        A measurement is judged at its first sight (`seen`): the workstream reports it as soon as
+        it lands, and the root offers it again when the workstream closes, in case the report was
+        lost; a second sight changes nothing. Everything it reads is recorded with the
+        measurement, so a replay decides the same.
         """
-        start, settlement = done.start, done.settlement
-        accuracy = reading_of(done.evidence.readings, EvidenceKind.CORRECTNESS)
-        benchmark = reading_of(done.evidence.readings, EvidenceKind.BENCHMARK)
+        found = (start.plan.work_id, start.sequence)
+        if found in self.seen:
+            return None
+        self.seen.add(found)
+        accuracy, benchmark = seen.accuracy, seen.benchmark
         if (
             start.parent.revision_id.root != self.revision.revision_id.root
-            or settlement is None
-            or not settlement.eligible
-            or settlement.retention != "candidate"
-            or settlement.candidate is None
+            or not seen.eligible
             or not checkable(terms)
             or accuracy is None
             or not accuracy.passed
@@ -239,8 +268,7 @@ class MainLine:
         ):
             return None
         main = self.reading()
-        space = candidates.space_of(terms)
-        if not _beats(benchmark.metrics, main, space):
+        if not _beats(benchmark.metrics, main, candidates.space_of(terms)):
             return None
         record = MergeRecord(
             merge_id=start.plan.work_id,
@@ -248,14 +276,14 @@ class MainLine:
             candidates=(
                 MergeSource(
                     hypothesis_id=start.plan.work_id,
-                    revision=settlement.candidate,
+                    revision=seen.candidate,
                     built_on=start.parent,
                 ),
             ),
             fast_forward=True,
             base=start.parent,
             outcome=MergeOutcome.MERGED,
-            revision=settlement.candidate,
+            revision=seen.candidate,
             accuracy_passed=True,
             benchmark_passed=True,
             metrics=benchmark.metrics,
@@ -263,7 +291,7 @@ class MainLine:
             main_benchmark_passed=self._benchmark_passed(),
         )
         self.merges.append(record)
-        self._advance(record, settlement.candidate, benchmark.host_snapshot)
+        self._advance(record, seen.candidate, benchmark.host_snapshot)
         return record
 
     def finished(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord:
@@ -382,11 +410,11 @@ class MainLine:
 
 
 def _beats(metrics: tuple[MetricRow, ...], main: MainReading, space: MetricSpace) -> bool:
-    """Whether a candidate Pareto-dominates main; nothing beats a pending measurement."""
+    """Whether a candidate dominates main by the one rule; nothing beats a pending measurement."""
     match main:
         case BaselinePending():
             return False
         case NoHeadline():
             return True
         case Headline(metrics=baseline):
-            return space.compare_metrics(metrics, baseline) is MetricComparison.BETTER
+            return space.compare_rows(metrics, baseline) is ComparisonVerdict.BETTER

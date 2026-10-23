@@ -27,8 +27,9 @@ from vibesys.hypothesis import (
     RegressionNotice,
     RoundRecord,
 )
-from vibesys.metrics import MetricComparison, MetricSpace, Objective
+from vibesys.metrics import MetricSpace, Objective
 from vibesys.prompts import PROMPTS_DIR, render_template
+from vs_core.api import ComparisonVerdict
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -115,7 +116,7 @@ def _row(  # noqa: PLR0913  # LW-040137 [PLR0913]; the keyword-only fields are i
         official_evaluation=official,
         perf_provenance=provenance,
         perf_comparison=(
-            MetricComparison.INCOMPARABLE if official and provenance == "framework" else None
+            ComparisonVerdict.INCONCLUSIVE if official and provenance == "framework" else None
         ),
         candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
         candidate_metrics=metrics or {},

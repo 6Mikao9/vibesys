@@ -28,8 +28,10 @@ from vibesys.orchestration.dynamic.search._handoff import HandoffWritten
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, planning_key, workstream_key
 from vibesys.orchestration.dynamic.search._main import MainLine, MainState
 from vibesys.orchestration.dynamic.search._outcomes import (
+    CandidateMeasured,
     WorkstreamDone,
     WorkstreamStart,
+    measured_by_settlement,
     snapshot_of,
 )
 from vibesys.orchestration.dynamic.search._parents import (
@@ -247,10 +249,13 @@ class DynamicResume(Value):
 
     ``version`` is this model's own: a change to what it holds that an older checkpoint does not
     decode as is a new version, and the root takes the union of the versions it can resume.
+    Version 2 is the checkpoint of an envelope at version 44 or later, whose evidence records
+    hold ``readings``; a version 1 checkpoint that reaches here was brought to that shape with
+    its envelope (`vs_core._envelope_migrations`), so both read as one.
     """
 
     kind: Literal["dynamic-resume"] = "dynamic-resume"
-    version: Literal[1] = 1
+    version: Literal[1, 2] = 2
     config: DynamicConfig
     record: RecordState
 
@@ -1144,10 +1149,27 @@ class RunRecord:
             self.hypotheses[start.plan.work_id] = _hypotheses.with_round(current, done)
         if start.plan.kind is WorkKind.MERGE:
             self.main.finished(done, self.terms)
-        elif not profile:
-            self.main.fast_forward(done, self.terms)
+        else:
+            settled = measured_by_settlement(done)
+            if settled is not None:
+                self._judge_measurement(start, settled)  # a no-op when its report already was
         self._offer_as_parent(done)
         self._keep(done)
+
+    def candidate_measured(self, measured: CandidateMeasured) -> None:
+        """A workstream's candidate was measured: main may move to it before the workstream closes.
+
+        The measurement is judged here at its first sight; the workstream's close offers it again
+        (`finished`), which changes nothing once it was judged.
+        """
+        start = self.running.get(measured.key)
+        if start is not None:
+            self._judge_measurement(start, measured)
+
+    def _judge_measurement(self, start: WorkstreamStart, measured: CandidateMeasured) -> None:
+        """Fold a candidate's settled trusted measurement into main: the one way a candidate moves it."""
+        self.refined(measured.input)
+        self.main.measured(start, measured, self.terms)
 
     def _offer_as_parent(self, done: WorkstreamDone) -> None:
         snapshot = snapshot_of(done)

@@ -5,11 +5,14 @@ candidate for its trusted measurement (`Submission`), its measurement no longer 
 (`Released`), it has waited for the input's measurement longer than the run allows
 (`InputOverdue`), its workspace opened and it waits for its first agent slot (`Opened`), core
 suspended one of its agent turns on the turn's own evaluations
-(`Suspended`), core authorized that turn's resume (`Resuming`). The root folds each report into
+(`Suspended`), core authorized that turn's resume (`Resuming`), its candidate's trusted
+measurement landed and its settlement was decided (`CandidateMeasured`, which may move main
+before the workstream closes). The root folds each report into
 its record and answers a submission on the workstream's own `VERDICTS` latch: measure now, or
 never (`_queue.SlotVerdict`); and a resume on its `RESUMES` latch, once an agent slot is free.
 """
 
+from vibesys.orchestration.dynamic.search._outcomes import CandidateMeasured
 from vibesys.orchestration.dynamic.search._queue import SlotVerdict, Submission
 from vs_core.api.search import ChannelKey, Flow, LatchKey, Value
 
@@ -53,7 +56,9 @@ class Granted(Value):
     """The root lent a resuming turn an agent slot: its agent may go on."""
 
 
-type Report = Submission | Released | InputOverdue | Opened | Suspended | Resuming
+type Report = (
+    Submission | Released | InputOverdue | Opened | Suspended | Resuming | CandidateMeasured
+)
 
 REPORTS = ChannelKey[Report]("workstream-reports")
 """Every workstream reports here; the root reads it."""

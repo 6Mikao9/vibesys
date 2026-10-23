@@ -9,7 +9,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys.events import ObjectiveOverview, RunOverview
+from vibesys.events import ObjectiveAxis, ObjectiveOverview, RunOverview
 from vibesys.metrics import MetricSpace, Objective
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions, objective_axes_of
 from vs_sim.api.testing import examples
@@ -45,7 +45,12 @@ def test_the_overview_carries_the_options_axes_in_order_and_survives_the_wire(
     assert [(axis.name, axis.direction) for axis in axes] == [
         (objective.name, objective.direction) for objective in objectives
     ]
-    overview = RunOverview(objective=ObjectiveOverview(text="Go faster.", objectives=axes))
+    overview = RunOverview(
+        objective=ObjectiveOverview(
+            text="Go faster.",
+            objectives=tuple(ObjectiveAxis(name=a.name, direction=a.direction) for a in axes),
+        )
+    )
     assert RunOverview.model_validate_json(overview.model_dump_json()) == overview
 
 

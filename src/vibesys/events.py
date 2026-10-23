@@ -35,7 +35,6 @@ from vs_core.api import (
     ComparisonVerdict,
     EndReason,
     SpanId,
-    TaskObjective,
     WireSpan,
 )
 from vs_redaction.api import redact_diagnostic_text
@@ -286,6 +285,19 @@ class EvaluatorIdentity(BaseModel):
     version: str = Field(min_length=1)
 
 
+class ObjectiveAxis(BaseModel):
+    """One axis candidates are ranked on, as a client is told it: its name and which way is better.
+
+    The task's objective in core also holds the noise policy a comparison reads, which is not the
+    run's to show; the wire carries only what a client marks.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    direction: Literal["max", "min"]
+
+
 class ObjectiveOverview(BaseModel):
     """What the run optimizes: the task's objective and the metric it is judged on.
 
@@ -301,7 +313,7 @@ class ObjectiveOverview(BaseModel):
     metric: str | None = None
     unit: str | None = None
     direction: Literal["max", "min"] | None = None
-    objectives: tuple[TaskObjective, ...] = ()
+    objectives: tuple[ObjectiveAxis, ...] = ()
     """Every axis candidates are ranked on, headline first, as the run's metric space declares
     them (empty when it declares none). Each candidate's gate span carries a reading per axis,
     with its unit."""

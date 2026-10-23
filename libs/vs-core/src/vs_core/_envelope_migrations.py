@@ -25,8 +25,8 @@ was told and done, as it was).
 
 from __future__ import annotations
 
-import hashlib
 import json
+from hashlib import sha256
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
@@ -161,6 +161,83 @@ def _v42_to_v43(envelope: JsonObject) -> JsonObject:
     return {**_object(_rewritten(envelope)), "schema_version": 43}
 
 
+def _v43_to_v44(envelope: JsonObject) -> JsonObject:
+    """Version 44 reads the JSON documents the envelope holds as text at the version 43 shapes.
+
+    Version 43 rewrote the fields the envelope types, but a run also keeps documents as text: an
+    operation's request and outcome, a flow's recorded result, its checkpoint and its published
+    record (`_EMBEDDED_JSON`). A save of version 42 still held a sample's or a record's single
+    ``reading`` and a comparison's flat headline inside them, where the version 43 models refuse
+    them, so no run saved by version 42 with a benchmark in its history could be resumed. Each
+    such document is parsed, rewritten the way version 43 rewrote the envelope, and written
+    back; a document that holds none of those shapes is left exactly as it was written, so no
+    request and no digest that names it changes. Nothing is invented and nothing decided is
+    decided again: the rewrite only restates a reading or a verdict in the shape that holds it.
+    """
+    return {**_object(_embedded(envelope)), "schema_version": 44}
+
+
+_EMBEDDED_JSON: Final = (
+    "payload_json",
+    "outcome_json",
+    "result_json",
+    "snapshot_json",
+    "published",
+    "output_json",
+    "attrs_json",
+)
+"""The fields of the envelope that hold a JSON document as text."""
+_CANONICAL_JSON: Final = frozenset({"payload_json"})
+"""Of those, the ones whose text is canonical (keys sorted at every level): a request is proved
+byte for byte against the canonical text of the value it decodes to, so a request rewritten here
+stays that text."""
+
+
+def _embedded(value: JsonValue) -> JsonValue:
+    """``value`` with the JSON documents held as text in it at the version 43 shapes."""
+    if isinstance(value, list):
+        return [_embedded(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    return _restated(
+        value,
+        {
+            key: _embedded_text(item, canonical=key in _CANONICAL_JSON)
+            if key in _EMBEDDED_JSON and isinstance(item, str)
+            else _embedded(item)
+            for key, item in value.items()
+        },
+    )
+
+
+def _embedded_text(text: str, *, canonical: bool = False) -> str:
+    """``text``, a JSON document, at the version 43 shapes (``canonical``: with sorted keys).
+
+    Any other text, and a document that has none of the old shapes, is returned as it is.
+    """
+    try:
+        document = json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(document, dict | list):
+        return text
+    rewritten = _rewritten(_embedded(document))
+    if rewritten == document:
+        return text
+    return json.dumps(rewritten, separators=(",", ":"), ensure_ascii=False, sort_keys=canonical)
+
+
+def upgrade_document_shapes(source: str) -> str:
+    """``source``, a persisted JSON document, at the version 43 shapes.
+
+    The envelope is not the only document a run keeps its samples, evidence records and
+    comparisons in (the publication journal holds its events), and none of the others carries a
+    version: the rewrite is the one of the migration to 44, which leaves a document that is
+    already in the shapes, and any text that is no JSON document, as it is.
+    """
+    return _embedded_text(source)
+
+
 _OBJECTIVE_FIELDS: Final = (
     "metric",
     "unit",
@@ -174,92 +251,53 @@ _OBJECTIVE_FIELDS: Final = (
 the comparison keeps and the objective repeats."""
 
 
-_EMBEDDED_DOCUMENTS: Final = frozenset({"payload_json", "snapshot_json", "published"})
-"""The fields of the envelope that hold a JSON document of their own, as text: the request of a
-registered operation, the checkpoint of a flow and what a flow published. They carry the same
-samples, evidence records and comparisons, so they are rewritten with the rest."""
-_CANONICAL_DOCUMENTS: Final = frozenset({"payload_json"})
-"""Of those, the ones whose text is canonical (keys sorted at every level): a request is proved
-byte for byte against the canonical text of the value it decodes to."""
-
-
 def _rewritten(value: JsonValue) -> JsonValue:
     """``value`` with every sample, evidence record and comparison in it at the version 43 shape."""
     if isinstance(value, list):
         return [_rewritten(item) for item in value]
     if not isinstance(value, dict):
         return value
-    node = {
-        key: _embedded(item, canonical=key in _CANONICAL_DOCUMENTS)
-        if key in _EMBEDDED_DOCUMENTS and isinstance(item, str)
-        else _rewritten(item)
-        for key, item in value.items()
-    }
+    node = _restated(value, {key: _rewritten(item) for key, item in value.items()})
     if "reading" in node and ("evidence_id" in node or {"run", "measured_input"} <= node.keys()):
         node["readings"] = [node.pop("reading")]
     elif {"candidate_input", "base_input", "candidate_value", "metric"} <= node.keys():
         objective = {key: node.pop(key) for key in _OBJECTIVE_FIELDS if key in node}
         node["objectives"] = [{**objective, "verdict": node["verdict"]}]
-    return _rebound(value, node)
+    return node
 
 
-_COVERED_BY_DIGEST: Final = ("decision", "request")
-"""The values a stored ``payload_digest`` is the fingerprint of: an accepted decision (a receipt)
-and a request (a record)."""
+_COVERED_BY_A_DIGEST: Final = (("decision", "payload_digest"), ("request", "payload_digest"))
+"""The documents a record keeps beside the digest of the text it was proven by: a decision's
+receipt, and a request's record (`vs_core._proofs`)."""
 
 
-def _fingerprint(value: JsonValue) -> str:
-    """What core stores of a value it accepted: the digest of its canonical text."""
-    text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode()).hexdigest()
+def _digest(document: JsonValue) -> str:
+    """The fingerprint core states for a value, read off its JSON: sorted keys, no whitespace."""
+    text = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return sha256(text.encode()).hexdigest()
 
 
-def _rebound(before: dict[str, JsonValue], after: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """``after``, with the digest of the value it covers made that of the value as rewritten.
+def _restated(old: JsonObject, new: JsonObject) -> JsonObject:
+    """``new`` with the digest of a decision or request this step rewrote stated again.
 
-    A receipt or a record stores the digest of the decision or request it accepted, and core
-    proves the decoded value against it on resume. A value this migration rewrote has another
-    canonical text, so the digest it was accepted under is the digest of its old text, which no
-    code can recompute any more. Only a digest that was the old value's own is rebound: any
-    other is left for the proof to refuse, as a damaged document.
+    A receipt and a request record prove what they hold by a digest of it, and resuming refuses a
+    save whose proof no longer holds ("accepted decision integrity failed"): rewriting the
+    document leaves its saved digest standing for text that is gone. The digest is restated only
+    where it is certain to be the same fingerprint: the saved one was the digest of the saved
+    document as read off its JSON, so that of the rewritten document, read the same way, is what
+    core states for it. Any other digest is left as it was and resuming refuses the save.
     """
-    digest = before.get("payload_digest")
-    for key in _COVERED_BY_DIGEST:
+    node = new
+    for cover, field in _COVERED_BY_A_DIGEST:
         if (
-            isinstance(digest, str)
-            and key in before
-            and before[key] != after[key]
-            and _fingerprint(before[key]) == digest
+            field in old
+            and cover in old
+            and cover in new
+            and new[cover] != old[cover]
+            and old[field] == _digest(old[cover])
         ):
-            return {**after, "payload_digest": _fingerprint(after[key])}
-    return after
-
-
-def upgrade_document_shapes(source: str) -> str:
-    """``source``, a persisted JSON document, with the shapes of version 43 in it.
-
-    Its samples, evidence records and comparisons are rewritten as the migration to 43 does; the
-    same text is returned when it holds none or is no JSON document. The envelope is not the only
-    document a run keeps those in (the publication journal holds its events), and none of the
-    others carries a version, so the rewrite leaves a document that is already in the shapes alone.
-    """
-    return _embedded(source, canonical=False)
-
-
-def _embedded(text: str, *, canonical: bool) -> str:
-    """``text``, a JSON document, with its samples, evidence records and comparisons rewritten.
-
-    A document that holds none, or that is no JSON document, is returned as it is, so its text
-    is not touched (the same text is the same value for every digest that covers it).
-    """
-    try:
-        document = json.loads(text)
-    except ValueError:
-        return text
-    rewritten = _rewritten(document)
-    if rewritten == document:
-        return text
-    return json.dumps(rewritten, separators=(",", ":"), ensure_ascii=False, sort_keys=canonical)
+            node = {**node, field: _digest(new[cover])}
+    return node
 
 
 def _floor_declared(core: JsonObject) -> bool:
@@ -296,6 +334,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     40: _v40_to_v41,
     41: _v41_to_v42,
     42: _v42_to_v43,
+    43: _v43_to_v44,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

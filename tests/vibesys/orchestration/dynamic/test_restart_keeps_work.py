@@ -46,7 +46,7 @@ from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.candidates.api import InputReading, Measured, input_metrics, space_of
 from vibesys.dynamic_migration import migrate_objective_policy, recorded_objective_readings
-from vibesys.metrics import MetricComparison, MetricRow
+from vibesys.metrics import MetricRow
 from vibesys.orchestration.dynamic.search.api import (
     CoreHolds,
     DynamicConfig,
@@ -61,6 +61,7 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     AttemptRef,
     CheckpointKnown,
+    ComparisonVerdict,
     EventCursor,
     EvidenceKind,
     FlowState,
@@ -585,8 +586,8 @@ def test_objective_migration_preserves_work_and_reprojects_verified_checkpoints(
     parent = run.offered()[0].snapshot
     assert parent.benchmark is not None
     assert (
-        space_of(terms).compare_metrics(parent.benchmark.metrics, input_metrics(run.baseline))
-        is MetricComparison.BETTER
+        space_of(terms).compare_rows(parent.benchmark.metrics, input_metrics(run.baseline))
+        is ComparisonVerdict.BETTER
     )
     assert run.world().merge_options.mergeable(parent.hypothesis_id)
     assert any(item.revision == parent.revision for item in run.implemented())

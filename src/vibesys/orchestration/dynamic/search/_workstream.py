@@ -22,8 +22,9 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamStart,
     assertion,
     failure_of,
+    measured_by_workstream,
 )
-from vibesys.orchestration.dynamic.search._reports import seated
+from vibesys.orchestration.dynamic.search._reports import REPORTS, seated
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._spans import (
     label_outcome,
@@ -115,6 +116,9 @@ async def close_with(
         work.baseline = await the_bar(ctx, ws, await the_input(ctx, w, work))
         closing = closing.model_copy(update={"input": work.baseline})
     settled = keep(ctx, w, ws, closing, work.baseline)
+    measured = measured_by_workstream(w, closing, settled)
+    if measured is not None:
+        ctx.channel(REPORTS).send(measured)  # main may move now; the agents wait for nothing
     label_outcome(ctx, w, closing, settled, work)
     mark(ctx, w, work, ResumeStage.SETTLING, result=closing.result, closing=closing)
     return closing

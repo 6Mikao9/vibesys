@@ -15,14 +15,13 @@ from vibesys.candidates.api import STOPPED as STOPPED_TEXT
 from vibesys.candidates.api import (
     Baseline,
     assessment,
+    beats_input,
     gates_of,
-    input_metrics,
     settle_for,
-    space_of,
 )
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active
-from vibesys.metrics import AcceptedReading, MetricComparison, reading_of
+from vibesys.metrics import AcceptedReading, reading_of
 from vibesys.orchestration.dynamic.models import UnappliedPart
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._parents import ParentSnapshot
@@ -276,6 +275,64 @@ class Closing(Value):
         return STOPPED_TEXT if self.cause.kind is FailureKind.STOPPED else self.cause.kind.value
 
 
+class CandidateMeasured(Value):
+    """A candidate's trusted measurement has landed and its settlement is decided: main may move.
+
+    This is the one input main takes from a measurement (`MainLine.measured`). The workstream
+    reports it the moment it has it (`_reports`), without waiting for its workspace to close, and
+    the root derives the same value from a workstream that finished (`measured_by_settlement`),
+    so a report a restart lost still counts. It exists only for a retained candidate: one whose
+    trusted accuracy check passed (`settle_for`).
+    """
+
+    key: str
+    """The workstream whose candidate it is."""
+    candidate: RevisionRef
+    eligible: bool
+    """Whether its settlement is winner-eligible: it passed the task's gates and checks and
+    beats the input."""
+    accuracy: AcceptedReading | None = None
+    benchmark: AcceptedReading | None = None
+    input: Baseline | None = None
+    """The input as the settlement was decided against (`Closing.input`)."""
+
+
+def _measured(
+    start: WorkstreamStart, evidence: Evidence, settled: Settle | Settlement, bar: Baseline | None
+) -> CandidateMeasured | None:
+    """The measurement of an implementer's retained candidate; None for anything else."""
+    candidate = settled.candidate
+    if (
+        start.plan.kind is not WorkKind.IMPLEMENT
+        or not start.plan.measured
+        or settled.retention != "candidate"
+        or candidate is None
+    ):
+        return None
+    return CandidateMeasured(
+        key=start.key,
+        candidate=candidate,
+        eligible=settled.eligible,
+        accuracy=reading_of(evidence.readings, EvidenceKind.CORRECTNESS),
+        benchmark=reading_of(evidence.readings, EvidenceKind.BENCHMARK),
+        input=bar,
+    )
+
+
+def measured_by_workstream(
+    start: WorkstreamStart, closing: Closing, settle: Settle
+) -> CandidateMeasured | None:
+    """The measurement a workstream reports once it has asserted what its closing established."""
+    return _measured(start, closing.evidence, settle, closing.input)
+
+
+def measured_by_settlement(done: "WorkstreamDone") -> CandidateMeasured | None:
+    """The measurement of a finished workstream, as core settled it."""
+    if done.settlement is None:
+        return None
+    return _measured(done.start, done.evidence, done.settlement, done.input)
+
+
 @dataclass
 class Work:
     """What a workstream holds while it works, so a failure or a stop still settles with it."""
@@ -444,24 +501,9 @@ def assertion(
     return settle_for(
         closing,
         gates=gates_of(terms),
-        beats_input=beats_input(closing, terms, baseline),
+        beats_input=beats_input(baseline, closing.readings, terms),
         unsettled=UNSETTLED,
     )
-
-
-def beats_input(closing: Closing, terms: TaskTerms, baseline: Baseline | None) -> bool:
-    """Whether the candidate Pareto-dominates the input's bar beyond per-axis noise.
-
-    The bar is `input_metrics`: a measured input's benchmark, or that of one that failed only
-    its accuracy check. With no bar the candidate is judged on the task's gates alone, and a
-    run that adopts it says so (`RunRecord.ending`).
-    """
-    bar = input_metrics(baseline)
-    if not bar:
-        return True
-    benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
-    metrics = () if benchmark is None else benchmark.metrics
-    return space_of(terms).compare_metrics(metrics, bar) is MetricComparison.BETTER
 
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})

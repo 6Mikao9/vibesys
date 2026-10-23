@@ -8,7 +8,10 @@ when nothing can be ranked and what an unmeasured input means.
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 
-from vibesys.metrics import Measurement, MetricComparison, MetricSpace
+from vibesys.candidates._input import Baseline, input_metrics
+from vibesys.candidates._task import space_of
+from vibesys.metrics import AcceptedReading, Measurement, MetricSpace, reading_of
+from vs_core.api import ComparisonVerdict, EvidenceKind, TaskTerms
 
 
 class Unranked(StrEnum):
@@ -51,4 +54,26 @@ def improves_on(
     """
     if input_reading is None:
         return when_input_unmeasured
-    return space.compare(candidate, input_reading) is MetricComparison.BETTER
+    return (
+        space.compare(() if candidate is None else (candidate,), (input_reading,))
+        is ComparisonVerdict.BETTER
+    )
+
+
+def beats_input(
+    baseline: Baseline | None, readings: tuple[AcceptedReading, ...], terms: TaskTerms
+) -> bool:
+    """Whether the candidate's benchmark beats the input's bar, by the one rule of the system.
+
+    The bar is `input_metrics` (a measured input's benchmark, or that of one that failed only
+    its accuracy check); an input with no bar leaves nothing to beat, and the candidate is then
+    judged on the task's gates alone. Beating it is dominance (`MetricSpace.compare`): no
+    objective worse, and one better, beyond the noise the task declares or the stated default.
+    Every search settles a candidate through this one function.
+    """
+    bar = input_metrics(baseline)
+    if not bar:
+        return True
+    benchmark = reading_of(readings, EvidenceKind.BENCHMARK)
+    metrics = () if benchmark is None else benchmark.metrics
+    return space_of(terms).compare_rows(metrics, bar) is ComparisonVerdict.BETTER

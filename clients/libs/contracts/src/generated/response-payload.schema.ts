@@ -1185,6 +1185,30 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "IterationUnavailableReason",
       "type": "string"
     },
+    "ObjectiveAxis": {
+      "additionalProperties": false,
+      "description": "One axis candidates are ranked on, as a client is told it: its name and which way is better.\n\nThe task's objective in core also holds the noise policy a comparison reads, which is not the\nrun's to show; the wire carries only what a client marks.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "max",
+            "min"
+          ],
+          "title": "Direction",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "direction"
+      ],
+      "title": "ObjectiveAxis",
+      "type": "object"
+    },
     "ObjectiveOverview": {
       "additionalProperties": false,
       "description": "What the run optimizes: the task's objective and the metric it is judged on.\n\n``unit`` and ``direction`` come from the run's own measurements and objectives once it has\nthem; ``correctness_check`` is the argv of the check a candidate must pass (empty when the\ntask gates on none).",
@@ -1236,7 +1260,7 @@ const responsePayloadSchema: Record<string, unknown> = {
         "objectives": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/TaskObjective"
+            "$ref": "#/$defs/ObjectiveAxis"
           },
           "title": "Objectives",
           "type": "array"
@@ -1884,31 +1908,6 @@ const responsePayloadSchema: Record<string, unknown> = {
       ],
       "title": "SpanWaitKind",
       "type": "string"
-    },
-    "TaskObjective": {
-      "additionalProperties": false,
-      "description": "One axis the task compares candidates on, and which way is better.",
-      "properties": {
-        "name": {
-          "minLength": 1,
-          "title": "Name",
-          "type": "string"
-        },
-        "direction": {
-          "enum": [
-            "max",
-            "min"
-          ],
-          "title": "Direction",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "direction"
-      ],
-      "title": "TaskObjective",
-      "type": "object"
     },
     "WaitingOn": {
       "additionalProperties": false,

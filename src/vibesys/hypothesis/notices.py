@@ -17,6 +17,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vs_core.api import DEFAULT_RELATIVE_NOISE, VERDICT_NOISES
+
 __all__ = [
     "ArchiveAxis",
     "ArchiveConflict",
@@ -118,6 +120,11 @@ class ParetoArchiveView(_Notice):
 
     axes: tuple[ArchiveAxis, ...]
     relative_noise: float
+    """The relative noise of one run the task declares; 0 when it declares none."""
+    verdict_noises: float = VERDICT_NOISES
+    """How many noises a difference must exceed for an axis to be better or worse."""
+    default_noise: float = DEFAULT_RELATIVE_NOISE
+    """The relative noise of one run assumed where the task declares none."""
     latest: ArchiveLatestRound | None
     trusted_parents: tuple[ArchiveTrustedParent, ...] = ()
     pending_claims: tuple[ArchivePendingClaim, ...] = ()

@@ -15,7 +15,7 @@ from vibesys.hypothesis import (
     parse_round_record,
     serialize_round_record,
 )
-from vibesys.metrics import MetricComparison
+from vs_core.api import ComparisonVerdict
 from vs_sim.api.testing import examples
 
 
@@ -322,7 +322,7 @@ def _golden_record(name: str) -> RoundRecord:
             perf_baseline_commit="b" * 40,
             perf_baseline_metric=100.0,
             perf_delta_pct=12.5,
-            perf_comparison=MetricComparison.BETTER,
+            perf_comparison=ComparisonVerdict.BETTER,
             perf_provenance="framework",
             implementer_provider="codex",
             implementer_model="gpt-5.6-sol",
@@ -349,7 +349,7 @@ def _golden_record(name: str) -> RoundRecord:
             hypothesis_outcome="continue",
             profile_skipped=True,
             perf_provenance="implementer",
-            perf_comparison=MetricComparison.INCOMPARABLE,
+            perf_comparison=ComparisonVerdict.INCONCLUSIVE,
         ),
     }
     return records[name]
@@ -367,6 +367,19 @@ def test_round_record_encoding_matches_pre_retirement_golden(name: str) -> None:
 
     assert encoded == payload
     assert (json.dumps(encoded, indent=2) + "\n").encode() == golden
+
+
+def test_record_persisted_with_the_old_verdict_word_still_loads() -> None:
+    """A round that could not be compared was stored as ``incomparable``: the same decision."""
+    fixtures = Path(__file__).parent / "fixtures" / "round_records"
+    recorded = json.loads((fixtures / "recorded-with-incomparable-verdict.json").read_bytes())
+    current = json.loads((fixtures / "deferred.json").read_bytes())
+    assert recorded["perf_comparison"] == "incomparable"
+
+    restored = parse_round_record(recorded)
+
+    assert restored.perf_comparison is ComparisonVerdict.INCONCLUSIVE
+    assert serialize_round_record(restored) == current
 
 
 def test_sparse_legacy_record_decodes_to_pre_retirement_defaults() -> None:
@@ -421,7 +434,7 @@ def test_only_the_retired_driver_key_is_tolerated_on_load(driver: str | None, un
         candidate_disposition=st.text(),
         judge_verdict=st.sampled_from([None, "pass", "fail", "deferred"]),
         reviewed=st.booleans(),
-        perf_comparison=st.one_of(st.none(), st.sampled_from(MetricComparison)),
+        perf_comparison=st.one_of(st.none(), st.sampled_from(ComparisonVerdict)),
         metrics=st.dictionaries(
             st.text(), st.floats(allow_nan=False, allow_infinity=False), max_size=4
         ),

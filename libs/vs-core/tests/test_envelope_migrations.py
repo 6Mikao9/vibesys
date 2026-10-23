@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -212,6 +212,7 @@ _DOCUMENTS = st.recursive(
 
 
 @pytest.mark.regression
+@example(document={"evidence_id": "a", "reading": _LEGACY_READING}, key="payload_json")
 @given(document=_DOCUMENTS, key=st.sampled_from(_EMBEDDED_KEYS))
 def test_a_json_document_embedded_in_the_envelope_is_rewritten_like_the_value_it_holds(
     document: Json, key: str
@@ -245,6 +246,9 @@ def _fingerprint(value: Json) -> str:
 
 
 @pytest.mark.regression
+@example(
+    document={"evidence_id": "a", "reading": _LEGACY_READING}, covered="decision", damaged=False
+)
 @given(
     document=_DOCUMENTS,
     covered=st.sampled_from(("decision", "request")),
@@ -271,17 +275,6 @@ def test_a_digest_is_rebound_to_the_value_the_migration_rewrote_and_to_no_other(
     else:
         assert held["payload_digest"] == _fingerprint(rewritten)
         assert (held["payload_digest"] == digest) == (rewritten == document)
-
-
-def test_a_version_42_request_payload_holds_readings_after_the_migration() -> None:
-    stored = json.loads((_FIXTURES / "v42-floor.json").read_text(encoding="utf-8"))
-    request = {"evidence": [{"evidence_id": "e1", "reading": _LEGACY_READING}], "kind": "x"}
-    stored["wrapper"] = {"payload_json": json.dumps(request, sort_keys=True, separators=(",", ":"))}
-
-    migrated = _upgraded(json.dumps(stored))
-
-    payload = json.loads(str(_object(migrated["wrapper"])["payload_json"]))
-    assert payload["evidence"] == [{"evidence_id": "e1", "readings": [_LEGACY_READING]}]
 
 
 def test_every_version_from_the_oldest_supported_has_a_migration_and_a_fixture() -> None:
@@ -318,3 +311,216 @@ def test_every_migration_since_compatible_changes_keep_the_version_rewrites_its_
         "the version raise if every saved envelope decodes as is, or save a fixture holding the "
         "data the step rewrites"
     )
+
+
+def _embedded_documents(envelope: dict[str, Json]) -> dict[str, str]:
+    """The JSON documents the fixture envelope holds as text, by where it keeps them."""
+    live = _object(_object(envelope["strategy"])["live"])
+    flows = live["flows"]
+    assert isinstance(flows, list)
+    held = {f"flow:{_object(flow)['path']}": _object(flow)["snapshot_json"] for flow in flows}
+    held["published"] = live["published"]
+    assert all(isinstance(text, str) for text in held.values())
+    return {key: text for key, text in held.items() if isinstance(text, str)}
+
+
+def _legacy_nodes(value: Json) -> int:
+    """How many version 42 shapes ``value`` holds: a lone ``reading``, a flat headline."""
+    if isinstance(value, list):
+        return sum(_legacy_nodes(item) for item in value)
+    if not isinstance(value, dict):
+        return 0
+    own = int(
+        (
+            "reading" in value
+            and ("evidence_id" in value or {"run", "measured_input"} <= value.keys())
+        )
+        or {"candidate_input", "base_input", "candidate_value", "metric"} <= value.keys()
+    )
+    return own + sum(_legacy_nodes(item) for item in value.values())
+
+
+def test_the_documents_a_version_43_envelope_holds_as_text_are_brought_to_the_version_43_shapes() -> (
+    None
+):
+    """A save of version 42 kept its checkpoints, published record and requests as text.
+
+    Version 43 rewrote the envelope's own fields and not these, so the strict models refused the
+    old ``reading`` and flat comparison inside them. Each such document is rewritten; the
+    documents that hold no old shape, and everything the envelope types, are left as they were.
+    """
+    source = (_FIXTURES / "v43-embedded.json").read_text(encoding="utf-8")
+    stored, upgraded = json.loads(source), _upgraded(source)
+    before, after = _embedded_documents(stored), _embedded_documents(upgraded)
+
+    assert {key: _legacy_nodes(json.loads(text)) for key, text in before.items()} == {
+        "flow:": 2,
+        "flow:other": 0,
+        "published": 2,
+    }
+    assert {key: _legacy_nodes(json.loads(text)) for key, text in after.items()} == dict.fromkeys(
+        before, 0
+    )
+    assert after["flow:other"] == before["flow:other"]  # not one byte of an untouched document
+    nested = json.loads(json.loads(after["published"])["operation"]["payload_json"])
+    assert nested["evidence"][0]["readings"] == [stored_reading(before["published"])]
+    assert (
+        json.loads(after["flow:"])["record"]["parents"][0]["proof"][0]["readings"][0]["metric"]
+        == "throughput"
+    )
+
+    def blank(envelope: dict[str, Json]) -> dict[str, Json]:
+        live = _object(_object(envelope["strategy"])["live"])
+        flows = live["flows"]
+        assert isinstance(flows, list)
+        return {
+            **envelope,
+            "schema_version": 0,
+            "strategy": {
+                **_object(envelope["strategy"]),
+                "live": {
+                    **live,
+                    "published": None,
+                    "flows": [{**_object(flow), "snapshot_json": ""} for flow in flows],
+                },
+            },
+        }
+
+    assert blank(upgraded) == blank(stored)  # only the documents held as text changed
+
+
+def stored_reading(published: str) -> Json:
+    """The one ``reading`` of the evidence record in the request the published record holds."""
+    request = json.loads(json.loads(published)["operation"]["payload_json"])
+    return request["evidence"][0]["reading"]
+
+
+@given(
+    texts=st.lists(
+        st.one_of(
+            st.text(max_size=30),
+            st.integers().map(str),
+            st.just("null"),
+            st.just("[1,2,3]"),
+            st.just('{"reading":1}'),
+            st.just('{"width":2,"ratio":1.0}'),
+        ),
+        min_size=1,
+        max_size=4,
+    )
+)
+def test_a_text_that_is_not_a_document_with_an_old_shape_is_never_touched(
+    texts: list[str],
+) -> None:
+    stored = _object(json.loads((_FIXTURES / "v43-embedded.json").read_text(encoding="utf-8")))
+    live = _object(_object(stored["strategy"])["live"])
+    flows = live["flows"]
+    assert isinstance(flows, list)
+    live["flows"] = [
+        {**_object(flows[0]), "path": f"p{index}", "snapshot_json": text}
+        for index, text in enumerate(texts)
+    ]
+    live["published"] = None
+    upgraded = _object(_object(_upgraded(json.dumps(stored))["strategy"])["live"])
+    kept = upgraded["flows"]
+    assert isinstance(kept, list)
+    assert [_object(flow)["snapshot_json"] for flow in kept] == texts
+
+
+def test_upgrading_a_version_44_envelope_twice_changes_nothing() -> None:
+    source = (_FIXTURES / "v43-embedded.json").read_text(encoding="utf-8")
+    once = core.upgrade_envelope(source, ("schema_version",))
+    assert core.upgrade_envelope(once, ("schema_version",)) == once
+
+
+def _fingerprint(document: Json) -> str:
+    """The digest core states for a value: sha256 of its JSON with sorted keys and no spaces."""
+    text = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _legacy_ref(index: int) -> Json:
+    return {
+        "evidence_id": {"root": f"e{index}", "kind": "evidence"},
+        "kind": "benchmark",
+        "reading": {"metric": "throughput", "value": 50.0 + index, "direction": "max"},
+    }
+
+
+_STEPS = (("v42-floor.json", False), ("v43-embedded.json", True))
+"""The save a step is held to and whether its old shapes sit inside a document held as text:
+version 43 rewrites the envelope's own fields, version 44 the documents held as text."""
+
+
+def _with_proofs(
+    fixture: str, decisions: list[Json], requests: list[Json], *, tampered: bool = False
+) -> dict[str, Json]:
+    """The ``fixture`` whose receipts and request records hold ``decisions`` and ``requests``."""
+    stored = _object(json.loads((_FIXTURES / fixture).read_text(encoding="utf-8")))
+    core_state = _object(stored["core"])
+    run = _object(core_state["run"])
+    run["receipts"] = [
+        {
+            "decision_id": {"root": f"d{index}", "kind": "decision"},
+            "decision": decision,
+            "payload_digest": "tampered" if tampered else _fingerprint(decision),
+        }
+        for index, decision in enumerate(decisions)
+    ]
+    records = _object(core_state["records"])
+    records["records"] = [
+        {"request": request, "payload_digest": "tampered" if tampered else _fingerprint(request)}
+        for request in requests
+    ]
+    return stored
+
+
+def _holding(refs: int, *, as_text: bool) -> Json:
+    """A decision that holds ``refs`` evidence records at the old shape, in its fields or as text."""
+    proof: Json = [_legacy_ref(i) for i in range(refs)]
+    if as_text:
+        return {"kind": "operation", "request": {"payload_json": json.dumps({"evidence": proof})}}
+    return {"kind": "wait", "proof": proof, "width": 2}
+
+
+def _held(migrated: dict[str, Json]) -> list[tuple[Json, str]]:
+    """Every document a receipt or request record proves by its digest, and that digest."""
+    core_state = _object(migrated["core"])
+    receipts = _object(core_state["run"])["receipts"]
+    records = _object(core_state["records"])["records"]
+    assert isinstance(receipts, list)
+    assert isinstance(records, list)
+    digest = "payload_digest"
+    held = [(_object(item)["decision"], str(_object(item)[digest])) for item in receipts]
+    return held + [(_object(item)["request"], str(_object(item)[digest])) for item in records]
+
+
+@pytest.mark.parametrize(("fixture", "as_text"), _STEPS, ids=["v42", "v43"])
+@settings(deadline=None)
+@given(refs=st.integers(min_value=0, max_value=3), others=st.integers(min_value=0, max_value=2))
+def test_a_receipt_and_a_request_record_keep_a_digest_that_proves_what_they_hold(
+    fixture: str, *, as_text: bool, refs: int, others: int
+) -> None:
+    """A step that rewrites a decision or a request states its digest again; no other is touched."""
+    rewritten = [_holding(refs, as_text=as_text)]
+    untouched: list[Json] = [{"kind": "wait", "width": width} for width in range(others)]
+    stored = _with_proofs(fixture, rewritten + untouched, rewritten + untouched)
+    migrated = _upgraded(json.dumps(stored))
+
+    assert all(digest == _fingerprint(document) for document, digest in _held(migrated))
+    before, after = _held(stored), _held(migrated)
+    moved = [new[0] != old[0] for old, new in zip(before, after, strict=True)]
+    assert moved == [refs > 0, *([False] * others)] * 2
+    for old, new, changed in zip(before, after, moved, strict=True):
+        assert (old[1] != new[1]) is changed  # a digest moves with its document and only then
+
+
+@pytest.mark.parametrize(("fixture", "as_text"), _STEPS, ids=["v42", "v43"])
+def test_a_digest_that_is_not_the_one_of_the_saved_document_is_left_for_resuming_to_refuse(
+    fixture: str, *, as_text: bool
+) -> None:
+    """Only a digest that provably covered the old document is restated: a damaged one stays so."""
+    decision = _holding(1, as_text=as_text)
+    migrated = _upgraded(json.dumps(_with_proofs(fixture, [decision], [decision], tampered=True)))
+
+    assert [digest for _, digest in _held(migrated)] == ["tampered", "tampered"]

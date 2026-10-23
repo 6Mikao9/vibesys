@@ -24,7 +24,6 @@ from vibesys.serial_search._attribution import (
 from vibesys.serial_search._closing import (
     FinishedRound,
     accuracy_passed,
-    beats_input,
     benchmark_outcome,
     failed_gate,
     settle,
@@ -139,7 +138,6 @@ __all__ = [
     "attributed",
     "attribution_of",
     "base_commit",
-    "beats_input",
     "benchmark_outcome",
     "bottlenecks_of",
     "capture_attribution",

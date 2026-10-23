@@ -3,9 +3,10 @@
 Guarantees under test:
 
 * A metric space is frozen with unique axes and a validated relative noise.
-* Comparison is direction-aware and decided only outside the noise tolerance (exactly at the
-  tolerance is noise; a zero baseline or zero noise compares strictly); missing or mismatched
-  evidence is incomparable.
+* Comparison is vs-core's one rule (`vs_core.api.judge`, `dominance`) projected onto the space's
+  axes: direction-aware, decided only beyond the band two standard errors wide, under the noise
+  the task declares or the stated default (never a zero band); missing or mismatched evidence is
+  inconclusive.
 * Dominance needs every axis and one material win; the frontier keeps every tradeoff and drops
   dominated points; completeness needs a value on every configured axis.
 """
@@ -17,7 +18,8 @@ from typing import Literal
 import pytest
 from pydantic import ValidationError
 
-from vibesys.metrics import Measurement, MetricComparison, MetricSpace, Objective
+from vibesys.metrics import Measurement, MetricSpace, Objective
+from vs_core.api import DEFAULT_RELATIVE_NOISE, ComparisonVerdict
 
 _OPS = Objective(name="ops", direction="max")
 _LATENCY = Objective(name="latency", direction="min")
@@ -60,19 +62,25 @@ def test_signed_primary_orients_headline_values_for_ranking() -> None:
     assert MetricSpace().signed_primary(12.0) == 12.0
 
 
+def _compare(space: MetricSpace, candidate: float, baseline: float) -> ComparisonVerdict:
+    return space.compare((_reading(candidate),), (_reading(baseline),))
+
+
 @pytest.mark.parametrize("direction", ["max", "min"])
-def test_a_delta_exactly_at_the_tolerance_is_within_noise(
+def test_a_difference_inside_the_band_is_within_noise_and_beyond_it_a_result(
     direction: Literal["max", "min"],
 ) -> None:
-    """The tolerance is inclusive: only a delta beyond it is a real result."""
+    """A declared noise of 5% a run makes the band about 14% of the base, either side."""
     space = MetricSpace(
         objectives=(Objective(name="ops", direction=direction),), relative_noise=0.05
     )
+    higher = ComparisonVerdict.BETTER if direction == "max" else ComparisonVerdict.WORSE
+    lower = ComparisonVerdict.WORSE if direction == "max" else ComparisonVerdict.BETTER
 
-    assert space.compare(_reading(105.0), _reading(100.0)) is MetricComparison.WITHIN_NOISE
-    assert space.compare(_reading(95.0), _reading(100.0)) is MetricComparison.WITHIN_NOISE
-    beyond = MetricComparison.BETTER if direction == "max" else MetricComparison.WORSE
-    assert space.compare(_reading(105.01), _reading(100.0)) is beyond
+    assert _compare(space, 105.0, 100.0) is ComparisonVerdict.WITHIN_NOISE
+    assert _compare(space, 95.0, 100.0) is ComparisonVerdict.WITHIN_NOISE
+    assert _compare(space, 130.0, 100.0) is higher
+    assert _compare(space, 70.0, 100.0) is lower
 
 
 @pytest.mark.parametrize("direction", ["max", "min"])
@@ -83,58 +91,61 @@ def test_direction_decides_which_side_of_the_baseline_is_better(
         objectives=(Objective(name="ops", direction=direction),), relative_noise=0.05
     )
 
-    higher = space.compare(_reading(120.0), _reading(100.0))
-    lower = space.compare(_reading(80.0), _reading(100.0))
+    higher = _compare(space, 150.0, 100.0)
+    lower = _compare(space, 60.0, 100.0)
 
-    assert higher is (MetricComparison.BETTER if direction == "max" else MetricComparison.WORSE)
-    assert lower is (MetricComparison.WORSE if direction == "max" else MetricComparison.BETTER)
+    assert higher is (ComparisonVerdict.BETTER if direction == "max" else ComparisonVerdict.WORSE)
+    assert lower is (ComparisonVerdict.WORSE if direction == "max" else ComparisonVerdict.BETTER)
 
 
-def test_a_zero_noise_space_compares_strictly() -> None:
+def test_a_space_that_declares_no_noise_is_judged_under_the_stated_default_never_strictly() -> None:
     space = MetricSpace(objectives=(_OPS,))
 
-    assert space.compare(_reading(100.000001), _reading(100.0)) is MetricComparison.BETTER
-    assert space.compare(_reading(99.999999), _reading(100.0)) is MetricComparison.WORSE
-    assert space.compare(_reading(100.0), _reading(100.0)) is MetricComparison.WITHIN_NOISE
+    assert DEFAULT_RELATIVE_NOISE == 0.05
+    assert space.noise_of("ops") == 0.0  # it declares none; the rule states a default for it
+    assert _compare(space, 100.000001, 100.0) is ComparisonVerdict.WITHIN_NOISE
+    assert _compare(space, 99.999999, 100.0) is ComparisonVerdict.WITHIN_NOISE
+    assert _compare(space, 100.0, 100.0) is ComparisonVerdict.WITHIN_NOISE
+    assert _compare(space, 200.0, 100.0) is ComparisonVerdict.BETTER
+    assert _compare(space, 50.0, 100.0) is ComparisonVerdict.WORSE
 
 
-def test_a_zero_baseline_leaves_no_scale_so_the_comparison_is_strict() -> None:
-    """The tolerance is relative, so at a zero baseline it is zero too."""
+def test_a_zero_baseline_has_no_scale_so_only_an_equal_reading_is_judged() -> None:
+    """The noise is relative, so at a zero baseline there is nothing to hold a difference against."""
     space = MetricSpace(objectives=(_OPS,), relative_noise=0.5)
 
-    assert space.compare(_reading(0.5), _reading(0.0)) is MetricComparison.BETTER
-    assert space.compare(_reading(-0.5), _reading(0.0)) is MetricComparison.WORSE
-    assert space.compare(_reading(0.0), _reading(0.0)) is MetricComparison.WITHIN_NOISE
+    assert _compare(space, 0.0, 0.0) is ComparisonVerdict.WITHIN_NOISE
+    assert _compare(space, 0.5, 0.0) is ComparisonVerdict.INCONCLUSIVE
+    assert _compare(space, -0.5, 0.0) is ComparisonVerdict.INCONCLUSIVE
 
 
-def test_a_negative_baseline_scales_the_tolerance_by_its_magnitude() -> None:
+def test_a_negative_baseline_scales_the_noise_by_its_magnitude() -> None:
     space = MetricSpace(objectives=(_OPS,), relative_noise=0.1)
     minimizing = MetricSpace(
         objectives=(Objective(name="ops", direction="min"),), relative_noise=0.1
     )
 
-    assert space.compare(_reading(-95.0), _reading(-100.0)) is MetricComparison.WITHIN_NOISE
-    assert space.compare(_reading(-85.0), _reading(-100.0)) is MetricComparison.BETTER
-    assert space.compare(_reading(-115.0), _reading(-100.0)) is MetricComparison.WORSE
-    assert minimizing.compare(_reading(-85.0), _reading(-100.0)) is MetricComparison.WORSE
+    assert _compare(space, -95.0, -100.0) is ComparisonVerdict.WITHIN_NOISE
+    assert _compare(space, -60.0, -100.0) is ComparisonVerdict.BETTER
+    assert _compare(space, -160.0, -100.0) is ComparisonVerdict.WORSE
+    assert _compare(minimizing, -60.0, -100.0) is ComparisonVerdict.WORSE
 
 
 @pytest.mark.parametrize(
     ("candidate", "baseline"),
     [
-        (None, _reading(100.0)),
-        (_reading(100.0), None),
-        (_reading(100.0, "unconfigured"), _reading(100.0, "unconfigured")),
-        (_reading(100.0), _reading(100.0, "latency")),
+        ((), (_reading(100.0),)),
+        ((_reading(100.0),), ()),
+        ((_reading(100.0, "unconfigured"),), (_reading(100.0, "unconfigured"),)),
+        ((_reading(100.0),), (_reading(100.0, "latency"),)),
     ],
 )
-def test_missing_or_mismatched_evidence_is_incomparable(
-    candidate: Measurement | None,
-    baseline: Measurement | None,
+def test_missing_or_mismatched_evidence_is_inconclusive(
+    candidate: tuple[Measurement, ...], baseline: tuple[Measurement, ...]
 ) -> None:
     space = MetricSpace(objectives=(_OPS,), relative_noise=0.05)
 
-    assert space.compare(candidate, baseline) is MetricComparison.INCOMPARABLE
+    assert space.compare(candidate, baseline) is ComparisonVerdict.INCONCLUSIVE
 
 
 def test_best_and_compare_to_best_order_a_scalar_history() -> None:
@@ -149,11 +160,13 @@ def test_best_and_compare_to_best_order_a_scalar_history() -> None:
         100.0, "a"
     )
     # An empty history is advanced by anything measurable.
-    assert space.compare_to_best(_reading(1.0), []) is MetricComparison.BETTER
-    assert space.compare_to_best(None, history) is MetricComparison.INCOMPARABLE
-    assert space.compare_to_best(_reading(1.0, "unconfigured"), []) is MetricComparison.INCOMPARABLE
-    assert space.compare_to_best(_reading(104.0), history) is MetricComparison.WITHIN_NOISE
-    assert space.compare_to_best(_reading(120.0), history) is MetricComparison.BETTER
+    assert space.compare_to_best(_reading(1.0), []) is ComparisonVerdict.BETTER
+    assert space.compare_to_best(None, history) is ComparisonVerdict.INCONCLUSIVE
+    assert (
+        space.compare_to_best(_reading(1.0, "unconfigured"), []) is ComparisonVerdict.INCONCLUSIVE
+    )
+    assert space.compare_to_best(_reading(104.0), history) is ComparisonVerdict.WITHIN_NOISE
+    assert space.compare_to_best(_reading(130.0), history) is ComparisonVerdict.BETTER
 
 
 def _named_a(item: Measurement) -> Measurement:
@@ -167,7 +180,7 @@ def test_dominance_needs_every_axis_and_one_material_win() -> None:
 
     assert space.dominates({"ops": 110.0, "latency": 101.0}, baseline)
     # Better on one axis, materially worse on the other.
-    assert not space.dominates({"ops": 110.0, "latency": 110.0}, baseline)
+    assert not space.dominates({"ops": 110.0, "latency": 130.0}, baseline)
     # Everything within noise is not a dominating point.
     assert not space.dominates({"ops": 102.0, "latency": 101.0}, baseline)
     # A missing axis makes the rows incomparable rather than dominated.
