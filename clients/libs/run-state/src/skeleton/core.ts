@@ -26,6 +26,7 @@ function replyEntry(
       kind: 'reply',
       spanId,
       turnId: spanId,
+      invocationId: spanId,
       agentKind: turn.role,
       content: JSON.stringify(reply.value),
       reply: ownProjectionInput(reply),
