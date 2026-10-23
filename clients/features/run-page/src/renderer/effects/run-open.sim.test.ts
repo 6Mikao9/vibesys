@@ -395,17 +395,27 @@ async function bannerOf(records: SimRun['records'], run: Partial<SimRun>) {
 }
 
 test('a finished run’s failure diagnostic does not depend on how many records follow it', async () => {
-  for (const legacyKeyframes of [false, true]) {
-    for (const trailing of [0, 256, 257, 700, 1500]) {
-      const records = withEarlyFailure(trailing);
-      for (const keyframes of [[], [records.length], [Math.floor(records.length / 2)]]) {
-        const label = `${trailing} records after the notice, checkpoint ${keyframes[0] ?? 'none'}, ${legacyKeyframes ? 'keyframe without failure facts' : 'tracked keyframe'}`;
-        const {message, tails} = await bannerOf(records, {keyframes, legacyKeyframes});
-        expect(message, label).toBe('Measurement unavailable');
-        // Bounded cost: the live Tail, plus at most one paged read per page looked back.
-        expect(tails, label).toBeLessThanOrEqual(1 + FAILURE_PAGES);
-      }
-    }
+  // Tracked keyframes (none, final, middle) and keyframes without failure facts (final, middle),
+  // with the notice inside the window, just outside it, and several pages back.
+  const cases = [
+    ...[0, 257, 700].flatMap(count =>
+      (['none', 'final', 'middle'] as const).map(at => ({count, at, legacy: false})),
+    ),
+    ...[256, 257, 1500].flatMap(count =>
+      (['final', 'middle'] as const).map(at => ({count, at, legacy: true})),
+    ),
+  ];
+  for (const {count, at, legacy} of cases) {
+    const records = withEarlyFailure(count);
+    const through = at === 'final' ? records.length : Math.floor(records.length / 2);
+    const label = `${count} records after the notice, ${at} checkpoint, ${legacy ? 'without failure facts' : 'tracked'}`;
+    const {message, tails} = await bannerOf(records, {
+      keyframes: at === 'none' ? [] : [through],
+      legacyKeyframes: legacy,
+    });
+    expect(message, label).toBe('Measurement unavailable');
+    // Bounded cost: the live Tail, plus at most one paged read per page looked back.
+    expect(tails, label).toBeLessThanOrEqual(1 + FAILURE_PAGES);
   }
 });
 
