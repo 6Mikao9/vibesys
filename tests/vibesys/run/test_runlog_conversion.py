@@ -621,8 +621,8 @@ def converted_input_tokens(project: Project) -> int | None:
             span = record.body.value.span
             if span is not None and span.label is not None and span.label.attrs is not None:
                 latest[span.id] = AgentTurnAttrs.from_binary(span.label.attrs.value)
-    usage = latest["op:turn-a"].usage
-    return None if usage is None else usage.input
+    amounts = [attrs.usage.input for attrs in latest.values() if attrs.usage is not None]
+    return sum(amounts) if amounts else None
 
 
 @given(
@@ -649,3 +649,48 @@ def test_conversion_counts_a_repeated_source_usage_line_once(
             journal.write_bytes(b"".join(usage_journal(rows)))
             convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
             assert converted_input_tokens(project) == expected
+
+
+@given(
+    sources=st.dictionaries(
+        st.integers(3, 900),
+        st.tuples(st.integers(1, 10_000), st.booleans()),
+        min_size=1,
+        max_size=5,
+    ),
+    deliveries=st.lists(st.integers(0, 4), min_size=1, max_size=12),
+    binding_at=st.integers(0, 12),
+)
+@example(sources={3: (100, False)}, deliveries=[0, 0], binding_at=1)
+def test_conversion_usage_identity_survives_late_span_bindings(
+    sources: dict[int, tuple[int, bool]], deliveries: list[int], binding_at: int
+) -> None:
+    """Source identity survives duplicates before/after binding, optional spans and reordered usage."""
+    order = list(sources)
+    rows = [order[index % len(order)] for index in deliveries] + order
+    documents = [
+        json.loads(line)
+        for line in usage_journal([(sequence, sources[sequence][0]) for sequence in rows])
+    ]
+    binding = documents.pop(1)
+    binding["data"]["span"]["invocation"] = "turn-a"
+    for document in documents[1:-1]:
+        document["execution_id"] = "turn-a"
+        if not sources[document["sequence"]][1]:
+            document["data"].pop("span_id")
+    documents.insert(1 + binding_at % len(rows), binding)
+    with TemporaryDirectory() as directory:
+        task = Path(directory)
+        root = task / "project"
+        root.mkdir()
+        with pytest.MonkeyPatch.context() as env:
+            env.setenv("VIBESYS_STATE_HOME", str(task / "home"))
+            project = Project.open(root)
+            source = Project.event_journal_path_for(root, "run-1")
+            source.parent.mkdir(parents=True)
+            source.write_bytes(
+                b"".join(json.dumps(document).encode() + b"\n" for document in documents)
+            )
+            result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+            assert result.status == ConversionStatus.CONVERTED
+            assert converted_input_tokens(project) == sum(tokens for tokens, _ in sources.values())

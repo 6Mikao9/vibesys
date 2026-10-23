@@ -423,3 +423,35 @@ def test_usage_counts_each_source_event_once_however_it_is_delivered(
         totals = turn_input_tokens(each)
         for span, total in expected.items():
             assert totals[span] == total + (base.get(span) or 0)
+
+
+@pytest.mark.regression
+@given(count=st.integers(16, 32), ahead=st.lists(st.integers(1, 31), max_size=10))
+@example(count=16, ahead=[15, 2, 15])
+def test_ordered_usage_retains_bounded_replay_state(
+    usage_source: tuple[MappingState, SummaryState, e.CoreEvent, e.CoreEvent],
+    count: int,
+    ahead: list[int],
+) -> None:
+    """Reordering, repetition and closing every sequence gap compact back to one frontier."""
+    _, _, template, _ = usage_source
+    state = MappingState("run-a")
+    source = template.model_copy(
+        update={
+            "execution_id": "scale-turn",
+            "data": e.TurnUsageData(span_id="op:scale-turn", input_tokens=1),
+        }
+    )
+    first = 1
+    state = map_event(state, source.model_copy(update={"sequence": first})).state
+    retained = len(repr(state))
+    for offset in ahead:
+        state = map_event(
+            state, source.model_copy(update={"sequence": first + offset % count})
+        ).state
+    for sequence in range(first + 1, first + count):
+        state = map_event(state, source.model_copy(update={"sequence": sequence})).state
+    assert turn_input_tokens(state)["op:scale-turn"] == count
+    # The public immutable cursor includes fixed span snapshots. With the same span set, its
+    # retained representation is bounded independently of the number of ordered usage events.
+    assert len(repr(state)) <= retained + 64

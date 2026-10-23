@@ -3058,6 +3058,7 @@ dependencies = [
     { name = "pygit2" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "rpds-py" },
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
@@ -3115,6 +3116,7 @@ requires-dist = [
     { name = "pygit2", specifier = ">=1.18,<2" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "rpds-py", specifier = ">=0.30,<0.31" },
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "websockets", specifier = ">=14.2,<15" },
 ]

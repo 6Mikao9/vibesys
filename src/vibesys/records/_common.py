@@ -48,7 +48,6 @@ class Projection:
         self.waits = dict(state.waits)
         self.intents = dict(state.intents)
         self.metric_values = dict(state.metric_values)
-        self.usage_sources = set(state.usage_sources)
         self.records: list[p.Record] = []
         self.blobs: list[BlobWrite] = []
         self.streams: list[StreamWrite] = []
@@ -177,6 +176,17 @@ class Projection:
         self.emit("span", p.SpanRecord(change=change, span=span))
 
     def result(self) -> MappedEvent:
+        through = self.state.source_through
+        pending = self.state.source_pending
+        sequence = self.event.sequence
+        if sequence > through:
+            if sequence == through + 1:
+                through = sequence
+                while through + 1 in pending:
+                    through += 1
+                    pending = pending.discard(through)
+            else:
+                pending = pending.insert(sequence)
         state = replace(
             self.state,
             sequence=self.state.sequence + len(self.records),
@@ -191,7 +201,8 @@ class Projection:
             waits=tuple(self.waits.items()),
             intents=tuple(self.intents.items()),
             metric_values=tuple(self.metric_values.items()),
-            usage_sources=tuple(sorted(self.usage_sources)),
+            source_through=through,
+            source_pending=pending,
             ending=self.ending,
             pending=tuple(self.pending),
         )
