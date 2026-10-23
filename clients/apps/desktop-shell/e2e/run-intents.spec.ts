@@ -385,7 +385,8 @@ test('live controls remain reachable with both readers and history follows pause
   await observe(2, RunLiveness.ENDED);
   await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
   await expect(pauseNow).toHaveCount(0);
-  await expect(resume).toHaveCount(0);
+  // The host admits Resume after any ending, whatever flag the ended record keeps.
+  await expect(resume).toBeVisible();
   await expect(page.getByText('Running', {exact: true})).toHaveCount(0);
   await capture(page, 'controls-finished');
 });

@@ -168,7 +168,7 @@ async function prepareSession(page: Page, state: 'live' | 'parked' | 'stopped' =
       state:
         state === 'parked'
           ? {case: 'parked', value: {}}
-          : {case: 'ended', value: {outcome: Outcome.STOPPED, resumable: true}},
+          : {case: 'ended', value: {outcome: Outcome.STOPPED}},
     });
   }
   const fixture = wire(source);
