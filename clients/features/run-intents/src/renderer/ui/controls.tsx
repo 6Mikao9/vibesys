@@ -147,7 +147,7 @@ function WriterStatus({status}: {readonly status: 'ready' | 'catching-up' | 'unk
   const words = {
     ready: null,
     'catching-up': 'Catching up with the run… Reconnecting automatically.',
-    unknown: 'Writer status unknown. Reconnecting automatically.',
+    unknown: 'Run status unknown. Reconnecting automatically.',
   };
   return words[status] ? <Text tone="muted">{words[status]}</Text> : null;
 }

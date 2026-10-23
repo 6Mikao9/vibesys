@@ -135,7 +135,7 @@ export const livenessWatchMachine = setup({
   },
 });
 
-/** Epoch gaps trigger a re-read without discarding the page's last usable snapshot. */
+/** Unresolved facts retain one re-read deadline across unknown/catching-up transitions. */
 export const writerRecoveryMachine = setup({
   types: {events: {} as {type: 'observe'; waiting: boolean}},
   actions: {

@@ -71,7 +71,7 @@ export function useRunIntents(props: {
   });
   useWriterRecovery(
     props.schedule,
-    props.enabled && writer.status === 'catching-up',
+    props.enabled && writer.status !== 'ready',
     props.refreshWriter,
   );
   if (!props.enabled || !snapshot || projectRoot === undefined)

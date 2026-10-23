@@ -36,7 +36,7 @@ export type WriterControls = {readonly epoch: bigint} & (
  * acknowledgements can prove a successor exists before lifecycle catches up. WatchRuns is
  * known until its subscription ends or its 30-second lease expires, then unknown (never alive).
  * The total projection yields actions, Resume, or a visible catching-up/unknown reason.
- * The liveness watch resubscribes within 31 seconds; an epoch gap asks the owning page to
+ * The liveness watch resubscribes within 31 seconds; unresolved facts ask the owning page to
  * re-read lifecycle within 30 seconds, repeatedly while the gap persists. Machine/DOM properties
  * enforce these bounds. Resume follows the host contract: every ending is eligible.
  */

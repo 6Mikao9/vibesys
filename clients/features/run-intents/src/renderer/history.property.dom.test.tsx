@@ -20,7 +20,7 @@ import {
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
 import {Window} from 'happy-dom';
-import {act} from 'react';
+import {act, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import {RunIntents} from './index.js';
 
@@ -522,5 +522,91 @@ test('property: controls equal what the host admits across any interleaving of l
       verifyInterleaving(steps),
     ),
     {numRuns: 60, seed: 3431},
+  );
+});
+
+test('property: unresolved facts keep their recovery deadline across liveness expiry and resubscription', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.constantFrom('starting', 'running', 'operatorHold', 'draining'),
+      fc.constantFrom('parked', 'finished', 'failed'),
+      fc.integer({min: 1, max: 4}),
+      fc.boolean(),
+      async (initial, ending, epoch, resumable) => {
+        const bridge = new FakeGatewayBridge();
+        const clock = new FakeClock();
+        const container = document.createElement('div');
+        const root = createRoot(container);
+        let refreshes = 0;
+        function ObservedRun() {
+          const [kind, setKind] = useState<Kind>(initial);
+          return (
+            <RunIntents
+              bridge={bridge}
+              host={'local' as HostKey}
+              projectRoot={recordedProjectRoot('/project')}
+              runId="run-1"
+              enabled
+              schedule={clock.schedule}
+              relaunch={{epoch: BigInt(epoch), lifecycle: lifecycleOf(kind, resumable)}}
+              refreshWriter={() => {
+                refreshes += 1;
+                setKind(ending);
+              }}
+            />
+          );
+        }
+        const watch = () =>
+          bridge.streams
+            .filter(stream => stream.method.endsWith('/WatchRuns') && !stream.cancelled)
+            .at(-1);
+        const labels = () =>
+          [...container.querySelectorAll('button')].map(button => button.textContent);
+        const visible = () => {
+          if (labels().length === 0) expect(container.textContent).toMatch(/catching up|unknown/i);
+        };
+        try {
+          await act(async () => root.render(<ObservedRun />));
+          let observed = watch();
+          await act(async () => observed?.receive(livenessPacket(epoch, RunLiveness.ALIVE)));
+          expect(labels().sort()).toEqual(
+            expectedButtons({
+              lifecycleEpoch: epoch,
+              kind: initial,
+              liveness: {epoch, value: RunLiveness.ALIVE},
+              tailEpoch: 0,
+            }).sort(),
+          );
+          await act(async () => observed?.receive(livenessPacket(epoch, RunLiveness.ENDED)));
+          expect(labels()).toEqual([]);
+          visible();
+          // Separate event-loop tasks flush React between tied deadlines. One advanceBy over all
+          // timers would batch the expiry and refresh, hiding cancellation of the refresh deadline.
+          for (let step = 0; step < 12 && refreshes === 0; step += 1) {
+            const next = clock.pendingDelays()[0];
+            if (next === undefined || clock.now() + next > 60_000) break;
+            await act(async () => {
+              clock.runNext();
+            });
+            visible();
+            const current = watch();
+            if (current && current !== observed) {
+              observed = current;
+              await act(async () => current.receive(livenessPacket(epoch, RunLiveness.ENDED)));
+              visible();
+            }
+          }
+          expect(refreshes).toBeGreaterThan(0);
+          expect(clock.now()).toBeLessThanOrEqual(60_000);
+          expect(labels()).toEqual(['Resume']);
+        } finally {
+          await act(async () => root.unmount());
+          container.remove();
+        }
+        expect(clock.pending).toBe(0);
+        expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
+      },
+    ),
+    {numRuns: 16, seed: 34363, examples: [['starting', 'parked', 1, false]]},
   );
 });
