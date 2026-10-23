@@ -20,11 +20,13 @@ from vs_agent.api import (
 )
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
 from vs_core.api import (
+    AttemptId,
     CancelOwnedJob,
     InvocationId,
     InvocationRef,
     RunId,
     Scope,
+    ScopePermit,
     SessionId,
     TurnPermit,
 )
@@ -333,3 +335,21 @@ def test_a_continuation_starts_after_the_pause_drain() -> None:
     started: list[str] = []
     channel.start_execution(lambda: started.append("continuation"), execution_id="continuation")
     assert started == ["continuation"]
+
+
+def test_a_turn_of_an_admitted_attempt_starts_after_the_pause_drain_and_any_other_does_not() -> (
+    None
+):
+    """Core's attempt permit lets a turn that descends from no admitted one start in the drain."""
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    scope = Scope(owner=AttemptId(root="attempt"), generation=0)
+    channel.land_park()
+    channel.prepare_execution(
+        "judge-turn", scope, permit=ScopePermit(scope=scope, deadline_at=100.0)
+    )
+    started: list[str] = []
+    channel.start_execution(lambda: started.append("judge-turn"), execution_id="judge-turn")
+    assert started == ["judge-turn"]
+    channel.prepare_execution("new-attempt-turn", scope)
+    with pytest.raises(AgentExecutionCancelledError):
+        channel.start_execution(lambda: None, execution_id="new-attempt-turn")

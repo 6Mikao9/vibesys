@@ -40,7 +40,7 @@ from vs_core.api import (
     RunControlEvent,
     RunStatus,
 )
-from vs_core.api.testing import drive
+from vs_core.api.testing import Faults, drive
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -49,7 +49,8 @@ if TYPE_CHECKING:
 
 _STEPS = 4000
 """A hang guard: a run still going after this many steps is stuck."""
-_SETTINGS = settings(max_examples=examples(pr=6, nightly=40), deadline=None, database=None)
+# Two whole runs of the dynamic search per example (with and without the pause): PR depth draws few.
+_SETTINGS = settings(max_examples=examples(pr=4, nightly=40), deadline=None, database=None)
 
 
 @dataclass
@@ -115,7 +116,9 @@ def _world(width: int, shape: Shape) -> DynamicWorld:
     )
 
 
-def _run(width: int, pause_at: int | None, shape: Shape) -> tuple[Trace[FlowState], _Operator]:
+def _run(
+    width: int, pause_at: int | None, shape: Shape, crash: int | None = None
+) -> tuple[Trace[FlowState], _Operator]:
     selected = config(max_in_flight=width, max_rounds=1 if shape is Shape.ONE_ROUND else 2)
     operator = _Operator(world=_world(width, shape), pause_at=pause_at)
     trace = drive(
@@ -130,6 +133,7 @@ def _run(width: int, pause_at: int | None, shape: Shape) -> tuple[Trace[FlowStat
             events=(RecoveryStarted(epoch=1, now_at=0.0),),
             max_steps=_STEPS,
         ),
+        None if crash is None else Faults(crash_after=frozenset({crash})),
     )
     return trace, operator
 
@@ -165,17 +169,23 @@ def _open_work(core: CoreState) -> list[str]:
 
 
 @_SETTINGS
-@example(width=1, pause_at=20, shape=Shape.ONE_ROUND)
-@example(width=2, pause_at=45, shape=Shape.ONE_ROUND)
-@given(width=st.integers(1, 2), pause_at=st.integers(0, 160), shape=st.sampled_from(tuple(Shape)))
+@example(width=1, pause_at=20, shape=Shape.ONE_ROUND, crash=None)
+@example(width=2, pause_at=45, shape=Shape.ONE_ROUND, crash=None)
+@example(width=1, pause_at=20, shape=Shape.ONE_ROUND, crash=70)  # the host dies while it drains
+@given(
+    width=st.integers(1, 2),
+    pause_at=st.integers(0, 160),
+    shape=st.sampled_from(tuple(Shape)),
+    crash=st.none() | st.integers(1, 400),
+)
 def test_a_pause_settles_the_admitted_attempts_and_the_relaunch_ends_as_no_pause_would(
-    width: int, pause_at: int, shape: Shape
+    width: int, pause_at: int, shape: Shape, crash: int | None
 ) -> None:
     # The scripted judge sends back whichever candidate it meets first, so two candidates
     # in flight do not meet it in an order a pause leaves alone.
     assume(shape is not Shape.MIXED or width == 1)
     normal, _ = _run(width, None, shape)
-    paused, operator = _run(width, pause_at, shape)
+    paused, operator = _run(width, pause_at, shape, crash)
     note(
         f"paused before request {pause_at}: {operator.paused}, parked {len(operator.parked)} times"
     )

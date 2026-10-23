@@ -23,12 +23,19 @@ from .types.evaluation import (
     OwnedJob,
     SubmitMeasurement,
 )
-from .types.records import BlockRequest, RequestPhase, Scheduled
+from .types.records import (
+    BlockRequest,
+    CancelOwnedResource,
+    InspectRequest,
+    RequestPhase,
+    Scheduled,
+)
 from .types.sessions import (
     CancelTurn,
     CloseSession,
     DispatchTurn,
     EnsureSession,
+    InspectTurn,
     ResumeSessionTurn,
     SessionPhase,
     SnapshotAndRetainRun,
@@ -56,6 +63,15 @@ _DRAIN_EFFECTS = (
     BlockRequest,
     CancelOwnedJob,
     CollectEvidence,
+)
+# Recovery asks the far side what became of the requests a host left open, and a drain that
+# did not answer would end them as lost. These only ask or release, so no gate holds them.
+_RECONCILIATION = (
+    InspectRequest,
+    InspectTurn,
+    CancelOwnedResource,
+    ObserveOwnedJob,
+    InspectOwnedJob,
 )
 
 
@@ -103,7 +119,7 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
     if pause_withdraws(state, request):
         return False
     return _request_bound(state, request) is not None or isinstance(
-        request, (*_DRAIN_EFFECTS, ObserveOwnedJob, InspectOwnedJob)
+        request, (*_DRAIN_EFFECTS, *_RECONCILIATION)
     )
 
 

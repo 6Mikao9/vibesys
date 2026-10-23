@@ -15,6 +15,8 @@ attempt between two roles. The operator then relaunches the run as a successor e
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -49,13 +51,21 @@ _QUEUED_WORKSTREAM = Scenario(
     shares=True,
     faults=Faults(),
 )
+#: The same, with a job that reports running twice, so the drain settles while the host can die.
+_SETTLING_WORKSTREAM = replace(_QUEUED_WORKSTREAM, polls=(2,))
+# A whole run of the toy search per example, with and without the pause: PR depth draws few.
 _SETTINGS = settings(
-    max_examples=examples(pr=8, nightly=60), deadline=None, derandomize=True, database=None
+    max_examples=examples(pr=5, nightly=60), deadline=None, derandomize=True, database=None
 )
 
 
-def _run(scenario: Scenario, pause_at: int | None) -> tuple[Trace, ToyHost]:
-    """The scenario with an operator Pause before the ``pause_at``-th answer, relaunched once parked."""
+def _run(
+    scenario: Scenario, pause_at: int | None, crash: int | None = None
+) -> tuple[Trace, ToyHost]:
+    """The scenario with an operator Pause before the ``pause_at``-th answer, relaunched once parked.
+
+    With ``crash``, the host also dies after that many commits and a new one takes over.
+    """
     host = ToyHost(
         waits=scenario.waits,
         polls=scenario.polls,
@@ -68,7 +78,12 @@ def _run(scenario: Scenario, pause_at: int | None) -> tuple[Trace, ToyHost]:
         max_steps=_STEPS,
     )
     config = Config(workstreams=scenario.workstreams, in_flight=scenario.in_flight, interpret=True)
-    trace = run_toy(host, config, faults=scenario.faults)
+    faults = (
+        scenario.faults
+        if crash is None
+        else replace(scenario.faults, crash_after=frozenset({crash}))
+    )
+    trace = run_toy(host, config, faults=faults)
     assert trace.finished, f"the run never ended: {trace.core.run.status.value}"
     return trace, host
 
@@ -95,11 +110,16 @@ def _restarted(trace: Trace) -> bool:
 
 
 @_SETTINGS
-@example(scenario=_WAITING_JUDGE, pause_at=11)  # the job ends while paused (the live stall)
-@example(scenario=_QUEUED_WORKSTREAM, pause_at=3)  # a workstream the run had not started
-@given(scenario=SCENARIOS, pause_at=st.integers(0, 40))
+@example(
+    scenario=_WAITING_JUDGE, pause_at=11, crash=None
+)  # the job ends while paused (the live stall)
+@example(
+    scenario=_QUEUED_WORKSTREAM, pause_at=3, crash=None
+)  # a workstream the run had not started
+@example(scenario=_SETTLING_WORKSTREAM, pause_at=0, crash=43)  # the host dies as the drain settles
+@given(scenario=SCENARIOS, pause_at=st.integers(0, 40), crash=st.none() | st.integers(1, 200))
 def test_a_pause_settles_every_admitted_attempt_before_the_run_parks(
-    scenario: Scenario, pause_at: int
+    scenario: Scenario, pause_at: int, crash: int | None
 ) -> None:
     """The run that parks has no admitted attempt open, and its relaunch ends it as no pause would.
 
@@ -108,7 +128,7 @@ def test_a_pause_settles_every_admitted_attempt_before_the_run_parks(
     then ends once, in success, with every workstream where it would have ended.
     """
     unpaused, _ = _run(scenario, None)
-    trace, host = _run(scenario, pause_at)
+    trace, host = _run(scenario, pause_at, crash)
     for parked in host.parked:
         assert parked.run.status is core.RunStatus.PARKED
         assert _open_work(parked) == []
@@ -123,6 +143,6 @@ def test_a_pause_settles_every_admitted_attempt_before_the_run_parks(
         if isinstance(row.decision, core.Finish) and isinstance(row.feedback, core.Accepted)
     ]
     assert len(finishes) == 1
-    if host.parked and not _restarted(trace):
+    if host.parked and not _restarted(trace) and crash is None:
         # Held work resumes in another order, so parallel workstreams may end in another order.
         assert _ends(trace) == _ends(unpaused)

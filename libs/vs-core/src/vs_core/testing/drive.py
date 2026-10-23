@@ -371,7 +371,8 @@ class _Driver[S: StrategyState]:
     def recover(self) -> None:
         """A new host: reload what was persisted, then start recovery under the next epoch."""
         self.reload()
-        self.epoch += 1
+        # The new host's epoch follows the run's own: an operator's Resume starts an epoch too.
+        self.epoch = max(self.epoch, self.trace.core.records.recovery.epoch) + 1
         self.recovering = False
         now_at = max(self.clock, self.trace.core.run.now_at)
         self.consume(RecoveryStarted(epoch=self.epoch, now_at=now_at))

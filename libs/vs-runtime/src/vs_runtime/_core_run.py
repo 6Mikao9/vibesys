@@ -27,6 +27,7 @@ makes it non-decreasing and never below the last time core committed.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -223,6 +224,9 @@ def _take_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
 
 
 _PASSES_TO_WAKE_A_DUE_TIMER = 3
+_LOG = logging.getLogger(__name__)
+_DRAIN_IDLE_NOTE_S = 60.0
+"""How often a pause drain that waits on the clock says what it waits for (loop-clock seconds)."""
 
 
 async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
@@ -349,6 +353,7 @@ class _Loop:
         self._lease: asyncio.Task[None] | None = None
         # Set when the operator asks to stop, so a wait that has requests running ends now.
         self._woken = asyncio.Event()
+        self._drain_noted_at: float | None = None
 
     def _core(self) -> CoreState:
         return self._shell.record.envelope.core
@@ -595,8 +600,23 @@ class _Loop:
         )
         return (quiet, record.envelope.strategy, record.delivery_cursor, self._shell.dispatched)
 
+    def _note_idle_drain(self, core: CoreState, now: float) -> None:
+        """Say what an idle pause drain waits for, so a drain that cannot finish is never silent.
+
+        With nothing in flight, a drain waits on a job's poll or on the clock (a flow's timer, a
+        wait's deadline). While that goes on, the log says what is open instead of leaving an
+        idle process, once a minute.
+        """
+        if core.run.status is not RunStatus.DRAINING or self._shell.in_flight:
+            self._drain_noted_at = None
+            return
+        if self._drain_noted_at is None or now - self._drain_noted_at >= _DRAIN_IDLE_NOTE_S:
+            self._drain_noted_at = now
+            _LOG.warning("the pause drain is idle: %s", _describe(core, self._stall_notes()))
+
     async def _wait(self, now: float) -> None:
         core = self._core()
+        self._note_idle_drain(core, now)
         due = self._next_wake(core)
         asked = self._shell.next_wake_at
         if asked is not None and asked > now:
