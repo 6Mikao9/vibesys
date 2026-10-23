@@ -31,7 +31,20 @@ function hasUserMessage(records: readonly StoreRecord[], requestId: string): boo
 }
 
 /** The chat bodies one UI event stands for, given the thread's records so far. */
-function bodiesOf(event: RunEvent, id: string, records: readonly StoreRecord[]): Body[] {
+/** The question a turn is asked, when the batch holds the terminal `chat` event that records it. */
+function askedLater(batch: readonly RunEvent[], requestId: string): string {
+  const answered = batch.find(
+    each => each.data?.kind === 'chat' && each.data.invocation_id === requestId,
+  );
+  return answered?.text ?? '';
+}
+
+function bodiesOf(
+  event: RunEvent,
+  id: string,
+  records: readonly StoreRecord[],
+  batch: readonly RunEvent[],
+): Body[] {
   const requestId =
     event.invocation_id ??
     (event.data?.kind === 'chat' ? event.data.invocation_id : null) ??
@@ -50,7 +63,10 @@ function bodiesOf(event: RunEvent, id: string, records: readonly StoreRecord[]):
   if (data?.kind === 'chat')
     return [...question(event.text ?? ''), messageBody(requestId, ChatRole.ASSISTANT, data.answer)];
   if (data?.kind === 'agent_output_chunk' && data.channel === 'assistant')
-    return [...question(''), chatBody({case: 'token', value: {requestId, text: data.content}})];
+    return [
+      ...question(askedLater(batch, requestId)),
+      chatBody({case: 'token', value: {requestId, text: data.content}}),
+    ];
   if (data?.kind === 'steer_proposed')
     return [
       chatBody({
@@ -77,7 +93,7 @@ export async function emitChat(page: Page, events: readonly RunEvent[]): Promise
     sessions.set(id, records);
     const batch = updates.get(id) ?? [];
     updates.set(id, batch);
-    for (const body of bodiesOf(event, id, records)) {
+    for (const body of bodiesOf(event, id, records, events)) {
       const record = create(RecordSchema, {
         seq: BigInt(records.length + 1),
         epoch: 1,

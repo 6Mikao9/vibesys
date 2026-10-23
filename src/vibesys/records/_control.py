@@ -53,6 +53,8 @@ def steer(projection: Projection) -> None:
         action=enum_value(p.IntentAction, delivery.action),
         step=p.IntentStep.REFUSED if refused else p.IntentStep.APPLIED,
         reason=delivery.reason if refused else None,
+        # Dropped and ended are what the card tells apart from a refusal and from a withdrawal.
+        reason_code=delivery.state.value if delivery.state.value in {"dropped", "ended"} else None,
         mode=None if delivery.mode is None else enum_value(p.SteerMode, delivery.mode),
         withdraws=delivery.withdraws,
         target=None

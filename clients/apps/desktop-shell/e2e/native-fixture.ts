@@ -12,6 +12,7 @@ import {
   RecordSchema,
   RunLiveness,
   STORE_SCHEMA_HASH,
+  type Record as StoreRecord,
   TailResponseSchema,
 } from '@vibesys/proto';
 import type {RunFixture, StoreRunFixture} from '@vibesys/run-fixtures';
@@ -53,6 +54,17 @@ function ensure(fixtures: readonly RunFixture[]): void {
     maxBuffer: 16 << 20,
     timeout: 120000,
   });
+}
+/** Every record the shipping projection makes of the fixture's run, in log order. */
+export function nativeRecords(fixture: RunFixture): StoreRecord[] {
+  ensure([fixture]);
+  const replay = fromBinary(
+    ClientReplaySchema,
+    readFileSync(join(cache, hash(JSON.stringify(fixture)), 'replay.pb')),
+  );
+  return replay.batches
+    .flatMap(batch => batch.records.map(bytes => fromBinary(RecordSchema, bytes)))
+    .sort((a, b) => Number(a.seq - b.seq));
 }
 export function nativeFixtureScript(fixture: RunFixture): string {
   ensure([fixture]);

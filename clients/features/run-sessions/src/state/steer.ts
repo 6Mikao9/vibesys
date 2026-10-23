@@ -59,19 +59,29 @@ export function foldSteer(fold: SteerFold, records: readonly StoreRecord[]): Ste
   return {throughSeq, intents, links};
 }
 
+/** The step a recorded outcome is; the run's reason code tells a drop and an ending from a refusal. */
+function stepOf(intent: IntentState): SteerDeliveryFact['step'] {
+  if (intent.action === IntentAction.WITHDRAW) {
+    return intent.step === IntentStep.REFUSED ? 'refused' : 'ended';
+  }
+  if (intent.reasonCode === 'dropped') return 'dropped';
+  if (intent.reasonCode === 'ended') return 'ended';
+  return intent.step === IntentStep.REFUSED ? 'refused' : 'queued';
+}
+
 function intentFact(seq: bigint, intent: IntentState): SteerDeliveryFact | null {
   const withdraw = intent.action === IntentAction.WITHDRAW;
   if (!withdraw && intent.action !== IntentAction.STEER) return null;
-  const refused = intent.step === IntentStep.REFUSED;
+  const step = stepOf(intent);
   return {
     sequence: Number(seq),
-    step: refused ? 'refused' : withdraw ? 'ended' : 'queued',
+    step,
     controlId: intent.controlId,
     action: withdraw ? 'withdraw' : 'steer',
     withdraws: intent.withdraws ?? null,
     role: null,
     attemptId: null,
-    reason: refused ? (intent.reason ?? intent.reasonCode ?? null) : withdraw ? 'withdrawn' : null,
+    reason: withdraw && step === 'ended' ? 'withdrawn' : (intent.reason ?? intent.reasonCode ?? null),
   };
 }
 

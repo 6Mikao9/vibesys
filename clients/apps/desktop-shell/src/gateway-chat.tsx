@@ -101,9 +101,14 @@ export function useGatewayChatState(
   const core = input.core
     ? {...sessionCore(input.core, threads.context), steerDeliveries: steers}
     : null;
+  const roles = useMemo(
+    () => [...new Set(input.core?.usageRecords.map(record => String(record.role)) ?? [])],
+    [input.core?.usageRecords],
+  );
   const chat = useRunChat({
     identity: `${input.host}/${input.runId}`,
     core,
+    roles,
     ports: chatPorts,
     readOnly: input.readOnly,
     askable: true,
