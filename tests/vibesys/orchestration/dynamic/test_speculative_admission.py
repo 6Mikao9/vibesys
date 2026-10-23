@@ -24,8 +24,9 @@ from vibesys.orchestration.dynamic.search.api import (
 
 @pytest.mark.regression
 @example(waiting=33)
-@given(waiting=st.integers(33, 100))
-def test_the_default_backlog_parks_every_waiter_within_the_runs_work_budget(waiting: int) -> None:
+@given(waiting=st.integers(2, 100))
+def test_by_default_no_waiter_parks_and_the_admission_limit_is_the_width(waiting: int) -> None:
+    """The reported run: the default backlog parked every waiter, so core admitted the budget."""
     config = DynamicConfig(max_rounds=waiting + 1, max_in_flight=1)
     run = run_record(config)
     for i in range(waiting):
@@ -41,9 +42,9 @@ def test_the_default_backlog_parks_every_waiter_within_the_runs_work_budget(wait
                 at=0,
             )
         )
-    assert len(run.parked) == waiting
-    assert run.capacity() == 1
-    assert budget(config).parallel >= waiting + 1
+    assert not run.parked
+    assert run.capacity() == 0
+    assert budget(config).parallel == 1
 
 
 @pytest.mark.regression

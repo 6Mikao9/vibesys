@@ -131,8 +131,10 @@ def test_the_limits_admit_exactly_the_attempts_the_config_schedules(
     )
     assert plan.limits.max_attempts == config.max_rounds * config.max_in_flight
     # agents work in max_in_flight attempts; the parked ones beside them stay admitted
-    parked = min(config.backlog, plan.limits.max_attempts - config.max_in_flight)
-    assert plan.limits.max_parallel == config.max_in_flight + parked
+    assert plan.limits.max_parallel == config.admission_limit
+    assert plan.limits.max_parallel == min(
+        config.max_in_flight + config.max_backlog, plan.limits.max_attempts
+    )
     assert plan.limits.max_turns >= plan.limits.max_attempts
     _started(plan, root, run)
 
