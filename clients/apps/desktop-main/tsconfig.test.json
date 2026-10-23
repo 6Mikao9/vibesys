@@ -62,6 +62,33 @@
     },
     {
       "path": "../../libs/proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/connection/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/settings/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.reader.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.cache.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/run-fixtures/tsconfig.lib.json"
+    },
+    {
+      "path": "../../features/run-page/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/run-page/tsconfig.renderer.json"
     }
   ]
 }

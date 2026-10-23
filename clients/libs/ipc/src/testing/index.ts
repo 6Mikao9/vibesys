@@ -44,3 +44,5 @@ export class FakeGatewayBridge implements GatewayBridge {
     };
   }
 }
+
+export {FakeGatewayPort} from './gateway-port.js';

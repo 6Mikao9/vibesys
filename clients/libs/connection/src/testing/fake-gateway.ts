@@ -227,7 +227,7 @@ export class FakeGateway implements GatewayDialer {
 
 function end(stream: ServerHttp2Stream, code = 0, detail = ''): void {
   stream.once('wantTrailers', () =>
-    stream.sendTrailers({'grpc-status': String(code), 'grpc-message': detail}),
+    stream.sendTrailers({'grpc-status': String(code), 'grpc-message': encodeURIComponent(detail)}),
   );
   stream.end();
 }

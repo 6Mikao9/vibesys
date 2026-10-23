@@ -159,6 +159,67 @@ for (const mode of ['socket', 'connect pipe'] as const) {
   });
 }
 
+// The identical contract runs over the scheduled Fake in ipc/src/gateway-port.test.ts.
+test('MessageChannelMain preserves FIFO, copies bytes and truncates on close', async () => {
+  const cases: Array<{
+    name: string;
+    messages: number[][];
+    receiverClosed: boolean;
+    expected: number[][];
+  }> = JSON.parse(
+    await readFile(join(repository, 'proto/testdata/gateway_port/contract.json'), 'utf8'),
+  );
+  const app = await electron.launch({
+    args: [fileURLToPath(new URL('./gateway-app.mjs', import.meta.url)), ...electronRuntimeArgs()],
+    env: {
+      ...process.env,
+      VIBESYS_GATEWAY_ROOT: buildDirectory,
+      VIBESYS_GATEWAY_BINARY: binary,
+      VIBESYS_GATEWAY_MODE: 'connect pipe',
+    },
+  });
+  try {
+    for (const row of cases) {
+      const received = await app.evaluate(async ({MessageChannelMain}, row) => {
+        const {port1, port2} = new MessageChannelMain();
+        const received: number[][] = [];
+        const ended = new Promise<void>(resolve => {
+          port1.on('close', resolve);
+          port2.on('close', resolve);
+        });
+        let arrived = (): void => {};
+        const allArrived = new Promise<void>(resolve => {
+          arrived = resolve;
+        });
+        port2.on('message', event => {
+          received.push([...event.data]);
+          if (received.length === row.expected.length) arrived();
+        });
+        port1.start();
+        port2.start();
+        if (row.receiverClosed) {
+          port2.close();
+          await ended;
+        }
+        for (const values of row.messages) {
+          const bytes = new Uint8Array(values);
+          port1.postMessage(bytes);
+          bytes.fill(99);
+        }
+        // Ports in one process may drop what is still in flight on close, so the delivered
+        // cases wait for arrival first; the page ends a call with a reply and then closes.
+        if (row.expected.length > 0) await allArrived;
+        port1.close();
+        await ended;
+        return received;
+      }, row);
+      expect(received, row.name).toEqual(row.expected);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
 function deferred<T>() {
   let resolve = (_value: T): void => {};
   let reject = (_error: unknown): void => {};
