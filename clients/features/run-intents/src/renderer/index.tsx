@@ -84,9 +84,11 @@ export function useRunIntents(props: RunIntentsProps) {
     historyEpoch: committed,
     acknowledgedEpoch: acknowledged,
   });
+  // Before the page has a lifecycle to observe its own loader owns the retries; re-reading from
+  // here would restart that loader's bounded backoff for ever.
   useWriterRecovery(
     props.schedule,
-    props.enabled && writer.status !== 'ready',
+    props.enabled && props.relaunch !== undefined && writer.status !== 'ready',
     props.refreshWriter,
   );
 

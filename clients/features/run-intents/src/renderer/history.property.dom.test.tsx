@@ -900,3 +900,38 @@ test('property: confirming facts supersede Resume timeout in either order on eve
     },
   );
 });
+
+test('a page with no lifecycle yet is not asked to re-read: its own loader owns the retries', async () => {
+  const bridge = new FakeGatewayBridge();
+  const clock = new FakeClock();
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  let refreshes = 0;
+  try {
+    await act(async () =>
+      root.render(
+        <RunIntents
+          bridge={bridge}
+          host={'local' as HostKey}
+          projectRoot={recordedProjectRoot('/project')}
+          runId="run-1"
+          enabled
+          schedule={clock.schedule}
+          refreshWriter={() => {
+            refreshes += 1;
+          }}
+        />,
+      ),
+    );
+    for (let step = 0; step < 24; step += 1) {
+      if (clock.pendingDelays()[0] === undefined) break;
+      await act(async () => {
+        clock.runNext();
+      });
+    }
+    expect(refreshes).toBe(0);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

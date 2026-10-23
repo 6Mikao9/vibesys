@@ -191,12 +191,16 @@ def _legacy_round_benchmark_repeat(
 
 
 def _spanless_subject(projection: Projection) -> p.GateSubject:
-    """A gate event of an older journal names no span: the input's has no execution, a candidate's has."""
-    return (
-        p.GateSubject.CANDIDATE
-        if projection.event.execution_id is not None
-        else p.GateSubject.INPUT
+    """A gate event of an older journal names no span: the input is measured before any candidate exists.
+
+    The run's own execution runs the input's gates, so an execution id does not tell them from a
+    candidate's; whether a candidate (a workstream) has started does.
+    """
+    started = projection.event.execution_id is not None and any(
+        span.label is not None and span.label.kind == "workstream"
+        for span in projection.spans.values()
     )
+    return p.GateSubject.CANDIDATE if started else p.GateSubject.INPUT
 
 
 def gate(projection: Projection) -> None:

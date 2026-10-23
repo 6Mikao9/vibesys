@@ -136,6 +136,7 @@ async function newEpoch(page: Page, fixture: StoreRunFixture): Promise<void> {
         liveness: RunLiveness.ALIVE,
         head: {
           strategy: 'fixture',
+          epoch: 2,
           lifecycle: running.body.case === 'lifecycle' ? running.body.value : undefined,
           process: {pid: 1, epoch: 2, startedAt: epoch.at},
         },
@@ -182,7 +183,9 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
       await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeDisabled();
       await capture(page, `${state}-${width}-launching`);
       await newEpoch(page, world.fixture);
-      await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
+      // The successor epoch runs: the controls follow it, and Resume is superseded.
+      await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
+      await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
       world.release();
       await expect(page.getByText('Resume · Applied', {exact: true})).toBeVisible();
       await capture(page, `${state}-${width}-epoch`);

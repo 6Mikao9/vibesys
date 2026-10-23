@@ -182,3 +182,41 @@ def test_a_failed_input_is_an_explicit_unmeasured_state() -> None:
     assert fact is not None
     assert fact.state is not None
     assert fact.state.field == "unmeasured"
+
+
+def _spanless_gate(execution_id: str) -> e.CoreEvent:
+    """A gate event of an older journal: no span, but the run's own execution id."""
+    return e.CoreEvent.model_validate(
+        {
+            "type": e.CoreEventType.GATE_FINISHED,
+            "data": e.GateFinishedData(gate=e.GateKind.BENCHMARK),
+            "timestamp": _AT,
+            "run_id": "run-a",
+            "sequence": 1,
+            "execution_id": execution_id,
+        }
+    )
+
+
+def _gate_subjects(records: list[p.Record]) -> list[p.GateSubject]:
+    subjects = []
+    for record in records:
+        body = record.body
+        if body is None or body.field != "span":
+            continue
+        label = body.value.span.label if body.value.span is not None else None
+        if label is not None and label.kind == "gate" and label.attrs is not None:
+            subjects.append(p.GateAttrs.from_binary(label.attrs.value).subject)
+    return subjects
+
+
+@given(executions=st.lists(st.text("abc", min_size=1, max_size=3), min_size=1, max_size=3))
+def test_a_spanless_gate_is_the_inputs_until_a_candidate_has_started(
+    executions: list[str],
+) -> None:
+    before = _records([_started(), *[_spanless_gate(name) for name in executions]])
+    assert _gate_subjects(before) == [p.GateSubject.INPUT] * len(executions)
+    after = _records(
+        [_started(), _workstream("op:ws"), *[_spanless_gate(name) for name in executions]]
+    )
+    assert _gate_subjects(after) == [p.GateSubject.CANDIDATE] * len(executions)

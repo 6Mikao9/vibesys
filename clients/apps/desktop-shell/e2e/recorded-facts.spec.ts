@@ -140,8 +140,10 @@ test('recorded root shows Pause, the checkout skip, and scripted', async ({page}
   await shot(page, 'checkout-skip');
 });
 
-test('a run with no recorded root shows no Pause', async ({page}) => {
+test('a run whose log records no root is still addressed by the catalog, so it shows Pause', async ({
+  page,
+}) => {
   await openGateway(page, withoutRoot(storeRunFixture('live')));
-  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
   await shot(page, 'no-recorded-root');
 });
