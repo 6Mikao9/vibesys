@@ -129,11 +129,15 @@ for (const row of failing) {
     }
   });
 
-  test(`${row.name}: the unary refusal keeps its gRPC status and decoded diagnostic across the preload`, async () => {
+  test(`${row.name}: the unary refusal keeps its gRPC status across the preload`, async () => {
+    for (const seed of SEEDS)
+      expect((await observe(row, seed)).unary?.code, `seed ${seed}`).toBe(row.code);
+  });
+
+  test(`${row.name}: the unary refusal carries the decoded diagnostic`, async () => {
     for (const seed of SEEDS) {
       const refusal = (await observe(row, seed)).unary;
       // The main process names the error class before the gateway's diagnostic.
-      expect(refusal?.code, `seed ${seed}`).toBe(row.code);
       expect(refusal?.message.endsWith(row.message), `seed ${seed}: ${refusal?.message}`).toBe(
         true,
       );

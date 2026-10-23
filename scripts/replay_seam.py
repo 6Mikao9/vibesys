@@ -1,8 +1,13 @@
 """Replay the seam properties on a historical commit, to see which bugs they find there.
 
-For one target commit the script makes a detached worktree, applies the I/O seam commit (the
-refactor that only adds injection points, no behavior), overlays this checkout's seam tests and
-test support, runs them with the expected-failure markers lifted, and removes the worktree.
+For one target commit the script makes a detached worktree and gives it the seams the tests need:
+the session factory (the I/O seam commit, restricted to the connection package), the gateway
+preload factory with its channel capabilities (rewritten in place when the target predates
+#3434), and the transport in libs/ipc. It then overlays this checkout's seam tests and test
+support, runs them, and removes the worktree. None of these adapters changes how a target
+handles a reply or an error; they only name the places the tests inject into. Where a target
+lacks the page's `gatewayBridge` or `loadView`, the adapter appends the identity bridge and
+a projection of what that code shows (`error`), so the same assertions apply.
 A non-zero exit means a property failed on that commit. Logs go to ``.agent-logs/``.
 
 This is local tooling, not a CI test: it needs git, pnpm, bun (the version pinned in
@@ -14,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -30,7 +36,7 @@ CLIENT_TESTS = {
     "accounting": "clients/features/run-page/src/state/accounting-seam.test.ts",
 }
 CLIENT_SUPPORT = (
-    "clients/apps/desktop-main/src/preload/seam-world.test.ts",
+    "clients/apps/desktop-main/src/testing/gateway-world.ts",
     "clients/libs/connection/src/testing/schedule.ts",
     "clients/libs/connection/src/testing/gateway-session.ts",
     "clients/libs/ipc/src/testing/gateway-port.ts",
@@ -121,14 +127,108 @@ def link_workspace(clients: Path) -> None:
                 link.symlink_to(directory, target_is_directory=True)
 
 
+SEAM_FILES = (
+    "clients/libs/connection/src/shell/gateway.ts",
+    "clients/libs/connection/src/shell/grpc.ts",
+    "clients/libs/connection/src/index.ts",
+)
+PRELOAD = "clients/apps/desktop-main/src/preload/welcome.cts"
+IPC = "clients/libs/ipc/src"
+STATE_INDEX = "clients/features/run-page/src/state/index.ts"
+LOAD_VIEW = """
+export type LoadView = {
+  readonly kind: 'ready' | 'loading' | 'reconnecting' | 'failed';
+  readonly word: string;
+};
+// Replay adapter: what a target without `loadView` shows, from the fields it has.
+export function loadView(context: {
+  readonly error: string | null;
+  readonly load?: {readonly complete?: boolean};
+}): LoadView {
+  if (context.error === 'Not on this host') return {kind: 'failed', word: 'No run log'};
+  if (context.error !== null) return {kind: 'failed', word: context.error};
+  return context.load?.complete === true
+    ? {kind: 'ready', word: ''}
+    : {kind: 'loading', word: ''};
+}
+"""
+
+
+def adapt_preload(text: str) -> str:
+    """Rewrite a pre-#3434 preload so its gateway bridge is built from channel capabilities."""
+    if "function createGatewayPreload(" in text:
+        return text
+    begin = text.index("  electron.contextBridge.exposeInMainWorld('vibesysGateway', {")
+    end = text.index("  prepareFirstPaint", begin)
+    block = text[begin:end]
+    close = re.search(r"  } satisfies import\('@vibesys/ipc'\)\.\w+\);\n", block)
+    if close is None:
+        message = "unsupported preload shape: the gateway bridge is not a satisfies literal"
+        raise ValueError(message)
+    literal = block[block.index("{") : close.start() + 3]
+    literal = literal.replace(
+        "openGateway(\n          'unary',",
+        "openGateway(\n          capabilities,\n          'unary',",
+    )
+    literal = literal.replace("openGateway('stream',", "openGateway(capabilities, 'stream',")
+    wiring = (
+        "  electron.contextBridge.exposeInMainWorld(\n    'vibesysGateway',\n"
+        "    createGatewayPreload({\n"
+        "      newChannel: () => new MessageChannel(),\n"
+        "      open: (request, port) => electron.ipcRenderer.postMessage('vibesys:gateway', request, [port]),\n"
+        "    }),\n  );\n"
+    )
+    text = text[:begin] + wiring + text[end:]
+    text = text.replace(
+        "export = createWelcomePreload;",
+        "function createGatewayPreload(capabilities: any): any {\n  return "
+        + literal
+        + ";\n}\n\ncreateWelcomePreload.gateway = createGatewayPreload;\nexport = createWelcomePreload;",
+    )
+    text, count = re.subn(
+        r"function openGateway\(\n", "function openGateway(\n  capabilities: any,\n", text
+    )
+    text = text.replace(
+        "  const electron: typeof import('electron') = require('electron');\n  const {port1, port2} = new MessageChannel();",
+        "  const {port1, port2} = capabilities.newChannel();",
+    )
+    text = text.replace(
+        "  electron.ipcRenderer.postMessage('vibesys:gateway', {kind, host, method, bytes}, [port2]);",
+        "  capabilities.open({kind, host, method, bytes}, port2);",
+    )
+    if count != 1 or "new MessageChannel();\n  let closed" in text:
+        message = "unsupported preload shape: openGateway differs"
+        raise ValueError(message)
+    return text
+
+
 def overlay_client(checkout: Path, suites: list[str]) -> None:
-    """Install the I/O seam, the tests and their support on the target's client tree."""
+    """Install the seams, the tests and their support on the target's client tree."""
     git = executable("git")
     seam = checked(
         [git, "log", "-1", "--format=%H", f"--grep={SEAM_SUBJECT}", "HEAD"], ROOT
     ).strip()
-    patch = checked([git, "diff", f"{seam}^", seam], ROOT)
+    patch = checked([git, "diff", f"{seam}^", seam, "--", *SEAM_FILES], ROOT)
     checked([git, "apply", "--3way"], checkout, stdin=patch)
+    preload = checkout / PRELOAD
+    preload.write_text(adapt_preload(preload.read_text()))
+    transport = checkout / IPC / "gateway-transport.ts"
+    shell_transport = checkout / "clients/apps/desktop-shell/src/gateway-transport.ts"
+    if shell_transport.exists() and not transport.exists():
+        transport.write_text(
+            shell_transport.read_text().replace("from '@vibesys/ipc'", "from './gateway.js'")
+        )
+    ipc_index = checkout / IPC / "index.ts"
+    index_text = ipc_index.read_text()
+    lines = []
+    if "gatewayTransport" not in index_text:
+        lines.append("export {gatewayTransport} from './gateway-transport.js';")
+    if "gatewayBridge" not in index_text:
+        lines.append("export const gatewayBridge = <T>(preload: T): T => preload;")
+    ipc_index.write_text(index_text + "\n" + "\n".join(lines) + "\n")
+    state = checkout / STATE_INDEX
+    if "loadView" not in state.read_text():
+        state.write_text(state.read_text() + LOAD_VIEW)
     for relative in (*CLIENT_SUPPORT, *(CLIENT_TESTS[name] for name in suites)):
         copy(relative, checkout)
     for relative, lines in TESTING_EXPORTS.items():
@@ -201,8 +301,14 @@ def report(
         if line.startswith(("(fail)", "FAILED", "ERROR"))
     ]
     print(f"{commit[:9]} {suite}: exit {result.returncode}; {log.relative_to(ROOT)}")
+    # Rows share their property text after "NAME: "; count the rows that fail each property.
+    properties: dict[str, int] = {}
     for line in dict.fromkeys(failed):
-        print(f"  {line}")
+        name = re.sub(r" \[[\d.]+ms\]$", "", line.removeprefix("(fail) "))
+        key = name.split(": ", 1)[1] if line.startswith("(fail)") and ": " in name else name
+        properties[key] = properties.get(key, 0) + 1
+    for key, count in properties.items():
+        print(f"  {count} x {key}")
     return result.returncode
 
 

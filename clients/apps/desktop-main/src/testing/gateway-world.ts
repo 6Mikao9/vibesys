@@ -8,7 +8,12 @@ import {PassThrough} from 'node:stream';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {GatewayCalls, type GatewaySessionFactory, HELLO_METHOD} from '@vibesys/connection';
 import {FakeGatewaySession, type GatewayWireCall, Schedule} from '@vibesys/connection/testing';
-import {type GatewayRequest, gatewayBridge, gatewayTransport} from '@vibesys/ipc';
+import {
+  type GatewayPreload,
+  type GatewayRequest,
+  gatewayBridge,
+  gatewayTransport,
+} from '@vibesys/ipc';
 import {FakeGatewayPort} from '@vibesys/ipc/testing';
 import {API_SCHEMA_HASH, HelloResponseSchema} from '@vibesys/proto';
 import {SettingsStore} from '@vibesys/settings';
@@ -91,7 +96,7 @@ export function gatewayWorld(seed: number, request: (call: GatewayWireCall) => v
       );
     },
   });
-  const bridge = gatewayBridge(preload);
+  const bridge = gatewayBridge(acrossContextBridge(preload));
   return {
     schedule,
     clock,
@@ -104,5 +109,30 @@ export function gatewayWorld(seed: number, request: (call: GatewayWireCall) => v
       calls.close();
       for (const port of ports) port.close();
     },
+  };
+}
+
+/**
+ * What the page sees of the preload's bridge. Electron's context bridge copies values and drops
+ * an Error's own properties, keeping its message: a refusal that travels as an Error loses its
+ * status, which is why the preload resolves with a value (e2e/gateway.spec.ts checks it on a
+ * real window).
+ */
+function acrossContextBridge(preload: GatewayPreload): GatewayPreload {
+  return {
+    unary: (host, method, bytes) => {
+      const call = preload.unary(host, method, bytes);
+      return {
+        result: call.result.then(
+          reply => structuredClone(reply),
+          (error: unknown) => {
+            throw new Error(error instanceof Error ? error.message : String(error));
+          },
+        ),
+        cancel: () => call.cancel(),
+      };
+    },
+    stream: (host, method, bytes, receive, ended) =>
+      preload.stream(host, method, bytes, receive, ended),
   };
 }
