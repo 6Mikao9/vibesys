@@ -80,7 +80,13 @@ export function IntentControls(props: {
           entry.status === 'applied' &&
           entry.epoch === props.relaunch?.appliedEpoch,
       ) ? (
-        <RelaunchStatus {...props.relaunch} epoch={props.epoch} />
+        <RelaunchStatus
+          {...props.relaunch}
+          epoch={props.epoch}
+          earlierAction={props.entries.some(
+            entry => entry.status === 'applied' && entry.epoch === props.relaunch?.appliedEpoch,
+          )}
+        />
       ) : null}
       {props.warning ? (
         <Text tone="warn" title={props.warning}>

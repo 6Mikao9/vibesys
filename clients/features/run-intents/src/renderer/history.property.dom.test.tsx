@@ -199,8 +199,12 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
       ),
     );
   const active = () => activeStream(bridge);
-  const send = (records: ReturnType<typeof recordsOf>) =>
-    act(async () => active().receive(packet(records)));
+  const send = async (records: ReturnType<typeof recordsOf>) => {
+    await act(async () => active().receive(packet(records)));
+    expect(
+      historyRows(container).filter(text => text.endsWith('· Applied')).length,
+    ).toBeLessThanOrEqual(1);
+  };
   try {
     if (availabilityOnly) {
       await render();

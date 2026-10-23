@@ -29,12 +29,18 @@ export function RelaunchAction(props: RelaunchView): JSX.Element | null {
     />
   );
 }
-export function RelaunchStatus(props: RelaunchView & {readonly epoch: bigint}): JSX.Element | null {
+export function RelaunchStatus(
+  props: RelaunchView & {readonly epoch: bigint; readonly earlierAction: boolean},
+): JSX.Element | null {
   if (props.result)
     return (
       <Text title={props.result}>
         Resume · {props.appliedEpoch !== null ? 'Applied' : props.result}
-        {props.appliedEpoch !== null && props.appliedEpoch < props.epoch ? ' · Earlier epoch' : ''}
+        {props.appliedEpoch !== null && props.appliedEpoch < props.epoch
+          ? ' · Earlier epoch'
+          : props.earlierAction
+            ? ' · Earlier action'
+            : ''}
       </Text>
     );
   if (props.state === 'launching') return <Text tone="muted">Waiting for the host</Text>;
