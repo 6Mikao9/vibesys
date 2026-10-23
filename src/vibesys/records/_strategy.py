@@ -175,6 +175,15 @@ def adoption(projection: Projection) -> None:
         projection.span(span)
 
 
+def _spanless_subject(projection: Projection) -> p.GateSubject:
+    """A gate event of an older journal names no span: the input's has no execution, a candidate's has."""
+    return (
+        p.GateSubject.CANDIDATE
+        if projection.event.execution_id is not None
+        else p.GateSubject.INPUT
+    )
+
+
 def gate(projection: Projection) -> None:
     data = projection.event.data
     if not isinstance(data, (e.GateStartedData, e.GateFinishedData)):
@@ -187,7 +196,7 @@ def gate(projection: Projection) -> None:
     span = labelled(projection, "gate", data.span_id or identity)
     attrs = p.GateAttrs(
         stage=enum_value(p.GateStage, data.gate),
-        subject=subject(projection, span.parent) if known else p.GateSubject.UNATTRIBUTED,
+        subject=subject(projection, span.parent) if known else _spanless_subject(projection),
         recipe=data.recipe,
         source=enum_value(p.FrameworkSource, data.source),
         source_label=data.source_label,

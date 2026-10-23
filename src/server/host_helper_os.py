@@ -347,7 +347,33 @@ class FileProjects:
             )
         if digest.ending is not None or digest.closing is not None:
             self._digests[journal] = (version, digest)
-        return digest
+        return self._with_log_headline(project_root, run_id, digest)
+
+    @staticmethod
+    def _with_log_headline(project_root: Path, run_id: str, digest: RunDigest) -> RunDigest:
+        """A run with a typed log shows the headline its log states, as its page does."""
+        runlog = import_module("vs_runlog.api")
+        wire = import_module("vs_proto.api")
+        path = Project.run_log_path_for(project_root, run_id)
+        try:
+            head = runlog.read_run_head(path)
+        except (OSError, ValueError):
+            return digest
+        objective = head.objective
+        if objective is None or not objective.has_field("best_value") or objective.series is None:
+            return digest
+        series = objective.series
+        row = import_module("server.run_digest")
+        return row.with_log_headline(
+            digest,
+            row.LogHeadline(
+                best=objective.best_value,
+                input_value=objective.input_value if objective.has_field("input_value") else None,
+                metric=series.name,
+                unit=series.unit,
+                minimize=series.direction == wire.Direction.MIN,
+            ),
+        )
 
     def require_initialized(self, project: Path) -> Path:
         """The project's root, once it is known to define tasks."""
