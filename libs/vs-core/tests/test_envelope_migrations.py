@@ -266,8 +266,10 @@ def test_a_digest_is_rebound_to_the_value_the_migration_rewrote_and_to_no_other(
     digest = "0" * 64 if damaged else _fingerprint(document)
     stored["held"] = [{covered: document, "payload_digest": digest}]
 
-    (held,) = _upgraded(json.dumps(stored))["held"]
+    holders = _upgraded(json.dumps(stored))["held"]
 
+    assert isinstance(holders, list)
+    held = holders[0]
     assert isinstance(held, dict)
     rewritten = held[covered]
     if damaged:

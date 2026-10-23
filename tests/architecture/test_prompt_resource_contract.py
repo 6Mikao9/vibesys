@@ -14,7 +14,6 @@ import pytest
 from jinja2 import Environment, meta
 
 from vs_core.api import (
-    ComparisonPolicy,
     EvidenceId,
     EvidenceKind,
     ObservationStatus,
@@ -607,7 +606,7 @@ def core_policy_context() -> dict[str, object]:
         "base_accuracy_passed": True,
         "repeated_failure": None,
         "comparisons": (),
-        **core_protocol_variables(ComparisonPolicy()),
+        **core_protocol_variables(),
         "required_fields": (),
         "prior_failure_tail": "AssertionError: fixture",
         "prior_failure_fence": "```",

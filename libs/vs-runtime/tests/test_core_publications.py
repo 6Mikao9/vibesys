@@ -334,7 +334,8 @@ def _legacy(document: object) -> object:
     node = {key: _legacy(item) for key, item in document.items()}
     readings = node.get("readings")
     if "evidence_id" in node and isinstance(readings, list) and len(readings) == 1:
-        node["reading"] = node.pop("readings")[0]
+        node["reading"] = readings[0]
+        del node["readings"]
     return node
 
 
