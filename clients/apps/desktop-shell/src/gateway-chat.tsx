@@ -8,10 +8,51 @@ import {
 import {sessionCore} from '@vibesys/feature-run-sessions/state';
 import {newRequestId} from '@vibesys/request-identity';
 import type {CoreState} from '@vibesys/run-state';
-import {SteerMode, SteerTargetKind} from '@vibesys/runs/chat';
+import {type HarnessOption, steerModeOf, steerTargetKindOf} from '@vibesys/runs/chat';
 import {addressedIntent, runReference} from '@vibesys/runs/intents';
 import {Button, Stack, Text} from '@vibesys/ui';
 import {useEffect, useMemo} from 'react';
+
+type ControlRequest = Parameters<RunChatPorts['control']>[0];
+
+function controlIntent(request: ControlRequest) {
+  if (request.action === 'withdraw')
+    return {case: 'withdraw' as const, value: {withdraws: request.withdraws}};
+  return {
+    case: 'steer' as const,
+    value: {
+      text: request.text,
+      mode: steerModeOf(request.mode),
+      target: {
+        kind: steerTargetKindOf(request.target?.kind),
+        id: request.target?.id ?? '',
+      },
+    },
+  };
+}
+
+function harnessEntry(option: HarnessOption) {
+  return {
+    provider: option.provider,
+    model: option.model,
+    default: option.default,
+    ...(option.display
+      ? {
+          display: {
+            providerName: option.display.providerName,
+            ...(option.display.modelName ? {modelName: option.display.modelName} : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** One abort signal per owner, cancelled when the owner changes or unmounts. */
+function useLifetime(owner: object): AbortController {
+  const lifetime = useMemo(() => ({owner, controller: new AbortController()}), [owner]);
+  useEffect(() => () => lifetime.controller.abort(), [lifetime]);
+  return lifetime.controller;
+}
 
 /** Compose the existing chat UI with protobuf gateway operations and session records. */
 export function useGatewayChat(
@@ -29,24 +70,11 @@ export function useGatewayChat(
   );
   const service = useMemo(() => chatService(ports), [ports]);
   const threads = useChatThreads(ports, input.projectRoot !== '');
-  const lifetime = useMemo(() => new AbortController(), [ports]);
-  useEffect(() => () => lifetime.abort(), [lifetime]);
+  const lifetime = useLifetime(ports);
   const chatPorts: RunChatPorts = {
     harnesses: async () => ({
       kind: 'listed',
-      harnesses: (await service.catalog(newRequestId(), lifetime.signal)).map(option => ({
-        provider: option.provider,
-        model: option.model,
-        default: option.default,
-        ...(option.display
-          ? {
-              display: {
-                providerName: option.display.providerName,
-                ...(option.display.modelName ? {modelName: option.display.modelName} : {}),
-              },
-            }
-          : {}),
-      })),
+      harnesses: (await service.catalog(newRequestId(), lifetime.signal)).map(harnessEntry),
     }),
     createThread: async (harness, signal, requestId) => {
       try {
@@ -69,38 +97,12 @@ export function useGatewayChat(
     },
     control: async request => {
       try {
-        const intent =
-          request.action === 'withdraw'
-            ? {case: 'withdraw' as const, value: {withdraws: request.withdraws}}
-            : {
-                case: 'steer' as const,
-                value: {
-                  text: request.text,
-                  mode:
-                    request.mode === 'standing'
-                      ? SteerMode.STANDING
-                      : request.mode === 'interrupt'
-                        ? SteerMode.INTERRUPT
-                        : SteerMode.NEXT_TURN,
-                  target: {
-                    kind:
-                      request.target?.kind === 'role'
-                        ? SteerTargetKind.ROLE
-                        : request.target?.kind === 'attempt'
-                          ? SteerTargetKind.ATTEMPT
-                          : request.target?.kind === 'item'
-                            ? SteerTargetKind.ITEM
-                            : SteerTargetKind.RUN,
-                    id: request.target?.id ?? '',
-                  },
-                },
-              };
         await service.control(
           addressedIntent(
             runReference(input.projectRoot, input.runId),
             request.control_id,
             input.epoch,
-            intent,
+            controlIntent(request),
           ),
           lifetime.signal,
         );

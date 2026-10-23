@@ -9,6 +9,7 @@ import {
   CandidateState,
   type ExampleListSchema,
   type HarnessOptionSchema,
+  type InspectCandidateRequest,
   MachineDescriptionSchema,
   type PreflightRunRequest,
   PreflightRunResponseSchema,
@@ -68,30 +69,8 @@ export class FakeReadCatalog implements RegistryReadPorts {
     this.requests.push(request);
     const method = request.method;
     switch (method.case) {
-      case 'inspectCandidate': {
-        const gate = this.#inspectionGate;
-        if (gate?.path === method.value.path) {
-          this.#inspectionGate = undefined;
-          gate.arrived();
-          await gate.released;
-          if (signal.aborted) throw new Error('operation cancelled');
-        }
-
-        const identity = this.candidates.get(method.value.path);
-        return this.reply({
-          result: {
-            case: 'inspectCandidate',
-            value: {
-              requestId: method.value.requestId,
-              selectionRevision: method.value.selectionRevision,
-              schemaHash: API_SCHEMA_HASH,
-              minimumVersion: '0.1.1',
-              state: identity === undefined ? CandidateState.NOT_FOUND : CandidateState.FOUND,
-              ...(identity === undefined ? {} : {identity}),
-            },
-          },
-        });
-      }
+      case 'inspectCandidate':
+        return this.inspect(method.value, signal);
 
       case 'listTasks': {
         const tasks = this.projects.get(method.value.project);
@@ -150,6 +129,33 @@ export class FakeReadCatalog implements RegistryReadPorts {
       default:
         throw new Error(`unsupported read: ${method.case}`);
     }
+  }
+
+  private async inspect(
+    request: InspectCandidateRequest,
+    signal: AbortSignal,
+  ): Promise<Uint8Array> {
+    const gate = this.#inspectionGate;
+    if (gate?.path === request.path) {
+      this.#inspectionGate = undefined;
+      gate.arrived();
+      await gate.released;
+      if (signal.aborted) throw new Error('operation cancelled');
+    }
+    const identity = this.candidates.get(request.path);
+    return this.reply({
+      result: {
+        case: 'inspectCandidate',
+        value: {
+          requestId: request.requestId,
+          selectionRevision: request.selectionRevision,
+          schemaHash: API_SCHEMA_HASH,
+          minimumVersion: '0.1.1',
+          state: identity === undefined ? CandidateState.NOT_FOUND : CandidateState.FOUND,
+          ...(identity === undefined ? {} : {identity}),
+        },
+      },
+    });
   }
 
   private preflight(request: PreflightRunRequest): Uint8Array {

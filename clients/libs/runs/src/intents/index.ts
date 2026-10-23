@@ -9,6 +9,7 @@ import {
   type PostIntentRequest,
   PostIntentRequestSchema,
   type PostIntentResponse,
+  ReadRequestSchema,
   RecordSchema,
   SteerMode,
   SteerTargetKind,
@@ -94,6 +95,14 @@ export function configuredHostCall(bytes: Uint8Array, checkout: string | null): 
   const request = fromBinary(HostCallRequestSchema, bytes);
   request.checkout = checkout;
   return toBinary(HostCallRequestSchema, request);
+}
+
+/** A read names the host's saved checkout as well; renderer bytes cannot choose another. */
+export function configuredRead(bytes: Uint8Array, checkout: string | null): Uint8Array {
+  if (checkout === null) throw new Error('No checkout configured for this host');
+  const request = fromBinary(ReadRequestSchema, bytes);
+  request.checkout = checkout;
+  return toBinary(ReadRequestSchema, request);
 }
 
 /** A typed negative HostCall reply, distinct from an uncertain transport failure. */

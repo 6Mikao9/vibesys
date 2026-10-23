@@ -311,6 +311,18 @@ function hostCallRequest(method: string): Uint8Array {
       }),
     );
   }
+  if (method === 'createChatSession') {
+    return toBinary(
+      HostCallRequestSchema,
+      create(HostCallRequestSchema, {
+        checkout: '/checkout',
+        method: {
+          case: 'createChatSession',
+          value: {...project, sessionId: 'thread-a', provider: 'claude', model: 'opus'},
+        },
+      }),
+    );
+  }
   throw new Error(`no host-call payload for ${method}`);
 }
 

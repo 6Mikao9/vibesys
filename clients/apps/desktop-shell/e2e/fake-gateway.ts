@@ -1,5 +1,5 @@
 import {fileURLToPath} from 'node:url';
-import {create, toBinary} from '@bufbuild/protobuf';
+import {create, type DescMessage, type MessageInitShape, toBinary} from '@bufbuild/protobuf';
 import type {Page} from '@playwright/test';
 import {
   GetBlobsRequestSchema,
@@ -28,6 +28,10 @@ export interface WireFixture {
   chat: number[];
   watchRuns: number[];
 }
+const encode = <S extends DescMessage>(schema: S, init: MessageInitShape<S>): number[] => [
+  ...toBinary(schema, create(schema, init)),
+];
+
 export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixture {
   const encoded = fixture.records.map(record => toBinary(RecordSchema, record));
   const prefix = fixture.records.slice(0, fixture.initialCount);
@@ -36,22 +40,20 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
   const last = fixture.records.filter(record => record.body.case === 'lifecycle').at(-1);
   const lifecycle = last?.body.case === 'lifecycle' ? last.body.value : undefined;
   const epoch = fixture.records.at(-1)?.epoch ?? 1;
+  const throughSeq = fixture.records.at(-1)?.seq ?? 0n;
+  const stream = (data: Uint8Array) =>
+    encode(TailStreamResponseSchema, {data, nextOffset: BigInt(data.length)});
   return {
-    watchRuns: [
-      ...toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {
-          runId: 'run-a',
-          liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
-          head: {
-            strategy: 'fixture',
-            epoch,
-            lifecycle,
-            process: {pid: 1, epoch, startedAt: {seconds: 1700000000n}},
-          },
-        }),
-      ),
-    ],
+    watchRuns: encode(WatchRunsResponseSchema, {
+      runId: 'run-a',
+      liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
+      head: {
+        strategy: 'fixture',
+        epoch,
+        lifecycle,
+        process: {pid: 1, epoch, startedAt: {seconds: 1700000000n}},
+      },
+    }),
     methods: {
       skeleton: method('skeleton'),
       tail: method('tail'),
@@ -60,66 +62,25 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
       hostCall: method('hostCall'),
       watchRuns: method('watchRuns'),
     },
-    skeleton: [
-      ...toBinary(
-        SkeletonResponseSchema,
-        create(SkeletonResponseSchema, {
-          records: encoded.slice(0, fixture.initialCount),
-          committedSeq: fixture.records.at(-1)?.seq ?? 0n,
-          nextSeq: (prefix.at(-1)?.seq ?? 0n) + 1n,
-          complete: fixture.initialCount === fixture.records.length,
-        }),
-      ),
-    ],
-    tail: [
-      ...toBinary(
-        TailResponseSchema,
-        create(TailResponseSchema, {
-          records: encoded.slice(fixture.initialCount),
-          throughSeq: fixture.records.at(-1)?.seq ?? 0n,
-        }),
-      ),
-    ],
+    skeleton: encode(SkeletonResponseSchema, {
+      records: encoded.slice(0, fixture.initialCount),
+      committedSeq: throughSeq,
+      nextSeq: (prefix.at(-1)?.seq ?? 0n) + 1n,
+      complete: fixture.initialCount === fixture.records.length,
+    }),
+    tail: encode(TailResponseSchema, {records: encoded.slice(fixture.initialCount), throughSeq}),
     blobs: Object.fromEntries(
       Object.entries(fixture.blobs).map(([sha256, data]) => [
-        [
-          ...toBinary(
-            GetBlobsRequestSchema,
-            create(GetBlobsRequestSchema, {runId: 'run-a', sha256: [sha256]}),
-          ),
-        ].join(','),
-        [
-          ...toBinary(
-            GetBlobsResponseSchema,
-            create(GetBlobsResponseSchema, {blobs: [{sha256, data}]}),
-          ),
-        ],
+        encode(GetBlobsRequestSchema, {runId: 'run-a', sha256: [sha256]}).join(','),
+        encode(GetBlobsResponseSchema, {blobs: [{sha256, data}]}),
       ]),
     ),
-    chatRequest: [
-      ...toBinary(TailRequestSchema, create(TailRequestSchema, {sessionId: 'default'})),
-    ],
+    chatRequest: encode(TailRequestSchema, {sessionId: 'default'}),
     chat: [],
     streams: Object.fromEntries(
-      Object.entries(fixture.streams).map(([id, data]) => [
-        id,
-        [
-          ...toBinary(
-            TailStreamResponseSchema,
-            create(TailStreamResponseSchema, {data, nextOffset: BigInt(data.length)}),
-          ),
-        ],
-      ]),
+      Object.entries(fixture.streams).map(([id, data]) => [id, stream(data)]),
     ),
-    log: [
-      ...toBinary(
-        TailStreamResponseSchema,
-        create(TailStreamResponseSchema, {
-          data: fixture.streams['build-log'] ?? new Uint8Array(),
-          nextOffset: BigInt(fixture.streams['build-log']?.length ?? 0),
-        }),
-      ),
-    ],
+    log: stream(fixture.streams['build-log'] ?? new Uint8Array()),
   };
 }
 

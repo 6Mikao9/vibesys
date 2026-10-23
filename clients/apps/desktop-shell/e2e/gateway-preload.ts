@@ -21,117 +21,138 @@ import {foldSkeleton, observeRun, seedSkeleton} from '@vibesys/run-skeleton';
 import {ChatPeer} from './chat-peer.js';
 import type {WireFixture} from './fake-gateway.js';
 
-export function installGateway(input: WireFixture): void {
-  const calls: string[] = [];
-  const streams = new Set<(bytes: Uint8Array) => void>();
-  const ended = new Set<(error?: string) => void>();
-  const history = [input.tail];
-  const observations = fixtureObservations(input);
-  const chat = new ChatPeer(input.chat);
-  const watchers = new Set<(bytes: Uint8Array) => void>();
-  let active = 0;
-  const bridge: GatewayBridge = {
-    unary: (host: string, method: string, request: Uint8Array) => {
-      calls.push(method);
-      const local = chat.unary(method, request);
-      if (local) return {result: Promise.resolve(local), cancel: () => undefined};
-      if (method === input.methods.hostCall) {
-        const peer = window as unknown as {
-          postIntent(host: string, bytes: number[]): Promise<number[]>;
-        };
-        const operation = fromBinary(HostCallRequestSchema, request).method;
-        if (!peer.postIntent && operation.case === 'chatMessage')
-          return {
-            result: Promise.resolve(
-              chat.message(
-                operation.value.sessionId,
-                operation.value.requestId,
-                operation.value.text,
-              ),
-            ),
-            cancel: () => undefined,
-          };
-        return {
-          result: peer.postIntent(host, [...request]).then(bytes => new Uint8Array(bytes)),
-          cancel: () => undefined,
-        };
-      }
-      const bytes =
-        method === input.methods.skeleton
-          ? input.skeleton
-          : method === input.methods.blobs
-            ? input.blobs[[...request].join(',')]
-            : undefined;
-      if (!bytes) throw new Error('Unknown unary');
-      return {result: Promise.resolve(new Uint8Array(bytes)), cancel: () => undefined};
-    },
-    stream: (
-      _host: string,
-      method: string,
-      _bytes: Uint8Array,
-      receive: (bytes: Uint8Array) => void,
-      finish: (error?: string) => void,
-    ) => {
-      ended.add(finish);
-      calls.push(method);
-      active += 1;
-      let closed = false;
-      let cancelChat: () => void = () => undefined;
-      if (method === input.methods.tail) {
-        const tail = fromBinary(TailRequestSchema, _bytes);
-        if (tail.sessionId !== '') {
-          cancelChat = chat.watch(tail.sessionId, tail.fromSeq, receive);
-        } else {
-          streams.add(receive);
-          for (const bytes of history) receive(new Uint8Array(bytes));
-        }
-      } else if (method === input.methods.watchRuns) {
-        watchers.add(receive);
-        receive(observations.decode(new Uint8Array(input.watchRuns)));
-      } else if (method === input.methods.log)
-        receive(
-          new Uint8Array(
-            input.streams?.[fromBinary(TailStreamRequestSchema, _bytes).streamId] ?? input.log,
-          ),
-        );
-      else throw new Error('Unknown stream');
-      return {
-        cancel: () => {
-          if (!closed) {
-            closed = true;
-            active -= 1;
-            streams.delete(receive);
-            ended.delete(finish);
-            cancelChat();
-            watchers.delete(receive);
-          }
-        },
-      };
-    },
+type Receive = (bytes: Uint8Array) => void;
+
+const settled = (bytes: Uint8Array) => ({result: Promise.resolve(bytes), cancel: () => undefined});
+
+/** The page-side gateway: serves the fixture's frames and records what the client asked of it. */
+class FixtureGateway {
+  readonly calls: string[] = [];
+  readonly streams = new Set<Receive>();
+  readonly ended = new Set<(error?: string) => void>();
+  readonly watchers = new Set<Receive>();
+  readonly history: number[][];
+  readonly observations: ReturnType<typeof fixtureObservations>;
+  readonly chat: ChatPeer;
+  active = 0;
+
+  constructor(readonly input: WireFixture) {
+    this.history = [input.tail];
+    this.observations = fixtureObservations(input);
+    this.chat = new ChatPeer(input.chat);
+  }
+
+  unary = (host: string, method: string, request: Uint8Array) => {
+    this.calls.push(method);
+    const local = this.chat.unary(method, request);
+    if (local) return settled(local);
+    if (method === this.input.methods.hostCall) return this.hostCall(host, request);
+    const bytes =
+      method === this.input.methods.skeleton
+        ? this.input.skeleton
+        : method === this.input.methods.blobs
+          ? this.input.blobs[[...request].join(',')]
+          : undefined;
+    if (!bytes) throw new Error('Unknown unary');
+    return settled(new Uint8Array(bytes));
   };
 
-  Object.assign(window, {
-    vibesysGateway: preloadOver(bridge),
-    fakeGateway: {
+  stream = (
+    _host: string,
+    method: string,
+    bytes: Uint8Array,
+    receive: Receive,
+    finish: (error?: string) => void,
+  ) => {
+    this.ended.add(finish);
+    this.calls.push(method);
+    this.active += 1;
+    let closed = false;
+    const cancelChat = this.subscribe(method, bytes, receive);
+    return {
+      cancel: () => {
+        if (closed) return;
+        closed = true;
+        this.active -= 1;
+        this.streams.delete(receive);
+        this.ended.delete(finish);
+        cancelChat();
+        this.watchers.delete(receive);
+      },
+    };
+  };
+
+  private hostCall(host: string, request: Uint8Array) {
+    const peer = window as unknown as {
+      postIntent(host: string, bytes: number[]): Promise<number[]>;
+    };
+    const operation = fromBinary(HostCallRequestSchema, request).method;
+    if (!peer.postIntent && operation.case === 'chatMessage')
+      return settled(
+        this.chat.message(
+          operation.value.sessionId,
+          operation.value.requestId,
+          operation.value.text,
+        ),
+      );
+    return {
+      result: peer.postIntent(host, [...request]).then(bytes => new Uint8Array(bytes)),
+      cancel: () => undefined,
+    };
+  }
+
+  /** Subscribe one stream and return what releases it from the chat peer. */
+  private subscribe(method: string, bytes: Uint8Array, receive: Receive): () => void {
+    const {methods} = this.input;
+    if (method === methods.tail) {
+      const tail = fromBinary(TailRequestSchema, bytes);
+      if (tail.sessionId !== '') return this.chat.watch(tail.sessionId, tail.fromSeq, receive);
+      this.streams.add(receive);
+      for (const entry of this.history) receive(new Uint8Array(entry));
+    } else if (method === methods.watchRuns) {
+      this.watchers.add(receive);
+      receive(this.observations.decode(new Uint8Array(this.input.watchRuns)));
+    } else if (method === methods.log)
+      receive(
+        new Uint8Array(
+          this.input.streams?.[fromBinary(TailStreamRequestSchema, bytes).streamId] ??
+            this.input.log,
+        ),
+      );
+    else throw new Error('Unknown stream');
+    return () => undefined;
+  }
+
+  controls() {
+    return {
       appendChat: (bytes: number[]) => {
-        chat.append(bytes);
+        this.chat.append(bytes);
       },
-      sendChatFrame: (bytes: number[]) => chat.publish(bytes),
-      seedChat: (id: string, bytes: number[]) => chat.append(bytes, id),
+      sendChatFrame: (bytes: number[]) => this.chat.publish(bytes),
+      seedChat: (id: string, bytes: number[]) => this.chat.append(bytes, id),
       disconnect: () => {
-        for (const finish of [...ended]) finish('SSH connection closed');
+        for (const finish of [...this.ended]) finish('SSH connection closed');
       },
-      calls: () => calls,
-      active: () => active,
+      calls: () => this.calls,
+      active: () => this.active,
       observe: (bytes: number[]) => {
-        for (const receive of watchers) receive(observations.decode(new Uint8Array(bytes)));
+        for (const receive of this.watchers)
+          receive(this.observations.decode(new Uint8Array(bytes)));
       },
       append: (bytes: number[]) => {
-        observations.append(bytes);
-        history.push(bytes);
-        for (const receive of streams) receive(new Uint8Array(bytes));
+        this.observations.append(bytes);
+        this.history.push(bytes);
+        for (const receive of this.streams) receive(new Uint8Array(bytes));
       },
-    },
+    };
+  }
+}
+
+export function installGateway(input: WireFixture): void {
+  const gateway = new FixtureGateway(input);
+  Object.assign(window, {
+    vibesysGateway: preloadOver({unary: gateway.unary, stream: gateway.stream}),
+    fakeGateway: gateway.controls(),
   });
 }
 

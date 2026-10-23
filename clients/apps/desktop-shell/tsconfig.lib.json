@@ -95,6 +95,9 @@
       "path": "../../libs/run-skeleton/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/run-state/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/run-skeleton/tsconfig.reader.json"
     },
     {

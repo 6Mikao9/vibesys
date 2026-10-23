@@ -1,6 +1,5 @@
 /** Generic IPC composition. Authorization precedes provisioning or dialing. */
 import {arch, platform} from 'node:os';
-import {fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   type ConnectionManager,
   GATEWAY_DIRECTORY,
@@ -16,8 +15,7 @@ import {
 } from '@vibesys/connection';
 import {type HostKey, hostFromKey} from '@vibesys/hosts';
 import {GATEWAY_CHANNEL, gatewayEnd, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
-import {ReadRequestSchema} from '@vibesys/proto';
-import {configuredHostCall, HOST_CALL_METHOD} from '@vibesys/runs/intents';
+import {configuredHostCall, configuredRead, HOST_CALL_METHOD} from '@vibesys/runs/intents';
 import {type SettingsStore, settingsFor} from '@vibesys/settings';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import type {IpcMain} from 'electron';
@@ -80,22 +78,24 @@ export function installGatewayIpc(
         if (!done) port.postMessage(gatewayReply(bytes));
       };
       if (request.kind === 'unary') {
-        let bytes = request.bytes;
-        if (request.method === HOST_CALL_METHOD || request.method === READ_METHOD) {
-          const {settings: file} = await settings.hosts();
-          const checkout = settingsFor(file, hostFromKey(request.host))?.checkout ?? null;
-          if (request.method === HOST_CALL_METHOD) bytes = configuredHostCall(bytes, checkout);
-          else {
-            if (checkout === null) throw new Error('No checkout configured for this host');
-            const read = fromBinary(ReadRequestSchema, bytes);
-            read.checkout = checkout;
-            bytes = toBinary(ReadRequestSchema, read);
-          }
-        }
+        const bytes = await withCheckout(settings, request);
         receive(await calls.unary(request.host, request.method, bytes, abort.signal));
       } else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
     })().then(() => finish(), finish);
   });
+}
+
+/** Host-call and read requests carry the checkout configured for their host. */
+async function withCheckout(
+  settings: SettingsStore,
+  request: {readonly host: HostKey; readonly method: string; readonly bytes: Uint8Array},
+): Promise<Uint8Array> {
+  if (request.method !== HOST_CALL_METHOD && request.method !== READ_METHOD) return request.bytes;
+  const {settings: file} = await settings.hosts();
+  const checkout = settingsFor(file, hostFromKey(request.host))?.checkout ?? null;
+  return request.method === HOST_CALL_METHOD
+    ? configuredHostCall(request.bytes, checkout)
+    : configuredRead(request.bytes, checkout);
 }
 
 function gatewayFor(

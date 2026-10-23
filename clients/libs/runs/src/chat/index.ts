@@ -20,6 +20,8 @@ import {
   ReadResponseSchema,
   type Record,
   RecordSchema,
+  SteerMode,
+  SteerTargetKind,
   TailRequestSchema,
   TailResponseSchema,
   validatedExactFromBinary,
@@ -34,6 +36,25 @@ export type {
   Record,
 } from '@vibesys/proto';
 export {ChatRole, SteerMode, SteerTargetKind} from '@vibesys/proto';
+
+/** The wire enum for a steer's UI-facing mode name; an unnamed mode is the next turn. */
+export function steerModeOf(mode: string | undefined): SteerMode {
+  return mode === 'standing'
+    ? SteerMode.STANDING
+    : mode === 'interrupt'
+      ? SteerMode.INTERRUPT
+      : SteerMode.NEXT_TURN;
+}
+/** The wire enum for a steer target's UI-facing kind; an unnamed kind is the run. */
+export function steerTargetKindOf(kind: string | undefined): SteerTargetKind {
+  return kind === 'role'
+    ? SteerTargetKind.ROLE
+    : kind === 'attempt'
+      ? SteerTargetKind.ATTEMPT
+      : kind === 'item'
+        ? SteerTargetKind.ITEM
+        : SteerTargetKind.RUN;
+}
 export {HOST_CALL_METHOD, INTENT_TAIL_METHOD as CHAT_TAIL_METHOD} from '../intents/index.js';
 export const CHAT_BLOBS_METHOD = `/${HostService.typeName}/${HostService.method.getBlobs.name}`;
 

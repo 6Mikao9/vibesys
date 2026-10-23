@@ -37,9 +37,7 @@
     "@vibesys/runs": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
-    "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
-    "@vibesys/request-identity": "workspace:*",
     "@vibesys/run-state": "workspace:*"
   },
   "devDependencies": {

@@ -656,18 +656,12 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
-      '@vibesys/request-identity':
-        specifier: workspace:*
-        version: link:../../libs/request-identity
       '@vibesys/run-state':
         specifier: workspace:*
         version: link:../../libs/run-state
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
-      '@vibesys/ui':
-        specifier: workspace:*
-        version: link:../../libs/ui
       react:
         specifier: 19.1.1
         version: 19.1.1

@@ -3,15 +3,73 @@ import {create, type MessageInitShape, toBinary} from '@bufbuild/protobuf';
 import type {Page} from '@playwright/test';
 import type {RunEvent} from '@vibesys/contracts';
 import {
+  type ChatRecordSchema,
   ChatRole,
   RecordSchema,
-  SteerMode,
-  SteerTargetKind,
   type Record as StoreRecord,
   TailResponseSchema,
 } from '@vibesys/proto';
+import {steerModeOf, steerTargetKindOf} from '@vibesys/runs/chat';
+
+type Body = NonNullable<MessageInitShape<typeof RecordSchema>['body']>;
+type ChatEvent = NonNullable<MessageInitShape<typeof ChatRecordSchema>['event']>;
 
 const histories = new WeakMap<Page, Map<string, StoreRecord[]>>();
+
+const chatBody = (event: ChatEvent): Body => ({case: 'chat', value: {event}});
+const messageBody = (requestId: string, role: ChatRole, text: string): Body =>
+  chatBody({case: 'message', value: {requestId, role, content: {case: 'text', value: text}}});
+
+function hasUserMessage(records: readonly StoreRecord[], requestId: string): boolean {
+  return records.some(
+    record =>
+      record.body.case === 'chat' &&
+      record.body.value.event.case === 'message' &&
+      record.body.value.event.value.requestId === requestId &&
+      record.body.value.event.value.role === ChatRole.USER,
+  );
+}
+
+/** The chat bodies one UI event stands for, given the thread's records so far. */
+function bodiesOf(event: RunEvent, id: string, records: readonly StoreRecord[]): Body[] {
+  const requestId =
+    event.invocation_id ??
+    (event.data?.kind === 'chat' ? event.data.invocation_id : null) ??
+    `q-${event.sequence}`;
+  const question = (text: string): Body[] =>
+    hasUserMessage(records, requestId) ? [] : [messageBody(requestId, ChatRole.USER, text)];
+  const data = event.data;
+  if (data?.kind === 'chat_thread_created')
+    return [
+      chatBody({
+        case: 'created',
+        value: {id, title: data.title ?? '', provider: data.provider, model: data.model},
+      }),
+    ];
+  if (data?.kind === 'agent_execution_started') return question(data.user_prompt ?? '');
+  if (data?.kind === 'chat')
+    return [...question(event.text ?? ''), messageBody(requestId, ChatRole.ASSISTANT, data.answer)];
+  if (data?.kind === 'agent_output_chunk' && data.channel === 'assistant')
+    return [...question(''), chatBody({case: 'token', value: {requestId, text: data.content}})];
+  if (data?.kind === 'steer_proposed')
+    return [
+      chatBody({
+        case: 'proposedSteer',
+        value: {
+          id: data.proposal_id,
+          requestId,
+          text: data.proposal.text,
+          mode: steerModeOf(data.proposal.mode),
+          target: {
+            kind: steerTargetKindOf(data.proposal.target?.kind),
+            id: data.proposal.target?.id ?? '',
+          },
+        },
+      }),
+    ];
+  return [];
+}
+
 export async function emitChat(page: Page, events: readonly RunEvent[]): Promise<void> {
   const sessions = histories.get(page) ?? new Map<string, StoreRecord[]>();
   histories.set(page, sessions);
@@ -22,107 +80,35 @@ export async function emitChat(page: Page, events: readonly RunEvent[]): Promise
     sessions.set(id, records);
     const batch = updates.get(id) ?? [];
     updates.set(id, batch);
-    const append = (value: NonNullable<MessageInitShape<typeof RecordSchema>['body']>) => {
+    for (const body of bodiesOf(event, id, records)) {
       const record = create(RecordSchema, {
         seq: BigInt(records.length + 1),
         epoch: 1,
         at: {seconds: 1n},
-        body: value,
+        body,
       });
       records.push(record);
       batch.push(record);
-    };
-    const message = (requestId: string, role: ChatRole, text: string) =>
-      append({
-        case: 'chat',
-        value: {
-          event: {case: 'message', value: {requestId, role, content: {case: 'text', value: text}}},
-        },
-      });
-    const requestId =
-      event.invocation_id ??
-      (event.data?.kind === 'chat' ? event.data.invocation_id : null) ??
-      `q-${event.sequence}`;
-    const userExists = () =>
-      records.some(
-        record =>
-          record.body.case === 'chat' &&
-          record.body.value.event.case === 'message' &&
-          record.body.value.event.value.requestId === requestId &&
-          record.body.value.event.value.role === ChatRole.USER,
-      );
-    const data = event.data;
-    if (data?.kind === 'chat_thread_created')
-      append({
-        case: 'chat',
-        value: {
-          event: {
-            case: 'created',
-            value: {id, title: data.title ?? '', provider: data.provider, model: data.model},
-          },
-        },
-      });
-    else if (data?.kind === 'agent_execution_started') {
-      if (!userExists()) message(requestId, ChatRole.USER, data.user_prompt ?? '');
-    } else if (data?.kind === 'chat') {
-      if (!userExists()) message(requestId, ChatRole.USER, event.text ?? '');
-      message(requestId, ChatRole.ASSISTANT, data.answer);
-    } else if (data?.kind === 'agent_output_chunk' && data.channel === 'assistant') {
-      if (!userExists()) message(requestId, ChatRole.USER, '');
-      append({
-        case: 'chat',
-        value: {event: {case: 'token', value: {requestId, text: data.content}}},
-      });
-    } else if (data?.kind === 'steer_proposed') {
-      append({
-        case: 'chat',
-        value: {
-          event: {
-            case: 'proposedSteer',
-            value: {
-              id: data.proposal_id,
-              requestId,
-              text: data.proposal.text,
-              mode:
-                data.proposal.mode === 'standing'
-                  ? SteerMode.STANDING
-                  : data.proposal.mode === 'interrupt'
-                    ? SteerMode.INTERRUPT
-                    : SteerMode.NEXT_TURN,
-              target: {
-                kind:
-                  data.proposal.target?.kind === 'role'
-                    ? SteerTargetKind.ROLE
-                    : data.proposal.target?.kind === 'attempt'
-                      ? SteerTargetKind.ATTEMPT
-                      : data.proposal.target?.kind === 'item'
-                        ? SteerTargetKind.ITEM
-                        : SteerTargetKind.RUN,
-                id: data.proposal.target?.id ?? '',
-              },
-            },
-          },
-        },
-      });
     }
   }
-  for (const [id, batch] of updates)
-    if (batch.length > 0) {
-      const bytes = [
-        ...toBinary(
-          TailResponseSchema,
-          create(TailResponseSchema, {
-            records: batch.map(record => toBinary(RecordSchema, record)),
-            throughSeq: batch.at(-1)?.seq ?? 0n,
-          }),
-        ),
-      ];
-      await page.evaluate(
-        ({id, bytes}) =>
-          (
-            window as unknown as {fakeGateway: {seedChat(id: string, bytes: number[]): void}}
-          ).fakeGateway.seedChat(id, bytes),
-        {id, bytes},
-      );
-    }
+  for (const [id, batch] of updates) if (batch.length > 0) await seedChat(page, id, batch);
+}
+
+async function seedChat(page: Page, id: string, batch: readonly StoreRecord[]): Promise<void> {
+  const bytes = [
+    ...toBinary(
+      TailResponseSchema,
+      create(TailResponseSchema, {
+        records: batch.map(record => toBinary(RecordSchema, record)),
+        throughSeq: batch.at(-1)?.seq ?? 0n,
+      }),
+    ),
+  ];
+  await page.evaluate(
+    ({id, bytes}) =>
+      (
+        window as unknown as {fakeGateway: {seedChat(id: string, bytes: number[]): void}}
+      ).fakeGateway.seedChat(id, bytes),
+    {id, bytes},
+  );
 }
