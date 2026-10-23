@@ -35,6 +35,7 @@ from vibesys.orchestration.dynamic.search._operations import (
 from vibesys.orchestration.dynamic.search._outcomes import (
     UNSETTLED,
     Candidate,
+    CandidateMeasured,
     Closing,
     Evidence,
     MergeReport,
@@ -47,6 +48,8 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     blocked_failure,
     ended_by,
     failure_of,
+    measured_by_settlement,
+    measured_by_workstream,
     round_of,
     snapshot_of,
 )
@@ -174,6 +177,7 @@ __all__ = [
     "BlockerKind",
     "Bound",
     "Candidate",
+    "CandidateMeasured",
     "Closing",
     "CombinePick",
     "CombineSource",
@@ -282,6 +286,8 @@ __all__ = [
     "fence",
     "implement_prompt",
     "ingest",
+    "measured_by_settlement",
+    "measured_by_workstream",
     "options",
     "planning_key",
     "refusal",
