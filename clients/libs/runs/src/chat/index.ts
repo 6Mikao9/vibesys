@@ -45,15 +45,68 @@ export function steerModeOf(mode: string | undefined): SteerMode {
       ? SteerMode.INTERRUPT
       : SteerMode.NEXT_TURN;
 }
-/** The wire enum for a steer target's UI-facing kind; an unnamed kind is the run. */
-export function steerTargetKindOf(kind: string | undefined): SteerTargetKind {
-  return kind === 'role'
-    ? SteerTargetKind.ROLE
-    : kind === 'attempt'
-      ? SteerTargetKind.ATTEMPT
-      : kind === 'item'
-        ? SteerTargetKind.ITEM
-        : SteerTargetKind.RUN;
+
+declare const nonEmpty: unique symbol;
+/** A role, attempt or item id; only `targetId` makes one, so an empty id cannot be built. */
+export type TargetId = string & {readonly [nonEmpty]: true};
+
+export function targetId(id: string | null | undefined): TargetId {
+  if (id === null || id === undefined || id === '') throw new Error('A steer target needs an id');
+  return id as TargetId;
+}
+
+/**
+ * A steer target as the protocol takes it: the whole run names no id, every other kind exactly
+ * one (the contract rejects an empty id and an id on the run alike).
+ */
+export type SteerTargetInit =
+  | {readonly kind: SteerTargetKind.RUN}
+  | {
+      readonly kind: SteerTargetKind.ROLE | SteerTargetKind.ATTEMPT | SteerTargetKind.ITEM;
+      readonly id: TargetId;
+    };
+
+/** The target the UI's kind name and id mean; an unnamed kind is the whole run. */
+export function steerTargetOf(
+  kind: string | undefined,
+  id: string | null | undefined,
+): SteerTargetInit {
+  switch (kind) {
+    case 'role':
+      return {kind: SteerTargetKind.ROLE, id: targetId(id)};
+    case 'attempt':
+      return {kind: SteerTargetKind.ATTEMPT, id: targetId(id)};
+    case 'item':
+      return {kind: SteerTargetKind.ITEM, id: targetId(id)};
+    default:
+      return {kind: SteerTargetKind.RUN};
+  }
+}
+
+/** What a steer card sends, as the shell receives it. */
+export type ChatControl =
+  | {readonly action: 'withdraw'; readonly withdraws: string}
+  | {
+      readonly action: 'steer';
+      readonly text: string;
+      readonly mode?: string | undefined;
+      readonly target?:
+        | {readonly kind?: string | undefined; readonly id?: string | null | undefined}
+        | undefined;
+    };
+
+/** The typed intent a card's control stands for; a malformed target throws before anything is sent. */
+export function chatControlIntent(control: ChatControl) {
+  if (control.action === 'withdraw')
+    return {case: 'withdraw' as const, value: {withdraws: control.withdraws}};
+  return {
+    case: 'steer' as const,
+    value: {
+      text: control.text,
+      mode: steerModeOf(control.mode),
+      target: steerTargetOf(control.target?.kind, control.target?.id),
+    },
+  };
 }
 export {HOST_CALL_METHOD, INTENT_TAIL_METHOD as CHAT_TAIL_METHOD} from '../intents/index.js';
 export const CHAT_BLOBS_METHOD = `/${HostService.typeName}/${HostService.method.getBlobs.name}`;

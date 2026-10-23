@@ -9,7 +9,7 @@ import {
   type Record as StoreRecord,
   TailResponseSchema,
 } from '@vibesys/proto';
-import {steerModeOf, steerTargetKindOf} from '@vibesys/runs/chat';
+import {steerModeOf, steerTargetOf} from '@vibesys/runs/chat';
 
 type Body = NonNullable<MessageInitShape<typeof RecordSchema>['body']>;
 type ChatEvent = NonNullable<MessageInitShape<typeof ChatRecordSchema>['event']>;
@@ -60,10 +60,7 @@ function bodiesOf(event: RunEvent, id: string, records: readonly StoreRecord[]):
           requestId,
           text: data.proposal.text,
           mode: steerModeOf(data.proposal.mode),
-          target: {
-            kind: steerTargetKindOf(data.proposal.target?.kind),
-            id: data.proposal.target?.id ?? '',
-          },
+          target: steerTargetOf(data.proposal.target?.kind, data.proposal.target?.id),
         },
       }),
     ];

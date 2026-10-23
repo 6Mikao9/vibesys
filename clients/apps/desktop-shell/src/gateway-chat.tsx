@@ -8,28 +8,10 @@ import {
 import {sessionCore} from '@vibesys/feature-run-sessions/state';
 import {newRequestId} from '@vibesys/request-identity';
 import type {CoreState} from '@vibesys/run-state';
-import {type HarnessOption, steerModeOf, steerTargetKindOf} from '@vibesys/runs/chat';
+import {chatControlIntent, type HarnessOption} from '@vibesys/runs/chat';
 import {addressedIntent, runReference} from '@vibesys/runs/intents';
 import {Button, Stack, Text} from '@vibesys/ui';
 import {useEffect, useMemo} from 'react';
-
-type ControlRequest = Parameters<RunChatPorts['control']>[0];
-
-function controlIntent(request: ControlRequest) {
-  if (request.action === 'withdraw')
-    return {case: 'withdraw' as const, value: {withdraws: request.withdraws}};
-  return {
-    case: 'steer' as const,
-    value: {
-      text: request.text,
-      mode: steerModeOf(request.mode),
-      target: {
-        kind: steerTargetKindOf(request.target?.kind),
-        id: request.target?.id ?? '',
-      },
-    },
-  };
-}
 
 function harnessEntry(option: HarnessOption) {
   return {
@@ -102,7 +84,7 @@ export function useGatewayChat(
             runReference(input.projectRoot, input.runId),
             request.control_id,
             input.epoch,
-            controlIntent(request),
+            chatControlIntent(request),
           ),
           lifetime.signal,
         );
