@@ -119,6 +119,24 @@ export class Controls {
     await this.#append(records);
   }
 
+  /**
+   * The run applies the newest posted control: it writes the IntentState that settles it, after
+   * the record numbered `after` when the run has since moved on past the fixture's records.
+   */
+  async settle(action: IntentAction, after?: bigint): Promise<void> {
+    if (after !== undefined) this.#sequence = after;
+    const record = create(RecordSchema, {
+      seq: ++this.#sequence,
+      epoch: 1,
+      at: {seconds: 1700000200n},
+      body: {
+        case: 'intent',
+        value: {controlId: this.lastId(), action, step: IntentStep.APPLIED},
+      },
+    });
+    await this.#append([record]);
+  }
+
   /** The newest turn span of that role, written again with a steer link to the control. */
   #linked(controlId: string, role: string, seq: bigint): StoreRecord {
     const turn = [...this.#records].reverse().find(record => {

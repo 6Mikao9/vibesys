@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {expect, type Page, test} from '@playwright/test';
-import {RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
+import {IntentAction, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
 import {Controls} from './chat-controls.js';
 import {
   type FakeBridgeSeed,
@@ -10,7 +10,7 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {addInitScripts, initScript} from './init-scripts.js';
-import {journeyFixture, journeyScript, transitionJourney} from './journey-world.js';
+import {journeyFixture, journeyHead, journeyScript, transitionJourney} from './journey-world.js';
 import {installGatewayOnly} from './retired-run-bridge.js';
 import {STARTED_AT} from './started-at.js';
 
@@ -160,6 +160,7 @@ test('a live run drains from the header over its session, and is let go', async 
 
   await push(page, listed([server('paused', 'user')]));
   await transitionJourney(page, 'empty', 'parked');
+  await controls.settle(IntentAction.PAUSE, journeyHead('parked'));
   // The drained writer has left: the host reports the writer ended, so Resume is admissible.
   await page.evaluate(
     bytes =>
@@ -168,7 +169,7 @@ test('a live run drains from the header over its session, and is let go', async 
       ...toBinary(
         WatchRunsResponseSchema,
         create(WatchRunsResponseSchema, {
-          runId: 'run-a',
+          runId: RUN_ID,
           liveness: RunLiveness.PARKED,
           head: {epoch: 1},
         }),

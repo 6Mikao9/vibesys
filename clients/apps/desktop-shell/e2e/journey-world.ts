@@ -80,6 +80,20 @@ export async function appendJourney(page: Page, after: number, through: number):
   }
 }
 
+/** The sequence of the last record a journey's committed replay holds. */
+export function journeyHead(name: Journey): bigint {
+  const replay = fromBinary(
+    ClientReplaySchema,
+    readFileSync(new URL(`./scenarios/${name}.pb`, import.meta.url)),
+  );
+  return replay.batches
+    .flatMap(batch => batch.records)
+    .reduce((head, bytes) => {
+      const {seq} = fromBinary(RecordSchema, bytes);
+      return seq > head ? seq : head;
+    }, 0n);
+}
+
 /** The real skeleton builder appends the requested lifecycle after this scenario's prefix. */
 export async function transitionJourney(page: Page, from: Journey, to: Journey): Promise<void> {
   const read = (name: Journey) =>
