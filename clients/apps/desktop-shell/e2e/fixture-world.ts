@@ -39,7 +39,6 @@ import {type FixtureServerMethods, installFakeFixtureServer} from './fake-fixtur
 import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
 import {FAKE_OFFER} from './fake-offer.js';
 import {installFakeRun, type RunMethods} from './fake-run.js';
-import {type FakeSummarySpanSeed, installFakeSummarySpan} from './fake-summary-span.js';
 import {addInitScripts, initScript as script} from './init-scripts.js';
 import {nativeFixtureScript} from './native-fixture.js';
 import {STARTED_AT} from './started-at.js';
@@ -89,7 +88,6 @@ export interface OpenOptions {
   readonly theme?: 'ink' | 'paper';
   /** A finished run's history served in small pages, held part-way: see `fake-history.ts`. */
   readonly historyServing?: Omit<FakeHistorySeed, 'events'>;
-  readonly summaryServing?: Omit<FakeSummarySpanSeed, 'events'>;
 }
 
 /** The registry phase a run that ended with `outcome` stays in. */
@@ -231,11 +229,6 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
   );
   if (options.historyServing !== undefined) {
     scripts.push(script(installFakeHistory, {...options.historyServing, events: fixture.events}));
-  }
-  if (options.summaryServing !== undefined) {
-    scripts.push(
-      script(installFakeSummarySpan, {...options.summaryServing, events: fixture.events}),
-    );
   }
   scripts.push(nativeFixtureScript(fixture));
   return scripts;
