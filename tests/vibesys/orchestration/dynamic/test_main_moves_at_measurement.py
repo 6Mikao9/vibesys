@@ -392,7 +392,9 @@ def test_a_measurement_judged_once_is_not_judged_again_when_the_input_bar_later_
     start = start_of(0, BASE)
     record.running[start.key] = start
 
-    record.candidate_measured(report_of(0, work, start))
+    report = report_of(0, work, start)
+    assert report is not None
+    record.candidate_measured(report)
     assert record.main.revision == BASE
 
     record.refined(
