@@ -46,3 +46,8 @@ def test_every_declared_scalar_measurement_has_canonical_metric_rows(path: Path)
         attrs = json.loads(label.get("attrs_json") or "{}")
         if "metric_value" in attrs:
             assert attrs.get("metrics"), f"{path.name}: {span['id']} has no native metric rows"
+            metric = attrs.get("metric_name", fixture["objective"]["metric"])
+            readings = {row["name"]: row["value"] for row in attrs["metrics"]}
+            assert readings.get(metric) == attrs["metric_value"], (
+                f"{path.name}: {span['id']} scalar {metric} disagrees with its canonical metric row"
+            )
