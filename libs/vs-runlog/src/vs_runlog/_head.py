@@ -3,6 +3,7 @@
 from vs_proto.api import (
     AgentTurnAttrs,
     Direction,
+    EpochStarted,
     GateAttrs,
     GateSubject,
     HeadlineObjective,
@@ -49,19 +50,47 @@ def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead 
         points = next((h.points for h in state.metrics if h.series == objective.series), [])
         readings = [v.point for v in points if v.point is not None]
         head.objective = HeadlineObjective(series=declaration)
+        input_value = _input_value(state, epoch, objective.series)
+        if input_value is not None:
+            head.objective.input_value = input_value
         if readings:
             values = [p.value for p in readings]
             head.objective.best_value = (
                 max(values) if objective.direction == Direction.MAX else min(values)
             )
-            input_value = next(
-                (p.value for p in readings if not p.has_field("span") or _is_input(state, p.span)),
-                None,
-            )
-            if input_value is not None:
-                head.objective.input_value = input_value
             head.chart_points = readings[-256:]
     return head
+
+
+def _input_value(state: Keyframe, epoch: EpochStarted, series: str) -> float | None:
+    """The input's measurement of the objective, as the run states it.
+
+    A run written with the typed fact states it. A run written before the fact existed is read once,
+    here: the objective's first reading by a spanless point or an input gate is the input's.
+    """
+    fact = None if epoch.run is None else epoch.run.input_measurement
+    if fact is not None and fact.state is not None:
+        return fact.state.value.value if fact.state.field == "measured" else None
+    inputs = {
+        span_id
+        for span_id, history in state.spans.items()
+        if history.versions
+        and (span := history.versions[-1].span) is not None
+        and span.label is not None
+        and span.label.kind == "gate"
+        and span.label.attrs is not None
+        and GateAttrs.from_binary(span.label.attrs.value).subject is GateSubject.INPUT
+    }
+    return next(
+        (
+            point.point.value
+            for history in state.metrics
+            if history.series == series
+            for point in history.points
+            if point.point is not None and (not point.point.span or point.point.span in inputs)
+        ),
+        None,
+    )
 
 
 def _add_usage(total: TokenUsage | None, usage: TokenUsage) -> TokenUsage:
@@ -79,13 +108,3 @@ def _add_usage(total: TokenUsage | None, usage: TokenUsage) -> TokenUsage:
         if usage.has_field(field):
             setattr(result, field, (getattr(result, field) or 0) + value)
     return result
-
-
-def _is_input(state: Keyframe, span_id: str) -> bool:
-    history = state.spans.get(span_id)
-    if history is None or not history.versions:
-        return False
-    span = history.versions[-1].span
-    if span is None or span.label is None or span.label.kind != "gate" or span.label.attrs is None:
-        return False
-    return GateAttrs.from_binary(span.label.attrs.value).subject is GateSubject.INPUT

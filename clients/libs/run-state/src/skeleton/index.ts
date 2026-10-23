@@ -110,6 +110,7 @@ export function readSkeleton(
   view: StoreView,
   objectiveText = '',
   content?: SkeletonContent,
+  inputFallback?: number,
 ): SkeletonReading {
   screenSequence(view.seq);
   const epoch = view.epochs.at(-1)?.epoch;
@@ -149,7 +150,11 @@ export function readSkeleton(
         },
       }
     : null;
-  const spans = measuredSpans(screenSpans(Object.values(view.spans), skeleton), view);
+  const spans = measuredSpans(
+    screenSpans(Object.values(view.spans), skeleton),
+    view,
+    inputFallback,
+  );
   const times = [
     ...view.metrics.flatMap(history =>
       history.points.flatMap(item => (item.point ? [item.point.clock] : [])),
@@ -163,7 +168,7 @@ export function readSkeleton(
     comparisons: comparisonFacts(view),
     baselines: baselineFacts(view),
     pauses: capacityIntervals(view),
-    input: inputMeasurement(spans, view),
+    input: inputMeasurement(view, inputFallback),
     inputFailures: inputFailures(skeleton, view),
     startup: startupSteps(skeleton, view.seq),
     latest: times.reduce<number | null>(

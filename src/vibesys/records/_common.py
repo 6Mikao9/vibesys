@@ -32,6 +32,21 @@ def enum_value[T: Enum](enum: type[T], value: str) -> T:
     return enum[value.upper().replace("-", "_")]
 
 
+class InputReboundError(ValueError):
+    """A second, different measurement of the input in one epoch: the fact is written once."""
+
+
+class MetricReboundError(ValueError):
+    """A second, different reading at a reading's identity: a reading is immutable once written."""
+
+
+def measured_input(fact: p.InputMeasurement | None) -> p.MeasuredInput | None:
+    """The measurement, when the fact says the input was measured."""
+    if fact is None or fact.state is None or fact.state.field != "measured":
+        return None
+    return fact.state.value
+
+
 class Projection:
     """A local builder; no mutable value is shared with its input state."""
 
@@ -49,6 +64,12 @@ class Projection:
         self.intents = dict(state.intents)
         self.primary_series = state.primary_series
         self.objective_inferred = state.objective_inferred
+        self.input_measurement = (
+            None
+            if state.input_measurement is None
+            else p.InputMeasurement.from_binary(state.input_measurement)
+        )
+        self.input_inherited = state.input_inherited
         self.metric_values = dict(state.metric_values)
         self.records: list[p.Record] = []
         self.blobs: list[BlobWrite] = []
@@ -99,13 +120,62 @@ class Projection:
         unit: str = "",
         direction: p.Direction = p.Direction.NONE,
         role: p.SeriesRole = p.SeriesRole.REFERENCE,
+        input_gate: bool = False,
     ) -> None:
+        """Record a reading; ``input_gate`` marks one taken by the input's gate.
+
+        A reading at a span is immutable at its identity (series and span; a spanless series is a time series): the same value again is nothing,
+        a different one is :class:`MetricReboundError`. The first objective reading of the input's gate
+        is the input's measurement, written once as a typed fact (:meth:`measure_input`).
+        """
         self._declare_metric(point.series, unit, direction, role)
         key = (point.series, point.span)
         value = (point.value, point.clock)
-        if self.metric_values.get(key) != value:
+        known = self.metric_values.get(key)
+        if point.span and known is not None and known[0] != point.value:
+            message = f"{point.series} at {point.span}: {known[0]} cannot become {point.value}"
+            raise MetricReboundError(message)
+        if input_gate and point.span is not None and self._is_objective(point.series):
+            self.measure_input(point.series, point.value, point.span)
+        if known != value:
             self.metric_values[key] = value
             self.emit("metric", point)
+
+    def _is_objective(self, series: str) -> bool:
+        run = None if self.header is None else self.header.run
+        return run is not None and bool(run.objectives) and run.objectives[0].series == series
+
+    def measure_input(self, series: str, value: float, span: str) -> None:
+        """Write the input's objective measurement into the epoch declaration, once."""
+        current = self.input_measurement
+        measured = measured_input(current)
+        if measured is not None and not self.input_inherited:
+            if measured.value != value or measured.series != series:
+                message = f"the input measured {measured.value}, not {value} ({series} at {span})"
+                raise InputReboundError(message)
+            return
+        self.input_inherited = False
+        self._set_input(
+            p.InputMeasurement(
+                state=p.Oneof("measured", p.MeasuredInput(series=series, value=value, span=span))
+            )
+        )
+
+    def give_up_input(self) -> None:
+        """Say that the input was not measured, unless it already was."""
+        current = self.input_measurement
+        if measured_input(current) is not None:
+            return
+        self._set_input(p.InputMeasurement(state=p.Oneof("unmeasured", p.UnmeasuredInput())))
+
+    def _set_input(self, measurement: p.InputMeasurement) -> None:
+        self.input_measurement = measurement
+        if self.header is None or self.header.run is None:
+            return
+        header = p.EpochStarted.from_binary(self.header.to_binary())
+        if header.run is not None:
+            header.run.input_measurement = measurement
+        self.emit("declaration_amended", header)
 
     def _declare_metric(
         self, series: str, unit: str, direction: p.Direction, role: p.SeriesRole
@@ -219,6 +289,10 @@ class Projection:
             waits=tuple(self.waits.items()),
             intents=tuple(self.intents.items()),
             primary_series=self.primary_series,
+            input_measurement=None
+            if self.input_measurement is None
+            else self.input_measurement.to_binary(),
+            input_inherited=self.input_inherited,
             objective_inferred=self.objective_inferred,
             metric_values=tuple(self.metric_values.items()),
             ending=self.ending,

@@ -32,6 +32,8 @@ class MappingState:
     intents: tuple[tuple[str, bytes], ...] = ()
     primary_series: str | None = None
     objective_inferred: bool = False
+    input_measurement: bytes | None = None
+    input_inherited: bool = False
     metric_values: tuple[tuple[tuple[str, str | None], tuple[float, float]], ...] = ()
     ending: bytes | None = None
     pending: tuple[bytes, ...] = ()

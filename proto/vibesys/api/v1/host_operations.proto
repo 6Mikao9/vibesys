@@ -420,23 +420,4 @@ service HostOperationsService {
       }
     };
   }
-  // Converts stopped pre-transport runs of one project. Repeating is safe: a
-  // converted run is skipped. The caller repeats until the response is complete.
-  rpc ConvertSavedRuns(vibesys.host.v1.ConvertSavedRunsRequest) returns (vibesys.host.v1.ConvertSavedRunsResponse) {
-    option (vibesys.host.v1.operation) = {
-      operation_id: 39
-      request_tag: 39
-      response_tag: 39
-      cap_ms: 120000
-      grace_ms: 5000
-      effect: OPERATION_EFFECT_IDEMPOTENT_MUTATION
-      retry: RETRY_RECONCILE_SAME_ID
-      cardinality: CARDINALITY_UNARY
-      executor: EXECUTOR_CHECKOUT
-      correlation: {
-        request_path: 1
-        response_path: 1
-      }
-    };
-  }
 }

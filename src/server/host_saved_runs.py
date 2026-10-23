@@ -1,7 +1,9 @@
-"""Saved-run discovery projection independent of history conversion.
+"""Saved-run discovery: the project catalog's metadata, and whether each run has a typed log.
 
-The project catalog supplies metadata; this module never derives run facts.
-``page_saved_runs`` fences pages by that catalog without reading or importing journals. This command module loads only for saved-run discovery.
+The project catalog supplies metadata; this module never derives run facts. ``page_saved_runs``
+fences pages by that catalog and reads no journal. A run kept in the old format is listed as such
+until it is migrated (``vibesys host convert-runs``). This command module loads only for
+saved-run discovery.
 """
 
 from __future__ import annotations
@@ -20,14 +22,13 @@ __all__ = ["page_saved_runs"]
 
 
 def _availability(project: Project, run: pb.SavedRun) -> None:
-    """Say whether history is readable now; conversion and publication have their own owner."""
+    """A run is readable when it has a typed log; any other run is in the old format."""
     pb = import_module("vs_proto.api").host_payloads
-    observed = import_module("vibesys.api.transport").observe_conversion(project, run.run_id)
-    run.imported = (
-        pb.SavedRunImport.AVAILABLE if observed.available else pb.SavedRunImport.UNAVAILABLE
-    )
-    if not observed.available:
-        run.detail = observed.detail
+    if project.run_log_path_for(project.root, run.run_id).is_file():
+        run.imported = pb.SavedRunImport.AVAILABLE
+    else:
+        run.imported = pb.SavedRunImport.UNAVAILABLE
+        run.detail = "old format"
 
 
 def page_saved_runs(
@@ -37,8 +38,7 @@ def page_saved_runs(
 ) -> pb.ListSavedRunsResponse:
     """Return at most 200 rows and 1 MiB; refuse continuation after catalog drift.
 
-    Listing reads at most one head or refusal per run, never the journal or
-    conversion. Unavailable history stays listed with a reason.
+    Listing checks one file per run. A run in the old format stays listed, labelled as such.
     """
     project_type = import_module("vs_project.api").Project
     pb = import_module("vs_proto.api").host_payloads

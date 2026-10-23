@@ -37,14 +37,16 @@ export function projectSkeleton(
   objectiveText = '',
   options: {head?: RunLivenessHint['head']; content?: SkeletonContent} = {},
 ): RunModel {
+  const headline = readHeadline(options.head, seq);
   const reading = readSkeleton(
     skeleton,
     seekSkeleton(skeleton, seq),
     objectiveText,
     options.content,
+    headline?.inputValue,
   );
   return {
-    headline: readHeadline(options.head, seq),
+    headline,
     input: reading.input,
     at: Number(seq),
     trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},
@@ -98,6 +100,7 @@ export function skeletonScreenState(
     ),
     '',
     content,
+    whole.headline?.inputValue,
   );
   const lifecycle = observedLifecycle(skeleton, hint);
   const status = lifecycle.status;

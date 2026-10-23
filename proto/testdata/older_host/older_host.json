@@ -8,12 +8,6 @@
       "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'complete-paths' (choose from 'convert-run', 'convert-runs')\n"
     },
     {
-      "command": "convert-saved-runs",
-      "exit_code": 2,
-      "stdout_bytes": 0,
-      "stderr": "usage: vibesys host [-h] {convert-run,convert-runs} ...\nvibesys host: error: argument method: invalid choice: 'convert-saved-runs' (choose from 'convert-run', 'convert-runs')\n"
-    },
-    {
       "command": "copy-project",
       "exit_code": 2,
       "stdout_bytes": 0,

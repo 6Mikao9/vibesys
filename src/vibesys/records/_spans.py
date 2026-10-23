@@ -141,6 +141,7 @@ def _metric_rows(projection: Projection, source: CoreSpan, span: p.Span) -> None
             ),
             unit=row.unit or "",
             direction=enum_value(p.Direction, row.direction),
+            input_gate=subject(projection, source.parent) is p.GateSubject.INPUT,
         )
 
 

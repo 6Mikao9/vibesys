@@ -12,7 +12,6 @@ from vibesys.api.host_operations._compute import (
     ClusterUnknownError,
     serve_cluster,
 )
-from vibesys.api.host_operations._convert import serve_convert_saved_runs
 from vibesys.api.host_operations._handlers import handlers
 from vibesys.api.host_operations._login import LoginRefusedFact, LoginStartedFact, serve_login
 from vibesys.api.host_operations._project import (
@@ -49,7 +48,6 @@ __all__ = [
     "execute_read",
     "host_read_failure",
     "serve_cluster",
-    "serve_convert_saved_runs",
     "serve_login",
     "serve_project",
     "serve_start",

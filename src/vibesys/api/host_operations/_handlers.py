@@ -100,7 +100,6 @@ MUTATION_SLOTS = (
     "create_example",
     "copy_project",
     "start_run",
-    "convert_saved_runs",
 )
 
 

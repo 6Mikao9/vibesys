@@ -1,9 +1,8 @@
-"""Native discovery pages preserve metadata and observe conversion without doing work."""
+"""Native discovery pages preserve metadata and label runs kept in the old format."""
 
 from __future__ import annotations
 
 import gzip
-import os
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,7 +13,6 @@ from tests.server.host_helper_support import fake_host
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import answer_registered_read
 from server.host_saved_runs import page_saved_runs
-from vibesys.api.transport import convert_run
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_proto.api import (
@@ -28,7 +26,7 @@ from vs_proto.api import (
     validate,
 )
 from vs_proto.api import host_payloads as pb
-from vs_runlog.api import FakeFileSync, RunLock, encode_frame
+from vs_runlog.api import RunLock, encode_frame
 from vs_sim.api.testing import ManualClock, SimNetwork, SimThreads
 
 
@@ -55,7 +53,7 @@ def test_discovery_fences_pages_preserves_metadata_and_reports_missing_history(
     assert len(first.runs) == 200
     assert first.next_offset == 200
     assert all(row.imported == pb.SavedRunImport.UNAVAILABLE for row in first.runs)
-    assert all(row.detail == "journal is missing" for row in first.runs)
+    assert all(row.detail == "old format" for row in first.runs)
     assert first.runs[0].task == "task-a"
     assert first.runs[0].display_name == "Saved run"
     request = pb.ListSavedRunsRequest(
@@ -222,64 +220,3 @@ def test_discovery_dates_native_only_runs_from_the_first_epoch_and_sorts_them(
         (run_id, Timestamp.from_seconds(datetime(2026, 10, day, tzinfo=UTC).timestamp()))
         for run_id, day in [("run-z", 2), ("run-a", 20)]
     ]
-
-
-def test_old_agent_turn_without_identity_has_a_final_typed_refusal_in_every_listing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
-    root = tmp_path / "project"
-    root.mkdir()
-    path = Project.event_journal_path_for(root, "run-1")
-    path.parent.mkdir(parents=True)
-    fixture = Path(__file__).resolve().parents[1] / "vibesys/run/fixtures/pre-agent-identity.jsonl"
-    path.write_bytes(fixture.read_bytes())
-
-    # Conversion owns the refusal; discovery only reads the persisted observation.
-    os.utime(path, (100, 100))
-    convert_run(
-        Project.open(root),
-        "run-1",
-        clock=ManualClock(start=1000),
-        threads=SimThreads(),
-        install_sync=FakeFileSync(),
-    )
-    first = page_saved_runs(
-        pb.ListSavedRunsRequest(request_id="first", project=str(root)),
-        root,
-        [_run(1)],
-    )
-    assert first.runs[0].imported == pb.SavedRunImport.UNAVAILABLE
-    assert first.runs[0].detail.startswith("cannot convert:")
-    assert "agent: Field required" in first.runs[0].detail
-    receipt = path.parent / "run.conversion.pb"
-    before = receipt.stat().st_mtime_ns
-    second = page_saved_runs(
-        pb.ListSavedRunsRequest(request_id="again", project=str(root)),
-        root,
-        [_run(1)],
-    )
-    assert second.runs[0].detail == first.runs[0].detail
-    assert receipt.stat().st_mtime_ns == before
-    assert not (path.parent / "run.log").exists()
-
-
-def test_listing_keeps_a_recent_prelock_journal_live_without_creating_a_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
-    root = tmp_path / "project"
-    root.mkdir()
-    path = Project.event_journal_path_for(root, "run-1")
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"still writing")
-    os.utime(path, (1000, 1000))
-    before = {p.name: p.read_bytes() for p in path.parent.iterdir()}
-    result = page_saved_runs(
-        pb.ListSavedRunsRequest(request_id="live", project=str(root)),
-        root,
-        [_run(1)],
-    )
-    assert result.runs[0].imported == pb.SavedRunImport.UNAVAILABLE
-    assert result.runs[0].detail == "History conversion pending"
-    assert {p.name: p.read_bytes() for p in path.parent.iterdir()} == before

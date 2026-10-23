@@ -53,7 +53,6 @@ def _slots() -> tuple[str, ...]:
         "create_example",
         "copy_project",
         "start_run",
-        "convert_saved_runs",
     )
 
 

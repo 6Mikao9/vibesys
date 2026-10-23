@@ -26,7 +26,6 @@ export const operationPolicies = Object.freeze({
   TestCluster: Object.freeze({name: 'TestCluster', id: 33, requestTag: 33, responseTag: 33, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   StartRun: Object.freeze({name: 'StartRun', id: 36, requestTag: 36, responseTag: 36, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 3, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   TerminateRun: Object.freeze({name: 'TerminateRun', id: 38, requestTag: 38, responseTag: 38, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
-  ConvertSavedRuns: Object.freeze({name: 'ConvertSavedRuns', id: 39, requestTag: 39, responseTag: 39, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   Login: Object.freeze({name: 'Login', id: 40, requestTag: 40, responseTag: 40, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 3, retry: 3, executor: 1, cardinality: 2, firstEventMs: 25000} as const),
 });
 export const hostCallBudgets = Object.freeze({
@@ -141,12 +140,6 @@ export function acceptTerminateRun(input: MessageInitShape<typeof pb.TerminateRu
 }
 export async function callTerminateRun(transport: OperationTransport, request: Accepted<"TerminateRun">, signal: OperationSignal): Promise<pb.TerminateRunResponse> {
   return call(transport, {policy: operationPolicies.TerminateRun, requestSchema: pb.TerminateRunRequestSchema, responseSchema: pb.TerminateRunResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
-}
-export function acceptConvertSavedRuns(input: MessageInitShape<typeof pb.ConvertSavedRunsRequestSchema>): Accepted<"ConvertSavedRuns"> {
-  return accept(operationPolicies.ConvertSavedRuns, pb.ConvertSavedRunsRequestSchema, input);
-}
-export async function callConvertSavedRuns(transport: OperationTransport, request: Accepted<"ConvertSavedRuns">, signal: OperationSignal): Promise<pb.ConvertSavedRunsResponse> {
-  return call(transport, {policy: operationPolicies.ConvertSavedRuns, requestSchema: pb.ConvertSavedRunsRequestSchema, responseSchema: pb.ConvertSavedRunsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptLogin(input: MessageInitShape<typeof pb.LoginRequestSchema>): Accepted<"Login"> {
   return accept(operationPolicies.Login, pb.LoginRequestSchema, input);
@@ -281,8 +274,6 @@ export function encodeHostMutate(checkout: string, name: string, payload: Uint8A
       return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'startRun', value: fromBinary(pb.StartRunRequestSchema, payload)}}));
     case 'TerminateRun':
       return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'terminateRun', value: fromBinary(pb.TerminateRunRequestSchema, payload)}}));
-    case 'ConvertSavedRuns':
-      return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'convertSavedRuns', value: fromBinary(pb.ConvertSavedRunsRequestSchema, payload)}}));
     default: throw new Error('unknown mutation');
   }
 }
@@ -313,9 +304,6 @@ export function decodeHostMutate(name: string, payload: Uint8Array): Uint8Array 
     case 'TerminateRun':
       if (result.case !== 'terminateRun') throw new Error('response correlation mismatch');
       return toBinary(pb.TerminateRunResponseSchema, result.value);
-    case 'ConvertSavedRuns':
-      if (result.case !== 'convertSavedRuns') throw new Error('response correlation mismatch');
-      return toBinary(pb.ConvertSavedRunsResponseSchema, result.value);
     default: throw new Error('unknown mutation');
   }
 }
@@ -346,7 +334,6 @@ export const mutateBudgets = Object.freeze({
   testCluster: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),
   startRun: Object.freeze({capMs: 60000, graceMs: 5000, totalMs: 65000} as const),
   terminateRun: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
-  convertSavedRuns: Object.freeze({capMs: 120000, graceMs: 5000, totalMs: 125000} as const),
 } as const);
 export const watchBudgets = Object.freeze({
   login: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 25000} as const),

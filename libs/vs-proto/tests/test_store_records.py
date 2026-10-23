@@ -109,12 +109,10 @@ def message_examples() -> dict[str, Message]:
         ]
         for message in walk(root)
     }
-    examples["RunConversionRefusal"] = p.RunConversionRefusal(
-        journal_size=1, journal_modified_ns=1, reason="cannot convert: historical attrs"
-    )
-    examples["RunConversionReceipt"] = p.RunConversionReceipt(
-        journal_size=1, journal_modified_ns=1, projection_version=1
-    )
+    measured = p.MeasuredInput(series="speed", value=1.5, span="gate:input:benchmark:default")
+    examples["MeasuredInput"] = measured
+    examples["UnmeasuredInput"] = p.UnmeasuredInput()
+    examples["InputMeasurement"] = p.InputMeasurement(state=p.Oneof("measured", measured))
     examples["Failure"] = p.Failure(kind=p.SpanFailureKind.OUTCOME, message="Gate failed")
     return examples
 
