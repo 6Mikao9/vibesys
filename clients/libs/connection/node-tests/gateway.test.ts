@@ -429,7 +429,6 @@ const deadlineInputs = {
   removeCluster: {name: 'cluster-a'},
   testCluster: {cluster},
   startRun: {project: '/project'},
-  convertSavedRuns: {project: '/project'},
   terminateRun: {
     projectRoot: '/project',
     runId: 'run-a',

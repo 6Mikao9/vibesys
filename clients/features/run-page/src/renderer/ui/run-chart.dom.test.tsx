@@ -12,6 +12,8 @@ import {
   GateAttrsSchema,
   GateStage,
   GateSubject,
+  InputMeasurementSchema,
+  MeasuredInputSchema,
   RecordSchema,
   type RunHead,
   RunHeadSchema,
@@ -147,7 +149,17 @@ function withStandaloneInput(
     epoch: 1,
     body: {case: 'metric', value: {series: 'throughput', span: 'input-gate', value, clock: 1}},
   });
-  return [...records.slice(0, 2), gate, point, ...records.slice(2)].map((record, index) =>
+  // The writer states the input it measured in the epoch declaration; the chart reads that.
+  const opening = clone(RecordSchema, records[0] as (typeof records)[number]);
+  if (opening.body.case === 'epochStarted' && opening.body.value.run) {
+    opening.body.value.run.inputMeasurement = create(InputMeasurementSchema, {
+      state: {
+        case: 'measured',
+        value: create(MeasuredInputSchema, {series: 'throughput', value, span: 'input-gate'}),
+      },
+    });
+  }
+  return [opening, ...records.slice(1, 2), gate, point, ...records.slice(2)].map((record, index) =>
     create(RecordSchema, {...record, seq: BigInt(index + 1)}),
   );
 }

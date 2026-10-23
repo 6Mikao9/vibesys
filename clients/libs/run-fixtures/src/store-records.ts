@@ -54,7 +54,7 @@ function descriptors() {
 
 type Body = NonNullable<MessageInitShape<typeof RecordSchema>['body']>;
 
-function epochBody(epoch = 1, objective = OBJECTIVE, hash = HASH): Body {
+function epochBody(epoch = 1, objective = OBJECTIVE, hash = HASH, input?: number): Body {
   return {
     case: 'epochStarted',
     value: create(EpochStartedSchema, {
@@ -72,6 +72,16 @@ function epochBody(epoch = 1, objective = OBJECTIVE, hash = HASH): Body {
         objective: {sha256: hash, size: BigInt(objective.length), mediaType: 'text/plain'},
         objectives: [{series: 'throughput', direction: Direction.MAX}],
         expectedRoles: ['implementer'],
+        ...(input === undefined
+          ? {}
+          : {
+              inputMeasurement: {
+                state: {
+                  case: 'measured' as const,
+                  value: {series: 'throughput', value: input, span: 'input-gate'},
+                },
+              },
+            }),
       },
       series: [
         {name: 'throughput', unit: 'ops/s', direction: Direction.MAX, role: SeriesRole.OBJECTIVE},
@@ -249,7 +259,12 @@ export function storeRunFixture(
     epoch = 2;
     push(epochBody(epoch, LATER_OBJECTIVE, LATER_HASH));
   }
-  if (kind === 'facts') for (const body of storeFacts()) push(body);
+  if (kind === 'facts') {
+    for (const body of storeFacts()) push(body);
+    // The writer states the input once its measurement is recorded: the declaration is amended.
+    const stated = epochBody(1, OBJECTIVE, HASH, 100);
+    if (stated.case === 'epochStarted') push({case: 'declarationAmended', value: stated.value});
+  }
   push({
     case: 'stream',
     value: {id: 'build-log', kind: StreamKind.LOG, title: 'Build', state: StreamState.OPENED},

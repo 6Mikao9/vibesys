@@ -457,20 +457,27 @@ test('a native metric headlines the writer fact even without candidate-shaped sp
 for (const reversed of [false, true]) {
   test(`native event fold preserves objective tiles and trends with a writer headline (${reversed})`, () => {
     const records = storeRunFixture('facts', 2).records.map(record => clone(RecordSchema, record));
-    const epoch = records[0]?.body;
-    if (epoch?.case !== 'epochStarted' || !epoch.value.run) throw new Error('fixture');
-    epoch.value.run.objectives.push(
-      create(ObjectiveSchema, {series: 'latency', direction: Direction.MIN}),
+    // Every declaration of the epoch (its opening and the amendment that states the input).
+    const declarations = records.flatMap(record =>
+      record.body.case === 'epochStarted' || record.body.case === 'declarationAmended'
+        ? [record.body.value]
+        : [],
     );
-    if (reversed) epoch.value.run.objectives.reverse();
-    epoch.value.series.push(
-      create(MetricSeriesDeclSchema, {
-        ...epoch.value.series[0],
-        name: 'latency',
-        unit: 'ms',
-        direction: Direction.MIN,
-      }),
-    );
+    for (const declaration of declarations) {
+      if (!declaration.run) throw new Error('fixture');
+      declaration.run.objectives.push(
+        create(ObjectiveSchema, {series: 'latency', direction: Direction.MIN}),
+      );
+      if (reversed) declaration.run.objectives.reverse();
+      declaration.series.push(
+        create(MetricSeriesDeclSchema, {
+          ...declaration.series[0],
+          name: 'latency',
+          unit: 'ms',
+          direction: Direction.MIN,
+        }),
+      );
+    }
     const events = records
       .flatMap(record => {
         if (record.body.case !== 'metric' || record.body.value.series !== 'throughput')
