@@ -179,3 +179,68 @@ test('the loader lists what it holds and a second open is sent no descriptor byt
   }
   expect(requests).toEqual([[], [reply.descriptorSets[0]?.sha256 ?? '']]);
 });
+
+/** A reply whose keyframe has one epoch per set, each set named; `sends` picks the sets it carries. */
+function replyOf(datas: readonly Uint8Array[], sends: (index: number) => boolean) {
+  const keyframe = create(KeyframeSchema, {throughSeq: BigInt(datas.length), logOffset: 8n});
+  const sent = datas.flatMap((data, index) => {
+    const hash = bytesToHex(sha256(data));
+    keyframe.epochs.push(
+      create(EpochVersionSchema, {
+        seq: BigInt(index + 1),
+        epoch: {runId: 'run-1', epoch: index + 1},
+        descriptorsSha256: hash,
+      }),
+    );
+    return sends(index) ? [create(DescriptorSetSchema, {sha256: hash, data})] : [];
+  });
+  return create(SkeletonResponseSchema, {
+    keyframe: toBinary(KeyframeSchema, keyframe),
+    descriptorSets: sent,
+    committedSeq: BigInt(datas.length),
+    nextSeq: BigInt(datas.length + 1),
+    complete: true,
+  });
+}
+
+const distinctSets = (count: number, tag: string): Uint8Array[] =>
+  Array.from({length: count}, (_, index) =>
+    toBinary(
+      FileDescriptorSetSchema,
+      create(FileDescriptorSetSchema, {file: [{name: `${tag}${index}.proto`, package: tag}]}),
+    ),
+  );
+
+const restoredEpochs = (reply: ReturnType<typeof replyOf>) =>
+  fromBinary(KeyframeSchema, reply.keyframe ?? new Uint8Array()).epochs;
+
+test('restoring a reply never depends on the cache capacity, up to the protocol limit of sets', () => {
+  // The schema allows 64 sets in a reply; the cache keeps 16 between requests.
+  for (const count of [0, 1, 15, 16, 17, 33, 64]) {
+    for (const warm of [0, 5, 16, 20]) {
+      const cache = new DescriptorCache();
+      for (const data of distinctSets(warm, 'warm')) cache.restore(replyOf([data], () => true));
+      const restored = cache.restore(replyOf(distinctSets(count, `c${count}w${warm}`), () => true));
+      const epochs = restoredEpochs(restored);
+      expect(epochs.length, `${count} sets, ${warm} warm`).toBe(count);
+      expect(epochs.every(version => version.epoch?.descriptors !== undefined)).toBe(true);
+    }
+  }
+});
+
+test('a request keeps every set it advertised however the cache churns before its reply', () => {
+  const cache = new DescriptorCache();
+  const mine = distinctSets(16, 'mine');
+  for (const data of mine) cache.restore(replyOf([data], () => true));
+  const lease = cache.lease();
+  expect(lease.known).toHaveLength(16);
+  // Another request's reply evicts all of them from the cache while this one is in flight.
+  cache.restore(replyOf(distinctSets(40, 'other'), () => true));
+  expect(cache.known().some(name => lease.known.includes(name))).toBe(false);
+  // The gateway answered this request naming only what it advertised, sending nothing.
+  const restored = lease.restore(replyOf(mine, () => false));
+  expect(restoredEpochs(restored).every(version => version.epoch?.descriptors !== undefined)).toBe(
+    true,
+  );
+  expect(() => cache.restore(replyOf(mine, () => false))).toThrow(DescriptorsUnknown);
+});
