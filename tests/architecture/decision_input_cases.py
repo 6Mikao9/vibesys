@@ -390,6 +390,7 @@ def cases() -> dict[str, Case]:
                 round_number=7,
                 base_revision=_revision("base-revision-n"),
                 base_round=4,
+                base_value=173.25,
                 has_history=True,
                 regression_kind="regression-kind-l",
                 regression_round=6,
@@ -399,6 +400,7 @@ def cases() -> dict[str, Case]:
             {
                 "round_number": "round 7",
                 "base_revision": "base-revision-n",
+                "base_value": "173.25",
                 "regression_kind": "regression-kind-l",
                 "exhaustion_feedback": "exhaustion-feedback-m",
             },

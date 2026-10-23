@@ -18,7 +18,7 @@ a failure of either ends the search.
 
 from typing import Self
 
-from vibesys.candidates.api import space_of, workspace_mode_for
+from vibesys.candidates.api import input_value, space_of, workspace_mode_for
 from vibesys.hypothesis import Continue, Finished, NewHypothesis, rounds
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
 from vibesys.orchestration.multi.search._attempt import MultiAttempt, Next
@@ -157,6 +157,7 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
                 round_number=start.number,
                 base_revision=start.base,
                 base_round=start.best_round,
+                base_value=_measured(start),
                 has_history=bool(evidence.history),
                 regression_kind=evidence.regression_kind,
                 regression_round=evidence.regression_round,
@@ -200,6 +201,12 @@ async def profile_base(
             PROFILER, workspace=opened, revision=start.base, started_by=(started_by,)
         )
         return await profile(profiler, prompt)
+
+
+def _measured(start: MultiRound) -> float | None:
+    """The headline the trusted gates measured of the round's base, or None if they have not."""
+    made = start.retained_as(start.base)
+    return made.value if made is not None else input_value(start.baseline)
 
 
 async def route(router: Session, prompt: PreRoundPrompt) -> PreRoundDecision | None:

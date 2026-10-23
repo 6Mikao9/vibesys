@@ -710,6 +710,7 @@ def core_policy_context() -> dict[str, object]:
         "regression_round": None,
         # The multi router's `PreRoundPrompt`: the round whose idea made the base.
         "base_round": 2,
+        "base_value": 173.25,
         # `RoundPrompt` fields.
         "activation_evidence": "fixture",
         "dominated_by_rounds": (),

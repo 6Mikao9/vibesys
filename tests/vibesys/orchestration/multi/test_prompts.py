@@ -139,6 +139,7 @@ _PRE_ROUND = st.builds(
     round_number=st.integers(1, 5),
     base_revision=_REVISIONS,
     base_round=st.none() | st.integers(1, 4),
+    base_value=st.none() | st.floats(0.5, 1e6),
     has_history=st.booleans(),
     regression_kind=st.none() | _TEXT,
     regression_round=st.none() | st.integers(1, 4),
@@ -210,6 +211,22 @@ def _render(
 @given(context=_PRE_ROUND, kind=st.sampled_from(("none", "linux_cpu")))
 def test_the_routing_prompt_renders_for_every_context(context: PreRoundPrompt, kind: str) -> None:
     assert _OBJECTIVE in _render(PromptTemplate.PRE_ROUND, context, profiler_kind=kind)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_PRE_ROUND)
+def test_a_measured_base_is_never_launched_by_the_router_to_learn_whether_it_runs(
+    context: PreRoundPrompt,
+) -> None:
+    """A trusted measurement already says the base runs; only an unmeasured round 1 checks."""
+    text = _render(PromptTemplate.PRE_ROUND, context, profiler_kind="neuron")
+    measured = context.base_value is not None
+    assert ("The trusted gates measured it at" in text) is measured
+    assert ("you may run" in text and "one cheap check" in text) is (
+        not measured and not context.has_history
+    )
+    if measured:
+        assert "holds no measurement at all" not in text
 
 
 def test_a_routing_prompt_saved_before_the_base_was_shown_still_decodes() -> None:

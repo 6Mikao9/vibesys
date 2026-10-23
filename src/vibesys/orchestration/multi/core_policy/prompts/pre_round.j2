@@ -11,6 +11,11 @@ round builds on is `{{ rev(base_revision) }}`{% if base_round is not none %}, ma
 judge "is there a running system to profile" from it, not from your workspace. List its
 files with `git ls-tree -r --name-only REVISION` and read them with
 `git show REVISION:PATH`. A requested profile runs in a checkout of it.
+{% if base_value is not none %}
+The trusted gates measured it at {{ base_value }}: it builds, starts and serves the
+benchmark, so a profile of it can run. Do not launch it yourself to find out; a server
+may take many minutes to start.
+{% endif %}
 {% endif %}
 
 {% if has_history %}
@@ -47,7 +52,11 @@ determines the next step, when the current defect needs a local repair, or when
 the workspace contains terminal edits and planning must first select/restore a
 trusted checkpoint. This phase cannot apply rollback.
 
-{% if not has_history %}
+{% if not has_history and base_value is not none %}
+This is round 1, and the trusted measurement above is the only result there is: no
+earlier profile exists, so a profile is the only way this campaign's first plan can
+target a measured bottleneck rather than a guessed one. Decide on that evidentiary value.
+{% elif not has_history %}
 Profiling measures a running system, and round 1 has no prior result saying one
 exists. A pinned seed checkout or a declared benchmark contract states intent,
 not the state of this workspace, so despite the restriction above you may run

@@ -46,6 +46,8 @@ class PreRoundPrompt(RolePromptContext):
     """
     base_round: int | None = None
     """The round whose idea made ``base_revision``; None when it is the input."""
+    base_value: float | None = None
+    """The headline the trusted gates measured of ``base_revision``; None when they have not."""
     has_history: bool
     regression_kind: str | None = None
     regression_round: int | None = None

@@ -29,6 +29,7 @@ from tests.vibesys.orchestration.multi._host import (
 )
 from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.serial_search._host import (
+    CANDIDATE_THROUGHPUT,
     INPUT_THROUGHPUT,
     Baseline,
     World,
@@ -240,6 +241,38 @@ def test_a_later_rounds_router_and_profiler_see_the_retained_candidate_not_the_i
     host.run.reply(profiler, profiled())
     host.drain()
     assert_flow_closed(host)
+
+
+@MODES
+def test_the_router_is_told_what_the_trusted_gates_measured_of_the_base(
+    *, restarting: bool
+) -> None:
+    """Regression: told round 1 holds no measurement, a live router launched a 27B server to
+    see whether it runs, gave up after 15 s of model loading and declined to profile, although
+    the trusted gates had just measured that same input end to end."""
+    host = MultiHost.start(config(max_rounds=2, profiling=True), restarting=restarting)
+    host.drain_until_turn(ROUTER)
+    first = host.run.expect_turn(role=ROUTER)
+    assert getattr(first.context, "base_value", None) == INPUT_THROUGHPUT
+    host.run.reply(first, routed())
+    host.drain_until_turn(PLANNER)
+    design(host, "h1")
+    implement(host, candidate="def456")
+    judge(host, passed=True)
+    host.drain_until_turn(ROUTER)
+
+    second = host.run.expect_turn(role=ROUTER)
+    assert getattr(second.context, "base_value", None) == CANDIDATE_THROUGHPUT
+
+
+@MODES
+def test_a_router_over_an_unmeasured_input_is_given_no_value(*, restarting: bool) -> None:
+    host = MultiHost.start(
+        config(profiling=True), restarting=restarting, baseline="failed-workload"
+    )
+    host.drain_until_turn(ROUTER)
+
+    assert getattr(host.run.expect_turn(role=ROUTER).context, "base_value", 0.0) is None
 
 
 @MODES
