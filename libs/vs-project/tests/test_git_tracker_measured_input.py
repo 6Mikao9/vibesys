@@ -22,6 +22,8 @@ from vs_sim.api.testing import examples
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_project.api import GitTracker
+
 _READ = ("main.py", "src/kernel.py")
 _UNREAD = ("NOTES.md", "notes/round.md")
 _DECLARED = ("NOTES.md", "notes/")
@@ -207,6 +209,21 @@ _DECLARATIONS = st.sampled_from(
     ]
 )
 """Declarations a task may state: some withhold paths the tree holds, some name none of them."""
+_NAMES_NOTHING = ("evidence/", "other.md", "a/b/")
+"""Paths no edit above ever writes."""
+
+
+def _evaluated(
+    case: Path, tracker: GitTracker, commit: str, declared: tuple[str, ...], number: int
+) -> tuple[str, dict[str, tuple[str, str]]]:
+    """A commit's measured input under ``declared``, and the tree an evaluation of it receives."""
+    root = case / "repo"
+    worktree = case / f"evaluated-{number}"
+    _git(root, "worktree", "add", "-q", "--detach", str(worktree), commit)
+    real_git_tracker(worktree, run_id="input-run", events=NullGitTrackerEvents()).withhold_unread(
+        declared
+    )
+    return tracker.measured_input(commit, declared), _tree(worktree)
 
 
 @pytest.mark.regression
@@ -218,20 +235,23 @@ _DECLARATIONS = st.sampled_from(
 @given(
     edits=st.lists(_EDITS, max_size=5),
     declarations=st.tuples(_DECLARATIONS, _DECLARATIONS),
+    nothing=st.lists(st.sampled_from(_NAMES_NOTHING), max_size=3),
 )
-@example(edits=[], declarations=((), ("evidence/",)))
-def test_one_commit_read_under_two_declarations_has_one_measured_input_iff_one_evaluated_tree(
+@example(edits=[], declarations=((), ("evidence/",)), nothing=["evidence/"])
+@example(edits=[], declarations=((), ("NOTES.md",)), nothing=[])
+def test_the_measured_input_is_the_content_an_evaluation_receives_not_its_declaration(
     tmp_path: Path,
     edits: list[tuple[str, str, int | str]],
     declarations: tuple[tuple[str, ...], tuple[str, ...]],
+    nothing: list[str],
 ) -> None:
-    """The input is the content the evaluation receives, not the declaration that withheld it.
+    """Two declarations that give an evaluator different trees give different inputs, and a
+    declaration that names nothing the tree holds changes nothing.
 
-    A task that adds ``unread = ["evidence/"]`` to a tree with no ``evidence/`` changes nothing
-    the evaluator reads, so it must not turn the measurements already taken of that commit into
-    another input's (run 142822: a base with three samples was left with one). Conversely, two
-    declarations that withhold different content give the evaluator different trees, and so
-    different inputs.
+    A task that adds ``unread = ["evidence/"]`` to a tree with no ``evidence/`` withholds
+    nothing, so it must not turn the measurements already taken of that commit into another
+    input's (run 142822: a base with three samples was left with one). A path the baseline
+    holds is withheld from every commit, so it is part of the input though no patch shows it.
     """
     case = tmp_path / f"case-{len(list(tmp_path.iterdir()))}"
     root = case / "repo"
@@ -244,19 +264,15 @@ def test_one_commit_read_under_two_declarations_has_one_measured_input_iff_one_e
         _apply(root, edit)
         _git(root, "add", "-A", "-f", "--", ".", ":(exclude).vibesys/state")
         _git(root, "commit", "-q", "--allow-empty", "-m", f"step {number}")
-    _git(root, "add", "-A", "-f", "--", ".", ":(exclude).vibesys/state")
-    _git(root, "commit", "-q", "--allow-empty", "-m", "final")
     commit = _git(root, "rev-parse", "HEAD").strip()
-    seen: list[tuple[str, dict[str, tuple[str, str]]]] = []
-    for number, declared in enumerate(declarations):
-        worktree = case / f"evaluated-{number}"
-        _git(root, "worktree", "add", "-q", "--detach", str(worktree), commit)
-        real_git_tracker(
-            worktree, run_id="input-run", events=NullGitTrackerEvents()
-        ).withhold_unread(declared)
-        seen.append((tracker.measured_input(commit, declared), _tree(worktree)))
-    (first_digest, first_tree), (second_digest, second_tree) = seen
-    assert (first_digest == second_digest) == (first_tree == second_tree)
+    first, second = (
+        _evaluated(case, tracker, commit, declared, number)
+        for number, declared in enumerate(declarations)
+    )
+    assert (first[0] == second[0]) <= (first[1] == second[1])
+    bare = _evaluated(case, tracker, commit, (), 2)
+    padded = _evaluated(case, tracker, commit, tuple(nothing), 3)
+    assert bare == padded
 
 
 def test_a_declaration_order_and_a_directory_slash_are_not_part_of_the_input(

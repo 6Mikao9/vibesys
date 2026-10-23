@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import os
 import re
 import shutil
@@ -394,12 +395,13 @@ class GitTracker:
 
         *unread* names workspace paths (files or directories) the task's evaluation never
         reads, such as an agent's notes. The digest is of the content the evaluation
-        receives, never of the declaration that withheld it: two commits that differ only
-        in withheld paths have the same digest, and so do one commit read under two
-        declarations that withhold the same content (a declaration naming a path the tree
-        lacks withholds nothing). It covers every other tracked path, VibeSys's own files
-        included, as the patch from the baseline commit, which is part of the digest too,
-        so commits of different workspaces never share one.
+        receives, not of the declaration that withheld it: two commits that differ only in
+        withheld paths have the same digest, and so does one commit read under a declaration
+        that names nothing the tree holds (``unread = ["evidence/"]`` over a tree without
+        one). It covers every other tracked path, VibeSys's own files included, as the patch
+        from the baseline commit, which is part of the digest too, so commits of different
+        workspaces never share one. A path the baseline itself holds is outside that patch,
+        so the digest names which of the declared paths the baseline holds.
 
         A worktree of *commit* after :meth:`withhold_unread` holds exactly what this digests:
         two commits with one digest are evaluated on byte-identical trees.
@@ -411,10 +413,17 @@ class GitTracker:
         withheld = sorted({Path(path).as_posix().rstrip("/") for path in unread})
         skipped = [f":(exclude){_wildcard_safe(path)}" for path in withheld]
         patch = self._git.diff_patch(root, commit, [".", *skipped], style=PatchStyle.EXACT)
+        held = [path for path in withheld if self._holds(root, path)]
         digest = hashlib.sha256(f"{root}\n".encode())
-        digest.update(_NO_DECLARATION_LINE)
+        digest.update(f"{json.dumps(held)}\n".encode())
         digest.update(patch.encode())
         return f"sha256:{digest.hexdigest()}"
+
+    def _holds(self, revision: str, path: str) -> bool:
+        """Whether *revision*'s tree holds a file at *path* or anything below it."""
+        return self._git.read_blob(revision, path) is not None or bool(
+            self._git.tree_files(revision, path)
+        )
 
     def withhold_unread(self, unread: Sequence[str]) -> None:
         """Remove *unread* from this worktree, so it holds what :meth:`measured_input` digests.
@@ -1297,16 +1306,6 @@ def _entries_below(tree: WorkspaceTree, relative: str) -> list[tuple[str, EntryK
             if kind is EntryKind.DIRECTORY:
                 pending.append(child)
     return found
-
-
-_NO_DECLARATION_LINE = b"[]\n"
-"""The line a measured-input digest once spent on the task's unread declaration.
-
-The digest no longer covers the declaration, only the content it withheld. The line stays,
-fixed, because a run's recorded samples are keyed by digests that had it written as an empty
-declaration: keeping it keeps those digests, and so their history, valid for every commit whose
-declaration withholds nothing.
-"""
 
 
 def _wildcard_safe(path: str) -> str:
