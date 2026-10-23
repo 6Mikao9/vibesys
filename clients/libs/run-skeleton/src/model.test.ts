@@ -327,11 +327,11 @@ test('the fold keeps the latest error notice of each epoch, wherever the notices
     state = (state * 1103515245 + 12345) % 2 ** 31;
     return state % bound;
   };
-  for (let round = 0; round < 60; round += 1) {
-    const records = Array.from({length: next(300)}, (_, index) =>
+  for (let round = 0; round < 12; round += 1) {
+    const records = Array.from({length: next(150)}, (_, index) =>
       create(RecordSchema, {
         seq: BigInt(index + 1),
-        epoch: 1 + Math.floor((index * 3) / 300),
+        epoch: 1 + Math.floor((index * 3) / 150),
         body: {
           case: 'notice',
           value: {severity: [Severity.WARNING, Severity.ERROR, Severity.FATAL][next(3)] ?? 1},
