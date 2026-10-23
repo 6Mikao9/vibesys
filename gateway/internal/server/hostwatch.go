@@ -74,7 +74,11 @@ func (h *host) Watch(request *apiv1.WatchRequest, stream apiv1.HostService_Watch
 		return nil
 	}
 	if firstExpired.Load() || errors.Is(err, context.DeadlineExceeded) {
-		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, "host watch deadline exceeded"))
+		budget := dispatched.Deadline
+		if firstExpired.Load() {
+			budget = dispatched.FirstEvent
+		}
+		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED, deadlineMessage("watch", dispatched.CLI, budget)))
 	}
 	if errors.Is(err, context.Canceled) {
 		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host watch cancelled"))

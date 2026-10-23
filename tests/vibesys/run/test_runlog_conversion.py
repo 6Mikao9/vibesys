@@ -24,6 +24,7 @@ from vibesys.api.transport import (
     convert_run,
     convert_runs,
     iter_conversions,
+    observe_conversion,
     prelock_writer_is_live,
 )
 from vibesys.events import (
@@ -1149,3 +1150,45 @@ def test_a_log_of_an_older_projection_is_rebuilt_once_and_the_reason_is_named(
         in rebuilt.reason
     )
     assert convert_run(project, "run-1", **kwargs).status is ConversionStatus.EXISTS
+
+
+@pytest.mark.parametrize("kind", ["empty", "pretrace", "broken", "unsupported"])
+def test_a_journal_that_cannot_convert_says_why_instead_of_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """Discovery shows a final reason for each way a stopped run stays unconverted, and a pass keeps it."""
+    project, journal = journal_at(tmp_path, monkeypatch)
+    journal.close()
+    directory = Project.log_directory_for(project.root, "run-1")
+    source = directory / "core-events.jsonl"
+    pretrace = Path(__file__).parent / "fixtures/pre-agent-identity.jsonl"
+    source.write_bytes(
+        {
+            "empty": b"",
+            "broken": b"{broken}",
+            "pretrace": b'{"type":"round_finished","timestamp":"2026-01-01T00:00:00Z","sequence":1}\n',
+            "unsupported": pretrace.read_bytes(),
+        }[kind]
+    )
+    os.utime(source, (100, 100))
+    assert observe_conversion(project, "run-1").detail == "History conversion pending"
+    kwargs = {
+        "clock": ManualClock(start=1000),
+        "threads": SimThreads(),
+        "install_sync": FakeFileSync(),
+    }
+
+    def convert() -> ConversionStatus | None:
+        try:
+            return convert_run(project, "run-1", **kwargs).status
+        except ValueError:
+            return None  # a malformed journal is a failure the bulk pass reports
+
+    first = convert()
+    seen = observe_conversion(project, "run-1")
+    assert not seen.available
+    assert seen.detail not in {"", "History conversion pending"}
+    # Asking again does not change what discovery says, and does not reconvert a final answer.
+    again = convert()
+    assert observe_conversion(project, "run-1").detail == seen.detail
+    assert again is first

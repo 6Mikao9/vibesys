@@ -34,6 +34,7 @@ from vs_runlog.api import (
 )
 
 if TYPE_CHECKING:
+    import os
     from collections.abc import Generator, Iterator
 
     from vs_sim.api import SleepingClock, Threads
@@ -334,8 +335,8 @@ def _convert_revision(
         if (refusal.journal_size, refusal.journal_modified_ns) == (
             source.st_size,
             source.st_mtime_ns,
-        ):
-            return ConversionResult(ConversionStatus.CANNOT_CONVERT, refusal.reason)
+        ) and (final := _retained_result(refusal.reason)) is not None:
+            return final
     try:
         result = _convert_stopped(
             directory, run_id, clock=clock, threads=threads, install_sync=install_sync
@@ -344,15 +345,42 @@ def _convert_revision(
         if source is None:
             raise
         reason = ("cannot convert: " + str(error)).encode()[:2048].decode(errors="ignore")
-        refusal = RunConversionRefusal(
-            journal_size=source.st_size, journal_modified_ns=source.st_mtime_ns, reason=reason
-        )
-        validate(refusal)
-        atomic_write_bytes(refusal_path, refusal.to_binary())
+        _retain(refusal_path, source, reason)
         return ConversionResult(ConversionStatus.CANNOT_CONVERT, reason)
-    if result.status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}:
+    except RunLogConversionError as error:
+        if source is not None:
+            _retain(refusal_path, source, f"{_FAILED}{error}")
+        raise
+    if result.status is ConversionStatus.SKIPPED and result.reason in _FINAL_SKIPS:
+        if source is not None:
+            _retain(refusal_path, source, result.reason)
+    elif result.status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}:
         refusal_path.unlink(missing_ok=True)
     return result
+
+
+# What a retained reason says. A skip whose journal can never convert, and a refusal, are final for
+# the journal's revision; a failure is retried, but discovery shows why it last failed.
+_FAILED = "conversion failed: "
+_FINAL_SKIPS = frozenset({"journal has no events", "journal predates the run trace"})
+
+
+def _retained_result(reason: str) -> ConversionResult | None:
+    if reason in _FINAL_SKIPS:
+        return ConversionResult(ConversionStatus.SKIPPED, reason)
+    if reason.startswith(_FAILED):
+        return None
+    return ConversionResult(ConversionStatus.CANNOT_CONVERT, reason)
+
+
+def _retain(path: Path, source: os.stat_result, reason: str) -> None:
+    refusal = RunConversionRefusal(
+        journal_size=source.st_size,
+        journal_modified_ns=source.st_mtime_ns,
+        reason=reason.encode()[:2048].decode(errors="ignore"),
+    )
+    validate(refusal)
+    atomic_write_bytes(path, refusal.to_binary())
 
 
 def _unconvertible(journal: Path) -> ConversionResult | None:
