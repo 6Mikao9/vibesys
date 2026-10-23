@@ -14,13 +14,15 @@ fresh, and the candidate's 40% TTFT gain never entered the verdict.
 
 from __future__ import annotations
 
-import random
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
+
+if TYPE_CHECKING:
+    import random
 
 type Way = Literal["max", "min"]
 
@@ -208,18 +210,17 @@ def test_the_comparison_is_the_oracles_whichever_objectives_each_sample_reports(
     assert {item.metric for item in result.objectives} == judged
 
 
-@given(world=worlds(), seed=st.integers(0, 2**32))
+@given(world=worlds(), rng=st.randoms(use_true_random=False))
 def test_the_order_samples_arrive_in_changes_no_comparison(
-    world: tuple[list[dict[str, float]], list[dict[str, float]]], seed: int
+    world: tuple[list[dict[str, float]], list[dict[str, float]]], rng: random.Random
 ) -> None:
     """Nothing about a verdict depends on which run came first or last."""
     mine, theirs = world
     # the candidate's latest sample names the objectives, so keep it last; the base shuffles freely
     head, last = mine[:-1], mine[-1]
-    shuffled = random.Random(seed)
     other_head, other_theirs = list(head), list(theirs)
-    shuffled.shuffle(other_head)
-    shuffled.shuffle(other_theirs)
+    rng.shuffle(other_head)
+    rng.shuffle(other_theirs)
 
     one = compared(mine, theirs)
     two = compared([*other_head, last], other_theirs)
