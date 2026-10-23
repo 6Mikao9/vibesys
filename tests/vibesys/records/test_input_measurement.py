@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
@@ -17,6 +18,9 @@ from vibesys.records._common import InputReboundError, MetricReboundError
 from vibesys.records.api import MappingState, map_event
 from vs_runlog.api import FakeFileSync, FileRunLogWriter, read_run_head
 from vs_sim.api.testing import ManualClock, SimThreads
+
+if TYPE_CHECKING:
+    import random
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _SERIES = "speed"
@@ -88,10 +92,7 @@ def _records(events: list[e.CoreEvent]) -> list[p.Record]:
 def _fact(records: list[p.Record]) -> p.InputMeasurement | None:
     epoch = None
     for record in records:
-        if record.body is not None and record.body.field in {
-            "epoch_started",
-            "declaration_amended",
-        }:
+        if record.body is not None and isinstance(record.body.value, p.EpochStarted):
             epoch = record.body.value
     return None if epoch is None or epoch.run is None else epoch.run.input_measurement
 
@@ -106,7 +107,7 @@ def gate_sets(draw: st.DrawFn) -> tuple[list[float | None], list[float]]:
 
 @given(gates=gate_sets(), shuffle=st.randoms(use_true_random=False))
 def test_the_input_fact_is_the_input_gates_measurement_in_any_order(
-    gates: tuple[list[float | None], list[float]], shuffle: object
+    gates: tuple[list[float | None], list[float]], shuffle: random.Random
 ) -> None:
     inputs, candidates = gates
     measured = [v for v in inputs if v is not None]
@@ -115,7 +116,7 @@ def test_the_input_fact_is_the_input_gates_measurement_in_any_order(
     events = [_gate(f"op:input-{i}", None, v) for i, v in enumerate(inputs)]
     events += [_gate(f"op:cand-{i}", "op:ws", v) for i, v in enumerate(candidates)]
     # Any interleaving of the gates; a workstream is open before its own gates, as it is in a run.
-    shuffle.shuffle(events)  # type: ignore[attr-defined]
+    shuffle.shuffle(events)
     records = _records([_started(), _workstream("op:ws"), *events])
     fact = _fact(records)
     first = next((v for v in inputs if v is not None), None)
@@ -150,8 +151,10 @@ def _without_fact(records: list[p.Record]) -> list[p.Record]:
     kept = []
     for record in records:
         copy = p.Record.from_binary(record.to_binary())
-        if copy.body is not None and copy.body.field in {"epoch_started", "declaration_amended"}:
-            copy.body.value.run.input_measurement = None
+        if copy.body is not None and isinstance(copy.body.value, p.EpochStarted):
+            run = copy.body.value.run
+            if run is not None:
+                run.clear_field("input_measurement")
         kept.append(copy)
     return kept
 
