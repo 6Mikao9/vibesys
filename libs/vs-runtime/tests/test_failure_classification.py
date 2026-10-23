@@ -204,7 +204,12 @@ def test_a_job_failure_follows_its_worst_stage(kinds: list[BenchmarkFailureKind 
 
 
 def _retries(limit: int) -> EvaluationRetries:
-    return EvaluationRetries(infrastructure_attempts=limit, ambiguous_attempts=min(limit, 2))
+    return EvaluationRetries(
+        infrastructure_attempts=limit,
+        ambiguous_attempts=min(limit, 2),
+        environment_backoff=30.0,
+        environment_backoff_cap=300.0,
+    )
 
 
 def _submissions(failure: MeasurementFailure, limit: int) -> int:

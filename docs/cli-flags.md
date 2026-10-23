@@ -159,13 +159,20 @@ candidate's. Declare its bounds in `agent.toml`:
 [evaluation]
 infrastructure_attempts = 3    # tries in all after a node fault or lost job
 ambiguous_attempts = 2         # tries in all when the evidence cannot say whose fault it was
+environment_backoff_seconds = 30.0       # wait before running again after the task's host refused (exit 75)
+environment_backoff_cap_seconds = 300.0  # longest wait between two runs of a refused measurement
 request_retry_limit = 3        # re-sends of a request the executor did not run
 request_backoff_seconds = 1.0
 request_backoff_cap_seconds = 30.0
 ```
 
 The search sees one result per measurement, the last try's. A failure that is the
-candidate's own is a result and is never tried again. Each attempts value is at most 5 and
+candidate's own is a result and is never tried again. A host's refusal is no failure: when
+the task's own evaluator exits with status 75 (see the evaluator protocol), the measurement
+waits, reported as queued with the refusal as its reason, and runs again after
+`environment_backoff_seconds` (doubling to the cap) for as long as the host refuses. It
+spends no try and no limit; only a stop, or the run's queue budget for a job that never
+starts, ends the wait. Each attempts value is at most 5 and
 `request_retry_limit` at most 10: caps in the core that no setting can lift.
 `[run]` also holds `cancellation_bound_seconds`, `cleanup_bound_seconds` and
 `reconciliation_bound_seconds` (60 each), the time core gives its own cleanup waits.

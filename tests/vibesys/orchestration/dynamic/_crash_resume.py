@@ -33,7 +33,7 @@ from vs_core.api import (
     StopMode,
     SubmitMeasurement,
 )
-from vs_core.api.testing import Failed, Succeeded, Unknown
+from vs_core.api.testing import Succeeded, Unknown
 from vs_dst.api import Effects, RecoverableExecutors
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostFault
 from vs_project.api import (
@@ -43,17 +43,13 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import FakeGitRepositories, run_execution_record
-from vs_runtime.api import EvaluationRetries, OrchestrationResumeDecision, member_workspace_id
+from vs_runtime.api import OrchestrationResumeDecision, member_workspace_id
 from vs_runtime.api.infrastructure import (
     ProjectRunEffects,
     ProjectRunRequest,
     ProjectRunResources,
-    RecordState,
     RunEnvironmentSpec,
-    classify,
-    job_failure,
     open_project_run_resources,
-    signal_of,
 )
 from vs_runtime.api.testing import FakePublicationDelivery, HostOptions, Launch, scripted_host
 from vs_sim.api import Signals
@@ -347,16 +343,9 @@ class ResumeWorld:
         if isinstance(request, SubmitMeasurement) and self.store.refusing:
             self.store.refusing = False
             self.refusals += 1
-            # The trusted evaluator refused for disk pressure (protocol exit 75).
-            # Classification is production's table; the fake does not assign blame.
-            failure = job_failure(
-                [classify(signal_of(75, trusted_evaluator=True), RecordState.OUTCOME)]
-            )
-            retries = EvaluationRetries(infrastructure_attempts=2, ambiguous_attempts=1)
-            if not retries.allows_another(failure, tries=1):
-                return Failed(accepted=False, measurement_failure=failure)
-            # The backend owns retries; only its final try reaches core. The
-            # scripted far side heals on try two, as the production wrapper does.
+            # The trusted evaluator refused for disk pressure (protocol exit 75). The backend
+            # holds that measurement queued and runs it again (`RetryingEvaluationExecutor`),
+            # so core hears of no failure: the far side answers as if it had never refused.
             return self.script(request, core)
         if (silence := self.store.provider_silence(request)) is not None:
             self.outages += isinstance(request, DispatchTurn | ResumeSessionTurn)

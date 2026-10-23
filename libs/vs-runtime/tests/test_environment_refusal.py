@@ -1,12 +1,12 @@
-"""A trusted evaluator's report that its host refused to measure is never the candidate's.
+"""A trusted evaluator's report that its host refused to measure is no verdict on the candidate.
 
 Regression: a task's accuracy checker refused to run because the host lacked free disk
 (``Insufficient free disk ... Do not repack or copy weights``) and exited nonzero. The
 run read that exit as the accuracy command's verdict on the candidate, failed its round,
 and lost a real win. The evaluator protocol gives the task a typed way to say "my host
 refused" (``ENVIRONMENT_REFUSED_EXIT_STATUS``); every trusted stage reads it as an
-infrastructure failure, which the backend and core measure again within their bounds,
-while the candidate's own build cannot claim it.
+environment refusal, which the backend waits out without spending a try
+(``test_environment_wait``), while the candidate's own build cannot claim it.
 """
 
 from __future__ import annotations
@@ -105,24 +105,24 @@ def _benchmark(output: str, exit_code: int, *, record: RecordState) -> Benchmark
 @pytest.mark.regression
 @given(output=_REFUSALS)
 @example(output=_DISK)
-def test_an_accuracy_check_whose_host_refused_is_retried_not_charged_to_the_candidate(
+def test_an_accuracy_check_whose_host_refused_is_a_refusal_not_a_verdict_on_the_candidate(
     output: str,
 ) -> None:
     kind = _accuracy(output, ENVIRONMENT_REFUSED_EXIT_STATUS)
 
-    assert kind is BenchmarkFailureKind.INFRASTRUCTURE
+    assert kind is BenchmarkFailureKind.ENVIRONMENT_REFUSED
     assert job_failure([kind]).retryable
 
 
 @pytest.mark.regression
 @given(output=_REFUSALS, record=st.sampled_from(_BENCHMARK_RECORDS))
 @example(output=_DISK, record=RecordState.OUTCOME)
-def test_a_benchmark_whose_host_refused_is_retried_whatever_it_wrote(
+def test_a_benchmark_whose_host_refused_is_a_refusal_whatever_it_wrote(
     output: str, record: RecordState
 ) -> None:
     assert (
         _benchmark(output, ENVIRONMENT_REFUSED_EXIT_STATUS, record=record)
-        is BenchmarkFailureKind.INFRASTRUCTURE
+        is BenchmarkFailureKind.ENVIRONMENT_REFUSED
     )
 
 
@@ -133,7 +133,7 @@ def test_an_accuracy_check_that_failed_for_any_other_reason_is_the_candidates(
     kind = _accuracy(output, exit_code)
 
     if exit_code == ENVIRONMENT_REFUSED_EXIT_STATUS:
-        assert kind is BenchmarkFailureKind.INFRASTRUCTURE
+        assert kind is BenchmarkFailureKind.ENVIRONMENT_REFUSED
     else:
         # The refusal is the exit status, never the wording: the gate is not loosened.
         assert kind is BenchmarkFailureKind.WORKLOAD
@@ -156,10 +156,10 @@ def test_a_candidate_build_cannot_declare_its_host_refused(output: str) -> None:
 
 
 @given(record=st.sampled_from(RecordState), trusted=st.booleans())
-def test_the_refusal_status_is_infrastructure_exactly_for_a_trusted_evaluator(
+def test_the_refusal_status_is_a_refusal_exactly_for_a_trusted_evaluator(
     record: RecordState, *, trusted: bool
 ) -> None:
     signal = signal_of(ENVIRONMENT_REFUSED_EXIT_STATUS, trusted_evaluator=trusted)
 
     assert (signal is TerminalSignal.ENVIRONMENT_REFUSED) is trusted
-    assert (classify(signal, record) is BenchmarkFailureKind.INFRASTRUCTURE) is trusted
+    assert (classify(signal, record) is BenchmarkFailureKind.ENVIRONMENT_REFUSED) is trusted

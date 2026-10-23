@@ -499,6 +499,7 @@ class _ProductHostFactory:
                     project.project.state.local_namespace(
                         project.state.run_id, "core-evaluation-tries"
                     ),
+                    clock=self.timing.clock,
                     tries=tries,
                 ),
                 environment=self._core_environment(resources),

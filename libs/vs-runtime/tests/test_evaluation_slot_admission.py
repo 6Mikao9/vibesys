@@ -490,7 +490,12 @@ async def test_a_profile_job_shares_admission_and_releases_on_cancellation() -> 
 @given(count=st.integers(min_value=1, max_value=8))
 async def test_restart_reacquires_every_submitted_jobs_durable_admission_lease(count: int) -> None:
     namespace = InMemoryEvaluationNamespace()
-    retries = EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=1)
+    retries = EvaluationRetries(
+        infrastructure_attempts=1,
+        ambiguous_attempts=1,
+        environment_backoff=30.0,
+        environment_backoff_cap=300.0,
+    )
     workspaces = FakeWorkspaces(
         FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
     )
@@ -502,6 +507,7 @@ async def test_restart_reacquires_every_submitted_jobs_durable_admission_lease(c
         PollingEvaluationExecutor(before, workspaces, clock=ManualClock(), admission=old_slots),
         retries,
         namespace,
+        clock=ManualClock(),
     )
     try:
         for index in range(count):
@@ -528,6 +534,7 @@ async def test_restart_reacquires_every_submitted_jobs_durable_admission_lease(c
         PollingEvaluationExecutor(after, workspaces, clock=ManualClock(), admission=slots),
         retries,
         namespace,
+        clock=ManualClock(),
     )
     try:
         for index in range(count):

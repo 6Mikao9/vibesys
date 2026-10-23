@@ -74,7 +74,12 @@ _PRINTED: dict[Literal["build", "accuracy", "benchmark"], tuple[bytes, bytes]] =
 }
 _STAGES = (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
 _TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED})
-_RETRIES = EvaluationRetries(infrastructure_attempts=2, ambiguous_attempts=1)
+_RETRIES = EvaluationRetries(
+    infrastructure_attempts=2,
+    ambiguous_attempts=1,
+    environment_backoff=30.0,
+    environment_backoff_cap=300.0,
+)
 
 
 def _request(snapshot: str, purpose: str, stages: tuple[EvidenceKind, ...]) -> EvaluationRequest:
@@ -160,6 +165,7 @@ async def _measure(
         ),
         _RETRIES,
         namespace,
+        clock=ManualClock(),
         tries=tries,
     )
     await executor.submit(request, handle_id=_HANDLE)
@@ -261,7 +267,7 @@ async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires
         sleeper=pacing,
     )
     executor = RetryingEvaluationExecutor(
-        stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
+        stack.executor, _RETRIES, InMemoryEvaluationNamespace(), clock=ManualClock(), tries=tries
     )
 
     settled: asyncio.Future[None] | None = None
@@ -300,7 +306,7 @@ async def test_a_slurm_stage_whose_log_disk_is_full_still_measures(tmp_path: Pat
     tries = TryHandles()
     stack = await build_stack(tmp_path, stage_output=tries.stage_output(stage_output_opener(store)))
     executor = RetryingEvaluationExecutor(
-        stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
+        stack.executor, _RETRIES, InMemoryEvaluationNamespace(), clock=ManualClock(), tries=tries
     )
     volume.capacity = 200  # the first stage's index record fits, and little else
 
@@ -437,6 +443,7 @@ async def test_a_measurement_recorded_before_stages_named_a_purpose_resumes_on_i
             PollingEvaluationExecutor(FakeEvaluation(), workspaces, clock=ManualClock()),
             _RETRIES,
             namespace,
+            clock=ManualClock(),
         )
         await earlier.submit(_without_purpose(request), handle_id=_HANDLE)
         await earlier.close()

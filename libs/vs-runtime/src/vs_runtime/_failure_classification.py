@@ -1,12 +1,15 @@
 """Whose fault a failed measurement stage is, decided by one table.
 
 A stage that ends without a pass is the candidate's fault (``WORKLOAD``), the
-machinery's (``INFRASTRUCTURE``), or cannot be told (``AMBIGUOUS``). Only a verdict about
+machinery's (``INFRASTRUCTURE``), or cannot be told (``AMBIGUOUS``), or the evaluator's host
+declined to take the measurement at all (``ENVIRONMENT_REFUSED``). Only a verdict about
 the candidate is ``WORKLOAD``: the evaluator ran the candidate's measurement and judged it
 (it wrote a result, or the stage's own exit status is its judgement). A stage the clock
 or the machinery stopped judged nothing, so it is never ``WORKLOAD``; ``INFRASTRUCTURE``
 and ``AMBIGUOUS`` are measured again up to the submission bound and then charge nobody
-(see ``vs_core.api.MeasurementFailure.charges_candidate``). Every executor reads its evidence into the same two
+(see ``vs_core.api.MeasurementFailure.charges_candidate``). ``ENVIRONMENT_REFUSED`` is no
+failure to count: the measurement waits for the host and runs again without spending a try
+(see ``vs_runtime.RetryingEvaluationExecutor``). Every executor reads its evidence into the same two
 facts, how the stage ended (``TerminalSignal``) and what the evaluator left behind
 (``RecordState``), and asks ``classify``. No executor branches on the cause itself.
 
@@ -18,7 +21,7 @@ signal                             absent      declared    outcome     exit stat
 no exit status (node loss,         infra       infra       infra       infra
 preemption, boot failure, job
 time limit, collection failure)
-exit 75 from a trusted evaluator   infra       infra       infra       infra
+exit 75 from a trusted evaluator   refused     refused     refused     refused
 (its host refused the measurement)
 service never ready, log shows     candidate   candidate   candidate   candidate
 a candidate cause (out of memory,
@@ -43,6 +46,8 @@ exit status is their whole judgement. A time limit never judges a candidate, so 
 Exit 75 (``ENVIRONMENT_REFUSED_EXIT_STATUS``) is a refusal only from a command the task
 owns: the evaluator declares that its host refused to measure, so nothing of the
 candidate was judged. The candidate's own build exiting 75 is an ordinary nonzero exit.
+The status is the whole declaration: the words an evaluator prints never make a refusal, so
+a task whose preflight refuses must exit 75 for the framework to wait instead of judging.
 """
 
 from __future__ import annotations
@@ -101,12 +106,13 @@ class RecordState(StrEnum):
 _CANDIDATE = BenchmarkFailureKind.WORKLOAD
 _INFRA = BenchmarkFailureKind.INFRASTRUCTURE
 _AMBIGUOUS = BenchmarkFailureKind.AMBIGUOUS
+_REFUSED = BenchmarkFailureKind.ENVIRONMENT_REFUSED
 
 _Row = tuple[BenchmarkFailureKind, BenchmarkFailureKind, BenchmarkFailureKind, BenchmarkFailureKind]
 # Rows are signals, entries are (absent, declared, outcome, exit status), in `RecordState` order.
 _TABLE: dict[TerminalSignal, _Row] = {
     TerminalSignal.NO_EXIT_STATUS: (_INFRA, _INFRA, _INFRA, _INFRA),
-    TerminalSignal.ENVIRONMENT_REFUSED: (_INFRA, _INFRA, _INFRA, _INFRA),
+    TerminalSignal.ENVIRONMENT_REFUSED: (_REFUSED, _REFUSED, _REFUSED, _REFUSED),
     TerminalSignal.SERVICE_NOT_READY: (_AMBIGUOUS, _AMBIGUOUS, _AMBIGUOUS, _AMBIGUOUS),
     TerminalSignal.SERVICE_CANDIDATE_FAULT: (_CANDIDATE, _CANDIDATE, _CANDIDATE, _CANDIDATE),
     TerminalSignal.STAGE_TIMEOUT: (_AMBIGUOUS, _AMBIGUOUS, _CANDIDATE, _AMBIGUOUS),
@@ -218,9 +224,12 @@ def job_failure(kinds: Iterable[BenchmarkFailureKind | None]) -> MeasurementFail
     No failed stage means the executor died before measuring anything. Otherwise the
     machinery's fault outranks the rest, an unclassified stage proves nothing, an
     ambiguous one makes the job ambiguous, and only all-candidate stages blame the candidate.
+    A host's refusal is the machinery's for core, which never hears of it from a backend that
+    waits it out (``RetryingEvaluationExecutor``); a job that reaches core as one is measured
+    again like any machinery failure.
     """
     seen = set(kinds)
-    if not seen or _INFRA in seen:
+    if not seen or _INFRA in seen or _REFUSED in seen:
         return MeasurementFailure.INFRASTRUCTURE
     if None in seen:
         return MeasurementFailure.UNKNOWN

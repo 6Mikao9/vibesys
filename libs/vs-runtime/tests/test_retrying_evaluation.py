@@ -151,7 +151,12 @@ def _request(key: str = "measure") -> EvaluationRequest:
 
 _BOUNDS = st.integers(min_value=1, max_value=MAX_SUBMISSIONS_PER_MEASUREMENT)
 _RETRIES = st.tuples(_BOUNDS, _BOUNDS).map(
-    lambda pair: EvaluationRetries(infrastructure_attempts=max(pair), ambiguous_attempts=min(pair))
+    lambda pair: EvaluationRetries(
+        infrastructure_attempts=max(pair),
+        ambiguous_attempts=min(pair),
+        environment_backoff=30.0,
+        environment_backoff_cap=300.0,
+    )
 )
 _SCRIPTS = st.lists(st.sampled_from(Outcome), min_size=1, max_size=8).map(tuple)
 
@@ -171,7 +176,9 @@ def _run(
     script: tuple[Outcome, ...], retries: EvaluationRetries
 ) -> tuple[ScriptedExecutor, ExecutorObservation]:
     inner = ScriptedExecutor(script)
-    executor = RetryingEvaluationExecutor(inner, retries, InMemoryEvaluationNamespace())
+    executor = RetryingEvaluationExecutor(
+        inner, retries, InMemoryEvaluationNamespace(), clock=VirtualClock()
+    )
     terminal = run_virtual(VirtualClock(), _measure(executor))
     return inner, terminal
 
@@ -219,7 +226,7 @@ def test_a_retry_started_before_a_restart_is_not_lost(retries: EvaluationRetries
     """The next try is recorded before it starts, so a restarted host starts it, not reports."""
     namespace = InMemoryEvaluationNamespace()
     inner = ScriptedExecutor((Outcome.INFRASTRUCTURE, Outcome.SUCCEEDED))
-    first = RetryingEvaluationExecutor(inner, retries, namespace)
+    first = RetryingEvaluationExecutor(inner, retries, namespace, clock=VirtualClock())
 
     async def before_restart() -> None:
         await first.submit(_request(), handle_id="h")
@@ -227,7 +234,7 @@ def test_a_retry_started_before_a_restart_is_not_lost(retries: EvaluationRetries
         await first.poll("h")
 
     run_virtual(VirtualClock(), before_restart())
-    restarted = RetryingEvaluationExecutor(inner, retries, namespace)
+    restarted = RetryingEvaluationExecutor(inner, retries, namespace, clock=VirtualClock())
     terminal = run_virtual(VirtualClock(), _measure_resumed(restarted))
     if retries.infrastructure_attempts == 1:
         assert terminal == _terminal(Outcome.INFRASTRUCTURE)
@@ -246,9 +253,16 @@ async def _measure_resumed(executor: RetryingEvaluationExecutor) -> ExecutorObse
 
 
 def test_cancel_reaches_the_try_in_flight_and_work_is_not_swapped_under_a_handle() -> None:
-    retries = EvaluationRetries(infrastructure_attempts=3, ambiguous_attempts=2)
+    retries = EvaluationRetries(
+        infrastructure_attempts=3,
+        ambiguous_attempts=2,
+        environment_backoff=30.0,
+        environment_backoff_cap=300.0,
+    )
     inner = ScriptedExecutor((Outcome.INFRASTRUCTURE, Outcome.SUCCEEDED))
-    executor = RetryingEvaluationExecutor(inner, retries, InMemoryEvaluationNamespace())
+    executor = RetryingEvaluationExecutor(
+        inner, retries, InMemoryEvaluationNamespace(), clock=VirtualClock()
+    )
 
     async def story() -> None:
         await executor.submit(_request(), handle_id="h")
@@ -266,9 +280,19 @@ def test_cancel_reaches_the_try_in_flight_and_work_is_not_swapped_under_a_handle
 )
 def test_no_declaration_lifts_the_hard_cap(infrastructure: int) -> None:
     with pytest.raises(ValidationError, match="infrastructure_attempts"):
-        EvaluationRetries(infrastructure_attempts=infrastructure, ambiguous_attempts=1)
+        EvaluationRetries(
+            infrastructure_attempts=infrastructure,
+            ambiguous_attempts=1,
+            environment_backoff=30.0,
+            environment_backoff_cap=300.0,
+        )
     with pytest.raises(ValidationError, match="ambiguous_attempts"):
-        EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=infrastructure)
+        EvaluationRetries(
+            infrastructure_attempts=1,
+            ambiguous_attempts=infrastructure,
+            environment_backoff=30.0,
+            environment_backoff_cap=300.0,
+        )
 
 
 def test_the_declaration_has_no_defaults_no_unknown_keys_and_no_harder_ambiguity() -> None:
@@ -279,7 +303,12 @@ def test_the_declaration_has_no_defaults_no_unknown_keys_and_no_harder_ambiguity
             {"infrastructure_attempts": 2, "ambiguous_attempts": 1, "retries": 3}
         )
     with pytest.raises(ValidationError, match="ambiguous_attempts"):
-        EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=2)
+        EvaluationRetries(
+            infrastructure_attempts=1,
+            ambiguous_attempts=2,
+            environment_backoff=30.0,
+            environment_backoff_cap=300.0,
+        )
 
 
 @dataclass
@@ -308,7 +337,9 @@ def test_a_measurement_refused_because_the_run_environment_is_unavailable_is_nev
     retries: EvaluationRetries,
 ) -> None:
     inner = _UnavailableEnvironmentExecutor((Outcome.SUCCEEDED,))
-    executor = RetryingEvaluationExecutor(inner, retries, InMemoryEvaluationNamespace())
+    executor = RetryingEvaluationExecutor(
+        inner, retries, InMemoryEvaluationNamespace(), clock=VirtualClock()
+    )
 
     terminal = run_virtual(VirtualClock(), _measure(executor))
 
@@ -324,10 +355,19 @@ def test_restart_reloads_every_durable_first_try_when_the_executor_lost_its_task
     count: int,
 ) -> None:
     namespace = InMemoryEvaluationNamespace()
-    retries = EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=1)
-    first = RetryingEvaluationExecutor(ScriptedExecutor((Outcome.SUCCEEDED,)), retries, namespace)
+    retries = EvaluationRetries(
+        infrastructure_attempts=1,
+        ambiguous_attempts=1,
+        environment_backoff=30.0,
+        environment_backoff_cap=300.0,
+    )
+    first = RetryingEvaluationExecutor(
+        ScriptedExecutor((Outcome.SUCCEEDED,)), retries, namespace, clock=VirtualClock()
+    )
     recovered_inner = ScriptedExecutor((Outcome.SUCCEEDED,))
-    recovered = RetryingEvaluationExecutor(recovered_inner, retries, namespace)
+    recovered = RetryingEvaluationExecutor(
+        recovered_inner, retries, namespace, clock=VirtualClock()
+    )
 
     async def story() -> None:
         for index in range(count):
@@ -347,10 +387,17 @@ def test_restart_reloads_every_durable_first_try_when_the_executor_lost_its_task
 @given(count=st.integers(min_value=1, max_value=24))
 def test_recovery_respects_durable_cancellation_instead_of_resurrecting_it(count: int) -> None:
     namespace = InMemoryEvaluationNamespace()
-    retries = EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=1)
-    first = RetryingEvaluationExecutor(ScriptedExecutor((Outcome.SUCCEEDED,)), retries, namespace)
+    retries = EvaluationRetries(
+        infrastructure_attempts=1,
+        ambiguous_attempts=1,
+        environment_backoff=30.0,
+        environment_backoff_cap=300.0,
+    )
+    first = RetryingEvaluationExecutor(
+        ScriptedExecutor((Outcome.SUCCEEDED,)), retries, namespace, clock=VirtualClock()
+    )
     inner = ScriptedExecutor((Outcome.SUCCEEDED,))
-    recovered = RetryingEvaluationExecutor(inner, retries, namespace)
+    recovered = RetryingEvaluationExecutor(inner, retries, namespace, clock=VirtualClock())
 
     async def story() -> None:
         for index in range(count):
