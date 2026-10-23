@@ -1424,7 +1424,7 @@ depends_on = ["vs_runtime._runs"]
 
 [[interfaces]]
 from = ["launch"]
-expose = ["LaunchSettings", "built_in_orchestrations", "create_session", "default_run_readers", "default_runs", "open_run_store", "orchestration_roles", "validate_descriptor", "validate_run_request", "testing", "testing\\..*"]
+expose = ["LaunchSettings", "built_in_orchestrations", "create_session", "default_run_readers", "default_runs", "open_run_store", "orchestration_roles", "resume_adjustable_options", "validate_descriptor", "validate_run_request", "testing", "testing\\..*"]
 
 [[interfaces]]
 from = ["vibesys.api.runs"]

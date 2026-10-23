@@ -864,8 +864,11 @@ def test_agent_v5_run_resumes_only_with_the_options_it_started_with(tmp_path: Pa
 
 
 @pytest.mark.regression
-def test_dynamic_run_resumes_with_a_larger_max_rounds_and_only_that(tmp_path: Path) -> None:
-    """Regression: ``--resume --max-rounds 42`` over 24 recorded failed at argument resolution."""
+def test_dynamic_run_resumes_with_a_larger_max_rounds_and_the_operators_widths(
+    tmp_path: Path,
+) -> None:
+    """Regression: ``--resume --max-rounds 42`` over 24 recorded failed at argument resolution,
+    and so did ``--max-in-flight``; every other option stays as recorded."""
     project = tmp_path / "queue"
     evaluator = _write_project(project)
 
@@ -891,14 +894,15 @@ def test_dynamic_run_resumes_with_a_larger_max_rounds_and_only_that(tmp_path: Pa
         ConfigurationError, match=r"cannot lower 'max_rounds'.*recorded 2, requested 1"
     ):
         resume(dynamic(max_rounds=1), run_id)
-    with pytest.raises(ConfigurationError, match="cannot change its descriptor"):
-        resume(dynamic(max_rounds=3, max_in_flight=3), run_id)
+    with pytest.raises(ConfigurationError, match=r"cannot change its descriptor.*'judge_every'"):
+        resume(dynamic(max_rounds=3, judge_every=3), run_id)
 
-    with resume(dynamic(max_rounds=3), run_id):
+    with resume(dynamic(max_rounds=3, max_in_flight=3, max_backlog=1), run_id):
         pass
     stored = Project.open(project).state.load_run(run_id)
     assert isinstance(stored, OrchestrationRunManifest)
-    assert stored.orchestration.options["max_rounds"] == 3
+    options = stored.orchestration.options
+    assert (options["max_rounds"], options["max_in_flight"], options["max_backlog"]) == (3, 3, 1)
 
 
 @pytest.mark.parametrize(

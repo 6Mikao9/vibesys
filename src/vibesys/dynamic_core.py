@@ -338,6 +338,7 @@ def dynamic_core_registration() -> OrchestrationRegistration:
         plugin=plugin,
         projector=dynamic_projector(),
         resume_policy=dynamic_resume_policy,
+        resume_adjustable=_ADJUSTABLE,
         project_max_rounds=_project_max_rounds,
         iteration_support=IterationSupport.PROJECTED,
     )

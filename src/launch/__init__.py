@@ -255,6 +255,13 @@ def orchestration_roles(
     return tuple(agent.id for agent in _catalog(registry).resolve(descriptor.id).plugin.agents)
 
 
+def resume_adjustable_options(
+    descriptor: OrchestrationDescriptor, *, registry: OrchestrationRegistry | None = None
+) -> frozenset[str]:
+    """The options of the selected orchestration an operator may set again when they resume."""
+    return _catalog(registry).resolve(descriptor.id).resume_adjustable
+
+
 def validate_run_request(
     request: RunRequest,
     *,
@@ -284,6 +291,7 @@ __all__ = [
     "default_runs",
     "open_run_store",
     "orchestration_roles",
+    "resume_adjustable_options",
     "validate_descriptor",
     "validate_run_request",
 ]

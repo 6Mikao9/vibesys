@@ -18,6 +18,7 @@ from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import plan_of, resolved
 
+from vibesys.api.catalog import BUILT_INS
 from vibesys.errors import ConfigurationError
 from vibesys.orchestration.dynamic import REGISTRATION
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
@@ -163,3 +164,13 @@ def test_an_option_added_or_dropped_on_resume_is_a_change() -> None:
         _decide(bare, added)
     with pytest.raises(ConfigurationError, match="cannot change its descriptor"):
         _decide(added, bare)
+
+
+def test_an_orchestration_declares_resume_adjustable_options_only_through_a_resume_policy() -> None:
+    """The declaration the command line reads and the policy that decides are one fact: an
+    orchestration with no policy holds its descriptor exact, and the dynamic one declares the
+    options its policy accepts a change to, exactly."""
+    for registration in BUILT_INS:
+        if registration.resume_policy is None:
+            assert not registration.resume_adjustable, registration.plugin.id
+    assert REGISTRATION.resume_adjustable == frozenset(DynamicConfig.ADJUSTABLE_ON_RESUME)

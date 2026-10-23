@@ -13,7 +13,7 @@ from entrypoints.cli.constants import _RUN_ENVIRONMENT_OPTION_CLI_FIELDS
 from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
 from entrypoints.cli.loops import _resolve_project_root
 from entrypoints.cli.remote import _is_remote_project
-from launch import validate_descriptor
+from launch import resume_adjustable_options, validate_descriptor
 from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.profilers import coerce_profiler_kind
 from vibesys.api.request import ensure_resumable, migrate_recorded_run_environment
@@ -201,8 +201,13 @@ def _restore_cli_fields(
     *,
     budget: str,
     explicit: frozenset[str],
+    adjustable: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Apply descriptor options to present CLI fields and report conflicts."""
+    """Apply descriptor options to present CLI fields and report conflicts.
+
+    A flag the operator gave for an option the orchestration lets them set on a resume
+    (``adjustable``) is theirs, not a conflict; the resume policy decides whether its value stands.
+    """
     changed: list[str] = []
     for field, expected in options.items():
         if field in _CONFIG_ONLY_OPTIONS or field == budget:
@@ -213,7 +218,9 @@ def _restore_cli_fields(
         is_explicit = destination in explicit
         if is_explicit:
             requested = _normalized_resume_cli_value(destination, getattr(args, destination))
-            if requested != (tuple(expected) if isinstance(expected, list) else expected):
+            if field not in adjustable and requested != (
+                tuple(expected) if isinstance(expected, list) else expected
+            ):
                 changed.append(field)
         else:
             _set_resume_cli_value(args, destination, expected)
@@ -272,7 +279,15 @@ def _restore_descriptor_options(
         recorded_value=cast("int", options[budget]),
         explicit=explicit,
     )
-    changed.extend(_restore_cli_fields(args, options, budget=budget, explicit=explicit))
+    changed.extend(
+        _restore_cli_fields(
+            args,
+            options,
+            budget=budget,
+            explicit=explicit,
+            adjustable=resume_adjustable_options(descriptor),
+        )
+    )
     execution_cli = {
         "agent_backend": manifest.execution.agent_backend,
         "cli_provider": manifest.execution.cli_provider,

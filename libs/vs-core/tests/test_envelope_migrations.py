@@ -193,6 +193,62 @@ def test_the_migration_keeps_the_verdict_a_version_42_run_decided_and_states_it_
     ]
 
 
+_EMBEDDED_KEYS = ("payload_json", "snapshot_json", "published")
+"""The envelope's fields that hold a JSON document of their own, as text."""
+_LEGACY_READING = {"metric": "tpot_ms_avg", "value": 1.5, "direction": "min"}
+_LEGACY_RECORD = st.builds(
+    lambda name: {"evidence_id": name, "reading": _LEGACY_READING},
+    st.text(alphabet="abc", min_size=1, max_size=4),
+)
+_DOCUMENTS = st.recursive(
+    st.one_of(_LEGACY_RECORD, st.integers(), st.text(alphabet="xyz", max_size=4)),
+    lambda inner: (
+        st.lists(inner, max_size=3)
+        | st.dictionaries(st.text(alphabet="abz", min_size=1, max_size=3), inner, max_size=3)
+    ),
+    max_leaves=10,
+)
+
+
+@pytest.mark.regression
+@given(document=_DOCUMENTS, key=st.sampled_from(_EMBEDDED_KEYS))
+def test_a_json_document_embedded_in_the_envelope_is_rewritten_like_the_value_it_holds(
+    document: Json, key: str
+) -> None:
+    """Regression: a registered operation's request, a flow's checkpoint and what a flow
+    published are JSON documents held as text; a migration that only rewrote the structured
+    envelope left them in the shape version 42 wrote, and a run saved by it could not resume."""
+    stored = json.loads((_FIXTURES / "v42-floor.json").read_text(encoding="utf-8"))
+    text = json.dumps(document, separators=(",", ": "), ensure_ascii=False)
+    stored["structured"] = document
+    stored["wrapper"] = {key: text}
+
+    migrated = _upgraded(json.dumps(stored))
+
+    embedded = migrated["wrapper"]
+    assert isinstance(embedded, dict)
+    assert json.loads(str(embedded[key])) == migrated["structured"]
+    if migrated["structured"] == document:
+        assert embedded[key] == text  # nothing to rewrite: the text is not touched
+    elif key == "payload_json":
+        # a request is proved against the canonical text of the value it decodes to
+        canonical = json.dumps(
+            migrated["structured"], separators=(",", ":"), ensure_ascii=False, sort_keys=True
+        )
+        assert embedded[key] == canonical
+
+
+def test_a_version_42_request_payload_holds_readings_after_the_migration() -> None:
+    stored = json.loads((_FIXTURES / "v42-floor.json").read_text(encoding="utf-8"))
+    request = {"evidence": [{"evidence_id": "e1", "reading": _LEGACY_READING}], "kind": "x"}
+    stored["wrapper"] = {"payload_json": json.dumps(request, sort_keys=True, separators=(",", ":"))}
+
+    migrated = _upgraded(json.dumps(stored))
+
+    payload = json.loads(str(_object(migrated["wrapper"])["payload_json"]))
+    assert payload["evidence"] == [{"evidence_id": "e1", "readings": [_LEGACY_READING]}]
+
+
 def test_every_version_from_the_oldest_supported_has_a_migration_and_a_fixture() -> None:
     """Raising ``ENVELOPE_SCHEMA_VERSION`` fails here until the old version has both."""
     assert core.OLDEST_SUPPORTED_ENVELOPE_VERSION <= _SUPPORTED_SINCE

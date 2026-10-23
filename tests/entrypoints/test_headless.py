@@ -1858,6 +1858,40 @@ def test_v5_agent_resume_restores_config_constraints_and_budget(
         parse_cli_invocation(["--outer-loop", loop_kind, "--resume", run_id, "--stub-agent"])
 
 
+def test_a_dynamic_resume_lets_the_operator_set_the_budget_and_the_widths_and_no_other_option(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: ``--resume --max-in-flight 2`` over a run recorded at another width was refused
+    at argument resolution, before the orchestration's resume policy could say it may change."""
+    project = _write_input_project(tmp_path)
+    run_id = "20260811-120000-11111111-dynamic"
+    recorded = build_run_request(
+        parse_cli_invocation(
+            ["--outer-loop", "dynamic", "--input", str(project), "--max-in-flight", "2"]
+        )
+    ).orchestration
+    _write_project_run(
+        project,
+        run_id,
+        configuration=_RecordedRun(recorded),
+        created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
+    )
+    monkeypatch.chdir(project)
+    resume = ["--outer-loop", "dynamic", "--resume", run_id]
+
+    restored = parse_cli_invocation(resume).args
+    set_again = parse_cli_invocation(
+        [*resume, "--max-rounds", "30", "--max-in-flight", "4", "--max-backlog", "1"]
+    ).args
+
+    assert (restored.max_in_flight, restored.max_backlog) == (2, recorded.options["max_backlog"])
+    assert (set_again.max_rounds, set_again.max_in_flight, set_again.max_backlog) == (30, 4, 1)
+    with pytest.raises(ConfigurationError, match="judge_every"):
+        parse_cli_invocation([*resume, "--judge-every", "7"])
+    with pytest.raises(ConfigurationError, match="cannot decrease"):
+        parse_cli_invocation([*resume, "--max-rounds", "1"])
+
+
 def test_plain_resume_restores_its_configuration(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

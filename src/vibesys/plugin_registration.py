@@ -182,6 +182,13 @@ class OrchestrationRegistration:
         ]
         | None
     ) = None
+    resume_adjustable: frozenset[str] = frozenset()
+    """The descriptor options an operator may set again when they resume a run.
+
+    The one declaration of it: ``resume_policy`` accepts a change to exactly these (and holds every
+    other option exact), and the command line leaves the flags that set them to the operator
+    instead of restoring or refusing them. Empty: the descriptor resumes unchanged.
+    """
     project_max_rounds: Callable[[BaseModel], int | None] | None = None
     projector: OrchestrationProjector | None = None
     iteration_support: IterationSupport = IterationSupport.UNMAPPED

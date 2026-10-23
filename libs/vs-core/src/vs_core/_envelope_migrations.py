@@ -25,6 +25,7 @@ was told and done, as it was).
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
@@ -172,19 +173,49 @@ _OBJECTIVE_FIELDS: Final = (
 the comparison keeps and the objective repeats."""
 
 
+_EMBEDDED_DOCUMENTS: Final = frozenset({"payload_json", "snapshot_json", "published"})
+"""The fields of the envelope that hold a JSON document of their own, as text: the request of a
+registered operation, the checkpoint of a flow and what a flow published. They carry the same
+samples, evidence records and comparisons, so they are rewritten with the rest."""
+_CANONICAL_DOCUMENTS: Final = frozenset({"payload_json"})
+"""Of those, the ones whose text is canonical (keys sorted at every level): a request is proved
+byte for byte against the canonical text of the value it decodes to."""
+
+
 def _rewritten(value: JsonValue) -> JsonValue:
     """``value`` with every sample, evidence record and comparison in it at the version 43 shape."""
     if isinstance(value, list):
         return [_rewritten(item) for item in value]
     if not isinstance(value, dict):
         return value
-    node = {key: _rewritten(item) for key, item in value.items()}
+    node = {
+        key: _embedded(item, canonical=key in _CANONICAL_DOCUMENTS)
+        if key in _EMBEDDED_DOCUMENTS and isinstance(item, str)
+        else _rewritten(item)
+        for key, item in value.items()
+    }
     if "reading" in node and ("evidence_id" in node or {"run", "measured_input"} <= node.keys()):
         node["readings"] = [node.pop("reading")]
     elif {"candidate_input", "base_input", "candidate_value", "metric"} <= node.keys():
         objective = {key: node.pop(key) for key in _OBJECTIVE_FIELDS if key in node}
         node["objectives"] = [{**objective, "verdict": node["verdict"]}]
     return node
+
+
+def _embedded(text: str, *, canonical: bool) -> str:
+    """``text``, a JSON document, with its samples, evidence records and comparisons rewritten.
+
+    A document that holds none, or that is no JSON document, is returned as it is, so its text
+    is not touched (the same text is the same value for every digest that covers it).
+    """
+    try:
+        document = json.loads(text)
+    except ValueError:
+        return text
+    rewritten = _rewritten(document)
+    if rewritten == document:
+        return text
+    return json.dumps(rewritten, separators=(",", ":"), ensure_ascii=False, sort_keys=canonical)
 
 
 def _floor_declared(core: JsonObject) -> bool:
