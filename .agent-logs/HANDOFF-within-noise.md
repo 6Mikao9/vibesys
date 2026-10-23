@@ -80,11 +80,15 @@ So there are three dominance implementations (`compare_metrics`, `dominates`,
 `no_worse_metrics`) over `MetricSpace`, and a vs-core single-metric statistic that neither
 shares tolerance with nor sees other objectives.
 
-## Fix plan (this branch)
+## Fix as landed
 
-1. Identity: `measured_input` hashes the evaluated content only (root + patch with excludes).
-   A constant `[]` line keeps digests recorded before the change (declaration empty or
-   withholding nothing) byte-identical; `378e...` is reproduced for the base commit.
-2. One multi-objective comparison in vs-core: per objective `better | worse | same`, and
-   `dominates` = no objective worse and at least one better. Used by vs-core's verdict and by
-   the product's `MetricSpace` decisions, so there is one rule.
+1. Identity: `measured_input` hashes root, the declared paths the *baseline* holds, and the patch
+   with the declared paths excluded. A declaration naming nothing in the tree hashes as `[]`,
+   so `378e...` is reproduced for the base commit (replay verified).
+2. `MetricSpace`: `compare_metrics`, `no_worse_metrics` and `dominates` read one rule
+   (`_dominance` over `objective_comparisons`).
+3. Not done (follow-up): vs-core `Sample`/`Comparison` are headline-only because the persisted
+   shape carries one `Reading`. A per-objective vs-core comparison needs `Sample` and
+   `EvidenceRef` to carry every objective's reading, `Comparison` to carry per-objective
+   verdicts, an envelope migration and the default noise for undeclared objectives; it touches
+   files `fix/verdict-charges-candidate` changes (`types/job_observations.py`, `api/search.py`).
